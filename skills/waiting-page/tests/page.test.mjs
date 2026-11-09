@@ -3184,6 +3184,33 @@ for (const scheme of SCHEMES) {
     assert.ok(!(beside(g.rs) && below(g.rx)), `Send reply sits right of the hint while Close is below it, at 600 wide with the root font size doubled`);
   });
 }
+// The reply form at 530 and 546 wide, at the default text: past the 520px window, main draws Close left of Send reply on one line. A control.
+for (const width of [530, 546]) for (const scheme of SCHEMES) {
+  test(`press rows, ${scheme}: at ${width} wide the reply form's Close sits left of Send reply on one line`, async (t) => {
+    const r = await replyFormAt(t, { width, scheme }); if (!r) return;
+    const { g } = r;
+    assert.ok(Math.abs(g.rx.t - g.rs.t) <= 1, `Close (top ${Math.round(g.rx.t)} px) and Send reply (top ${Math.round(g.rs.t)} px) are not on one line at ${width} wide`);
+    assert.ok(g.rx.l < g.rs.l, `Close (x ${Math.round(g.rx.l)} px) is not left of Send reply (x ${Math.round(g.rs.l)} px) at ${width} wide`);
+  });
+}
+// The reply form at 600 wide with the root font size at 150%. Its box is under the 26.75em the stacked arrangement starts at, so Close
+// stacks under the hint, not beside it. At 200% the 16.5em rule stacks Close here whatever the window rule says, so a window rule
+// (max-width 520px) would go unseen at 200%; at 150% it leaves Close beside the hint.
+for (const scheme of SCHEMES) {
+  test(`press rows, ${scheme}: at 600 wide with the root font size at 150%, the reply form is under 26.75em wide`, async (t) => {
+    const r = await replyFormAt(t, { width: 600, scheme }); if (!r) return;
+    await zoomText(r.page, "150%");
+    const formEm = await r.page.evaluate(() => document.querySelector("form.replyform").getBoundingClientRect().width / parseFloat(getComputedStyle(document.documentElement).fontSize));
+    assert.ok(formEm < 26.75, `the reply form is ${formEm.toFixed(1)}em wide at 600 wide with the root font size at 150%, not under 26.75em, so the stacked arrangement does not apply`);
+  });
+  test(`press rows, ${scheme}: at 600 wide with the root font size at 150%, Close stacks under the hint, not beside it`, async (t) => {
+    const r = await replyFormAt(t, { width: 600, scheme }); if (!r) return;
+    await zoomText(r.page, "150%");
+    const g = await replyGeo(r.page, RPL_ROOT);
+    assert.ok(g, "no reply form is drawn at 600 wide with the root font size at 150%");
+    assert.ok(g.rx.t >= g.hint.b - 0.5, `Close (top ${Math.round(g.rx.t)} px) is beside the hint (bottom ${Math.round(g.hint.b)} px), not under it, at 600 wide with the root font size at 150%`);
+  });
+}
 
 // The Dismissed line: the folded row's Dismiss, pressed, leaves the line in the row's place. Its glyph is .g, its text is the line's other span,
 // and its press is the line's button (Restore). The runs are the text's own, clipped to its box, so a line the box hides is not read.
@@ -3423,6 +3450,39 @@ for (const [width, note] of [[600, ""], [1280, " (control)"]]) for (const scheme
   assert.ok(!g.hit, g.hit && `the hint text runs from ${Math.round(g.hit[0])} to ${Math.round(g.hit[1])} px, under Add to list from ${Math.round(g.add[0])} px, at ${width} wide with the root font size doubled`);
 });
 
+// The Ask box at 600 wide with the root font size doubled. Its box is under the 28.375em the stacked arrangement starts at, so the hint takes
+// the row's full width and Add to list sits on the line under it. A window rule (max-width 520px) would leave the hint beside Add to list.
+const askBoxGeo = (page) => page.evaluate(() => {
+  const box = (el) => { const r = el.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; };
+  const em = parseFloat(getComputedStyle(document.documentElement).fontSize);
+  return { em, form: document.querySelector(".askform").getBoundingClientRect().width / em, hint: box(document.getElementById("askHint")), add: box(document.getElementById("askAdd")) };
+});
+for (const scheme of SCHEMES) {
+  test(`ask box, ${scheme}: at 600 wide with the root font size doubled, the Ask box is under 28.375em wide`, async (t) => {
+    const page = await open(t, { viewport: { width: 600, height: 900 }, scheme }); if (!page) return;
+    await mustHave(page, "#askAdd", "Add to list");
+    await zoomedTo(page, 200);
+    const g = await askBoxGeo(page);
+    assert.ok(g.form < 28.375, `the Ask box is ${g.form.toFixed(1)}em wide at 600 wide with the root font size doubled, not under 28.375em, so the stacked arrangement does not apply`);
+  });
+  test(`ask box, ${scheme}: at 600 wide with the root font size doubled, the hint is at least 8em wide`, async (t) => {
+    const page = await open(t, { viewport: { width: 600, height: 900 }, scheme }); if (!page) return;
+    await mustHave(page, "#askAdd", "Add to list");
+    await zoomedTo(page, 200);
+    const g = await askBoxGeo(page);
+    const hintEm = (g.hint.r - g.hint.l) / g.em;
+    assert.ok(hintEm >= 8, `the Ask box hint is ${hintEm.toFixed(1)}em wide at 600 wide with the root font size doubled, not 8em or more`);
+  });
+  test(`ask box, ${scheme}: at 600 wide with the root font size doubled, Add to list does not cover the hint`, async (t) => {
+    const page = await open(t, { viewport: { width: 600, height: 900 }, scheme }); if (!page) return;
+    await mustHave(page, "#askAdd", "Add to list");
+    await zoomedTo(page, 200);
+    const g = await askBoxGeo(page);
+    const over = Math.min(g.hint.r, g.add.r) - Math.max(g.hint.l, g.add.l) > 0.5 && Math.min(g.hint.b, g.add.b) - Math.max(g.hint.t, g.add.t) > 0.5;
+    assert.ok(!over, `Add to list (x ${Math.round(g.add.l)} to ${Math.round(g.add.r)} px, top ${Math.round(g.add.t)} px) covers the hint (x ${Math.round(g.hint.l)} to ${Math.round(g.hint.r)} px, top ${Math.round(g.hint.t)} px) at 600 wide with the root font size doubled`);
+  });
+}
+
 // The Designs viewer at 600 wide with the root font size doubled: Close is inside the window. 1280 wide is the control.
 for (const [width, note] of [[600, ""], [1280, " (control)"]]) for (const scheme of SCHEMES) test(`designs viewer, ${scheme}: at ${width} wide with the root font size doubled${note}: Close is inside the window`, async (t) => {
   const it = viewerItem();
@@ -3433,6 +3493,22 @@ for (const [width, note] of [[600, ""], [1280, " (control)"]]) for (const scheme
   const g = await page.evaluate(() => ({ shown: !document.getElementById("dsheet").hidden, close: document.getElementById("dClose").getBoundingClientRect().right, iw: innerWidth }));
   assert.equal(g.shown, true, `the viewer did not open at ${width} wide`);
   assert.ok(g.close <= g.iw + 0.5, `Close runs to ${Math.round(g.close)} px in a ${g.iw} px window, at ${width} wide with the root font size doubled`);
+});
+
+// The Designs head at 600 wide with the root font size doubled. Its box is under the 30.5em its short labels start at, so the position reads
+// the short way, "1/2", not "1 of 2". The position follows the head's box, not the window: a window rule would read the 600 px window as wide.
+for (const scheme of SCHEMES) test(`designs viewer, ${scheme}: at 600 wide with the root font size doubled, the head's position reads the short way`, async (t) => {
+  const it = viewerItem();
+  const page = await open(t, { items: [it], designData: { ...VIEWER_DATA, "v-a": FULLW }, viewport: { width: 600, height: 900 }, scheme }); if (!page) return;
+  await zoomedTo(page, 200);
+  await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).click();
+  await page.waitForFunction(() => { const f = document.querySelector("#dStage .dframe:not(.off)"); return f && f.getBoundingClientRect().height > 60; });
+  const g = await page.evaluate(() => {
+    const em = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    return { head: document.querySelector(".dsh-head .in").getBoundingClientRect().width / em, pos: document.getElementById("dPos").textContent.trim() };
+  });
+  assert.ok(g.head < 30.5, `the Designs head is ${g.head.toFixed(1)}em wide at 600 wide with the root font size doubled, not under 30.5em`);
+  assert.ok(!/ of /.test(g.pos), `the head's position reads "${g.pos}", the long way, though its box is ${g.head.toFixed(1)}em wide at 600 wide with the root font size doubled`);
 });
 
 // Without an open answered ask, at 180 and 240 wide with the root font size doubled: the waiting-reply row's stacked Show answer and the
@@ -3450,6 +3526,99 @@ for (const width of [180, 240]) for (const scheme of SCHEMES) {
     await zoomedTo(page, 200);
     const g = await page.evaluate(() => ({ right: document.getElementById("send").getBoundingClientRect().right, iw: innerWidth }));
     assert.ok(g.right <= g.iw + 0.5, `Send answers runs to ${Math.round(g.right)} px in a ${g.iw} px window, ${where}`);
+  });
+}
+
+// ---------------------------------------------------------------- the ask list at narrow widths: the presses' heights, the send bar and the page width
+// The ask list holds one unfolded answer, a folded Dismiss row, a folded row whose reply waits, and a dismissed row behind Show dismissed asks.
+// Each claim is one test after its scope. The presses' heights are controls: the hidden sizers do not change them.
+const PRESS_ASKS = () => ({
+  "ask-an1": { id: "ask-an1", text: "Can I see the lane queue?", at: "2026-10-30T09:00:00Z", owner: "triage", answered: "2026-10-31T10:00:00Z", reply: "Yes. It is on the Status tab." },
+  "ask-fold-dis": FOLD_ROWS.dismiss.ask,
+  "ask-fold-dis2": { id: "ask-fold-dis2", text: "Does the batch runner pick up late lanes on its own now?", at: "2026-10-29T08:00:00Z", owner: "triage", answered: "2026-10-30T10:00:00Z", reply: "Yes." },
+  "ask-fold-res": FOLD_ROWS.restore.ask,
+  "ask-fold-wai": FOLD_ROWS.wait.ask,
+  "ask-fold-wai-r": FOLD_ROWS.wait.reply,
+});
+const PRESS_SEEN = { "waiting.askSeen": "2026-10-31T00:00:00Z" };
+// The page with the ask list at a width and root font size. showDismissed opens Show dismissed asks by script, so the setup is not the claim.
+async function pressListPage(t, { width, pct = 100, scheme = "light", showDismissed = false }) {
+  const page = await open(t, { dbExtra: { asks: PRESS_ASKS() }, storage: PRESS_SEEN, viewport: { width, height: 800 }, scheme }); if (!page) return null;
+  await mustHave(page, "#askDismissed", "Show dismissed asks control");
+  if (pct !== 100) await zoomedTo(page, pct);
+  if (showDismissed) await page.evaluate(() => document.getElementById("askDismissed").click());
+  return page;
+}
+const sizeWhere = (width, pct) => `at ${width} wide with the root font size ${pct === 200 ? "doubled" : "tripled"}`;
+for (const scheme of SCHEMES) {
+  test(`ask list, ${scheme}: at 180 wide at the default text, the Dismiss and Restore presses stay 44 px tall`, async (t) => {
+    const page = await pressListPage(t, { width: 180, scheme, showDismissed: true }); if (!page) return;
+    await mustHave(page, "#res-ask-fold-res", "Restore press of the dismissed row");
+    const h = await page.evaluate(() => Object.fromEntries(["dis-ask-an1", "dis-ask-fold-dis2", "res-ask-fold-res"].map((id) => [id, document.getElementById(id)?.getBoundingClientRect().height ?? null])));
+    for (const id of Object.keys(h)) assert.ok(h[id] !== null && Math.abs(h[id] - 44) <= 1, `#${id} is ${h[id] === null ? "not shown" : Math.round(h[id]) + " px tall"} at 180 wide at the default text, not 44 px`);
+  });
+  test(`ask list, ${scheme}: at 180 wide at the default text, Show answer stays one line, 22 px tall`, async (t) => {
+    const page = await pressListPage(t, { width: 180, scheme }); if (!page) return;
+    await mustHave(page, "#row-ask-fold-wai .fgo", "Show answer on the row whose reply waits");
+    const h = await page.evaluate(() => document.querySelector("#row-ask-fold-wai .fgo").getBoundingClientRect().height);
+    assert.ok(Math.abs(h - 22) <= 1, `Show answer is ${Math.round(h)} px tall at 180 wide at the default text, not one line of 22 px`);
+  });
+}
+
+// The list's elements under the fixed send bar, by the box that overlaps the bar's. The list's end is the page's, scrolled to the bottom.
+const underSendBar = (page) => page.evaluate(() => {
+  const bar = document.getElementById("bar").getBoundingClientRect(), hits = [];
+  for (const [name, sel] of [["the Show dismissed toggle", "#askDismissed"], ["the dismissed row", "#row-ask-fold-res"], ["its Restore press", "#res-ask-fold-res"]]) {
+    const el = document.querySelector(sel); if (!el) continue;
+    const r = el.getBoundingClientRect();
+    if (r.bottom > bar.top + 0.5 && r.top < bar.bottom - 0.5 && r.right > bar.left && r.left < bar.right) hits.push(`${name} (${Math.round(r.top)} to ${Math.round(r.bottom)} px)`);
+  }
+  return { bar: [Math.round(bar.top), Math.round(bar.bottom)], hits };
+});
+// What the viewport point at the Show dismissed toggle's centre lands on: ok when that is the toggle or one of its parts.
+const toggleHit = (page) => page.evaluate(() => {
+  const t = document.getElementById("askDismissed"), r = t.getBoundingClientRect();
+  const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return { ok: !!el && (el === t || t.contains(el)), what: el ? (el.id ? "#" + el.id : el.tagName.toLowerCase()) : "nothing (the point is outside the window)" };
+});
+const BAR_SIZES = [[180, 200], [220, 200], [240, 200], [180, 300], [240, 300], [300, 300], [360, 300]];
+for (const [width, pct] of BAR_SIZES) for (const scheme of SCHEMES) {
+  const where = `${sizeWhere(width, pct)}, scrolled to the end`;
+  test(`ask list, ${scheme}: ${where}: no element of the list sits under the send bar`, async (t) => {
+    const page = await pressListPage(t, { width, pct, scheme, showDismissed: true }); if (!page) return;
+    await mustHave(page, "#res-ask-fold-res", "Restore press of the dismissed row");
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    const g = await underSendBar(page);
+    assert.deepEqual(g.hits, [], `the send bar (${g.bar[0]} to ${g.bar[1]} px) covers ${g.hits.join(" and ")}, ${where}`);
+  });
+  test(`ask list, ${scheme}: ${where}: the Show dismissed toggle takes a press`, async (t) => {
+    const page = await pressListPage(t, { width, pct, scheme }); if (!page) return;
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    const h = await toggleHit(page);
+    assert.ok(h.ok, `a press at the Show dismissed toggle lands on ${h.what}, not on the toggle, ${where}`);
+  });
+}
+
+// The page at 180 and 220 wide doubled, and 180, 240 and 320 wide tripled: it does not scroll sideways, and the Show dismissed toggle and the
+// note under the Questions heading fit the window.
+const WIDTH_SIZES = [[180, 200], [220, 200], [180, 300], [240, 300], [320, 300]];
+for (const [width, pct] of WIDTH_SIZES) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, pct);
+  test(`ask list, ${scheme}: ${where}: the page does not scroll sideways`, async (t) => {
+    const page = await pressListPage(t, { width, pct, scheme }); if (!page) return;
+    const fault = await sidewaysFault(page);
+    assert.ok(!fault, fault && `${fault}, ${where}`);
+  });
+  test(`ask list, ${scheme}: ${where}: the Show dismissed toggle fits the window`, async (t) => {
+    const page = await pressListPage(t, { width, pct, scheme }); if (!page) return;
+    const g = await page.evaluate(() => { const r = document.getElementById("askDismissed").getBoundingClientRect(); return { l: r.left, r: r.right, iw: innerWidth }; });
+    assert.ok(g.l >= -0.5 && g.r <= g.iw + 0.5, `the Show dismissed toggle runs from ${Math.round(g.l)} to ${Math.round(g.r)} px in a ${g.iw} px window, ${where}`);
+  });
+  test(`ask list, ${scheme}: ${where}: the note under the Questions heading fits the window`, async (t) => {
+    const page = await pressListPage(t, { width, pct, scheme }); if (!page) return;
+    await mustHave(page, ".asks-head p", "the note under the Questions heading");
+    const g = await page.evaluate(() => { const r = document.querySelector(".asks-head p").getBoundingClientRect(); return { l: r.left, r: r.right, iw: innerWidth }; });
+    assert.ok(g.l >= -0.5 && g.r <= g.iw + 0.5, `the note under the Questions heading runs from ${Math.round(g.l)} to ${Math.round(g.r)} px in a ${g.iw} px window, ${where}`);
   });
 }
 
