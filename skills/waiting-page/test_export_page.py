@@ -285,11 +285,51 @@ RED = [
     ("password with a plain word before a secret", "password: " + "none hunter2", "hunter2"),
     ("password with a plain word and a comma before a secret", "password: " + "none, hunter2", "hunter2"),
     ("password with a quoted plain word before a secret", "password: " + '"none" hunter2', "hunter2"),
+    # Real-looking secrets of the three kinds whose false positives are narrowed: they stay refused.
+    ("credential name with a live-key value", "API_KEY='" + "sk_live_" + "9fQ2xZ7Lk3'", "9fQ2xZ7Lk3"),
+    ("password in minified code with a real value", 'password:"' + "hunter2" + '-Secret!"', "hunter2-Secret!"),
+    ("URL credentials on a host name with a short password", "https://user:" + "p4ss" + "@host.example.com/", "p4ss"),
+    ("password that starts with !0", "password:" + "!0hunter2", "!0hunter2"),
+    ("credential name with a value that starts with return", "api_key=" + "return9fQ2xZ7Lk3", "return9fQ2xZ7Lk3"),
 ]
+# Dashed and short vendor-style keys, each set in four credential-name carriers. Each value is joined from parts, so no
+# key-looking literal sits whole in the source. A hyphen-joined value of letters and digits is a key shape, so the
+# hyphen-words rule must not pass it. The underscored row and the six-character last part are refused today; they pin
+# that a fix keeps the refusal.
+DASHED_KEYS = (
+    ("dashed sk live key", "sk-" + "live-" + "ab12"),
+    ("underscored sk live key", "sk_" + "live_" + "ab12"),
+    ("dashed sk test key", "sk-" + "test-" + "ab12"),
+    ("dashed pk live key", "pk-" + "live-" + "ab12"),
+    ("dashed sk live key with a six-character last part", "sk-" + "live-" + "ab12cd"),
+    ("dashed ghp token", "ghp-" + "ab12cd"),
+    ("dashed rk live key", "rk-" + "live-" + "ab12"),
+)
+KEY_CARRIERS = (
+    ("KEY single-quoted", "KEY='%s'"),
+    ("api_key unquoted", "api_key=%s"),
+    ("token with a colon", "token: %s"),
+    ("SECRET_KEY double-quoted", 'SECRET_KEY="%s"'),
+)
+RED += [("%s in %s" % (name, carrier), fmt % value, value)
+        for name, value in DASHED_KEYS for carrier, fmt in KEY_CARRIERS]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
 GREEN = [
     ("token budget", "token budget"),
+    # Code text the scan misread: a localStorage key name, a minified JS boolean, a URL-looking run that crosses quotes,
+    # brackets and `|`, and keyCode handling.
+    ("key name of lower-case words joined by hyphens", "KEY='automations-v3-review'"),
+    # Hyphen-joined lower-case words with a digit take the hyphen-words path, the path a fix to the key shape narrows. Each
+    # has a short part (`key`, `v`), so a fix that refuses short parts goes red here.
+    ("key name of hyphen words with a short part and a digit", "KEY='cache-key-v2'"),
+    ("token name of hyphen words with a short part and a digit", "token: page-length-v2"),
+    ("minified JS boolean after a password word", "password:!0"),
+    ("minified code with :// and a colon and @ across quotes and brackets", '"https://a"})];U&&(c=I==null||x:y@b'),
+    ("minified keyCode comparison", "e.keyCode===13&&e.preventDefault()"),
+    # The same shapes as a real bundled page has them: booleans in a run, and a switch case on a key event name.
+    ("minified JS booleans in a run after a password word", "password:!0,range:!0,search:!0,tel:!0};function"),
+    ("minified switch case on a key event name", 'switch(a){case "keyup":return-1!==Hj.indexOf(b.keyCode);'),
     ("password manager", "password manager"),
     ("private key rotation", "rotate the private key"),
     # A public key block is not a secret. A fix that drops PRIVATE from the shape would refuse it.
@@ -419,6 +459,11 @@ GREEN = [
     ("CSS custom property ending in token", "--color-token: rgba(0,0,0,0.5);"),
     ("prose with Token before a sentence", "Token: Authorization needed before we continue"),
 ]
+
+# A 7-character value is under the shared 8-character floor on purpose, so each carrier passes.
+SEVEN_CHAR_KEYS = (("dashed sk key of seven characters", "sk-" + "ab12"),)
+GREEN += [("%s in %s" % (name, carrier), fmt % value)
+          for name, value in SEVEN_CHAR_KEYS for carrier, fmt in KEY_CARRIERS]
 
 
 def canonical(data):
