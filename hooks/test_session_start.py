@@ -74,6 +74,15 @@ def vcs(where, *args):
     return answer
 
 
+def make_stub(folder, name, body="exit 0\n"):
+    """An executable sh stub named `name` in `folder`, running `body`. Returns its path."""
+    path = os.path.join(folder, name)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("#!/bin/sh\n" + body)
+    os.chmod(path, 0o755)
+    return path
+
+
 class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
 
     def setUp(self):
@@ -108,7 +117,7 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             vcs(self.primary, "worktree", "add", "-q", "--detach", "--no-checkout", path, "HEAD")
 
     def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
-                 remote_session_id=None, path_dir=None, trace_file=None):
+                 remote_session_id=None, extra_env=None, path_dir=None, trace_file=None):
         """The hook's stdout lines. Its stderr lands in self.last_stderr.
 
         remote: the CLAUDE_CODE_REMOTE value, or None to unset it as a non-cloud runner does.
@@ -116,6 +125,7 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         session_cwd: the session's cwd, in the payload and as the process cwd; None means the primary checkout.
         source: the payload's "source" (startup, resume, ...), or None to send none.
         compact: send the payload with no spaces after its separators, the way the hook's sed must also read it.
+        extra_env: variables set on the hook's environment last, for the cases that name HOME or CLAUDE_ENV_FILE.
         path_dir: a folder put first on PATH, such as a git shim's folder, or None for the runner's own PATH.
         trace_file: a file git appends its own trace to (GIT_TRACE), or None for no trace.
         """
@@ -137,6 +147,9 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             env["CLAUDE_CODE_REMOTE"] = remote
         if remote_session_id is not None:
             env["CLAUDE_CODE_REMOTE_SESSION_ID"] = remote_session_id
+        # The session's env file is named only by the cases that mean it: a runner inside a Claude session has one.
+        env.pop("CLAUDE_ENV_FILE", None)
+        env.update(extra_env or {})
         answer = subprocess.run([sh_exe(), HOOK], input=payload, capture_output=True, text=True,
                                 env=env, cwd=where, timeout=120)
         self.last_stderr = answer.stderr
@@ -726,6 +739,193 @@ class SessionStartWaitingPageTests(SessionStartAgentWorktreeNoticeTests):
         hits = self.waiting_lines(self.run_checked(session_cwd=linked))
         self.assertEqual(len(hits), 1, "expected one waiting page line from the linked worktree, got %r" % hits)
         self.assertIn("behind", hits[0], "the waiting page line does not say behind: %r" % hits[0])
+
+
+class SessionStartEnvFileTests(SessionStartAgentWorktreeNoticeTests):
+    """The PATH line the hook writes to CLAUDE_ENV_FILE (roadmap step wait-tools-on-path). The guard's remedies
+    name wait-until and wait-pid by their bare names, which resolve in a session only through that line."""
+
+    # The 51-worktree case builds 51 worktrees; this class does not repeat it.
+    test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
+    SEED = "export KEEP_ME=1\n"  # a line the env file held before any run; no run may drop it
+    BIN_MARK = ".claude/bin"  # the text the hook's line names the bin folder by
+
+    def setUp(self):
+        super().setUp()
+        # HOME is a fixture. Its .claude/bin holds one executable wait-until stub, so no real folder can answer.
+        self.home = os.path.join(self.root, "home")
+        self.bin_dir = os.path.join(self.home, ".claude", "bin")
+        os.makedirs(self.bin_dir)
+        self.stub = make_stub(self.bin_dir, "wait-until")
+        self.env_file = os.path.join(self.root, "claude_env")
+        self.seed("")  # empty, as a fresh session starts it
+
+    def seed(self, text):
+        with open(self.env_file, "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def hook_env(self, **extra):
+        """The environment of one hook run: the fixture HOME and env file, plus the variables the case sets."""
+        return dict({"HOME": self.home, "CLAUDE_ENV_FILE": self.env_file}, **extra)
+
+    def env_lines(self):
+        with open(self.env_file, encoding="utf-8") as handle:
+            return handle.read().splitlines()
+
+    def bin_lines(self):
+        return [line for line in self.env_lines() if self.BIN_MARK in line]
+
+    def tree_names(self):
+        """Every file under the fixture root, relative, so a file the hook makes anywhere shows up."""
+        found = []
+        for folder, _dirs, files in os.walk(self.root):
+            found += [os.path.relpath(os.path.join(folder, name), self.root) for name in files]
+        return sorted(found)
+
+    def probe(self, body, source=True, path=None):
+        """Stdout of a fresh sh running `body`, after it sources CLAUDE_ENV_FILE when `source` is set. HOME is the fixture.
+        `path`, when given, is the PATH the shell starts with."""
+        script = '. "$1" || exit 3; ' + body if source else body
+        env = dict(os.environ, HOME=self.home)
+        if path is not None:
+            env["PATH"] = path
+        answer = subprocess.run([sh_exe(), "-c", script, "sh", self.env_file], capture_output=True, text=True,
+                                env=env, timeout=60)
+        self.assertEqual(answer.returncode, 0, "the sh probe failed, exit %d: %s"
+                         % (answer.returncode, answer.stderr.strip()))
+        return answer.stdout.strip()
+
+    def resolve(self, source, name="wait-until", path=None):
+        """Where a fresh sh finds `name`, after it sources the env file when `source` is set. HOME is the fixture."""
+        return self.probe("command -v %s || true" % name, source=source, path=path)
+
+    def assert_stub_resolves(self, where, name="wait-until", stub=None, path=None):
+        stub = self.stub if stub is None else stub
+        found = self.resolve(source=True, name=name, path=path)
+        self.assertTrue(found and os.path.realpath(found) == os.path.realpath(stub),
+                        "%s does not resolve to the fixture stub after %s: got %r" % (name, where, found))
+
+    def test_a_the_env_file_puts_the_stub_on_path(self):
+        lines = self.run_hook(extra_env=self.hook_env())
+        # Scope first: the hook ran, and the stub is not on the base PATH, so a later resolution comes from the hook.
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "the hook printed no checkout line: %r" % lines)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        self.assertNotEqual(self.resolve(source=False), self.stub,
+                            "fixture setup failed: the stub already resolves on the base PATH")
+        self.assert_stub_resolves("the hook ran in a git checkout")
+
+    def test_a2_a_session_outside_any_git_tree_gets_the_line_too(self):
+        # self.root holds git repos below it, but is not inside one, so the hook takes its no-checkout exit.
+        self.run_hook(session_cwd=self.root, extra_env=self.hook_env())
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr outside any git tree: %r" % self.last_stderr)
+        self.assert_stub_resolves("the hook ran outside any git tree")
+
+    def test_b_two_runs_add_one_line_and_keep_the_seed(self):
+        self.seed(self.SEED)
+        self.run_hook(extra_env=self.hook_env())
+        self.assertEqual(self.last_stderr, "", "the first run wrote to stderr: %r" % self.last_stderr)
+        self.assertIn(self.SEED.strip(), self.env_lines(), "the first run dropped the env file's own line")
+        self.assertEqual(len(self.bin_lines()), 1,
+                         "the first run wrote %d bin-folder lines, want 1: %r" % (len(self.bin_lines()), self.env_lines()))
+        # The test's PATH never holds the bin folder, so the second run finds its line only by reading the file.
+        self.run_hook(extra_env=self.hook_env())
+        self.assertEqual(self.last_stderr, "", "the second run wrote to stderr: %r" % self.last_stderr)
+        self.assertIn(self.SEED.strip(), self.env_lines(), "the second run dropped the env file's own line")
+        self.assertEqual(len(self.bin_lines()), 1,
+                         "the second run left %d bin-folder lines, want 1: %r" % (len(self.bin_lines()), self.env_lines()))
+
+    def test_c_a_path_that_holds_the_bin_folder_writes_nothing(self):
+        self.seed(self.SEED)
+        path = os.pathsep.join([self.bin_dir, os.environ.get("PATH", "")])
+        lines = self.run_hook(extra_env=self.hook_env(PATH=path))
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "the hook printed no checkout line: %r" % lines)
+        self.assertEqual(self.env_lines(), self.SEED.splitlines(),
+                         "a run whose PATH already holds ~/.claude/bin changed CLAUDE_ENV_FILE")
+
+    def test_d_without_an_env_file_the_hook_exits_quietly_and_writes_nothing(self):
+        before = self.tree_names()
+        lines = self.run_hook(extra_env={"HOME": self.home})
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "the hook printed no checkout line: %r" % lines)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        self.assertEqual(self.tree_names(), before, "the hook created or removed files with CLAUDE_ENV_FILE unset")
+
+    def assert_missing_env_file_gets_the_line(self, session_cwd, where):
+        # The name has a space, as a real session's path may. Its folder exists; the file does not yet.
+        folder = os.path.join(self.root, "fresh area")
+        os.makedirs(folder)
+        self.env_file = os.path.join(folder, "env file.sh")
+        self.assertFalse(os.path.exists(self.env_file), "fixture setup failed: the env file exists before the run")
+        self.run_hook(session_cwd=session_cwd, extra_env=self.hook_env())
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr for a missing env file, %s: %r"
+                         % (where, self.last_stderr))
+        self.assertTrue(os.path.isfile(self.env_file), "the hook did not create the env file, %s" % where)
+        self.assertEqual(len(self.bin_lines()), 1, "the env file holds %d bin-folder lines after the run, %s, want 1: %r"
+                         % (len(self.bin_lines()), where, self.env_lines()))
+
+    def test_e_a_missing_env_file_in_an_existing_folder_gets_the_line_in_a_git_tree(self):
+        self.assert_missing_env_file_gets_the_line(session_cwd=None, where="a session inside a git tree")
+
+    def test_e2_a_missing_env_file_in_an_existing_folder_gets_the_line_outside_a_git_tree(self):
+        self.assert_missing_env_file_gets_the_line(session_cwd=self.root, where="a session outside any git tree")
+
+    def test_f_an_env_file_that_names_a_directory_is_left_alone(self):
+        self.env_file = os.path.join(self.root, "env dir")
+        os.makedirs(self.env_file)
+        self.assertTrue(os.path.isdir(self.env_file), "fixture setup failed: the env path is not a directory")
+        before = self.tree_names()
+        lines = self.run_hook(extra_env=self.hook_env())
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "the hook printed no checkout line: %r" % lines)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr when CLAUDE_ENV_FILE names a directory: %r"
+                         % self.last_stderr)
+        self.assertEqual(self.tree_names(), before, "the hook wrote a file when CLAUDE_ENV_FILE names a directory")
+
+    def test_g_a_seed_with_no_trailing_newline_keeps_its_own_line(self):
+        # No newline after the seed: the hook's line must start on a line of its own.
+        self.seed(self.SEED.rstrip("\n"))
+        lines = self.run_hook(extra_env=self.hook_env())
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "the hook printed no checkout line: %r" % lines)
+        self.assertIn(self.SEED.strip(), self.env_lines(),
+                      "the seed line is not a line of its own, so the hook's line was glued to it: %r" % self.env_lines())
+        self.assertEqual(self.probe('printf %s "$KEEP_ME"'), "1", "sourcing the env file did not set KEEP_ME to 1")
+        self.assert_stub_resolves("the first run after a seed with no trailing newline")
+        self.run_hook(extra_env=self.hook_env())
+        self.assertEqual(len(self.bin_lines()), 1, "after the second run the env file holds %d bin-folder lines, want 1: %r"
+                         % (len(self.bin_lines()), self.env_lines()))
+
+    def test_h_the_bin_folder_comes_before_a_system_rm(self):
+        real_rm = shutil.which("rm")
+        usr_dir = os.path.join(self.root, "usr-like", "bin")
+        os.makedirs(usr_dir)
+        usr_rm = make_stub(usr_dir, "rm", 'exec "%s" "$@"\n' % real_rm)
+        # Each stub execs the real rm, so the hook's own rm -f still runs when the stub leads PATH.
+        bin_rm = make_stub(self.bin_dir, "rm", 'exec "%s" "$@"\n' % real_rm)
+        path = os.pathsep.join([usr_dir, self.bin_dir, os.environ.get("PATH", "")])
+        # Scope first: the fixture PATH gives the system rm the lead before any run.
+        self.assertEqual(os.path.realpath(self.resolve(source=False, name="rm", path=path)), os.path.realpath(usr_rm),
+                         "fixture setup failed: rm does not resolve to the system stub on the fixture PATH")
+        lines = self.run_hook(extra_env=self.hook_env(PATH=path))
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "the hook printed no checkout line: %r" % lines)
+        self.assert_stub_resolves("a run whose PATH holds the bin folder behind a system rm",
+                                  name="rm", stub=bin_rm, path=path)
+
+    def test_i_an_env_file_in_a_missing_folder_is_left_alone_and_silent(self):
+        # The append cannot open a file whose folder is missing. The hook's group keeps that failure off stderr.
+        folder = os.path.join(self.root, "no such dir")
+        self.env_file = os.path.join(folder, "env.sh")
+        self.assertFalse(os.path.exists(folder), "fixture setup failed: the env file's folder exists before the run")
+        lines = self.run_hook(extra_env=self.hook_env())
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "the hook printed no checkout line: %r" % lines)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr when CLAUDE_ENV_FILE sits in a missing folder: %r"
+                         % self.last_stderr)
+        self.assertFalse(os.path.exists(folder), "the hook created the missing folder of CLAUDE_ENV_FILE")
+        self.assertFalse(os.path.exists(self.env_file), "the hook created CLAUDE_ENV_FILE in a missing folder")
 
 
 # The standing-grant check (rule grants-read-from-main). The hook compares the committed blobs of CLAUDE.md and
