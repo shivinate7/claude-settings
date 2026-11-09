@@ -13042,6 +13042,19 @@ for _cmd in (_TYPE_D_EXEC, _TYPE_D_PRUNE_EXEC):
     sh("env: find -type d -exec grep -r control, a folder with no env file, allowed: " + _cmd, _cmd, "allow",
        cwd=ENVWALK_CLEAN)
 
+# A -type d term in a find makes the guard skip its file check, so the -type f branch reads the env file at the top
+# unchecked. The plain -type f find is the control that the guard refuses. Each red form is refused over the folder
+# that holds the env file, and each green control is the same command over a folder with no env file, allowed.
+_TYPE_F_EXEC = "find . -type f -exec grep K {} +"
+_TYPE_D_OR_F_EXEC = "find . -type d -o -type f -exec grep K {} +"
+_TYPE_D_PRUNE_OR_F_EXEC = r"find . \( -type d -name node_modules -prune \) -o -type f -exec grep -l K {} +"
+sh("env: find -type f -exec grep, the top folder holds the env file, refused: " + _TYPE_F_EXEC, _TYPE_F_EXEC, "deny",
+   "env-file", cwd=ENVWALK_HELD)
+for _cmd in (_TYPE_D_OR_F_EXEC, _TYPE_D_PRUNE_OR_F_EXEC):
+    sh("env: find -type d hides the file check, the top folder holds the env file, refused: " + _cmd, _cmd, "deny",
+       "env-file", cwd=ENVWALK_HELD)
+    sh("env: find -type d control, a folder with no env file, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_CLEAN)
+
 # A relative cd and an env -C reach the env file's folder through two steps the guard follows: cd src moves into
 # clean/src, and env -C ../../held reaches held, which holds the env file. ENVCD_ROOT is built with ENVPROJ_ROOT above.
 _CD_REL_ENV_CHDIR = "cd src && env -C ../../held grep -r K"
