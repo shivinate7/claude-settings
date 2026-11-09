@@ -60,11 +60,17 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
    `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
-   each lane head before the join. A red lane does not join. Before it marks the integration PR
+   each lane head before the build starts, once per lane. A red lane does not join. Before it marks the integration PR
    ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration branch>` on the batch
    head. A FAIL keeps it a draft. A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
+   **Freeze the lane set when the build starts** (decision `batch-freeze-lane-set`, a batch's lane set
+   freezes at its build). A release or a drop that arrives after that goes to the next batch. It never
+   triggers a rebuild. The one change after the freeze is the drop of a red run's blamed lane. Mark the integration PR ready at the first build, once its one batch-head lint
+   passes. A draft run skips every job, so never rebuild a draft batch only to close it. The next
+   batch builds and runs on top of the one in CI, and its head holds the running batch's head, so it
+   is not refused (decision `no-merge-during-batch-ci`, the contains rule).
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
    the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
@@ -82,7 +88,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    that pin to claude-settings main in a lane of its own, with no question. That lane's reviewer
    checks only that it changes pin lines alone, to a main commit that descends from the old pin.
    Put the fix on the lane branch, never on the integration branch. Run CI again, once, and merge the
-   rest. Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane
+   rest. A drop restarts CI at once and re-lints no lane that stays: each lane was linted once, before
+   the build (decision `batch-freeze-lane-set`). Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane
    (rule `roles-review-cap-three`, three review rounds) is the exception. Drop it and park it. It
    gets no fix lane until the owner decides.
    No merge to main while a batch's run is in progress. The owner is included. Decision
