@@ -15,6 +15,9 @@ The cases pin this contract:
 - Each hit row ends with a one-line remedy: say what and why; the history goes in git or the decision.
 - `--exclude PREFIX` skips the files under that path prefix. Repeat it for each prefix.
 - JS, TS, Astro and Swift comments follow the same rule. The same words in their strings or template text never fail.
+- A comment that states a run's colour or result on a head, on main or on the base is history.
+  It fails under the `history phrase` pattern. A colour phrase after when, if, unless, until, while or once in the
+  same clause is a condition and stays clean.
 - The check is one file. The suite copies only that file into the fixture repo, so the check finds
   the repo from its working directory or from its own location, and both give the fixture repo.
 """
@@ -42,6 +45,23 @@ with open(STANDARD, encoding="utf-8") as f:
 NEEDS_TSC = unittest.skipUnless(shutil.which("tsc") or os.environ.get("CI"),
                                 "tsc not on PATH; npm ci --ignore-scripts --prefix actions/code-check/tools (CI does)")
 
+# Run-state history: a comment that states a run's colour or result on a head, on main or on the base is history,
+# whatever verb or label comes before it. A colour phrase after when, if, unless, until, while or once in the same
+# clause is a condition and stays clean (see CLEAN). A condition word in an earlier clause, past a `;`, `:`, `.`,
+# `!` or `?`, does not exempt a later run phrase. The `history phrase` pattern flags each hit. The list also joins
+# FLAGGED, so every flagged test runs it.
+RUN_STATE = [
+    "RED on the head this branch starts from: the edit tool and the PATCH route are not judged",
+    "PINS, green on the head this branch starts from: prose after the CI line is refused",
+    "Red on main: main refuses every workflow edit by path, so each allow below fails",
+    "Both are green on main: they pin the cost of the new check",
+    "red on main", "green on the base", "was green before", "went red on the head",
+    "passed on main before this change",
+    "fails on main", "passes on the head", "This case passes on main.", "RED before this change",
+    "(green before the fix)", "the run is red on main", "Control, green on main:",
+    "if X; it passed on main", "when ready: this passed on main", "if cold, skip. The run is red on main",
+]
+
 # Text the check must flag, in a comment or in a docstring line.
 FLAGGED = [
     "fixed in round 2", "Round3 of changes", "after review round", "a review finding", "review points",
@@ -60,7 +80,7 @@ FLAGGED = [
     "Changed from returning None to raising", "Changed from the previous default to 5",
     "changed from the old file layout to the new one", "changed from the old state machine to a table",
     "changed from the old hash function to sha256", "changed from the old base class to a mixin",
-]
+] + RUN_STATE
 
 # Near misses. No pattern may flag any of them.
 CLEAN = [
@@ -77,6 +97,18 @@ CLEAN = [
     "Skip when previously it was seen in this loop",
     "Keep the old behaviour expected by legacy clients", "Keep the old behaviour required by billing",
     "Preserve the old behaviour relied on by v1 callers",
+    "These run against a green head.", "the merge cases run on a green head, so merge-checks pass",
+    "refuses a head that is not green", 'returns "red" when any job fails',
+    "the red/green colour of the badge", "a green check proves only its platform",
+    "the gate goes red when any job fails",
+    # A colour phrase after when, if, unless, until, while, once or only ... when is a condition, so it stays clean.
+    "only merge when green on the head", "if red on main, page the on-call",
+    "None when it is green on the head", "until it is green on the base",
+    "unless red on main, skip", "once green on the head, merge", "while it is red on the base, wait",
+    # A pass or fail verb that names code, not a run, is not history.
+    "Calling this fails on the main thread", "pass on the base class to the parent",
+    "passes on the head of the list", "fails on main() when argv is empty",
+    "has been passed before the loop", "was passed before the loop",
     "true if the hash changed from the previous snapshot", "true when the file changed from the previous run",
     "changed from the old snapshot", "changed from the original snapshot",
 ]
@@ -218,6 +250,15 @@ class FlagsAddedLines(Case):
             with self.subTest(text):
                 self.assertHit(out, "s%d.py" % i, 2)
 
+    def test_run_state_hits_name_the_history_phrase_pattern(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"h%d.py" % i: "x = 1\n# %s\ny = 2\n" % text for i, text in enumerate(RUN_STATE)})
+        _, out = self.lint()
+        for i, text in enumerate(RUN_STATE):
+            with self.subTest(text):
+                self.assertHit(out, "h%d.py" % i, 2)
+                self.assertIn("history phrase:", self.hit_line(out, "h%d.py" % i, 2))
+
     def test_docstring_kinds(self):
         self.base({"keep.py": "x = 1\n"})
         kinds = {
@@ -351,7 +392,7 @@ class Ratchet(Case):
             "a.rb": "# fixed in round 2\n",
             "notes.txt": "# owner ruling 2026-10-18\n",
             "notes.md": "Fixed in round 2. Owner ruling 2026-10-18.\n",
-            "run.sh": "# fixed in round 2\n",
+            "run.zsh": "# fixed in round 2\n",
             "data.txt": "# MEASURED CORRECTED\n",
             "README": "# PR #509\n",
         })
@@ -404,6 +445,31 @@ def f(x="round 2"):
 '''
         self.base({"keep.py": "x = 1\n"})
         self.change({"strings.py": src})
+        self.assertClean()
+
+    def test_run_state_words_in_string_literals_do_not_fail(self):
+        src = '''\
+A = "red on main"
+B = 'green on the base'
+C = "# red on main"
+D = '// green on the head'
+E = "[new allow: red on main, passes on d7fb2f1]"
+F = "passed on main before this change"
+G = r"was green before"
+H = f"{A} went red on the head"
+I = dict(note="red on main")
+J = """
+# red on main
+was green before
+"""
+
+
+def test_red_on_main_denies():
+    sh("... denies (red on main too)", ...)
+    assert I, "was green before"
+'''
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"run_state.py": src})
         self.assertClean()
 
     def test_multi_line_string_that_is_not_a_docstring_does_not_fail(self):
@@ -483,6 +549,37 @@ class Scanner(Case):
         self.assertEqual(rc, 1, out)
         self.assertHit(out, "flagged.py", at(flagged, "round 2"))
         self.assertNoHit(out, "clean.py", 2)
+
+    def test_run_state_comment_after_strings_that_hold_openers_is_flagged(self):
+        src = ('a = "# red on main"  # was green before\n'
+               "b = '// green on the head'  # went red on the head\n"
+               'c = "x"  # fine\n')
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"after.py": src})
+        rc, out = self.lint()
+        self.assertHit(out, "after.py", 1)
+        self.assertHit(out, "after.py", 2)
+        self.assertNoHit(out, "after.py", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_run_state_comment_after_a_multi_line_string_reports_its_own_line(self):
+        src = "SQL = '''\n# red on main\nwent red on the head\n'''\nx = 1  # fine\n# was green before\ny = 2\n"
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"after.py": src})
+        rc, out = self.lint()
+        self.assertHit(out, "after.py", at(src, "# was green before"))
+        for line in (1, 2, 3, 4, 5, 7):
+            self.assertNoHit(out, "after.py", line)
+        self.assertEqual(rc, 1, out)
+
+    def test_run_state_comment_after_a_lone_quote_is_flagged(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"single.py": "# don't\n# red on main\nx = 1\n",
+                     "double.py": '# say "hi\n# was green before\nx = 1\n'})
+        rc, out = self.lint()
+        self.assertHit(out, "single.py", 2)
+        self.assertHit(out, "double.py", 2)
+        self.assertEqual(rc, 1, out)
 
 
 class Exclude(Case):
@@ -592,6 +689,52 @@ class JsTsScan(Case):
         self.assertEqual(rc, 1, out)
         self.assertHit(out, "a.cts", 1)
         self.assertHit(out, "b.mts", 1)
+
+    def test_run_state_comment_is_flagged(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"app.ts": "const a = 1;\n// red on main\nexport {a};\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertHit(out, "app.ts", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_run_state_comment_openers_in_strings_do_not_hide_the_real_comment(self):
+        src = 'const a = "# red on main";\nconst b = \'// green on the head\';\nconst c = 1; // was green before\n'
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"app.ts": src})
+        rc, out = self.lint(path_tools=True)
+        self.assertNoHit(out, "app.ts", 1)
+        self.assertNoHit(out, "app.ts", 2)
+        self.assertHit(out, "app.ts", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_run_state_template_literal_text_is_not_a_comment(self):
+        src = "const s = `\n// red on main\nwent red on the head\n`;\n// was green before\nexport default s;\n"
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"util.ts": src})
+        rc, out = self.lint(path_tools=True)
+        self.assertNoHit(out, "util.ts", 2)
+        self.assertNoHit(out, "util.ts", 3)
+        self.assertHit(out, "util.ts", at(src, "was green before"))
+        self.assertEqual(rc, 1, out)
+
+    def test_run_state_lone_quote_in_jsx_text_does_not_hide_the_comment_after_it(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"app.js": "// don't\n// was green before\nconst x = 1;\n",
+                     "view.tsx": "export const p = <p>Don't</p>;\n// red on main\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertHit(out, "app.js", 2)
+        self.assertHit(out, "view.tsx", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_run_state_words_in_strings_and_template_text_are_clean(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"app.js": 'const a = "# red on main";\nconst b = \'/* green on the head */\';\n'
+                               "// These run against a green head.\n",
+                     "util.ts": "const s = `\n// red on main\n`;\n",
+                     "view.tsx": "export const p = <p>Don't was green before</p>;\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Traceback", out)
 
 
 @NEEDS_TSC
@@ -717,6 +860,387 @@ class SwiftScan(Case):
         self.change({"Urls.swift": 'let u = "http://x"\nlet v = "/* fixed on 2026-10-28 */"\n'})
         rc, out = self.lint()
         self.assertEqual(rc, 0, out)
+
+    def test_run_state_line_comment_is_flagged(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Thing.swift": "let c = 1 // green on the base\n"})
+        rc, out = self.lint()
+        self.assertHit(out, "Thing.swift", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_run_state_comment_openers_in_strings_do_not_hide_the_comment_after_them(self):
+        src = 'let a = "// red on main"\nlet b = "/* green on the head */"\nlet c = 1 // was green before\n'
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Thing.swift": src})
+        rc, out = self.lint()
+        self.assertNoHit(out, "Thing.swift", 1)
+        self.assertNoHit(out, "Thing.swift", 2)
+        self.assertHit(out, "Thing.swift", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_run_state_multi_line_string_holding_a_comment_is_text(self):
+        src = 'let s = """\n// red on main\nwent red on the head\n"""\nlet t = 1 // was green before\n'
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Thing.swift": src})
+        rc, out = self.lint()
+        self.assertNoHit(out, "Thing.swift", 2)
+        self.assertNoHit(out, "Thing.swift", 3)
+        self.assertHit(out, "Thing.swift", at(src, "was green before"))
+        self.assertEqual(rc, 1, out)
+
+    def test_run_state_lone_quote_in_a_line_comment_does_not_hide_the_next_comment(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Quote.swift": "// don't\n// red on main\nlet x = 1\n"})
+        rc, out = self.lint()
+        self.assertHit(out, "Quote.swift", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_run_state_strings_with_slashes_and_no_comment_are_clean(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Urls.swift": 'let u = "http://x red on main"\nlet v = "/* green on the base */"\n'})
+        self.assertClean()
+
+
+class ShellScan(Case):
+    """Shell comments: a `#` inside quotes, after an escape, in an expansion, in arithmetic or in a heredoc body is text."""
+
+    def scan(self, files):
+        self.base({"keep.py": "x = 1\n"})
+        self.change(files)
+        return self.lint()
+
+    def assertReadsClean(self, src):
+        """The construct reads with no Unread, so the file exits 0."""
+        rc, out = self.scan({"x.sh": src})
+        self.assertEqual(rc, 0, out)
+
+    def assertLaterCommentFlagged(self, src):
+        """The construct reads, and a comment on the line after it is still flagged."""
+        rc, out = self.scan({"x.sh": src + "# fixed in round 2\n"})
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "x.sh", src.count("\n") + 1)
+
+    def test_full_line_comment_is_flagged(self):
+        rc, out = self.scan({"x.sh": "# fixed in round 2\necho hi\n"})
+        self.assertHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_trailing_comment_after_a_command_is_flagged(self):
+        rc, out = self.scan({"x.sh": "cmd  # fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_incident_text_in_hooks_is_flagged(self):
+        rc, out = self.scan({"hooks/x.sh": "# (incident 2026-11-07, /base_run.txt)\n"})
+        self.assertHit(out, "hooks/x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_extensionless_sh_shebang_script_is_flagged(self):
+        rc, out = self.scan({"bin/run-sh": "#!/bin/sh\n# fixed in round 2\n"})
+        self.assertHit(out, "bin/run-sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_extensionless_bash_shebang_script_is_flagged(self):
+        rc, out = self.scan({"bin/run-bash": "#!/bin/bash\n# fixed in round 2\n"})
+        self.assertHit(out, "bin/run-bash", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_extensionless_env_bash_shebang_script_is_flagged(self):
+        rc, out = self.scan({"bin/run-env": "#!/usr/bin/env bash\n# fixed in round 2\n"})
+        self.assertHit(out, "bin/run-env", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_bash_extension_is_flagged(self):
+        rc, out = self.scan({"lib/x.bash": "# fixed in round 2\n"})
+        self.assertHit(out, "lib/x.bash", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_comment_after_a_multi_line_double_quoted_string_is_flagged(self):
+        rc, out = self.scan({"x.sh": 'echo "one\ntwo"\n# fixed in round 2\n'})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_hash_inside_double_quotes_is_text(self):
+        rc, out = self.scan({"x.sh": 'echo "x # fixed in round 2"\n# fixed in round 2\n'})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_hash_inside_single_quotes_is_text(self):
+        rc, out = self.scan({"x.sh": "echo 'x # fixed in round 2'\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_hash_inside_ansi_c_quotes_is_text(self):
+        rc, out = self.scan({"x.sh": "echo $'x # fixed in round 2'\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_escaped_hash_is_text(self):
+        rc, out = self.scan({"x.sh": "echo \\# fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_hash_inside_a_word_is_text(self):
+        rc, out = self.scan({"x.sh": "echo a#b fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_dollar_hash_is_text(self):
+        rc, out = self.scan({"x.sh": "echo $# fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_length_expansion_hash_is_text(self):
+        rc, out = self.scan({"x.sh": "echo ${#var} fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_prefix_strip_expansion_hash_is_text(self):
+        rc, out = self.scan({"x.sh": "echo ${x#*/} fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_longest_prefix_strip_expansion_hash_is_text(self):
+        rc, out = self.scan({"x.sh": "echo ${x##*/} fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_arithmetic_base_hash_is_text(self):
+        rc, out = self.scan({"x.sh": "echo $((16#ff)) fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_heredoc_body_with_plain_opener_is_text(self):
+        rc, out = self.scan({"x.sh": "cat <<EOF\n# fixed on 2026-10-28\nEOF\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 4)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_heredoc_body_with_single_quoted_opener_is_text(self):
+        rc, out = self.scan({"x.sh": "cat <<'EOF'\n# fixed on 2026-10-28\nEOF\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 4)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_heredoc_body_with_double_quoted_opener_is_text(self):
+        rc, out = self.scan({"x.sh": 'cat <<"EOF"\n# fixed on 2026-10-28\nEOF\n# fixed in round 2\n'})
+        self.assertHit(out, "x.sh", 4)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_heredoc_body_with_backslash_opener_is_text(self):
+        rc, out = self.scan({"x.sh": "cat <<\\EOF\n# fixed on 2026-10-28\nEOF\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 4)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_heredoc_body_with_tab_stripping_opener_and_tab_terminator_is_text(self):
+        rc, out = self.scan({"x.sh": "cat <<-EOF\n\t# fixed on 2026-10-28\n\tEOF\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 4)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_two_heredocs_on_one_line_keep_both_bodies_as_text(self):
+        src = "cat <<A; cat <<B\n# fixed on 2026-10-28\nA\n# fixed on 2026-10-28\nB\n# fixed in round 2\n"
+        rc, out = self.scan({"x.sh": src})
+        self.assertHit(out, "x.sh", 6)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 4)
+        self.assertEqual(rc, 1, out)
+
+    def test_here_string_does_not_swallow_the_next_line(self):
+        rc, out = self.scan({"x.sh": 'cat <<< "# fixed on 2026-10-28"\n# fixed in round 2\n'})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_lone_apostrophe_in_a_comment_does_not_hide_the_next_comment(self):
+        rc, out = self.scan({"x.sh": "# don't\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_lone_apostrophe_in_an_unquoted_heredoc_body_does_not_hide_the_next_comment(self):
+        rc, out = self.scan({"x.sh": "cat <<EOF\n# don't, fixed on 2026-10-28\nEOF\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 4)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_unclosed_double_quote_exits_unknown(self):
+        rc, out = self.scan({"x.sh": 'echo "open\n# fixed in round 2\n'})
+        self.assertEqual(rc, 2, out)
+        self.assertRegex(out, r"UNKNOWN.*x\.sh")
+
+    def test_unclosed_heredoc_exits_unknown(self):
+        rc, out = self.scan({"x.sh": "cat <<EOF\n# fixed in round 2\n"})
+        self.assertEqual(rc, 2, out)
+        self.assertRegex(out, r"UNKNOWN.*x\.sh")
+
+    def test_why_comment_is_clean(self):
+        rc, out = self.scan({"x.sh": "# git may be missing in a fresh container\ngit status\n"})
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Traceback", out)
+
+    def test_shebang_on_line_one_is_clean(self):
+        rc, out = self.scan({"x.sh": "#!/bin/sh\necho ok\n"})
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Traceback", out)
+
+    def test_reader_pin_comment_inside_command_substitution_is_flagged(self):
+        rc, out = self.scan({"x.sh": "x=$(\n  # fixed in round 2\n  echo a\n)\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_pin_comment_inside_backticks_is_flagged(self):
+        rc, out = self.scan({"x.sh": "x=`\n  # fixed in round 2\n  echo a\n`\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_pin_comment_in_a_case_arm_is_flagged(self):
+        rc, out = self.scan({"x.sh": 'case "$x" in\n  a)\n    # fixed in round 2\n    echo a ;;\nesac\n'})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_pin_comment_in_a_function_body_is_flagged(self):
+        rc, out = self.scan({"x.sh": "f() {\n  # fixed in round 2\n  echo a\n}\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_pin_trailing_comment_after_a_closing_quote_is_flagged(self):
+        rc, out = self.scan({"x.sh": 'x="a" # fixed in round 2\n'})
+        self.assertHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_line_continuation_keeps_a_comment_on_its_line(self):
+        rc, out = self.scan({"x.sh": "echo a \\\n#P60 fixed in round 2\n b\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_arithmetic_then_subshell_pipeline_does_not_hide_the_later_comment(self):
+        rc, out = self.scan({"x.sh": "((cd /tmp; ls) | wc -l)\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_dollar_arithmetic_with_a_subshell_does_not_hide_the_later_comment(self):
+        rc, out = self.scan({"x.sh": "echo $((echo a) | cat)\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_backticks_with_a_comment_inside_do_not_hide_the_later_comment(self):
+        rc, out = self.scan({"x.sh": "x=`echo a # note`\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_comment_in_a_case_arm_in_a_quoted_substitution_is_flagged(self):
+        rc, out = self.scan({"x.sh": 'x="$(case $k in\na) echo ;;\n# fixed in round 2\nesac)"\n'})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_comment_in_a_case_arm_in_an_unquoted_substitution_is_flagged(self):
+        rc, out = self.scan({"x.sh": "x=$(case $k in\na) echo ;;\n# fixed in round 2\nesac)\n"})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_comment_in_a_case_arm_in_an_unquoted_parameter_default_is_flagged(self):
+        rc, out = self.scan({"x.sh": "x=${y:-$(case $k in\na) echo ;;\n# fixed in round 2\nesac)}\n"})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_hash_in_a_quoted_string_in_a_later_arm_is_text(self):
+        src = 'x="$(case $k in\na) echo ;;\nb) echo "# fixed in round 2" ;;\nesac)"\n# fixed in round 2\n'
+        rc, out = self.scan({"x.sh": src})
+        self.assertHit(out, "x.sh", 5)
+        self.assertNoHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_spaced_hash_in_a_quoted_string_in_a_later_arm_is_text(self):
+        rc, out = self.scan({"x.sh": 'x="$(case $k in\na) echo ;;\nb) echo "x # fixed in round 2" ;;\nesac)"\n'})
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Traceback", out)
+
+    def test_reader_gap_comment_after_a_quoted_word_in_a_later_arm_is_flagged(self):
+        rc, out = self.scan({"x.sh": 'x="$(case $k in\na) echo ;;\nb) echo "x" # fixed in round 2\nesac)"\n'})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_case_inside_backticks_reads_clean(self):
+        self.assertReadsClean("x=`case $x in a) echo 1;; esac`\n")
+
+    def test_case_inside_double_quoted_backticks_reads_clean(self):
+        self.assertReadsClean('x="`case $x in a) echo 1;; esac`"\n')
+
+    def test_case_as_array_element_reads_clean(self):
+        self.assertReadsClean("kw=(case esac)\n")
+
+    def test_case_as_appended_array_element_reads_clean(self):
+        self.assertReadsClean("arr+=(case)\n")
+
+    def test_case_as_first_element_of_multi_line_array_reads_clean(self):
+        self.assertReadsClean("arr=(\n  case\n  b\n)\n")
+
+    def test_case_in_regex_alternation_reads_clean(self):
+        self.assertReadsClean("[[ $w =~ ^(if|case|esac)$ ]]\n")
+
+    def test_case_in_extglob_pattern_reads_clean(self):
+        self.assertReadsClean("[[ $w == @(case|esac) ]]\n")
+
+    def test_one_line_function_with_case_reads_clean(self):
+        self.assertReadsClean("function f { case $1 in a) :;; esac; }\n")
+
+    def test_case_word_in_echo_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("echo case\n")
+
+    def test_case_word_in_assignment_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("x=case\n")
+
+    def test_case_word_as_option_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("cmd --case\n")
+
+    def test_esac_as_argument_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("echo esac\n")
+
+    def test_nested_case_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  a) case $y in\n    b) echo ;;\n  esac ;;\nesac\n")
+
+    def test_paren_led_pattern_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  (a|b) echo 1 ;;\nesac\n")
+
+    def test_fallthrough_and_continue_terminators_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  a) echo 1 ;&\n  b) echo 2 ;;&\n  c) echo 3 ;;\nesac\n")
+
+    def test_heredoc_inside_arm_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  a) cat <<EOF\nhello\nEOF\n;;\nesac\n")
+
+    def test_subshell_inside_arm_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  a) (cd /tmp; ls) ;;\nesac\n")
+
+    def test_case_with_no_esac_at_end_of_input_exits_unknown(self):
+        rc, out = self.scan({"x.sh": "case $x in\n  a) echo 1 ;;\n"})
+        self.assertEqual(rc, 2, out)
+        self.assertRegex(out, r"UNKNOWN.*x\.sh")
+        self.assertIn("case never ends with esac", out)
+
+    def test_esac_with_no_case_exits_unknown(self):
+        rc, out = self.scan({"x.sh": "echo x\nesac\n"})
+        self.assertEqual(rc, 2, out)
+        self.assertRegex(out, r"UNKNOWN.*x\.sh")
+        self.assertIn("esac with no case", out)
+
+    def test_unclosed_backtick_exits_unknown(self):
+        rc, out = self.scan({"x.sh": "x=`echo a\n"})
+        self.assertEqual(rc, 2, out)
+        self.assertRegex(out, r"UNKNOWN.*x\.sh")
+        self.assertIn("command substitution never closes", out)
 
 
 class Degraded(Case):

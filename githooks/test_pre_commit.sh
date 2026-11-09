@@ -274,13 +274,13 @@ fresh_mr mr-hatch main; arm_hook "$neutral"; arm
 printf 'x\n' >f.txt; git add -- f.txt
 must_staged f.txt && lands "ok: PRE_COMMIT_GUARD=off lets a stale copy through" env PRE_COMMIT_GUARD=off git commit -q -m c
 
-# Round 2. The check reads HEAD, not the working tree: an uncommitted edit to the hook excuses nothing.
+# The check reads HEAD, not the working tree: an uncommitted edit to the hook excuses nothing.
 fresh_mr mr-uncommitted main; arm_hook "$neutral"; arm
 printf '# an uncommitted edit\n' >>githooks/main-ref/reference-transaction
 printf 'x\n' >f.txt; git add -- f.txt
 must_staged f.txt && refused_naming "sh githooks/main-ref/install.sh" "refused: uncommitted edit does not excuse a stale armed copy" git commit -q -m c
 
-# Round 2. A repo that vendors the installer from before --check: the pre-commit must not re-arm the copy
+# A repo that vendors the installer from before --check: the pre-commit must not re-arm the copy
 # through it. The copy stays byte-identical, the verdict is unknown, and unknown lets the commit land.
 fresh_mr mr-old-install main "$repo/githooks/test_fixtures/main-ref-install-no-check.sh"; arm_hook "$neutral"; arm
 printf 'x\n' >f.txt; git add -- f.txt
@@ -290,7 +290,7 @@ lands_with "unknown" "ok: vendored installer with no --check, the commit lands a
 armed_after="$(cksum <.git/hooks/reference-transaction)"
 if [ "$armed_before" = "$armed_after" ]; then echo "ok   pre-commit leaves the armed copy alone when the vendored installer has no --check"; else bad=1; echo "FAIL pre-commit re-armed the copy through a vendored installer that has no --check"; fi
 
-# Round 2. git rev-parse --show-toplevel fails inside the hook: the verdict is unknown and the commit is allowed.
+# git rev-parse --show-toplevel fails inside the hook: the verdict is unknown and the commit is allowed.
 # git prepends its exec path (/usr/lib/git-core) to PATH, so a PATH shim alone never runs. GIT_EXEC_PATH at a
 # dir with no git binary puts the shim first. The shim logs each failing call: the case checks that the
 # failure happened before it judges the verdict.

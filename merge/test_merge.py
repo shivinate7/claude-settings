@@ -13652,7 +13652,7 @@ class ReviewArgs(ReviewEnv):
 
     def test_preview_and_confirm_take_no_review_record(self):
         # Q1 a, pinned: the review flags add no refusal to the preview or the confirm, so a pull request with no record runs as before.
-        # This case passes on main. It guards against a refusal added later.
+        # This case guards against a refusal added later.
         rc, out, err = self.run_args("7")
         self.assertEqual(rc, 0, out + err)
         rc, out, err = self.run_args("7", "--confirm")

@@ -34,7 +34,7 @@
 //
 // The fixture (tests/fixture/) gained: src/retry.py, src/caller.py, config.json, docs/map/homes.md, and fact lines in core.md.
 // Its codeExtensions stay ["ts"]: the readers read .py and .json facts without them being code files. Adding them would change
-// the upgrade of `/api/runs.json:1` (case 7a) and the config of case 4, which are green on main.
+// the upgrade of `/api/runs.json:1` (case 7a) and the config of case 4, which those cases pin as they stand.
 // Each case that edits the fixture edits a scratch copy in this run's temp folder, never the checkout.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

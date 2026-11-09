@@ -983,7 +983,7 @@ def case_reask_batch_one_call_rule_once():
 
 def case_reask_refusal_denies():
     # Case 7: case 1's write, and the fake refuses it. The deny is question-judge, and the prompt holds the rule
-    # once, so this case is red on main for the rule and not for the deny.
+    # once, so this case pins the rule's count in the prompt, apart from the deny.
     rule = none_direction_rule()
     r = run_hook(page_input("update", reask_item(PAGE_MARK)), answer=REASK_FLAG)
     d = r.deny() or {}

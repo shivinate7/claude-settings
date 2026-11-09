@@ -4656,7 +4656,7 @@ sh("kill: xargs kill after a pipe from a plain list is not by name", "echo 1 | x
 sh("kill: pgrep alone only reads", "pgrep -f node", "allow", cwd=NOGIT)
 
 # Four ways to stop a process by port, or every
-# process, passed on main. `kill $(lsof -t ...)` is the `$(pgrep ...)` act: the pid list is made by
+# process, and the guard must refuse each. `kill $(lsof -t ...)` is the `$(pgrep ...)` act: the pid list is made by
 # a pattern, but the guard names only pgrep and pidof. `fuser -k` and `kill-port` kill by port, the
 # same act as `lsof -t | xargs kill`. `kill -9 -1` reads `-1` as a flag, so pid -1 (every process)
 # never reaches the pid check; `kill -9 -- -1` above already denies. Claude writes each of these when
@@ -14838,7 +14838,7 @@ DESELECT = "      - name: Unit\n        run: python3 -m pytest --deselect a::b\n
 NEW_WORKFLOW = ("on: push\njobs:\n  test:\n    steps:\n      - name: Guard tests\n"
                 "        run: python3 hooks/test_guard.py\n")
 
-# Red on main: main refuses every workflow edit by path, so each allow below fails for that one cause.
+# Each allow below pins one test step a workflow edit may add. A refusal here points at the path check alone.
 for _name, _path, _old, _new in (
     ("a Linux test step inserted after a lint step", WF, LINT, LINT + TEST_LINUX),
     ("a Windows python test step inserted after a lint step", WF, LINT, LINT + TEST_WINDOWS),
@@ -30490,7 +30490,7 @@ lb_add("a lane session's Bash, memory 91.7%: busy, allowed, the reader runs once
 lb_add("a lane session's Edit, 9.4 GB free of 926 GB: busy, allowed, the reader runs once",
        lb_decision_check("Edit", LB_BUSY_EDIT, "allow", tool_input=LB_LANE_EDIT, own_env=LB_OWN, transcript=LB_LANE))
 # An agent of a lane makes an agent's call, so it reads the load once, as an agent's write does, and the lane check never
-# reads it again. Both are green on main: they pin the cost of the new check on an agent's call.
+# reads it again. Both pin the cost of the new check on an agent's call, which must not add a second read.
 lb_add("a lane session's agent Bash (agent_id set), memory 91.7%: busy, allowed, the reader runs once",
        lb_decision_check("Bash", LB_BUSY, "allow", tool_input=LB_LANE_BASH, agent=LB_AGENT, own_env=LB_OWN,
                          transcript=LB_LANE))

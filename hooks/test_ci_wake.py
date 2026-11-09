@@ -883,7 +883,7 @@ def case_real_run_listed_late():
 
 
 def case_real_failed_run_beside_a_draft_run_is_red():
-    """Control: a skipped draft run does not hide a real failure. Passes on main."""
+    """Control: a skipped draft run does not hide a real failure, so the verdict still reads from the real run."""
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [DRAFT_DONE, RED]))
     expect_verdict("draft run listed skipped beside a failed real run (control)", res, "red",
                    names_in=["unit", "e2e"], names_out=["lint", "workflow"])
@@ -1457,7 +1457,7 @@ def case_wait_for_lists_again_until_a_real_run_shows():
 def case_wait_for_lists_until_the_deadline_and_no_further():
     """wait_for: only a skipped draft run, so no real run, ever. It keeps listing, 30 s or more apart,
     and its last pause ends at the deadline: no list after the deadline, no pause past it. A deadline
-    10 s away (budget 10): the one pause is cut to 10 s, and this row passes on main."""
+    10 s away (budget 10): the one pause is cut to 10 s, so the wait never outlasts the deadline."""
     for budget in (100, 10):
         label = "wait_for, only a skipped draft run, deadline in %d s" % budget
         raised, clock, calls, deadline = wait_for_on_fakes([DRAFT_DONE], budget)

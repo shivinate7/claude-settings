@@ -12,7 +12,7 @@ Tools are pinned in lint/code_check_standard.json and run through pipx or npx. A
 a dev machine). The javascript typecheck layer runs tsc over the tracked .mjs files and keeps only broken imports of
 a relative specifier, extensionless relative imports, TypeScript-only syntax and syntax errors ("mjs-imports"); checkJs is on for
 import diagnostics only, and type errors are dropped. Formatter layers are skipped until o2 (one layout) lands; their rows say so.
-It also runs lint/check_comment_narration.py (rule building-comments-say-why) on the Python, JS/TS, Astro and Swift lines the change adds
+It also runs lint/check_comment_narration.py (rule building-comments-say-why) on the Python, JS/TS, Astro, Swift and shell lines the change adds
 since --base, minus the exclude folders. It reads the lint/ and hooks/ folders of the repo the action is pinned to,
 which GitHub fetches whole at the pinned sha."""
 import argparse, json, os, re, subprocess, sys

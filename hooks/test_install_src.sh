@@ -4080,7 +4080,7 @@ mergepin5() {
 }
 
 # ---- guardset1, guardset2: shared_names.py lands inside the atomic guard set -------------------------
-# Owner ruling: hooks/shared_names.py is the one home of PROJECT_FROZEN_FILES and config_dir. The guard
+# hooks/shared_names.py is the one home of PROJECT_FROZEN_FILES and config_dir (decision config-watch-fast-exit). The guard
 # imports it with no fallback copy, so a guard run that loads guard.d/<id>/ must find it there. The flat
 # copy is the other way in, and the config watch is a flat hook that must find the set's copy the way
 # guard.py finds the set. hooks/git_reads.py is the one home of the git and session reads the guard and

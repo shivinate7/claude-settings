@@ -408,7 +408,7 @@ need "exit 75 passes through" rc_is 75
 need "one xcodebuild call" test "$(grep -c ^xcodebuild "$calls")" -eq 1
 end_case "7 test exit 75 is a result"
 
-# Lock: step sim-machine-lock (roadmap record 55264090, 2026-11-02).
+# Lock: step sim-machine-lock (roadmap record 55264090).
 # 16 is re-pointed to a booted Duo: the reuse path takes the lock with one mkdir, and holds it for the run.
 fresh; booted "iPhone Duo" $DUO1; run
 need "exit code" rc_is 0
@@ -475,7 +475,7 @@ sig_case() {
 sig_case INT; end_case "19 INT after its own boot still shuts the simulator down"
 sig_case TERM; end_case "20 TERM after its own boot still shuts the simulator down"
 
-# Lock: step sim-machine-lock (roadmap record 55264090, 2026-11-02).
+# Lock: step sim-machine-lock (roadmap record 55264090).
 fresh; hold_lock $$; run SIM_TEST_LOCK_WAIT=1
 need "exit is non-zero" test $rc -ne 0
 need "no simctl boot" test "$(grep -c '^simctl boot' "$calls")" -eq 0
@@ -549,8 +549,8 @@ need "pid in the lock is the tool's pid" lock_pid_is_tool
 need "lock gone after the run" lock_gone
 end_case "34 live holder that ends in about 1 s: the run waits, then runs normally"
 
-# Crash loop: step sim-crash-loop-stop (roadmap record 55264090, 2026-11-02). Named incident: 7-minute simulator
-# crash loop, home repo, 2026-11-01.
+# Crash loop: step sim-crash-loop-stop (roadmap record 55264090). Named incident: 7-minute simulator
+# crash loop, home repo.
 fresh; run STUB_CRASH=3 STUB_HANG_SECS=4
 need "exit is non-zero" test $rc -ne 0
 need "xcodebuild was stopped: no xc_finished" test ! -e "$work/xc_finished"

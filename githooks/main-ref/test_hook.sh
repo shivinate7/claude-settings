@@ -176,24 +176,24 @@ ckdir "$c" >/dev/null 2>&1
 after="$(cksum <"$c/.git/hooks/reference-transaction")"
 if [ "$before" = "$after" ]; then echo "ok   --check leaves the armed copy unchanged"; else echo "FAIL --check changed the armed copy"; bad=1; fi
 
-# Round 2. The check reads HEAD, not the working tree: an uncommitted edit to the hook excuses nothing.
+# The check reads HEAD, not the working tree: an uncommitted edit to the hook excuses nothing.
 c="$(fresh_clone "$src" chk-uncommitted)"; arm_copy "$c" "$neutral"
 printf '# an uncommitted edit\n' >>"$c/githooks/main-ref/reference-transaction"
 t stale "--check: uncommitted edit does not excuse a stale copy, exits 1" ckdir "$c"
 says "--check: uncommitted edit, stale copy names the re-arm command" "sh githooks/main-ref/install.sh"
 
-# Round 2. A hooksPath in drive-letter form is absolute, so its copy is not read under the worktree.
+# A hooksPath in drive-letter form is absolute, so its copy is not read under the worktree.
 # Linux has no drive letters; the message is the testable part: no worktree prefix in front of C:/.
 c="$(fresh_clone "$src" chk-drive)"; git -C "$c" config core.hooksPath 'C:/x/hooks'
 t stale "--check: drive-letter hooksPath with no copy exits 1" ckdir "$c"
 lacks "--check: drive-letter hooksPath is not read under the worktree" "/C:/x/hooks"
 
-# Round 2. A hooks path under a regular file is a stat error: unknown (exit 2), never a stale copy (exit 1).
+# A hooks path under a regular file is a stat error: unknown (exit 2), never a stale copy (exit 1).
 c="$(fresh_clone "$src" chk-stat)"; : >"$c/afile"; git -C "$c" config core.hooksPath "$c/afile/hooks"
 t unknown "--check: hooks path under a regular file exits 2" ckdir "$c"
 says "--check: hooks path under a regular file says unknown" "unknown"
 
-# Round 2. No local main but origin/main present: the verdict comes from origin/main.
+# No local main but origin/main present: the verdict comes from origin/main.
 c="$(fresh_clone "$src" chk-origin-stale)"; git -C "$c" switch -q -c away; git -C "$c" branch -q -D main
 arm_copy "$c" "$neutral"
 t stale "--check: no local main, stale copy exits 1 against origin/main" ckdir "$c"
