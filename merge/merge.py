@@ -3649,7 +3649,7 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--kind docs-only means no guard or check, so --guard must be no")
         if a.fix_check and a.fix_check[0] == a.head:
             p.error("--fix-check: the reviewed head must differ from --head, or the fix diff is empty")
-        # The reviewer row (decision agent-model-cap): a fix check and a reviewer round 2 or 3 run Sonnet; round 3 may run Opus by the
+        # The reviewer row (decision agent-model-cap): a fix check and a later-round reviewer run Sonnet; the last round may run Opus by the
         # owner's override. Checked here, never in parse_review, so a record posted before the rule still parses.
         if a.fix_check and "sonnet" not in a.fix_check[2].lower():
             p.error(f"--fix-check: a fix check runs sonnet, not {a.fix_check[2]!r} (decision agent-model-cap, the reviewer row)")
