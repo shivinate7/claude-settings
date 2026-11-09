@@ -144,3 +144,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - fix-check-cites-unpinned (same source): no check pins the five doc cites of the literal "Fix check".
 - export-false-collections-doc (#2360 round 1 reviewer, via lane artifact-pages-other-account 19:33 CST Nov 8): layout.py docstring at :264 says `export: false` takes no collections, but :295-301 accepts them.
 - collections-page-accepted (same source): `collections: ["page"]` passes layout.py (:298) and export_page.py would export into the page folder (:507), while `--rebuild --collections` refuses `page` (:584).
+- carry-count-wording (#2344 fresh round 1, lane replacement-pr-carries-review 19:38 CST Nov 8, Decision: pr-review-record): merge.py:29-30 and test_merge.py:14748-14749 say a carry counts toward the source's cap, but merge.py:3757-3763 records nothing on the source, so two carries from one PASS both pass; each is pinned to the PASS tree, so no harm, only wrong wording.
+- replaces-pr-form-refused (same source and decision): merge.py:3751 refuses "replaces PR #N"; the remedy names the accepted form.
+- copy-carries-own-head (same source and decision): a plain copy carries with its own Head, not the copied PASS Head; this matches the decision and opens no hole against the base.
