@@ -438,7 +438,11 @@ class ReviewRecordTests(unittest.TestCase):
         # Catches: a record created before the cutover and edited after it, with no Stamp line, read as made before the cutover.
         self.cutover_history("fixture")
         self.serve(comments=[{"body": unstamped(record()), "created_at": BEFORE, "updated_at": AFTER}], base="fixture")
-        self.assert_blocked(self.stop(self.lane_turn(report(CLAIM))))
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assert_blocked(out)
+        # With a cutover, an edited record names no Stamp line: the cutover, not the Stamp line, decides its cause.
+        self.assertNotIn("Stamp line", out["reason"], "the refusal names the Stamp line with a cutover set: %r" % out["reason"])
 
     def test_a_hand_edited_newest_record_blocks_a_pass_claim(self):
         # Catches: _newest_record taking the newest record without its edit, so a record that merge --reviewed reads bad (its updated_at
@@ -452,6 +456,8 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertIsNotNone(out, "the PASS claim passed on a hand-edited newest record, which merge --reviewed reads bad")
         self.assert_blocked(out)
         self.assertIn("PR #12", out["reason"], out)
+        # A stamped record names no Stamp line, though it is edited with no cutover: the Stamp line is there, so no cause names it.
+        self.assertNotIn("Stamp line", out["reason"], "the refusal names the Stamp line for a stamped record: %r" % out["reason"])
 
     def test_an_unedited_newest_record_satisfies_a_pass_claim(self):
         # The control: the same body, with updated_at equal to created_at, is no edit, and it satisfies the claim on two reads.
@@ -551,7 +557,7 @@ class ReviewRecordTests(unittest.TestCase):
     def test_unstamped_record_with_no_cutover_is_refused_and_the_remedy_names_the_stamp_line(self):
         # Catches: the refusal of an unstamped record in a repo with no cutover, whose text names no Stamp line, so the
         # reviewer is not told what the record lacks. The render command stays in the remedy.
-        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: a cutover is set for main")
+        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: no cutover is set for main")
         body = unstamped(record())
         self.assertIsNone(merge_mod.parse_review(body, None, None), "fixture: merge reads the unstamped record with no cutover")
         self.serve(comments=[body])
@@ -565,7 +571,7 @@ class ReviewRecordTests(unittest.TestCase):
         # cutover names the no-record cause, not the Stamp line that merge's parse of the same body requires. The unedited twin
         # above names the Stamp line.
         comment = edited_unstamped()
-        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: a cutover is set for main")
+        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: no cutover is set for main")
         self.assertIsNone(merge_mod.parse_review(comment["body"], None, None), "fixture: merge reads the unstamped record with no cutover")
         self.assertIsNotNone(merge_mod.review_newest([comment])[1], "fixture: merge does not call the edited newest record untrusted")
         self.serve(comments=[comment])
@@ -578,7 +584,7 @@ class ReviewRecordTests(unittest.TestCase):
 
     def test_an_edited_unstamped_record_with_no_cutover_still_refuses_a_pass_claim(self):
         # The control: the same edited, unstamped record is refused on two reads, never accepted.
-        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: a cutover is set for main")
+        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: no cutover is set for main")
         self.serve(comments=[edited_unstamped()])
         out = self.stop(self.lane_turn(report(CLAIM)))
         self.assert_reads_of(PR)
@@ -750,7 +756,7 @@ class ReviewRecordTests(unittest.TestCase):
         # Catches: an unstamped record with a note after its CI line, and no cutover, named with the CI-line cause. The record
         # has no Stamp line, so the Stamp cause is the one to name.
         body = unstamped(record()) + "\n" + INCIDENT_NOTE + "\n"
-        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: a cutover is set for main")
+        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: no cutover is set for main")
         self.assertIsNone(merge_mod.parse_review(body, None, None), "fixture: merge reads the record with a note after the CI line")
         self.serve(comments=[body])
         out = self.stop(self.lane_turn(report(CLAIM)))
