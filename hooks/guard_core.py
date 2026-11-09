@@ -1112,8 +1112,17 @@ def is_print_step(segment: str, may_fail: bool) -> bool:
         return True
     if word[0] == "printf":
         return False
+    return not redirect_can_fail(segment)
+
+
+def redirect_can_fail(segment: str, null_ok: bool = False) -> bool:
+    """True when SEGMENT holds a redirect that can fail: any `<` or `>` outside quotes, past the fd copies of
+    `FD_COPY` (a file may be missing, a descriptor closed). Quoted text is no redirect. With NULL_OK a redirect to a
+    null device (`SILENT_WRITE_REDIRECT`) opens always and is no such redirect."""
+    if null_ok:
+        segment = SILENT_WRITE_REDIRECT.sub("", segment)
     bare = "".join("x" if quote else char for _, char, quote in walk_quotes(segment))
-    return not any(char in "<>" for char in FD_COPY.sub("", bare))
+    return any(char in "<>" for char in FD_COPY.sub("", bare))
 
 
 def _leaves_body_never(tokens, segment: str, end: str, in_pipe: bool) -> bool:
