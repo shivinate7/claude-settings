@@ -17249,26 +17249,26 @@ def _bh_push(name, tail, expected, fake, cwd, **kw):
     sh("push-batch: " + name, VCS + " push " + tail, expected, cwd=cwd, env_path=_bh_env(fake), **kw)
 
 
-BH_DENY = {"rule": PUSH_BATCH_RULE, "carries": BH_CARRIES, "lacks": BH_LACKS}
+BH_REFUSE = {"rule": PUSH_BATCH_RULE, "carries": BH_CARRIES, "lacks": BH_LACKS}
 # DENY, rule push-batch-held. Each lane's tip is held by a ready pull request on main, so each push is refused.
 _bh_push("refused, an explicit HEAD refspec to a held lane", "origin HEAD:lane-held", "deny", BH_HELD_GH, BH_HELD,
-         **BH_DENY)
+         **BH_REFUSE)
 _bh_push("refused, a colon-less refspec that names the held lane", "origin lane-held", "deny", BH_HELD_GH, BH_HELD,
-         **BH_DENY)
+         **BH_REFUSE)
 _bh_push("refused, the refs/heads spelling of the held lane", "origin HEAD:refs/heads/lane-held", "deny", BH_HELD_GH,
-         BH_HELD, **BH_DENY)
-_bh_push("refused, a bare push of the held lane under its upstream", "", "deny", BH_HELD_GH, BH_HELD, **BH_DENY)
-_bh_push("refused, -u HEAD to the held lane", "-u origin HEAD", "deny", BH_HELD_GH, BH_HELD, **BH_DENY)
+         BH_HELD, **BH_REFUSE)
+_bh_push("refused, a bare push of the held lane under its upstream", "", "deny", BH_HELD_GH, BH_HELD, **BH_REFUSE)
+_bh_push("refused, -u HEAD to the held lane", "-u origin HEAD", "deny", BH_HELD_GH, BH_HELD, **BH_REFUSE)
 sh("push-batch: refused, a held push chained after an echo", "echo ok && " + VCS + " push origin HEAD:lane-held",
-   "deny", cwd=BH_HELD, env_path=_bh_env(BH_HELD_GH), **BH_DENY)
+   "deny", cwd=BH_HELD, env_path=_bh_env(BH_HELD_GH), **BH_REFUSE)
 _bh_push("refused, a lane whose tip a second ready pull request holds", "origin HEAD:lane-second", "deny",
-         BH_SECOND_GH, BH_SECOND, **BH_DENY)
+         BH_SECOND_GH, BH_SECOND, **BH_REFUSE)
 _bh_push("refused, a lane whose holder is past the first page of the open list", "origin HEAD:lane-full", "deny",
-         BH_FULL_GH, BH_FULL, **BH_DENY)
+         BH_FULL_GH, BH_FULL, **BH_REFUSE)
 _bh_push("refused, a lane whose batch head is identical to its tip", "origin HEAD:lane-ident", "deny",
-         BH_IDENT_GH, BH_IDENT, **BH_DENY)
+         BH_IDENT_GH, BH_IDENT, **BH_REFUSE)
 
-# CONTROL, each an allow or an ask that the rule must not change. Each passes on main, and each names its rule.
+# CONTROL: each is an allow or an ask the rule must leave unchanged, and each names its rule.
 _bh_push("control, a push that moves nothing to a held lane is silent", "origin HEAD:lane-same", "allow",
          BH_SAME_GH, BH_SAME, silent=True)
 _bh_push("control, a bare push that moves nothing to a held lane is silent", "", "allow", BH_SAME_GH, BH_SAME,
@@ -17296,15 +17296,15 @@ sh("push-batch: control, a quoted push into a held lane is silent", 'echo "' + V
 # A held lane moved in the same push as a delete, and --all naming a held lane branch, are refused. A literal name and
 # -u alone stay refused. A delete-only push and --all with no held tip keep their verdicts.
 _bh_push("refused, a held lane moved in the same push as a delete", "origin HEAD:lane-held :old-zz", "deny",
-         BH_HELD_GH, BH_HELD, **BH_DENY)
+         BH_HELD_GH, BH_HELD, **BH_REFUSE)
 _bh_push("control, a delete-only push is silent", "origin :old-zz", "allow", BH_HELD_GH, BH_HELD, silent=True)
-_bh_push("refused, --all with a held lane branch", "--all origin", "deny", BH_HELD_GH, BH_HELD, **BH_DENY)
+_bh_push("refused, --all with a held lane branch", "--all origin", "deny", BH_HELD_GH, BH_HELD, **BH_REFUSE)
 _bh_push("control, --all with no held tip keeps ask push-main", "--all origin", "ask", BH_COUNT_GH, BH_COUNT,
          rule=PUSH_MAIN_RULE)
 _bh_push("control, a literal destination name is refused", "origin HEAD:lane-held", "deny", BH_HELD_GH, BH_HELD,
-         **BH_DENY)
+         **BH_REFUSE)
 _bh_push("control, -u alone into a held lane is refused", "-u origin HEAD:lane-held", "deny", BH_HELD_GH, BH_HELD,
-         **BH_DENY)
+         **BH_REFUSE)
 
 
 # The cost, pinned on the counted fake: one open-list call, then one compare per ready pull request, and nothing for a
