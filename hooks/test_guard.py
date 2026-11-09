@@ -10239,7 +10239,7 @@ def _build_pfr_history():
         # The agentId trailer's hex word resolves to no commit, so it is skipped and no sha counts.
         "held-agent-trailer": pfr_call("toolu_rev1", pfr_report(pfr_verdict("FAIL", 1), PFR_FINDING)
                                        + "\nagentId: a8970de98355e6dce") + pfr_pr(),
-        # c91cf3c2 is a path word that resolves to no commit, so it is skipped; C is off PR head B's history.
+        # A path word that names no commit is skipped; C's sha decides the hold, and C is off PR head B's history.
         "held-path-then-off-history": pfr_call("toolu_rev1", pfr_report(
             pfr_verdict("FAIL", 1), "Read notes/c91cf3c2.md first.", "Reviewed at head %s" % sha_c, PFR_FINDING))
                                       + pfr_pr(),
