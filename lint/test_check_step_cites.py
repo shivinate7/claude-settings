@@ -25,6 +25,9 @@ class CitesOfOneText(unittest.TestCase):
     def test_an_inline_code_cite_counts(self):
         self.assertEqual(scan.cites("Builds on `step:inline-one`."), ["inline-one"], "an inline-code cite was not read")
 
+    def test_a_bare_cite_in_prose_counts(self):
+        self.assertEqual(scan.cites("Builds on step:bare-one in prose."), ["bare-one"], "a bare cite without backticks was not read")
+
     def test_a_cite_inside_a_backtick_fence_is_no_cite(self):
         self.assertEqual(scan.cites("```\nstep:fenced-one\n```\n"), [], "a cite inside a backtick fence was counted")
 
