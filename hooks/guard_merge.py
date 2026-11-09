@@ -1319,10 +1319,10 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
 
 # ---- a reviewer brief names its pull request (rule review-needs-pr, decision pr-review-record)
 # An orchestrator's spawn of `reviewer` must name the pull request it reviews; a `design-reviewer` spawn must when its
-# brief carries a round marker. Between the PR word and the number the form may hold space, hyphen, `#`, `:`, `(`,
+# brief carries a round marker. Between the PR word and the number, on one line, the form may hold space, tab, hyphen, `#`, `:`, `(`,
 # markdown bold or code marks, and the word `number`; a letter other than that word breaks it ("a PR will follow").
 NEEDS_PR_NAMED = re.compile(
-    r"(?:\bPRs?|\bpull\s+requests?)(?:[\s\-#:(*_`]|\bnumber\b)*\d+|github\.com/[^/\s]+/[^/\s]+/pull/\d+",
+    r"(?:\bPRs?|\bpull\s+requests?)(?:[ \t\-#:(*_`]|\bnumber\b)*\d+|github\.com/[^/\s]+/[^/\s]+/pull/\d+",
     re.IGNORECASE)
 NEEDS_PR_REMOTE_URL = re.compile(r"(?:^|[/@])github\.com[:/]", re.IGNORECASE)
 NEEDS_PR_REASON = (

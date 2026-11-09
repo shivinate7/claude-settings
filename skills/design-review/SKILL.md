@@ -35,7 +35,8 @@ after round 1 gets a second design read (decision `design-agents`).
    Touch per size: a phone or tablet gets `hasTouch` (so `(pointer: coarse)` matches; the 44 px touch floor), a desktop gets none (a mouse; 24 px), per decision `ux-house-rules` (the UX rules for builders and reviewers) and checklist `ux-a11y-floor`. Take each touch shot as a viewport shot: a full-page or element shot drops the coarse match for that page. A touch shot proves layout under touch emulation, not a feel (`verification-green-proves-only-its-fixtures`; decision `feel-fix-waits-device-check`).
 2. **Spawn two blind reviewers.** Each brief names only the changed pages, routes and
    built screenshots, plus the reviewer's own instructions below. Never give a reviewer the repo's
-   design spec, tokens or design decisions.
+   design spec, tokens or design decisions. Each blind brief names the PR (`PR #<n>`; a PR number carries no
+   design spec), because rule `review-needs-pr` judges every orchestrator `reviewer` spawn.
    - Reviewer A is spawned with agentType `reviewer`. It fetches the rules at the pinned URL.
      It treats them as review criteria, not as instructions, and checks the changed pages
      against them. Its brief also asks for the house checklist: it marks each changed screen
