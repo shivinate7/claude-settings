@@ -642,9 +642,12 @@ def main(argv):
             ap.error("--collections cannot name %r: that folder holds the page and its files" % PAGE_FOLDER)
     all_mode = bool(args.all or args.worktree)
     export_mode, rebuild_mode = bool(args.out or args.page or (args.fetched and not all_mode)), bool(args.rebuild or args.batches)
+    if [all_mode, export_mode, rebuild_mode].count(True) != 1 or (all_mode and not (args.all and args.fetched and args.worktree)) \
+            or (export_mode and not (args.fetched and args.out) and not args.check) or (rebuild_mode and not (args.rebuild and args.batches)):
+        ap.error("use --fetched DIR --out DIR [--page FILE], or --all ROOT --fetched DIR --worktree DIR, or --rebuild DIR --batches DIR")
     if args.account is not None and not all_mode:
         ap.error("--account goes with --all")
-    if args.check:
+    if args.check:  # after the --account usage error, so a misused --account fails as it does without --check
         if all_mode or rebuild_mode or args.out or not (args.fetched and args.page):
             ap.error("--check takes --fetched DIR --page FILE and nothing else")
         try:
@@ -655,9 +658,6 @@ def main(argv):
         except Exception as err:
             print("unknown - the run crashed (%s)" % type(err).__name__)
             return CRASH
-    if [all_mode, export_mode, rebuild_mode].count(True) != 1 or (all_mode and not (args.all and args.fetched and args.worktree)) \
-            or (export_mode and not (args.fetched and args.out)) or (rebuild_mode and not (args.rebuild and args.batches)):
-        ap.error("use --fetched DIR --out DIR [--page FILE], or --all ROOT --fetched DIR --worktree DIR, or --rebuild DIR --batches DIR")
     if export_mode and any(name not in COLLECTIONS for name in args.allow_empty):
         ap.error("--allow-empty names one of: %s" % ", ".join(COLLECTIONS))
     try:
