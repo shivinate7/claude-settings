@@ -11459,8 +11459,8 @@ NPR_GITLAB_COM = "https://gitlab.com/owner/repo.git"
 NPR_PROXY_ELSEWHERE = "http://local_proxy@203.0.113.7:1234/git/owner/name"
 # A github url under a section that is not a remote (a submodule), with no remote section at all.
 NPR_SUBMODULE_CONFIG = '[submodule "vendor"]\n\turl = %s\n' % NPR_GITHUB_HTTPS
-# Ruling a (coordinator, 18:44 CST, 2026-11-08): a reviewer brief is judged with or without a round marker, and a
-# design-reviewer brief only with one.
+# A reviewer brief is judged with or without a round marker. A design-reviewer brief is judged only with one, because
+# its blind read names pages and no pull request.
 NPR_DIFF_LANE_X = "Review the diff of branch lane-x against main and report PASS or FAIL."
 NPR_PR_12 = "Review PR #12 and report PASS or FAIL."
 NPR_PULL_ONLY = "Review https://github.com/o/r/pull/12 and report PASS or FAIL."
@@ -11615,9 +11615,8 @@ npr_allow("a brief that names PR (#12) in parentheses is allowed",
           "Agent", npr_spawn("reviewer", NPR_PR_PAREN, "haiku"), npr_path("github-https"))
 npr_allow("a brief that names PR number 12 is allowed",
           "Agent", npr_spawn("reviewer", NPR_PR_NUMBER_WORD, "haiku"), npr_path("github-https"))
-# A blind design-review brief names pages only and carries no round marker: the rule does not judge it. Re-pointed
-# from a reviewer to a design-reviewer by ruling a (coordinator, 18:44 CST, 2026-11-08): a reviewer with no marker
-# and no pull request is now judged.
+# A blind design-review brief names pages only and carries no round marker: the rule does not judge it. It is a
+# design-reviewer brief, because a reviewer with no marker and no pull request is judged.
 npr_allow("a blind design-review brief with no round marker that names pages only is allowed",
           "Agent", npr_spawn("design-reviewer", NPR_PAGES, "opus", round_line=None), npr_path("github-https"))
 npr_allow("a design-reviewer brief with no round marker and no pull request is allowed",
@@ -11643,8 +11642,8 @@ npr_allow("a builder spawn with no pull request is not judged by this rule",
 npr_allow("an Explore spawn with no pull request is not judged by this rule",
           "Agent", npr_spawn("Explore", NPR_NO_PR, "haiku"), npr_path("github-https"))
 
-# Ruling a (coordinator, 18:44 CST, 2026-11-08). In a GitHub-remote checkout every orchestrator spawn of `reviewer` is
-# judged, with or without a round marker. A reviewer brief with no marker and no pull request is refused.
+# In a GitHub-remote checkout every orchestrator spawn of `reviewer` is judged, with or without a round marker. A
+# reviewer brief with no marker and no pull request is refused.
 npr_refuse("a reviewer brief with no round marker that names no pull request is refused",
            "Agent", npr_spawn("reviewer", NPR_DIFF_LANE_X, "haiku", round_line=None), npr_path("github-https"))
 npr_refuse("a role spelled `Reviewer` with no round marker that names no pull request is refused",
@@ -21036,7 +21035,7 @@ add("brief-claim: builder brief with no claim about main is allowed",
     prompt="Make these green. The guard must refuse `password: none for the guest` for every role.",
     subagent_type="builder", model="sonnet")
 add("brief-claim: reviewer brief with the main claim is allowed (out of scope)",
-    "allow", tool="Agent", prompt="Check the diff. Main passes `password: none for the guest`, so the fix is wrong.",
+    "allow", tool="Agent", prompt="Check PR #12. Main passes `password: none for the guest`, so the fix is wrong.",
     subagent_type="reviewer")
 add("brief-claim: Explore brief with the main claim is allowed (out of scope)",
     "allow", tool="Agent",
