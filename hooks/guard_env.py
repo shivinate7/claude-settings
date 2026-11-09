@@ -1261,14 +1261,21 @@ def _glob_unescaped(glob: str) -> str:
                   flags=re.DOTALL)
 
 
-def _glob_picks(name: str, relative: str, glob: str, fold: bool, by_name: bool = False) -> bool:
+def _glob_picks(name: str, relative: str, glob: str, fold: bool, by_name: bool = False, named: bool = False) -> bool:
     """True when a file named `name`, at path `relative` (`_glob_anchor`), matches `glob`. With
-    `by_name` (grep's `--include` and `--exclude`) the glob is matched on the name alone, so a glob
+    `named` (grep's `--include` and `--exclude` on a file it is named) the glob is matched on the
+    whole path and on each tail of it after a `/`, so `sub/*` picks `./sub/a`. With `by_name` (grep's
+    rules on a file it finds in a folder) the glob is matched on the name alone, so a glob
     with a `/` picks no file. Otherwise a glob with no `/` is matched on the name, and one with a `/`
     on the relative path, where a leading `**/` also matches at the top and a mid-glob `**/` matches
     zero folders. `*` crosses a `/`, so a doubtful glob picks more, never less."""
     if fold:
         name, relative, glob = name.lower(), relative.lower(), glob.lower()
+    if named:
+        glob = _glob_unescaped(glob)
+        tails = [relative] + [relative[at + 1:] for at, letter in enumerate(relative)
+                              if letter == "/" and relative[at + 1:at + 2] != "/"]
+        return any(fnmatch.fnmatchcase(tail, glob) for tail in tails)
     glob = _glob_unescaped(glob.lstrip("/"))
     if by_name or "/" not in glob:
         return fnmatch.fnmatchcase(name, glob)
@@ -1276,12 +1283,13 @@ def _glob_picks(name: str, relative: str, glob: str, fold: bool, by_name: bool =
         g.startswith("**/") and fnmatch.fnmatchcase(relative, g[3:])) for g in _zero_folder_forms(glob))
 
 
-def _glob_picked(name: str, relative: str, rules, by_name: bool = False) -> tuple:
+def _glob_picked(name: str, relative: str, rules, by_name: bool = False, named: bool = False) -> tuple:
     """(whether a file is read, whether the rule that read it overrides the ignore rules), by the
     include and exclude `rules` as grep applies them: the LAST rule whose glob matches the file
-    decides. With no match, a file is read unless the first rule is an include."""
+    decides (`_glob_picks` reads `by_name` and `named`). With no match, a file is read unless the
+    first rule is an include."""
     for kind, pattern, fold, overrides in reversed(rules):
-        if _glob_picks(name, relative, pattern, fold, by_name):
+        if _glob_picks(name, relative, pattern, fold, by_name, named):
             return kind == "include", kind == "include" and overrides
     return not rules or rules[0][0] != "include", False
 
@@ -1302,9 +1310,9 @@ def _glob_anchor(folder: str, cwd: str) -> str:
 
 
 def _env_file_in(folder: str, rules=(), exclude_dir=(), ignored=frozenset(), by_name=False,
-                 anchor="", min_depth: int = 0, max_depth=None) -> str:
+                 anchor="", min_depth: int = 0, max_depth=None, named=False) -> str:
     """The first env file under `folder`, or ENV_TOO_LARGE past ENV_WALK_LIMIT entries, else ''. A symlink is not followed, as rg and ag do not.
-    `.git` holds no env file and is skipped. `rules` narrow it, as `_glob_picked` reads them (`by_name` is grep's), on
+    `.git` holds no env file and is skipped. `rules` narrow it, as `_glob_picked` reads them (`by_name` and `named` are grep's), on
     each path with `anchor` (`_glob_anchor`) in front, and a
     folder that matches an `exclude_dir` glob is not entered. `ignored` is `_ignored_paths`: a file
     or folder in it is skipped, except a file that a rule with `overrides` set picks. An ignored folder
@@ -1328,7 +1336,7 @@ def _env_file_in(folder: str, rules=(), exclude_dir=(), ignored=frozenset(), by_
         for name in files:
             if not names_env_file(name) or level + 1 < min_depth or (max_depth is not None and level + 1 > max_depth):
                 continue
-            read, overrides = _glob_picked(name, anchor + prefix + name, rules, by_name)
+            read, overrides = _glob_picked(name, anchor + prefix + name, rules, by_name, named)
             if read and (overrides or prefix + name not in ignored):
                 return os.path.join(top, name)
         if seen > ENV_WALK_LIMIT:
@@ -1692,14 +1700,15 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders
     may walk `here`, the folders it names). The env file is '' for none, a path, or ENV_TOO_LARGE.
 
     `find` names every file under each folder it is given (default `.`), and `ls -a` or `ls -A` names each
-    entry of the folder, dotfiles too. Each file name reaches the search as a path, which `rg` and `grep` read
-    whatever their flags. A folder find prints is read whole only when `reads_folders` is set: the search
+    entry of the folder, dotfiles too. Each file name reaches the search as a path. rg reads it whatever its
+    globs, and grep reads it when its include and exclude rules pick the path (`_glob_picks` with `named`). A folder find prints is read whole only when `reads_folders` is set: the search
     walks a folder and reads the dotfiles in it (`_env_walk`). A `find` whose every alternative has a
     `-name` or `-iname` glob that no env file name fits (`*.py`) names none (`_find_names_no_env`). Each
     folder find prints is walked as the search walks a folder it is given (`_search_walk`), narrowed by
     the search's include rules and ignore set (`narrowing`: rules, exclude-dir globs, whether grep's, whether
     the ignore rules are off). With a `-name` glob, each such folder has its own cap, and only a folder too
-    large to walk is judged by its names alone. A file find names is judged whatever the narrowing. `-type d`
+    large to walk is judged by its names alone. A file find names is judged by grep's include and exclude rules
+    alone, and for rg whatever the narrowing. `-type d`
     names folders alone. A start word
     with a variable names folders the guard cannot see. A plain `ls` names no dotfile, so only the folders it names are
     walked. `ls -a` also names `.` and `..`, so `here` and its parent are walked. Any other source, or a pipe that is not directly before the xargs,
@@ -1761,6 +1770,10 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders
             # A quoted glob is no glob to the shell, so it is not expanded.
             expand = re.search(r"[*?\[]", start) and word == start
             for folder in glob.glob(target) if expand else [target]:
+                # The path find prints for the start, as the shell handed it: relative to `here` unless absolute.
+                head = os.path.join(here, "")
+                shown = (folder[len(head):] if folder.startswith(head) and not os.path.isabs(os.path.expanduser(start))
+                         else folder).replace(os.sep, "/")
                 if names_no_env:
                     found = (_find_folder_env(folder, globs, os.path.basename(start.rstrip("/")) or start, low, high,
                                               narrowed_walk)
@@ -1768,14 +1781,19 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders
                     # A folder or tree too large to judge is judged by its names alone, and they name no env file.
                     found = "" if found == ENV_TOO_LARGE else found
                 elif os.path.isdir(folder):
-                    # A file find names is read whatever the search's narrowing. A folder find prints is walked
-                    # whole by the search, which reads only the files its rules pick.
-                    found = _env_file_in(folder, min_depth=low, max_depth=high)
+                    # rg reads a file it is named whatever its globs. grep reads one only when its include and
+                    # exclude rules pick the path find prints. A folder find prints is walked whole by the
+                    # search, which reads only the files its rules pick.
+                    found = (_env_file_in(folder, rules, anchor=shown.rstrip("/") + "/", min_depth=low,
+                                          max_depth=high, named=True) if by_name
+                             else _env_file_in(folder, min_depth=low, max_depth=high))
                     if not found and prints_folder:
                         found = _find_folder_env(folder, [("*", False)], os.path.basename(start.rstrip("/")) or start,
                                                  low, high, narrowed_walk)
                 else:
-                    found = folder if names_env_file(os.path.basename(folder)) and not low else ""
+                    base = os.path.basename(folder)
+                    found = folder if names_env_file(base) and not low and (
+                        not by_name or _glob_picked(base, shown, rules, named=True)[0]) else ""
                 if found:
                     return found, False, []
         return "", False, []
