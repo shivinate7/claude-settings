@@ -63,7 +63,8 @@ PATTERNS = {
         r"|\badded\s+after\s+(?:code\s+)?review\b"
         r"|\bformerly\b"
         r"|\bthe\s+old\s+behaviou?r\s+(?:(?!\w+ed\s+(?:by|for|on|in|at|with|from)\b)\w+ed|was|were|had|did|used|let|ran|took|gave|made|kept)\b", re.I),
-    "owner order": re.compile(r"\bowner(?:'s)?\s+(?:ruling|order|request|ask)\b", re.I),
+    # A hyphenated "-owner" followed by 2+ spaces is a rule-table name column, so only a single space flags it.
+    "owner order": re.compile(r"(?:(?<!-)\bowner(?:'s)?\s+|(?<=-)owner(?:'s)?[ \t](?![ \t]))(?:ruling|order|request|ask)\b", re.I),
 }
 REMEDY = "say what and why; the history goes in git or the decision"
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@")
