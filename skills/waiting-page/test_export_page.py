@@ -46,9 +46,9 @@ Contract the page cases assume (the builder builds to it):
     doc_id order. The item's answer (answers/<doc_id>, with `item` set to the item's id) takes the same n, so a page grant
     still matches. `renumbered` counts items, not answers. `kept-live` counts the COPY docs that LIVE holds, in any
     collection. The last stdout line is `batches K docs N kept-live S renumbered R`, exit 0. Unknown, exit 2: a missing or
-    empty COPY, a missing LIVE, a folder in either that is not a collection (or a --collections name), or nothing left to
-    write. --collections works as with --rebuild. A usage error, exit 2: --merge without --live or --batches.
-    Not pinned: whether a LIVE collection with no marker is unknown.
+    empty COPY, a missing LIVE, a LIVE collection with no .complete marker (a cut-short fetch), a folder in either that is
+    not a collection (or a --collections name), or nothing left to write. --collections works as with --rebuild. A usage
+    error, exit 2: --merge without --live or --batches. The COPY needs no marker.
   Verdict words: `changed N`, `same`, `refused` (exit 1), `unknown` (exit 2), and a crash (exit 3, one line).
   Not pinned here: whether a supporting file no longer fetched is deleted.
 """
@@ -1277,6 +1277,18 @@ class Rebuild(Base):
         self.assertVerdict(r, "unknown")
         self.assertEqual(r.returncode, 2, shown(r))
         self.assertNoBatches(batches, "a missing live folder")
+
+    def test_a_live_collection_with_no_marker_is_unknown_and_writes_nothing(self):
+        # A fetch cut short leaves a folder with no marker. Its missing docs look absent, so a merge would `set` over
+        # live docs that the fetch never reached: item-002 here.
+        live = self.fetch(items={"item-001": item(1)})
+        os.remove(os.path.join(live, "items", MARKER))
+        copy = self.copy_of({"items": {"item-001": item(1), "item-002": item(2)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertNoBatches(batches, "a live collection with no marker")
 
     def test_merge_with_a_folder_that_is_not_a_collection_on_either_side_is_unknown(self):
         stray = {"x": {"n": 1}}
