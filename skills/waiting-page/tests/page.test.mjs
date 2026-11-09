@@ -2874,7 +2874,7 @@ function foldedScope(g, kind, width) {
   assert.equal(g.dateText, FOLD_DATE, `the date line reads "${g.dateText}", not "${FOLD_DATE}", at ${width} wide`);
 }
 // At 360 and 390 wide, light theme: three claims per row kind, one test each, so each failure names one cause. The waiting-reply row at 390
-// is green on the old page (its date ends 11 px before Show answer): it guards the fix from moving the date under the press there.
+// ends its date 11 px before Show answer, so these claims guard against a change that moves the date under the press there.
 for (const width of [360, 390]) for (const kind of Object.keys(FOLD_ROWS)) {
   test(`folded answered row ${FOLD_ROWS[kind].label}: its date line stays in its box, at ${width} wide`, async (t) => {
     const page = await foldedRowPage(t, kind, width); if (!page) return;
@@ -2895,7 +2895,7 @@ for (const width of [360, 390]) for (const kind of Object.keys(FOLD_ROWS)) {
     assert.ok(g.textRight <= g.pressLeft, `the date line ends at ${Math.round(g.textRight)} px, under the press "${g.pressName}" at ${Math.round(g.pressLeft)} px, at ${width} wide`);
   });
 }
-// Controls at 1440 and 820 wide, green on the old page: the row is as it is there, one line of date and the one-line row height.
+// Controls at 1440 and 820 wide: the row keeps one line of date and the one-line row height at these widths, so these claims hold there.
 for (const width of [1440, 820]) for (const kind of Object.keys(FOLD_ROWS)) {
   test(`folded answered row ${FOLD_ROWS[kind].label}: at ${width} wide its date line is one line, and the row keeps its one-line height`, async (t) => {
     const page = await foldedRowPage(t, kind, width); if (!page) return;
@@ -3036,7 +3036,7 @@ for (const scheme of SCHEMES) {
   });
 }
 
-// Controls at 1440, 820, 390 and 360 wide, pinned from the page as it draws now so the fix keeps them. Each row's box is [left, right, height] of the folded
+// Controls at 1440, 820, 390 and 360 wide, pinned from the page's measured boxes, so a later change to the row must keep them. Each row's box is [left, right, height] of the folded
 // row's li; the row and press are [right, top offset from the li, height] and [left, right, top offset, height]. A box that moves fails by
 // name. The Ask box presses are [Add left, Add right, Send left, Send right]. Tolerance is 1 px.
 const PINS = {
@@ -3183,7 +3183,7 @@ for (const scheme of SCHEMES) {
   });
 }
 
-// The reply form at 600 wide. The control: at the default text Close sits left of Send reply on one line, as main draws it. With the root font
+// The reply form at 600 wide. The control: at the default text Close sits left of Send reply on one line. With the root font
 // size doubled, the two sit on one line in that order or stack with Send reply first, and no press sits right of the hint while the other
 // is below it.
 async function replyFormAt(t, { width, scheme, zoom = false, pct = 200 }) {
@@ -3220,7 +3220,7 @@ for (const scheme of SCHEMES) {
 }
 // The reply form's Close and Send reply at 180 and 220 wide, doubled and tripled: each label's text sits inside its press, and each press
 // sits inside the answered row. The text is read as its line pieces, since a press that clips its text reports no overflow of its box.
-// Red on the head page: the text at 180 wide, and at 220 wide tripled. Green there: the text at 220 wide doubled (a control), and every
+// The text claims cover 180 and 220 wide, doubled and tripled. The text at 220 wide doubled is a control, and every
 // press-in-row case, which is a pin (named "(pin)") of a claim the page already holds.
 const REPLY_NARROW = [[180, 200], [180, 300], [220, 200], [220, 300]];
 for (const [width, pct] of REPLY_NARROW) for (const scheme of SCHEMES) {
@@ -3240,7 +3240,7 @@ for (const [width, pct] of REPLY_NARROW) for (const scheme of SCHEMES) {
   });
 }
 
-// The reply form at 530 and 546 wide, at the default text: past the 520px window, main draws Close left of Send reply on one line. A control.
+// The reply form at 530 and 546 wide, at the default text: past the 520px window, Close sits left of Send reply on one line. A control.
 for (const width of [530, 546]) for (const scheme of SCHEMES) {
   test(`press rows, ${scheme}: at ${width} wide the reply form's Close sits left of Send reply on one line`, async (t) => {
     const r = await replyFormAt(t, { width, scheme }); if (!r) return;
@@ -3643,8 +3643,8 @@ for (const pct of [100, 150, 200, 300]) for (const scheme of SCHEMES) {
 // ---------------------------------------------------------------- an answered row at large text: its presses sit in the row, and the page does not scroll sideways
 // The row with Dismiss, unfolded (not seen before its answer, so the answer is new and the row stays open, with Reply and Dismiss at its
 // end) or folded (seen on an earlier visit, so Dismiss is the row's side press). Each case reads its scope first (the fold, the root font
-// size, and Dismiss shown), then makes one claim, so a failure names one cause. Red widths are where the old page fails; each control is
-// a width where it passes.
+// size, and Dismiss shown), then makes one claim, so a failure names one cause. Red widths are where an overflowing row fails the claim; each control is
+// a width where the claim holds.
 const DIS_ROW = FOLD_ROWS.dismiss.ask.id;
 // Opens the Dismiss row at a width, then sets the root font size to pct percent of its own. Null without a browser.
 async function dismissRowAt(t, { folded, width, pct, scheme }) {
@@ -3672,7 +3672,7 @@ const ROW_CLAIMS = {
   ahead: { what: "the You asked line sits inside its row", check: (page) => inRowFault(page, ".ahead", "the You asked line") },
   sizer: { what: "the hidden Dismiss label (span.sz) sits inside its row", check: (page) => inRowFault(page, "span.sz", "the hidden Dismiss label") },
 };
-// [claim, folded, root font size in percent, widths]. ROW_RED fails on the old page; ROW_CONTROL passes on it.
+// [claim, folded, root font size in percent, widths]. ROW_RED lists the widths where an overflowing row fails a claim; ROW_CONTROL lists widths where the claim holds.
 const ROW_RED = [
   ["sideways", false, 200, [180, 200, 220, 240]], ["dismiss", false, 200, [180, 200, 220, 240]], ["ahead", false, 200, [180, 200, 220]],
   ["sideways", true, 200, [180, 200, 220]], ["sizer", true, 200, [180, 200, 220]],
@@ -3918,8 +3918,8 @@ for (const scheme of SCHEMES) {
 }
 
 // A Dismiss press whose write waits says "Dismissing…" and keeps its 44 px height at 180 wide at the default text. The write is held
-// (hold: { update: 0 }) until the case releases it, so the busy label is up while the case reads it. Red on the head page: the press is
-// 68 px tall while it reads "Dismissing…", so the label wraps.
+// (hold: { update: 0 }) until the case releases it, so the busy label is up while the case reads it. A wrapped label makes the press
+// 68 px tall while it reads "Dismissing…", so the case fails when the label wraps.
 for (const scheme of SCHEMES) test(`ask list, ${scheme}: at 180 wide at the default text, a Dismiss press that waits for its write says Dismissing… and stays 44 px tall`, async (t) => {
   const r = await heldPress(t, { kind: "dismiss", width: 180, pct: 100, scheme }); if (!r) return;
   const h = await r.page.evaluate((id) => document.getElementById(id).getBoundingClientRect().height, r.id);
@@ -4245,8 +4245,7 @@ for (const scheme of SCHEMES) {
 }
 
 // ---------------------------------------------------------------- the tab list in forced colours
-// The line under the tabs is read from pixels, so no case pins the element that draws it. Under the unselected tab it shows (green on
-// the old page); the selected tab must break it (red on the old page).
+// The line under the tabs is read from pixels, so no case pins the element that draws it. Under the unselected tab it shows; the selected tab must break it.
 // Forced colours: the selected tab breaks the line under the tabs, so it sets the selected tab apart. The
 // pixels are read from a screenshot of the bar, on its bottom border row under the centre of each tab; the canvas pixel at the bar's
 // top-left corner is the reference for "no line".
@@ -9894,8 +9893,8 @@ for (const width of [390, 1280]) {
 
 // ---------------------------------------------------------------- the copy-fallback notice in the Status view
 // A step's Copy that the clipboard refuses selects the text and raises the notice (.sv-toast), a fixed note at the foot of the window.
-// At 180, 240 and 320 wide with the root font size doubled, the shown notice sits clear of the send bar. Red on the head page at 180 and 240;
-// 320 is green there (a control).
+// At 180, 240 and 320 wide with the root font size doubled, the shown notice sits clear of the send bar. The 320 case is a control:
+// the claim holds there at this size.
 const COPY_STEP = { c1: { title: "Copy the step's ask", status: "active", phase: "cleanup", order: 0, note: "n", ask: "Paste this into chat when you are ready.", updatedAt: "2026-10-26T00:00:00Z" } };
 for (const width of [180, 240, 320]) for (const scheme of SCHEMES) {
   const where = `at ${width} wide with the root font size doubled`;
