@@ -1038,6 +1038,21 @@ class Rebuild(Base):
                 self.assertIsNotNone(error_line(r), "a name that is not a slug is not a usage error. Output:\n" + shown(r))
                 self.assertEqual(glob.glob(os.path.join(batches, "batch-*.json")), [], "a bad name still wrote batches")
 
+    def test_the_reserved_page_folder_name_is_a_usage_error_that_writes_nothing(self):
+        waiting = self.copy_of({"steps": {"step-001": {"n": 1}}})
+        write_text(os.path.join(waiting, "page", "page.html"), "<!doctype html>\n<title>registry</title>\n")
+        for number, names in enumerate((("page",), ("steps", "page"))):
+            batches = os.path.join(self.tmp.name, "batches-%d" % number)
+            with self.subTest(names=names):
+                r = self.rebuild(waiting, batches, collections=names)
+                self.assertOptionBuilt(r)
+                self.assertEqual(r.returncode, 2,
+                                 "--collections page is not a usage error: exit 2 expected. Output:\n" + shown(r))
+                err = error_line(r)
+                self.assertIsNotNone(err, "--collections page has no usage error line. Output:\n" + shown(r))
+                self.assertIn("'page'", err, "the usage error does not name page: %s" % err)
+                self.assertEqual(os.listdir(batches), [], "--collections page still wrote files")
+
 
 class All(Base):
     """--all: each artifact in the repo's registry (the "artifacts" key of its extras file) exports its collections to
