@@ -3405,9 +3405,10 @@ for (const width of TAB_SIZES) for (const zoom of [false, true]) for (const desi
 }
 
 // ---------------------------------------------------------------- the tab labels at narrow widths and large text: no word breaks
-// A tab is at most the bar's width (max-inline-size: 100cqw), and that measure is 32 px narrower than the strip. A label wider than it wraps
-// inside a word (overflow-wrap: anywhere). The rows are the widths and text sizes where a label is wider than that measure: "Questions 2"
-// at 150%, 200% and 300%, "Designs 2" at 200% and 300%, "Status" at 300%. The controls are widths where the label fits.
+// A tab is capped at the strip's own width: 100cqw, the bar's content box, plus the bar's side padding. A label wider than that wraps
+// inside a word (overflow-wrap: anywhere). The rows are the widths and text sizes where a cap measured on the bar's content box would
+// break a label that #2383 showed whole: "Questions 2" at 150%, 200% and 300%, "Designs 2" at 200% and 300%, "Status" at 300%.
+// The controls are widths where the label fits.
 // Each case reads one tab's label: a word whose Range is in more than one box is broken across lines.
 const TAB_LABEL = { tabQ: "Questions 2", tabD: "Designs 2", tabStatus: "Status" };
 const TAB_LABEL_RED = [
