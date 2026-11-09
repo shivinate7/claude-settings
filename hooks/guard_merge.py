@@ -1110,25 +1110,26 @@ def _is_open(rows) -> bool:
 
 
 def _covered(module, host, branch: str, tip, rows, pool) -> bool:
-    """True when a pull request holds the work of `branch`, whose pull requests in every state are `rows` and whose
-    tip is `tip` (read from the branch when None, and only once a closed or merged row needs it). An open pull
+    """True when a pull request or an archive copy holds the work of `branch`, whose pull requests in every state are
+    `rows` and whose tip is `tip` (read from the branch when None, once no open pull request covers it). An open pull
     request covers. A merged one covers when its head is the tip. A closed unmerged one covers only when the tip is
     contained in the head of an open or merged pull request (compare of that head...tip reads behind or identical).
     Those heads come from `pool`, the rows already read: the repo's open list rows on a lane head form and the rows
     of every other branch of the lane that was read. A merged pull request on a head no read reached is not seen,
-    so that case refuses. This adds no read besides one compare per head to test."""
+    so that case refuses. Last, the branch's `archive/<branch>` copy covers when the tip is contained in it (compare
+    of archive/<branch>...tip reads behind or identical); a 404 means no copy, so the branch is not covered. This adds
+    one tip read when the caller had none, one compare per head to test, and one copy compare, all on the refusal path."""
     if _is_open(rows):
         return True
-    if not rows:
-        return False
     if tip is None:
         tip = str(_read_json(host, "branches/" + branch, "branch")["commit"]["sha"])
     if any(str(row["head"]["sha"]) == tip for row in rows if _is_merged(row)):
         return True
-    if not any(row["state"] == "closed" and not _is_merged(row) for row in rows):
-        return False
-    heads = [str(row["head"]["sha"]) for row in [*rows, *pool] if row["state"] == "open" or _is_merged(row)]
-    return any(sha == tip or _compare_status(module, host, sha, tip) in _CONTAINED for sha in dict.fromkeys(heads))
+    if any(row["state"] == "closed" and not _is_merged(row) for row in rows):
+        heads = [str(row["head"]["sha"]) for row in [*rows, *pool] if row["state"] == "open" or _is_merged(row)]
+        if any(sha == tip or _compare_status(module, host, sha, tip) in _CONTAINED for sha in dict.fromkeys(heads)):
+            return True
+    return _compare_status(module, host, "archive/" + branch, tip, missing_ok=True) in _CONTAINED
 
 
 def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:

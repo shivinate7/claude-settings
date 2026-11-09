@@ -110,9 +110,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        deny. An archive_session of a lane (newest get_session record of the target, read from the
                        transcript, tagged cs-build:lane) while an open pull request of its cs-repo has a head ref
                        equal to its cs-step slug, or while a branch of the record (external_metadata.current_branches)
-                       is ahead of its repo's default branch with no pull request in any state; the repos are the
-                       cs-repo tags plus the record's github sources, a 404 on a compare skips that branch in that repo, and
-                       archive/ branches are skipped. No record of the target, a lane with no cs-step or cs-repo
+                       is ahead of its repo's default branch and nothing covers it; the repos are the cs-repo tags,
+                       the record's github sources and the repo-named current_branches keys, and a 404 on a compare
+                       skips that branch in that repo. Slug-form branches (`<slug>`, `lane/<slug>` and their `-*`
+                       variants) are read too; archive/ branches are skipped. An open pull request covers. A merged
+                       one covers only when its head is the tip. A closed unmerged one covers only when the tip is in
+                       an open or merged pull request's head. An `archive/<branch>` copy holding the tip covers. No record of the target, a lane with no cs-step or cs-repo
                        tag, and a read that fails (gh missing too) are refusals. A target with no lane tag passes.
                        An override lifts it.
   lane-one-topic      deny. A send_message whose first non-blank line starts with the marker
