@@ -4957,6 +4957,7 @@ test("dismiss: Restore writes dismissed null with update, the line says the thre
   // The line stays where it is and says when the thread returns. Dismiss takes Restore's place.
   await mustHave(page, `li#row-${root} #dis-${root}`, "Dismiss in place of Restore on the line");
   assert.equal(await page.locator(`li#row-${root} #res-${root}`).count(), 0, "Restore is still on the line");
+  // The soft hyphen after "Re" in "Restored." draws nothing on screen, so the match drops it and reads the words.
   const said = ((await page.locator(`li#row-${root}`).textContent()) || "").replace(/­/g, "").replace(/\s+/g, " ").trim();
   assert.ok(said.includes("Restored. It joins the list at the next load."), "the line reads " + JSON.stringify(said));
   // The next load draws the thread again, and the stored record has dismissed null.
