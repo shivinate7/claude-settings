@@ -133,11 +133,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        could not judge, when that commit covers a triplet already in the tree or the chain
                        runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
                        (commit-refuses-conflict-markers)
-  octopus-push         deny. A `git push` whose range (remote-tracking tip, else upstream, else default base,
-                       up to the pushed ref, else HEAD) adds a merge commit of more than two parents; a merge
-                       already in the remote-tracking tip's history passes. A destination named main or master
-                       is left to push-main. Cost: a few `git rev-list` reads per push, one with a
-                       remote-tracking ref.
+  octopus-push         deny. A `git push` whose range (the pushed ref, else HEAD, less every ref of the pushed
+                       remote, else origin) adds a merge commit of more than two parents; a merge that a
+                       remote ref already holds passes. A dry run and a destination named main or master are
+                       left out; push-main asks about the latter. Cost: one `git rev-list` per pushed ref.
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
@@ -3934,9 +3933,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
 
     # 6c3. A push whose range adds a merge of more than two parents (rule octopus-push).
-    # Cost: a few `git rev-list` reads per push segment (one when the destination has a remote-tracking
-    # ref), and none for a command with no push.
-    matched = octopus_push_hit(stripped, cwd)
+    # Cost: one `git rev-list` per pushed ref, none for a dry run, a main or master destination, or a
+    # command with no push.
+    matched = octopus_push_hit(stripped, cwd, read_verb)
     if matched:
         refuse(tool, "deny", "octopus-push", OCTOPUS_PUSH_REASON.format(sha=matched), matched)
 
