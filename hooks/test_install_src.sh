@@ -5003,12 +5003,12 @@ caseM7() {
 
 # m8_check LABEL: after the install named LABEL, the mirror is at main ($want), refreshed in place (the sentinel survives),
 # the install's source is the mirror, the installed files match main, and the checkout keeps its branch and head. Prints the
-# first failure and returns 1. Reads mirror, want, co_head and co_branch from caseM8.
+# first failure and returns 1. Reads mirror, want, co_head and co_branch, which m8_setup sets.
 m8_check() {
   if [ "$(git -C "$mirror" rev-parse HEAD)" != "$want" ] || [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$want" ]; then
     printf '%s: the mirror is at %s, want main %s' "$1" "$(git -C "$mirror" rev-parse HEAD)" "$want"; return 1
   fi
-  if [ ! -e "$mirror/.git/caseM8-sentinel" ]; then printf '%s: the mirror was cloned again, not refreshed in place' "$1"; return 1; fi
+  if [ ! -e "$mirror/.git/refresh-sentinel" ]; then printf '%s: the mirror was cloned again, not refreshed in place' "$1"; return 1; fi
   if [ "$(normalize_path "$(installed_src "$h/.claude-cfg" "$h")")" != "$(normalize_path "$mirror")" ]; then
     printf '%s: the install source is [%s], want the mirror [%s]' "$1" "$(installed_src "$h/.claude-cfg" "$h")" "$mirror"; return 1
   fi
@@ -5020,6 +5020,24 @@ m8_check() {
   return 0
 }
 
+# m8_setup NAME: the fixture the mirror cases share. A GitHub fixture NAME, a checkout on branch lane, and one cloud install
+# that leaves a marked mirror at main $first. Sets fx, h, co, old, want, first, mirror, co_head and co_branch. On a fixture
+# fault it sets m8_setup_why and returns 1. Call it directly, never in $(...): the globals it sets must reach the case.
+m8_setup() {
+  move_fixture "$1"
+  git -C "$co" checkout -q -b lane
+  co_head=$(git -C "$co" rev-parse HEAD); co_branch=$(git -C "$co" symbolic-ref -q HEAD)
+  move_install
+  first=$want; mirror="$h/claude-settings-main"
+  if [ "$rc" -ne 0 ]; then m8_setup_why="the first install exited $rc: $(install_problems)"; return 1; fi
+  if [ "$(git -C "$mirror" rev-parse HEAD 2>/dev/null)" != "$first" ] \
+     || [ "$(git -C "$mirror" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
+    m8_setup_why="the first install did not leave a marked mirror at main [$first]"; return 1
+  fi
+  # A file inside the mirror's .git that only an in-place refresh keeps: a mirror that is cloned again loses it.
+  : > "$mirror/.git/refresh-sentinel"
+}
+
 # caseM8: later cloud installs in the same HOME, after origin/main gains a commit, take the mirror by two routes, and the mirror
 # refreshes in place each time. The second install finds the mirror through the pointer the first one wrote, so its refresh
 # runs from the pointer candidate (install.sh, the top mirror_refresh "$SRC"). The third install is pointed back at the
@@ -5029,18 +5047,7 @@ m8_check() {
 caseM8() {
   name="caseM8: later cloud installs in the same HOME, after origin/main gains commits: the mirror refreshes in place by the pointer route and by the checkout fallback, and the installed files match it"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
-  move_fixture m8
-  git -C "$co" checkout -q -b lane
-  co_head=$(git -C "$co" rev-parse HEAD); co_branch=$(git -C "$co" symbolic-ref -q HEAD)
-  move_install
-  first=$want; mirror="$h/claude-settings-main"
-  if [ "$rc" -ne 0 ]; then bad "$name" "FIXTURE the first install exited $rc: $(install_problems)"; return; fi
-  if [ "$(git -C "$mirror" rev-parse HEAD 2>/dev/null)" != "$first" ] \
-     || [ "$(git -C "$mirror" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
-    bad "$name" "FIXTURE the first install did not leave a marked mirror at main [$first]"; return
-  fi
-  # A file inside the mirror's .git that only an in-place refresh keeps: a mirror that is cloned again loses it.
-  : > "$mirror/.git/caseM8-sentinel"
+  m8_setup m8 || { bad "$name" "FIXTURE $m8_setup_why"; return; }
 
   # The second install: main gains a commit, and the pointer the first install wrote names the mirror.
   advance_github_fixture "$fx" second claudemd; want=$(fixture_sha "$fx")
@@ -5179,6 +5186,64 @@ caseM10() {
   if msg=$(m10_run stalefetch); then ok "$name"; else bad "$name" "$msg"; fi
   name="caseM10 (stalekeep): origin unreachable with HEAD at the origin/main record: one WARN names the failed fetch, the log says last fetched main, no tip is claimed, and the checkout is the source"
   if msg=$(m10_run stalekeep); then ok "$name"; else bad "$name" "$msg"; fi
+}
+
+# ---- caseM11-M13: the mirror refresh warns of local commits only when main holds a commit origin main lacks ----
+# The defect: mirror_refresh warns when main differs from the mirrorSha record. A stale record, left by a mirrorSha write
+# that failed after the mirror moved on, then warns and keeps the mirror behind, though main holds nothing origin lacks.
+# caseM11: the record is stale and main is an ancestor of origin main. caseM12: the record is stale and main equals origin
+# main. Both must refresh in place with no WARN. caseM13 is the control: main holds a commit origin lacks, so the WARN stays
+# and the mirror keeps that commit.
+caseM11() {
+  name="caseM11: a stale mirrorSha, with main an ancestor of origin main: no WARN names local commits, and the mirror refreshes in place to origin main"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  m8_setup m11 || { bad "$name" "FIXTURE $m8_setup_why"; return; }
+  git -C "$mirror" config claude-settings.mirrorSha "$old"
+  advance_github_fixture "$fx" second claudemd; want=$(fixture_sha "$fx")
+  if [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" = "$first" ]; then bad "$name" "FIXTURE the stale record equals main [$first]"; return; fi
+  if ! git -C "$fx/bare.git" merge-base --is-ancestor "$first" "$want"; then bad "$name" "FIXTURE main [$first] is not an ancestor of origin main [$want]"; return; fi
+  move_install
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc on the second install: $(install_problems)"; return; fi
+  if printf '%s\n' "$out" | grep -qF "WARN: the clone $mirror has local commits on main"; then
+    bad "$name" "the mirror [$mirror] is warned to hold local commits, but main [$first] is an ancestor of origin main [$want]"; return
+  fi
+  if ! msg=$(m8_check "the second install"); then bad "$name" "$msg"; return; fi
+  ok "$name"
+}
+
+caseM12() {
+  name="caseM12: a stale mirrorSha, with main equal to origin main: no WARN names local commits, and the mirror refreshes in place"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  m8_setup m12 || { bad "$name" "FIXTURE $m8_setup_why"; return; }
+  git -C "$mirror" config claude-settings.mirrorSha "$old"
+  if [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" = "$first" ]; then bad "$name" "FIXTURE the stale record equals main [$first]"; return; fi
+  if [ "$(fixture_sha "$fx")" != "$first" ]; then bad "$name" "FIXTURE origin main moved, so main is not equal to it"; return; fi
+  move_install
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc on the second install: $(install_problems)"; return; fi
+  if printf '%s\n' "$out" | grep -qF "WARN: the clone $mirror has local commits on main"; then
+    bad "$name" "the mirror [$mirror] is warned to hold local commits, but main [$first] equals origin main"; return
+  fi
+  if ! msg=$(m8_check "the second install"); then bad "$name" "$msg"; return; fi
+  ok "$name"
+}
+
+caseM13() {
+  name="caseM13 (control): a mirror whose main holds a commit origin main lacks: the WARN names local commits, and the mirror keeps that commit"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  m8_setup m13 || { bad "$name" "FIXTURE $m8_setup_why"; return; }
+  advance_github_fixture "$fx" second claudemd; want=$(fixture_sha "$fx")
+  git -C "$mirror" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "local only"
+  mine=$(git -C "$mirror" rev-parse HEAD)
+  if git -C "$fx/bare.git" cat-file -e "$mine" 2>/dev/null; then bad "$name" "FIXTURE origin main holds the local commit"; return; fi
+  move_install
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc on the second install: $(install_problems)"; return; fi
+  if ! printf '%s\n' "$out" | grep -qF "WARN: the clone $mirror has local commits on main"; then
+    bad "$name" "no WARN names the local commits: $(install_problems)"; return
+  fi
+  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$mine" ]; then bad "$name" "the mirror left its local commit [$mine]"; return; fi
+  if [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$first" ]; then bad "$name" "the mirrorSha record moved though the mirror was kept"; return; fi
+  if [ ! -e "$mirror/.git/refresh-sentinel" ]; then bad "$name" "the mirror was cloned again, not kept in place"; return; fi
+  ok "$name"
 }
 
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
@@ -5335,6 +5400,9 @@ run caseM7
 run caseM8
 run caseM9
 run caseM10
+run caseM11
+run caseM12
+run caseM13
 run pinmove1
 run pinmove2
 run pinmove3
