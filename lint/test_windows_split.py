@@ -18,7 +18,8 @@ CiCoverage also proves every tracked test file has a run step: test_*.py, test_*
 
 SplitJobs does the same for the Linux split (checks, checks-merge-install) and the macOS split (checks-macos, checks-macos-b):
 each suite runs in exactly one job of its split, with its pinned `if:` and `shell:`. It also reads the Linux guard split
-(checks-guard, checks-guard-2): the guard suite runs in one shard per job, each with its GUARD_SHARD value.
+(checks-guard, checks-guard-2): the guard suite runs in one shard per job, each with its GUARD_SHARD value, and both shards
+are named in the all-jobs-passed and ci-done needs.
 
 Run with:  python3 lint/test_windows_split.py -v
 """
@@ -787,12 +788,9 @@ PLAYWRIGHT_USES = "$/actions/playwright-setup"
 
 def linux_guard_split_problems(text):
     """The Linux guard split: the guard suite runs in exactly the LINUX_GUARD_SHARD jobs, one shard each, and in no other Linux
-    job. Each shard step is pinned by pin_problems. A job-level or workflow-level GUARD_SHARD would reach every step, so it is
-    a problem too."""
+    job. Each shard step is pinned by pin_problems. A job-level GUARD_SHARD reaches every step of its job, so job_env_problems
+    flags it; a workflow-level one is hardening_problems' to flag."""
     problems = job_env_problems(text, tuple(LINUX_GUARD_SHARD))
-    header = re.split(r"^jobs:\s*$", text, maxsplit=1, flags=re.M)[0]
-    if any(re.match(r"\s*GUARD_SHARD:", strip_comment(line)) for line in header.splitlines()):
-        problems.append("GUARD_SHARD is set in the workflow env, so every job takes it")
     linux = [n for n, j in all_jobs(text).items() if (j["os"] or "").startswith("ubuntu")]
     homes = split_homes(text, linux, LINUX_GUARD)
     names = sorted(job for job, _ in homes)
@@ -1114,6 +1112,40 @@ def linux_guard_doc(a=None, b=None, extra=None):
     return split_doc({**jobs, **(extra or {})})
 
 
+def planned_linux_guard_split(text):
+    """checks.yml text with the planned Linux guard split, built from the real file: checks-guard keeps its job with GUARD_SHARD
+    1/2 in the guard step's env, a copy of that job named checks-guard-2 carries GUARD_SHARD 2/2, and checks-guard-2 follows
+    checks-guard in each fan-in. A file that already has checks-guard-2 is returned as it is, so the cases stay true after the
+    split lands."""
+    if "\n  checks-guard-2:\n" in text:
+        return text
+    job = job_block(text, "checks-guard")
+    env_end = '          GUARD_CHROMIUM: "1"\n'
+    assert job.count(env_end) == 1, "the checks-guard guard step's env changed: this fixture must follow it"
+    first = job.replace(env_end, env_end + "          GUARD_SHARD: 1/2\n")
+    second = job.replace(env_end, env_end + "          GUARD_SHARD: 2/2\n")
+    text = text.replace("  checks-guard:" + job, "  checks-guard:" + first + "  checks-guard-2:" + second, 1)
+    return text.replace("      - checks-guard\n", "      - checks-guard\n      - checks-guard-2\n")
+
+
+def fan_in_rules():
+    """The two fan-in rules as (needs_of, needs_problems, ci_done_problems): all-jobs-passed's needs (all_jobs_passed_rules) and
+    ci-done's needs (actions/ci-done-comment/test_comment.py). Imported here, not at the top: all_jobs_passed_rules imports this
+    file, so a module-level import would be circular."""
+    from all_jobs_passed_rules import needs_of, needs_problems  # noqa: E402  the one home of the all-jobs-passed needs rule
+    sys.path.insert(0, os.path.join(HERE, "..", "actions", "ci-done-comment"))
+    import test_comment  # noqa: E402  the one home of the ci-done needs rule
+    return needs_of, needs_problems, test_comment.ci_done_problems
+
+
+def without_need(text, job, name):
+    """`text` with `name` taken out of the needs of `job` (the job's own block, from its key to the next job key)."""
+    block = job_block(text, job)
+    entry = f"      - {name}\n"
+    assert block and entry in block, f"{name} is not in {job}'s needs"
+    return text.replace(block, block.replace(entry, "", 1), 1)
+
+
 class SplitJobs(unittest.TestCase):
     """The Linux split (checks, checks-merge-install) and the macOS split (checks-macos, checks-macos-b): each suite of the old
     single job runs in exactly one job of its split, with its pinned `if:` and `shell:` and no env (LINUX_SUITES, MACOS_SUITES)."""
@@ -1227,7 +1259,6 @@ class SplitJobs(unittest.TestCase):
             "no job at all": "jobs:\n",
             "GUARD_SHARD in a job's env": linux_guard_doc().replace(
                 "    needs: scope\n    steps:", "    needs: scope\n    env:\n      GUARD_SHARD: 1/2\n    steps:", 1),
-            "GUARD_SHARD in the workflow env": "env:\n  GUARD_SHARD: 1/2\n" + linux_guard_doc(),
             "the shard's if changed": linux_guard_doc(a=[linux_guard_shard(
                 "1/2", if_="needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'")]),
             "the shard's if dropped": linux_guard_doc(a=[linux_guard_shard("1/2", if_=None)]),
@@ -1238,17 +1269,30 @@ class SplitJobs(unittest.TestCase):
             with self.subTest(defect=label):
                 self.assertTrue(linux_guard_split_problems(text), label)
 
-    def test_a_workflow_comment_or_quoted_value_that_names_guard_shard_is_no_home(self):
-        # A comment and a quoted value are text, not a workflow env key, so neither is a defect (the scanner rule: a comment
-        # opener in quotes, and a lone quote in a comment, read as text).
-        controls = ["# GUARD_SHARD is set per step; don't set it here\n", 'note: "# GUARD_SHARD: 1/2"\n']
-        for control in controls:
-            with self.subTest(control=control):
-                self.assertEqual(linux_guard_split_problems(control + linux_guard_doc()), [])
+    def test_the_planned_linux_guard_split_passes_the_split_and_install_checks(self):
+        # The full-size control: the planned split of the real file passes both checks, so each defect below is the only flag.
+        planned = planned_linux_guard_split(self.text)
+        self.assertEqual(linux_guard_split_problems(planned), [])
+        self.assertEqual(linux_guard_install_problems(planned), [])
+
+    def test_checker_sees_the_planned_install_defects(self):
+        planned = planned_linux_guard_split(self.text)
+        job = job_block(planned, "checks-guard-2")
+        install = f"        if: ${{{{ {LINUX_GUARD_IF} }}}}\n        uses: {PLAYWRIGHT_USES}\n"
+        self.assertIn(install, job, "the fixture: checks-guard-2's install step carries the scope if")
+        bad = {
+            "the install step's if changed": planned.replace(job, job.replace(
+                install, install.replace(LINUX_GUARD_IF, "needs.scope.outputs.code == 'true'"), 1), 1),
+            "no install step in checks-guard-2": planned.replace(job, job.replace(
+                f"        uses: {PLAYWRIGHT_USES}\n", "        uses: actions/checkout@v5\n", 1), 1),
+        }
+        for label, text in bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(linux_guard_install_problems(text), label)
 
     def test_hardening_does_not_flag_the_linux_shard_values(self):
         # The two Linux shard values are homes: each sits in a guard step's env, as the Windows and macOS shard values do.
-        self.assertEqual([p for p in hardening_problems(linux_guard_doc()) if "GUARD_SHARD" in p], [])
+        self.assertEqual([p for p in hardening_problems(planned_linux_guard_split(self.text)) if "GUARD_SHARD" in p], [])
 
     def test_hardening_flags_a_stray_guard_shard_value(self):
         # Named failure: a GUARD_SHARD value that no shard step owns reaches every step that inherits it (job or workflow env).
@@ -1260,6 +1304,27 @@ class SplitJobs(unittest.TestCase):
         for label, text in stray.items():
             with self.subTest(defect=label):
                 self.assertTrue([p for p in hardening_problems(text) if "GUARD_SHARD appears" in p], label)
+
+    def test_both_guard_shards_are_in_each_fan_in(self):
+        # Named failure: a guard shard runs on a pull request but is in neither all-jobs-passed's needs nor ci-done's, so its red
+        # cannot block the merge or post the wake comment. The names come from LINUX_GUARD_SHARD, the one home of the split.
+        needs_of, _, _ = fan_in_rules()
+        for job in ("all-jobs-passed", "ci-done"):
+            self.assertIsNotNone(job_block(self.text, job), job)
+            for shard in LINUX_GUARD_SHARD:
+                with self.subTest(job=job, shard=shard):
+                    self.assertIn(shard, needs_of(job_block(self.text, job)) or [], f"{shard} is not in {job}'s needs")
+
+    def test_a_shard_left_out_of_either_fan_in_is_flagged(self):
+        _, needs_problems, ci_done_problems = fan_in_rules()
+        planned = planned_linux_guard_split(self.text)
+        # The control: the planned text passes both fan-in rules, so each defect below is the only flag.
+        self.assertEqual(needs_problems(planned), [])
+        self.assertEqual(ci_done_problems(planned), [])
+        for job, check in (("all-jobs-passed", needs_problems), ("ci-done", ci_done_problems)):
+            for shard in LINUX_GUARD_SHARD:
+                with self.subTest(job=job, shard=shard):
+                    self.assertTrue(check(without_need(planned, job, shard)), f"{shard} left out of {job}")
 
 
 class TopLevelOr(unittest.TestCase):
