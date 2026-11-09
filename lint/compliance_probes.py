@@ -757,18 +757,34 @@ def shell_words(line):
 
 def xcodebuild_runs(text):
     """The arguments of each `xcodebuild` command in `text` (comments already cut), one list per command. A command
-    ends at a COMMAND_MARKS mark or the line end. A Make recipe prefix (`@`, `-`, `+`) is no part of the name."""
+    ends at a COMMAND_MARKS mark or the line end. A `$(` or a backtick opens an inner command and keeps the outer group
+    aside, restored at the close, so an action after a substitution in an argument stays in the run. A Make recipe
+    prefix (`@`, `-`, `+`) is no part of the name."""
     runs = []
+
+    def end(group):
+        names = [w.lstrip(MAKE_RECIPE_PREFIXES).rsplit("/", 1)[-1] for w in group]
+        if "xcodebuild" in names and not PRINTERS & set(names[:names.index("xcodebuild")]):
+            runs.append(group[names.index("xcodebuild") + 1:])
+
     for line in text.splitlines():
-        group = []
-        for word in [] if STEP_NAME.match(line) else shell_words(line) + [";"]:
-            if word in COMMAND_MARKS:
-                names = [w.lstrip(MAKE_RECIPE_PREFIXES).rsplit("/", 1)[-1] for w in group]
-                if "xcodebuild" in names and not PRINTERS & set(names[:names.index("xcodebuild")]):
-                    runs.append(group[names.index("xcodebuild") + 1:])
+        group, outer = [], []  # `outer`: (opener, the group set aside at it), innermost last
+        for word in [] if STEP_NAME.match(line) else shell_words(line):
+            if word in ("$(", "(") or (word == "`" and not (outer and outer[-1][0] == "`")):
+                outer.append((word, group))
+                group = []
+            elif word in (")", "`"):
+                end(group)
+                opener, held = outer.pop() if outer else (None, [])
+                group = held if opener in ("$(", "`") else []
+            elif word in COMMAND_MARKS:
+                end(group)
                 group = []
             else:
                 group.append(word)
+        end(group)
+        for _opener, held in reversed(outer):  # a substitution left open at the line end
+            end(held)
     return runs
 
 
