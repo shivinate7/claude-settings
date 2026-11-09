@@ -133,7 +133,7 @@ class Fixture(unittest.TestCase):
 
 
 class CheckCase(Fixture):
-    """Cases that need the check. Each fails on main, where lint/check_red_run.py does not exist yet."""
+    """Cases for lint/check_red_run.py, the check that reads each Red-run trailer."""
 
     def setUp(self):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_red_run.py")

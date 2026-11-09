@@ -24,7 +24,7 @@ Known limits:
 - The push check reads the unpushed range only. A commit pushed before the rule landed, or by a tool call the guard does not read (a script, `sh -c`), is judged by CI alone. It reads no branch that `--all`, `--mirror` or `--tags` with no refspec sends. A repo whose default base cannot be read gets no push-time hit, so CI judges its commits.
 - A lane begun before the check landed escapes for its commits from before that, unless it is rebased.
 - Conflict-resolution lines in a merge commit are not judged.
-- Mutation tests are not test paths, so they need no trailer.
+- The three mutation tests (`hooks/mutate_guard.py`, `hooks/mutate_shared.py`, `janitor/mutate_sweep.py`) are test content: a builder never edits them, a test-author writes them (owner ruling, 2026-11-08 17:19 CST, waiting-page item 447 a). This check does not judge them. It reads only `guard.is_test_rel`, which does not name them. `AUTHOR_MUTATION_TESTS` in `hooks/guard.py` reaches the builder and test-author checks through `is_mutation_test_rel`; this check does not read it. So a commit that adds lines to one of them needs no trailer.
 - The check path is fixed in the check. Renaming the check turns it off.
 - In a repo whose HEAD has no `lint/check_red_run.py`, a range that reaches back past the repo's first trailered test commit judges old commits too (item 5). The test-author's `--base origin/main` keeps the range to its own lane.
 

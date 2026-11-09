@@ -70,8 +70,8 @@ LIVE_STREAM_REASON = (
     "this command follows a stream and never ends on its own, so it outlives the turn "
     "and the agent that started it. "
     "Remedy: run the command in the foreground with a timeout, or in the background and "
-    "wait for its completion notice. To wait on a pid, use `wait-pid PID [--timeout SECS]`. "
-    "To wait until a clock time, use `wait-until TIME [--timeout SECS]`."
+    "wait for its completion notice. To wait on a pid, use `bin/wait-pid PID [--timeout SECS]`. "
+    "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`."
 )
 
 
@@ -85,6 +85,7 @@ LIVE_STREAM_REASON = (
 NARRATING_COMMANDS = ("merge", "merge.cmd")
 NARRATING_SCRIPT_TAILS = ("merge/merge.py", "merge/launch.py")
 TRUNCATING_FILTERS = ("tail", "head")
+SCRIPT_INTERPRETERS = ("python", "python3", "py")
 
 
 def narrating_stage(segment: str) -> str:
@@ -95,9 +96,21 @@ def narrating_stage(segment: str) -> str:
     index = resolve_command(tokens)
     if index is None:
         return ""
+    return _roster_word(tokens, index)
+
+
+def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
+    """The roster spelling the command at `index` runs (`merge`, `merge.cmd`, or a script run through
+    a runner, `python merge.py`), else ''. The one reader of NARRATING_COMMANDS and
+    NARRATING_SCRIPT_TAILS. By default a word carrying a script path counts, so `python3.11` and
+    `uv run python` both match. `interpreter_only` (the check rule) keeps the word to python, python3
+    or py, so `grep -n x merge/merge.py` is no run of the script, and `python3.11` and `uv run`
+    do not match. The follow-up branch check-tail-wrapper-forms adds both."""
     word = basename(tokens[index])
     if word in NARRATING_COMMANDS:
         return word
+    if interpreter_only and word.removesuffix(".exe") not in SCRIPT_INTERPRETERS:
+        return ""
     for token in tokens[index:]:
         if token.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
             return word + " " + basename(token)
@@ -129,6 +142,78 @@ NARRATED_TAIL_REASON = (
     "like a hang. "
     "Remedy: run the command with nothing after it and read its output as it arrives, or "
     "redirect to a file you read back afterwards, or use tee to keep a full copy."
+)
+
+
+# A CHECK piped into `tail` or `head` (decision background-check-through-verdict). A filter that keeps
+# one end holds every byte until the command exits, then prints a few lines, so the one useful line, the
+# verdict, can be cut off or never read. `verdict <cmd>` keeps the whole log and prints the verdict
+# itself. Only named checks count, one entry per incident, because refusing every `| tail` is the
+# cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). The merge tool's verdict calls
+# (`--lane-lint`, `--review-record`, in each spelling of the roster above) are refused in the
+# foreground too. `merge --confirm` is narrated_tail_hit's, so it is left out here and never refused
+# twice. `ci-job` is refused in the background only.
+CHECK_COMMANDS = ("ci-job", "ci-job.cmd")
+CHECK_FLAGS = ("--lane-lint", "--review-record")
+
+
+def check_stage(segment: str, background: bool) -> str:
+    """The command word when one segment runs a named check, else ''. `ci-job` counts
+    only in the background."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    index = resolve_command(tokens)
+    if index is None:
+        return ""
+    if basename(tokens[index]) in CHECK_COMMANDS:
+        return basename(tokens[index]) if background else ""
+    if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
+        return ""
+    return _roster_word(tokens, index, interpreter_only=True)
+
+
+def _pipeline_hit(stages, background: bool) -> str:
+    """The matched text when a named check in one pipeline's stages reaches `tail`/`head`. A `tee`
+    between them does not end the reach, since the filter after it still cuts what the agent reads. A
+    `tee` with no `tail` or `head` after it is not a hit."""
+    for first, segment in enumerate(stages):
+        stage = check_stage(segment, background)
+        if not stage:
+            continue
+        for later in stages[first + 1:]:
+            tokens = segment_tokens(later)
+            at = resolve_command(tokens) if tokens else None
+            if at is None:
+                continue
+            word = basename(tokens[at])
+            if word in TRUNCATING_FILTERS:
+                return stage + " | " + word
+    return ""
+
+
+def check_tail_hit(stripped: str, background: bool) -> str:
+    """The matched text when a call pipes a named check into `tail`/`head`, directly or through other
+    filters. A pipeline ends at any separator other than `|`."""
+    ends = []
+    segments = split_segments(stripped, ends)
+    stages = []
+    for segment, end in zip(segments, ends):
+        stages.append(segment)
+        if end != "|":
+            hit = _pipeline_hit(stages, background)
+            if hit:
+                return hit
+            stages = []
+    return _pipeline_hit(stages, background)
+
+
+CHECK_TAIL_REASON = (
+    "this check's output goes into a filter that keeps one end, so the filter holds everything "
+    "until the check exits and the verdict can be lost "
+    "(decision background-check-through-verdict). "
+    "Remedy: run the check through verdict, as `verdict <cmd>` with nothing after it. It keeps the "
+    "full log and prints the verdict itself."
 )
 
 
@@ -392,8 +477,8 @@ def waiter_verdict(segments, background: bool) -> str:
 WAITER_REASON = (
     "a pause between polls turns waiting into a loop of turns that each print a word. "
     "Remedy: wait for the CI-wake notice that follows gh pr ready. "
-    "To wait until a clock time, use `wait-until TIME [--timeout SECS]`, with TIME an ISO-8601 instant "
-    "that has a zone. To wait on one pid, use `wait-pid PID [--timeout SECS]`. "
+    "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`, with TIME an ISO-8601 instant "
+    "that has a zone. To wait on one pid, use `bin/wait-pid PID [--timeout SECS]`. "
     "To wait for another condition, run the long command in the background and wait for its completion "
     "notice. In the background, one pause of any length followed by a command is allowed, and so is a "
     "loop whose test orders the date output against a literal time of the same kind: date +%s against an "
@@ -562,8 +647,8 @@ PATTERN_POLLER_REASON = (
     "the loop's own condition polls for a process by name or by pattern. That pattern can match "
     "every process whose command line names it, including this session's own wrapper for the "
     "same wait, so the condition can stay true long after the work is done. "
-    "Remedy: wait on one pid with `wait-pid PID [--timeout SECS]`, which also takes a job a stall "
-    "left behind. To wait until a clock time, use `wait-until TIME [--timeout SECS]`. "
+    "Remedy: wait on one pid with `bin/wait-pid PID [--timeout SECS]`, which also takes a job a stall "
+    "left behind. To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`. "
     "To wait for CI, wait for the CI-wake notice that follows gh pr ready."
 )
 
