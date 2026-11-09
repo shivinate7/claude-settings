@@ -33,7 +33,14 @@ bounded_git() {
   shift 2
   ( cd "$git_dir_arg" 2>/dev/null && git "$@" >"$git_out_arg" 2>/dev/null ) &
   fetch_pid=$!
-  ( sleep "$fetch_timeout"; kill "$fetch_pid" >/dev/null 2>&1 ) >/dev/null 2>&1 &
+  # The watchdog's TERM handler kills its own sleep, so a git call that returns first leaves no sleep behind for
+  # the full bound. (jobs -p is empty inside a dash subshell, so the pid is kept in a variable.)
+  ( wd_sleep=""
+    trap 'kill "$wd_sleep" >/dev/null 2>&1; exit 0' TERM
+    sleep "$fetch_timeout" &
+    wd_sleep=$!
+    wait "$wd_sleep"
+    kill "$fetch_pid" >/dev/null 2>&1 ) >/dev/null 2>&1 &
   killer_pid=$!
   wait "$fetch_pid" 2>/dev/null
   fetch_rc=$?
@@ -257,6 +264,7 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
       if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
         printf 'claude-settings: %s is %s commits behind origin/main; global rules and hooks are stale\n' \
           "$d" "$behind"
+        ptr_behind_printed=1
       fi
     else
       printf 'claude-settings: cannot check %s against origin/main, the fetch did not run; freshness unknown\n' \
@@ -356,8 +364,11 @@ fi
 # moved; the line prints only when they differ, and not when the default-branch check above already said behind.
 # Cost: once per session start, never per prompt (the hook is wired to SessionStart only): one git fetch of this
 # checkout (shared with the earlier freshness checks, so at most one per checkout), whose own writes are refs,
-# objects and FETCH_HEAD; one git remote read, one git cat-file --batch-check and one git rev-list, all local
-# object-store reads. The hook writes no file and starts no timer.
+# objects and FETCH_HEAD; one git remote read, one git cat-file --batch-check and one git rev-list, plus, only
+# when local main differs, one git config read and, when the pointer clone printed behind, two git rev-parse
+# reads, all local. The fetch is bounded by a watchdog (bounded_git): a short-lived subshell and a sleep of at
+# most CLAUDE_SETTINGS_FETCH_TIMEOUT seconds, killed when the fetch returns first. No other timer and no
+# long-lived process. The hook writes no file.
 gm_unref=""
 if (cd "$toplevel" 2>/dev/null && git remote 2>/dev/null | grep -qx origin); then
   if ! bounded_fetch "$toplevel"; then
@@ -412,12 +423,27 @@ if [ -n "$gm_out" ]; then
 fi
 
 # Local main against origin/main: `main...origin/main` counts local-only commits (ahead) on the left and
-# origin-only commits (behind) on the right. Silent when either ref is absent or the two are equal.
-if [ -z "$dflt_behind_printed" ]; then
+# origin-only commits (behind) on the right. Silent when either ref is absent or the two are equal. Also silent
+# when a behind line for this repo's main already printed (the default-branch check, or the pointer check when
+# the pointer clone and this checkout share a git common dir, which a live pin does), and on a clone install.sh
+# made (claude-settings.cloudMirror), which the cloud resume refreshes.
+lm_skip=""
+[ -n "$dflt_behind_printed" ] && lm_skip=1
+if [ -z "$lm_skip" ] && [ -n "$ptr_behind_printed" ]; then
+  lm_ptr_common=$(cd "$d" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)
+  lm_top_common=$(cd "$toplevel" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)
+  [ -n "$lm_ptr_common" ] && [ "$lm_ptr_common" = "$lm_top_common" ] && lm_skip=1
+fi
+if [ -z "$lm_skip" ]; then
   lm_counts=$(cd "$toplevel" 2>/dev/null && git rev-list --left-right --count refs/heads/main...refs/remotes/origin/main 2>/dev/null)
   lm_ahead=${lm_counts%%[[:space:]]*}
   lm_behind=${lm_counts##*[[:space:]]}
+  lm_mirror=""
   if [ -n "$lm_counts" ] && { [ "${lm_ahead:-0}" -gt 0 ] || [ "${lm_behind:-0}" -gt 0 ]; } 2>/dev/null; then
+    lm_mirror=$(cd "$toplevel" 2>/dev/null && git config --get claude-settings.cloudMirror 2>/dev/null)
+  fi
+  if [ -n "$lm_counts" ] && [ "$lm_mirror" != "true" ] \
+     && { [ "${lm_ahead:-0}" -gt 0 ] || [ "${lm_behind:-0}" -gt 0 ]; } 2>/dev/null; then
     lm_line="checkout $toplevel: local main is $lm_behind commit"
     [ "$lm_behind" = 1 ] || lm_line="${lm_line}s"
     lm_line="$lm_line behind origin/main"
