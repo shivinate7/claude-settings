@@ -1,0 +1,11 @@
+{
+  "title": "`merge --review-record --kind docs-only` refuses when the PR's diff against its base touches a file that is not a doc",
+  "why": "Lane reviewed-head-push-ask (session_013NEJL36oZi9XZ76KB8nFQy), via the coordinator 18:39 CST Nov 8: `merge <pr> --review-record --kind docs-only` renders a record without checking the diff. #2066 is docs-only but now holds guard code, since #1725 merged into it. No harm yet: the lane holds #2066's record until #1725 merges.",
+  "note": "Same command as step record-tool-posts-itself (lane session_013NEJL3qwtN2VRPNsTZMhZD); that lane or the coordinator decides whether it folds in. Filed 18:43 CST Nov 8.",
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "todo",
+  "order": 852,
+  "updatedAt": "2026-11-08T18:42:00-06:00"
+}
