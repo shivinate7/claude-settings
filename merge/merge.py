@@ -3357,10 +3357,10 @@ def review_stamp_since(root, base, default=None):
                            f"after {REVIEW_DEEPEN_TRIES} deepens of {REVIEW_DEEPEN_STEP} commits. Run `git fetch --unshallow origin`, then run the command again. " + REVIEW_CITE)
             def cut(why):
                 return (f"{why} before the review stamp cutover was found: origin/{default} is a shallow history, and the first commit holding the salt, "
-                        f"{first[0][:9]}, is the shallow boundary. Run the command again to continue the deepen, or `git fetch --unshallow origin` for the full history. " + REVIEW_CITE)
+                        f"{first[0][:9]}, is the shallow boundary. Run the command again to continue the deepen, or `git fetch --unshallow origin` for the full history. ")
             left = deadline_left()
             if left is not None and left <= 0:
-                raise Stop(cut("The shared time budget ran out"))  # no fetch starts once the budget is spent
+                raise Stop(cut("The shared time budget ran out") + REVIEW_CITE)  # no fetch starts once the budget is spent
             try:
                 fc, fout = fetch_branch(top, default, deepen=REVIEW_DEEPEN_STEP)
             except subprocess.TimeoutExpired as e:
@@ -3368,7 +3368,7 @@ def review_stamp_since(root, base, default=None):
                     raise
                 # The clock alone decides a run-out (decision pr-review-record, "The cutover"): a fetch cut at its own cap with time left is a failed read.
                 after = deadline_left()
-                raise Stop(cut("The shared time budget ran out" if after is not None and after <= 0 else "One deepen fetch hit its own time limit")) from e
+                raise Stop(cut("The shared time budget ran out" if after is not None and after <= 0 else "One deepen fetch hit its own time limit") + REVIEW_CITE) from e
             if fc:
                 raise Stop(f"origin/{default} is a shallow history, too shallow to read the review stamp cutover: the first commit holding the salt, {first[0][:9]}, is the shallow boundary, "
                            f"and the fetch that deepens it by {REVIEW_DEEPEN_STEP} commits (`git fetch --deepen={REVIEW_DEEPEN_STEP} origin`) failed (git exited {fc}): {fout[:300]}. "
