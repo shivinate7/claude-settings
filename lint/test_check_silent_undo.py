@@ -692,11 +692,11 @@ class Flips(unittest.TestCase):
     def test_a_line_pasted_into_a_comment_is_not_a_re_wrap(self):
         self.red("", "timeout = 60", "# was timeout = 60 before")
 
-    def test_a_line_that_only_gained_an_argument_passes(self):
+    def test_a_hand_rewrite_that_only_adds_an_argument_is_a_rewrite_finding(self):
         # Roadmap step merge-keeps-main-verbatim: the hand edit of main's line is a rewrite finding, and no lost line is read.
         assert_rewrite_kind(self, self.resolve("run(a, b)", "run(a, b, env=e)", "run(a, b, env=e, timeout=T)"))
 
-    def test_a_third_value_still_passes(self):
+    def test_a_hand_rewrite_to_a_third_value_is_a_rewrite_finding(self):
         # Roadmap step merge-keeps-main-verbatim: the hand edit of main's line is a rewrite finding, and no lost line is read.
         assert_rewrite_kind(self, self.resolve("RULE_FLOOR = 80", "RULE_FLOOR = 91", "RULE_FLOOR = 94"))
 
@@ -2294,8 +2294,43 @@ class RecordsPage(unittest.TestCase):
         got, notes = C.check(r.dir, "origin/main", "HEAD", tool=self.TOOL)
         self.assertTrue(any("docs/records.md" in p for p in got), (got, notes))
 
+    DEBT2 = "**What.** Keep the page honest, too.\n"
+    ROW2 = "| `d-two` | Keep the page honest, too. | [`debts/d-two.md`](../debts/d-two.md) |"
+    ROW2_HAND = "| `d-two` | Keep the page honest, typed by hand. | [`debts/d-two.md`](../debts/d-two.md) |"
 
-NO_EXCUSE = "check() takes no run_state: a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
+    def test_an_excused_page_finding_is_not_carried_on_a_later_octopus_exception(self):
+        """Finding 2 of roadmap step merge-keeps-main-verbatim. A merge types main's new row on docs/records.md by hand: a
+        finding. Regenerating the page makes the head's copy the generator's output, which excuses it. An octopus merge
+        then raises Octopus, and the excused page finding must not ride on that exception."""
+        r = self.r = self.fixture()
+        r.sh("checkout", "-q", "-b", "feat")  # RevivedNote.octopus merges two side branches into `feat`
+        self.put_lf(r, {"other.txt": "lane v2\n"})
+        self.commit_all(r, "lane work")
+        r.sh("checkout", "-q", "main")
+        self.put_lf(r, {"debts/d-two.md": self.DEBT2})
+        self.regenerate(r)
+        self.commit_all(r, "a second debt and its row")
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        with open(os.path.join(r.dir, "docs", "records.md"), encoding="utf-8", newline="") as f:
+            auto = f.read()  # the working tree holds git's own auto-merge of the page
+        self.assertIn(self.ROW2, auto, "premise: git's auto-merge of the page does not hold main's row")
+        self.put_lf(r, {"docs/records.md": auto.replace(self.ROW2, self.ROW2_HAND)})
+        self.commit_all(r, "Merge main")
+        self.assertTrue(any("docs/records.md" in p for p in r.verdict()), "premise: the hand-typed row is not a finding")
+        self.regenerate(r)
+        self.commit_all(r, "regenerate the records page")
+        got = r.verdict()  # no octopus yet: the merge's page finding is gone, so the generated-page excuse holds
+        self.assertEqual(got, [], "premise: the regenerated head still has a finding with no octopus, so the page is not excused: %r" % (got,))
+        RevivedNote.octopus(self)  # the one octopus head: RevivedNote's fixture, three parents on branch feat
+        with self.assertRaises(C.Octopus) as cm:
+            C.check(r.dir, "origin/main", "HEAD")
+        carried = [p for p in cm.exception.problems if "docs/records.md" in p]
+        self.assertEqual(carried, [], "the excused generated-page finding rode on the octopus exception: %r" % (cm.exception.problems,))
+
+
+NO_EXCUSE ="check() takes no run_state: a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
 
 
 class RetireCite(unittest.TestCase):
@@ -2932,29 +2967,29 @@ class MergeKeepsMain(unittest.TestCase):
     FILL = "".join("filler %d\n" % i for i in range(1000))  # the full-size base: a thousand lines above the imports
     TRAILER = "Drops-lines: lib.txt -- %s"
 
-    def start(self, base, main, lane=None, lane_msg="feat"):
-        """lib.txt holds `base` at the cut. The lane commits `lane` to lib.txt, or else a change to other.txt. Then main commits `main`."""
+    def start(self, base, main, lane=None, lane_msg="feat", path="lib.txt"):
+        """`path` (lib.txt unless a case names another) holds `base` at the cut. The lane commits `lane` to it, or else a change to other.txt. Then main commits `main`."""
         r = self.r = Repo()
-        r.commit("base", date="2025-12-01T10:00:00", lib_txt=base, other_txt="other v1\n")
+        r.commit("base", date="2025-12-01T10:00:00", **{path: base}, other_txt="other v1\n")
         r.push()
         r.sh("checkout", "-q", "-b", "feat")
         if lane is None:
             r.commit("feat", date=self.T0, other_txt="other v2\n")
         else:
-            r.commit(lane_msg, date=self.T0, lib_txt=lane)
+            r.commit(lane_msg, date=self.T0, **{path: lane})
         r.sh("checkout", "-q", "main")
-        r.commit("main", date=self.T1, lib_txt=main)
+        r.commit("main", date=self.T1, **{path: main})
         r.push()
         r.sh("checkout", "-q", "feat")
         return r
 
-    def merge_by_hand(self, text, trailer=None):
-        """Merge main with no conflict, then write lib.txt as `text`: a hand edit of the merge commit."""
+    def merge_by_hand(self, text, trailer=None, path="lib.txt"):
+        """Merge main with no conflict, then write `path` as `text`: a hand edit of the merge commit."""
         r = self.r
         r.sh("merge", "--no-commit", "--no-ff", "main")  # a conflict would fail here: no case of this class is one
-        auto = r.sh("show", ":lib.txt")  # the index holds git's own auto-merge
+        auto = r.sh("show", ":" + path)  # the index holds git's own auto-merge
         self.assertNotEqual(auto, text.strip(), "premise: the hand text is git's own auto-merge, so the merge is no hand edit")
-        r.put("lib.txt", text)
+        r.put(path, text)
         r.sh("add", "-A")
         r.sh("commit", "-q", "-m", "Merge main" + ("\n\n" + trailer if trailer else ""), date=self.T2)
         return r.sh("rev-parse", "HEAD")
@@ -2985,7 +3020,7 @@ class MergeKeepsMain(unittest.TestCase):
         self.assert_merge_holds(m, "OrderedDict, defaultdict, Counter)")
         self.assert_merge_holds(m, "from collections import OrderedDict", present=False)
 
-    # Red on main: the hand edit is a finding by the new read, and the old reads excuse it by the trailer.
+    # A hand edit of main's line is a rewrite finding, and a Drops-lines trailer on its path does not lift it.
 
     def test_a_reflowed_main_import_outside_a_conflict_is_a_hand_edit_despite_a_trailer(self):
         self.reflow(self.BASE, self.BASE_WITH_IMPORT)
@@ -3014,7 +3049,7 @@ class MergeKeepsMain(unittest.TestCase):
         self.assert_merge_holds(m, "drop the cache after one failed write")
         self.check_excused_hand_edit("reworded, not lost")
 
-    # Green on main and after: the controls.
+    # Controls: a conflict resolution, a true drop under its trailer, a clean merge and a lane's own edit stay quiet.
 
     def test_a_conflict_resolved_to_a_third_value_is_quiet(self):
         text = lambda val: "".join("l%d\n" % i for i in range(1, 6)) + val + "\ntail\n"
@@ -3218,6 +3253,49 @@ class MergeKeepsMain(unittest.TestCase):
         r.commit("change the value on purpose\n\n" + self.TRAILER % "changed on purpose", date=self.T2, lib_txt=self.rule("RULE_FLOOR = 94"))
         self.assertEqual(len(r.sh("rev-list", "--parents", "-n", "1", "HEAD").split()), 2, "premise: the head is a merge, not a later lane commit")
         self.assertEqual(r.verdict(), [], "a later lane commit that changes main's value on purpose, with its trailer, was refused")
+
+    # Finding 1 (roadmap step merge-keeps-main-verbatim): a Drops-lines trailer excuses its own path when its commit changes
+    # at least one file, whatever that file is. The lane drops legacy_hook() from `path` by hand with no trailer. A later
+    # commit carries the trailer for `path` and does not change `path`.
+
+    def drop_then_later_trailer(self, path, later):
+        """The merge drops legacy_hook(), which main added, from `path`: refused for its lost line. Then a later commit
+        carries the trailer for `path`. `later` is "edit" (other.txt changes) or "rename" (a file the lane added is renamed)."""
+        self.start(self.BASE, self.BASE + "legacy_hook()\n", lane="lane_own = 1\n" + self.BASE, path=path)
+        if later == "rename":
+            self.r.commit("lane adds a scratch file", date=self.T0, scratch_txt="scratch\n")  # the file the later commit renames
+        self.merge_by_hand("lane_own = 1\n" + self.BASE, path=path)
+        got = self.r.verdict()
+        self.assertTrue(any(p.startswith(path + ":") and "drops" in p for p in got),
+                        "premise: the merge without a trailer is not refused for its lost line in %s: %s" % (path, got))
+        trailer = "Drops-lines: %s -- legacy hook removed on purpose" % path
+        if later == "rename":
+            self.r.sh("mv", "scratch.txt", "renamed.txt")
+            self.r.sh("commit", "-q", "-m", "Rename the scratch file\n\n" + trailer)
+        else:
+            self.r.commit("Notes fix\n\n" + trailer, date=self.T2, other_txt="other v3\n")
+        got = self.r.verdict()
+        self.assertIn("ALLOWED %s: legacy hook removed on purpose" % path, self.r.notes,
+                      "a Drops-lines trailer on a later commit that changes no %s did not excuse the drop in %s" % (path, path))
+        self.assertEqual([p for p in got if p.startswith(path + ":")], [],
+                         "the drop in %s stayed a finding under its own trailer: %s" % (path, got))
+
+    def test_a_drops_lines_trailer_excuses_its_own_path_from_a_later_commit_that_changes_another_file(self):
+        """Path rule of roadmap step merge-keeps-main-verbatim: a Drops-lines trailer excuses its own path when its commit
+        changes at least one file, and that file need not be the path."""
+        self.drop_then_later_trailer("lib.txt", "edit")
+
+    def test_a_drops_lines_trailer_on_a_rename_only_commit_excuses_its_path(self):
+        """Roadmap step merge-keeps-main-verbatim: a rename changes files, so its trailer excuses the path it names."""
+        self.drop_then_later_trailer("lib.txt", "rename")
+
+    def test_a_drops_lines_trailer_excuses_a_path_with_a_space_from_another_file(self):
+        """Roadmap step merge-keeps-main-verbatim: git -z reads the path as it is, with its space, so the trailer excuses it."""
+        self.drop_then_later_trailer("my file.txt", "edit")
+
+    def test_a_drops_lines_trailer_excuses_a_non_ascii_path_from_another_file(self):
+        """Roadmap step merge-keeps-main-verbatim: git -z reads the path as it is, with its non-ASCII letter, so the trailer excuses it."""
+        self.drop_then_later_trailer("café.txt", "edit")
 
 
 if __name__ == "__main__":
