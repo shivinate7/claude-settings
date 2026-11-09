@@ -5570,6 +5570,23 @@ sh("git-after-cd: pytest with || true, then ; a git push -u, is refused",
    "pytest -q || true; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
 sh("git-after-cd: pytest with || true, then && a git push -u, is refused",
    "pytest -q || true && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+# THE CLAUSES OF THE UNFAILING TEST, ONE KILLING CASE EACH. A `:` tail on an `if` test is refused as `|| true` is.
+# A `[` test and a git call are no check, and `&&` has no `||` tail, so each of those pushes passes. The else body
+# of an `|| true` test never runs, so its push passes too: a refusal of it is a false alarm.
+sh("git-after-cd: an if test of pytest with || :, then a git push -u in its then body, is refused",
+   "if pytest -q || :; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: an if test of [ -f a with || true is no check, so its then body push passes",
+   "if [ -f a ] || true; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: an if test of a git fetch with || true is no check, so its then body push passes",
+   "if %s fetch || true; then %s push -u origin b; fi" % (VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: an if test of pytest with && true has no || tail, so its then body push passes",
+   "if pytest -q && true; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: an if test of pytest with || true, whose else body pushes, passes",
+   "if pytest -q || true; then :; else %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
+# THE THEN BODY'S TAIL IS NO TEST'S TAIL. The else runs when the file test fails, and no check failed: its push passes.
+# The `|| true` belongs to the then body, so a reader that takes the then body's tail as the test's tail refuses it.
+sh("git-after-cd: an else body after a file test, when the then body ends in || true, passes",
+   "if [ -f a ]; then pytest -q || true; else %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: a check protected by || exit 1, then ; a git push -u origin b, passes",
    "pytest -q || exit 1; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 # A GLUED `(if true` WITH A PUSH IN ITS ELSE BODY. The `true` test always runs its then body, so the push in the else
