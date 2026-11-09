@@ -103,6 +103,7 @@ FAMILIES = {
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
+    "hook-bypass": "a git commit, merge or push that skips the git hooks: core.hooksPath on the command or in the environment, --no-verify, and -n on commit; the mutation tool's own exemption",
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
@@ -10809,6 +10810,199 @@ sh("git env set: Bash printf into a profile, a directive split by adjacent quote
 sh("git env set: Bash printf into a profile, a doubled backslash before n inside a name, denies",
    r"printf GIT_\\nDIR=/x >> ~/.bashrc", "deny", GIT_ENV_RULE, cwd=NOGIT)
 
+# =========================================================================== hook bypass
+# A git commit, merge or push that skips the git hooks is denied under rule hook-bypass. Five spellings of
+# one act: `-c core.hooksPath=...` on the command (the key in any case), `--no-verify` on commit, merge or
+# push, `-n` on commit alone, and the key set in the environment through GIT_CONFIG_COUNT or
+# GIT_CONFIG_PARAMETERS. `-n` is no bypass on push (--dry-run) or on merge (--no-stat), so both stay allowed.
+# The glued form `-ccore.hooksPath=x` is no spelling: git 2.43.0 refuses it as an unknown option, so no case
+# names it.
+#
+# Each deny has a green control beside it: the same command with the bypass taken out. A control that is not
+# allowed means another rule fires on that shape, so the deny beside it proves nothing about this rule.
+# The hooks path is `x`, a value no hook lives at, so the key alone decides, except in the one env case that
+# names /dev/null, as git's own examples do.
+FAMILY = "hook-bypass"
+HOOK_BYPASS = "hook-bypass"
+
+# (1) The key on the command line, for each verb that runs hooks.
+sh("hook-bypass: core.hooksPath on the command, commit, denies",
+   VCS + " -c core.hooksPath=x commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: core.hooksPath on the command, merge, denies",
+   VCS + " -c core.hooksPath=x merge feature/x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: core.hooksPath on the command, push, denies",
+   VCS + " -c core.hooksPath=x push origin feature/x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: the key in capitals on the command, Core.HooksPath, denies",
+   VCS + " -c Core.HooksPath=x commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, commit with no hooks key, allows",
+   VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, merge with no hooks key, allows",
+   VCS + " merge feature/x", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, push with no hooks key, allows",
+   VCS + " push origin feature/x", "allow", cwd=GITMAIN)
+
+# (2) --no-verify on commit, merge and push.
+sh("hook-bypass: --no-verify on commit, denies",
+   VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify on merge, denies",
+   VCS + " merge --no-verify feature/x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify on push, denies",
+   VCS + " push --no-verify origin feature/x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+
+# (3) -n on commit is --no-verify. Bundled with -m, and after the other flags, it is still the bypass.
+sh("hook-bypass: -n on commit is --no-verify, denies",
+   VCS + " commit -n -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: -n bundled with -m on commit, -nm x, denies",
+   VCS + " commit -nm x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify after the other flags and the message, denies",
+   VCS + " commit -am x --no-verify", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, commit -am x with no bypass, allows",
+   VCS + " commit -am x", "allow", cwd=GITMAIN)
+sh("hook-bypass: -mn on commit is the message n, not -n, allows",
+   VCS + " commit -mn", "allow", cwd=GITMAIN)
+
+# (4) The bypass reached through -C, a chain, a cd and a second line.
+sh("hook-bypass: --no-verify after git -C <dir>, denies",
+   VCS + " -C " + slash(GITMAIN) + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, git -C <dir> commit with no bypass, allows",
+   VCS + " -C " + slash(GITMAIN) + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: --no-verify after a status in an && chain, denies",
+   VCS + " status && " + VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, the same && chain with no bypass, allows",
+   VCS + " status && " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: core.hooksPath after a cd, denies",
+   "cd " + slash(GITMAIN) + " && " + VCS + " -c core.hooksPath=x commit -m x", "deny", HOOK_BYPASS,
+   cwd=GITMAIN)
+sh("hook-bypass: control, a cd and then a commit with no bypass, allows",
+   "cd " + slash(GITMAIN) + " && " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: --no-verify on the second line of a command, denies",
+   VCS + " status\n" + VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, the same two lines with no bypass, allows",
+   VCS + " status\n" + VCS + " commit -m x", "allow", cwd=GITMAIN)
+
+# (5) The key set in the environment. GIT_CONFIG_COUNT and GIT_CONFIG_PARAMETERS, each with a control that sets
+# another key, so the value is read and not only the variable's name.
+sh("hook-bypass: GIT_CONFIG_COUNT sets core.hooksPath for a commit, denies",
+   "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null " + VCS
+   + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, GIT_CONFIG_COUNT sets user.name for a commit, allows",
+   "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=x " + VCS + " commit -m x",
+   "allow", cwd=GITMAIN)
+sh("hook-bypass: GIT_CONFIG_PARAMETERS sets core.hooksPath for a push, denies",
+   "GIT_CONFIG_PARAMETERS=\"'core.hooksPath'='/dev/null'\" " + VCS + " push origin feature/x",
+   "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, GIT_CONFIG_PARAMETERS sets user.name for a push, allows",
+   "GIT_CONFIG_PARAMETERS=\"'user.name'='x'\" " + VCS + " push origin feature/x", "allow", cwd=GITMAIN)
+
+# (6) Scanner shapes: a lone apostrophe, and a # inside quotes, before the bypass. The guard reads the text the
+# shell reads, so neither quote nor comment opener may hide the flag that follows.
+sh("hook-bypass: a lone apostrophe in text before a bypass, denies",
+   "echo don't; " + VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, a lone apostrophe before a plain commit, allows",
+   "echo don't; " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: a # inside a quoted message does not hide a later --no-verify, denies",
+   VCS + ' commit -m "a # b" --no-verify', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, a # inside a quoted message with no bypass, allows",
+   VCS + ' commit -m "a # b"', "allow", cwd=GITMAIN)
+sh("hook-bypass: a # inside an echo string does not hide a bypass after it, denies",
+   'echo "# note"; ' + VCS + " -c core.hooksPath=x commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, a # inside an echo string before a plain commit, allows",
+   'echo "# note"; ' + VCS + " commit -m x", "allow", cwd=GITMAIN)
+
+# (7) PowerShell takes the same key on the command line, and its control with no key allows.
+sh("hook-bypass: PowerShell, core.hooksPath on the command, denies",
+   VCS + " -c core.hooksPath=x commit -m x", "deny", HOOK_BYPASS, tool="PowerShell", cwd=GITMAIN)
+sh("hook-bypass: control, PowerShell commit with no hooks key, allows",
+   VCS + " commit -m x", "allow", tool="PowerShell", cwd=GITMAIN)
+
+# (8) A bypass wrapped in another command: a shell, eval, env -S, xargs or timeout. The guard reads the command the
+# wrapper runs, not only the first word, so each wrapped bypass denies. The controls wrap a commit with no bypass,
+# or text that names one, and allow.
+sh("hook-bypass: --no-verify in a bash -c string, denies",
+   'bash -c "' + VCS + ' commit --no-verify -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: -n in an sh -c string, denies",
+   "sh -c '" + VCS + " commit -n -m x'", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify in an eval string, denies",
+   'eval "' + VCS + ' commit --no-verify -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify in an env -S string, denies",
+   'env -S "' + VCS + ' commit --no-verify -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: core.hooksPath in a bash -c string, denies",
+   'bash -c "' + VCS + ' -c core.hooksPath=/dev/null commit -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify fed to xargs, denies",
+   "echo --no-verify | xargs " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify after timeout 5, denies",
+   "timeout 5 " + VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, a bash -c string with a commit and no bypass, allows",
+   'bash -c "' + VCS + ' commit -m x"', "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a bash -c echo that names a bypass is text, allows",
+   "bash -c 'echo " + VCS + " commit --no-verify'", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a sh -c string with a push -n dry run, allows",
+   'sh -c "' + VCS + ' push -n"', "allow", cwd=GITMAIN)
+
+# (8b) A config write that turns hooks off, with a commit, merge or push after it in the same command, is denied.
+# DECIDED: a config write with nothing after it in the command is allowed. It sets a value and skips no hook; the
+# case below pins that. The controls read the key, unset it, set another key, or name the write in text.
+sh("hook-bypass: config core.hooksPath set, then a commit in the same command, denies",
+   VCS + " config core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --local core.hooksPath set, then a commit, denies",
+   VCS + " config --local core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --worktree core.hooksPath set, then a commit, denies",
+   VCS + " config --worktree core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --global core.hooksPath set, then a commit, denies",
+   VCS + " config --global core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --add core.hooksPath, then a push after a semicolon, denies",
+   VCS + " config --add core.hooksPath x; " + VCS + " push", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config core.hookspath set with -C, then a merge, denies (key case-blind)",
+   VCS + " -C " + slash(GITMAIN) + " config core.hookspath x && " + VCS + " merge y", "deny", HOOK_BYPASS,
+   cwd=GITMAIN)
+sh("hook-bypass: control, a config read of core.hooksPath, allows",
+   VCS + " config core.hooksPath", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a config --get of core.hooksPath, then a commit, allows",
+   VCS + " config --get core.hooksPath && " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a config --unset of core.hooksPath, allows",
+   VCS + " config --unset core.hooksPath", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a config write of user.name, then a commit, allows",
+   VCS + " config user.name x && " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a quoted mention of the config write, then a commit, allows",
+   'echo "git config core.hooksPath /dev/null" && ' + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a config write with no commit, merge or push after it, allows",
+   VCS + " config core.hooksPath /dev/null", "allow", cwd=GITMAIN)
+
+# (9) False alarms. Each names a bypass flag or key as text, or reads the key, and is allowed: no hook is skipped.
+sh("hook-bypass allow: push -n is --dry-run, not a bypass",
+   VCS + " push -n origin feature/x", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: merge -n is --no-stat, not a bypass",
+   VCS + " merge -n feature/x", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: log -n 5 counts commits",
+   VCS + " log -n 5", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: -n as a commit message value",
+   VCS + ' commit -m "-n"', "allow", cwd=GITMAIN)
+sh("hook-bypass allow: --no-verify as a commit message value",
+   VCS + ' commit -m "--no-verify"', "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a quoted --no-verify in a commit message",
+   VCS + " commit -m 'never use --no-verify'", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a quoted core.hooksPath in a commit message",
+   VCS + ' commit -m "refuse core.hooksPath bypass"', "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a heredoc commit message that names --no-verify and core.hooksPath",
+   VCS + " commit -F - <<'EOF'\nrefuse --no-verify and a core.hooksPath bypass\nEOF", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a multi-line quoted commit message that names --no-verify",
+   VCS + ' commit -m "subject\n\nrefuse --no-verify"', "allow", cwd=GITMAIN)
+sh("hook-bypass allow: echo of a bypass command is text",
+   'echo "git commit --no-verify"', "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a trailing shell comment that names --no-verify",
+   VCS + " commit -m x # --no-verify is refused", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: reading core.hooksPath with git config",
+   VCS + " config core.hooksPath", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: -c user.name on a commit, no hooks key",
+   VCS + " -c user.name=x commit -m y", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: -c core.hooksPath on status, which is not commit, merge or push",
+   VCS + " -c core.hooksPath=x status", "allow", cwd=GITMAIN)
+# The exemption: hooks/mutate_shared.py sets core.hooksPath inside Python, for the throwaway worktree it makes.
+# The guard never sees that git call, so the command that runs the file is allowed. The next pin check reads
+# the file, so this allow holds only while that code still sets the key.
+sh("hook-bypass allow: running hooks/mutate_shared.py, whose own checkout sets core.hooksPath",
+   "python3 hooks/mutate_shared.py", "allow", cwd=GITMAIN)
+
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
 #
@@ -16488,6 +16682,35 @@ sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COM
    cwd=NOGIT, agent_id="bld1", agent_type="builder")
 sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
    "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
+
+# ---- hook-bypass: the one exemption. hooks/mutate_shared.py sets core.hooksPath for the throwaway worktree it
+# makes, and the guard never sees that git call. The allow above holds only while that code path sets the key,
+# so this check reads the file and finds the setting in the function that makes the worktree. A copy of the
+# string in the guard would pass a check that reads the guard alone.
+FAMILY = "hook-bypass"
+
+
+def mutate_shared_hooks_path_case():
+    """Scope first: the file has a _make_checkout function. Then the subject: one call in it runs `worktree add`
+    with a core.hooksPath setting. The file is read with ast, so a comment or a docstring that names the key
+    does not count."""
+    path = os.path.join(REPO, "hooks", "mutate_shared.py")
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), path)
+    funcs = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "_make_checkout"]
+    if not funcs:
+        return False, "hooks/mutate_shared.py has no _make_checkout function"
+    for call in (node for node in ast.walk(funcs[0]) if isinstance(node, ast.Call)):
+        texts = [part.value for part in ast.walk(call)
+                 if isinstance(part, ast.Constant) and isinstance(part.value, str)]
+        if "worktree" in texts and "add" in texts and any(text.startswith("core.hooksPath=") for text in texts):
+            return True, "_make_checkout's worktree add sets core.hooksPath"
+    return False, "_make_checkout's worktree add no longer sets core.hooksPath"
+
+
+LOG_CHECKS_EXTRA.append(("hook-bypass: hooks/mutate_shared.py still sets core.hooksPath in the checkout it makes",
+                         mutate_shared_hooks_path_case))
+FIXTURELESS_CHECKS.add(mutate_shared_hooks_path_case)
 
 # ---- frozen: the main mirror and the live pin name are copied into guard_frozen.py from install.sh and
 # merge/install_from_main.sh. Each shell name is a literal in its script, and the guard keeps its own copy
