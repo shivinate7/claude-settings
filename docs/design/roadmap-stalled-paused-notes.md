@@ -38,7 +38,9 @@ Deep links: `#s=mixed|dense`, `&o=hatch|tint`, `&c=on|off`, `&w=all|390|1280`, `
    Pick: no.
 
 4. **Count words in the Now card.** The line reads "4 of 12 done · 1 in progress · 1 stalled · 1
-   paused". Option No count words keeps today's line.
+   paused · 1 blocked". Done always shows. A kind at 0 is left out. Option No count words drops them.
+   A listed id with no step in the plan stays in the Stalled band only. No bar, rail or Now card line
+   counts it.
    Gain: the counts that the bar shows are also in words, so no reader needs the cells.
    Loss: "stalled" shows once more on the screen. It is in a sentence, so `ux-label-once` passes it.
    Pick: yes.
@@ -49,8 +51,8 @@ Deep links: `#s=mixed|dense`, `&o=hatch|tint`, `&c=on|off`, `&w=all|390|1280`, `
    Pick: yes.
 
 6. **Bar names.** The Now card bar and the phase head bar get `role="img"`, an `aria-label` and a
-   `title`, such as "4 done, 1 in progress, 1 stalled, 1 paused, 5 to do". Each rail button's
-   `aria-label` adds ", 1 stalled, 1 paused" where the count is not 0.
+   `title`, such as "4 done, 1 in progress, 1 stalled, 1 paused, 1 blocked, 4 to do". Each rail
+   button's `aria-label` names in progress, stalled, paused and blocked where the count is not 0.
    Gain: a screen reader and a hover read every cell kind.
    Loss: none seen.
    Pick: yes.
