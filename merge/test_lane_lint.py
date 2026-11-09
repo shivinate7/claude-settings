@@ -14,7 +14,7 @@ is one lane lint: the lane commits a logging stub as the file the head's mutate 
 waits on real minutes. Cost per case: one stub ci-job start, one head worktree, and one mutate stub start where the step runs (the untouched
 control starts none). Measured: about 0.1 s per case on the first commit (the suite took 8.6 s before and 10.1 s with it, one run each).
 The follow-up cases (lint_with_report: the unknown bound at its edge, and the tally form run_mutants prints) cost the same per case: one lint,
-one head worktree, one mutate stub start. Their stub exits 0 whatever it prints, so each fails or passes on its own count. Measured: about
+one head worktree, one mutate stub start. Their stub exits 0, or 1 where a case says so: the lint judges the readable report, so each case fails or passes on its own count. Measured: about
 0.5 s per case on the builder head (the suite took 10.4 s before those five cases and 13.2 s after, one run each; noisy).
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
@@ -921,13 +921,12 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 0, text)
         self.assert_one_mutate_run(head)
 
-    def lint_with_report(self, out):
-        """Lint a lane whose mutate command prints `out` and exits 0. The stub exits 0 whatever it prints, so each case fails or passes on
-        its own count: the real command exits 1 with any survivor or wrong cause (mutate_shared.run_mutants), a conflict the report names.
-        -> (rc, text, head)."""
+    def lint_with_report(self, out, rc=0):
+        """Lint a lane whose mutate command prints `out` and exits `rc` (default 0). The lint judges the readable report, not the exit code
+        (the ruling on the wrong-cause exit): the real command exits 1 with any wrong cause (mutate_shared.run_mutants). -> (rc, text, head)."""
         body, script = real_mutate_job()
         self.use_ci_job(PASSING, 0)
-        head = self.push_lane({script: mutate_script(self.mutate_log, out=out), WORKFLOW_REL: workflow_of(body)})
+        head = self.push_lane({script: mutate_script(self.mutate_log, out=out, rc=rc), WORKFLOW_REL: workflow_of(body)})
         rc, text = self.timed_lint(437, "--lane-lint", "7")
         return rc, text, head
 
@@ -964,6 +963,38 @@ class LaneLint(CiJobStub, tm.CloudSession):
         n = merge.MUTATE_UNKNOWN_MAX + 1
         rc, text, head = self.lint_with_report(tally_out(694 - n, 0, n))
         self.assertEqual(rc, 1, "the lint passed a tally with %d wrong cause, one past MUTATE_UNKNOWN_MAX: %s" % (n, text))
+        self.assertEqual(counts_missing(text, {"unknown": n}), None, "the FAIL output does not name unknown %d: %s" % (n, text))
+        self.assert_one_mutate_run(head)
+
+    # The exit-code ruling: the lint judges the readable report. A nonzero exit fails only when no report reads.
+
+    def test_a_tally_with_wrong_cause_and_no_survivor_passes_at_exit_1_with_its_counts(self):
+        rc, text, head = self.lint_with_report(tally_out(690, 0, 4), rc=1)
+        self.assertEqual(rc, 0, "the lint refused a tally of 690 of 694 killed, 0 survived, 4 wrong cause, within the bound, "
+                                "because the command exited 1: " + text)
+        lines = pass_lines(text)
+        self.assertEqual(len(lines), 1, text)
+        self.assertEqual(counts_missing(lines[0], {"killed": 690, "survived": 0, "unknown": 4}), None,
+                         "the PASS line does not name the tally's counts: " + text)
+        self.assert_one_mutate_run(head)
+
+    def test_a_table_report_within_the_bound_passes_at_exit_1(self):
+        n = merge.MUTATE_UNKNOWN_MAX
+        rc, text, head = self.lint_with_report(mutate_report(694, 694 - n, n, 0), rc=1)
+        self.assertEqual(rc, 0, "the lint refused a report with %d unknown, within MUTATE_UNKNOWN_MAX, because the command exited 1: %s" % (n, text))
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        self.assert_one_mutate_run(head)
+
+    def test_a_tally_with_one_survivor_still_fails_at_exit_1_and_names_it(self):  # the control: green on 13df8e522
+        rc, text, head = self.lint_with_report(tally_out(689, 1, 4), rc=1)
+        self.assertEqual(rc, 1, "the lint passed a tally with 1 survivor at exit 1: " + text)
+        self.assertEqual(counts_missing(text, {"survived": 1}), None, "the FAIL output does not name survived 1: " + text)
+        self.assert_one_mutate_run(head)
+
+    def test_a_tally_with_unknown_past_the_bound_still_fails_at_exit_1_and_names_it(self):  # the control: green on 13df8e522
+        n = merge.MUTATE_UNKNOWN_MAX + 1
+        rc, text, head = self.lint_with_report(tally_out(694 - n, 0, n), rc=1)
+        self.assertEqual(rc, 1, "the lint passed a tally with %d unknown, past MUTATE_UNKNOWN_MAX, at exit 1: %s" % (n, text))
         self.assertEqual(counts_missing(text, {"unknown": n}), None, "the FAIL output does not name unknown %d: %s" % (n, text))
         self.assert_one_mutate_run(head)
 
