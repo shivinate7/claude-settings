@@ -136,7 +136,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   octopus-push         deny. A `git push` whose range (the pushed ref, else HEAD, less every ref of the pushed
                        remote, else origin) adds a merge commit of more than two parents; a merge that a
                        remote ref already holds passes. A dry run and a destination named main or master are
-                       left out; push-main asks about the latter. Cost: one `git rev-list` per pushed ref.
+                       left out; push-main asks about the latter. A remote named by a URL or a path
+                       counts every remote's refs. Cost: one `git rev-list` per pushed ref, and one `git
+                       config` more for such a remote.
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
@@ -3933,8 +3935,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
 
     # 6c3. A push whose range adds a merge of more than two parents (rule octopus-push).
-    # Cost: one `git rev-list` per pushed ref, none for a dry run, a main or master destination, or a
-    # command with no push.
+    # Cost: one `git rev-list` per pushed ref, plus one `git config` for a remote named by a URL or a path;
+    # none for a dry run, a main or master destination, or a command with no push.
     matched = octopus_push_hit(stripped, cwd, read_verb)
     if matched:
         refuse(tool, "deny", "octopus-push", OCTOPUS_PUSH_REASON.format(sha=matched), matched)

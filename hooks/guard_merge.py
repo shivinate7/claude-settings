@@ -693,15 +693,31 @@ def _push_hit(segment, stripped, cwd, args):
     return ""
 
 
+_NOT_A_PLAIN_NAME = re.compile(r"[/:\\.~]")
+
+
+def _remote_refs(where, remote):
+    """The `git rev-list` option that selects the remote-tracking refs of `remote`. A push may name a URL
+    or a path, whose refs sit under another name, so a word with a `/`, `:`, `\\`, `.` or `~` in it reads
+    `git config --get remote.<word>.url` once, and an unconfigured one selects every remote's refs. A
+    plain word is taken as a configured name, with no read."""
+    if _NOT_A_PLAIN_NAME.search(remote):
+        done = _git(where, "config", "--get", "remote." + remote + ".url")
+        if done is None or done.returncode != 0:
+            return "--remotes"
+    return "--remotes=" + remote
+
+
 def _octopus_hit(segment, stripped, cwd, args):
     """Return the short sha of the first merge of more than two parents that a `git push` would send,
     else ''. The range is what the push adds to the remote: the source ref, less every ref of the pushed
     remote, so an octopus that a remote ref already holds (a merge of origin/main brings one in) is not
     sent. A destination named like the default branch is skipped before any read: push-main asks about
-    that push, and a deny from here would win over the ask. One `git rev-list` for each ref."""
+    that push, and a deny from here would win over the ask. One `git rev-list` for each ref, and one
+    `git config` more for a remote named by a URL or a path (`_remote_refs`)."""
     for where, source, _dest, _tracking, remote, _memo in _push_refs(
             segment, stripped, cwd, args, DEFAULT_BRANCH_FALLBACK):
-        done = _git(where, "rev-list", "--merges", "--parents", source, "--not", "--remotes=" + remote, "--")
+        done = _git(where, "rev-list", "--merges", "--parents", source, "--not", _remote_refs(where, remote), "--")
         if done is None or done.returncode != 0:
             continue
         for line in done.stdout.splitlines():
