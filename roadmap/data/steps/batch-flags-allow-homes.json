@@ -1,0 +1,11 @@
+{
+  "title": "Every allow list that names the merge tool's flags agrees with the code's flag constant",
+  "phase": "now",
+  "status": "todo",
+  "order": 923,
+  "owner": "coordinator",
+  "why": "Item 458 a adds three batch flags to the merge tool's allow rule in settings.json. merge/cloud_allow.json has no \"Merge Tool Read Checks\" entry, and its tests pin exactly 3 rules. hooks/guard_stream.py CHECK_FLAGS also lists read-check flags. Neither was checked against the new flags. Rule building-allow-list-is-the-constant says an allow list points at the constant the code emits.",
+  "note": "Coordinator (13:23 CST Nov 9), from #2378's 458 a builder. Not a hold. Related: step batch-freeze-lane-set-enforce (the 458 a edit).",
+  "updatedAt": "2026-11-09T13:23:00-06:00",
+  "lane": ""
+}
