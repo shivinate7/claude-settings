@@ -4187,7 +4187,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
             elif not read_verb("push", args):
                 # A non-forced push that writes main or master (rule push-main, asks), an agent-worktree
-                # branch name (rule push-agent-branch, denies), or an implied destination off the branch's
+                # branch name (rule push-agent-branch, refuses), or an implied destination off the branch's
                 # upstream (rule push-stray-branch, asks). A dry run writes nothing.
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":

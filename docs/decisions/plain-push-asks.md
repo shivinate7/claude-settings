@@ -1,4 +1,4 @@
-# A plain push asks when it writes main or a stray branch
+# A plain push asks when it writes main or a stray branch, and is refused when it writes an agent branch
 
 ## The ruling
 
@@ -30,10 +30,13 @@ A third kind is refused, with its remedy. The owner's typed override lets each t
   drop the ask for a push that makes a new branch. The ask's remedy names `HEAD:<branch>`.
 - `push-agent-branch`: a push that writes an agent-worktree name puts a stray branch on the remote. Bare
   and `-u` count, and so does a bare push under `push.autoSetupRemote`. It refuses and names its
-  remedy, `git push origin HEAD:<lane-branch>`, so the owner never sees a prompt
-  (`guard-remedy-not-to-owner`). Source: owner ruling `agent-branch-never-pushed`, 2026-11-02 (record
-  on branch `agent-branch-push`, PR 1143, not yet on main), and the coordinator's pick (a), 2026-11-09
-  13:21 CST, step `agent-branch-push-refuses`. A test-author or builder pushing a lane-named branch
+  remedy, `git push origin HEAD:<lane-branch>`, so the owner never sees a prompt. The refusal text
+  goes to the session, not the owner (the principle of `guard-remedy-not-to-owner`, which records it
+  for Stop refusals). Source, kind process: owner ruling, 2026-11-02, that a `worktree-agent-*`
+  branch never reaches origin (32 sat on origin that day, pushed because the agent files said to
+  push the worktree's own branch); the coordinator's pick (a), 2026-11-09 13:21 CST, step
+  `agent-branch-push-refuses`, extends it to the `agent-<hex>` and `claude/agent-<hex>` forms (the
+  owner's words name `worktree-agent-*` only). A test-author or builder pushing a lane-named branch
   unasked is not read here; roadmap step `push-ask-reads-brief` holds it.
 - Silent:
   - a push to the branch's own upstream, unless that name is an agent-worktree name;
