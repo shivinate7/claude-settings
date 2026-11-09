@@ -88,8 +88,9 @@ ENV_EXISTENCE_COMMANDS = ("ls", "test", "[", "[[")
 # `find` tests that take a name pattern, and the actions that act on a match. A pattern after one of
 # those tests lists the file's name and reads no contents, as `ls` does, when the segment holds no
 # action that runs a command, deletes, or writes the match list to a file, and its output goes to the
-# terminal, a file, a message, or a filter that runs no command (`ENV_FIND_FILTERS`). A substitution
-# or a pipe into any other command hands the names to a command that may read them.
+# terminal or a message value, straight or through a chain of filters that run no command
+# (`ENV_FIND_FILTERS`). A redirect to a file, another substitution, or any other pipe stage hands the
+# names to a command that may read them (`_find_output_on_screen`).
 ENV_FIND_NAME_TESTS = (
     "-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex")
 ENV_FIND_ACTIONS = FIND_EXEC_ACTIONS + ("-delete", "-fprint", "-fprint0", "-fprintf", "-fls")
@@ -470,9 +471,9 @@ def substitution_commands(raw: str, stripped: str, outer: bool = False):
 #   - a brace or variable split (`.env{,.x}`, `.e$Xnv`) cannot be read statically;
 #   - a dot glob such as `cat .*` or `tar .*` refuses, on purpose, as it sweeps in `.env`;
 #   - `find -name '.env*'` lists names and is allowed, as `ls` is, while its output goes to the
-#     terminal, a file or a filter that runs no command (`ENV_FIND_FILTERS`); a substitution or
-#     a pipe into any other command refuses. `find .env -print` is judged as a name word and
-#     refuses;
+#     terminal or a message value, straight or through filters that run no command
+#     (`ENV_FIND_FILTERS`); a redirect to a file, another substitution, or any other pipe stage
+#     refuses. `find .env -print` is judged as a name word and refuses;
 #   - a relay split across two separate tool calls (write the name to a file in one, read the file
 #     in the next) cannot be seen by a per-command guard;
 #   - the relay check matches the literal path, so another spelling of the same file (`./f`, or
@@ -1259,12 +1260,27 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
     return False
 
 
-def _pipe_sink(pieces, at: int) -> str:
-    """The command that reads the pipe the piece `at` closes, else "" (none found)."""
-    if at + 1 >= len(pieces):
-        return ""
-    parts = _env_parts(pieces[at + 1])
-    return _env_words(parts[0])[2] if parts else ""
+# A redirect of stdout. `2>` sends errors only; `&>` reaches here as `>` (`_env_parts`).
+ENV_STDOUT_REDIRECTS = (">", ">>", "1>", "1>>")
+
+
+def _find_output_on_screen(words, piped: bool, pieces, ends, at: int) -> bool:
+    """True when a find segment's output reaches only the screen: no stdout redirect to a file,
+    and, when `piped`, each stage of the pipe that the piece `at` opens is a filter
+    (`ENV_FIND_FILTERS`) with no such redirect."""
+    if any(w in ENV_STDOUT_REDIRECTS for w in words):
+        return False
+    while piped and ends[at] == "|":
+        at += 1
+        parts = _env_parts(pieces[at]) if at < len(pieces) else []
+        if not parts:
+            return False
+        stage, _, command = _env_words(parts[0])
+        if command not in ENV_FIND_FILTERS or any(w in ENV_STDOUT_REDIRECTS for w in stage):
+            return False
+        if len(parts) > 1:
+            return True  # the filter is sent to the background, and its output goes to the screen
+    return True
 
 
 def _env_flat(cmd: str, text_ok: bool = False):
@@ -1341,10 +1357,10 @@ def _env_flat(cmd: str, text_ok: bool = False):
                 if command in ENV_EXISTENCE_COMMANDS:
                     continue  # asking whether the file is there reads none of it
                 # `text_ok` is false for a substitution that is not a message value: its output is an
-                # argument of the command around it. A pipe must end in a filter, not a runner.
+                # argument of the command around it. Every pipe stage must be a filter, not a runner.
                 if (command == "find" and previous in ENV_FIND_NAME_TESTS and text_ok
                         and not any(w in ENV_FIND_ACTIONS for w in words)
-                        and (not piped or _pipe_sink(pieces, at) in ENV_FIND_FILTERS)):
+                        and _find_output_on_screen(words, piped, pieces, ends, at)):
                     continue  # a name test lists the name, as ls does
                 actor = "'%s'" % command if command else "this command"
                 return (ENV_CONTENTS_REASON,
