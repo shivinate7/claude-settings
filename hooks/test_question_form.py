@@ -1516,12 +1516,12 @@ def case_step_absolute_path_cmdlet_is_refused_in_every_form():
 
 def case_step_verb_noun_folder_with_slash_is_text():
     # A folder path that ends in `/` is text: the slash marks a folder, not a cmdlet, so a Verb-Noun name in it passes.
-    # These pass on main already, since a cmdlet name must end the span. They keep passing once the slash rule is built.
+    # A cmdlet name must end the span, so these stay text whatever the slash rule does.
     for folder in ("~/Documents/Test-Results/", "C:\\Users\\x\\Documents\\Read-Me\\"):
         page("a step naming the folder `%s` in prose is text and passes" % folder, "set",
              entry_of(task_item(["Save the notes in `%s` before the review" % folder])), None)
-    # Controls, passing on main: a path as the argument of a command word that is no shell program, and a PowerShell
-    # command, which no shell-line check reads. A rule that refuses a path by its position must keep these passing.
+    # Controls: a path as the argument of a non-shell command word, and a PowerShell command, which no shell-line
+    # check reads. A rule that refuses a path by its position must keep these passing.
     for span in ("open ~/Documents/Open-Items", "show /Users/x/Projects/Build-Tools"):
         page("a step holding `%s` is text and passes, its path an argument" % span, "set",
              entry_of(task_item(["Check the output of `%s`" % span])), None)
