@@ -23,7 +23,7 @@ and there are probably more places to use them". The word is "refuter" (item 282
 | Lane | Model call | Who else sees the verdict | Calls per day | Pick | Gold |
 |---|---|---|---|---|---|
 | blind-plan-refuter | one per plan | nobody before the build | plan records added: 2 to 17 a day, 10-30 to 11-04 (proxy; most Plan output is no record) | Opus, ruled (item 279, pick d). Not in the question. | Opus |
-| reviewer-brief-blind | none: a guard check on the brief | n/a | 0 | n/a, no model call. The reviewer keeps its row: haiku round 1, sonnet rounds 2 and 3. Item 279 option c (guard fix check on sonnet) was not picked. | 0 calls |
+| reviewer-brief-blind | none: a guard check on the brief | n/a | 0 | n/a, no model call. The reviewer keeps its row: haiku round 1, sonnet rounds 2 and 3. Every fix check runs on sonnet (item 279 option c, picked as item 351 a, 2026-11-07 14:44 CST; widened from guard and check changes to every change by item 444 a, 2026-11-08 15:04 CST). | 0 calls |
 | judge-replay-corpus | CI only, per judge change | CI | only on a PR that changes a judge | n/a. Each judge replays on its own production row, or the replay proves nothing. | each judge's own row |
 | step-done-needs-check | none: a lint | n/a | 0 | n/a, no model call. Its `Critic:` line names the refuter role, which is Opus. | 0 calls |
 | challenger-page-against | one per decision item | the owner reads the case; the Opus question reviewer reads the question | decision items added: 6 to 51 a day, 10-31 to 11-06, median 22 (measured) | Sonnet | a strong case against, read by the owner |
@@ -36,8 +36,7 @@ and its count is the highest. The close read is the last reader before "done", a
 
 ## 2. More places a refuter catches a normal-work mistake
 
-Item 279 options c and e (guard fix check on sonnet; a second blind reviewer on guard PRs) were offered and
-not picked. This list does not repeat them.
+Item 279 options c and e (guard fix check on sonnet; a second blind reviewer on guard PRs) were offered. Option c was picked as item 351 a, 2026-11-07 14:44 CST, and widened by item 444 a, 2026-11-08 15:04 CST; option e was not. This list does not repeat them.
 
 | Place | Mistake Claude makes | Harm | Calls per day | Model | Gold |
 |---|---|---|---|---|---|

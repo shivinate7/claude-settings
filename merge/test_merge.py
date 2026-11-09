@@ -12842,7 +12842,7 @@ def record_text(rounds=REVIEW_PASS, head=REVIEW_HEAD, kind="normal", guard="no",
     return "\n".join([marker, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
                       *rounds, *fix, f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
 
-def fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model="haiku"):
+def fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model=merge.REVIEW_FIX_GUARD_MODEL):
     """The one literal of the fix check line: the reviewed head the fix diff starts from, the role, the model and the verdict."""
     return f"Fix check: {head}, {role}, {model}, {verdict}"
 
@@ -12888,8 +12888,8 @@ def no_record_numbers(out):
     """The pull request numbers named on the `no record:` line."""
     return {int(m) for l in out.splitlines() if l.startswith("no record:") for m in re.findall(r"#(\d+)", l)}
 
-REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", "haiku", "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict
-REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", "haiku", "FAIL")
+REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict; every fix check runs on that model (owner, 2026-11-08 15:04 CST, item 444 a)
+REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "FAIL")
 
 def fix_state(test, fix, **kw):
     """-> (state, why) of a record built without a fix line, with `fix` set on its parsed dict. review_state runs without the parser, so a
@@ -13308,7 +13308,8 @@ class ReviewFixRules(unittest.TestCase):
                  (("Round 1: reviewer, sonnet, FAIL",), "no", "not owed", "PASS", "done"))
         for rounds, guard, net, verdict, want in cases:
             with self.subTest(rounds=rounds, guard=guard, net=net, verdict=verdict):
-                text = record_text(rounds=rounds, guard=guard, net=net, fix=(fix_check_line(verdict=verdict),))
+                model = merge.REVIEW_FIX_GUARD_MODEL
+                text = record_text(rounds=rounds, guard=guard, net=net, fix=(fix_check_line(verdict=verdict, model=model),))
                 self.assertEqual(record_state(self, text), want)
 
     def test_a_fix_pass_after_a_failed_first_round_names_the_fail_and_the_fix_check(self):
@@ -13443,7 +13444,7 @@ class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
     error prints no record. Each refusal sits beside the good value, which must exit 0, so a parser that never learned the flag fails here too."""
 
-    def fix_value(self, head=REVIEW_OLD_HEAD, role="reviewer", model="haiku", verdict="PASS"):
+    def fix_value(self, head=REVIEW_OLD_HEAD, role="reviewer", model=merge.REVIEW_FIX_GUARD_MODEL, verdict="PASS"):
         return f"{head}:{role}:{model}:{verdict}"
 
     def earlier_host(self):
@@ -13496,7 +13497,7 @@ class ReviewFixBase(ReviewEnv):
     OTHER_HEAD = "2e" * 20  # a head that no record reviewed
 
     def review_with_base(self, base, host):
-        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:haiku:PASS", host=host)
+        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
 
     def assert_refused(self, rc, out, err):
         self.assertEqual(rc, 2, "the fix check was not refused:\n" + out + err)
@@ -14260,6 +14261,125 @@ BACKING_TEXT = "a = 1\nb = 2\nc = 3\nd = 4\n"
 CAP_NAME = "PROSE_JUDGE_MAX_CALLS"
 PROSE_CAP = 2
 
+
+class ReviewFixSonnet(ReviewEnv):
+    """Every fix check runs on Sonnet, whatever the change's Guard or check value (owner, 2026-11-08 15:04 CST, item 444 a). That widens
+    item 351 a (owner, 2026-11-07 14:44 CST), which covered a change with Guard or check yes only. A fix check on another model, such as
+    Haiku, reads open on every record, and `--review-record` refuses to write one (exit 2) with a remedy that names sonnet. A Sonnet fix
+    check, whatever its letter case, reads as it always has. Records are built with record_text() and read with record_verdict(); the write
+    path runs through merge.main, so each case reaches the rule in the real code."""
+
+    OTHER_MODEL = "haiku"  # a fix check model that is not merge.REVIEW_FIX_GUARD_MODEL, so it is refused on every record
+    LOOKALIKE_MODEL = "claude-sonnet-5-5"  # contains the sonnet name, so a substring match passes it and only the exact compare refuses it
+    REFUSED_MODELS = (OTHER_MODEL, LOOKALIKE_MODEL)  # each is refused on every record, guard yes and no alike
+    MODEL_REFUSAL = f"must run on {merge.REVIEW_FIX_GUARD_MODEL}"  # the phrase review_state gives as the why of a model refusal
+
+    def guard_yes_verdict(self, rounds, fix_model, net="not owed"):
+        return record_verdict(self, record_text(rounds=rounds, guard="yes", net=net, fix=(fix_check_line(model=fix_model),)))
+
+    def guard_flags(self, fix_model, guard="yes"):
+        """The review flags for a normal change with `guard`, round 1 FAILed, and a fix check PASS on `fix_model` from the earlier head."""
+        return ("--kind", "normal", "--guard", guard, "--round", "1:reviewer:sonnet:FAIL", "--head", self.head(),
+                "--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:{fix_model}:PASS")
+
+    def earlier_host(self):
+        """ReviewFixFlag's shared step: the live head, with one earlier record that reviewed the fix base and has no fix line."""
+        return ReviewFixFlag.earlier_host(self)
+
+    def test_a_fix_pass_on_another_model_on_a_guard_change_reads_open_not_done(self):
+        # The model refusal is asserted in the why, not only the open state: once owner item 402 a lands, a guard-yes change before round 3
+        # reads open on its own, so the state alone would stay green with the model rule deleted.
+        for model in self.REFUSED_MODELS:
+            for rounds in (("Round 1: reviewer, sonnet, FAIL",), ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL")):
+                with self.subTest(model=model, rounds=rounds):
+                    state, why = self.guard_yes_verdict(rounds, model)
+                    self.assertEqual(state, "open", f"a {model} fix check PASS on a guard or check change must not read done: {why!r}")
+                    self.assertIn(self.MODEL_REFUSAL, why, f"a {model} fix check PASS on a guard or check change is not refused on its model: {why!r}")
+
+    def test_a_sonnet_fix_pass_on_a_guard_change_is_not_refused_by_the_model_rule(self):
+        # Pins the model part only. Owner item 402 a (2026-11-08 06:08 CST) owes round 3 on a guard or check change, so the state is not
+        # asserted here. The haiku verdict is the control: it must carry the model refusal, or the sonnet check proves nothing.
+        for rounds in (("Round 1: reviewer, sonnet, FAIL",), ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL")):
+            with self.subTest(rounds=rounds):
+                _, haiku_why = self.guard_yes_verdict(rounds, self.OTHER_MODEL)
+                self.assertIn(self.MODEL_REFUSAL, haiku_why, "the haiku control lost the model refusal, so this case proves nothing:\n" + haiku_why)
+                _, why = self.guard_yes_verdict(rounds, merge.REVIEW_FIX_GUARD_MODEL)
+                self.assertNotIn(self.MODEL_REFUSAL, why, f"a sonnet fix check on a guard or check change gets the model refusal: {why!r}")
+
+    def test_a_fix_pass_on_another_model_on_a_change_with_no_guard_reads_open_not_done(self):
+        # owner item 444 a: Guard or check no owes the same sonnet fix check as yes, so another model's PASS reads open after each round
+        for model in self.REFUSED_MODELS:
+            for rounds in (("Round 1: reviewer, sonnet, FAIL",), REVIEW_PASS, REVIEW_FAILED_THREE):
+                with self.subTest(model=model, rounds=rounds):
+                    state, why = record_verdict(self, record_text(rounds=rounds, guard="no", fix=(fix_check_line(model=model),)))
+                    self.assertEqual(state, "open", f"a {model} fix check PASS on a change with no guard or check must not read done: {why!r}")
+                    self.assertIn(self.MODEL_REFUSAL, why, f"a {model} fix check PASS on a change with no guard or check is not refused on its model: {why!r}")
+
+    def test_a_sonnet_fix_pass_on_a_change_with_no_guard_still_reads_done(self):
+        # control: the same record on Sonnet reads done, so the open state above comes from the model and not the record
+        state, why = record_verdict(self, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",), guard="no",
+                                                      fix=(fix_check_line(model=merge.REVIEW_FIX_GUARD_MODEL),)))
+        self.assertEqual(state, "done", f"a Sonnet fix check PASS on a change with no guard or check must read done: {why!r}")
+
+    def remedy_names_sonnet(self, model, text):
+        # The refused model's own name holds "sonnet", so it is taken out before the check: only the remedy can satisfy it.
+        return merge.REVIEW_FIX_GUARD_MODEL in text.replace(model, "")
+
+    def test_a_fix_check_on_another_model_on_a_guard_change_is_refused_and_names_sonnet(self):
+        for model in self.REFUSED_MODELS:
+            with self.subTest(model=model):
+                rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(model), host=self.earlier_host())
+                self.assertEqual(rc, 2, f"a {model} fix check on a guard or check change was written, not refused:\n" + out + err)
+                self.assertNotIn("Traceback", err)
+                self.assertNotIn(REVIEW_MARKER, out, f"a refused {model} fix check still printed a record")
+                self.assertTrue(self.remedy_names_sonnet(model, out + err), "the refusal does not name sonnet as the model to use:\n" + out + err)
+
+    def test_a_sonnet_fix_check_on_a_guard_change_prints_the_record(self):
+        # control: the same flags on Sonnet are written, with the fix line the record reads back
+        rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(merge.REVIEW_FIX_GUARD_MODEL), host=self.earlier_host())
+        self.assertEqual(rc, 0, "a Sonnet fix check on a guard or check change was refused:\n" + out + err)
+        self.assertIn(fix_check_line(model=merge.REVIEW_FIX_GUARD_MODEL), posted_body(self, out).splitlines())
+
+    def test_a_fix_check_on_another_model_on_a_change_with_no_guard_is_refused_and_names_sonnet(self):
+        # owner item 444 a: the refusal does not turn on Guard or check, so the same flags with guard no are refused too
+        for model in self.REFUSED_MODELS:
+            with self.subTest(model=model):
+                rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(model, guard="no"), host=self.earlier_host())
+                self.assertEqual(rc, 2, f"a {model} fix check on a change with no guard or check was written, not refused:\n" + out + err)
+                self.assertNotIn(REVIEW_MARKER, out, f"a refused {model} fix check still printed a record")
+                self.assertNotIn("Traceback", err)
+                self.assertTrue(self.remedy_names_sonnet(model, out + err), "the refusal does not name sonnet as the model to use:\n" + out + err)
+
+    def test_a_sonnet_fix_check_on_a_change_with_no_guard_prints_the_record(self):
+        # control: the same flags on Sonnet are written on Guard or check no, with the fix line the record reads back
+        rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(merge.REVIEW_FIX_GUARD_MODEL, guard="no"), host=self.earlier_host())
+        self.assertEqual(rc, 0, "a Sonnet fix check on a change with no guard or check was refused:\n" + out + err)
+        self.assertIn(fix_check_line(model=merge.REVIEW_FIX_GUARD_MODEL), posted_body(self, out).splitlines())
+
+    # The model in the spelling a person may type. Built from the constant, so the cases follow the model name when it changes.
+    MIXED_CASE_MODEL = merge.REVIEW_FIX_GUARD_MODEL.capitalize()
+
+    def test_a_mixed_case_sonnet_fix_pass_on_a_guard_change_reads_like_lowercase(self):
+        # Pins letter case only. The state is not asserted: owner item 402 a (2026-11-08 06:08 CST) owes round 3 on a guard or check change.
+        rounds = ("Round 1: reviewer, sonnet, FAIL",)
+        lower = self.guard_yes_verdict(rounds, merge.REVIEW_FIX_GUARD_MODEL)  # control: the lowercase model is not refused
+        self.assertNotIn(self.MODEL_REFUSAL, lower[1], f"the lowercase control is refused on the model, so the case proves nothing: {lower[1]!r}")
+        mixed = self.guard_yes_verdict(rounds, self.MIXED_CASE_MODEL)
+        self.assertEqual(mixed, lower, f"a {self.MIXED_CASE_MODEL} fix check PASS on a guard or check change reads differently from lowercase")
+
+    def test_a_mixed_case_sonnet_fix_check_on_a_guard_change_is_accepted_and_printed(self):
+        rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(self.MIXED_CASE_MODEL), host=self.earlier_host())
+        self.assertEqual(rc, 0, f"--review-record refused a {self.MIXED_CASE_MODEL} fix check on a guard or check change:\n" + out + err)
+        self.assertIn(fix_check_line(model=self.MIXED_CASE_MODEL), posted_body(self, out).splitlines())
+
+    def test_a_mixed_case_sonnet_fix_check_on_a_change_with_no_guard_reads_done_and_is_printed(self):
+        # control: the letter-case match holds on Guard or check no too, as it does on yes
+        state, why = record_verdict(self, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",), guard="no",
+                                                      fix=(fix_check_line(model=self.MIXED_CASE_MODEL),)))
+        self.assertEqual(state, "done", f"a {self.MIXED_CASE_MODEL} fix check PASS on a change with no guard or check must read done: {why!r}")
+        rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(self.MIXED_CASE_MODEL, guard="no"), host=self.earlier_host())
+        self.assertEqual(rc, 0, f"--review-record refused a {self.MIXED_CASE_MODEL} fix check on a change with no guard or check:\n" + out + err)
+        self.assertIn(fix_check_line(model=self.MIXED_CASE_MODEL), posted_body(self, out).splitlines())
 
 class JudgeStub:
     """Stands in for decision_watch.invoke_model. `answer(prompt)` gives (verdict, error), or raises. Each call's prompt is
