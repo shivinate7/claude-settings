@@ -20733,23 +20733,29 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that edit
 # ---- the test-author's merge route covers the product paths a merge left conflicted, in a merge that has a test
 # conflict (decision builders-cannot-edit-tests). A merge with no test path conflicted gives no path that route, and
 # a conflicted workflow keeps its content check. `src/app.py` is the only conflict in the product-only merge.
-def _product_mid_merge(w):
-    """Cut at main. The lane changes src/app.py, and main changes the same line. No test path is in the merge.
-    Main is merged in and the merge is left in progress with src/app.py conflicted."""
+def _product_mid_merge(w, paths=("src/app.py",)):
+    """Cut at main. The lane changes each of `paths`, and main changes the same line of each. By default `paths` is
+    src/app.py alone, so no test path is in the merge. Main is merged in and the merge is left in progress with
+    exactly `paths` conflicted."""
     main = w + "-main"
-    _test_author_lane(w, "src/app.py", "x = 6\n")
+    _test_author_lane(w, paths[0], "x = 6\n", more=tuple((rel, "x = 6\n") for rel in paths[1:]))
     _must(w, "reset", "-q", "--hard", "lane")
-    _put_commit(main, [("src/app.py", "x = 9\n")], "main moves")
+    _put_commit(main, [(rel, "x = 9\n") for rel in paths], "main moves")
     merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
     if merged.returncode == 0:
         sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
-    _require_conflict(w, "src/app.py")
+    for rel in paths:
+        _require_conflict(w, rel)
+    unmerged = sorted(run_vcs(w, "diff", "--name-only", "--diff-filter=U").stdout.split())
+    if unmerged != sorted(paths):
+        sys.exit("fixture setup failed: the unmerged paths in %r are %r, not %r" % (w, unmerged, sorted(paths)))
 
 
-def _product_merge_commit(w):
-    """`_product_mid_merge`, resolved by hand and committed: src/app.py takes a text neither side holds."""
-    _product_mid_merge(w)
-    write(os.path.join(w, "src/app.py"), "x = 7\n")
+def _product_merge_commit(w, paths=("src/app.py",)):
+    """`_product_mid_merge`, resolved by hand and committed: each of `paths` takes a text neither side holds."""
+    _product_mid_merge(w, paths)
+    for rel in paths:
+        write(os.path.join(w, rel), "x = 7\n")
     _must(w, "add", "-A")
     _must(w, *IDENT, "commit", "-q", "--no-edit")
 
@@ -20794,6 +20800,34 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that reso
 add("test-author: Edit of a workflow that changes a non-test step in a mixed merge is refused", "deny", rule=TA,
     tool="Edit", file_path=os.path.join(CI_MID, CI), old_string=CI_LINT,
     new_string=CI_LINT.replace("ste_lint.py", "other_lint.py"), carries=("builder", "Report"), **AUTH_CI)
+
+
+# ---- the mutation-test conflict. A mutation test is a builder-refused path (`is_builder_test_rel`), so a merge whose
+# conflicts are a mutation test and a product file gives the builder no path to commit it. The test-author's route
+# opens on any builder-refused conflict, and a merge with no such conflict keeps refusing its product paths.
+GM = "hooks/guard_merge.py"
+MG = "hooks/mutate_guard.py"
+MUT_FILES = {**MIXED_FILES, GM: "x = 1\n", MG: "x = 1\n"}
+MUT_MID = diff_repo("ta-mut-mid", lambda w: _product_mid_merge(w, (GM, MG)), files=MUT_FILES)
+MUT_DONE = diff_repo("ta-mut-done", lambda w: _product_merge_commit(w, (GM, MG)), files=MUT_FILES)
+PAIR_MID = diff_repo("ta-prod-pair-mid", lambda w: _product_mid_merge(w, (GM, "src/app.py")), files=MUT_FILES)
+AUTH_MUT = dict(agent_id="auth1", agent_type="test-author", cwd=MUT_MID)
+AUTH_PAIR = dict(agent_id="auth1", agent_type="test-author", cwd=PAIR_MID)
+# The test-author's Edit and Write of the product file that the merge conflicts beside a mutation test. The mutation
+# test is the test-author's, so the route it opens covers the product file too.
+add("test-author: Edit of a product file its merge conflicts beside a mutation test is allowed", "allow", tool="Edit",
+    file_path=os.path.join(MUT_MID, GM), new_string="x = 7\n", **AUTH_MUT)
+add("test-author: Write of a product file its merge conflicts beside a mutation test is allowed", "allow", tool="Write",
+    file_path=os.path.join(MUT_MID, GM), content="x = 7\n", **AUTH_MUT)
+# The test-author's merge commit that resolves both conflicts: the product path is the test-author's, so no
+# author-diff line is written.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that resolves a conflicted mutation test and a "
+                         "conflicted product file is never refused and logs no author-diff line",
+                         author_silent_case(MUT_DONE, "ta-mut-done")))
+# A merge whose conflicts are two product files, and no test path, keeps refusing each product file.
+add("test-author: Edit of a product file its merge conflicts beside another product file is refused, with no test "
+    "path conflicted", "deny", rule=TA, tool="Edit", file_path=os.path.join(PAIR_MID, GM), new_string="x = 7\n",
+    carries=("builder", "Report"), **AUTH_PAIR)
 
 
 def refused_push_and_stop_case(label):
