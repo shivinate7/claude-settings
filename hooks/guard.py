@@ -55,8 +55,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        and no agent_id, while git's own merge of HEAD and MERGE_HEAD conflicts a non-.md path. The
                        write form, under the write tools below, is its Edit or Write of a non-.md path while MERGE_HEAD
                        is set. The reason says to abort the merge and send the whole merge to a role agent. A call
-                       from an agent, and a merge that conflicts only Markdown, pass. An unread record, an env with
-                       no session id and a failed git read allow and log `orchestrator-merge-write-unread`. A call
+                       from an agent, and a merge that conflicts only Markdown, pass. An env with no session id
+                       passes silently. An unread record and a failed git read allow and log
+                       `orchestrator-merge-write-unread`. A call
                        with no merge runs one MERGE_HEAD probe and reads no transcript. An override lifts it.
                        (builders-cannot-edit-tests, the merge route)
   git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
