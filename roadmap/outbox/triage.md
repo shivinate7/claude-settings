@@ -231,3 +231,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - gh-reopen-cloud-allowed (#2444 round 3, gh-write cloud guard, via coordinator 12:49 CST Nov 9): gh pr reopen, gh pr update-branch and gh issue reopen pass in the cloud. Fix: add them to the cloud write list.
 - gh-rerun-unpinned (same source): no test pins that `gh run rerun` is allowed in the cloud. Fix: add an allow case.
 - gh-body-h-hides-write (same source): `--body -h` hides a write from the reader. Fix: treat a value after --body as a value, not a flag.
+- notes-cite-closed-2153 (coordinator 12:59 CST Nov 9, lane time-from-one-helper): rows in docs/debts/notes.md cite the closed #2153; they should cite #2258, its replacement. Fix: a docs PR rewrites those cites.

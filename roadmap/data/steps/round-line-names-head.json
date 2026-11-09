@@ -1,10 +1,10 @@
 {
   "title": "Each review Round line names the head it read, and the record tool refuses a mismatch",
   "why": "Coordinator 23:34 CST Nov 8: four lanes tonight posted records whose round 3 read an older head than the record's Head line (#2379, #2371, #2388, #2385). On #2388 the rounds read the replaced PR's head (#2362, 98d2b4eee) and the coordinator caught it by hand at 23:28 CST. The tool cannot see which head a round read. Harm: a merge on rounds that never read the merged code.",
-  "note": "Fix: each Round line carries the head it read, and `merge --review-record` refuses a record whose last round or fix check names a head other than --head. Lane agent-worktree-add-in-tool-dir also proposed refusing a record on a PR whose earlier head sits in a replaced PR without a round dated after the head commit. Starts after record-tool-posts-itself merges; may fold into fix-check-record-carries-rounds if one lane takes both.",
+  "note": "Fix: each Round line carries the head it read, and `merge --review-record` refuses a record whose last round or fix check names a head other than --head. Lane agent-worktree-add-in-tool-dir also proposed refusing a record on a PR whose earlier head sits in a replaced PR without a round dated after the head commit. Starts after record-tool-posts-itself merges; may fold into fix-check-record-carries-rounds if one lane takes both. Coordinator (12:59 CST Nov 9), from lane time-from-one-helper (#2258): folded candidate round-line-matches-scope. The record tool also refuses a Round N line that does not match its reviewer's brief scope. Incident: a diff-only fix check was recorded as round 3 on #2258.",
   "phase": "now",
   "owner": "coordinator",
   "status": "todo",
   "order": 878,
-  "updatedAt": "2026-11-08T23:34:00-06:00"
+  "updatedAt": "2026-11-09T12:38:00-06:00"
 }

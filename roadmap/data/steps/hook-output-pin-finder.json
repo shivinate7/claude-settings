@@ -1,0 +1,11 @@
+{
+  "title": "One test finds every exact pin of a hook's printed line, so a change to that line finds every pin",
+  "phase": "now",
+  "status": "todo",
+  "order": 919,
+  "owner": "coordinator",
+  "why": "A change to a hook's printed line left a stale exact pin in hooks/test_shared_names.py, and all three review rounds on #2258 missed it.",
+  "note": "Coordinator (12:59 CST Nov 9), from lane time-from-one-helper (#2258): candidate hook-output-pin-finder. One test greps every test file for an exact pin of a hook's printed line.",
+  "updatedAt": "2026-11-09T12:38:00-06:00",
+  "lane": ""
+}
