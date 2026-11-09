@@ -49,7 +49,7 @@ CI: read live by merge --reviewed
 - A plain write on a PR with no earlier record that parses must name a head on every line. Otherwise it refuses with exit 2 and no record, and its remedy names the `:SHA` field.
 - A record already posted parses and reads as before. A write after an earlier record that parses may still use the old form. The check reuses the plain path's comment-list read.
 - Coordinator pick Q1 a, 17:35 CST Nov 8, not the owner's words: a first record needs shas on its Round lines.
-- Coordinator pick Q2 a, 17:35 CST Nov 8, not the owner's words: a size-limit slice is another line in the same round. A PARTIAL keeps the same-head refusal.
+- Coordinator pick Q2 a, 18:53 CST Nov 8, not owner's words: a slice is recorded as another line in its round; the round reads passed only when every line passes. A PARTIAL keeps the same-head refusal.
 - Why: PR 2235 posted rounds 1 to 3 at once, read on another PR's heads, and passed round 3 at the head where round 2 failed. The coordinator withdrew the earlier own-rounds rule at 15:56 CST on 2026-11-08, because a named head proves more.
 - The write step refuses, with exit 2 and no record, a named head that is not one of the PR's own commits. An own commit is the live head, or an ancestor of it that the base branch lacks.
 - Two compare reads prove it for each distinct sha, the ancestor read and the base read. The live head needs only the base read. This is the same proof the open FAIL record on an ancestor head uses.
