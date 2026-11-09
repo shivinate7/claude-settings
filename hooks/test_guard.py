@@ -11294,8 +11294,8 @@ def archive_allow(name, transcript, env_path, agent_id=None):
 
 
 def agent_archive_refuse(name, transcript, env_path, agent_id):
-    """An agent's archive_session, refused by agent-no-remote-tools before any lane read. The reason names that rule
-    and none of the lane's reasons, so a refusal that came from the lane logic does not pass."""
+    """An agent's archive_session of a target lane-closes allows, refused by agent-no-remote-tools after it. The reason
+    names that rule and none of the lane's reasons, so a refusal that came from the lane logic does not pass."""
     add("lane-closes-after-records: " + name, "deny", rule=AGENT_NO_REMOTE, tool=ARCHIVE_TOOL, cwd=NOGIT,
         lacks=ARCHIVE_NAMED + ARCHIVE_OPEN_PIN + ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN, transcript=transcript,
         env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER, agent_id=agent_id)
@@ -11403,10 +11403,10 @@ archive_refuse("a get_session result whose content is an int before the lane's r
                role_path("body-int-then-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
 
 
-# An agent's call (one with an `agent_id`) is refused by agent-no-remote-tools before any lane read: decision
-# `session-tiers` says the batch runner archives lanes, and no agent does. Each case below still writes the agent's
-# transcript beside the main one, at `<transcript_path minus .jsonl>/subagents/agent-<agent_id>.jsonl`, with the record
-# a lane reader would act on. A guard that read it before the refusal would reach the lane logic and fail the case.
+# The agent's own record. An agent (a call with an `agent_id`) made its get_session call in its own transcript, which
+# sits beside the main transcript at `<transcript_path minus .jsonl>/subagents/agent-<agent_id>.jsonl`. The guard reads
+# that file for the agent's call. A lane is refused when either record says lane. An orchestrator call (no agent_id)
+# reads the main record alone. A malformed agent_id reads no file at all.
 AGENT_OWN_ID = "ab12cd34ef56a7890"  # an agent id as the harness sends it: 17 hex characters
 AGENT_QUIET = [role_use("m0", "Bash"), role_result("m0", "ok")]  # a transcript with no get_session call
 # name -> (the main transcript's lines, [(agent_id, the agent file's lines), ...]). An agent id that the guard
@@ -11455,36 +11455,63 @@ def write_agent_transcripts():
 
 
 lazy_fixture([role_path(name) for name in AGENT_FIXTURES], write_agent_transcripts)
-agent_archive_refuse("an agent's archive is refused before any lane read: its own record is a non-lane target",
+# An agent whose own record names a non-lane target passes lane-closes-after-records, and agent-no-remote-tools refuses
+# it after that (decision session-tiers: no agent archives a session). The refusal names that rule, not a lane reason.
+agent_archive_refuse("an agent whose own record is a non-lane target is refused by agent-no-remote-tools",
                      role_path("agent-own-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
-agent_archive_refuse("an agent's archive is refused before any lane read: its own record is a lane with an open records pull request",
-                     role_path("agent-own-lane"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
-agent_archive_refuse("an agent's archive is refused before any lane read: no record in its own transcript or the main one",
-                     role_path("agent-no-record"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# An agent whose own record is a lane with an open records pull request: refused, for that pull request. The reason pin
+# proves the agent's record was read: a guard that missed it would refuse for having no record.
+archive_refuse("an agent whose own record is a lane with an open records pull request is refused, for the open pull request",
+               role_path("agent-own-lane"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# No record in either transcript: refused for no record, and the open list is not read.
+archive_refuse("an agent with no record in its own transcript or the main one is refused, for no record",
+               role_path("agent-no-record"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
 # An orchestrator call (no agent_id) reads the main transcript only: its lane record refuses for the open pull request.
 archive_refuse("an orchestrator call with a lane record in the main transcript is refused, for the open pull request",
                role_path("archive-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
-agent_archive_refuse("an agent's archive is refused before any lane read: the main record is non-lane and its own file holds no record",
+# An agent whose main record is non-lane, and whose own file reads clean but holds no record of the target: lane-closes
+# allows it, so the refusal is the agent rule's. A lane reader that refused for no record would fail this case.
+agent_archive_refuse("an agent whose main record is non-lane is refused by agent-no-remote-tools, though its own file holds no record",
                      role_path("agent-quiet-main-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
 # The same agent file, on an orchestrator call with no agent_id: the file is not its record, so the main record decides.
 archive_allow("an orchestrator call with a non-lane main record is allowed though an agent file beside it holds a lane",
               role_path("orchestrator-agent-file"), fake_gh_path(ARCHOPEN))
-agent_archive_refuse("an agent's archive is refused before any lane read: its own record is a lane, the main record is not",
-                     role_path("main-triage-agent-lane"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
-agent_archive_refuse("an agent's archive is refused before any lane read: the main record is a lane, its own record is not",
-                     role_path("main-lane-agent-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
-# The id `x.y` has a dot, which AGENT_ID refuses. Its file name is legal on Windows, unlike an id with a path separator.
-agent_archive_refuse("an agent's archive is refused before any lane read: its agent_id is malformed",
-                     role_path("agent-malformed-id"), fake_gh_path(ARCHOPEN), agent_id="x.y")
-agent_archive_refuse("an agent's archive is refused before any lane read: no file at its agent path, the main record is non-lane",
+# Precedence: a lane in either record refuses. The agent's own record is a lane, the main record is not.
+archive_refuse("a lane in the agent's own record is refused though the main record says non-lane",
+               role_path("main-triage-agent-lane"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# Precedence the other way: the main record is a lane, the agent's own record is not. It still refuses.
+archive_refuse("a lane in the main record is refused though the agent's own record says non-lane",
+               role_path("main-lane-agent-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# A malformed agent_id: the file its raw text names holds a non-lane record. It is not read, so the call is refused for no
+# record. A reader that skipped the AGENT_ID check would read that record and allow the archive. The id `x.y` has a dot,
+# which AGENT_ID refuses, and its file name is legal on Windows, unlike an id with a path separator.
+archive_refuse("a malformed agent_id reads no agent file: a non-lane record at its raw path is not read, and the call is refused for no record",
+               role_path("agent-malformed-id"), fake_gh_path(ARCHOPEN), agent_id="x.y",
+               carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
+# No file at the agent's path, and a non-lane main record: no agent record is read, so lane-closes allows it, and
+# agent-no-remote-tools refuses it after. A reader that refused on a missing agent file would fail this case for no record.
+agent_archive_refuse("an agent with no file at its agent path is refused by agent-no-remote-tools: the main record is non-lane",
                      role_path("agent-file-absent"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
-agent_archive_refuse("an agent's archive is refused before any lane read: its agent file path is a folder",
-                     role_path("agent-dir-at-file"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
-# Both records are lanes on different steps. The two cases differ only in which record holds the open pull request.
-agent_archive_refuse("an agent's archive is refused before any lane read: a lane in both records, the open pull request on the agent record's step",
-                     role_path("main-lane-agent-second-step"), fake_gh_path(ARCHOPEN_AGENT), agent_id=AGENT_OWN_ID)
-agent_archive_refuse("an agent's archive is refused before any lane read: a lane in both records, the open pull request on the main record's step",
-                     role_path("main-lane-agent-second-step"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# A folder at the agent's file path, and a non-lane main record: the read fails with an error other than a missing file, so
+# the archive is refused for no record. A reader that caught every read error as a missing file would allow it.
+archive_refuse("an agent whose file path is a folder is refused, for no record: a read error is not a missing agent file",
+               role_path("agent-dir-at-file"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
+# Both records are lanes on different steps of the same repo. The open pull request is on the agent record's step only, so
+# the archive is refused for it only when the agent record's step is read too. A reader that kept only the main record's
+# step would allow it.
+archive_refuse("a lane in both records, with the open pull request on the agent record's step only, is refused for that pull request",
+               role_path("main-lane-agent-second-step"), fake_gh_path(ARCHOPEN_AGENT), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN)
+# The mirror: the open pull request is on the main record's step only. A reader that kept only the agent record's step
+# would allow it. Together with the case above, each record's step alone fails, whichever record comes first.
+archive_refuse("a lane in both records, with the open pull request on the main record's step only, is refused for that pull request",
+               role_path("main-lane-agent-second-step"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN)
 
 
 # =========================================================================== 5h. one lane, one topic
@@ -16112,22 +16139,22 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no fi
                          archive_writes_nothing_case))
 
 
-def archive_agent_refused_no_read_case():
-    """An agent's archive is refused by agent-no-remote-tools before any lane read, and makes no gh call, though its own
-    record carries a step slug that an open-list read would find."""
+def archive_agent_non_lane_no_read_case():
+    """An agent's archive of a target that is no lane is refused by agent-no-remote-tools, and makes no gh call, though
+    its own record carries a step slug that an open-list read would find. lane-closes-after-records allows it first."""
     folder = archive_counted_gh()
     gh_calls_taken(folder)
     decision, reason = archive_judged(role_path("agent-own-triage-slug"), folder, agent_id=AGENT_OWN_ID)
     calls = gh_calls_taken(folder)
     if decision != "deny" or AGENT_NO_REMOTE not in reason:
-        return False, "an agent's archive: %s (%r)" % (decision, reason)
+        return False, "an agent's non-lane target: %s (%r)" % (decision, reason)
     if calls:
-        return False, "an agent's archive made %d gh call(s): %r" % (len(calls), calls)
+        return False, "an agent's non-lane target made %d gh call(s): %r" % (len(calls), calls)
     return True, "refused by %s, and no gh call" % AGENT_NO_REMOTE
 
 
-LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an agent's archive is refused before any lane read, and makes no gh call",
-                         archive_agent_refused_no_read_case))
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an agent's non-lane archive is refused by agent-no-remote-tools, and makes no gh call",
+                         archive_agent_non_lane_no_read_case))
 
 
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
@@ -22483,8 +22510,35 @@ PINNED_OUTWARD_TOOLS = (
     "mcp__claude-code-remote__confirm_repository_trust",
     "mcp__claude-code-remote__request_computer_folder",
 )
+# Three pinned names have a main rule that answers first (judge() in guard.py: rules 8a before 8b). Each name's case on
+# the bare call expects that owner rule. A second case, on a shape the owner lets through, expects agent-no-remote-tools,
+# so the new rule is proven for each name. OUTWARD_CALLS also runs archive_session on that shape; the pinned case is the
+# one the pin set counts, so both stay.
+OWNED_PINNED = {
+    "mcp__claude-code-remote__archive_session": (ARCHIVE_RULE, {}),
+    "mcp__claude-code-remote__confirm_repository_trust": (TRUST_RULE, {}),
+    "mcp__claude-code-remote__request_computer_folder": (TRUST_RULE, {}),
+}
+# The shape each owner lets through, with the transcript it reads: a non-lane target, and an untagged own record.
+OWNER_PASSES = {
+    "mcp__claude-code-remote__archive_session": ({"session_id": ROLE_OTHER}, role_path("archive-triage")),
+    "mcp__claude-code-remote__confirm_repository_trust": (TRUST_TOOLS["mcp__claude-code-remote__confirm_repository_trust"],
+                                                          role_path("untagged")),
+    "mcp__claude-code-remote__request_computer_folder": (TRUST_TOOLS["mcp__claude-code-remote__request_computer_folder"],
+                                                         role_path("untagged")),
+}
 for _full in PINNED_OUTWARD_TOOLS:
     _short = _full[len(REMOTE_PREFIX):]
+    if _full in OWNED_PINNED:
+        _owner, _bare_input = OWNED_PINNED[_full]
+        outward_case("agent-no-remote-tools: pinned %s from a general-purpose agent is refused by %s first" % (_short, _owner),
+                     "deny", _short, _bare_input, None, AGENT_ID_VALUE, "general-purpose", rule=_owner,
+                     lacks=(_short, AGENT_NO_REMOTE))
+        _pass_input, _pass_transcript = OWNER_PASSES[_full]
+        outward_case("agent-no-remote-tools: pinned %s from a general-purpose agent on a shape %s allows is refused" % (_short, _owner),
+                     "deny", _short, _pass_input, _pass_transcript, AGENT_ID_VALUE, "general-purpose", rule=AGENT_NO_REMOTE,
+                     lacks=_short)
+        continue
     outward_case("agent-no-remote-tools: pinned %s from a general-purpose agent is refused" % _short, "deny",
                  _short, {}, None, AGENT_ID_VALUE, "general-purpose", rule=AGENT_NO_REMOTE, lacks=_short)
 
@@ -22496,6 +22550,8 @@ def pinned_outward_check():
     spec = importlib.util.spec_from_file_location("shared_names_pinned", os.path.join(HERE, "shared_names.py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    if not hasattr(module, "REMOTE_OUTWARD_TOOLS"):
+        return False, "shared_names.py defines no REMOTE_OUTWARD_TOOLS"
     constant = tuple(module.REMOTE_OUTWARD_TOOLS)
     for name in PINNED_OUTWARD_TOOLS:
         if name not in constant:
