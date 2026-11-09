@@ -17466,14 +17466,21 @@ sh("builder-refuse: commit-tree of the empty tree, which drops every file, is de
    agent_id="bld1", agent_type="builder")
 
 
+def _plumb_run(name, repo, command, decision, rule):
+    """Run one `commit-tree` call for a builder in `repo`. Return (stdout, the guard.log rows that hold
+    `decision` and `rule`), so every plumbing case reads one row shape."""
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + name), repo, "builder", "bld1", commands=[command])
+    return out, [r for r in rows if len(r) == 6 and r[2] == decision and r[3] == rule]  # six: session last
+
+
 def plumb_unread_run(name, repo, command, what):
     """One `commit-tree` call that git cannot read is allowed silently, and logged as role-diff-unread: unknown,
     never clear. `what` names the part git cannot read, for the message."""
-    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + name), repo, "builder", "bld1", commands=[command])
+    out, hits = _plumb_run(name, repo, command, "noted", "role-diff-unread")
     if out:
         got, reason = read_decision(out)
         return False, "expected a silent allow, got %s (%s)" % (got, reason[:80])
-    if not any(len(r) == 6 and r[2] == "noted" and r[3] == "role-diff-unread" for r in rows):  # six: session last
+    if not hits:
         return False, "no role-diff-unread line for " + what
     return True, "allowed silently, and %s is logged role-diff-unread" % what
 
@@ -17542,15 +17549,16 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a three-parent commit-tree is allowed 
                                                   "three parents")))
 
 
-# Review round 2 on the commit-tree judge. Each red case names its cause: a `-m` value that holds `<` or `>`
-# sends the segment to the whitespace split, so its words read as extra trees and the call is unread.
+# The commit-tree cases below each read one call's message words, parent words or tree word, and say which.
+# A `-m` value that holds `<` or `>` sends the segment to the whitespace split, so its words read as extra
+# trees, and the call is unread.
 def plumb_clean_run(name, repo, command, what):
     """One `commit-tree` call the guard judges clean: silent, and no role-diff-unread row for it."""
-    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + name), repo, "builder", "bld1", commands=[command])
+    out, hits = _plumb_run(name, repo, command, "noted", "role-diff-unread")
     if out:
         got, reason = read_decision(out)
         return False, "expected a silent allow, got %s (%s)" % (got, reason[:80])
-    if any(len(r) == 6 and r[2] == "noted" and r[3] == "role-diff-unread" for r in rows):  # six: session last
+    if hits:
         return False, "allowed, but logged role-diff-unread: %s was not judged" % what
     return True, "allowed silently, and judged clean: %s" % what
 
@@ -17558,11 +17566,10 @@ def plumb_clean_run(name, repo, command, what):
 def plumb_names_run(name, repo, command, path):
     """One `commit-tree` call denied for a builder whose log row names `path`. The deny text names no path,
     so the row is what shows which parent the guard judged the tree on."""
-    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + name), repo, "builder", "bld1", commands=[command])
+    out, hits = _plumb_run(name, repo, command, "deny", PLUMB)
     got = [decision for decision, _reason in _guard_answers(out)]
     if got != ["deny"]:
         return False, "expected a deny, got %r" % got
-    hits = [r for r in rows if len(r) == 6 and r[2] == "deny" and r[3] == PLUMB]  # six: session last
     if not hits:
         return False, "no %s row for the deny" % PLUMB
     if hits[0][4] != path:
@@ -17577,9 +17584,6 @@ sh("builder-refuse: a commit-tree with a Co-Authored-By message, whose tree adds
 sh("builder-refuse: a commit-tree with two -m values, the second holding `<` and `>`, whose tree adds a test file, is denied for a builder",
    VCS + " commit-tree " + plumb_tree(PLUMB_ADD) + ' -p HEAD -m "Add tests" -m "Co-Authored-By: Claude <noreply@anthropic.com>"',
    "deny", rule=PLUMB, cwd=_plumb, agent_id="bld1", agent_type="builder")
-sh("builder-refuse: a commit-tree with an unquoted -m, whose tree adds a test file, is denied for a builder",
-   VCS + " commit-tree " + plumb_tree(PLUMB_ADD) + " -p HEAD -m Add tests",
-   "deny", rule=PLUMB, cwd=_plumb, agent_id="bld1", agent_type="builder")
 # Controls: the head already denies these, so they stay green.
 sh("builder-refuse: a commit-tree with a -m that holds `->`, whose tree adds a test file, is denied for a builder",
    VCS + " commit-tree " + plumb_tree(PLUMB_ADD) + ' -p HEAD -m "red -> green and more"',
@@ -17587,6 +17591,7 @@ sh("builder-refuse: a commit-tree with a -m that holds `->`, whose tree adds a t
 sh("builder-refuse: a commit-tree with a plain -m, whose tree adds a test file, is denied for a builder",
    VCS + " commit-tree " + plumb_tree(PLUMB_ADD) + ' -p HEAD -m "Add tests"',
    "deny", rule=PLUMB, cwd=_plumb, agent_id="bld1", agent_type="builder")
+
 
 # A tree written inline as `$(git write-tree)` is the index's tree. The builder stages a test file, commits nothing.
 def _plumb_staged_change(w):
