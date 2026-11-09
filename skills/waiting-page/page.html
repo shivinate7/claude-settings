@@ -650,8 +650,6 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .feed { list-style: none; margin: 0; padding: 4px 0; }
 .feed li { display: grid; grid-template-columns: 76px 16px minmax(0, 1fr); gap: 8px; align-items: start; padding: 6px 14px; font-size: 14px; }
 .feed .when, .ev .when { font: 13px var(--mono); color: var(--muted); padding-top: 1px; }
-/* Under 260px the time column leaves the step's words no room: the time takes its own line above the glyph and the words. */
-@container (max-width: 259px) { .feed li, .ev { grid-template-columns: 16px minmax(0, 1fr); } .feed .when, .ev .when { grid-column: 1 / -1; } }
 .lnk { display: inline; min-height: 32px; color: var(--ink); text-align: left; }
 .lnk .id { color: var(--muted); }
 .morelink { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; font-weight: 600; color: var(--acc); }
@@ -674,6 +672,8 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .day h3 + .ev { border-top: 0; }
 .ev .rg { margin-top: 3px; }
 .ev .gist { color: var(--muted); font-size: 13.5px; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* Under 260px the time column leaves the step's words no room: the time takes its own line above the glyph and the words. Sits after the base .ev rule, which has equal specificity. */
+@container (max-width: 259px) { .feed li, .ev { grid-template-columns: 16px minmax(0, 1fr); } .feed .when, .ev .when { grid-column: 1 / -1; } }
 .ev.done .t { text-decoration: line-through; text-decoration-color: var(--line); }
 .lead { padding: 10px 14px; font-size: 14px; color: var(--muted); }
 .gcard { margin-bottom: 16px; }
@@ -3199,6 +3199,8 @@ function showTab(which) {
   [["tabQ", q], ["tabStatus", !q]].forEach(([id, on]) => { $(id).setAttribute("aria-selected", String(on)); $(id).tabIndex = on ? 0 : -1; });
   setTitle();
   if (!q) document.dispatchEvent(new Event("statusshown"));
+  // A tab partly outside a narrow or zoomed bar scrolls into view, by key or by click.
+  $(q ? "tabQ" : "tabStatus").scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 $("tabQ").onclick = (e) => { e.preventDefault(); showTab("q"); };
 $("tabStatus").onclick = (e) => { e.preventDefault(); showTab("s"); };
