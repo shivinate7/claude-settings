@@ -7245,6 +7245,37 @@ test("a doing step that is not stalled still reads In progress in the Changes lo
   assert.equal(await row.locator('[role="img"]').getAttribute("aria-label"), "In progress", "the Changes log row of the doing step does not read In progress");
 });
 
+// ---------------------------------------------------------------- the Changes log rows keep their source order at every width and text size
+// The rows of the Changes log (#svDays .ev) draw top to bottom in the order the page holds them. A reflow that reorders them (an order rule,
+// or column-reverse on a day) puts a row above one the page holds before it. Twenty steps on four days fill a page of rows, so each case
+// reads a full page. Each case is one width and one text size, in both schemes.
+const CHANGES_WIDTHS = [180, 320, 768];
+const CHANGES_SIZES = [100, 200];
+const changesSteps = () => {
+  const rows = [["c1", "cleanup", 1, "doing"], ...Array.from({ length: 19 }, (_, i) => ["s" + (i + 1), "cleanup", i + 2, i % 3 ? "todo" : "done"])];
+  const steps = stepsOf(rows);
+  rows.forEach(([id], i) => { steps[id].updatedAt = `2026-10-${String(26 - Math.floor(i / 5)).padStart(2, "0")}T${String(9 + (i % 5)).padStart(2, "0")}:00:00Z`; });
+  return steps;
+};
+// The Changes log rows in the page's order: each row's step id and its top edge in px.
+const changesRows = (page) => page.locator("#svDays .ev").evaluateAll((rows) => rows.map((r) => ({
+  id: r.querySelector("button[data-go]")?.getAttribute("data-go") ?? "", top: r.getBoundingClientRect().top,
+})));
+for (const width of CHANGES_WIDTHS) for (const pct of CHANGES_SIZES) for (const scheme of SCHEMES) {
+  test(`Changes log, ${scheme}: ${sizeWhere(width, pct)}: the rows draw in the page's order`, async (t) => {
+    const page = await open(t, { pageHtml: phasePage(changesSteps()), viewport: { width, height: 900 }, scheme }); if (!page) return;
+    if (pct > 100) await zoomText(page, pct + "%");
+    await openStatus(page);
+    await page.click("#vt-log"); // the Changes view is hidden until its tab is pressed, and a hidden row has no box to read
+    await page.locator("#v-log").waitFor({ state: "visible" });
+    const rows = await changesRows(page);
+    assert.ok(rows.length >= 5, `the Changes log draws ${rows.length} rows, not a page of them, ${sizeWhere(width, pct)}`);
+    for (let i = 1; i < rows.length; i++) {
+      assert.ok(rows[i].top >= rows[i - 1].top, `row ${rows[i].id} draws at ${Math.round(rows[i].top)} px, above row ${rows[i - 1].id} at ${Math.round(rows[i - 1].top)} px, though the page holds ${rows[i - 1].id} first, ${sizeWhere(width, pct)}`);
+    }
+  });
+}
+
 // A paused step keeps status active, as a stalled one does. The count, the Latest changes feed and the Changes log never read it In progress.
 const PAUSED_STALL = { why: "", steps: [], paused: ["a3"], badPause: [], items: [], ...NO_ITEMS };
 const pausedSteps = () => {
