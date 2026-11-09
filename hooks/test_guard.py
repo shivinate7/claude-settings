@@ -27440,7 +27440,7 @@ spo_register("scratchpad-owner: overwrite 6 a top-level call overwrites agent A'
 spo_register("scratchpad-owner: overwrite 7 agent B's append to agent A's file: asked", ovw_case_7)
 
 
-# Rule scratchpad-owner, more cases. Each case is red on head where its label says asked, allowed or passes,
+# Rule scratchpad-owner, more cases. Each case's label says asked, allowed or passes,
 # and each control beside it stays green: the writer runs the same call, so a red case names this rule's gap.
 
 # A different length from PY_TEXT, so a record keyed on size tells the two texts apart.
