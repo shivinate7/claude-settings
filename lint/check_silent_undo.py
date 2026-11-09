@@ -4,7 +4,7 @@
     python3 lint/check_silent_undo.py [--upstream origin/main] [--head HEAD] [--strict]
     python3 lint/check_silent_undo.py --history [REV] [--window 60]   # audit, always exit 0
 
-Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
+Four reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
 
   lost lines  A merge commit M (in upstream..head) loses a line one parent added since the
               merge base: the line is absent from every base, M holds fewer copies than that
@@ -12,6 +12,19 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               the file, and no line of the same hunk reads 0.9 like it (a resolver's rewrite).
               Catches a conflict taken "ours", and a hand edit of a merge. Only a parent that
               upstream already holds counts: a line the branch alone added is the branch's own.
+  hand edit   A merge commit M (two parents) replaces by hand a line only main added or changed since the merge
+              base, outside a conflict. One `git show --remerge-diff -U0 M` shows what M changed against git's own
+              re-merge. A removed line inside a conflict block (the diff's `<<<<<<<` to `>>>>>>>` lines) is a
+              resolution and is quiet. Outside a block, a hunk that removes a line and adds another (not a
+              whitespace-only change, a reorder or a pure delete) is a finding when the removed line is absent from
+              every base and one parent holds it and the other does not. A line the lane touched, or only the lane
+              added, is quiet. A pure delete is the lost-line read. A Drops-lines trailer does not excuse a hand
+              edit: restore main's lines in the merge, and change them in a later lane commit. Only a generated
+              page (below) does. Cost, per merge commit: that one git call. Only a merge with such a hunk adds a
+              rev-list, a merge-base, a diff-tree per base and parent (renames), one `git log` per parent and
+              file (branch_only_lines), and one `git cat-file --batch` process (class Blobs), closed at the end.
+              No process stays running and no file is written. Debt merge-commit-skips-review is the incident
+              class.
   reversal    The result of landing head on upstream puts a file back as it was before an
               earlier first-parent commit of upstream changed it: the exact blob (whole
               file), a -U0 hunk reversed on all but one line, or lines main only added
@@ -39,7 +52,7 @@ are the diff of old name to new name, as they would be in place. A file below th
 
 Blank lines and whitespace never count. The escape is a trailer in a commit message, one per
 path: `Drops-lines: <path> -- <reason>`. The PR body is read too: the same line in it
-excuses its path. A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
+excuses its path, except for a hand edit. A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
 `Retire-run: <slug> -- <run URL>` line in the PR body's last paragraph that the debt-close check
 (check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. It needs a
 run reader (run_state); with none, or a read that fails, the finding stays. Only a whole delete is excused, not a rename out of
@@ -69,6 +82,9 @@ except ImportError:  # a hook loads this file; a missing helper never stops that
 TRAILER = "Drops-lines"
 ZERO = "0" * 40
 WORD = re.compile(r"[A-Za-z0-9]")
+HAND = "hand-edited"  # the word of the rewrite finding (fmt_hand); fix_note finds it again by this constant
+HAND_FIX = ("A %s finding is not lifted by a %s trailer: restore main's lines in the merge, and change them in a later lane commit."
+            % (HAND, TRAILER))
 
 
 class Unknown(Exception):
@@ -443,6 +459,111 @@ def lost_in_parent(cwd, m, p, bases, refs, blobs):
     return found
 
 
+# ------------------------------------------------------------------ hand edits
+
+CONFLICT_OPEN = re.compile(r"<{7}(?: |$)")
+CONFLICT_CLOSE = re.compile(r">{7}(?: |$)")
+
+
+def diff_name(field):
+    """The path of a `---` or `+++` header field of a patch, or None for /dev/null. git quotes a name with a control
+    character, a quote or a backslash (C style, octal bytes), and tab-ends one with a space."""
+    field = field.rstrip("\n")
+    if field == "/dev/null":
+        return None
+    if field.startswith('"'):
+        raw = bytearray()
+        body, i = field[1:-1], 0
+        esc = {"t": 9, "n": 10, "r": 13, "a": 7, "b": 8, "f": 12, "v": 11, '"': 34, "\\": 92}
+        while i < len(body):
+            c = body[i]
+            if c != "\\":
+                raw += c.encode("utf-8", "surrogateescape")
+                i += 1
+            elif body[i + 1:i + 2].isdigit():
+                raw.append(int(body[i + 1:i + 4], 8))
+                i += 4
+            else:
+                raw.append(esc.get(body[i + 1:i + 2], 92))
+                i += 2
+        field = raw.decode("utf-8", "surrogateescape")
+    else:
+        field = field.split("\t")[0]
+    return field[2:] if field[1:2] == "/" else field  # the a/ or b/ prefix git writes
+
+
+def remerge_edits(patch):
+    """{path: [(removed lines, added lines)]} from `git show --remerge-diff -U0`: what a merge commit changed against git's
+    own re-merge of its parents. A removed line counts only outside a conflict block: the removed `<<<<<<<` line opens the
+    block and the removed `>>>>>>>` line closes it, and the state holds across hunks, because -U0 leaves out the lines a
+    resolution kept. A line removed inside a block is a resolution, never a hand edit. Lines are whitespace-normalized."""
+    res, path, in_hunk, in_block, cur = {}, None, False, False, None
+    for l in patch.split("\n"):  # not splitlines: a form feed inside a line is no line break
+        if l.startswith("diff --git "):
+            path, in_hunk, in_block = None, False, False
+        elif not in_hunk and l.startswith("--- "):
+            path = diff_name(l[4:])
+        elif not in_hunk and l.startswith("+++ "):
+            path = diff_name(l[4:]) or path
+        elif l.startswith("@@") and path is not None:
+            in_hunk, cur = True, ([], [])
+            res.setdefault(path, []).append(cur)
+        elif in_hunk and l[:1] == "-":
+            if CONFLICT_OPEN.match(l[1:]):
+                in_block = True
+            elif in_block:
+                in_block = not CONFLICT_CLOSE.match(l[1:])
+            else:
+                cur[0].append(norm(l[1:]))
+        elif in_hunk and l[:1] == "+":
+            cur[1].append(norm(l[1:]))
+    return res
+
+
+def hand_edits(cwd, m, refs=()):
+    """[(path, parent, [line])] for two-parent merge commit m: lines that only main added or changed since the merge base,
+    which m replaces by hand outside a conflict. One `git show --remerge-diff` reads the merge. A hunk is a replacement when
+    it removes a line outside a conflict block and adds another (a whitespace-only change, a reorder and a pure delete
+    are not; a pure delete is the lost-line read). A removed line is main's when a parent holds it, the other parent does
+    not, and no base does. With refs, a line whose adding commit no ref holds is the branch's own (branch_only_lines). A line
+    both sides wrote is no one's alone. The git calls after the first run only for a merge that holds such a hunk."""
+    _, out = git(cwd, "show", "--remerge-diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames",
+                 "--src-prefix=a/", "--dst-prefix=b/", "--format=", m)
+    cands = {}
+    for path, hs in remerge_edits(out).items():
+        for gone, new in hs:
+            gone, new = [x for x in gone if x], [x for x in new if x]
+            if gone and new and collections.Counter(gone) != collections.Counter(new) and any(WORD.search(x) for x in gone + new):
+                cands[path] = cands.get(path, []) + [gone]
+    if not cands:
+        return []
+    parents = git(cwd, "rev-list", "--parents", "-n", "1", m)[1].split()[1:]
+    if len(parents) != 2:
+        return []
+    rc, o = git(cwd, "merge-base", "--all", *parents, ok=(0, 1))
+    bases = o.split() if rc == 0 else []
+    found, blobs, moved = [], Blobs(cwd), {}
+    try:
+        for path in sorted(cands):
+            in_p = [counts(blobs.get(p, path)) for p in parents]
+            in_b = []
+            for b in bases:
+                if (b, parents[0], parents[1]) not in moved:  # a path main renamed since the base is read at its old name
+                    moved[b, parents[0], parents[1]] = [{new: old for old, (new, _, _) in renamed(cwd, b, p, raw_files(cwd, b, p)).items()} for p in parents]
+                at = [mv.get(path, path) for mv in moved[b, parents[0], parents[1]]]
+                in_b += [counts(blobs.get(b, a)) for a in set(at)]
+            for i, p in enumerate(parents):
+                mine = {l for gone in cands[path] for l in gone if l in in_p[i] and l not in in_p[1 - i] and not any(l in c for c in in_b)}
+                if refs and mine:
+                    mine -= branch_only_lines(cwd, p, bases, path, sorted(mine), refs)
+                lines = list(dict.fromkeys(l for gone in cands[path] for l in gone if l in mine))
+                if lines:
+                    found.append((path, p, lines))
+    finally:
+        blobs.close()
+    return found
+
+
 # -------------------------------------------------------------------- reversal
 
 _hunks = {}
@@ -566,6 +687,16 @@ def fmt_rev(path, how, e):
 def fmt_lost(m, path, p, lost):
     shown = "".join("\n      - " + l for l in lost)
     return "%s: merge %s drops %d line(s) that parent %s added%s" % (path, m[:9], len(lost), p[:9], shown)
+
+
+def fmt_hand(m, path, p, lines):
+    shown = "".join("\n      - " + l for l in lines)
+    return "%s: merge %s %s %d line(s) that parent %s added, outside a conflict%s" % (path, m[:9], HAND, len(lines), p[:9], shown)
+
+
+def fix_note(problems):
+    """The sentence a refusal adds when a finding is a hand edit: the trailer that excuses a lost line does not lift it."""
+    return " " + HAND_FIX if any(HAND in p for p in problems) else ""
 
 
 # --------------------------------------------------------------------- revived
@@ -712,10 +843,11 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     ok = allowed(cwd, "%s..%s" % (upstream, h), pr_body)
     refs = [upstream] + [r for r in ((default,) if default else ("origin/HEAD", "origin/main", "main")) if r != upstream and git(
         cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
-    items, octopus = [], []
+    items, hand, octopus = [], [], []
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
         try:
             items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
+            hand += [(x[0], fmt_hand(m, *x)) for x in hand_edits(cwd, m, refs)]
         except Octopus as e:  # the other reads still run: their findings must not hide behind this one
             octopus.append(str(e))
     items += revived_notes(cwd, upstream, h)
@@ -733,13 +865,14 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     n = int(git(cwd, "rev-list", "--count", "--first-parent", "%s..%s" % (base, upstream))[1]) + 1  # +1: the fork commit
     earlier = first_parent(cwd, upstream, n)
     items += [(x[0], fmt_rev(*x)) for x in reversals(cwd, old, new, files, earlier)]
-    page, same = generated_page(cwd, h, {p for p, _ in items if p not in ok}, upstream, tool)
+    page, same = generated_page(cwd, h, {p for p, _ in items if p not in ok} | {p for p, _ in hand}, upstream, tool)
     if same:
         ok = dict(ok, **{page: "the page is the generator's output for the head"})
     open_paths = {p for p, _ in items if p not in ok}
     if open_paths:
         ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
     bad, notes = judge(items, ok)
+    bad += [t for p, t in hand if not (same and p == page)]  # no Drops-lines trailer excuses a hand edit; only a generated page does
     notes += misplaced(cwd, "%s..%s" % (upstream, h)) if bad else []
     if octopus:
         e = Octopus("; ".join(octopus))
@@ -756,6 +889,7 @@ def history(cwd, rev, window):
     out = []
     for m in git(cwd, "rev-list", "--merges", rev)[1].split():
         out += ["%s %s" % (m[:9], t) for t in judge([(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m)], allowed(cwd, m + "^!"))[0]]
+        out += ["%s %s" % (m[:9], fmt_hand(m, *x)) for x in hand_edits(cwd, m)]  # no refs, as with lost_lines here; no trailer excuses it
     for i, c in enumerate(line):
         if not c.parent:
             continue
@@ -798,7 +932,7 @@ def main(argv):
         for p in e.problems:
             say("silent-undo: FAIL: " + p)
         if e.problems:
-            say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
+            say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message.%s" % (TRAILER, fix_note(e.problems)))
         say("silent-undo: UNKNOWN: %s" % e)
         return 1 if (e.problems or a.strict or os.environ.get("CI")) else 0
     for n in notes:
@@ -806,7 +940,7 @@ def main(argv):
     for p in problems:
         say("silent-undo: FAIL: " + p)
     if problems:
-        say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
+        say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message.%s" % (TRAILER, fix_note(problems)))
     return 1 if problems else 0
 
 

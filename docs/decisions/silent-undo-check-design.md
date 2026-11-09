@@ -3,7 +3,7 @@
 ## The ruling
 
 `lint/check_silent_undo.py` is the one home. CI runs it on each pull request with `--strict`.
-`merge/merge.py` calls it through `undo_check` before it pushes or merges. It reads three things.
+`merge/merge.py` calls it through `undo_check` before it pushes or merges. It reads four things.
 
 - **Reversal.** Landing the branch on upstream puts a file back as an earlier first-parent commit of
   upstream had it: the exact blob, a `-U0` hunk reversed on all but one line, or lines main only added
@@ -15,6 +15,19 @@
   commit added on the branch alone is the branch's. A merge of three or more parents is not read, and the
   check reports it as UNKNOWN only after the other reads finish. The merge tool refuses an UNKNOWN that
   carries a finding, and the reason flag cannot lift it (step notes-union-batch-revival).
+- **Hand edit.** A two-parent merge commit replaces by hand a line only main added or changed since the merge
+  base, outside a conflict (debt `merge-commit-skips-review`, a merge commit that hides a lane's change to
+  main's lines). One `git show --remerge-diff -U0` per merge commit shows what the merge changed against git's own
+  re-merge. A removed line inside the diff's conflict markers is a resolution, judged across hunks and never per
+  hunk, and is quiet. Outside a block, a hunk that removes a line and adds another is a finding when one
+  parent holds the removed line, the other parent and every base lack it, and (in the check, not in history) a
+  commit upstream holds its adder. A line the lane touched, or only the lane added, is quiet. A whitespace-only
+  change, a reorder and a pure delete are quiet; a pure delete is the lost-line read. **A `Drops-lines` trailer
+  does not lift it**, because the trailer excuses a path by whatever reason it gives, and a reworded line is
+  not a lost one. The way out is to restore main's lines in the merge and change them in a later lane commit.
+  Only a generated page (the records page) is excused. Cost: that one git call per merge commit; a merge with
+  such a hunk adds a rev-list, a merge-base, renames reads and one `git cat-file --batch` read of its files. No
+  process stays running and no file is written. History mode runs it too, with no refs, as the lost-line read does.
 - **Revived note.** A note the branch deleted is back at head, because a union merge of main put it back
   (decision `notes-merge-union`). The check replays the branch's own commits and counts copies per note.
   A note is its slug, or its whole line when it has no slug form. A rebase leaves no merge, so it is not read
@@ -70,7 +83,8 @@ changed lines are a new edit, so the reversal dial stays at one line until a mea
 - A move, a rename or a reorder: a removed line that the change adds to another file.
 - A rename git pairs (`-M`, 50% similar or more): the new file is judged on its edits, as if made in place. Below that it stays a delete and an add.
 - A re-wrapped prose line. A short line never passes as a re-wrap.
-- A rewrite by the resolver, when a line of the same hunk reads very much like the lost line. Adding
+- For the lost-line read, a rewrite by the resolver, when a line of the same hunk reads very much like the lost line.
+  Outside a conflict that rewrite is a hand edit. Adding
   tokens to a line (a new argument) is a rewrite when it adds no negation.
 - A stale value put back is a reversal, never a rewrite. A similar line excuses a drop only when it
   differs from both the lost line and the base line, and its operators and negation match the lost line.
