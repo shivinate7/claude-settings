@@ -6954,6 +6954,18 @@ sh("silent-write real: a variable folder holding the real checkout, cd \"$R\" th
    cwd=THROWAWAY)
 sh("silent-write real: the literal twin, cd into the real checkout then a discarded commit, is refused",
    "cd " + slash(GITMAIN) + " && " + VCS + " commit -m x >/dev/null", "deny", "silent-write", cwd=THROWAWAY)
+# A variable is read only from a plain assignment that runs in this shell. On 9e6762c56 the walk reads the
+# throwaway folder in the first and third rows and allows the commit; the one-quote row is denied there, as
+# on main. Judged from the real checkout, each row stays denied.
+sh("silent-write [cdvar-unread]: D=<throwaway> mkdir -p, cd \"$D\", then a discarded commit from the real checkout, is refused",
+   "D=" + TSLASH + " mkdir -p \"$D\"; cd \"$D\" && " + VCS + " commit -m x >/dev/null 2>&1", "deny", "silent-write",
+   cwd=GITMAIN)
+sh("silent-write [cdvar-unread]: R=<throwaway>, a quote, R=<real>, cd \"$R\", then a discarded commit, is refused",
+   "R=" + TSLASH + "; echo \"it's\"; R=" + slash(GITMAIN) + "; cd \"$R\" && " + VCS + " commit -m x >/dev/null 2>&1",
+   "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write [cdvar-unread]: as the row before, with a second quote after R=<real>, is refused",
+   "R=" + TSLASH + "; echo \"it's\"; R=" + slash(GITMAIN) + "; echo \"it's\"; cd \"$R\" && " + VCS
+   + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)
 sh("silent-write throwaway: --git-dir names the throwaway repo, and it is judged there",
    VCS + " --git-dir=" + TSLASH + "/.git commit -m x >/dev/null", "allow", cwd=GITMAIN)
 sh("silent-write throwaway: a discarded pipe tail in a throwaway repo",
@@ -12028,6 +12040,10 @@ cmk_refuse("a real merge conflict left in a file, then add -A and commit",
          VCS + " add -A && " + VCS + " commit -m x", CMK_MERGE)
 cmk_refuse("a triplet staged in a source file, then commit", VCS + " commit -m x", CMK_STAGED)
 cmk_refuse("a triplet staged, behind a false command in the chain", "false && " + VCS + " commit -m x", CMK_STAGED)
+# A plain VAR=value runs nothing, so `_chain_safe` keeps the chain readable and the commit is judged. Before
+# that change, the assignment made the chain unreadable and the commit was allowed.
+cmk_refuse("[cdvar-unread] a triplet staged, behind a plain assignment in the chain", "CDVAR=1 && " + VCS + " commit -m x",
+           CMK_STAGED)
 # A variable folder is read where the shell runs the commit, as its literal twin is (failed_cd_stays).
 cmk_refuse("a variable folder holding a triplet staged in a source file, cd \"$R\" then commit",
            "R=" + slash(CMK_STAGED) + "; cd \"$R\" && " + VCS + " commit -m x", NOGIT)
