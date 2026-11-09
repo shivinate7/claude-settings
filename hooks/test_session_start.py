@@ -66,6 +66,24 @@ def sh_exe():
     sys.exit("fixture setup failed: Git sh.exe not found")
 
 
+# Git for Windows' sh puts /usr/bin ahead of PATH at startup, so a PATH that a case needs is set inside sh, after
+# that startup. Same line as PATH_FIRST in hooks/test_wrappers.py: the two suites are standalone scripts.
+SET_PATH = ('if command -v cygpath >/dev/null 2>&1; then PATH=$(cygpath -up "$LAUNCH_PATH"); '
+            'else PATH=$LAUNCH_PATH; fi; export PATH; ')
+
+
+def start_script(launcher=None, shell_path=None):
+    """The sh script that starts the hook: sh's own path is kept, `launcher` runs (text that puts a folder ahead of
+    PATH at startup, as msys does), `shell_path` becomes PATH, then the hook runs in that same sh."""
+    parts = ['SELF_SH=$(command -v sh); ']
+    if launcher is not None:
+        parts.append(launcher + "; ")
+    if shell_path is not None:
+        parts.append(SET_PATH)
+    parts.append('exec "$SELF_SH" "$1"')
+    return "".join(parts)
+
+
 def vcs(where, *args):
     answer = subprocess.run([VCS, "-C", where, *IDENT, *args], capture_output=True, text=True,
                             timeout=60)
@@ -117,7 +135,8 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             vcs(self.primary, "worktree", "add", "-q", "--detach", "--no-checkout", path, "HEAD")
 
     def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
-                 remote_session_id=None, extra_env=None, path_dir=None, trace_file=None):
+                 remote_session_id=None, extra_env=None, path_dir=None, trace_file=None, launcher=None,
+                 shell_path=None):
         """The hook's stdout lines. Its stderr lands in self.last_stderr.
 
         remote: the CLAUDE_CODE_REMOTE value, or None to unset it as a non-cloud runner does.
@@ -128,6 +147,8 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         extra_env: variables set on the hook's environment last, for the cases that name HOME or CLAUDE_ENV_FILE.
         path_dir: a folder put first on PATH, such as a git shim's folder, or None for the runner's own PATH.
         trace_file: a file git appends its own trace to (GIT_TRACE), or None for no trace.
+        launcher: sh text run before the hook starts, such as a folder put ahead of PATH at startup, or None.
+        shell_path: the PATH the hook starts with, set inside sh after Git's startup, or None to keep the env's PATH.
         """
         where = self.primary if session_cwd is None else session_cwd
         # Forward slashes: the hook reads "cwd" with sed, and a doubled backslash is not a path.
@@ -150,7 +171,12 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         # The session's env file is named only by the cases that mean it: a runner inside a Claude session has one.
         env.pop("CLAUDE_ENV_FILE", None)
         env.update(extra_env or {})
-        answer = subprocess.run([sh_exe(), HOOK], input=payload, capture_output=True, text=True,
+        if shell_path is not None:
+            env["LAUNCH_PATH"] = shell_path
+        argv = [sh_exe(), HOOK]
+        if launcher is not None or shell_path is not None:
+            argv = [sh_exe(), "-c", start_script(launcher, shell_path), "sh", HOOK]
+        answer = subprocess.run(argv, input=payload, capture_output=True, text=True,
                                 env=env, cwd=where, timeout=120)
         self.last_stderr = answer.stderr
         self.assertEqual(answer.returncode, 0, "the hook exited %d" % answer.returncode)
@@ -749,6 +775,7 @@ class SessionStartEnvFileTests(SessionStartAgentWorktreeNoticeTests):
     test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
     SEED = "export KEEP_ME=1\n"  # a line the env file held before any run; no run may drop it
     BIN_MARK = ".claude/bin"  # the text the hook's line names the bin folder by
+    STARTUP_FOLDER = "PATH=/fake-usr:$PATH"  # a folder msys puts ahead of PATH at startup, as the launcher does
 
     def setUp(self):
         super().setUp()
@@ -782,28 +809,31 @@ class SessionStartEnvFileTests(SessionStartAgentWorktreeNoticeTests):
             found += [os.path.relpath(os.path.join(folder, name), self.root) for name in files]
         return sorted(found)
 
-    def probe(self, body, source=True, path=None):
+    def probe(self, body, source=True, path=None, args=()):
         """Stdout of a fresh sh running `body`, after it sources CLAUDE_ENV_FILE when `source` is set. HOME is the fixture.
-        `path`, when given, is the PATH the shell starts with."""
+        `path`, when given, is the PATH the shell runs with, set inside sh after Git's startup. `args` follow the env
+        file as $2 onward."""
         script = '. "$1" || exit 3; ' + body if source else body
         env = dict(os.environ, HOME=self.home)
         if path is not None:
-            env["PATH"] = path
-        answer = subprocess.run([sh_exe(), "-c", script, "sh", self.env_file], capture_output=True, text=True,
+            env["LAUNCH_PATH"] = path
+            script = SET_PATH + script
+        answer = subprocess.run([sh_exe(), "-c", script, "sh", self.env_file, *args], capture_output=True, text=True,
                                 env=env, timeout=60)
         self.assertEqual(answer.returncode, 0, "the sh probe failed, exit %d: %s"
                          % (answer.returncode, answer.stderr.strip()))
         return answer.stdout.strip()
 
-    def resolve(self, source, name="wait-until", path=None):
-        """Where a fresh sh finds `name`, after it sources the env file when `source` is set. HOME is the fixture."""
-        return self.probe("command -v %s || true" % name, source=source, path=path)
+    def stub_check(self, name, stub, source=True, path=None):
+        """`same` when a fresh sh finds `name` as the file `stub`, else what it finds. -ef compares the files
+        themselves, so an msys spelling and a Windows spelling of one file match."""
+        script = 'if [ "$(command -v %s)" -ef "$2" ]; then echo same; else command -v %s || true; fi' % (name, name)
+        return self.probe(script, source=source, path=path, args=[stub])
 
     def assert_stub_resolves(self, where, name="wait-until", stub=None, path=None):
         stub = self.stub if stub is None else stub
-        found = self.resolve(source=True, name=name, path=path)
-        self.assertTrue(found and os.path.realpath(found) == os.path.realpath(stub),
-                        "%s does not resolve to the fixture stub after %s: got %r" % (name, where, found))
+        got = self.stub_check(name, stub, path=path)
+        self.assertEqual(got, "same", "%s does not resolve to the fixture stub after %s: got %r" % (name, where, got))
 
     def test_a_the_env_file_puts_the_stub_on_path(self):
         lines = self.run_hook(extra_env=self.hook_env())
@@ -811,7 +841,7 @@ class SessionStartEnvFileTests(SessionStartAgentWorktreeNoticeTests):
         self.assertTrue(any(line.startswith("checkout ") for line in lines),
                         "the hook printed no checkout line: %r" % lines)
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
-        self.assertNotEqual(self.resolve(source=False), self.stub,
+        self.assertNotEqual(self.stub_check("wait-until", self.stub, source=False), "same",
                             "fixture setup failed: the stub already resolves on the base PATH")
         self.assert_stub_resolves("the hook ran in a git checkout")
 
@@ -838,11 +868,20 @@ class SessionStartEnvFileTests(SessionStartAgentWorktreeNoticeTests):
     def test_c_a_path_that_holds_the_bin_folder_writes_nothing(self):
         self.seed(self.SEED)
         path = os.pathsep.join([self.bin_dir, os.environ.get("PATH", "")])
-        lines = self.run_hook(extra_env=self.hook_env(PATH=path))
+        lines = self.run_hook(extra_env=self.hook_env(), shell_path=path)
         self.assertTrue(any(line.startswith("checkout ") for line in lines),
                         "the hook printed no checkout line: %r" % lines)
         self.assertEqual(self.env_lines(), self.SEED.splitlines(),
                          "a run whose PATH already holds ~/.claude/bin changed CLAUDE_ENV_FILE")
+
+    def test_c2_a_folder_put_ahead_at_startup_does_not_push_the_bin_folder_back(self):
+        self.seed(self.SEED)
+        path = os.pathsep.join([self.bin_dir, os.environ.get("PATH", "")])
+        lines = self.run_hook(extra_env=self.hook_env(), shell_path=path, launcher=self.STARTUP_FOLDER)
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "the hook printed no checkout line: %r" % lines)
+        self.assertEqual(self.env_lines(), self.SEED.splitlines(),
+                         "a startup folder ahead of the bin folder made the hook change CLAUDE_ENV_FILE")
 
     def test_d_without_an_env_file_the_hook_exits_quietly_and_writes_nothing(self):
         before = self.tree_names()
@@ -906,9 +945,9 @@ class SessionStartEnvFileTests(SessionStartAgentWorktreeNoticeTests):
         bin_rm = make_stub(self.bin_dir, "rm", 'exec "%s" "$@"\n' % real_rm)
         path = os.pathsep.join([usr_dir, self.bin_dir, os.environ.get("PATH", "")])
         # Scope first: the fixture PATH gives the system rm the lead before any run.
-        self.assertEqual(os.path.realpath(self.resolve(source=False, name="rm", path=path)), os.path.realpath(usr_rm),
+        self.assertEqual(self.stub_check("rm", usr_rm, source=False, path=path), "same",
                          "fixture setup failed: rm does not resolve to the system stub on the fixture PATH")
-        lines = self.run_hook(extra_env=self.hook_env(PATH=path))
+        lines = self.run_hook(extra_env=self.hook_env(), shell_path=path)
         self.assertTrue(any(line.startswith("checkout ") for line in lines),
                         "the hook printed no checkout line: %r" % lines)
         self.assert_stub_resolves("a run whose PATH holds the bin folder behind a system rm",
