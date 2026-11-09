@@ -5351,6 +5351,8 @@ sh("git-after-cd: a git push in the first then body of an if on a check, with an
 # the elif's then body runs only after pytest passed. The elif's own test does not count as a failed check before it.
 sh("git-after-cd: an if on a file test, then an elif on pytest with a git push -u in its then body, passes",
    'if [ -f y ]; then echo ok; elif pytest -q; then %s push -u origin b; fi' % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: an if on a file test, then an elif ! pytest with a git push -u in its then body, passes: ruling 2026-11-08 20:29 CST withdrew the refusal",
+   'if [ -f y ]; then echo ok; elif ! pytest -q; then %s push -u origin b; fi' % VCS, "allow", cwd=NOGIT)
 # A LATER CHECK IN AN ELIF TEST. The first test is a check, so the elif test runs only when it failed: the push in the
 # elif's then body runs on that failed check and is refused. The walk keeps the first check it sees, not the last.
 sh("git-after-cd: an if on pytest, then an elif on make check with a git push -u in its then body, is refused",
