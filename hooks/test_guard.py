@@ -12739,8 +12739,8 @@ sh("frozen shell: bash <<EOF>/dev/null with cd docs in the body, then sed -i on 
    "frozen-path", cwd=CFG)
 # A cd that may run moves the shell for the sed after it, and that sed writes the frozen settings.json if the shell
 # stays in the config folder. A sourced heredoc reads its last body, so a cd there moves the shell. A cd fed through
-# eval runs as a typed cd. A cd in a multi-line if body may run. The eval row is red on the current guard. The other
-# deny rows already hold today. The notes.txt rows are the same commands on a file that is not frozen.
+# eval or source <(...) runs as a typed cd. A cd in a multi-line if body may run. The notes.txt rows are the same
+# commands on a file that is not frozen.
 sh("frozen shell: source /dev/stdin <<'A' <<'B', a cd into the config folder in the second body, then sed -i on "
    "settings.json, denies [two heredocs pin]",
    "source /dev/stdin <<'A' <<'B'\nx\nA\ncd " + slash(CFG) + "\nB\nsed -i s/a/b/ settings.json", "deny",
@@ -12771,6 +12771,20 @@ sh("frozen shell: a cd into the config folder in a multi-line if body, then sed 
 sh("frozen shell: a cd into the config folder in a multi-line if body, then sed -i on notes.txt, "
    "allows [if body control]",
    "if true; then\ncd " + slash(CFG) + "\nfi\nsed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
+# Opposite direction, from the config folder. bash runs its heredoc body, the second one here, in a child shell, so a cd
+# in it moves nothing here. An if body whose test may fail may not run its cd. The notes.txt rows are the same commands
+# on a file that is not frozen.
+sh("frozen shell: bash <<'A' <<'B' with cd docs in the second body, then sed -i on settings.json, from the config "
+   "folder, denies [bash two heredocs red]",
+   "bash <<'A' <<'B'\nx\nA\ncd docs\nB\nsed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=CFG)
+sh("frozen shell: bash <<'A' <<'B' with cd docs in the second body, then sed -i on notes.txt, from the config folder, "
+   "allows [bash two heredocs control]",
+   "bash <<'A' <<'B'\nx\nA\ncd docs\nB\nsed -i s/a/b/ notes.txt", "allow", cwd=CFG)
+sh("frozen shell: an if body with cd docs whose test may fail, then sed -i on settings.json, from the config folder, "
+   "denies [if body may not run red]",
+   "if test -f x; then\ncd docs\nfi\nsed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=CFG)
+sh("frozen shell: the same if body, then sed -i on notes.txt, from the config folder, allows [if body may not run control]",
+   "if test -f x; then\ncd docs\nfi\nsed -i s/a/b/ notes.txt", "allow", cwd=CFG)
 # Five cds, then a frozen write. The absolute chain is refused. The `../` chain reaches the same folders, and the walk
 # normalises each `..` step, so it is refused too. Both chains end on the config folder, and the notes.txt rows are the
 # same chains on a file that is not frozen.
