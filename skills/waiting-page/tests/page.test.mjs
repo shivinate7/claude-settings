@@ -3320,10 +3320,11 @@ for (const [width, zoom, label] of TAB_WIDTHS) for (const scheme of SCHEMES) {
 // selectable tab selected. Each claim is one test, so a failure names one cause.
 const TAB_SIZES = [180, 240, 320, 430, 480, 520];
 // Opens the tab set, then checks its scope: the Designs tab is shown only with designs, and the tab that should be selected is.
-async function tabSetPage(t, { width, zoom, designs, scheme, sel }) {
+async function tabSetPage(t, { width, zoom, pct = 100, designs, scheme, sel }) {
   const items = designs ? [mk("with-design", 1, { designs: [{ slug: "s1", label: "Option a" }, { slug: "s2", label: "Option b" }] }), mk("other", 2)] : undefined;
   const page = await open(t, { items, designData: DESIGNS, viewport: { width, height: 900 }, scheme }); if (!page) return null;
   if (zoom) await zoomText(page);
+  if (pct > 100) await zoomText(page, pct + "%");
   if (sel === "Status") await openStatus(page);
   else await mustHave(page, "#tabQ", "Questions tab");
   await mustHave(page, "#tabD", "Designs tab");
@@ -3370,6 +3371,67 @@ for (const width of TAB_SIZES) for (const zoom of [false, true]) for (const desi
     const reading = [...g.tabs].sort((x, y) => (Math.abs(x.t - y.t) > 1 ? x.t - y.t : x.l - y.l)).map((x) => x.name);
     const dom = g.tabs.map((x) => x.name);
     assert.deepEqual(reading, dom, `the tabs read ${reading.join(", ")}, not in DOM order ${dom.join(", ")}`);
+  });
+}
+
+// ---------------------------------------------------------------- the Designs sheet and the tab strip at narrow widths
+// The strip scrolls on its own (#tabs, overflow-x: auto), so a tab that scrolls out of it lies outside its box. Each case is a tab set with
+// Designs shown, three tabs, and reads its scope first. Red on the old page: at 180-240 the selected Questions tab scrolls out of the strip
+// when the Designs sheet opens and closes; at 180 with the root font size doubled, and at 180-240 tripled, it is wider than the strip; at 180
+// default and 220-240 doubled the sheet's Close sits outside the window. Each control is a width the old page passes.
+// The width and the text size in a claim's name. Text at the default size is named too, so the cases below share this one.
+const sizeWhere = (width, pct) => `at ${width} wide ${pct === 100 ? "at the default text" : "with the root font size " + (pct === 200 ? "doubled" : "tripled")}`;
+// Presses the Designs tab with a real press, as the owner does. The sheet must show.
+async function openDesigns(page) {
+  await page.click("#tabD");
+  const shown = await page.locator("#dsheet").waitFor({ state: "visible" }).then(() => true, () => false);
+  assert.ok(shown, "pressing the Designs tab does not open the Designs sheet");
+}
+// Closes the sheet by script, so the close is setup and the claim after it reads the strip. The sheet must hide.
+async function closeDesigns(page) {
+  await page.evaluate(() => document.getElementById("dClose").click());
+  const gone = await page.locator("#dsheet").waitFor({ state: "hidden" }).then(() => true, () => false);
+  assert.ok(gone, "the Designs sheet does not close");
+}
+// After the sheet opens and closes, the selected tab sits inside the tab bar's box, to half a pixel.
+const SHEET_RED = [180, 200, 220, 240];
+for (const [set, note] of [[SHEET_RED, ""], [[430], " (control)"]]) for (const width of set) for (const scheme of SCHEMES) {
+  test(`tab list, ${scheme}: at ${width} wide, after the Designs sheet opens and closes, the selected tab sits inside the tab bar${note}`, async (t) => {
+    const page = await tabSetPage(t, { width, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    await openDesigns(page);
+    await closeDesigns(page);
+    const g = await tabGeo(page);
+    const s = g.tabs.find((x) => x.sel);
+    assert.ok(s, "no shown tab is marked selected");
+    assert.ok(s.l >= g.nav.l - 0.5 && s.r <= g.nav.r + 0.5, `the selected ${s.name} tab runs from ${Math.round(s.l)} to ${Math.round(s.r)} px, past the tab bar's ${Math.round(g.nav.l)} to ${Math.round(g.nav.r)} px, at ${width} wide`);
+  });
+}
+// [width, root font size in percent]. On the old page the selected tab is wider than the strip at 180 doubled and at 180-240 tripled. At
+// 200-240 doubled it fits, so those are controls.
+const TAB_WIDE_RED = [[180, 200], [180, 300], [200, 300], [220, 300], [240, 300]];
+const TAB_WIDE_CONTROL = [[200, 200], [220, 200], [240, 200], [320, 200]];
+for (const [set, note] of [[TAB_WIDE_RED, ""], [TAB_WIDE_CONTROL, " (control)"]]) for (const [width, pct] of set) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, pct);
+  test(`tab list, ${scheme}: ${where}, three tabs, Questions selected: the selected tab is no wider than the tab bar${note}`, async (t) => {
+    const page = await tabSetPage(t, { width, pct, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    const g = await tabGeo(page);
+    const s = g.tabs.find((x) => x.sel);
+    assert.ok(s, "no shown tab is marked selected");
+    assert.ok(s.r - s.l <= g.nav.r - g.nav.l + 0.5, `the selected ${s.name} tab is ${Math.round(s.r - s.l)} px wide, wider than the ${Math.round(g.nav.r - g.nav.l)} px tab bar, ${where}`);
+  });
+}
+// [width, root font size in percent]. Once the sheet opens, its Close sits inside the window: red at 180 default and at 220 and 240 doubled.
+const CLOSE_RED = [[180, 100], [220, 200], [240, 200]];
+const CLOSE_CONTROL = [[390, 100]];
+for (const [set, note] of [[CLOSE_RED, ""], [CLOSE_CONTROL, " (control)"]]) for (const [width, pct] of set) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, pct);
+  test(`Designs sheet, ${scheme}: ${where}: the Close button sits inside the window${note}`, async (t) => {
+    const page = await tabSetPage(t, { width, pct, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    await openDesigns(page);
+    const b = await page.locator("#dClose").boundingBox();
+    const vw = await page.evaluate(() => window.innerWidth);
+    assert.ok(b, "the Designs sheet's Close has no box");
+    assert.ok(b.x >= -0.5 && b.x + b.width <= vw + 0.5, `the Designs sheet's Close runs from ${Math.round(b.x)} to ${Math.round(b.x + b.width)} px in a ${vw} px window, ${where}`);
   });
 }
 
@@ -3422,6 +3484,31 @@ for (const [set, note] of [[ROW_RED, ""], [ROW_CONTROL, " (control)"]]) for (con
     const page = await dismissRowAt(t, { folded, width, pct, scheme }); if (!page) return;
     const fault = await ROW_CLAIMS[claim].check(page);
     assert.ok(!fault, fault && `${fault}, ${where}`);
+  });
+}
+
+// The title column of a folded row with Dismiss, at 600 wide at the default text, is at least 8 em of its own text. The old page leaves the
+// press beside it too little room there. Each control is a width the old page passes.
+for (const [set, note] of [[[600], ""], [[1280], " (control)"]]) for (const width of set) for (const scheme of SCHEMES) {
+  test(`folded answered row with Dismiss, ${scheme}: at ${width} wide at the default text, its title column is at least 8 em${note}`, async (t) => {
+    const page = await foldedRowPage(t, "dismiss", width, scheme); if (!page) return;
+    const g = await page.evaluate((id) => { const li = document.getElementById("row-" + id), ft = li.querySelector(".frow .ftext"), dis = document.getElementById("dis-" + id); return { folded: li.classList.contains("folded"), dis: !!dis && dis.checkVisibility(), w: ft ? ft.getBoundingClientRect().width : 0, em: ft ? parseFloat(getComputedStyle(ft).fontSize) : 0 }; }, DIS_ROW);
+    assert.ok(g.folded, `the row is not folded at ${width} wide`);
+    assert.ok(g.dis, `Dismiss is not shown beside the folded row at ${width} wide`);
+    assert.ok(g.w >= 8 * g.em, `the title column is ${Math.round(g.w)} px wide, under 8 em of its ${Math.round(g.em)} px text (${Math.round(8 * g.em)} px), ${sizeWhere(width, 100)}`);
+  });
+}
+// The bar status at 180 wide at the default text, beside the Send answers press, reads the open count. The old page squeezes it to 1 px
+// beside the buttons. It passes when it is at least 4 em of its own text wide, or sits on a line of its own. 390 is the control.
+for (const [set, note] of [[[180], ""], [[390], " (control)"]]) for (const width of set) for (const scheme of SCHEMES) {
+  test(`bar, ${scheme}: at ${width} wide at the default text, the bar status is at least 4 em wide or sits on its own line${note}`, async (t) => {
+    const page = await open(t, { viewport: { width, height: 800 }, scheme }); if (!page) return;
+    await mustHave(page, "#barStatus", "bar status");
+    await page.locator("#barStatus", { hasText: "stay open" }).waitFor({ state: "attached" }).catch(() => {});
+    const g = await page.evaluate(() => { const s = document.getElementById("barStatus"), sr = s.getBoundingClientRect(), b = document.getElementById("send").getBoundingClientRect(); return { text: s.textContent.replace(/\s+/g, " ").trim(), w: sr.width, em: parseFloat(getComputedStyle(s).fontSize), top: sr.top, bottom: sr.bottom, sendTop: b.top, sendBottom: b.bottom }; });
+    assert.ok(/stay open/.test(g.text), `the bar status reads ${JSON.stringify(g.text)}, not the open count`);
+    const own = g.bottom <= g.sendTop + 0.5 || g.top >= g.sendBottom - 0.5;
+    assert.ok(g.w >= 4 * g.em || own, `the bar status is ${Math.round(g.w)} px wide, under 4 em of its ${Math.round(g.em)} px text, and shares a line with Send answers, at ${width} wide at the default text`);
   });
 }
 
@@ -3573,14 +3660,13 @@ const PRESS_ASKS = () => ({
 });
 const PRESS_SEEN = { "waiting.askSeen": "2026-10-31T00:00:00Z" };
 // The page with the ask list at a width and root font size. showDismissed opens Show dismissed asks by script, so the setup is not the claim.
-async function pressListPage(t, { width, pct = 100, scheme = "light", showDismissed = false }) {
-  const page = await open(t, { dbExtra: { asks: PRESS_ASKS() }, storage: PRESS_SEEN, viewport: { width, height: 800 }, scheme }); if (!page) return null;
+async function pressListPage(t, { width, pct = 100, scheme = "light", showDismissed = false, hold = {} }) {
+  const page = await open(t, { dbExtra: { asks: PRESS_ASKS() }, storage: PRESS_SEEN, viewport: { width, height: 800 }, scheme, hold }); if (!page) return null;
   await mustHave(page, "#askDismissed", "Show dismissed asks control");
   if (pct !== 100) await zoomedTo(page, pct);
   if (showDismissed) await page.evaluate(() => document.getElementById("askDismissed").click());
   return page;
 }
-const sizeWhere = (width, pct) => `at ${width} wide with the root font size ${pct === 200 ? "doubled" : "tripled"}`;
 for (const scheme of SCHEMES) {
   test(`ask list, ${scheme}: at 180 wide at the default text, the Dismiss and Restore presses stay 44 px tall`, async (t) => {
     const page = await pressListPage(t, { width: 180, scheme, showDismissed: true }); if (!page) return;
@@ -3600,17 +3686,57 @@ for (const scheme of SCHEMES) {
 // (hold: { update: 0 }) until the case releases it, so the busy label is up while the case reads it. Red on the head page: the press is
 // 68 px tall while it reads "Dismissing…", so the label wraps.
 for (const scheme of SCHEMES) test(`ask list, ${scheme}: at 180 wide at the default text, a Dismiss press that waits for its write says Dismissing… and stays 44 px tall`, async (t) => {
-  const page = await open(t, { dbExtra: { asks: PRESS_ASKS() }, storage: PRESS_SEEN, viewport: { width: 180, height: 800 }, scheme, hold: { update: 0 } }); if (!page) return;
-  await mustHave(page, "#dis-ask-fold-dis", "Dismiss press of the folded row");
-  await page.click("#dis-ask-fold-dis");
-  const held = await page.waitForFunction(() => window.__held === 1, null, { timeout: 3000 }).then(() => true, () => false);
-  assert.ok(held, "the Dismiss write did not reach the hold, so the busy label is not up");
-  const label = await page.locator("#dis-ask-fold-dis > span:not(.sz)").textContent();
-  assert.equal(label, "Dismissing…", `the Dismiss press reads ${JSON.stringify(label)} while its write waits, not "Dismissing…"`);
-  const h = await page.evaluate(() => document.getElementById("dis-ask-fold-dis").getBoundingClientRect().height);
-  await page.evaluate(() => window.__release());
+  const r = await heldPress(t, { kind: "dismiss", width: 180, pct: 100, scheme }); if (!r) return;
+  const h = await r.page.evaluate((id) => document.getElementById(id).getBoundingClientRect().height, r.id);
+  await r.page.evaluate(() => window.__release());
   assert.ok(Math.abs(h - 44) <= 1, `the Dismiss press is ${Math.round(h)} px tall while it reads "Dismissing…" at 180 wide at the default text, not 44 px`);
 });
+
+// A press whose write waits, with the write held (hold: { update: 0 }) so the busy state is up while the case reads it. The press is read at
+// rest first, at the same zoom, then pressed. Dismiss is the folded row's press. Restore is read in the dismissed list, as the owner opens it.
+const HELD = { dismiss: { id: "dis-" + FOLD_ROWS.dismiss.ask.id, word: "Dismissing", verb: "Dismiss" }, restore: { id: "res-" + FOLD_ROWS.restore.ask.id, word: "Restoring", verb: "Restore" } };
+// Opens the page, presses the kind's press and waits for its write at the hold. Null without a browser.
+async function heldPress(t, { kind, width, pct, scheme }) {
+  const { id, word, verb } = HELD[kind];
+  const page = await pressListPage(t, { width, pct, scheme, showDismissed: kind === "restore", hold: { update: 0 } }); if (!page) return null;
+  await mustHave(page, "#" + id, `the ${verb} press`);
+  const rest = await page.evaluate((i) => document.getElementById(i).getBoundingClientRect().height, id);
+  await page.click("#" + id);
+  const held = await page.waitForFunction(() => window.__held === 1, null, { timeout: 3000 }).then(() => true, () => false);
+  assert.ok(held, `the ${verb} write did not reach the hold, so the busy state is not up`);
+  const label = await page.locator(`#${id} > span:not(.sz)`).textContent();
+  assert.equal(label, word + "…", `the ${verb} press reads ${JSON.stringify(label)} while its write waits, not "${word}…"`);
+  return { page, id, rest, word, verb };
+}
+// [width, root font size in percent]: the Dismiss press keeps its resting height while its write waits. The control is 390 at the default text.
+const HELD_RED = [[180, 200], [180, 300], [220, 300], [240, 300]];
+const HELD_CONTROL = [[390, 100]];
+for (const [set, note] of [[HELD_RED, ""], [HELD_CONTROL, " (control)"]]) for (const [width, pct] of set) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, pct);
+  test(`ask list, ${scheme}: ${where}: a Dismiss press whose write waits keeps its resting height${note}`, async (t) => {
+    const r = await heldPress(t, { kind: "dismiss", width, pct, scheme }); if (!r) return;
+    const now = await r.page.evaluate((i) => document.getElementById(i).getBoundingClientRect().height, r.id);
+    await r.page.evaluate(() => window.__release());
+    assert.ok(Math.abs(now - r.rest) <= 1, `the Dismiss press is ${Math.round(now)} px tall while its write waits, not its resting ${Math.round(r.rest)} px, ${where}`);
+  });
+}
+// Whether assistive tech can read a press as busy: aria-busy="true" on the press, or a live region (aria-live, role status or alert) that
+// holds the busy word. Empty when neither is there. The old press names itself "Dismiss: ..." and nothing more while it waits.
+const busyExposed = (page, id, word) => page.evaluate(({ id, word }) => {
+  const b = document.getElementById(id);
+  if (b && b.getAttribute("aria-busy") === "true") return "aria-busy";
+  const live = [...document.querySelectorAll('[aria-live], [role="status"], [role="alert"]')];
+  return live.some((el) => el.textContent.includes(word)) ? "live text" : "";
+}, { id, word });
+for (const kind of ["dismiss", "restore"]) for (const [width, pct] of HELD_RED) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, pct);
+  test(`ask list, ${scheme}: ${where}: a ${HELD[kind].verb} press whose write waits is exposed as busy to assistive tech`, async (t) => {
+    const r = await heldPress(t, { kind, width, pct, scheme }); if (!r) return;
+    const how = await busyExposed(r.page, r.id, r.word);
+    await r.page.evaluate(() => window.__release());
+    assert.ok(how, `the ${r.verb} press says nothing to assistive tech while its write waits: no aria-busy="true" on it, and no live text holds "${r.word}"`);
+  });
+}
 
 // The list's elements under the fixed send bar, by the box that overlaps the bar's. The list's end is the page's, scrolled to the bottom.
 const underSendBar = (page) => page.evaluate(() => {
@@ -4515,6 +4641,25 @@ test("dismiss: with no store, the list says it cannot be read and no Dismiss is 
   await shownBox(page, "Your asks cannot be read in this view.");
   assert.equal(await page.locator('[id^="dis-"], .dismiss').count(), 0, "a Dismiss is drawn with no store");
 });
+
+// An answered thread with a 60-character token that has no break in it. Red on the old page at 360 and 390 wide: the filed path only. Its element
+// (.askc .thread .filed) has no overflow-wrap, so the thread's track sets the page's width. The owner's reply and the answer's reply wrap on the
+// old page, so they are controls, as is every variant at 1280.
+const TOKEN60 = "a".repeat(60);
+// [what, the records of the thread, the selector that holds the token]. The owner's reply is a reply in the thread, answered after the load.
+const TOKEN_FILED = ["filed path", [{ ...ASK_ANSWERED, home: TOKEN60 }], ".askc .thread .filed"];
+const TOKEN_OWN = ["owner's reply", [ASK_ANSWERED, { id: "ask-tok-own", text: TOKEN60, at: "2026-10-31T08:00:00Z", re: ASK_ANSWERED.id, owner: "lane tier-fold", answered: "2026-10-31T09:00:00Z", reply: "No." }], ".askc .thread .myreply .reply"];
+const TOKEN_ANSWER = ["answer's reply", [{ ...ASK_ANSWERED, reply: TOKEN60 }], ".askc .thread .reply"];
+// The filed path and the owner's reply are red at 360 and 390. The answer's reply wraps on the old page, so it is a control there, as at 1280.
+for (const [set, note, widths] of [[[TOKEN_FILED, TOKEN_OWN], "", [360, 390]], [[TOKEN_ANSWER], " (control)", [360, 390]], [[TOKEN_FILED, TOKEN_OWN, TOKEN_ANSWER], " (control)", [1280]]]) for (const width of widths) for (const scheme of SCHEMES) for (const [what, records, sel] of set) {
+  test(`answered thread, ${scheme}: at ${width} wide, a 60-character token in its ${what} does not scroll the page${note}`, async (t) => {
+    const page = await open(t, { dbExtra: { asks: Object.fromEntries(records.map((r) => [r.id, r])) }, storage: RPL_NEW, viewport: { width, height: 800 }, scheme }); if (!page) return;
+    const shown = await page.locator(sel).filter({ hasText: TOKEN60 }).first().waitFor({ state: "attached" }).then(() => true, () => false);
+    assert.ok(shown, `the answered thread does not show the token in its ${what} at ${width} wide`);
+    const fault = await sidewaysFault(page);
+    assert.ok(!fault, fault && `${fault}, with the token in the ${what} at ${width} wide`);
+  });
+}
 
 // ---------------------------------------------------------------- the ask stack: Add to list, one Send, one Undo for the batch
 
