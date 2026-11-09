@@ -3275,17 +3275,22 @@ def role_model_one(tool_input):
         return "", "", False
     default_model = os.environ.get(ROLE_MODEL_ENV, "").strip()
     # A fix check with no model field runs on the default model or the agent file's pin, so it is judged on its chain before either returns.
+    # Only a chain refusal returns here. A chain that passes falls through, so a fix check with no default and no pin is refused as any
+    # spawn with no model is. A chain that could not be read keeps its unread row when the checks below allow the spawn.
     # A default that ranks top (Opus) is left to the ceiling, as a spawn that names Opus is.
+    chain = ("", "", False)
     if (role == "reviewer" and table.get(role) is not None and ("fixcheck", None) in marker_hits(tool_input.get("prompt"))
             and (not default_model or role_model_rank(default_model) != len(ROLE_MODEL_RANK) - 1)):
-        return fix_check_chain_hit(tool_input.get("prompt"), pointer)
+        chain = fix_check_chain_hit(tool_input.get("prompt"), pointer)
+        if chain[0]:
+            return chain
     if default_model:
-        return "", "", False
+        return chain
     pinned = role_has_model_pin(pointer, role)
     if pinned is None:
         return "", pointer, True
     if pinned:
-        return "", "", False
+        return chain
     row = table.get(role, "sonnet")
     # A remedy never names Haiku: a role on a Haiku row has an agent file that pins it, so it rarely gets here.
     return ROLE_NO_MODEL_REASON % ("" if row == ROLE_MODEL_RANK[0] else " (%s)" % row), ROLE_NO_MODEL_MATCH + role, False
