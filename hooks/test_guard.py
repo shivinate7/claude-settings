@@ -11842,7 +11842,9 @@ record_allow("a commit message that names a push to roadmap is text",
 
 def record_push_cost_case():
     """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
-    `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
+    `git rev-parse --show-toplevel`. A non-main push also reads the local remote-tracking tip of its
+    destination under push-batch-held (decision batch-freeze-lane-set), so it starts three `git rev-parse`
+    calls in all, and a main push starts one. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
     (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
@@ -11886,18 +11888,18 @@ def record_push_cost_case():
         return kinds, lines
 
     for label, tail, want, *cwd in (
-        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1, "diff": 1}),
-        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1}),
-        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1}),
+        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 3, "symbolic-ref": 1, "diff": 1}),
+        ("a HEAD push", "push origin HEAD", {"rev-parse": 3, "symbolic-ref": 2, "config": 1, "diff": 1}),
+        ("a bare push", "push", {"rev-parse": 3, "symbolic-ref": 2, "config": 2, "diff": 1}),
         ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "config": 1, "diff": 1}),
         ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "config": 1, "diff": 1}),
-        ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1, "diff": 1}),
+        ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 3, "diff": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
-         {"rev-parse": 2, "symbolic-ref": 1, "diff": 3}),
+         {"rev-parse": 3, "symbolic-ref": 1, "diff": 3}),
         # A stray push: HEAD on a branch tracking another name. The destination's ref is read and is absent, so
         # the conflict check rejects that base and reads the upstream: two diff reads.
         ("a stray push, HEAD on a branch tracking another name", "push origin HEAD",
-         {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2}, PUSHSTRAY),
+         {"rev-parse": 3, "symbolic-ref": 2, "config": 1, "diff": 2}, PUSHSTRAY),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
         if kinds != want:
@@ -11916,7 +11918,7 @@ def record_push_cost_case():
         problems.append("a push to roadmap with an unreadable transcript: %s, want deny" % got)
     if problems:
         return False, "; ".join(problems)
-    return True, "one rev-parse per push, one more for a stray push, symbolic-ref for HEAD and bare, " \
+    return True, "three rev-parse per non-main push, one per main push, symbolic-ref for HEAD and bare, " \
                  "push.default for bare only; " \
                  "the transcript is read only at the record branch"
 
@@ -26473,9 +26475,9 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_override_case),
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
-    ("roadmap-one-writer: a push starts one rev-parse, one more for a stray push, symbolic-ref for a refspec, "
-     "HEAD and bare, push.default for bare only, one config read of the remote for a literal main destination, "
-     "no read for HEAD:<branch>, "
+    ("roadmap-one-writer: a non-main push starts three rev-parse calls, push-batch-held's tip read included, "
+     "symbolic-ref for a refspec, HEAD and bare, push.default for bare only, one config read of the remote for a "
+     "literal main destination, no config or symbolic-ref read for HEAD:<branch>, "
      "and reads the transcript only at the record branch",
      record_push_cost_case),
     ("conflict-markers: the cost probe judges a clean commit as no hit, under a stand-in git (the control)",
@@ -34330,7 +34332,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: a builder write to a path in no repository from a /c/ cwd", "worktree-home"),
     ("cite-by-id: a -F file that cannot be read", "cite"),
     ("env: heredoc-allow-strip", "env"),
-    ("roadmap-one-writer: a push starts one rev-parse", "push-delete"),
+    ("roadmap-one-writer: a non-main push starts three rev-parse calls", "push-delete"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
     _hits = [label for label in LOG_FAMILY if label.startswith(_prefix)]
