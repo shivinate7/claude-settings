@@ -22,6 +22,8 @@ Interface the check must meet (the builder builds to it):
 A case that expects a finding fails on a check that flags nothing. The controls expect silence.
 """
 import ast
+import contextlib
+import importlib.util
 import os
 import re
 import shlex
@@ -129,6 +131,54 @@ def cache_python(cache):
     """The python inside a cache venv, for fixtures that change what the cache holds."""
     parts = ("Scripts", "python.exe") if os.name == "nt" else ("bin", "python")
     return os.path.join(cache, *parts)
+
+
+def load_check_module():
+    """A fresh copy of the check, so its one-time bootstrap memo starts empty in this process."""
+    spec = importlib.util.spec_from_file_location("floor_check_" + os.urandom(4).hex(), CHECK)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@contextlib.contextmanager
+def check_env(changes):
+    """Set environment values for an in-process check; None removes one. The old values come back on exit."""
+    saved = {key: os.environ.get(key) for key in changes}
+    try:
+        for key, value in changes.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def bootstrap_starts(cache):
+    """The command lines the check starts through _nowindow.run while it bootstraps `cache` in this process."""
+    starts = []
+    module = load_check_module()
+    real = module._nowindow.run
+
+    def counting(cmd, *args, **kwargs):
+        starts.append(" ".join(str(part) for part in cmd))
+        return real(cmd, *args, **kwargs)
+
+    module._nowindow.run = counting
+    try:
+        changes = dict(index_env())
+        changes.update({"FLOOR_VENV_DIR": cache, "FLOOR_VERMIN_CMD": None})
+        with check_env(changes):
+            module.vermin_command()
+    finally:
+        module._nowindow.run = real
+    return starts
 
 
 def empty_index():
@@ -725,14 +775,42 @@ class CacheFolder(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(folder, ".ok")), "the built folder has no .ok marker")
 
 
+class StartCount(unittest.TestCase):
+    """The bootstrap's process starts, counted at the check's one no-window run. First use starts three processes
+    the check makes itself (venv create, pip install, import probe); a reused cache starts one import probe."""
+
+    def test_first_use_starts_the_venv_the_pip_install_and_the_import_probe(self):
+        require_pin()
+        starts = bootstrap_starts(fresh_cache())
+        self.assertEqual(len(starts), 3, "first use started %d processes through _nowindow.run, not 3: %r"
+                         % (len(starts), starts))
+        self.assertIn("-m venv", starts[0], "first use's first start is not the venv create: %r" % starts)
+        self.assertIn("-m pip install", starts[1], "first use's second start is not the pip install: %r" % starts)
+        self.assertIn("import vermin", starts[2], "first use's third start is not the import probe: %r" % starts)
+
+    def test_a_reused_cache_starts_one_import_probe(self):
+        require_pin()
+        cache = fresh_cache()
+        bootstrap_starts(cache)
+        starts = bootstrap_starts(cache)
+        self.assertEqual(len(starts), 1, "a reused cache started %d processes through _nowindow.run, not 1: %r"
+                         % (len(starts), starts))
+        self.assertIn("import vermin", starts[0], "a reused cache's one start is not the import probe: %r" % starts)
+
+
 class Docstring(unittest.TestCase):
-    def test_cost_line_says_three_process_starts_and_15_mb(self):
+    def test_cost_line_says_four_process_starts_on_first_use_and_names_the_probe_and_15_mb(self):
         with open(CHECK, encoding="utf-8") as handle:
-            doc = " ".join((ast.get_docstring(ast.parse(handle.read())) or "").split())
-        self.assertIn("Cost:", doc, "the module docstring has no Cost: line")
-        self.assertIn("three process starts", doc,
-                      "the Cost line does not say three process starts (venv create, ensurepip child, pip install)")
-        self.assertIn("15 MB", doc, "the Cost line does not say about 15 MB")
+            raw = ast.get_docstring(ast.parse(handle.read())) or ""
+        start = raw.find("Cost:")
+        self.assertNotEqual(start, -1, "the module docstring has no Cost: line")
+        paragraph = " ".join(raw[start:].split("\n\n")[0].split())
+        first_use = paragraph.split("Later runs")[0]
+        self.assertIn("four process starts", first_use,
+                      "the Cost line's first use does not say four process starts "
+                      "(venv create, its ensurepip child, pip install, import probe)")
+        self.assertIn("import vermin", first_use, "the Cost line's first use does not name the import vermin probe")
+        self.assertIn("15 MB", paragraph, "the Cost line does not say 15 MB")
 
 
 if __name__ == "__main__":
