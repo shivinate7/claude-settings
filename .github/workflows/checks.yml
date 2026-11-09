@@ -544,6 +544,12 @@ jobs:
       - name: Skill model rows fixture suite
         run: python3 lint/test_check_skill_model_rows.py
 
+      - name: Python 3.9 floor check
+        run: python3 lint/check_python_floor.py
+
+      - name: Python 3.9 floor fixture suite
+        run: python3 lint/test_check_python_floor.py
+
       - name: No-window spawn check
         run: python3 lint/test_no_window_spawn.py
 
