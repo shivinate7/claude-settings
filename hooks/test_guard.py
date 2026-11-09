@@ -12935,6 +12935,34 @@ sh("frozen resolve-vars: a /* inside double quotes is text, and the write after 
 sh("frozen resolve-vars: a lone apostrophe inside double quotes is text, and the write after it denies",
    'echo "it\'s"; echo x > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 
+# A redirect-only assignment keeps its value for the next command, as bash does: `D=... >/dev/null` sets D.
+sh("frozen resolve-vars: a redirect-only assignment with >/dev/null keeps its value, so a cp to it denies",
+   'D=' + CFG_SETTINGS + ' >/dev/null; cp a $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a redirect-only assignment with 2>/dev/null keeps its value, so a cp to it denies",
+   'D=' + CFG_SETTINGS + ' 2>/dev/null; cp a $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a redirect-only assignment with >/dev/null keeps its value, so a write to it denies",
+   'D=' + CFG_SETTINGS + ' >/dev/null; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, a plain assignment with no redirect keeps its value, so a cp to it denies",
+   'D=' + CFG_SETTINGS + '; cp a $D', "deny", "frozen-path", cwd=NOGIT)
+# A function body runs in the calling shell, so an assignment in it lasts after the call.
+sh("frozen resolve-vars: an assignment in a function body lasts after the call, so a write to it denies",
+   'function f { D=' + CFG_SETTINGS + '; }; f; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, an assignment in a f() body lasts after the call, so a write to it denies",
+   'f() { D=' + CFG_SETTINGS + '; }; f; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+# A verbatim heredoc body is text: its odd quote must not pair with a quote on a later line.
+sh("frozen resolve-vars: an odd quote in a heredoc body is text, so a write after the heredoc denies",
+   "python3 - <<'EOF'\nprint(\"x)\nEOF\nD=" + CFG_SETTINGS + '; echo "y" > $D', "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen resolve-vars: control, a heredoc body with its quote closed is text, so a write after it denies",
+   "python3 - <<'EOF'\nprint(\"x\")\nEOF\nD=" + CFG_SETTINGS + '; echo "y" > $D', "deny", "frozen-path",
+   cwd=NOGIT)
+# The shell reads an ambiguous redirect as an error and writes nothing, so the guard should allow it.
+sh("frozen resolve-vars: an ambiguous redirect from a value with an escaped space writes nothing, so a write to it allows",
+   'D=' + CFG_SETTINGS + '\\ x; echo y > $D', "allow", cwd=NOGIT)
+# Control: the same write with a plain value is denied, so the allow above comes from the ambiguous redirect.
+sh("frozen resolve-vars: control, the same assignment with no escaped space, then a write to it, denies",
+   'D=' + CFG_SETTINGS + '; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+
 # A TOKEN IN THE COMMAND LIFTS NOTHING. `DESTRUCTIVE_OK=1` and `GIT_DISCARD_OK=1` are plain env
 # assignments that the guard does not read. The one lift is the owner override (family
 # `override`): the owner types it as a prompt, and the guard reads it from a state file.
