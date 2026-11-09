@@ -644,6 +644,9 @@ PUSHLANEMASTER = os.path.join(ROOT, "pushlanemaster")
 PUSHSELF = os.path.join(ROOT, "pushself")
 PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
 PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
+# PUSHOWNREF is `lane-x`, tracking origin/batch-1, and origin/lane-x exists too. The stray rule
+# reads that ref as a destination already on the remote, so an implied push to its own name is silent there.
+PUSHOWNREF = os.path.join(ROOT, "pushownref")
 # Rule push-main reads the remote a push names (ruling 207 a, judged on its URL). Every push fixture's origin is
 # PUSHREMOTE, a network URL the guard never contacts, so the existing push-main asks keep their meaning.
 # PUSHLOCAL has a local origin (a bare path), PUSHSSH an scp-form origin, and PUSHNOREMOTE no remote at all.
@@ -2032,9 +2035,18 @@ def _build_push():
     run_vcs(PUSHMAINUP, "update-ref", "refs/remotes/origin/main", "HEAD")
     run_vcs(PUSHMAINUP, "branch", "--set-upstream-to=origin/main", "main")
 
+    # Its own name is on origin, so the implied pushes to it are silent. Built by git itself.
+    make_repo(PUSHOWNREF, {"base.txt": "base\n"})
+    run_vcs(PUSHOWNREF, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHOWNREF, "update-ref", "refs/remotes/origin/batch-1", "HEAD")
+    run_vcs(PUSHOWNREF, "update-ref", "refs/remotes/origin/lane-x", "HEAD")
+    run_vcs(PUSHOWNREF, "checkout", "-q", "-b", "lane-x")
+    run_vcs(PUSHOWNREF, "branch", "--set-upstream-to=origin/batch-1", "lane-x")
+
     for where, upstream in ((PUSHSTRAY, "origin/lane/x"), (PUSHSELF, "origin/feat"),
                             (PUSHLANE, "origin/main"), (PUSHLANEMASTER, "origin/master"),
-                            (PUSHSTACK, "origin/lane/base"), (PUSHMAINUP, "origin/main")):
+                            (PUSHSTACK, "origin/lane/base"), (PUSHMAINUP, "origin/main"),
+                            (PUSHOWNREF, "origin/batch-1")):
         got = run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip()
         if got != upstream:
             sys.exit("fixture setup failed in build_fixtures: %r needs upstream %s, reads %r"
@@ -2047,6 +2059,13 @@ def _build_push():
             or run_vcs(PUSHSTRAY, "config", "--get", "push.default").stdout.strip() != "simple"):
         sys.exit("fixture setup failed in build_fixtures: PUSHSTRAY needs remotes fork and origin "
                  "and push.default simple")
+    # Scope before subject (P7). The stray controls need origin/mylocal absent in PUSHSTRAY, and the ruling 432 a
+    # red rows need origin/lane-x present in PUSHOWNREF. Each is read back, so no case judges a fixture without it.
+    for where, ref, present in ((PUSHSTRAY, "refs/remotes/origin/mylocal", False),
+                                (PUSHOWNREF, "refs/remotes/origin/lane-x", True)):
+        if (run_vcs(where, "rev-parse", "-q", "--verify", ref).returncode == 0) != present:
+            sys.exit("fixture setup failed in build_fixtures: %r needs %s %s"
+                     % (where, ref, "present" if present else "absent"))
 
     # The agent-worktree names and their near misses (rule push-agent-branch). Each reads back its own name
     # in HEAD and no upstream, so a case judges the name it names and nothing inherited.
@@ -2382,7 +2401,7 @@ lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
-              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK,
+              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHOWNREF,
               PUSHLOCAL, PUSHLOCALSTRAY, PUSHLOCALMAIN, PUSHSSH, PUSHNOREMOTE,
               PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX,
               PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG],
@@ -7632,10 +7651,11 @@ sh("ask-step-hidden: a force push in a sh -c double-quoted substitution denies",
 sh("ask-step-hidden: control, a heredoc body naming a force push inside bash -c allows",
    "bash -c 'cat <<EOF\n" + HIDDEN_PUSH + "\nEOF'", "allow", cwd=PUSHFEAT)
 
-# ASK, owner rulings 206 a. An implied destination (a bare push, HEAD, @, or a
-# colon-less refspec naming the current branch) that lands off the branch's upstream asks, unless the push
-# carries -u and names the local branch (the silent cases below). PUSHSTRAY is `mylocal`, whose upstream is
-# origin/lane/x.
+# ASK, owner rulings 206 a and 432 a. An implied destination (a bare push, HEAD, @, or a colon-less refspec
+# naming the current branch) that lands off the branch's upstream asks while the destination is not yet on
+# origin, that is, no refs/remotes/origin/<name> (ruling 432 a). A push with -u that names the local branch is
+# silent (the silent cases below). PUSHSTRAY is `mylocal`, whose upstream is origin/lane/x, and origin/mylocal
+# is absent, so its rows ask.
 push_case("stray branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
 push_case("stray branch, @ asks", "origin @", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
 push_case("stray branch, the current branch named by its colon-less refspec asks", "origin mylocal", "ask",
@@ -7651,6 +7671,10 @@ push_case("stray branch, a second refspec that names the current branch asks",
           "origin HEAD:push-guard-asks mylocal", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
 sh("push: stray branch, a bare push under push.default current asks",
    VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
+# The remedy names the explicit form with a placeholder only (ruling 432 a). The real branch names of PUSHSTRAY
+# never appear in it.
+sh("push: stray branch, the ask names the explicit form HEAD:<branch>", VCS + " push origin HEAD", "ask",
+   PUSH_STRAY_RULE, cwd=PUSHSTRAY, carries=("HEAD:<branch>",), lacks=("HEAD:mylocal", "HEAD:lane/x"))
 
 # ASK, rule push-agent-branch. A non-forced push whose destination is an agent-worktree name asks, with or
 # without -u. push-stray-branch stays silent on a branch with no upstream, so this rule carries that case. The
@@ -7859,6 +7883,15 @@ sh("push: stacked lane, a bare -u under push.default current writes the local na
    VCS + " -c push.default=current push -u origin", "allow", cwd=PUSHSTACK, silent=True)
 push_case("stray branch, -u with HEAD writes the local name, is silent", "-u origin HEAD", "allow",
           cwd=PUSHSTRAY, silent=True)
+# Decision plain-push-asks, item 432 a.
+# A destination already on origin (refs/remotes/origin/<name>) is no stray. PUSHOWNREF is
+# `lane-x`, tracking origin/batch-1, with origin/lane-x present: each implied push to its own name is silent.
+push_case("own ref on origin, HEAD is silent", "origin HEAD", "allow", cwd=PUSHOWNREF, silent=True)
+push_case("own ref on origin, @ is silent", "origin @", "allow", cwd=PUSHOWNREF, silent=True)
+push_case("own ref on origin, the current name as a colon-less refspec is silent", "origin lane-x", "allow",
+          cwd=PUSHOWNREF, silent=True)
+sh("push: own ref on origin, a bare push under push.default current is silent",
+   VCS + " -c push.default=current push", "allow", cwd=PUSHOWNREF, silent=True)
 # A push that moves no branch: tags are not a branch destination, even on main.
 push_case("--tags on main is silent", "origin --tags", "allow", cwd=PUSHMAIN, silent=True)
 push_case("a tag name on main is silent", "origin v1.0", "allow", cwd=PUSHMAIN, silent=True)
@@ -11362,11 +11395,13 @@ def record_push_cost_case():
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
     (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
-    `HEAD:<branch>` adds no read. The conflict-markers push check
-    (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
+    `HEAD:<branch>` adds no read. A stray push (rule push-stray-branch: an implied destination off the
+    upstream) adds one `git rev-parse --verify -q` of the destination's remote-tracking ref. The conflict-markers
+    push check (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
     order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
     finds the merge base itself). A push with a tracking ref reads one base. A push with no tracking ref
-    and no upstream reads three, and the third, the default base, costs one `git symbolic-ref` for
+    and an upstream reads two. A push with no tracking ref and no upstream reads three, and the third, the
+    default base, costs one `git symbolic-ref` for
     origin/HEAD and one `git rev-parse --verify` per candidate branch tried, until one exists. A `git show`
     runs only when a marker finding needs its line read. The layout and extras files
     are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
@@ -11399,7 +11434,7 @@ def record_push_cost_case():
             kinds[word] = kinds.get(word, 0) + 1
         return kinds, lines
 
-    for label, tail, want in (
+    for label, tail, want, *cwd in (
         ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1, "diff": 1}),
         ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1}),
         ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1}),
@@ -11408,8 +11443,12 @@ def record_push_cost_case():
         ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1, "diff": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
          {"rev-parse": 2, "symbolic-ref": 1, "diff": 3}),
+        # A stray push: HEAD on a branch tracking another name. The destination's ref is read and is absent, so
+        # the conflict check rejects that base and reads the upstream: two diff reads.
+        ("a stray push, HEAD on a branch tracking another name", "push origin HEAD",
+         {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2}, PUSHSTRAY),
     ):
-        kinds, lines = spawn_kinds(VCS + " " + tail, PUSHFEAT)
+        kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
         if kinds != want:
             problems.append("%s: git spawns %s, want %s" % (label, sorted(kinds.items()), sorted(want.items())))
         if label == "a bare push" and not any("push.default" in line for line in lines):
@@ -11426,7 +11465,8 @@ def record_push_cost_case():
         problems.append("a push to roadmap with an unreadable transcript: %s, want deny" % got)
     if problems:
         return False, "; ".join(problems)
-    return True, "one rev-parse per push, symbolic-ref for HEAD and bare, push.default for bare only; " \
+    return True, "one rev-parse per push, one more for a stray push, symbolic-ref for HEAD and bare, " \
+                 "push.default for bare only; " \
                  "the transcript is read only at the record branch"
 
 
@@ -25570,8 +25610,9 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_override_case),
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
-    ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for a refspec, HEAD and bare, push.default "
-     "for bare only, one config read of the remote for a literal main destination, no read for HEAD:<branch>, "
+    ("roadmap-one-writer: a push starts one rev-parse, one more for a stray push, symbolic-ref for a refspec, "
+     "HEAD and bare, push.default for bare only, one config read of the remote for a literal main destination, "
+     "no read for HEAD:<branch>, "
      "and reads the transcript only at the record branch",
      record_push_cost_case),
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
@@ -32906,6 +32947,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: a builder write to a path in no repository from a /c/ cwd", "worktree-home"),
     ("cite-by-id: a -F file that cannot be read", "cite"),
     ("env: heredoc-allow-strip", "env"),
+    ("roadmap-one-writer: a push starts one rev-parse", "push-delete"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
     _hits = [label for label in LOG_FAMILY if label.startswith(_prefix)]
