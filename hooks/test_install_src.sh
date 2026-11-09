@@ -5246,6 +5246,52 @@ caseM13() {
   ok "$name"
 }
 
+# ---- caseM14-M15: a mirror refresh the install cannot finish says unknown, and keeps the clone ----
+# caseM14: main holds a local commit, so it differs from mirrorSha, and origin is unreachable. The fetch fails, and the WARN
+# says unknown, since the install cannot tell whether main holds a commit origin lacks. caseM15: the fetch lands, but main
+# names a commit the clone does not hold, so merge-base cannot read the relation (exit 128). The WARN says unknown too.
+# Both keep the clone with its main, its mirrorSha and its sentinel.
+caseM14() {
+  name="caseM14: a mirror with a local commit on main and origin unreachable: the WARN says unknown, and the clone keeps that commit"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  m8_setup m14 || { bad "$name" "FIXTURE $m8_setup_why"; return; }
+  git -C "$mirror" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "local only"
+  mine=$(git -C "$mirror" rev-parse HEAD)
+  if git -C "$fx/bare.git" cat-file -e "$mine" 2>/dev/null; then bad "$name" "FIXTURE origin main holds the local commit"; return; fi
+  write_redirect "$h" "$work/no-such-m14.git"
+  if HOME="$h" git -C "$mirror" ls-remote -q origin >/dev/null 2>&1; then bad "$name" "FIXTURE origin is still reachable from the mirror"; return; fi
+  move_install
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc on the second install: $(install_problems)"; return; fi
+  if ! printf '%s\n' "$out" | grep -qF "WARN: could not refresh the clone $mirror to main, and it is unknown whether main there holds local commits; keeping it as it is"; then
+    bad "$name" "no unknown WARN names the failed refresh: $(install_problems)"; return
+  fi
+  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$mine" ]; then bad "$name" "the mirror left its local commit [$mine]"; return; fi
+  if [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$first" ]; then bad "$name" "the mirrorSha record moved though the clone was kept"; return; fi
+  if [ ! -e "$mirror/.git/refresh-sentinel" ]; then bad "$name" "the mirror was cloned again, not kept in place"; return; fi
+  ok "$name"
+}
+
+caseM15() {
+  name="caseM15: a mirror whose main names a commit the clone does not hold, with origin reachable: the WARN says unknown, and the clone is kept"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  m8_setup m15 || { bad "$name" "FIXTURE $m8_setup_why"; return; }
+  gone=$(printf '%040d' 7)
+  if git -C "$mirror" cat-file -e "$gone" 2>/dev/null; then bad "$name" "FIXTURE the clone holds the missing commit"; return; fi
+  printf '%s\n' "$gone" > "$mirror/.git/refs/heads/main"
+  if [ "$(git -C "$mirror" rev-parse -q --verify main)" != "$gone" ]; then bad "$name" "FIXTURE main does not name the missing commit"; return; fi
+  mb=0; git -C "$mirror" merge-base --is-ancestor main "$first" 2>/dev/null || mb=$?
+  if [ "$mb" -ne 128 ]; then bad "$name" "FIXTURE merge-base reads main as exit $mb, not 128"; return; fi
+  move_install
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc on the second install: $(install_problems)"; return; fi
+  if ! printf '%s\n' "$out" | grep -qF "WARN: could not tell whether the clone $mirror holds local commits on main that main lacks (unknown); keeping it as it is"; then
+    bad "$name" "no unknown WARN names the failed relation read: $(install_problems)"; return
+  fi
+  if [ "$(git -C "$mirror" rev-parse -q --verify main)" != "$gone" ]; then bad "$name" "the clone moved main off the commit it kept"; return; fi
+  if [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$first" ]; then bad "$name" "the mirrorSha record moved though the clone was kept"; return; fi
+  if [ ! -e "$mirror/.git/refresh-sentinel" ]; then bad "$name" "the mirror was cloned again, not kept in place"; return; fi
+  ok "$name"
+}
+
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
 # session_start.sh cases) gets the same redirect as every other case.
 default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
@@ -5403,6 +5449,8 @@ run caseM10
 run caseM11
 run caseM12
 run caseM13
+run caseM14
+run caseM15
 run pinmove1
 run pinmove2
 run pinmove3
