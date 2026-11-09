@@ -138,6 +138,7 @@ LINUX_SUITES = {
     "python3 lint/test_settings_matcher.py": (None, None),
     "python3 lint/test_hook_platform_exit.py": (None, None),
     "python3 lint/test_check_hook_stubs.py": (None, None),
+    "python3 lint/test_check_hook_dup_names.py": (None, None),
     "python3 lint/test_check_record_slugs.py": (None, None),
     "python3 lint/test_check_red_run.py": (None, None),
     "python3 lint/test_find_copies.py": (None, None),
