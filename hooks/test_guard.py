@@ -3939,6 +3939,47 @@ add("hand-made worktree: an Agent call with no isolation, whose prompt names a w
 add("hand-made worktree: an Explore Agent call with no isolation passes", "allow", tool="Agent",
     cwd=HMMAIN, subagent_type="Explore", description="look", prompt="Read the repo.")
 
+# VARIABLE TARGETS. The shell expands `$S` and `${S}` before git sees the path, so a target that holds a
+# variable is judged by the value the same command gives it. A variable the command does not set reads as
+# unknown, and a worktree add from a non-temp primary with an unknown target is refused.
+HMVAR_SCRATCH = "S=" + HMSCRATCH + "; "
+hm_deny("a scratch path set in the same command, added from the non-temp primary as $S, is refused",
+        HMVAR_SCRATCH + HMADD + '"$S"')
+hm_deny("a scratch path set in the same command, added from the non-temp primary as $S/lane-x, is refused",
+        HMVAR_SCRATCH + HMADD + '"$S/lane-x"')
+hm_deny("a scratch path set in the same command, added from the non-temp primary as ${S}, is refused",
+        HMVAR_SCRATCH + HMADD + '"${S}"')
+hm_deny("a variable this command does not set, added from the non-temp primary as $S/lane, is refused",
+        HMADD + '"$S/lane"')
+hm_deny("an agent sets a variable to a tree in its folder that is not its home, and adds it, is refused",
+        "S=.claude/worktrees/lane9; " + HMADD + '"$S"', **HMAG)
+hm_allow("a variable set in the same command to a path under the home folder, with no agent, passes",
+         "S=.claude/worktrees/lane2; " + HMADD + '"$S"')
+hm_allow("a repo under the guard's temp folder adds a variable's path, and the throwaway rule passes it",
+         "S=../hmtmp-sibling; " + HMADD + '"$S"', cwd=HMTMPREPO)
+hm_allow("an agent sets a variable to its own red-run folder, as the red run does, and adds it, passes",
+         "R=" + HMAGENT_OWN_RED + "; " + HMADD + '--detach "$R" HEAD', **HMAG)
+# A variable the command never sets, in a throwaway repo: the throwaway rule judges the repo first, so the
+# unknown target passes there. The refusal for an unknown target sits after that rule.
+hm_allow("a repo under the guard's temp folder runs a variable target no command sets, and the throwaway rule passes it",
+         HMADD + '"$S/lane"', cwd=HMTMPREPO)
+
+# A VARIABLE IN -C. The shell expands `$R` in `-C "$R"` before git runs, so a -C target that holds a
+# variable is judged as unknown, and a worktree add that reaches the primary is refused. The assignment
+# may end its segment with `&&` or a newline: both pin the variable target resolved from the same command.
+hm_deny("a -C variable set in the same command, from a folder with no repo, reaches the primary and is refused",
+        "R=" + HMIN + "; " + VCS + ' -C "$R" worktree add ' + HMSCRATCH, cwd=NOGIT)
+hm_deny("a scratch path set with && in the same command, added from the non-temp primary as $S, is refused",
+        "S=" + HMSCRATCH + " && " + HMADD + '"$S"')
+hm_deny("a scratch path set on its own line in the same command, added from the non-temp primary as $S, is refused",
+        "S=" + HMSCRATCH + "\n" + HMADD + '"$S"')
+# A -C VARIABLE READ FROM THE SAME COMMAND. The -C value is resolved from an earlier assignment, so a tree
+# under the primary's home folder passes, and a throwaway repo passes whatever its target is.
+hm_allow("a -C variable set in the same command to the primary, with a home-folder target and no agent, passes",
+         "R=" + HMIN + "; " + VCS + ' -C "$R" worktree add .claude/worktrees/lane2', cwd=NOGIT)
+hm_allow("a -C variable set in the same command to a throwaway repo, with an unset target, passes",
+         "R=" + slash(HMTMPREPO) + "; " + VCS + ' -C "$R" worktree add "$S/lane"', cwd=NOGIT)
+
 TEMP_DIR = None   # back to the system temp for the sections below
 
 # THE REFUSAL TEXT and THE POINTER REMEDY, judged on the printed reason (see the two checks below).
