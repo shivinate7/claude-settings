@@ -13664,6 +13664,47 @@ sh("frozen shell: fix F4, a <# #> block comment holding two ASCII quotes pairs t
    "between two echoes is echo data, denies [cap-ask-fix r1 red]",
    "echo <# \" #> ; " + _F4_WRITE + " ; <# \" #>", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
 
+# PWSH-C TEXT MODE. PowerShell reads U+201C and U+201D as double quotes, so `Set-Content -Path “P” -Value 1`
+# writes P. The guard's path token keeps the curly quotes, so `is_frozen` does not match P, and the write
+# is allowed. That holds for the PowerShell tool, and for a Bash call that runs the same text in
+# `pwsh -c` or `powershell -Command`. Each write DENIES.
+SMART_CFG_SETTINGS = "“" + CFG_SETTINGS + "”"
+SMART_CFG_WRITE = "Set-Content -Path " + SMART_CFG_SETTINGS + " -Value 1"
+sh("frozen shell: pwsh-c-text-mode, a Bash call that runs a smart-quoted config settings write in pwsh -c "
+   "denies [pwsh-c-text-mode red]",
+   "pwsh -c '" + SMART_CFG_WRITE + "'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: pwsh-c-text-mode, a Bash call that runs a smart-quoted config settings write in "
+   "powershell -Command denies [pwsh-c-text-mode red]",
+   "powershell -Command \"" + SMART_CFG_WRITE + "\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: pwsh-c-text-mode, the PowerShell tool's smart-quoted config settings write denies "
+   "[pwsh-c-text-mode red]",
+   SMART_CFG_WRITE, "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+# Bash reads `\"` inside double quotes as one literal character, so with no PowerShell in the call this
+# echo is text and allowed. A PowerShell reading would end the string at the `\"` and read on.
+sh("frozen shell: pwsh-c-text-mode, a Bash echo of an escaped quote with no PowerShell is allowed "
+   "[pwsh-c-text-mode green]",
+   "echo \"a \\\" b\"", "allow", cwd=NOGIT)
+# NESTED-SCRIPT PINS. `_shell_write_hit` judges the PowerShell text that `cmd /c` or `iex` runs by PowerShell's
+# rules, through `_powershell_scripts_of`. Each DENIES on that step alone. The `cmd /c` text is quoted: a bare `&`
+# in Bash backgrounds the first command, and detached-launch denies that before the write is read.
+sh("frozen shell: pwsh-c-text-mode pin, cmd /c runs a smart-quoted config settings write after a `&` inside "
+   "double quotes and denies [pwsh-c-text-mode pin]",
+   "cmd /c \"echo don’t & copy NUL " + SMART_CFG_SETTINGS + "\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: pwsh-c-text-mode pin, iex runs a smart-quoted config settings write whose comment holds a "
+   "double quote, and denies [pwsh-c-text-mode pin]",
+   "iex 'Set-Content -Path " + SMART_CFG_SETTINGS + " -Value 1 # don\"t'", "deny", "frozen-path", cwd=NOGIT)
+# NESTED SHELL. A Bash, sh or env -S call that runs `pwsh -c` hands that text on as a plain string.
+# `_powershell_scripts_of` reads the `pwsh -c` inside it as PowerShell. Each DENIES.
+sh("frozen shell: pwsh-c-text-mode, bash -c runs a pwsh -c smart-quoted config settings write and denies "
+   "[pwsh-c-text-mode red]",
+   "bash -c \"pwsh -c '" + SMART_CFG_WRITE + "'\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: pwsh-c-text-mode, sh -c runs a pwsh -c smart-quoted config settings write and denies "
+   "[pwsh-c-text-mode red]",
+   "sh -c \"pwsh -c '" + SMART_CFG_WRITE + "'\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: pwsh-c-text-mode, env -S runs a pwsh -c smart-quoted config settings write and denies "
+   "[pwsh-c-text-mode red]",
+   "env -S \"pwsh -c '" + SMART_CFG_WRITE + "'\"", "deny", "frozen-path", cwd=NOGIT)
+
 
 # ================================================================ 6a-2. cap-ask-fix (frozen)
 # Each case is a frozen write the guard reads as text, so each case names its safety hole. Each DENIES. The
@@ -15671,6 +15712,112 @@ LOG_CHECKS_EXTRA = _TaggedLogs([
 ])
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
+# FLAG ORDER (pwsh-c-text-mode). POWERSHELL_CALL is one global that each judge sets for its own call. A
+# caller that reads it without setting it reads the last call's tool. Each pin reads one caller on a
+# PowerShell text, with the flag set by a PowerShell call, then judges a Bash call in this process and reads
+# the caller again. The text's `\"` ends a string for PowerShell and hides a write for bash, so a caller
+# that kept the Bash flag gives a different reading, and the pin fails.
+FLAG_BUILD_TEXT = 'echo "x\\" ; Set-Content hooks/test_probe.py -Value 1 ; echo \\"D"'
+FLAG_SESSION_TEXT = 'echo "x\\" ; Set-Content notes/out.txt -Value 1 ; echo \\"D"'
+FLAG_SETTINGS_TEXT = ('echo "C:\\" ; Set-Content .claude/settings.local.json \''
+                      + json.dumps({"env": {"CLAUDE_CODE_SUBAGENT_MODEL": "opus"}, "force": "1"})
+                      + '\' ; echo \\"D"')
+
+
+def _judge_bash_here(guard, cwd):
+    """Judge one Bash call on this module, as the hook does, so POWERSHELL_CALL holds the Bash tool's value."""
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = CFG
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            try:
+                guard.judge({"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": cwd})
+            except SystemExit:
+                pass
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+
+
+def _flag_pin(label, guard, cwd, read):
+    """`read()` is one caller's reading of a PowerShell text. Read with the PowerShell flag, it must find
+    the write; after a Bash call in this process it must read the same."""
+    guard.POWERSHELL_CALL[0] = True
+    with_flag = read()
+    if not with_flag:
+        return False, "%s: the PowerShell reading finds no write, so the pin proves nothing" % label
+    _judge_bash_here(guard, cwd)
+    if guard.POWERSHELL_CALL[0]:
+        return False, "%s: the Bash call left POWERSHELL_CALL set, so the pin proves nothing" % label
+    after_bash = read()
+    if after_bash != with_flag:
+        return False, "%s: after a Bash call the caller read the text by bash rules and saw %r, not %r" % (
+            label, after_bash, with_flag)
+    return True, "%s: the caller reads the PowerShell text the same after a Bash call" % label
+
+
+def flag_builder_case():
+    guard = _load_guard_module()
+    where = os.path.join(ROOT, "flag-builder")
+    make_repo(where, {"hooks/test_seed.py": "x = 1\n"})
+    stripped = guard.strip_heredoc_bodies(FLAG_BUILD_TEXT)
+    return _flag_pin("builder shell-write caller", guard, where,
+                     lambda: guard.builder_shell_test_hit(FLAG_BUILD_TEXT, stripped, where, tool="PowerShell"))
+
+
+def flag_builder_bash_case():
+    """A Bash-tool call on the same text reads it by bash rules, even after a PowerShell call set the flag."""
+    guard = _load_guard_module()
+    where = os.path.join(ROOT, "flag-builder-bash")
+    make_repo(where, {"hooks/test_seed.py": "x = 1\n"})
+    stripped = guard.strip_heredoc_bodies(FLAG_BUILD_TEXT)
+    # The PowerShell call first leaves the flag set, so only the Bash call's own reset can make it read by bash rules.
+    guard.builder_shell_test_hit(FLAG_BUILD_TEXT, stripped, where, tool="PowerShell")
+    bash = guard.builder_shell_test_hit(FLAG_BUILD_TEXT, stripped, where, tool="Bash")
+    if bash != "":
+        return False, "builder shell-write caller: the Bash-tool call read the text by PowerShell rules and saw %r" % (
+            bash,)
+    return True, "builder shell-write caller: the Bash-tool call reads the text by bash rules and sees no write"
+
+
+def flag_session_home_case():
+    guard = _load_guard_module()
+    primary = os.path.join(ROOT, "flag-primary")
+    make_repo(primary, {"src/app.py": "print(1)\n"})
+    session = "shome-" + uuid.uuid4().hex
+    write(os.path.join(primary, ".git", "session-homes", session),
+          os.path.join(primary, ".claude", "worktrees", "gone-lane") + "\n")
+    payload = {"tool_name": "PowerShell", "tool_input": {"command": FLAG_SESSION_TEXT}, "cwd": primary,
+               "session_id": session}
+    return _flag_pin("session-home caller", guard, primary,
+                     lambda: guard.session_home_hit(payload, "PowerShell", payload["tool_input"], primary))
+
+
+def flag_never_lifted_case():
+    guard = _load_guard_module()
+    where = os.path.join(ROOT, "flag-settings")
+    make_repo(where, {"README.md": "x\n"})
+    payload = {"tool_name": "PowerShell", "tool_input": {"command": FLAG_SETTINGS_TEXT}, "cwd": where}
+    return _flag_pin("never-lifted settings clause", guard, where,
+                     lambda: guard.never_lifted(payload, "PowerShell", payload["tool_input"], where))
+
+
+for _label, _check in (
+    ("frozen: a builder's shell write, read after a Bash call, is the same as with the PowerShell flag",
+     flag_builder_case),
+    ("frozen: a Bash-tool call on a builder's shell-write text reads it by bash rules, after a PowerShell call",
+     flag_builder_bash_case),
+    ("frozen: the session-home caller, read after a Bash call, is the same as with the PowerShell flag",
+     flag_session_home_case),
+    ("frozen: the never-lifted settings clause, read after a Bash call, is the same as with the PowerShell flag",
+     flag_never_lifted_case),
+):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = "frozen"
+
+
 # The base-copy cost check is appended here because LOG_CHECKS_EXTRA is defined here. Its family is the
 # base-copy section's, set by hand. MUTATE_ONLY="base copies" runs it.
 BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree stays within its stated git "
