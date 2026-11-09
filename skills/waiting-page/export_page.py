@@ -85,6 +85,11 @@ STREET_WORDS = ("Street", "St", "Avenue", "Ave", "Road", "Rd", "Drive", "Dr", "L
                 "Highway", "Hwy")
 STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND"
                "|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY")
+# The user part of a URL credential; the password part's character: a plain one, a `|` that is no `||`, or a quoted or
+# bracketed run with no `@`, `/`, `?`, `#` or blank in it.
+URL_USER = r"[^/?#\s@:\"'`()\[\]{}|]+"
+URL_PASSWORD_CHAR = (r"[^/?#\s@\"'`()\[\]{}|]|\|(?!\|)|\"[^\"\s/?#@]*\"|'[^'\s/?#@]*'"
+                     r"|\([^()\s/?#@]*\)|\[[^\[\]\s/?#@]*\]")
 # Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
 # from starting inside a longer word ("risk-" and "btn-sk-" are not "sk-").
 SECRET_SHAPES = (
@@ -105,8 +110,11 @@ SECRET_SHAPES = (
     ("session-cookie", re.compile(r"(?<![A-Za-z0-9_.])connect\.sid=\S+")),
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
     # `scheme://user:password@host`, on any host: a version pin after the `@` is blanked, so an IP host is caught here.
-    # Quotes, brackets and `|` end the user and password parts: minified code runs `"https://a"})];x||y:z@` together.
-    ("url-credentials", re.compile(r"://[^/?#\s@:\"'`()\[\]{}|]+:[^/?#\s@\"'`()\[\]{}|]+@")),
+    # The user part holds no quote, bracket or `|`: minified code runs `"https://a"})];x||y:z@` together. The password
+    # may hold them, as a pair (`"p"`, `(p)`, `[p]`) or a single `|`, and the `@` that ends it must not be followed by a
+    # quote, bracket or `|`: that is code (`"http://h:"+port+"@"`), not a host.
+    ("url-credentials", re.compile(
+        r"://" + URL_USER + r":(?:" + URL_PASSWORD_CHAR + r")+@(?![\"'`()\[\]{}|])")),
     ("password", re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(\S+)", re.I)),
     ("email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
     # Bare "Bearer <token>" or "Basic <credential>" with no header name: 20 or more token characters, so prose such as
@@ -146,10 +154,12 @@ SECRET_SHAPES = (
 # a word after it on the same line may be the secret (`none hunter2`). Anything else is refused.
 PLAIN_VALUES = frozenset(("optional", "required", "none", "null", "empty", "unset", "hidden", "redacted", "omitted"))
 JS_BOOLEANS = frozenset(("!0", "!1"))  # minified `true` and `false`
-# A minified boolean that ends the value or is followed by the next `,` `;` `}` `)` of a run: `password:!0,range:!0`.
-JS_BOOLEAN_RUN = re.compile(r"!(?:0|1)(?:[,;})].*)?")
-# A JS keyword then a non-word: code after a `case "keyup":`, not a literal value.
-JS_KEYWORD_VALUE = re.compile(r"(?:return|void|typeof|throw)[-+!~(]")
+# `!0` or `!1` after a password word. It is code, no value, when what follows it is code-shaped (see boolean_run_is_code).
+JS_BOOLEAN_START = re.compile(r"!(?:0|1)")
+# The next member of a minified run: a `,` or `;`, then a name and its `:` or `=`.
+JS_RUN_NEXT = re.compile(r"[,;]\s*[\"']?[A-Za-z_$][\w$]*[\"']?\s*[:=]\s*")
+# A JS keyword then `-` and a number only: code after a `case "keyup":`, not a literal value.
+JS_KEYWORD_VALUE = re.compile(r"(?:return|void|typeof|throw)(?:-\d+)?")
 MASK_VALUE = re.compile(r"[*•#]{3,}|[xX]{3,}")
 # `<placeholder words>` has no digits. A variable reference has an ALL_CAPS name, so `$Tr0ub4dor` and `${hunter2}` refuse.
 PLACEHOLDER_VALUE = re.compile(
@@ -203,10 +213,32 @@ def bare_value(value):
     return value
 
 
+def boolean_run_is_code(found):
+    """True when the value after a password word is a minified boolean and everything after it on the line is code:
+    nothing, a closer (`}` `)` `]`), or `,name:` / `;name=` members, each with a boolean or any value. A word after the
+    boolean (`!0,hunter2`, `!0 hunter2`) is a value, so it is not code."""
+    start = JS_BOOLEAN_START.match(found.group(2))
+    if not start:
+        return False
+    rest = found.group(2)[start.end():] + REST_OF_LINE.match(found.string, found.end()).group(0)
+    while True:
+        rest = rest.lstrip()
+        if not rest.strip(".,;") or rest[0] in "})]":
+            return True
+        member = JS_RUN_NEXT.match(rest)
+        if not member:
+            return False
+        rest = rest[member.end():]
+        start = JS_BOOLEAN_START.match(rest)
+        if not start:
+            return True
+        rest = rest[start.end():]
+
+
 def password_is_no_secret(found):
     """True when the value after a password word is a plain word, a mask or a placeholder, or `found` is
     `PWD=<path>`, and nothing but blanks follows it on its line."""
-    if JS_BOOLEAN_RUN.fullmatch(found.group(2)):
+    if boolean_run_is_code(found):
         return True
     if REST_OF_LINE.match(found.string, found.end()).group(0).strip():
         return False
@@ -256,8 +288,9 @@ def letters_are_words(value):
             and not CONSONANT_RUN.search(letters))
 
 
-# A name made of lower-case words joined by hyphens, each word with at most 2 trailing digits (`automations-v3-review`).
-HYPHEN_WORDS = re.compile(r"[a-z]+\d{0,2}(?:-[a-z]+\d{0,2})+")
+# A name made of lower-case words joined by hyphens. A part holds a digit only as a version: one letter and one or two
+# digits (`automations-v3-review`). `ab12` and `abcdefgh1` read as random, so they are no part of a name.
+HYPHEN_WORDS = re.compile(r"(?:[a-z]+|[a-z]\d{1,2})(?:-(?:[a-z]+|[a-z]\d{1,2}))+")
 # A vendor-style key made of words: a 2 or 3 letter vendor prefix, an environment word, then a last part with a digit
 # (`sk-live-ab12`, `pk-test-ab12`). It is a key shape, so the hyphen-words path must not pass it.
 VENDOR_KEY = re.compile(r"[a-z]{2,3}-(?:live|test|prod|dev|stage|staging|sandbox)(?:-[a-z]+\d{0,2})*-[a-z]*\d\w*")
@@ -271,7 +304,7 @@ def credential_is_no_secret(found):
     if value:
         return found.group("sep") == ":" and letters_are_words(value)
     value = found.group("mixed")
-    if value and JS_KEYWORD_VALUE.match(value):
+    if value and JS_KEYWORD_VALUE.fullmatch(value):
         return True
     return (bool(value) and HYPHEN_WORDS.fullmatch(value) is not None
             and VENDOR_KEY.fullmatch(value) is None
