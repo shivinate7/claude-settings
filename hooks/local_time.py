@@ -57,6 +57,8 @@ from datetime import datetime, timedelta, timezone
 CST = timedelta(hours=-6)
 # The inbox heading and stamp, written here and read by feedback_guard.py.
 HEADING_PREFIX = "### "
+TIME_PREFIX = "Local time: "
+PRINTED_LINES = ("TIME_PREFIX",)  # lint/check_hook_output_pins.py: tests build the line from these
 STAMP_FORMAT = "%Y-%m-%d %H:%M"
 STAMP_ZONES = {"CDT": "UTC-05:00", "CST": "UTC-06:00"}  # zone name -> offset text
 # Matches a stamp; groups 1 and 2 are its hour and minute. It mirrors STAMP_FORMAT.
@@ -88,7 +90,7 @@ def line(clock=clock):
     dst = start <= now < end
     local = now + CST + (timedelta(hours=1) if dst else timedelta())
     name = "CDT" if dst else "CST"
-    return "Local time: %s %s (%s)" % (local.strftime(STAMP_FORMAT), name, STAMP_ZONES[name])
+    return TIME_PREFIX + "%s %s (%s)" % (local.strftime(STAMP_FORMAT), name, STAMP_ZONES[name])
 
 
 def central_hhmm(at):
@@ -293,7 +295,7 @@ def page_note(raw):
         key = "%s|%s|%s" % (inp.get("url"), doc_id, at)
         if "\n" in key or key in seen:
             continue
-        stamp = line(lambda: _at_clock(at))[len("Local time: "):]
+        stamp = line(lambda: _at_clock(at))[len(TIME_PREFIX):]
         err = save_message(paths[0], stamp, page_note_text(data))
         if err is not None:
             failures.append(err)
@@ -378,7 +380,7 @@ def main(argv):
         if not agent:
             raw = sys.stdin.buffer.read()
             try:
-                capture(raw, stamp[len("Local time: "):])
+                capture(raw, stamp[len(TIME_PREFIX):])
             except Exception as e:  # a capture error never stops the grant
                 print("local_time: capture: %s" % e, file=sys.stderr)
             grant_override(raw, now)

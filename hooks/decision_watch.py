@@ -141,6 +141,7 @@ ACTION_WORDS = (
 
 UNKNOWN_PREFIX = "Decision watch: UNKNOWN, could not verify this turn against recorded decisions/guards/settings. "
 FLAG_PREFIX = "Decision watch: FLAG. "
+PRINTED_LINES = ("UNKNOWN_PREFIX", "FLAG_PREFIX")  # lint/check_hook_output_pins.py: tests build the line from these
 # A folder with no git repo has nothing for this hook to watch; that is a fact about the
 # folder, not a failed check, so it is said plainly and once per session (NO_REPO_SEEN_KEY).
 NO_REPO_MESSAGE = "Decision watch is off here: this folder is not a git repo."

@@ -4,6 +4,7 @@
   "codeExtensions": ["py", "mjs", "sh", "js", "ts"],
   "mapPaths": [
     "lint/find_copies.py",
+    "lint/check_hook_output_pins.py",
     "hooks/_nowindow.py",
     "hooks/prose_judge.py",
     "hooks/decision_watch.py",

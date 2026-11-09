@@ -373,6 +373,9 @@ jobs:
       - name: Hook dup-name fixture suite
         run: python3 lint/test_check_hook_dup_names.py
 
+      - name: Hook output pin fixture suite
+        run: python3 lint/test_check_hook_output_pins.py
+
       - name: Record slug fixture suite
         run: python3 lint/test_check_record_slugs.py
 
