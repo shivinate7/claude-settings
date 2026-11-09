@@ -62,7 +62,7 @@ For a list that has a home (a page collection, a roadmap ref, a git ref or a Git
 
 A premise is a statement, not a fact. After a compaction, a /clear or a fork, treat every
 premise as a statement, and every fact in the compaction summary as `notes`. Before you act on a
-weak or stale premise, check it. Then rewrite its line with the new source and date. When
+weak or stale premise, check it. Then rewrite its line with the new source and date. The guard rule `handoff-checked-stamp` refuses a changed `Checked` value on a premise you have not read or run a check of since the last compaction, so check before you restamp. When
 the check shows it wrong, delete the line or replace it with the true fact and its source.
 Keep no "was wrong" note. Fix the wrong fact in any brief, decision or plan that holds it. If
 work already rested on it, say so under Deviations in the next report. The way to check each

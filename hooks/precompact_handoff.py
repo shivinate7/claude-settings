@@ -198,16 +198,17 @@ def required_sections():
     return _marker_names(path)
 
 
-def premises_section():
-    """The marker's name for the premises section (the one that holds the word "premises"), or None."""
-    for name in required_sections():
+def premises_section(names=None):
+    """The marker's name for the premises section (the one that holds the word "premises"), or None. `names` is
+    required_sections()'s value, passed by a caller that has read the prompt already."""
+    for name in required_sections() if names is None else names:
         if "premises" in name.lower():
             return name
     return None
 
 
-def _premises_head():
-    name = premises_section()
+def _premises_head(name=None):
+    name = premises_section() if name is None else name
     return section_heading(re.escape(name) if name else r"(?:[A-Za-z]+[ \t]+)?premises")
 
 
@@ -584,6 +585,24 @@ def inbox_note(session_id):
             " repo's todo or debt store." % ", ".join(ids))
 
 
+def _premise_lines(text, name=None):
+    """[(id, kind, line)] of the premise lines in the premises section of `text`, in order, one entry per id (the
+    first wins). `line` is the whole line. [] when the section is missing or holds no line. `name` is the
+    marker's premises name, when the caller has it; else the prompt is read for it."""
+    head = _premises_head(name).search(text)
+    if not head:
+        return []
+    body = text[head.end():]
+    end = re.search(r"^#{1,2}[ \t]", body, re.M)
+    if end:
+        body = body[:end.start()]
+    found = {}
+    for m in _PREMISE_LINE.finditer(body):
+        stop = body.find("\n", m.end())
+        found.setdefault(m.group(1), ((m.group(2) or "").strip().lower(), body[m.start():stop if stop >= 0 else len(body)]))
+    return [(pid, kind, line) for pid, (kind, line) in found.items()]
+
+
 def handoff_premises(path):
     """[(id, kind)] of the premise lines in the handoff's premises section, in order,
     one entry per id. [] when the file is unreadable or the section is missing or has no line.
@@ -593,15 +612,120 @@ def handoff_premises(path):
             text = f.read()
     except (OSError, ValueError):  # ValueError: a byte that is not UTF-8
         return []
-    head = _premises_head().search(text)
-    if not head:
-        return []
-    body = text[head.end():]
-    end = re.search(r"^#{1,2}[ \t]", body, re.M)
-    found = {}
-    for m in _PREMISE_LINE.finditer(body[:end.start()] if end else body):
-        found.setdefault(m.group(1), (m.group(2) or "").strip().lower())
-    return list(found.items())
+    return [(pid, kind) for pid, kind, _line in _premise_lines(text)]
+
+
+# The parts of a premise line that the checked-stamp rule reads (decision precompact-handoff, item 15).
+_LINE_SOURCE = re.compile(r"\bSource:[ \t]*(.*?)[ \t]*\.?[ \t]*\bChecked[ \t]")
+_LINE_CHECKED = re.compile(r"^.*\bChecked[ \t]+(.*?)[ \t]*\.?[ \t]*$")
+# A Source token: a URL, a path (with a slash, or a file name with an extension), a 7+ hex hash with a digit, a
+# backticked command, or the slug or number after a record word. Text outside these is no token.
+_TOKEN_PATH = re.compile(r"https?://[^\s)`\]>]+|(?<![\w./~-])((?:[\w.~-]+(?:/[\w.~-]+)+)|(?:[\w-]+(?:\.[\w-]+)*\.[A-Za-z][A-Za-z0-9]{1,4}))(?::\d+(?:-\d+)?)?(?![\w/])")
+_TOKEN_HASH = re.compile(r"(?<![\w./-])[0-9a-f]{7,40}(?![\w-])")
+_TOKEN_TICKS = re.compile(r"`([^`\n]+)`")
+_TOKEN_RECORD = re.compile(r"\b(?:decision|debt|record|step|rule|lane|roadmap step|item)[ \t]+`?([a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b"
+                           r"|\b(?:PR|pull request|issue)[ \t]+#?(\d+)\b", re.I)
+# A call that starts an agent or sends a message names a path in its text and checks nothing, so it backs no premise.
+NO_CHECK_TOOLS = ("Agent", "Task", "SendMessage", "Workflow")
+READ_TOOLS = ("Read", "Grep", "Glob", "Bash", "PowerShell", "WebFetch", "WebSearch")  # a token-less Source needs one
+READ_MCP_WORDS = ("get", "list", "read", "query", "search", "view")
+
+
+def source_tokens(source):
+    """The tokens of a premise's Source text, in order, each once. [] when it holds none: then any one read backs it."""
+    found = [m.group(1).strip() for m in _TOKEN_TICKS.finditer(source)]
+    for m in _TOKEN_PATH.finditer(source):
+        token = (m.group(1) or m.group(0)).rstrip(".,;")
+        for lead in ("./", "~/"):
+            token = token[len(lead):] if token.startswith(lead) else token
+        found.append(token)
+    found += [m.group(0) for m in _TOKEN_HASH.finditer(source) if any(c.isdigit() for c in m.group(0))]
+    found += [m.group(1) or m.group(2) for m in _TOKEN_RECORD.finditer(source)]
+    return [t for t in dict.fromkeys(found) if t]
+
+
+def premise_stamps(text, name=None):
+    """{id: (kind, source, checked)} of the premise lines in `text`. `checked` is the lowercased text after the last
+    `Checked`, minus a closing period, or None when the line has no `Checked`. `source` is the text between `Source:`
+    and `Checked`, or "" when the line has none. `name` as in _premise_lines."""
+    stamps = {}
+    for pid, kind, line in _premise_lines(text if isinstance(text, str) else "", name):
+        checked = _LINE_CHECKED.search(line) if "Checked" in line else None
+        source = _LINE_SOURCE.search(line)
+        stamps[pid] = (kind, source.group(1) if source else "", (checked.group(1).strip().lower() or None) if checked else None)
+    return stamps
+
+
+def stamp_changes(before, after, name=None):
+    """[(id, tokens)] of the premises of `after` whose Checked value is new or differs from `before` (None or "" holds
+    none), and that need evidence: a `ruling` and a `Checked never` need none. A new line counts as changed.
+    `name` is the marker's premises name, when the caller has it."""
+    old = premise_stamps(before, name)
+    need = []
+    for pid, (kind, source, checked) in premise_stamps(after, name).items():
+        if kind == PREMISE_KINDS[0] or checked in (None, "never") or (pid in old and old[pid][2] == checked):
+            continue
+        need.append((pid, source_tokens(source)))
+    return need
+
+
+def _strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+
+
+def _is_read(name):
+    """True for a tool_use that reads: a read tool, a shell, or an MCP tool whose name says get, list, read, query, search or view."""
+    return name in READ_TOOLS or (isinstance(name, str) and name.startswith("mcp__")
+                                  and any(w in name.lower() for w in READ_MCP_WORDS))
+
+
+def _same_path(a, b):
+    norm = lambda p: os.path.normcase(os.path.normpath(os.path.expanduser(p)))
+    return norm(a) == norm(b)
+
+
+def backed_premises(transcript, need, handoff):
+    """The ids of `need` ([(id, tokens)] from stamp_changes) that the session's own transcript backs, or None when the
+    transcript cannot be read (the caller fails open). Evidence is a tool_use of the main session after the newest
+    `compact_boundary` record (none: the whole transcript) whose input holds a token of the premise's Source; a premise
+    with no token is backed by any one read tool_use. A record of an agent (isSidechain, or an agent_id) is no
+    evidence, nor is a call that starts an agent or sends a message, nor is a Read, Write or Edit of `handoff`, the
+    handoff itself. One open of the transcript."""
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    try:
+        import _transcript
+        records = _transcript.read_transcript(transcript)
+    except (OSError, ValueError):
+        return None
+    backed = set()
+    for rec in records:
+        if rec.get("isSidechain") or rec.get("agent_id"):
+            continue
+        if rec.get("type") == "system" and rec.get("subtype") == "compact_boundary":
+            backed.clear()
+            continue
+        for use in _transcript.tool_uses(rec):
+            name, given = use.get("name"), use.get("input")
+            if not isinstance(given, dict):
+                continue
+            if name in NO_CHECK_TOOLS or (name in ("Read", "Write", "Edit", "MultiEdit")
+                                          and isinstance(given.get("file_path"), str)
+                                          and _same_path(given["file_path"], handoff)):
+                continue
+            text = "\n".join(_strings(given))
+            for pid, tokens in need:
+                if pid not in backed and (any(t in text for t in tokens) if tokens else _is_read(name)):
+                    backed.add(pid)
+    return {pid for pid, _tokens in need if pid in backed}
 
 
 def premise_note(path, everyone):
