@@ -147,7 +147,8 @@ history word in another clause hides no claim. The line claims it for each PR it
 `#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
 the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
 PR on its line is refused and asks for the PR. The remedy names the act (`merge <pr> --review-record ...`, then post the
-record) and never the live head. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
+record) and never the live head. A newest record that exists but does not parse is refused in its own words (PR named, "does not parse", the same
+remedy as a missing record, with the post as a new comment), not as a missing record; it names the CI line as the cause only when text follows that line before the first `---` line. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
 checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
 blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
@@ -167,6 +168,9 @@ from _transcript import (  # noqa: E402
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
+
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with hooks/guard.py
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -329,11 +333,59 @@ def _stops_before_a_commit(args):
     return False
 
 
+GH_API_VALUE_FLAGS = {"-X", "--method", "-f", "-F", "--field", "--raw-field", "-H", "--header",
+                      "--input", "-q", "--jq", "-t", "--template", "--hostname", "--cache", "-p",
+                      "--preview", "-R", "--repo"}
+GH_API_FIELD_FLAGS = {"-f", "-F", "--field", "--raw-field", "--input"}
+# A pull's merge route, and the repo's merges route (a merge commit on a branch).
+GH_API_MERGE_ROUTE_RE = re.compile(r"(^|/)pulls/[^/]+/merge/?$")
+GH_API_MERGES_ROUTE_RE = re.compile(r"(^|/)repos/[^/]+/[^/]+/merges/?$")
+
+
+def _gh_api_lands(args):
+    """True when a `gh api` call (the tokens after `api`) merges. The route is the first word that
+    is no flag and no flag's value. The method is `-X`/`--method` when given, else POST once any
+    field or `--input` is given (gh's own default), else GET. A PUT to a pull's merge route and a POST
+    to the repo's merges route land; GET, a POST to a pull's merge route, `--help` and every other
+    route do not."""
+    method, has_fields, route, i = None, False, None, 0
+    while i < len(args):
+        arg = args[i]
+        i += 1
+        if arg in ("-X", "--method"):
+            method = args[i].upper() if i < len(args) else method
+            i += 1
+        elif arg.startswith("--method=") or arg.startswith("-X"):
+            method = arg.split("=", 1)[1].upper() if "=" in arg else arg[2:].upper()
+        elif arg in ("--help", "-h"):
+            return False   # prints help and makes no request
+        elif arg in GH_API_FIELD_FLAGS:
+            has_fields = True
+            i += 1
+        elif arg in GH_API_VALUE_FLAGS:
+            i += 1
+        elif arg.startswith("--"):
+            has_fields = has_fields or arg.split("=", 1)[0] in GH_API_FIELD_FLAGS
+        elif arg.startswith("-") and len(arg) > 1:
+            has_fields = has_fields or arg[:2] in ("-f", "-F")
+        elif route is None:
+            route = arg.split("?", 1)[0]
+    if route is None:
+        return False
+    method = method or ("POST" if has_fields else "GET")
+    if GH_API_MERGE_ROUTE_RE.search(route):
+        return method == "PUT"
+    return method == "POST" and bool(GH_API_MERGES_ROUTE_RE.search(route))
+
+
 def _segment_lands_a_gh_write(segment):
     """True when the segment's command word is `gh` and the call is `pr merge`, `pr create` or
-    `pr update-branch` without a flag that writes nothing (GH_NO_WRITE_FLAGS, `--help`, `-h`). `guard.gh_call_of` reads the
+    `pr update-branch` without a flag that writes nothing (GH_NO_WRITE_FLAGS, `--help`, `-h`), or
+    a `gh api` merge call (`_gh_api_lands`). `guard.gh_call_of` reads the
     command word past wrappers and a subshell, the same read the merge guard takes."""
     rest = guard.gh_call_of(segment)
+    if rest is not None and rest[:1] == ["api"]:
+        return _gh_api_lands(rest[1:])
     if rest is None or rest[:1] != ["pr"] or rest[1:2] == [] or rest[1] not in GH_LANDING_PR_VERBS:
         return False
     no_write = GH_NO_WRITE_FLAGS.get(rest[1], set()) | {"--help", "-h"}
@@ -734,7 +786,6 @@ LANE_REFUSAL = owner_line(
     "a question was asked in a lane session, whose own chat does not reach the owner, and it was not sent to "
     "its parent")
 NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
-LANE_TAG = "cs-build:lane"
 PARENT_TARGETS = {"@parent", "parent"}
 # A "?" ends a question unless a word character follows it, so a URL query (a?b=1) never counts. Quoted
 # text, backticked text and a blockquoted line are past words, never a question asked now. A straight
@@ -1312,6 +1363,20 @@ def refusal_rows(path, skipped=None):
     return rows
 
 
+def _read_raised(path):
+    """The (tool_name, reason) pairs recorded in the raised-refusals file at `path`; [] when it is missing or bad."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    pairs = []
+    for item in data if isinstance(data, list) else []:
+        if isinstance(item, list) and len(item) == 2 and all(isinstance(x, str) for x in item):
+            pairs.append((item[0], item[1]))
+    return pairs
+
+
 def pending_refusals(hook, text):
     """Settle the session's refusals file against the reply and return the tool names still unnamed.
 
@@ -1320,8 +1385,13 @@ def pending_refusals(hook, text):
     agent's: the row has agent_id, or its tool_use_id is a tool_use in an agent record. A row whose
     tool_use_id is in an orchestrator record stays, even with agent_id. A row with no tool_use_id, a
     tool_use_id found nowhere (not yet flushed) or an unreadable transcript stays, unless it has agent_id.
-    The file goes when none is left. One stat per Stop when the session had no refusal. Fails open: [] on
-    any error. Spec: docs/decisions/refusals-reach-the-owner.md."""
+    A row cleared by name is also recorded as (tool_name, reason) in the session's raised-refusals file, and a
+    later row with the same tool_name and the same reason, not blank after strip, is dropped without blocking: the owner
+    already heard of it. A different reason or tool, or a blank reason, still blocks. The refusals file goes
+    when none is left. One stat per Stop when the session had no refusal; the raised file is read only when
+    the refusals file has rows, and written only when a row is cleared by name. Fails open: [] on any error;
+    a raised file that cannot be written only means the repeat blocks once more.
+    Spec: docs/decisions/refusals-reach-the-owner.md."""
     try:
         sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
         import shared_names
@@ -1329,19 +1399,39 @@ def pending_refusals(hook, text):
         if path is None or not os.path.exists(path):
             return []
         rows = refusal_rows(path)
+        if not rows:
+            return []
         section = input_needed_section(text)
         agent_ids, orchestrator_ids = set(), set()
         transcript = hook.get("transcript_path")
         if transcript and any(r.get("tool_use_id") for _, r in rows):
             agent_ids, orchestrator_ids = tool_use_sources(transcript) or (set(), set())
+        raised_path = shared_names.raised_refusals_path(hook.get("session_id"))
+        raised = _read_raised(raised_path) if raised_path else []
+        newly_raised = []
         kept = []
         for line, row in rows:
             tool = row["tool_name"]
             use_id = row.get("tool_use_id")
+            reason = row.get("reason")
+            has_reason = isinstance(reason, str) and bool(reason.strip())
             from_agent = (row.get("agent_id") or use_id in agent_ids) and use_id not in orchestrator_ids
-            if from_agent or names_tool(section, tool) or says_refusal_right(text, tool):
+            if from_agent:
+                continue
+            if names_tool(section, tool) or says_refusal_right(text, tool):
+                if has_reason and (tool, reason) not in raised + newly_raised:
+                    newly_raised.append((tool, reason))
+                continue
+            if has_reason and (tool, reason) in raised:
                 continue
             kept.append((line, tool))
+        if newly_raised and raised_path:
+            try:
+                os.makedirs(os.path.dirname(raised_path), exist_ok=True)
+                with open(raised_path, "w", encoding="utf-8") as f:
+                    json.dump([list(pair) for pair in raised + newly_raised], f)
+            except OSError:
+                pass
         if len(kept) != len(rows):
             if kept:
                 with open(path, "w", encoding="utf-8") as f:
@@ -2336,6 +2426,14 @@ REVIEW_NO_RECORD = (
     "Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer read> --kind <kind> --guard "
     "<yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a comment on PR #%d, then report again."
 )
+REVIEW_UNPARSED = (
+    "Review-record guard: this reply claims a review PASS for PR #%d, and the newest review record on that PR does not parse, "
+    "so merge reads no record from it.%s Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer "
+    "read> --kind <kind> --guard <yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a new comment on "
+    "PR #%d, then report again."
+)
+REVIEW_UNPARSED_CI = (" Cause: the CI line must be the last line before `---`, and nothing may follow it; a line after the CI "
+                      "line makes the record unreadable.")
 
 
 def review_claims(text):
@@ -2372,10 +2470,20 @@ def _gh_json(args, cwd):
 
 
 def _newest_record(n, comments, merge_mod):
-    """The parsed newest review record comment of `comments` (oldest first), else None."""
+    """(parsed record, body) of the newest review record comment of `comments` (oldest first). No marked comment is
+    (None, None); a marked comment that does not parse is (None, its body), so the caller needs no second read."""
     bodies = [c.get("body") or "" for c in comments if isinstance(c, dict)]
     marked = [b for b in bodies if b.splitlines()[:1] == [merge_mod.REVIEW_MARKER]]
-    return merge_mod.parse_review(marked[-1]) if marked else None
+    return (merge_mod.parse_review(marked[-1]), marked[-1]) if marked else (None, None)
+
+
+def _text_after_ci_line(body, merge_mod):
+    """True when non-blank text follows the last CI line before the first `---` line: the one cause named for an unparsed record."""
+    lines = body.splitlines()
+    if "---" in lines:
+        lines = lines[:lines.index("---")]
+    at = [i for i, line in enumerate(lines) if line == merge_mod.REVIEW_CI_LINE]
+    return bool(at) and any(line.strip() for line in lines[at[-1] + 1:])
 
 
 def review_record_problem(hook, text):
@@ -2405,11 +2513,14 @@ def review_record_problem(hook, text):
             pages = _gh_json(["repos/{owner}/{repo}/issues/%d/comments" % n, "-X", "GET", "-f", "per_page=100",
                               "--paginate", "--slurp"], cwd)
             comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
-            rec = _newest_record(n, comments, merge_mod)
+            rec, body = _newest_record(n, comments, merge_mod)
         except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block
             notes.append("Review-record guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
             continue
-        if not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
+        if rec is None and body is not None:
+            cause = REVIEW_UNPARSED_CI if _text_after_ci_line(body, merge_mod) else ""
+            reasons.append(REVIEW_UNPARSED % (n, cause, n, n))
+        elif not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
             reasons.append(REVIEW_NO_RECORD % (n, n, n))
     return " ".join(reasons), " ".join(notes)
 
@@ -2490,7 +2601,7 @@ def write_marker(hook, idx):
 # A relayed question (spec past-rulings): a coordinator puts a lane's question in its reply, under Input Needed or as
 # a prose line that ends in `?`, so neither check in hooks/call_judge.py sees it. This Stop hook checks it, SYNC, with
 # the same candidates and the same item 8 as the question judge, and one more rule: option keys (question-keys).
-# Cost: one git process and one Sonnet call (15 s) on a Stop whose reply asks something; none on any other Stop.
+# Cost: one git process and one Sonnet call (60 s) on a Stop whose reply asks something; none on any other Stop.
 RELAY_RULE_REASON = owner_line("Past-ruling guard (rule past-ruling)", "%s")
 UNVETTED_REASON = owner_line(
     "Unvetted guard (rule past-ruling)",
