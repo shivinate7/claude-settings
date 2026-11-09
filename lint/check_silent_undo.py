@@ -287,9 +287,6 @@ def rewritten(line, hs, base=(), modified=False):
     return False
 
 
-OWN_LOOKUPS = 25  # per file: lost lines checked for a branch-only adder in one `git log -p` read; the rest count as lost
-
-
 def changed(patch):
     """The normalized added and removed lines of a patch. Headers are skipped by state, never by prefix:
     a line is content only after the first `@@` of its file section, so `++i;` and `-- note` count."""
@@ -308,18 +305,19 @@ def branch_only_lines(cwd, p, bases, path, lines, refs):
     """The subset of `lines` that only the branch added: for each, the commit that first added it on
     the way to parent p is reachable from none of refs (upstream and the default branch). A read that
     fails, or finds no adding commit, leaves the line out, so it counts. Unknown is never clear.
-    One `git log -m -p` per file, read once: a commit is marked by a changed line (added or removed,
-    as `-G` read it) that holds the line, whitespace-collapsed. `-m` lets a line that entered through
+    One `git log -m -p` per file, read once: a commit is marked by a changed line (added or removed)
+    that equals the line, whole-line and whitespace-collapsed: a longer line that only contains it
+    does not mark. `-m` lets a line that entered through
     a merge's own resolution show up. The oldest marked commit is the real adder: a line from main
     always has main's own commit in the range, older than any merge that carried it."""
     try:
         _, out = git(cwd, "log", "-m", "-p", "-U0", "--no-color", "--no-ext-diff", "--format=%x00%H", p, "--not", *bases, "--", path)
     except Unknown:
         return set()
-    commits = []  # (sha, the changed lines of that diff, newline-joined)
+    commits = []  # (sha, the set of that diff's normalized changed lines)
     for chunk in out.split("\0")[1:]:  # NUL: a text diff never holds one
         sha, _, body = chunk.partition("\n")
-        commits.append((sha.strip(), "\n".join(changed(body))))
+        commits.append((sha.strip(), set(changed(body))))
     held, res = {}, set()
     for line in lines:
         sha = next((c for c, text in reversed(commits) if line in text), None)
@@ -438,7 +436,7 @@ def lost_in_parent(cwd, m, p, bases, refs, blobs):
                 if not rewritten(l, hs, in_b, mod):
                     lost.append(l)
         if refs and lost:
-            own = branch_only_lines(cwd, p, bases, path, lost[:OWN_LOOKUPS], refs)  # the rest count as lost, unread
+            own = branch_only_lines(cwd, p, bases, path, lost, refs)
             lost = [l for l in lost if l not in own]
         if lost:
             found.append((path, p, lost))
