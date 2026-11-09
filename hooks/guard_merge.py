@@ -1109,13 +1109,14 @@ def _is_open(rows) -> bool:
     return any(row["state"] == "open" for row in rows)
 
 
-def _covered(module, host, branch: str, tip, rows, open_rows, slugs) -> bool:
+def _covered(module, host, branch: str, tip, rows, pool) -> bool:
     """True when a pull request holds the work of `branch`, whose pull requests in every state are `rows` and whose
     tip is `tip` (read from the branch when None, and only once a closed or merged row needs it). An open pull
     request covers. A merged one covers when its head is the tip. A closed unmerged one covers only when the tip is
-    contained in the head of an open or merged pull request (compare of that head...tip reads behind or identical);
-    those heads come from the branch's own rows and from the repo's open list rows on a lane head form. A merged
-    pull request on another head form is not read, to spare a read; that case refuses."""
+    contained in the head of an open or merged pull request (compare of that head...tip reads behind or identical).
+    Those heads come from `pool`, the rows already read: the repo's open list rows on a lane head form and the rows
+    of every other branch of the lane that was read. A merged pull request on a head no read reached is not seen,
+    so that case refuses. This adds no read besides one compare per head to test."""
     if _is_open(rows):
         return True
     if not rows:
@@ -1126,8 +1127,7 @@ def _covered(module, host, branch: str, tip, rows, open_rows, slugs) -> bool:
         return True
     if not any(row["state"] == "closed" and not _is_merged(row) for row in rows):
         return False
-    heads = [str(row["head"]["sha"]) for row in rows if _is_merged(row)]
-    heads += [str(row["head"]["sha"]) for row in open_rows if _on_lane_form(str(row["head"]["ref"]), slugs)]
+    heads = [str(row["head"]["sha"]) for row in [*rows, *pool] if row["state"] == "open" or _is_merged(row)]
     return any(sha == tip or _compare_status(module, host, sha, tip) in _CONTAINED for sha in dict.fromkeys(heads))
 
 
@@ -1140,7 +1140,8 @@ def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:
     value that is neither null nor a string, are shapes the read does not know, so they raise. A 404 on the compare
     means the branch is not in that repo, so it is skipped in that repo. Any other failed read raises, and
     archive_hit refuses on it. The caller holds one shared deadline over all the reads here (a nested
-    shared_deadline would reset it). `open_rows` is each repo's open pull request list, already read."""
+    shared_deadline would reset it). `open_rows` is each repo's open pull request list, already read. Every pull
+    request read of a repo is judged together, so a replacement on another branch of the lane is in hand."""
     branches, repos = [], list(tag_repos)
     for ccr in ccrs:
         meta = ccr.get("external_metadata")
@@ -1158,7 +1159,8 @@ def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:
     for repo in repos:
         host = module.Host(repo=repo)
         owner = repo.split("/")[0]
-        known = open_rows.get(repo, [])
+        pool = [row for row in open_rows.get(repo, []) if _on_lane_form(str(row["head"]["ref"]), slugs)]
+        pending = []  # (branch, tip or None, rows) of each branch ahead of the default: judged once every row is read
 
         def ahead(branch):
             """True when `branch` is not the default or an archive copy, and its compare with the default reads ahead."""
@@ -1171,8 +1173,8 @@ def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:
         for branch in branches:
             if ahead(branch):
                 rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + branch})
-                if not _covered(module, host, branch, None, rows, known, slugs):
-                    return True
+                pool += rows
+                pending.append((branch, None, rows))
         seen = set(branches)
         for slug in slugs:
             for form in lane_head_refs(slug):
@@ -1184,10 +1186,11 @@ def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:
                     # The branch exists (the refs read just listed it), so an open pull request covers it before any
                     # default-branch read; its tip is on the row already in hand.
                     rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + name})
-                    if _is_open(rows):
-                        continue
-                    if ahead(name) and not _covered(module, host, name, str(ref["object"]["sha"]), rows, known, slugs):
-                        return True
+                    pool += rows
+                    if not _is_open(rows) and ahead(name):
+                        pending.append((name, str(ref["object"]["sha"]), rows))
+        if any(not _covered(module, host, branch, tip, rows, pool) for branch, tip, rows in pending):
+            return True
     return False
 
 
@@ -1257,7 +1260,7 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
         # slug form (a paged read); and, for each branch the records name, one repo read per repo, one compare read per
         # repo x branch, and one pulls read per branch that is ahead. A branch under a slug form adds one pulls read, and
         # one compare read when no open pull request covers it. A branch with a pull request adds one tip read, and a
-        # closed unmerged one adds one compare read per open or merged head to test.
+        # closed unmerged one adds one compare read per distinct open or merged head among the rows already read.
         module = merge_module()
         if module is None:
             raise RuntimeError("the merge tool could not be loaded")
