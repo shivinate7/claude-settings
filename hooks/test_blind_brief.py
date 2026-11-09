@@ -102,6 +102,27 @@ def codes(faults):
     return {f[0] for f in faults}
 
 
+# A digit run is \d+, [0-9]+ or \d{n,}. A scan restarts at each digit of a run unless an anchor before the run stops it.
+DIGIT_RUN = re.compile(r"\\d\+|\[0-9\]\+|\\d\{\d+,\}")
+
+
+def digit_run_anchored(before):
+    # The anchors: the lookbehind (?<![\w.]), a word boundary, an escaped dot, \s or \W, a class with no word
+    # character such as [ ,], and a literal letter. A + on the anchor keeps it (\s+ needs one space, so no digit
+    # matches it). A ? or * makes it optional, so the run restarts inside itself: that is no anchor.
+    before = before[:-1] if before.endswith("+") else before
+    return (before.endswith(r"(?<![\w.])") or before.endswith(r"\b") or before.endswith(r"\.")
+            or before.endswith(r"\s") or before.endswith(r"\W")
+            or re.search(r"\[(?!\^)[^\]\\\w]*\]$", before) is not None
+            or re.search(r"(?<!\\)[A-Za-z]$", before) is not None)
+
+
+def unguarded_digit_runs(sources):
+    # The (pattern, spelling) of each digit run in the sources that no anchor guards.
+    return [(source, run.group()) for source in sources for run in DIGIT_RUN.finditer(source)
+            if not digit_run_anchored(source[:run.start()])]
+
+
 class BriefFaults(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -279,23 +300,20 @@ class BriefFaults(unittest.TestCase):
             with self.subTest(header=header):
                 self.assertIn("outside", codes(self.m.brief_faults(brief(header=header))))
 
-    def test_digit_runs_keep_their_guard_in_the_token_spacing_patterns(self):
-        # A digit run is scanned from its first digit only. Each token-spacing pattern that starts a digit
-        # run must keep a guard before its first \d+: the lookbehind (?<![\w.]) or a \b. Without it the
-        # pattern restarts at every digit of the run, and the scan grows as the square of the run's length.
-        # The patterns are read from the module, so this holds no copy of them.
-        unguarded = []
-        for pat in self.m.COMPILED["token-spacing"]:
-            text = pat.pattern
-            at = text.find("\\d+")
-            if at < 0:
-                continue
-            before = text[:at]
-            if not (before.endswith("(?<![\\w.])") or before.endswith("\\b")):
-                unguarded.append(text)
+    def test_digit_runs_keep_their_guard_in_every_pattern(self):
+        # A digit run is scanned from its first digit only. Every digit run in every COMPILED pattern (\d+,
+        # [0-9]+ and \d{n,}) must sit behind an anchor (digit_run_anchored), or the scan restarts at each digit
+        # of the run, and its cost grows as the square of the run's length. The patterns are read from the
+        # module, so this holds no copy of them.
+        runs = {kind: sum(len(DIGIT_RUN.findall(pat.pattern)) for pat in pats)
+                for kind, pats in self.m.COMPILED.items()}
+        # Scope first: an empty scan would pass, so the colour and spacing patterns must yield digit runs.
+        self.assertGreater(runs.get("token-colour", 0), 0, "no digit run was read from token-colour")
+        self.assertGreater(runs.get("token-spacing", 0), 0, "no digit run was read from token-spacing")
+        sources = [pat.pattern for pats in self.m.COMPILED.values() for pat in pats]
+        unguarded = unguarded_digit_runs(sources)
         self.assertEqual(unguarded, [],
-                         "token-spacing digit-run pattern lost its guard (?<![\\w.]) before \\d+: %s"
-                         % unguarded)
+                         "a digit run has no anchor before it, so a scan restarts inside it: %s" % unguarded)
 
     def test_long_digit_run_gives_the_right_verdict(self):
         # The verdict, not the time: a long run of digits is no fault, and the same run with a unit is a
