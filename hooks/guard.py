@@ -138,7 +138,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        remote ref already holds passes. A dry run and a destination named main or master are
                        left out; push-main asks about the latter. A remote named by a URL or a path
                        counts every remote's refs. Cost: one `git rev-list` per pushed ref, and one `git
-                       config` more for such a remote.
+                       config` more for such a remote. (octopus-push-refused)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
