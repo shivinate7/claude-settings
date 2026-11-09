@@ -29984,10 +29984,10 @@ LOG_CHECKS = LOG_CHECKS + ((RBB_OVERRIDE_LABEL, reviewer_brief_override_check),)
 
 # --------------------------------------------------------------------------- the refusal names the line it refused
 #
-# Debt note verdict-format-run-on (docs/debts/notes.md): a refused reviewer brief names no line, so its author guesses
-# which line to reword. The refusal names the refused line by its number in the brief, never by its text: brief lines
-# carry `haiku`, `guard.py` and paths, which the reason-hygiene check forbids in a reason. Each line below is quoted from
-# its source, and sits at a line number other than 1, so the number is read, not assumed.
+# A refused reviewer brief names the refused line by its number in the brief, so its author can find the line to reword.
+# The refusal never names the line by its text: brief lines carry `haiku`, `guard.py` and paths, which the reason-hygiene
+# check forbids in a reason. Each case below names its refused line by a count from the brief's first line, so a case on
+# line 1 is read the same way as a case on line 3.
 
 
 def rbb_line_refuse(name, prompt, number, extra=()):
@@ -29999,10 +29999,9 @@ def rbb_line_refuse(name, prompt, number, extra=()):
 # Source: the incident behind decision reviewer-brief-blind, a prior verdict pasted into a reviewer's brief.
 rbb_line_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior verdict: FAIL line at line 3, the refusal names line 3",
                 "Check the floor fix.\nRead the diff first.\nPrior verdict: FAIL\nFiles: hooks/guard.py.", 3)
-# Source: debt note verdict-format-run-on (docs/debts/notes.md). A false alarm the guard still refuses, so the refusal
-# names its line. When that note is fixed, re-point this case to another false-alarm line the guard refuses today.
-rbb_line_refuse("reviewer-brief-blind: refused: a bold format line, End your report with a verdict, at line 2, the refusal names line 2",
-                "Check the floor fix.\n**End your report with a verdict: PASS, FAIL or PARTIAL.**\nFiles: hooks/guard.py.", 2)
+# A plain verdict line at line 2 is refused, and the refusal names line 2.
+rbb_line_refuse("reviewer-brief-blind: refused: a Prior verdict: FAIL line at line 2, the refusal names line 2",
+                "Check the floor fix.\nPrior verdict: FAIL\nFiles: hooks/guard.py.", 2)
 # The report shape has no verdict line. Its refusal names the line of the first label line, `Done: the floor fix is in.`,
 # a builder's report pasted into the brief, as the decision names it.
 rbb_line_refuse("reviewer-brief-blind: refused: a report with Done and Deviations lines, the refusal names the first label line at line 3",
@@ -30019,6 +30018,17 @@ add("reviewer-brief-blind: refused: a Workflow agent() reviewer whose prompt hol
 # The scan refuses at its first verdict line, so the refusal names that line and not the later one.
 rbb_line_refuse("reviewer-brief-blind: refused: a reviewer brief with two verdict lines, at lines 2 and 4, the refusal names line 2",
                 "Check the floor fix.\nVerdict: PASS\nFiles: hooks/guard.py.\nVerdict: FAIL", 2,
+                extra=("line 2 of the brief",))
+# The refusal names the earliest refused line of the brief, whatever its shape. A verdict line above a report's labels
+# is that line, so it is named at line 1, not at the Done label below it.
+rbb_line_refuse("reviewer-brief-blind: refused: a Prior verdict: FAIL line above a Done and Next report, the refusal names line 1",
+                "Prior verdict: FAIL\nDone: the floor fix is in.\nNext: merge the head.", 1,
+                extra=("line 1 of the brief",))
+rbb_line_refuse("reviewer-brief-blind: refused: a Prior verdict: FAIL line above a BUILT item, the refusal names line 1",
+                "Prior verdict: FAIL\nCheck the floor fix in hooks/guard.py.\nBUILT c1 the floor fix, tests green.", 1,
+                extra=("line 1 of the brief",))
+rbb_line_refuse("reviewer-brief-blind: refused: a FAIL, round 2 line above a Done and Next report, the refusal names line 2",
+                "Check the floor fix.\nFAIL, round 2\nDone: the floor fix is in.\nNext: merge the head.", 2,
                 extra=("line 2 of the brief",))
 
 
