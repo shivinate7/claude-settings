@@ -159,9 +159,10 @@ _READ_DEADLINE = None
 
 @contextlib.contextmanager
 def shared_deadline(seconds):
-    """Give every `sh()` call made in this block one shared time budget (seconds) instead of the
-    fixed SH_TIMEOUT each would otherwise get. `seconds=None` is a no-op: sh() keeps using
-    SH_TIMEOUT alone, as it does everywhere outside this context."""
+    """Give every `sh()` call made in this block one shared time budget (seconds). Each call gets
+    what the budget has left, capped by its own limit (SH_TIMEOUT, or the caller's `timeout`):
+    min(budget left, cap). `seconds=None` is a no-op: sh() keeps using its own cap alone, as it
+    does everywhere outside this context."""
     global _READ_DEADLINE
     prior = _READ_DEADLINE
     _READ_DEADLINE = (time.monotonic() + seconds) if seconds is not None else None
