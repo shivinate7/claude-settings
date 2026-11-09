@@ -1,11 +1,11 @@
 {
   "title": "Waiting-page labels, buttons and dates break at whole words on a narrow screen with large text",
   "why": "Lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), 08:44 CST Nov 9. Source: #2423 round 3 record, comment 6742856907, \"Base defects\" (on the base from #2383, not from #2423). At 180-260 px wide with 150-300% text: press labels break mid-word (\"Dis|miss\", \"Re|stor|e\", \"Rep|ly\"); \"Send ans|wers\" breaks at 180@200% and 180-240@300%; the row date breaks as \"Answere|d\"; folded titles cut to \"W…\" at 180@300%. Harm: the owner reads the page on a phone, and a broken label slows or misleads a press.",
-  "note": "Fix: whole-word breaks, or a smaller-label layout at narrow width with zoomed text. The .dcap caption size (14 px at every text size) is out: #2423's fix takes it (lane correction 08:45 CST). Related: step notes-fix-page.",
+  "note": "Fix: whole-word breaks, or a smaller-label layout at narrow width with zoomed text. The .dcap caption size (14 px at every text size) is out: #2423's fix takes it (lane correction 08:45 CST). Related: step notes-fix-page. Lane session_013NEJL3WMfUf8CyoxsgvqVr started 08:45 CST Nov 9 (coordinator): designer, builder, design reviewer; branched from #2383, merges after #2383.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "",
-  "status": "todo",
+  "lane": "session_013NEJL3WMfUf8CyoxsgvqVr",
+  "status": "doing",
   "order": 913,
-  "updatedAt": "2026-11-09T08:44:00-06:00"
+  "updatedAt": "2026-11-09T08:45:00-06:00"
 }
