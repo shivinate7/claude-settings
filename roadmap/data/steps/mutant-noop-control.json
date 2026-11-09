@@ -1,0 +1,10 @@
+{
+  "title": "The mutant driver runs an unmutated copy first and counts no kills unless it is green",
+  "why": "Lane fix-check-render-first (#2392), 23:34 CST Nov 8: a mutant tree lacked actions/ci-alarm/events.json, so merge failed at import and every chain case was red on every mutant; the earlier kills proved nothing.",
+  "note": "hooks/mutate_guard.py: run the unmutated tree first; if it is not green, report unknown and count no kills. Red case first: a mutant tree with a file missing.",
+  "phase": "next",
+  "owner": "coordinator",
+  "status": "todo",
+  "order": 879,
+  "updatedAt": "2026-11-08T23:35:00-06:00"
+}
