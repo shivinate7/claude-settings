@@ -38,9 +38,9 @@ will change the page. It refuses such a chain even when the page ends unchanged.
 it can see.
 
 A merge commit of a past base tip is allowed too. A lane merges the base, takes the page the merge brought,
-and the base then moves on, so that page is no longer the base's. The guard allows the commit when the page it
-would hold has the exact blob id of the page at MERGE_HEAD, and MERGE_HEAD is a commit on origin/<base>'s
-first-parent line (a past base tip). A commit in the base's history off that line, such as a lane branch
+and the base then moves on, so that page is no longer the base's. The guard allows the commit when two things
+hold. The page it would hold has the exact blob id of the page at MERGE_HEAD. MERGE_HEAD is a commit on
+origin/<base>'s first-parent line (a past base tip). A commit in the base's history off that line, such as a lane branch
 already merged into the base, is refused. A rebuilt page, a page of a merge of any commit off that line, a
 page taken after `merge --quit` are refused. Two reads fail closed: a failed MERGE_HEAD page read or
 first-parent read refuses the commit. Every other failed read stays no hit. The guard runs before the chain, so
