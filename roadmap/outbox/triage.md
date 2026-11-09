@@ -245,7 +245,7 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - plain-merge-forms-span (coordinator 13:00 CST Nov 9, #2413 round 3): the plain_merge_forms helper in merge/test_merge.py matches a span that holds both forms. Fix: match each form on its own. Not a hold.
 - review-record-reversal-cite (same source): docs/decisions/pr-review-record.md reverses "posts nothing" and cites no owner ruling for it. Fix: cite the ruling, or mark the change as the coordinator's. Not a hold.
 - lane-lint-passed-red-tests (coordinator 13:03 CST Nov 9, lane review-record-provenance #2440): the lane lint passed #2112 with 4 red tests. Fix: find why the lint did not run those tests.
-- item-402a-drift-merge-py (same source): merge.py has drifted from item 402 a. Fix: ask lane review-record-provenance for the lines.
+- item-402a-drift-merge-py (same source): folded into step review-state-guard-needs-round-3, with the lines.
 - narration-lint-unknown-no-standard (same source): the narration lint gives UNKNOWN when standard.json is missing. Fold target: step cloud-install-code-check-config.
 - notes-repeated-keys (same source): docs/debts/notes.md has about 21 repeated keys. Fold target: note note-id-dup-lint.
 - review-comments-no-caller (same source): `Host.review_comments` in merge/merge.py has no production caller. Fix: give it a caller or delete it.
