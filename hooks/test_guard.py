@@ -5342,7 +5342,7 @@ sh("git-after-cd: an elif test that is a check guards its else body with a git p
 # last two pass.
 sh("git-after-cd: a check with an elif whose then body holds a git push, is refused",
    'if pytest -q; then echo ok; elif [ -f x ]; then %s push -u origin b; fi' % VCS, "deny", "git-after-cd",
-   cwd=NOGIT, carries=("&&",))
+   cwd=NOGIT, carries=("&&", "`elif`", "branch that runs"))
 sh("git-after-cd: an elif on a file test with a git push in its then body, and no check, passes",
    'if [ -f y ]; then echo ok; elif [ -f x ]; then %s push -u origin b; fi' % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: a git push in the first then body of an if on a check, with an elif that echoes, passes",
