@@ -113,8 +113,8 @@ def git_common_dir(where: str):
 
 def repo_top(where: str):
     """The nearest folder at or above `where` (symlinks resolved) that holds a `.git` entry, else None. A stat walk, no git spawn.
-    The one home of the repo-top walk: lint/report_guard.repo_root, hooks/local_time.repo_root, hooks/guard._checkout_root_by_stat
-    and merge's review cutover read call it."""
+    The walk that lint/report_guard.repo_root, hooks/local_time.repo_root, hooks/guard._checkout_root_by_stat
+    and merge's review cutover read share. It is not the only repo-top walk in the repo: older ones remain elsewhere."""
     folder = os.path.realpath(where)
     while True:
         if os.path.exists(os.path.join(folder, ".git")):
