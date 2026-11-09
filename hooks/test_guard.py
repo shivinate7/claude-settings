@@ -10331,8 +10331,9 @@ for _cmd in ("find . -name 'sub' | xargs grep -r K", "find . -name 'sub' | xargs
     sh("env: walk control, find prints sub with no narrowing, reads the env file in it, refused: " + _cmd, _cmd,
        "deny", "env-file", cwd=ENVWALK_NESTED)
 
-# rg and grep read `\.` in a glob as a literal dot, so `*\.md` picks sub/.env.md. The guard's glob match reads the
-# backslash as a letter, picks no file, and allows the find form. The control writes the glob as `*.md`, which picks it.
+# rg and grep read `\.` in a glob as a literal dot, so `*\.md` picks sub/.env.md. The guard unescapes each `\x` the
+# same way (`_glob_unescaped`), so its glob match picks that file and refuses the find form. The control writes the
+# glob as `*.md`, which picks it.
 _FIND_ESCAPED_DOT_MD = r"find . -name 'sub' | xargs grep -r --include='*\.md' K"
 sh("env: walk safety hole, find names sub, grep's escaped-dot include reads the env file that ends .md, refused: "
    + _FIND_ESCAPED_DOT_MD, _FIND_ESCAPED_DOT_MD, "deny", "env-file", cwd=ENVWALK_MD_SUFFIX)
