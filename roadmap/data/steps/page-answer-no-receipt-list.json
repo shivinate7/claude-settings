@@ -1,0 +1,17 @@
+{
+  "title": "A listing of waiting-page answers with no read receipt older than one hour",
+  "why": "Degen triage handoff 3b588136, premise P3: a page answer can arrive with no comment wake; item 143 sat 10.5 h unread. The harm: an owner answer waits with no session acting on it.",
+  "note": "Filed from Degen cloud coordinator (session_01MVD32QdrtEN15MxhdA1mnU), lane guards-claude-settings, 21:50 CST Nov 8 (Degen name ns-guard-page-answers-no-receipt). Runs on demand when a session reads the page, never on a timer (rule outcomes-mechanize-rules).",
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "todo",
+  "order": 871,
+  "updatedAt": "2026-11-08T21:50:00-06:00",
+  "paused": {
+    "why": "Needs the owner's OK to build.",
+    "decides": "owner",
+    "at": "2026-11-08T21:50:00-06:00",
+    "by": "lane guards-claude-settings"
+  }
+}

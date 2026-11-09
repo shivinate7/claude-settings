@@ -1,0 +1,11 @@
+{
+  "title": "`merge --review-record` output that a lane posts as is parses as a review record",
+  "why": "Degen PRs 547 and 550, 21:07 CST Nov 8: the output lanes posted started with a banner line, so the merge tool could not read the record. parse_review needs the marker as the exact first line (merge/merge.py), so one line above it voids the record and the batch waits on a re-post. Source of the banner: unmeasured.",
+  "note": "Filed from Degen cloud coordinator (session_01MVD32QdrtEN15MxhdA1mnU), lane guards-claude-settings, 21:50 CST Nov 8. Fix options: the tool prints the record alone on stdout, or parse_review skips lines above the marker. Decision pr-review-record.",
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "todo",
+  "order": 870,
+  "updatedAt": "2026-11-08T21:50:00-06:00"
+}

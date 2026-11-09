@@ -1,0 +1,17 @@
+{
+  "title": "Queued Degen guard step lane-default-checks-rulings (incident unknown)",
+  "why": "Incident unknown: only the slug survives in the stopped session's handoff (Degen lane cloud-check, handoff b7405bd4). Ask for it before building, or drop the step (rule building-guard-needs-incident).",
+  "note": "Filed from Degen cloud coordinator (session_01MVD32QdrtEN15MxhdA1mnU), lane guards-claude-settings, 21:50 CST Nov 8.",
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "todo",
+  "order": 873,
+  "updatedAt": "2026-11-08T21:50:00-06:00",
+  "paused": {
+    "why": "Incident unknown; the owner keeps or drops it.",
+    "decides": "owner",
+    "at": "2026-11-08T21:50:00-06:00",
+    "by": "lane guards-claude-settings"
+  }
+}
