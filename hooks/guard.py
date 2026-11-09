@@ -189,8 +189,9 @@ Other tools, in `judge` order:
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
                        pin and no default model is set. An Explore whose brief's first line
-                       carries the `Audit:` marker, a reviewer on a later-round brief and every Opus
-                       spawn pass it. An unread record
+                       carries the `Audit:` marker, a reviewer on a later-round brief, a reviewer
+                       whose brief's first non-blank line starts with `Fix check` (up to Sonnet;
+                       owner item 444 a) and every Opus spawn pass it. An unread record
                        passes and is noted as `agent-role-model-unread`. The general override lifts an
                        above-row refusal; no override lifts the no-model refusal. A Workflow
                        `agent()` call is judged as a spawn; one whose model or agentType the scan
@@ -393,7 +394,7 @@ while True:
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
-            SESSION_ID_RE, in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
+            SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
         )
         _loading = "guard_pointer"
         from guard_pointer import (
@@ -2053,10 +2054,12 @@ def builder_test_path(path: str, cwd: str) -> bool:
     return is_test_rel(rel)
 
 
-def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
+def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
     """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
     redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
-    python or node script a heredoc body or `-c` / `-e` holds, on the raw command."""
+    python or node script a heredoc body or `-c` / `-e` holds, on the raw command. `tool` is the
+    call's tool: it sets which shell's rules read the text."""
+    POWERSHELL_CALL[0] = tool == "PowerShell"
     return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
             or interpreter_write_hit(raw, cwd, builder_test_path))
 
@@ -3130,9 +3133,10 @@ ROLE_PARENTHETICAL = re.compile(r"\([^)]*\)")
 ROLE_DEFAULT = "general-purpose"
 # One point the owner has not ruled yet, one line to flip. A reviewer brief with a `Round N of 3` marker, N in
 # ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
+# A reviewer whose brief's first non-blank line starts with FIX_CHECK_MARKER (a fix check) may also run Sonnet above its row.
 # An Explore may run Sonnet, above its Haiku row, or Opus (opus_spawn_hit), only when its brief's first non-blank line carries
 # EXPLORE_AUDIT_MARKER (decision agent-model-cap). Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
-from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
+from shared_names import EXPLORE_AUDIT_MARKER, FIX_CHECK_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
 from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of the repo tag, shared with skills/roadmap/build.py
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
@@ -3143,6 +3147,7 @@ ROLE_MODEL_REASON = (
 )
 # A reviewer has a second way past its row, so only its refusal names it. Rounds come from the constant at call time.
 ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
+ROLE_REVIEWER_FIX_CHECK_REMEDY = ", or, when this brief is a fix check, open its first line with the `%s` marker"
 # An Explore has a second way past its row, so only its refusal names it, and only for a ranked model: the marker
 # does not lift a model the table does not rank.
 ROLE_EXPLORE_AUDIT_REMEDY = ", or, when this brief is an audit, open its first line with the `%s` marker"
@@ -3352,7 +3357,8 @@ def role_model_one(tool_input):
     """(reason, matched, unread) for one spawn against its role's row. `reason` is the deny, or "".
     `unread` is true when the table or the agent files could not be read: the spawn then passes. With no pointer checkout the rule stands down, silent. A spawn on Opus is left to
     opus_spawn_hit. An Explore on an audit brief
-    (EXPLORE_AUDIT_MARKER) and a reviewer on a later-round brief run above the row. Pure, so never_lifted may call it too.
+    (EXPLORE_AUDIT_MARKER), a reviewer on a later-round brief and a reviewer on a fix check brief
+    (FIX_CHECK_MARKER) run above the row. Pure, so never_lifted may call it too.
     An above-row refusal is liftable by the general override (decision agent-model-cap); the
     no-model refusal (matched ROLE_NO_MODEL_MATCH...) is not, and never_lifted reads only that one."""
     pointer = pointer_checkout()
@@ -3377,6 +3383,8 @@ def role_model_one(tool_input):
         if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS
                                                       for kind, n in brief_markers(tool_input.get("prompt"))):
             return "", "", False
+        if role == "reviewer" and named < top and ("fixcheck", None) in marker_hits(tool_input.get("prompt")):
+            return "", "", False
         if named > ROLE_MODEL_RANK.index(row):
             extra = ""
             if role == EXPLORE_ROLE and named < top:
@@ -3384,6 +3392,7 @@ def role_model_one(tool_input):
             if role == "reviewer":
                 extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(ROLE_REVIEWER_FREE_ROUNDS),
                                                     ", ".join("`Round %s of 3`" % n for n in ROLE_REVIEWER_FREE_ROUNDS))
+                extra += ROLE_REVIEWER_FIX_CHECK_REMEDY % FIX_CHECK_MARKER
             if tool_input.get(BRIEF_UNREAD):
                 extra += ", or " + BRIEF_LITERAL_REMEDY
             return ROLE_MODEL_REASON % extra, model, False
@@ -4113,7 +4122,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # own writes (a python or node heredoc body, -c, -e) from the raw one. Only an agent with a builder
     # role is judged, the same guard as the Edit tools.
     if role == BUILDER_ROLE:
-        matched = builder_shell_test_hit(raw, stripped, cwd)
+        matched = builder_shell_test_hit(raw, stripped, cwd, tool)
         if matched:
             refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
 
@@ -5093,7 +5102,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
 # by path shape and a stat walk, never by git, so the rule adds no git spawn beyond what the call
 # already spends. A git verb in the primary is read off the command text with `git_calls`.
 SESSION_HOME_DIR = "session-homes"
-# The git verbs that change the primary's files or branch. A `stash` that only reads (`list`, `show`)
+# The git verbs that change the primary's files or branch. A `stash` that only reads (STASH_READ_ACTIONS)
 # and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_git_hit.
 SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
                           "stash", "cherry-pick", "revert", "am", "apply", "clean")
@@ -5205,7 +5214,7 @@ def session_home_git_hit(command: str, where: str, in_primary) -> str:
         if not folder:
             continue
         for verb, args in verbs:
-            if verb == "stash" and args[:1] in (["list"], ["show"]):
+            if verb == "stash" and stash_action(args) in STASH_READ_ACTIONS:
                 continue
             if verb == "clean" and not clean_deletes_files(args):
                 continue
@@ -5219,6 +5228,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     the primary checkout, else ''. Only a call with no `agent_id` and a cwd in the primary's own files
     is judged. A missing, empty or unreadable record is unknown and passes. The clone's `.git`,
     `.claude/worktrees/`, and a target outside the clone pass. Liftable by an owner override."""
+    POWERSHELL_CALL[0] = tool == "PowerShell"
     if not isinstance(payload, dict) or payload.get("agent_id"):
         return ""
     if tool in WRITE_TOOLS:
@@ -5273,6 +5283,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
     worktree-home refusal. refuse() asks this before it spends an override, because a lifted act ends the
     check."""
+    POWERSHELL_CALL[0] = tool == "PowerShell"
     # role_model_check's above-row refusal is liftable (item 127 pick a); only its no-model refusal is never lifted.
     if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input)
             or role_model_check(tool, tool_input)[1].startswith(ROLE_NO_MODEL_MATCH)
@@ -5284,7 +5295,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
         return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
                     or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
                     or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw))
-                    or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd)))
+                    or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd, tool)))
     role = agent_role(payload)
     for target in write_targets(tool_input) if tool in WRITE_TOOLS else ():
         if (is_frozen(target, cwd) or (role and role_write_hit(role, tool_input, target, cwd, session_id_of(payload)))
