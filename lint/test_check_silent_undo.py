@@ -2932,7 +2932,7 @@ class MergeKeepsMain(unittest.TestCase):
     FILL = "".join("filler %d\n" % i for i in range(1000))  # the full-size base: a thousand lines above the imports
     TRAILER = "Drops-lines: lib.txt -- %s"
 
-    def start(self, base, main, lane=None):
+    def start(self, base, main, lane=None, lane_msg="feat"):
         """lib.txt holds `base` at the cut. The lane commits `lane` to lib.txt, or else a change to other.txt. Then main commits `main`."""
         r = self.r = Repo()
         r.commit("base", date="2025-12-01T10:00:00", lib_txt=base, other_txt="other v1\n")
@@ -2941,7 +2941,7 @@ class MergeKeepsMain(unittest.TestCase):
         if lane is None:
             r.commit("feat", date=self.T0, other_txt="other v2\n")
         else:
-            r.commit("feat", date=self.T0, lib_txt=lane)
+            r.commit(lane_msg, date=self.T0, lib_txt=lane)
         r.sh("checkout", "-q", "main")
         r.commit("main", date=self.T1, lib_txt=main)
         r.push()
@@ -3085,6 +3085,139 @@ class MergeKeepsMain(unittest.TestCase):
         m = self.merge_by_hand(self.rule("RULE_FLOOR = 94"))
         self.assert_merge_holds(m, "RULE_FLOOR = 94")
         assert_rewrite_kind(self, self.r.verdict())
+
+    # Shared steps for the cases below: the check's printed text and the merge tool's refusal, the rule-value merge
+    # that holds a hand finding and nothing else, and a fault on the read that runs after the hand read.
+
+    def cli(self, head):
+        """main() on the branch, with what it printed: (exit code, text)."""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = C.main(["--repo", self.r.dir, "--upstream", "origin/main", "--head", head])
+        return rc, buf.getvalue()
+
+    def merge_tool(self):
+        """The merge tool's silent-undo refusal on the branch, or None when it passes."""
+        import merge
+        merge.UNDO_MEMO.clear()  # a memo from another case's repository is never this one's answer
+        with contextlib.redirect_stdout(io.StringIO()):
+            try:
+                merge.undo_check(self.r.dir, "origin/main")
+            except merge.Stop as e:
+                return e
+        return None
+
+    def rule_hand_edit(self):
+        """main sets RULE_FLOOR to 91 and the merge hand-writes 94: a hand finding, and nothing else."""
+        self.start(self.rule("RULE_FLOOR = 80"), self.rule("RULE_FLOOR = 91"))
+        return self.merge_by_hand(self.rule("RULE_FLOOR = 94"))
+
+    def lost_in(self, got):
+        return [p for p in got if p.startswith("lib.txt:") and "drops" in p]
+
+    def merge_tree_fails(self):
+        """A `git merge-tree` read that exits 128 while the patch is armed. -> (patch, the calls that failed)."""
+        real, hits = subprocess.run, []
+
+        def run(args, *a, **k):
+            if "merge-tree" in args:
+                hits.append(args)
+                return subprocess.CompletedProcess(args, 128, "", "fatal: injected read failure")
+            return real(args, *a, **k)
+        return unittest.mock.patch.object(subprocess, "run", run), hits
+
+    # Item 2: a refusal that holds only hand findings names no trailer remedy; a lost-line refusal still does.
+
+    def test_a_hand_only_refusal_names_no_trailer_remedy_on_the_cli(self):
+        m = self.rule_hand_edit()
+        rc, text = self.cli(m)
+        self.assertIn("hand-edited", text, "premise: the hand finding is not printed")
+        remedy = [ln for ln in text.splitlines() if "add the trailer" in ln]
+        self.assertEqual(remedy, [], "a hand-only refusal tells the reader to add a trailer, which does not lift the merge's hand finding")
+        self.assertIn("later lane commit", text, "a hand-only refusal does not name the later lane commit route")
+
+    def test_a_hand_only_refusal_names_no_trailer_remedy_in_the_merge_tool(self):
+        import merge
+        self.rule_hand_edit()
+        e = self.merge_tool()
+        self.assertIsInstance(e, merge.Dropped, "premise: a hand-only merge is not refused as dropped")
+        self.assertNotIn("add the trailer", str(e), "a hand-only refusal tells the reader to add a trailer, which does not lift the merge's hand finding")
+        self.assertIn("later lane commit", str(e), "a hand-only refusal does not name the later lane commit route")
+
+    def test_a_lost_line_refusal_still_names_the_trailer_remedy(self):
+        import merge
+        self.start(self.BASE, self.BASE + "legacy_hook()\n")
+        m = self.merge_by_hand(self.BASE)
+        rc, text = self.cli(m)
+        self.assertIn("drops", text, "premise: the lost line is not printed")
+        self.assertTrue(any("add the trailer" in ln for ln in text.splitlines()), "a lost-line refusal lost its trailer remedy")
+        e = self.merge_tool()
+        self.assertIsInstance(e, merge.Dropped, "premise: a lost-line merge is not refused as dropped")
+        self.assertIn("add the trailer", str(e), "a lost-line refusal lost its trailer remedy in the merge tool")
+
+    # Item 3: a hand finding made before a later read raises Unknown rides on the exception.
+
+    def test_a_hand_finding_survives_a_later_unknown_read(self):
+        self.rule_hand_edit()
+        armed, hits = self.merge_tree_fails()
+        with armed:
+            with self.assertRaises(C.Unknown) as cm:
+                C.check(self.r.dir, "origin/main", "HEAD")
+        self.assertTrue(hits, "premise: the injected merge-tree read never ran")
+        self.assertTrue(rewrites(cm.exception.problems), "a hand finding was lost when a later read raised Unknown: %r" % (cm.exception.problems,))
+
+    def test_a_hand_finding_survives_a_later_unknown_read_in_the_merge_tool(self):
+        import merge
+        self.rule_hand_edit()
+        armed, hits = self.merge_tree_fails()
+        with armed:
+            e = self.merge_tool()
+        self.assertTrue(hits, "premise: the injected merge-tree read never ran")
+        self.assertIsInstance(e, merge.Dropped, "a hand finding under a later unknown read did not refuse as dropped, got %s" % type(e).__name__)
+
+    # Empty commits: a Drops-lines trailer on a commit that changes no file excuses nothing.
+
+    def test_an_empty_commit_with_a_drops_lines_trailer_does_not_excuse_a_lost_line(self):
+        r = self.start(self.BASE, self.BASE + "legacy_hook()\n")
+        self.merge_by_hand(self.BASE)
+        self.assertTrue(self.lost_in(r.verdict()), "premise: the untrailed merge is not refused for its lost line")
+        r.sh("commit", "-q", "--allow-empty", "-m", "Notes fix\n\n" + self.TRAILER % "legacy hook removed on purpose", date=self.T2)
+        self.assertEqual(r.sh("show", "--name-only", "--format=", "HEAD"), "", "premise: the empty commit changes a file")
+        got = r.verdict()
+        self.assertTrue(self.lost_in(got), "an empty commit's Drops-lines trailer excused a lost line: %s" % got)
+
+    def test_a_trailer_on_a_commit_that_changes_the_path_still_excuses_the_drop(self):  # control
+        self.start(self.BASE, self.BASE + "legacy_hook()\n", lane="lane_own = 1\n" + self.BASE,
+                   lane_msg="Own line first\n\n" + self.TRAILER % "legacy hook removed on purpose")
+        m = self.merge_by_hand("lane_own = 1\n" + self.BASE)
+        self.assert_merge_holds(m, "legacy_hook()", present=False)
+        got = self.r.verdict()
+        self.assertIn("ALLOWED lib.txt: legacy hook removed on purpose", self.r.notes, "premise: the lane commit's trailer was not read")
+        self.assertEqual(got, [], "a trailer on a commit that changes the path no longer excuses the drop")
+
+    def test_a_trailer_on_the_merge_that_holds_the_drop_still_excuses_it(self):  # control
+        self.start(self.BASE, self.BASE + "legacy_hook()\n")
+        m = self.merge_by_hand(self.BASE, self.TRAILER % "legacy hook removed on purpose")
+        self.assert_merge_holds(m, "legacy_hook()", present=False)
+        got = self.r.verdict()
+        self.assertIn("ALLOWED lib.txt: legacy hook removed on purpose", self.r.notes, "premise: the merge's trailer was not read")
+        self.assertEqual(got, [], "a trailer on the merge that holds the drop no longer excuses it")
+
+    def test_a_pr_body_drops_lines_line_still_excuses_a_lost_line(self):  # control
+        self.start(self.BASE, self.BASE + "legacy_hook()\n")
+        self.merge_by_hand(self.BASE)
+        self.assertTrue(self.lost_in(self.r.verdict()), "premise: the untrailed merge is not refused for its lost line")
+        got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body=self.TRAILER % "legacy hook removed on purpose")
+        self.assertIn("ALLOWED lib.txt: legacy hook removed on purpose", notes, "premise: the PR body line was not read")
+        self.assertEqual(got, [], "a PR-body Drops-lines line no longer excuses the drop")
+
+    def test_a_verbatim_merge_then_a_later_lane_commit_that_changes_the_value_on_purpose_is_clean(self):  # control
+        r = self.start(self.rule("RULE_FLOOR = 80"), self.rule("RULE_FLOOR = 91"))
+        r.sh("merge", "-q", "--no-edit", "main", date=self.T2)
+        self.assert_merge_holds(r.sh("rev-parse", "HEAD"), "RULE_FLOOR = 91")
+        r.commit("change the value on purpose\n\n" + self.TRAILER % "changed on purpose", date=self.T2, lib_txt=self.rule("RULE_FLOOR = 94"))
+        self.assertEqual(len(r.sh("rev-list", "--parents", "-n", "1", "HEAD").split()), 2, "premise: the head is a merge, not a later lane commit")
+        self.assertEqual(r.verdict(), [], "a later lane commit that changes main's value on purpose, with its trailer, was refused")
 
 
 if __name__ == "__main__":
