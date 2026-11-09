@@ -684,7 +684,7 @@ _FED_SHELL = re.compile(
     r"(?:^|[;&|(`{])[ \t]*(?:(?:builtin|command)[ \t]+)?(?:eval|source|\.)[ \t]"
     r"[^;&|\n]*?(?:(?:\$\(|<\(|`)[^;&|)`]*?)?<<", re.M).search
 _SHELL_FIRST = _interpreter_header(_SHELLS)
-_INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node"
+_INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node|deno"
 _INTERPRETER_FIRST = _interpreter_header(_INTERPRETERS)
 
 

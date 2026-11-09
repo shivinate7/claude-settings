@@ -317,6 +317,11 @@ def _push_scan(segment: str) -> str:
             elif char == "'" and '"' in span and INTERPRETER_RUNNER.search(ahead):
                 # The runner's script sits in single quotes, so its own strings are plain pairs.
                 span = _nested_commands(span, ahead, '"')
+            elif char == '"' and ARGV_CALL.search(ahead[-256:]):
+                # An argv call on a heredoc line (see below): the rest of the line is the call's
+                # arguments, so its pairs join into one command line as in a deno eval script.
+                out.append(_nested_commands("'" + segment[max(0, index - 256):] + "'", "deno eval ", '"'))
+                break
             elif char == '"' and CALL_RUNNER.search(ahead[-256:]):
                 # BANDAID: an interpreter heredoc body reaches this reader a line at a time, with
                 # no runner word ahead of it. A string handed to a call that runs it is a command
@@ -715,13 +720,16 @@ def _git_subcommands(words):
     return found
 
 
-def _command_hit(segment: str, names, judge, raw=None, by_word=False) -> str:
+def _command_hit(segment: str, names, judge, raw=None, by_word=False, flagged=False) -> str:
     """The first text `judge` returns for the arguments of a command named in `names`, in one parsed
     segment, else ''. The command word sits behind its wrappers or a
     subshell, or inside the script a shell, `eval` or `ssh` hands on. The one reader of these forms.
     A group's closing `)` is no part of the last argument. A segment shlex cannot parse is read as
     raw text with the pattern `raw`, when there is one. With `by_word`, `judge` also gets the
-    command word it judges."""
+    command word it judges. With `flagged`, `judge` is known to answer '' for arguments that hold no
+    word starting with `-` or `/`, so a command word with no such word after it is not judged: a
+    chain of command words (`echo rm rm rm ...`) then costs one pass, not one pass per word. This is a
+    bandaid: a chain with a flag at its end is still judged word by word."""
     tokens = segment_tokens(segment)
     if tokens is None:
         found = raw.search(segment) if raw else None
@@ -740,10 +748,11 @@ def _command_hit(segment: str, names, judge, raw=None, by_word=False) -> str:
                 if found:
                     return found
     words, bare = bare_words(segment)
+    last_flag = max((i for i, w in enumerate(words) if w[:1] in ("-", "/")), default=-1) if flagged else len(words)
     for at in sorted(bare - _git_subcommands(words)):
         opened = SUBST_OPEN.match(words[at])
         word = words[at][opened.end():] if opened else words[at]
-        if basename(word) not in names:
+        if basename(word) not in names or at >= last_flag:
             continue   # reading the group only for a named command keeps the loop linear in the words
         args = _in_group(words[at + 1:], bool(opened) and opened.group(1) == "`")
         found = judge(args, basename(word)) if by_word else judge(args)
@@ -751,7 +760,7 @@ def _command_hit(segment: str, names, judge, raw=None, by_word=False) -> str:
             return found
     for script in inner_commands(tokens):
         for inner in split_segments(script):
-            found = _command_hit(inner, names, judge, raw, by_word)
+            found = _command_hit(inner, names, judge, raw, by_word, flagged)
             if found:
                 return found
     return ""
@@ -765,7 +774,7 @@ def _rm_wide_text(args) -> str:
 def rm_delete_hit(segment: str) -> str:
     """Return the matched text when one segment runs `rm -rf` at a root, a home, the working
     directory or a glob, else ''. A segment shlex cannot parse is read as raw text."""
-    return _command_hit(segment, ("rm",), _rm_wide_text, RM_RAW)
+    return _command_hit(segment, ("rm",), _rm_wide_text, RM_RAW, flagged=True)
 
 
 # ------------------------------------------------------------ `.`, a parent, the working folder
@@ -865,7 +874,7 @@ def parent_delete_hit(segments, number: int, cwd: str):
     segment = segments[number]
     matched = _command_hit(
         segment, DELETE_WORDS, lambda args, word: _parent_delete_text(args, word, cwd, moved),
-        RM_PARENT_RAW, by_word=True)
+        RM_PARENT_RAW, by_word=True, flagged=True)
     if not matched:
         return "", ""
     if moved and REL_PARENT.fullmatch(_pwd_as_dot(matched.split()[-1].strip("'\""))):
@@ -988,7 +997,8 @@ def linked_nm_hit(segment: str, where: str) -> str:
             return "npm " + subcommand + " in a folder whose node_modules is a link"
         return ""
 
-    return _command_hit(segment, DELETE_WORDS, delete) or _command_hit(segment, ("npm", "npm.cmd"), install)
+    return (_command_hit(segment, DELETE_WORDS, delete, flagged=True)
+            or _command_hit(segment, ("npm", "npm.cmd"), install))
 
 
 LINKED_NM_REASON = (
