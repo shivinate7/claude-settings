@@ -4227,7 +4227,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "records-page", RECORDS_PAGE_REASON, matched)
 
     # 6c2. A commit or push that would carry all three conflict markers in one file (rule conflict-markers).
-    # Cost: a few short `git` reads per commit or push segment, and none for a command with neither.
+    # Cost: per judged commit, one `git rev-parse --show-toplevel --verify -q HEAD` (one more for an add in
+    # another folder) and one `git diff --check`; none for an add alone, or a command with no commit or push.
     kind, matched = conflict_markers_hit(stripped, cwd)
     if matched:
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else

@@ -11723,6 +11723,77 @@ def record_push_cost_case():
                  "the transcript is read only at the record branch"
 
 
+# The conflict-markers commit check's own git spawns (rule conflict-markers, decision commit-refuses-conflict-markers;
+# guard.py 6c2 states the cost). The probe calls conflict_markers_hit alone, so the stand-in git logs that clause's
+# spawns and none of the records-page check's, which judges a commit too and would be counted by a whole-guard run.
+CMK_COST_PROBE = r'''
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import guard_merge
+print(json.dumps(list(guard_merge.conflict_markers_hit(sys.argv[2], sys.argv[3]))))
+'''
+CMK_NO_HIT = '["", ""]'   # the probe's printed decision for no hit: json of ("", "")
+
+
+def _cmk_cost_check(tag, command, want):
+    """The clause's own git spawns for `command` in a clean repo, by git subcommand, are `want`. The clean repo has
+    no change and no untracked file. With `want` None only the scope is checked. The scope comes first: the probe
+    must run and judge the command as no hit, or the counts measure nothing. Why: the commit check's cost must not
+    grow without a test that notices it."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    log, path = _stand_in_git(tag)
+    if path is None:
+        return False, "no git on PATH"
+    where = os.path.join(ROOT, tag)
+    make_repo(where, {"README.md": "x\n"})
+    if os.path.exists(log):
+        os.remove(log)
+    done = subprocess.run(
+        [sys.executable, "-c", CMK_COST_PROBE, os.path.dirname(GUARD), command, where],
+        capture_output=True, text=True, env=dict(os.environ, PATH=path), timeout=60,
+    )
+    if done.returncode != 0 or done.stdout.strip() != CMK_NO_HIT:
+        return False, "%s: the probe did not judge the clean repo as no hit: exit %d, printed %r, error %r" % (
+            command, done.returncode, done.stdout.strip()[:120], done.stderr.strip()[-200:])
+    if want is None:
+        return True, "%s: judged as no hit" % command
+    kinds = {}
+    for line in (open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []):
+        words = line.split()
+        # The stand-in logs `-C <dir>` and `-c <key>=<value>` before the subcommand; those pairs are skipped.
+        while len(words) >= 2 and words[0] in ("-C", "-c"):
+            words = words[2:]
+        word = words[0] if words else ""
+        kinds[word] = kinds.get(word, 0) + 1
+    if kinds != want:
+        return False, "%s: the clause's git spawns are %s, want %s" % (
+            command, sorted(kinds.items()), sorted(want.items()))
+    return True, "%s: %s" % (command, sorted(kinds.items()))
+
+
+def cmk_cost_control_case():
+    """The green control: the probe runs on a clean commit and judges it as no hit, in the old code and the new."""
+    return _cmk_cost_check("cmkcost-control", VCS + " commit -m x", None)
+
+
+def cmk_cost_add_commit_case():
+    return _cmk_cost_check("cmkcost-add-commit", VCS + " add -A && " + VCS + " commit -m x",
+                           {"rev-parse": 1, "diff": 1, "ls-files": 1})
+
+
+def cmk_cost_add_case():
+    return _cmk_cost_check("cmkcost-add", VCS + " add -A", {})
+
+
+def cmk_cost_commit_case():
+    return _cmk_cost_check("cmkcost-commit", VCS + " commit -m x", {"rev-parse": 1, "diff": 1})
+
+
+FIXTURELESS_CHECKS.update((cmk_cost_control_case, cmk_cost_add_commit_case, cmk_cost_add_case,
+                           cmk_cost_commit_case))  # each builds only the clean repo it runs
+
+
 # =========================================================================== 5f. the trust card in a cs-build session
 #
 # Rule trust-card-in-build, decision session-tiers. A session whose own newest get_session record carries a
@@ -25870,6 +25941,12 @@ LOG_CHECKS = (
      "no read for HEAD:<branch>, "
      "and reads the transcript only at the record branch",
      record_push_cost_case),
+    ("conflict-markers: the cost probe judges a clean commit as no hit, under a stand-in git (the control)",
+     cmk_cost_control_case),
+    ("conflict-markers: git add -A && git commit -m x spawns one rev-parse, one diff --check and one ls-files",
+     cmk_cost_add_commit_case),
+    ("conflict-markers: git add -A alone spawns no git", cmk_cost_add_case),
+    ("conflict-markers: git commit -m x spawns one rev-parse and one diff --check", cmk_cost_commit_case),
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
      worktree_home_cd_into_other_checkout_case),
