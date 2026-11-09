@@ -3306,8 +3306,8 @@ def salt_cutover(root, ref, where=None):
 _tool_stamp_since = {}
 
 def tool_source_env():
-    """-> launch.py's TOOL_SOURCE_ENV, or None when launch cannot be imported. A caller reads it before the try that can raise a Stop, so a broken launch.py
-    cannot replace that Stop with an ImportError (the note is then left off, the Stop stands)."""
+    """-> launch.py's TOOL_SOURCE_ENV, or None when launch cannot be imported. Only a failed tool read calls it, to build its Stop's note, and under a
+    broad guard (tool_stamp_since), so a broken launch.py leaves the note off and the Stop stands."""
     if MERGE_DIR not in sys.path:  # PYTHONSAFEPATH keeps this folder off sys.path, so a bare import of launch fails
         sys.path.insert(0, MERGE_DIR)
     try:
@@ -3328,11 +3328,10 @@ def tool_stamp_since():
     """-> the cutover read from the merge tool's own source checkout (the parent of the folder holding this file, as the other tool paths are found), HEAD's history.
     The salt commit is fixed history, and a checkout that runs code reading the salt holds it, so this fetches nothing. One read per tool root in a process.
     A read that cannot run, or a HEAD with no salt commit, raises Stop naming the checkout, never None: an unknown cutover must not read every unstamped
-    record as old (coordinator item 386). Each such Stop also names the checkout launch.py started from, when it differs (tool_source_env, tool_source_note)."""
+    record as old (coordinator item 386). Each such Stop also names the checkout launch.py started from, when it differs and the note can be built (tool_source_env, tool_source_note). A read that succeeds never imports launch."""
     tool = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     if tool not in _tool_stamp_since:
         where = f"the merge tool's checkout {tool}"
-        source_env = tool_source_env()
         try:
             stamp, c, out = salt_cutover(tool, "HEAD", where=where)
             if c:
@@ -3342,7 +3341,10 @@ def tool_stamp_since():
                 raise Stop(f"{where} lacks the review stamp salt: no commit on its HEAD history adds `REVIEW_STAMP_SALT =` to merge/merge.py, so the "
                            "review stamp cutover is unknown. Update that checkout to origin/main, then run the command again. " + REVIEW_CITE)
         except Stop as e:
-            note = tool_source_note(tool, source_env)
+            try:  # the note is optional: a launch.py that does not import, or any other failure here, leaves it off and the Stop stands
+                note = tool_source_note(tool, tool_source_env())
+            except Exception:
+                note = ""
             if not note:
                 raise
             raise Stop(f"{note} {str(e).removesuffix(REVIEW_CITE).rstrip()} " + REVIEW_CITE) from e  # each tool-read Stop ends with this cite
