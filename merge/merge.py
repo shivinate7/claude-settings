@@ -40,9 +40,11 @@
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
                           commit or ref is linted against --base (default main). A PR on a base other than main also FAILs when its head lacks that base's head (never lifted). A FAIL step refuses. An unknown refuses unless
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. A lint that ran no lint
-                          CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock, merges
+                          CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Before the run, a
+                          `step:<slug>` cite in a changed decision, debt or CLAUDE.md, or in the PR body (PR number only), must name a
+                          step file on origin/roadmap; a missing step refuses, and a roadmap that cannot be read is an unknown. Takes no lock, merges
                           and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
-                          measured once on one PR head), one worktree.
+                          measured once on one PR head), one worktree; with a cite, one fetch of origin/roadmap and one ls-tree.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -2637,25 +2639,76 @@ def ci_job_run(wt, *args, notes=None):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
+def cite_record_paths(root, paths):
+    """The paths of `paths` that are records a step cite is read in: a .md file in the decisions or debts folder of `root` (lint/layout.py) and a CLAUDE.md
+    at any depth. Raises layout.LayoutError when the layout cannot be read."""
+    import layout
+    folders = (*layout.candidates(root, "decisions"), *layout.candidates(root, "debts"))  # the root's own folder, then the layout's, as a repo not yet moved reads them
+    return [p for p in paths if posixpath.basename(p) == "CLAUDE.md" or (posixpath.dirname(p) in folders and p.endswith(".md"))]
+
+def step_cite_check(root, head, base, body=""):
+    """Raise Stop on a `step:<slug>` cite, in a record that `head` changes against origin/<base> or in `body`, that names no step file on origin's record
+    branch (lint/check_step_cites.py reads the cites). The record branch is fetched once, and only when a cite was read. A read that cannot run is a Stop
+    as unknown, never a pass. Returns None when every cite resolves."""
+    import check_step_cites, layout
+    from check_artifact_cites import STEP_FOLDER
+    c, out = git(root, "diff", "--name-only", "--no-renames", "--diff-filter=d", "-z", f"origin/{base}...{head}")
+    if c:
+        raise Stop(f"git diff failed, so the step cite read is unknown, not a pass: {out} {LANE_LINT_CITE}")
+    texts = [body] if body else []
+    try:
+        records = cite_record_paths(root, [p for p in out.split("\0") if p])
+    except layout.LayoutError as e:
+        raise Stop(f"the record folders cannot be read, so the step cite read is unknown, not a pass: {e} {LANE_LINT_CITE}")
+    for path in records:
+        c, text = git(root, "show", f"{head}:{path}")
+        if c:
+            raise Stop(f"git show {head[:9]}:{path} failed, so the step cite read is unknown, not a pass: {text} {LANE_LINT_CITE}")
+        if check_step_cites.open_fence(text):  # the rows after an unclosed fence read as fenced, so a cite there would pass unseen
+            raise Stop(f"{path} holds a fence that never closes, so the step cite read is unknown, not a pass. Close the fence. {LANE_LINT_CITE}")
+        texts.append(text)
+    if not any(check_step_cites.cites(t) for t in texts):
+        return
+    try:
+        branch = layout.record_branch(root)
+    except layout.LayoutError as e:
+        raise Stop(f"the record branch cannot be read, so the step cite read is unknown, not a pass: {e} {LANE_LINT_CITE}")
+    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+    if c:
+        raise Stop(f"git fetch origin {branch} failed, so the step cite read is unknown, not a pass: {out} {LANE_LINT_CITE}")
+    c, out = git(root, "ls-tree", "--name-only", "--full-name", "-z", f"refs/remotes/origin/{branch}", "--", f"{STEP_FOLDER}/")
+    if c:
+        raise Stop(f"git ls-tree of origin/{branch} failed, so the step cite read is unknown, not a pass: {out} {LANE_LINT_CITE}")
+    known = {posixpath.basename(p)[:-len(".json")] for p in out.split("\0") if p.endswith(".json")}
+    absent = check_step_cites.missing(texts, known)
+    if absent:
+        raise Stop("\n".join([f"the lint of {head[:9]} FAILs: a step cite names no step file on origin/{branch} ({STEP_FOLDER}/<slug>.json):",
+                              *[f"  step:{slug}" for slug in absent],
+                              "File each step on the roadmap, or fix the cite. " + LANE_LINT_REMEDY]))
+
 def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head FAILs first.
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
-    A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names."""
+    A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
+    Before that run, step_cite_check refuses a `step:<slug>` cite, in a changed decision, debt or CLAUDE.md or (for a PR number) the PR body, that names no step
+    file on origin's record branch; a record branch that cannot be read, or a changed record whose fence never closes, refuses as unknown. Cost: one fetch of that branch and one ls-tree per run with a cite, none otherwise."""
+    body = ""  # a ref target has no pull request body
     if target.isdigit():
         host = host or Host()
         n = int(target)
         info = host.pr(n)
         base = info["base"]
         info = fetch_pr_head(root, info, base, host, n)  # a lane lints right after its push, when GitHub may still show the old head
-        head = info["head"]
+        head, body = info["head"], info.get("body", "")
         tmp, wt = add_worktree(root, head)
     else:
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
+        step_cite_check(root, head, base, body)  # before the lint run, so a refusal is fast
         pin_notes = []
         if target.isdigit():
             refuse_unstacked_head(root, head, base)
