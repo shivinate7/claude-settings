@@ -17090,6 +17090,8 @@ BH_FULL = os.path.join(ROOT, "bhfullrepo")                # lane-full: its holde
 BH_FULL_GH = os.path.join(ROOT, "bhfullgh")
 BH_COUNT = os.path.join(ROOT, "bhcountrepo")              # lane-count: two ready pull requests, neither holds its tip
 BH_COUNT_GH = os.path.join(ROOT, "bhcountgh")
+BH_MERGED = os.path.join(ROOT, "bhmergedrepo")            # lane-merged: its tip is an ancestor of origin/main, and a ready pull request holds it
+BH_MERGED_GH = os.path.join(ROOT, "bhmergedgh")
 
 
 def _bh_commit(where, name, text):
@@ -17105,10 +17107,11 @@ def _bh_head(where):
     return run_vcs(where, "rev-parse", "HEAD").stdout.strip()
 
 
-def _bh_lane(where, lane, pushed=True, local_ahead=True):
+def _bh_lane(where, lane, pushed=True, local_ahead=True, merged=False):
     """A checkout on `lane`, cut from origin/main, with one commit. When `pushed`, origin/<lane> holds that commit and
-    the lane's upstream is set. When `local_ahead`, one more commit is not pushed. Returns (the first commit, the local
-    head), each read back with git, so no case judges a fixture that lacks its state."""
+    the lane's upstream is set. When `local_ahead`, one more commit is not pushed. When `merged`, origin/main moves one
+    commit past that first commit, so the tip is an ancestor of origin/main and not equal to it. Returns (the first
+    commit, the local head), each read back with git, so no case judges a fixture that lacks its state."""
     make_repo(where, {"base.txt": "base\n"})
     run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
     run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -17120,6 +17123,11 @@ def _bh_lane(where, lane, pushed=True, local_ahead=True):
     if pushed:
         run_vcs(where, "update-ref", "refs/remotes/origin/" + lane, "HEAD")
         run_vcs(where, "branch", "--set-upstream-to=origin/" + lane, lane)
+    if merged:
+        past = run_vcs(where, *IDENT, "commit-tree", first + "^{tree}", "-p", first, "-m", "main past the merged tip")
+        if past.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: %r could not commit past %s" % (where, first))
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", past.stdout.strip())
     if local_ahead:
         _bh_commit(where, "lane.txt", "not pushed\n")
     remote = run_vcs(where, "rev-parse", "-q", "--verify", "refs/remotes/origin/" + lane)
@@ -17128,6 +17136,9 @@ def _bh_lane(where, lane, pushed=True, local_ahead=True):
                  % (where, lane, pushed))
     if (_bh_head(where) != first) != local_ahead:
         sys.exit("fixture setup failed in build_fixtures: %r needs local_ahead=%s" % (where, local_ahead))
+    if merged and (run_vcs(where, "merge-base", "--is-ancestor", first, "refs/remotes/origin/main").returncode != 0
+                   or run_vcs(where, "rev-parse", "refs/remotes/origin/main").stdout.strip() == first):
+        sys.exit("fixture setup failed in build_fixtures: %r needs its tip an ancestor of origin/main, not equal" % where)
     if pushed and run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip() \
             != "origin/" + lane:
         sys.exit("fixture setup failed in build_fixtures: %r needs upstream origin/%s" % (where, lane))
@@ -17220,6 +17231,14 @@ lazy_fixture([BH_FULL, BH_FULL_GH], _build_bh_full)
 lazy_fixture([BH_COUNT, BH_COUNT_GH], _build_bh_count)
 
 
+def _build_bh_merged():
+    tip, _ = _bh_lane(BH_MERGED, "lane-merged", merged=True)
+    _bh_fake(BH_MERGED_GH, tip, [_bh_pr(2, "pr-two-head", "integration/b68")], {"pr-two-head": "ahead"})
+
+
+lazy_fixture([BH_MERGED, BH_MERGED_GH], _build_bh_merged)
+
+
 def _bh_env(fake):
     """The PATH a case's guard runs on: the counted fake first, then the interpreter's and git's folders."""
     return fake + os.pathsep + PY_PATH + os.pathsep + GIT_PATH
@@ -17274,6 +17293,20 @@ sh("push-batch: control, a quoted push into a held lane is silent", 'echo "' + V
    "allow", cwd=BH_HELD, env_path=_bh_env(BH_HELD_GH), silent=True)
 
 
+# A held lane moved in the same push as a delete, and --all naming a held lane branch, are refused. A literal name and
+# -u alone stay refused. A delete-only push and --all with no held tip keep their verdicts.
+_bh_push("refused, a held lane moved in the same push as a delete", "origin HEAD:lane-held :old-zz", "deny",
+         BH_HELD_GH, BH_HELD, **BH_DENY)
+_bh_push("control, a delete-only push is silent", "origin :old-zz", "allow", BH_HELD_GH, BH_HELD, silent=True)
+_bh_push("refused, --all with a held lane branch", "--all origin", "deny", BH_HELD_GH, BH_HELD, **BH_DENY)
+_bh_push("control, --all with no held tip keeps ask push-main", "--all origin", "ask", BH_COUNT_GH, BH_COUNT,
+         rule=PUSH_MAIN_RULE)
+_bh_push("control, a literal destination name is refused", "origin HEAD:lane-held", "deny", BH_HELD_GH, BH_HELD,
+         **BH_DENY)
+_bh_push("control, -u alone into a held lane is refused", "-u origin HEAD:lane-held", "deny", BH_HELD_GH, BH_HELD,
+         **BH_DENY)
+
+
 # The cost, pinned on the counted fake: one open-list call, then one compare per ready pull request, and nothing for a
 # push of main or a dry run. ARCHIVE_CALLS is the counted fake's log (gh_calls_taken reads and clears it).
 def _bh_gh_calls(folder, command, cwd):
@@ -17325,9 +17358,9 @@ def bh_dry_run_cost_case():
                          "control, a dry run makes no gh call")
 
 
-def bh_unread_case(config_name, fake, label):
+def bh_unread_case(config_name, fake, label, tail="origin HEAD:lane-held"):
     """A push the batch read cannot judge is allowed, and its log holds a push-batch-unread line. The log is the
-    signal: an unread read that allowed silently would be a pass nobody can see."""
+    signal: an unread read that allowed silently would be a pass nobody can see. `tail` is the push's arguments."""
     def check():
         config = os.path.join(ROOT, config_name)
         os.makedirs(config, exist_ok=True)
@@ -17336,7 +17369,7 @@ def bh_unread_case(config_name, fake, label):
             os.remove(log)
         decision, reason = decide({"raw": None, "tool": "Bash", "cwd": BH_HELD, "session": None,
                                    "env_path": _bh_env(fake), "config": config,
-                                   "tool_input": {"command": VCS + " push origin HEAD:lane-held"}})
+                                   "tool_input": {"command": VCS + " push " + tail}})
         if decision != "allow":
             return False, "%s: the push was %s, not allowed (%s)" % (label, decision, reason[:90])
         text = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
@@ -17344,6 +17377,21 @@ def bh_unread_case(config_name, fake, label):
             return False, "%s: the allow left no %s line in guard.log" % (label, PUSH_BATCH_UNREAD)
         return True, "%s: allowed, and logged as %s" % (label, PUSH_BATCH_UNREAD)
     return check
+
+
+def bh_merged_tip_cost_case():
+    return _bh_cost_case(BH_MERGED_GH, BH_MERGED, "push origin HEAD:lane-merged", "allow", [],
+                         "a tip already merged into origin/main is allowed, with no gh call")
+
+
+def bh_unmerged_cost_case():
+    return _bh_cost_case(BH_HELD_GH, BH_HELD, "push origin HEAD:lane-held", "deny", ["pulls", "compare"],
+                         "control, an unmerged held tip still denies, one list and one compare")
+
+
+def bh_short_dry_run_cost_case():
+    return _bh_cost_case(BH_HELD_GH, BH_HELD, "push -nu origin HEAD:lane-held", "allow", [],
+                         "a dry run in a short-flag cluster (-nu) is allowed, with no gh call")
 
 
 LOG_CHECKS_EXTRA.append(("push-batch-held: a holder that is a draft costs the open list alone, one gh call",
@@ -17358,6 +17406,15 @@ LOG_CHECKS_EXTRA.append(("push-batch-held: an open list that cannot be read allo
                          bh_unread_case("bhunreadlist", BH_HELD_BROKEN_GH, "the open list cannot be read")))
 LOG_CHECKS_EXTRA.append(("push-batch-held: a compare that cannot be read allows the push, and logs push-batch-unread",
                          bh_unread_case("bhunreadcmp", BH_HELD_SERVER_GH, "the compare cannot be read")))
+LOG_CHECKS_EXTRA.append(("push-batch-held: a tip already merged into origin/main is allowed, with no gh call",
+                         bh_merged_tip_cost_case))
+LOG_CHECKS_EXTRA.append(("push-batch-held: control, an unmerged held tip still denies, one list and one compare",
+                         bh_unmerged_cost_case))
+LOG_CHECKS_EXTRA.append(("push-batch-held: a dry run in a short-flag cluster (-nu) is allowed, with no gh call",
+                         bh_short_dry_run_cost_case))
+LOG_CHECKS_EXTRA.append(("push-batch-held: a destination name the guard cannot read is allowed, and logs push-batch-unread",
+                         bh_unread_case("bhunreaddollar", BH_HELD_GH, "the destination name cannot be read",
+                                        tail="origin HEAD:$LANEB")))
 FAMILY = "paths"
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
