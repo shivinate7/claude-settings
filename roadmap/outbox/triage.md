@@ -225,3 +225,9 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - track-vars-quote-filter (same source): the quote and backslash filter in `_track_variables` (hooks/guard_core.py, about line 1104) runs on shlex tokens whose quotes are already gone, so its docstring is wrong. Fix: filter on the raw text, or correct the docstring.
 - worktree-home-cd-docstring (same source): stale docstring at hooks/test_guard.py about line 25357 (worktree_home_cd_after_untracked_case). Fix: update the text.
 - loop-clears-known-vars (same source): `for` and `if` clear known variables, so a loop form is allowed while its literal twin is denied. Fix: keep the known variables through loops.
+- brief-scope-glob-stem (#2334 agent-commit-file-scope, via coordinator 12:48 CST Nov 9): a glob with a literal stem and no `/` or extension (`verdict-*`) names no file, so the incident-2 shape escapes when written that way. Fix: match a stem-only glob against the brief's file list.
+- brief-path-one-home (same source): `brief_path_of` imports stall_watch, while guard_merge uses own_session.agent_transcript_path. Fix: one home, own_session.
+- brief-scope-no-mutant (same source): hooks/mutate_guard.py has no mutant for `brief-scope-diff`. Fix: add one.
+- gh-reopen-cloud-allowed (#2444 round 3, gh-write cloud guard, via coordinator 12:49 CST Nov 9): gh pr reopen, gh pr update-branch and gh issue reopen pass in the cloud. Fix: add them to the cloud write list.
+- gh-rerun-unpinned (same source): no test pins that `gh run rerun` is allowed in the cloud. Fix: add an allow case.
+- gh-body-h-hides-write (same source): `--body -h` hides a write from the reader. Fix: treat a value after --body as a value, not a flag.
