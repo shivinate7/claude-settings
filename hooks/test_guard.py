@@ -11134,6 +11134,9 @@ AGENT_FIXTURES = {
     # The same order in one file: an untagged read of the target, then a set_session_tags call on it. No agent file.
     "brief-agent-untagged-then-tags": (role_target_call("t1", ARCH_UNTAGGED_TAGS) + role_tag_call("t2", session=ROLE_OTHER),
                                        [(AGENT_OWN_ID, AGENT_QUIET)]),
+    # The control: the same untagged agent record, but the set_session_tags call names another session, not the target.
+    "brief-agent-untagged-other-tags": (role_tag_call("t2"),
+                                        [(AGENT_OWN_ID, role_target_call("t1", ARCH_UNTAGGED_TAGS))]),
     "trust-agent-untagged": (AGENT_QUIET, [(AGENT_OWN_ID, role_call("g1", ["cs-repo:o/r"]))]),
     "trust-agent-lane": (role_call("g1", ["cs-repo:o/r"]), [(AGENT_OWN_ID, role_call("g1", LANE_TAGS))]),
 }
@@ -11368,6 +11371,10 @@ step_refuse("a brief for topic B, over an untagged agent record and set_session_
 step_refuse("a brief for topic B, after an untagged read then set_session_tags in the main transcript, is refused as stale",
             role_path("brief-agent-untagged-then-tags"), "Lane brief: x. Topic: B.", agent_id=AGENT_OWN_ID,
             carries=("set_session_tags call on the target followed",), lacks=("holds no get_session",))
+# Allowed: the control for the two refusals above. The record is untagged, and the tag call names another session, so the
+# target is not retagged and the brief passes. A fix that marks any tag call stale refuses this case.
+step_allow("a brief for topic B, over an untagged agent record and set_session_tags on another session, is allowed",
+           role_path("brief-agent-untagged-other-tags"), "Lane brief: x. Topic: B.", agent_id=AGENT_OWN_ID)
 step_refuse("a lane in the agent's own record decides though the main record says triage: a brief for topic colors is refused",
             role_path("brief-agent-lane-over-triage"), "Lane brief: icon-b. Topic: colors.", agent_id=AGENT_OWN_ID,
             carries=("names a topic the lane does not hold",))
