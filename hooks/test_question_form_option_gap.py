@@ -9,7 +9,7 @@ through three ways, each red below:
   (c)  an update names its data by a relative file_path. _write_data opens the path against the hook
        process's cwd, not the payload's cwd, and an unreadable file reads as None, which passes.
 
-Controls, green on main, beside each red: the same write on the cwd's own page is refused, the same update by
+Controls, beside each case in this file: the same write on the cwd's own page is refused, the same update by
 an absolute path is refused (so the relative read is the cause of (c)), letter keys pass in each shape, a
 closed item passes, and a write to another collection passes.
 
@@ -128,14 +128,14 @@ def case_relative_file_path_refuses_none_key():
 # ------------------------------------------------------------------ the green controls
 
 def case_own_page_refuses_none_key():
-    """Control, green on main: the cwd repo's own page refuses an option keyed none. The rule works wherever
+    """Control: the cwd repo's own page refuses an option keyed none. The rule works wherever
     the guard reads the page as this repo's."""
     judge_both("control: the cwd repo's own page refuses an option keyed none",
                items_write("set", none_item()), tcj.PAGE_REPO, REFUSED)
 
 
 def case_absolute_path_refuses_none_key():
-    """Control, green on main: the same update by an absolute file_path is refused. So the relative read, not the
+    """Control: the same update by an absolute file_path is refused. So the relative read, not the
     rule, is the cause of (c)."""
     cwd = tcj.make_repo("gap-files")
     path = os.path.join(cwd, "absolute-none.json")
@@ -145,7 +145,7 @@ def case_absolute_path_refuses_none_key():
 
 
 def case_letter_keys_pass_in_each_shape():
-    """Controls, green on main: a letter-keyed item passes from another repo's page, from a cwd with no page
+    """Controls: a letter-keyed item passes from another repo's page, from a cwd with no page
     key, and from a relative file_path. Each red above is the none key and nothing else."""
     judge_both("control: letter keys pass on another repo's waiting page",
                items_write("set", tcj.good_page_item()), tcj.make_repo("gap-other", page=OTHER_URL), PASS)
@@ -160,7 +160,7 @@ def case_letter_keys_pass_in_each_shape():
 
 
 def case_closed_none_key_passes():
-    """Control, green on main: a closed item keyed none passes, both on the cwd's own page and on another
+    """Control: a closed item keyed none passes, both on the cwd's own page and on another
     repo's page. option_letter_hit returns for a closed item (the closed check), so the rule never judges it."""
     judge_both("control: a closed item keyed none passes on the cwd's own page",
                items_write("set", none_item(status="closed")), tcj.PAGE_REPO, PASS)
@@ -169,7 +169,7 @@ def case_closed_none_key_passes():
 
 
 def case_non_items_write_with_none_passes():
-    """Control, green on main: a write to another collection passes, though its data carries a key none, from
+    """Control: a write to another collection passes, though its data carries a key none, from
     another repo's page. The rule reads the items collection only."""
     cwd = tcj.make_repo("gap-other", page=OTHER_URL)
     judge_both("control: a meta write with key none in unrelated data passes",
@@ -203,7 +203,7 @@ def check_scope(name, call, cwd, cwd_page, on_page):
 
 
 def case_other_page_passes_letter_and_digit_keys():
-    """Pin, green on head: an items write to another repo's waiting page passes with option keys e2, a and c. Off
+    """Pin: an items write to another repo's waiting page passes with option keys e2, a and c. Off
     the cwd's own page only the key none is read, so e2, which is no letter, passes."""
     cwd = tcj.make_repo("gap-other", page=OTHER_URL)
     call = items_write("set", narrowed_item("e2", "a", "c"))
@@ -212,7 +212,7 @@ def case_other_page_passes_letter_and_digit_keys():
 
 
 def case_no_page_passes_key_e2():
-    """Pin, green on head: an items write from a cwd with no page key passes with the key e2. The cwd's page
+    """Pin: an items write from a cwd with no page key passes with the key e2. The cwd's page
     reads as unknown, so the write is off the cwd's page and only the key none is read."""
     cwd = tcj.make_repo("gap-nopage", page=None)
     call = items_write("set", narrowed_item("e2", "b"))
@@ -221,7 +221,7 @@ def case_no_page_passes_key_e2():
 
 
 def case_none_lookalike_keys_pass():
-    """Pin, green on head: the keys "None" and " none" pass off the cwd's own page. The page reserves exactly
+    """Pin: the keys "None" and " none" pass off the cwd's own page. The page reserves exactly
     "none", and the check compares exactly that key."""
     cwd = tcj.make_repo("gap-other", page=OTHER_URL)
     for key in ("None", " none"):
