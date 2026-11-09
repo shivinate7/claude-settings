@@ -7634,6 +7634,58 @@ sh("push: a multi-line template literal before an argv forced push, denies",
    'deno eval "const s = `line one\nline two`; new Deno.Command(\\"' + VCS + r'\", '
    r'{args: [\"push\", \"-f\", \"origin\", \"x\"]}).outputSync()"',
    "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# DENO SCRIPT, PLAIN AND ARGV. A deno eval script that spawns a forced push denies, and the argv call
+# that runs the same push through a shell denies with the same reason. `bash -c` and `sh -c` take the next
+# argument as their script, so each argv form below runs the forced push.
+sh("push: deno eval spawns a forced push by its plain script, denies",
+   r'deno eval "spawn(\"' + VCS + r' push -f origin x\")"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval -A runs bash -c with a forced push in an argv call, denies",
+   r'deno eval -A "new Deno.Command(\"bash\", {args: [\"-c\", \"' + VCS + r' push -f origin x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval -A runs sh -c with a forced push in an argv call, denies",
+   r'deno eval -A "new Deno.Command(\"sh\", {args: [\"-c\", \"' + VCS + r' push -f origin x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval -A runs bash -c with a forced push and a cwd after the args, denies",
+   r'deno eval -A "new Deno.Command(\"bash\", {args: [\"-c\", \"' + VCS + r' push -f origin x\"], '
+   r'cwd: \"/tmp\"}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval with no -A runs bash -c with a forced push, denies",
+   r'deno eval "new Deno.Command(\"bash\", {args: [\"-c\", \"' + VCS + r' push -f origin x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# DENO FLAG VALUES. A deno eval flag that takes a value, such as `--ext ts`, `--config x.json`,
+# `--seed 1` or `--cert a.pem`, puts a bare word between the flag and the script. Each form runs the
+# forced push, so each denies.
+sh("push: deno eval --ext ts before an argv forced push, denies",
+   r'deno eval --ext ts "new Deno.Command(\"' + VCS + r'\", '
+   r'{args: [\"push\", \"-f\", \"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval --config x.json before an argv forced push, denies",
+   r'deno eval --config x.json "new Deno.Command(\"' + VCS + r'\", '
+   r'{args: [\"push\", \"-f\", \"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval --seed 1 before an argv forced push, denies",
+   r'deno eval --seed 1 "new Deno.Command(\"' + VCS + r'\", '
+   r'{args: [\"push\", \"-f\", \"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval --cert a.pem before an argv forced push, denies",
+   r'deno eval --cert a.pem "new Deno.Command(\"' + VCS + r'\", '
+   r'{args: [\"push\", \"-f\", \"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# EMPTY AND APOSTROPHE ARGUMENTS. An empty argument is a word of its own, and an argument with an
+# apostrophe is string text, so neither one hides the forced push that follows it. Each denies.
+sh("push: argv call, empty arguments around a forced push, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", '
+   r'{args: [\"push\", \"\", \"-f\", \"\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: argv call, apostrophes in two arguments around a forced push, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"it' + "'" + r's\", \"-f\", '
+   r'\"can' + "'" + r't\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# A bash -c that runs git status is no push, so it allows.
+sh("push: argv call runs bash -c git status, allows",
+   r'deno eval "new Deno.Command(\"bash\", {args: [\"-c\", \"' + VCS + r' status\"]}).outputSync()"',
+   "allow", cwd=PUSHFEAT)
 # The push text reader's scanner shapes. A comment opener or a multi-line string inside quotes is text, so
 # each is an allow control, green today. A lone quote in text opens no string that hides a push: nothing
 # after an unterminated quote runs, so the push-looking text after `it's #` is not a live push.
@@ -23925,30 +23977,35 @@ def tick_safe_mean(run_once, cap):
     return True, total / runs, ""
 
 
-def rm_var_batch(cmd, must, cwd=NOGIT):
-    """Return tick_safe_mean of judging cmd in cwd. Every run must be a deny whose reason holds `must`.
+def rm_var_batch(cmd, must, cwd=NOGIT, want="deny", cap=RM_VAR_BATCH_CAP):
+    """Return tick_safe_mean of judging cmd in cwd. Every run must give `want` with a reason holding `must`.
 
-    The reason is the rule name, so an empty `must` checks the deny alone.
+    The reason is the rule name, so an empty `must` checks the verdict alone. `cap` bounds the runs.
     """
     def run_once():
         got, reason, took = judge_in_process(cmd, cwd)
-        if got != "deny" or must not in reason:
-            return False, 0.0, "judged %s, not the expected deny" % got
+        if got != want or must not in reason:
+            return False, 0.0, "judged %s, not the expected %s" % (got, want)
         return True, took, ""
-    return tick_safe_mean(run_once, RM_VAR_BATCH_CAP)
+    return tick_safe_mean(run_once, cap)
 
 
-def rm_var_ratio(make, small_n, big_n, must="rm-var-unguarded", cwd=NOGIT):
-    """Return (ok, text) for make(big_n) against make(small_n) scaled by big_n / small_n, judged in cwd."""
+def rm_var_ratio(make, small_n, big_n, must="rm-var-unguarded", cwd=NOGIT, want="deny",
+                 cap=RM_VAR_BATCH_CAP):
+    """Return (ok, text) for make(big_n) against make(small_n) scaled by big_n / small_n, judged in cwd.
+
+    Every run must give the verdict `want`, so a case whose command is an allow passes want="allow".
+    `cap` bounds the runs in each small batch.
+    """
     small, big = [], []
     for _ in range(RM_VAR_REPEATS):
-        ok, mean, text = rm_var_batch(make(small_n), must, cwd)
+        ok, mean, text = rm_var_batch(make(small_n), must, cwd, want, cap)
         if not ok:
             return False, "small n=%d: %s" % (small_n, text)
         small.append(mean)
         got, reason, took = judge_in_process(make(big_n), cwd)
-        if got != "deny" or must not in reason:
-            return False, "big n=%d judged %s, not the expected deny" % (big_n, got)
+        if got != want or must not in reason:
+            return False, "big n=%d judged %s, not the expected %s" % (big_n, got, want)
         big.append(took)
     size = big_n / small_n
     base = sum(small) / len(small)   # each batch mean is positive: it spans RM_VAR_FLOOR
@@ -24017,9 +24074,23 @@ def argv_gap_case():
     return rm_var_ratio(argv_gap_cmd, 6000, 48000, must="", cwd=PUSHFEAT)
 
 
+# A run of deno eval flags before a nested quote. Each `--a` has two parses in the flag pattern, one with
+# `--` and one with `-`, so a failed match tries every split and its CPU doubles per flag. The command
+# names no push, so it allows, and the ratio compares allow runs. The small side is 14 flags, about 4 ms a
+# judge, so the default cap of 100 runs ends short of RM_VAR_FLOOR. The cap here is 1000.
+def argv_flag_gap_cmd(n):
+    return "deno eval " + "--a " * n + 'x "a \\"b\\""'
+
+
+def argv_flag_gap_case():
+    return rm_var_ratio(argv_flag_gap_cmd, 14, 20, must="", cwd=PUSHFEAT, want="allow", cap=1000)
+
+
 _section_family = FAMILY
 FAMILY = "push-delete"
 LOG_CHECKS_EXTRA.append(("push: a failing ARGV_GAP over 48000 spaces stays linear in CPU", argv_gap_case))
+LOG_CHECKS_EXTRA.append(("push: a run of deno eval flags before a nested quote stays linear in CPU",
+                         argv_flag_gap_case))
 FAMILY = _section_family
 
 
