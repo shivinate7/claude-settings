@@ -365,7 +365,7 @@ def _install_ids_differ():
     return len(ids) > 1
 
 
-def _print_crash_deny():
+def _print_crash_refuse():
     """Print the guard-crash refusal, the one text of it. It reads nothing from a guard module, so the load
     failure below, which cannot trust one, prints it too."""
     print(json.dumps({"hookSpecificOutput": {
@@ -515,7 +515,7 @@ while True:
         except Exception:
             stopping = False
         if not stopping:
-            _print_crash_deny()
+            _print_crash_refuse()
         sys.exit(0)
 
 
@@ -3191,7 +3191,7 @@ def _question_form_module():
         question_form.use_hooks_home(_HERE)
     except Exception as exc:
         record("", "deny", "guard-crash", cap_safe("question_form: " + type(exc).__name__ + ": " + str(exc), 200))
-        _print_crash_deny()
+        _print_crash_refuse()
         sys.exit(0)
     return question_form
 
