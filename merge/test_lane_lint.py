@@ -909,6 +909,43 @@ class CrossMeasure(LaneFixture):
         self.assertEqual(pass_lines(text), [], "--with of a closed PR printed a PASS line: " + text)
         self.assertEqual(lints, 0, "the ci-job lint ran past the stop: " + text)
 
+    def test_a_with_list_reads_each_named_pr(self):
+        self.own_writes({"shared-a.txt": "lane 7\n", "shared-b.txt": "lane 7\n"})
+        self.pr_writes(11, {"shared-a.txt": "lane 11\n"}, lane_body(OTHER))
+        self.pr_writes(12, {"shared-b.txt": "lane 12\n"}, lane_body(OTHER))
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, reads, trees = self.measured("--lane-lint", "7", "--with", "11,12")
+        self.assertEqual(rc, 1, "--with 11,12 did not refuse the conflicts of both named PRs: " + text)
+        self.assertTrue(names_pr(text, 11), "the refusal does not name the --with PR #11: " + text)
+        self.assertTrue(names_pr(text, 12), "the refusal does not name the --with PR #12: " + text)
+        self.assertEqual(trees, 2, "git merge-tree ran %d times for --with 11,12, want two: one for each named PR" % trees)
+        self.assertEqual(reads, 1, "the open PRs were read %d times, want once" % reads)
+        self.assertEqual(lints, 0, "the ci-job lint ran past the --with refusal: " + text)
+
+    def test_a_with_list_with_a_blank_or_non_digit_item_stops_at_parse_and_never_passes(self):
+        """The list is parsed before any PR is read: a blank or non-digit item is a Stop, so no PR is read, no merge-tree runs and no lint runs."""
+        self.pr_writes(11, {"elsewhere.txt": "lane 11\n"}, lane_body(OTHER))  # a real PR, so a lenient parse would read it and could pass
+        self.use_ci_job(PASSING, 0)
+        for value in ("", " ", "11,", "11,,12", "11,x"):
+            with self.subTest(value=value):
+                rc, text, lints, reads, trees = self.measured("--lane-lint", "7", "--with", value)
+                self.assertEqual(rc, 1, "--with %r did not stop at parse: %s" % (value, text))
+                self.assertEqual(pass_lines(text), [], "--with %r printed a PASS line: %s" % (value, text))
+                self.assertEqual(reads, 0, "--with %r read the open PRs before the parse refused it" % value)
+                self.assertEqual(trees, 0, "--with %r ran git merge-tree before the parse refused it" % value)
+                self.assertEqual(lints, 0, "--with %r ran the ci-job lint: %s" % (value, text))
+
+    def test_a_with_list_that_repeats_a_number_reads_that_pr_once(self):
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        self.pr_writes(11, {"shared-a.txt": "lane 11\n"}, lane_body(OTHER))
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, reads, trees = self.measured("--lane-lint", "7", "--with", "11,11")
+        self.assertEqual(rc, 1, "--with 11,11 did not refuse the conflict of PR #11: " + text)
+        self.assertTrue(names_pr(text, 11), "the refusal does not name the --with PR #11: " + text)
+        self.assertEqual(trees, 1, "git merge-tree ran %d times for --with 11,11, want one: a repeated number is read once" % trees)
+        self.assertEqual(reads, 1, "the open PRs were read %d times, want once" % reads)
+        self.assertEqual(lints, 0, "the ci-job lint ran past the --with refusal: " + text)
+
     def test_a_closed_same_lane_pr_is_skipped_and_an_open_one_beside_it_fails(self):
         self.own_writes({"shared-a.txt": "lane 7\n"})
         self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN), state="closed")
