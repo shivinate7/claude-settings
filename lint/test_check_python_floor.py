@@ -242,6 +242,10 @@ UNION_FORMS = (
     ("None on the left", "Alias = None | int\n", 1),
     ("subscripted builtin operand", "Alias = list[str] | None\n", 1),
     ("builtin beside a plain name", "Alias = int | Widget\n", 1),
+    # The argument check alone: these are not assignment values, so only the isinstance/issubclass rule flags them.
+    ("isinstance inside a function body", "def f(value):\n    return isinstance(value, int | str)\n", 2),
+    ("issubclass inside a function body", "def f(kind):\n    return issubclass(kind, int | str)\n", 2),
+    ("isinstance in a module-level if", "if isinstance(value, int | str):\n    pass\n", 1),
 )
 
 
@@ -291,6 +295,13 @@ class UnionFuture(unittest.TestCase):
         self.assertEqual(code, 1, "an isinstance argument under the future import was not flagged: exit %d"
                          % code)
         self.assertTrue(flagged_at(out, "hooks/x.py", 3), "no output line names hooks/x.py:3: %r" % out)
+
+    def test_isinstance_inside_a_function_is_still_flagged_under_the_future_import(self):
+        # A call runs, so the future import does not exempt its second argument.
+        code, out = run_check(tree({"hooks/x.py": FUTURE + "def f(value):\n    return isinstance(value, int | str)\n"}))
+        self.assertEqual(code, 1, "an isinstance argument in a function body under the future import was not "
+                                  "flagged: exit %d" % code)
+        self.assertTrue(flagged_at(out, "hooks/x.py", 4), "no output line names hooks/x.py:4: %r" % out)
 
 
 class UnionNegatives(unittest.TestCase):
