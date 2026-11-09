@@ -1484,7 +1484,8 @@ class Rebuild(Base):
         self.assertTrue(os.path.isfile(design_file), "no designData.json in the batches folder")
         raw = read_text(design_file)
         self.assertNotIn("<", raw, "designData.json holds a raw '<': every '<' must be written as the escape \\u003c")
-        self.assertIn(r"<", raw, "designData.json has no \\u003c escape for the '<' in its values")
+        ESCAPE = chr(92) + "u003c"  # the six characters of the JSON escape for '<'
+        self.assertIn(ESCAPE, raw, "designData.json has no escape for the '<' in its values")
         self.assertEqual(json.loads(raw), {"a": "live </script> a", "c": "copy <b>tag</b>"},
                          "designData.json must parse to the live values plus the copy's added key")
 
