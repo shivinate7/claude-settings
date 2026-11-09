@@ -12404,7 +12404,7 @@ lazy_fixture([REC_DANGLE, REC_NEW, REC_ADOPT, REC_PLAIN, *REC_DANGLE_LANES.value
               REC_ANC, REC_ANC_LANE], _build_records_more)
 
 
-def records_deny(name, command, lane, **kw):
+def records_refuse(name, command, lane, **kw):
     sh("records-page: %s is refused" % name, command, "deny", RECORDS_RULE, cwd=REC_LANES.get(lane, lane),
        carries=RECORDS_SAYS, lacks=RECORDS_NEVER, **kw)
 
@@ -12414,24 +12414,24 @@ def records_allow(name, command, cwd, **kw):
 
 
 # 1. A staged page that is not the base's page: refused, under Bash and PowerShell, and for a builder.
-records_deny("a lane commit of a staged page that differs from the base's", VCS + " commit -m x", "staged")
-records_deny("a lane commit of a staged page that differs from the base's, under PowerShell",
+records_refuse("a lane commit of a staged page that differs from the base's", VCS + " commit -m x", "staged")
+records_refuse("a lane commit of a staged page that differs from the base's, under PowerShell",
              VCS + " commit -m x", "staged", tool="PowerShell")
-records_deny("a builder's commit of a staged page that differs from the base's", VCS + " commit -m x",
+records_refuse("a builder's commit of a staged page that differs from the base's", VCS + " commit -m x",
              "staged", agent_id="bld1", agent_type="builder")
 # A merge commit is no exemption: only the base's own page rides in on a merge.
-records_deny("a merge commit whose page was rebuilt by hand", VCS + " commit -m x", "merge-rebuilt")
+records_refuse("a merge commit whose page was rebuilt by hand", VCS + " commit -m x", "merge-rebuilt")
 # Stage then commit in one call (beyond the brief's five cases): the page is staged when the commit runs.
-records_deny("stage then commit: commit -am with an edited page", VCS + ' commit -am x', "unstaged")
-records_deny("stage then commit: commit -am with an edited page, under PowerShell", VCS + " commit -am x",
+records_refuse("stage then commit: commit -am with an edited page", VCS + ' commit -am x', "unstaged")
+records_refuse("stage then commit: commit -am with an edited page, under PowerShell", VCS + " commit -am x",
              "unstaged", tool="PowerShell")
-records_deny("stage then commit: add -A and commit with an edited page",
+records_refuse("stage then commit: add -A and commit with an edited page",
              VCS + " add -A && " + VCS + " commit -m x", "unstaged")
-records_deny("stage then commit: add -A and commit with an edited page, under PowerShell",
+records_refuse("stage then commit: add -A and commit with an edited page, under PowerShell",
              VCS + " add -A; " + VCS + " commit -m x", "unstaged", tool="PowerShell")
-records_deny("stage then commit: add . and commit with an edited page",
+records_refuse("stage then commit: add . and commit with an edited page",
              VCS + " add . && " + VCS + " commit -m x", "unstaged")
-records_deny("stage then commit: add of the page and commit with an edited page",
+records_refuse("stage then commit: add of the page and commit with an edited page",
              VCS + " add docs/records.md && " + VCS + " commit -m x", "unstaged")
 
 # 2. No staged change to the page: allowed, though the base's page moved after the lane was cut.
@@ -12453,7 +12453,7 @@ records_allow("a merge commit that brings the base's page, under PowerShell", VC
 records_allow("a commit of the base's own page copied over", VCS + " commit -m x", REC_LANES["copy-base"])
 # Refused: a commit that deletes the page from the index, with no merge in progress. No merge is in progress to
 # bring a page, so the commit holds no page the rule accepts.
-records_deny("a commit that deletes the page, with no merge in progress", VCS + " commit -m x", "deleted")
+records_refuse("a commit that deletes the page, with no merge in progress", VCS + " commit -m x", "deleted")
 # The stage-then-commit forms must hold the same line. A guard that refuses whenever the page on disk
 # differs from HEAD's, with no look at the base, refuses the merge and the remedy: both false alarms.
 for _lane in ("merge", "copy-base"):
@@ -12489,11 +12489,11 @@ for _name, _command in (
 # ---- the same two readings of a lone quote, a multi-line quoted message and a comment opener in a
 # string, building-scanner-respects-strings: the guard reads the command for a commit, so a quote or an
 # opener inside a message must neither hide a commit of the page nor invent one.
-records_deny("a commit of a staged page after a lone apostrophe", "echo don't\n" + VCS + " commit -m x",
+records_refuse("a commit of a staged page after a lone apostrophe", "echo don't\n" + VCS + " commit -m x",
              "staged")
-records_deny("a commit of a staged page after a comment opener inside a string",
+records_refuse("a commit of a staged page after a comment opener inside a string",
              'echo "# note // /* x"\n' + VCS + " commit -m x", "staged")
-records_deny("a commit of a staged page with a multi-line quoted message",
+records_refuse("a commit of a staged page with a multi-line quoted message",
              VCS + ' commit -m "first line\nsecond line"', "staged")
 records_allow("an echo of a commit inside a multi-line quoted string, with a staged page",
               'echo "first\n' + VCS + ' commit -m x\nlast"', REC_LANES["staged"])
@@ -12510,7 +12510,7 @@ for _name, _command, _kw in (
     ("--records-only, under PowerShell", GEN + " --records-only; " + ADD_A + "; " + COMMIT_X,
      {"tool": "PowerShell"}),
 ):
-    records_deny("a chain that runs the generator with %s, then add -A and commit, the page on disk equal to HEAD's"
+    records_refuse("a chain that runs the generator with %s, then add -A and commit, the page on disk equal to HEAD's"
                  % _name, _command, "product", **_kw)
 records_allow("a chain that runs the generator with --check, then add -A and commit",
               GEN + " --check && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
@@ -12534,7 +12534,7 @@ records_allow("add -A and commit after a merge of origin/main when origin/HEAD d
               ADD_A + " && " + COMMIT_X, _dl["merge"])
 records_allow("a merge --no-commit of origin/main and a commit in one chain, origin/HEAD dangling",
               VCS + " merge --no-commit origin/main && " + COMMIT_X, _dl["fresh"])
-records_deny("a hand-rebuilt page after a merge when origin/HEAD dangles", COMMIT_X, _dl["rebuilt"])
+records_refuse("a hand-rebuilt page after a merge when origin/HEAD dangles", COMMIT_X, _dl["rebuilt"])
 
 # The page is untracked at HEAD (the base added it after the lane was cut). `commit -a` never stages an
 # untracked file, so it commits no page. `add -A` and an add of the page do.
@@ -12542,8 +12542,8 @@ records_allow("commit -am when the page is untracked at HEAD", VCS + " commit -a
 records_allow("commit -am when the page is untracked at HEAD, under PowerShell", VCS + " commit -am x",
               REC_NEW_LANE, tool="PowerShell")
 records_allow("a plain commit when the page is untracked at HEAD", COMMIT_X, REC_NEW_LANE)
-records_deny("add -A and commit when the page is untracked at HEAD", ADD_A + " && " + COMMIT_X, REC_NEW_LANE)
-records_deny("add of the page and commit when the page is untracked at HEAD",
+records_refuse("add -A and commit when the page is untracked at HEAD", ADD_A + " && " + COMMIT_X, REC_NEW_LANE)
+records_refuse("add of the page and commit when the page is untracked at HEAD",
              VCS + " add docs/records.md && " + COMMIT_X, REC_NEW_LANE)
 
 # A commit that names its paths (`--` or --only) commits those paths and ignores the other staged
@@ -12552,8 +12552,8 @@ records_allow("a commit of src/app.py by path, with the page staged earlier", CO
               REC_LANES["staged-edit"])
 records_allow("a commit with --only of src/app.py, with the page staged earlier",
               VCS + " commit --only -m x src/app.py", REC_LANES["staged-edit"])
-records_deny("a plain commit with the page staged earlier and src/app.py edited", COMMIT_X, "staged-edit")
-records_deny("a commit by path that names the page, with the page staged earlier",
+records_refuse("a plain commit with the page staged earlier and src/app.py edited", COMMIT_X, "staged-edit")
+records_refuse("a commit by path that names the page, with the page staged earlier",
              COMMIT_X + " -- src/app.py docs/records.md", "staged-edit")
 
 # First adoption: the base has no page, and the lane creates it. Allowed (the rule reads a base with no
@@ -12573,9 +12573,9 @@ records_allow("a chain that logs the generator's history, then add -A and commit
               VCS + " log --oneline -- lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
 records_allow("a chain that runs the generator with --print, then add -A and commit",
               GEN + " --print && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
-records_deny("a chain that runs the generator as its own command word, then add -A and commit",
+records_refuse("a chain that runs the generator as its own command word, then add -A and commit",
              "./lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, "product")
-records_deny("a chain that runs the generator through env, then add -A and commit",
+records_refuse("a chain that runs the generator through env, then add -A and commit",
              "env python3 lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, "product")
 
 # The rule acts only when the base page opens with the generated header. A hand-written base page is no
@@ -12622,11 +12622,11 @@ records_allow("a test-author commit of the merge's own page with a clean product
 
 # Refused: a page rebuilt by hand after the merge, a merge of a branch that is not the base, and a page staged
 # after merge --quit, when no merge is in progress.
-records_deny("a test-author commit of a page rebuilt after the merge, origin/main moved on", VCS + " commit -m x",
+records_refuse("a test-author commit of a page rebuilt after the merge, origin/main moved on", VCS + " commit -m x",
              _mv["rebuilt"], **RECORDS_AUTHOR)
-records_deny("a test-author commit of a non-base merge's page, the feature branch's, origin/main moved on",
+records_refuse("a test-author commit of a non-base merge's page, the feature branch's, origin/main moved on",
              VCS + " commit -m x", _mv["nonbase"], **RECORDS_AUTHOR)
-records_deny("a test-author commit of the merge's page after merge --quit, no merge in progress",
+records_refuse("a test-author commit of the merge's page after merge --quit, no merge in progress",
              VCS + " commit -m x", _mv["quit"], **RECORDS_AUTHOR)
 # Allowed: the base's own page in a merge, with a product file staged. The test-author scope adds no refusal
 # for a product path in a merge.
@@ -12640,7 +12640,7 @@ records_allow("a test-author writes MERGE_HEAD's page into the tree, with no com
               VCS + " show MERGE_HEAD:docs/records.md > docs/records.md", _mv["take"], **RECORDS_AUTHOR)
 # Refused: the page of a branch whose tip is in origin/main's history, off its first-parent line. The merge of
 # that tip is not a merge of a base tip, so the page it brings is not the base's own page.
-records_deny("a test-author commit of a page from a branch merged into origin/main off its first-parent line",
+records_refuse("a test-author commit of a page from a branch merged into origin/main off its first-parent line",
              VCS + " commit -m x", REC_ANC_LANE, **RECORDS_AUTHOR)
 
 # =========================================================================== 5d. conflict markers
