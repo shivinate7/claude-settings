@@ -1706,6 +1706,11 @@ class QuietStepKeepsTheStallWatchFed(Job):
         self.assertIn("still running", done.stderr, done.stdout + done.stderr)
 
 
+# Runs ci-job with flock failing with ENOLCK, not contention. No path tried (a FIFO, /dev/null, /proc, /sys, a pipe) makes flock
+# fail that way, so the error is raised at the flock call of a real ci-job process.
+FLOCK_ENOLCK = launcher("import errno, fcntl\ndef no_locks(fd, operation):\n    raise OSError(errno.ENOLCK, 'No locks available')\nfcntl.flock = no_locks")
+
+
 @unittest.skipUnless(os.name == "posix", "the lock is an flock: POSIX only")
 class HeavyBrake(Job):
     """The cloud brake on heavy runs (roadmap step cloud-heavy-check-brake). With CLAUDE_CODE_REMOTE=true, a run other than
@@ -1717,6 +1722,7 @@ class HeavyBrake(Job):
     kill_group = staticmethod(QuietStepKeepsTheStallWatchFed.kill_group)  # the process-group kill: its one home is that class
     SLOW = step("slow", "read -r go < gate")  # blocks until the test writes the FIFO `gate` in the run's folder
     QUICK = step("quick", "touch quick-ran.txt")
+    SIGNALLED = step("slow", "echo up > up.fifo\nread -r go < gate")  # writes `up.fifo` once it runs, then blocks as SLOW does
 
     def setUp(self):
         super().setUp()
@@ -1876,6 +1882,65 @@ class HeavyBrake(Job):
         self.finish(holder)
         with self.assertRaises(ProcessLookupError, msg="a process of the run is still running after the run ended"):
             os.killpg(holder.pid, 0)  # the run's own group: ci-job and the children it started
+
+    def test_a_step_of_a_cloud_run_sees_the_variable_unset(self):
+        """A step gets GitHub's runner env: CLAUDE_CODE_REMOTE is absent, so a ci-job the step starts is not braked by this run's lock."""
+        rc, lines, out = self.run_to_end("outer", step("probe", 'printf %s "${CLAUDE_CODE_REMOTE-unset}" > seen.txt'))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+        with open(os.path.join(self.root, "seen.txt"), encoding="utf-8") as f:
+            seen = f.read()
+        self.assertEqual(seen, "unset", "the step saw CLAUDE_CODE_REMOTE=%r, so a ci-job it starts is refused by the run's own lock" % seen)
+
+    def test_a_ci_job_started_by_a_step_is_not_refused_by_the_run_holding_the_lock(self):
+        inner = os.path.join(self.root, "inner.yml")
+        with open(inner, "w", encoding="utf-8", newline="\n") as f:
+            f.write(workflow(self.QUICK))
+        nested = step("nested", "%s %s lane --workflow %s > nested.txt 2>&1 && echo 0 > nested.rc || echo $? > nested.rc"
+                      % (sys.executable, CI_JOB, inner))
+        rc, lines, out = self.run_to_end("outer", nested)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+        with open(os.path.join(self.root, "nested.rc"), encoding="utf-8") as f:
+            nested_rc = f.read().strip()
+        with open(os.path.join(self.root, "nested.txt"), encoding="utf-8") as f:
+            nested_out = f.read()
+        self.assertEqual(nested_rc, "0", "the ci-job the step started was refused by the lock its outer run holds: %s" % nested_out)
+
+    def test_a_step_that_sets_the_variable_in_its_own_env_still_sees_it(self):  # the control
+        probe = step("probe", 'printf %s "${CLAUDE_CODE_REMOTE-unset}" > seen.txt', env={"CLAUDE_CODE_REMOTE": "'true'"})
+        rc, lines, out = self.run_to_end("outer", probe)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+        with open(os.path.join(self.root, "seen.txt"), encoding="utf-8") as f:
+            seen = f.read()
+        self.assertEqual(seen, "true", "the step's own env: CLAUDE_CODE_REMOTE did not reach the step: %r" % seen)
+
+    def test_a_killed_run_keeps_the_lock_while_its_step_still_runs(self):
+        """Probe for the lock's life: SIGKILL ends the run's ci-job alone, and its step runs on in the run's process group. A
+        second heavy run must still be refused while that step runs; the case fails when the lock freed with its holder."""
+        up = os.path.join(self.root, "up.fifo")
+        os.mkfifo(up)
+        reader = os.open(up, os.O_RDONLY | os.O_NONBLOCK)  # the test's end: the step's write to it does not wait
+        self.addCleanup(os.close, reader)
+        holder = self.start("holder", self.SIGNALLED)
+        ready, _, _ = select.select([reader], [], [], 60)
+        self.assertTrue(ready, "the holder's step did not start within 60 s")
+        os.kill(holder.pid, signal.SIGKILL)  # the run alone dies: its step is left running in the run's process group
+        holder.wait()
+        try:
+            os.killpg(holder.pid, 0)  # precondition: a member of that group still runs, so the probe reads a live step
+        except ProcessLookupError:
+            self.fail("precondition: the killed run's step had already ended, so the probe proves nothing")
+        rc, lines, out = self.run_to_end("second", self.QUICK)
+        self.assertEqual(self.verdicts(lines), ["unknown"], "a second heavy run started while the killed run's step still ran: the lock freed with its holder: %s" % out)
+        self.assertEqual(rc, 2, out)
+
+    def test_a_lock_error_that_is_not_contention_does_not_print_the_busy_refusal(self):
+        argv, env = self.job_call(self.QUICK, launch=("-c", FLOCK_ENOLCK), wf="enolck.yml",
+                                  env={"TMPDIR": self.tmp, "CLAUDE_CODE_REMOTE": "true"})
+        done = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, env=env, timeout=120)
+        out = done.stdout + done.stderr
+        self.assertNotIn("another heavy check runs", out, "a flock error that is not contention printed the busy refusal: %s" % out)
+        lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
+        self.assertEqual((done.returncode, self.verdicts(lines)), (0, ["PASS"]), out)
 
 
 def load_ci_job():
