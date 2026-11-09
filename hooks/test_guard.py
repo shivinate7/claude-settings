@@ -9498,6 +9498,129 @@ sh("env: heredoc-r3: an unquoted body that runs ls in backticks and names a forc
    "cat > /tmp/n.md <<EOF\nrun `ls` then git push --force later\nEOF", "allow", cwd=NOGIT)
 
 
+# ---- flag-false-alarm: env-file forms that read no file's contents, and the controls. Decision env-file-stays-unread.
+# Each allow row reads no file's contents. The word after a boolean flag is a pattern, a glob that
+# excludes the name reads nothing, a jq or yq word is a key, a folder named with the prefix is only
+# made by mkdir, and a file type after rg -T names no file. Main refuses each allow row except the
+# rg -T one, which main allows.
+# Each refuse row is refused by this guard: the name is a path, a glob that includes it, a loader or
+# in-place write of it, a folder that a commit or a printer reads, or a folder entered by cd or pushd
+# (the next word reads from it). jq, gojq and yq read -C as a
+# colour switch, so the word after it is the program or a file, never a value. ag's --file-search-regex
+# picks the files it reads by name only with a hidden flag, and its -p names a file of ignore patterns it reads.
+FLAG_FALSE_ALARM_ALLOW = (
+    "ag -f " + ENV + " src",
+    "ack -f " + ENV,
+    "grep -r --exclude=" + ENV + " foo .",
+    "grep -r --exclude " + ENV + " foo .",
+    "rg -t py " + ENV,
+    "mkdir " + ENV + "s",
+    "jq " + ENV + "ironment f.json",
+    "jq " + ENV + "From f.json",
+    "jq " + ENV + " f.json",
+    "yq " + ENV + "s f.yaml",
+    "yq e " + ENV + "s f.yaml",
+    "jq -C " + ENV + "s f.json",
+    "jq -L dir " + ENV + " f.yaml",
+    "rg -T " + ENV + " K",
+)
+FLAG_FALSE_ALARM_REFUSE = (
+    "cat " + ENV,
+    "jq . " + ENV,
+    "grep x " + ENV,
+    "grep --include=" + ENV + " -r K .",
+    "rg -g " + ENV + " K",
+    "jq --from-file " + ENV,
+    "jq -f " + ENV,
+    "jq --rawfile x " + ENV + " -n .",
+    "ag -f K " + ENV,
+    "ag -t K " + ENV,
+    "rg -tpy K " + ENV,
+    # rg with a hidden flag searches dotfiles, and -T py excludes only python files, so `.env` is searched.
+    "rg --hidden -T py " + ENV,
+    "rg -uu -T py " + ENV,
+    "rg -. -T py " + ENV,
+    "yq -i .x=1 " + ENV,
+    "yq " + ENV,
+    "yq e " + ENV,
+    "yq -i " + ENV,
+    "yq e -i " + ENV,
+    "yq -i e " + ENV,
+    "jq -L " + ENV + " .",
+    VCS + " add " + ENV + "s",
+    "cat " + ENV + "s",
+    "jq -C . " + ENV + " f.json",
+    "gojq -C . " + ENV + " f.json",
+    "yq -C . " + ENV + " f.yaml",
+    "jq -rC .k " + ENV + " f.json",
+    "jq -C -f " + ENV + " .",
+    "gojq . " + ENV,
+    "yq eval .x " + ENV,
+    "grep --exclude-from " + ENV + " foo .",
+    "ag -fp " + ENV + " K",
+    # -p is --path-to-ignore: ag reads the named file as an ignore file, so `.env` is read.
+    "ag -p " + ENV + " K",
+    "cd " + ENV + "s",
+    "pushd " + ENV + "s",
+    "cd " + ENV + ".d",
+)
+for _cmd in FLAG_FALSE_ALARM_ALLOW:
+    sh("env: flag-false-alarm: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
+for _cmd in FLAG_FALSE_ALARM_REFUSE:
+    sh("env: flag-false-alarm: still refused, " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+
+# ---- a folder move into an env-prefixed name. Decision env-file-stays-unread.
+# A lone cd or pushd into one is refused (FLAG_FALSE_ALARM_REFUSE). The Bash tool keeps its folder, so the
+# move would open the next call's reads. The chained forms are pinned here too. Set-Location is the PowerShell cd.
+sh("env: folder move: cd into .envs, then cat a file in it", "cd " + ENV + "s && cat config.json",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: pushd into .envs, then cat a file in it", "pushd " + ENV + "s && cat config.json",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: cd into .env.d, then cat a file in it", "cd " + ENV + ".d && cat x",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: PowerShell Set-Location into .envs, then Get-Content a file in it",
+   "Set-Location " + ENV + "s; Get-Content config.json", "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: folder move: cd into .envs, then ls in it", "cd " + ENV + "s && ls", "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: cd into .envs, then cd back out", "cd " + ENV + "s && cd ..", "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: PowerShell Set-Location into .envs, alone", "Set-Location " + ENV + "s",
+   "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+# A hidden search reads a dotfile whose name matches its -G regex. `-G e` matches `.env`, and the search
+# reads that file while `.env` is the pattern.
+# The guard tries the regex on a few sample env file names. A suffix outside that sample (.production,
+# .development, .test, .staging) is an env file too. Inside double quotes the shell turns `\\.` into `\.`,
+# the regex ag reads. A regex that will not compile is refused: the guard cannot tell what it matches.
+for _cmd in (
+    "ag --hidden -G e " + ENV,
+    "ag -u -G e " + ENV,
+    "ag --hidden --file-search-regex e " + ENV,
+    "ag --unrestricted -G e " + ENV,
+    "ag --hidden --file-search-regex=e " + ENV,
+    "ag --hidden -Ge " + ENV,
+    r"ag --hidden -G '\.env\.production' K",
+    "ag --hidden -G prod K",
+    r"ag --hidden -G '\.development' K",
+    r"ag --hidden -G '\.test' K",
+    r"ag --hidden -G '\.staging' K",
+    r'ag --hidden -G "\\.(env|rc)$" K',
+    r'ag --hidden -G "\\.e" K',
+    "ag --hidden -G 'rc$' K",
+    "ag --hidden -G local K",
+    r"ag --hidden -G '^\./\.env' K",
+    "ag --hidden -G '(' K",
+):
+    sh("env: ag hidden: refused, " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+# The controls. A hidden search whose -G regex names no env file reads none, so it stays allowed. The last
+# row is allowed here and refused by main: main reads the `e` after -G as the pattern and judges `.env` as
+# a file. ag reads `.env` as the pattern, and without a hidden flag it skips dotfiles, so no env file is read.
+for _cmd in ("ag --hidden -G '\\.py$' KEY", "ag -G e " + ENV):
+    sh("env: ag hidden: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
+# With no hidden flag, ag does not search dotfiles, so a -G or --file-search-regex that names `.env` reads
+# no env file. -f is --follow, not a hidden flag. Decision env-file-stays-unread judges the file regex
+# only with a hidden flag.
+for _cmd in ("ag -G " + ENV + " K", "ag --file-search-regex " + ENV + " K", "ag -fG " + ENV + " K"):
+    sh("env: ag no hidden: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+
 def incident_write_strip_case():
     """strip_heredoc_bodies keeps no body line of the incident cat write.
 
