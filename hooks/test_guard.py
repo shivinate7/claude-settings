@@ -69,6 +69,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import precompact_handoff as ph  # noqa: E402  the one home of the handoff and flag paths
+import local_time  # noqa: E402  the one home of the inbox paths
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
 
 # Assembled, so this file never holds the token whole.
@@ -102,9 +103,11 @@ FAMILIES = {
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
+    "hook-bypass": "a git commit, merge or push that skips the git hooks: core.hooksPath on the command or in the environment, --no-verify, and -n on commit; the mutation tool's own exemption",
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
+    "sendmessage-session-id": "SendMessage whose to starts session_: refused, since a session_ id is not an agent name and delivery to one is unmeasured; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -138,6 +141,7 @@ FAMILIES = {
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
     "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
     "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
+    "handoff-sections": "a write that leaves a session's handoff without a section the prompt's marker names is refused, naming the sections; the marker is the one list; the fail-open copies; and the cost",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
@@ -473,6 +477,7 @@ SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktr
 SUBJDIRTY = os.path.join(ROOT, "subjdirty")  # a real checkout with real uncommitted work
 SUBJSTASH = os.path.join(ROOT, "subjstash")  # a clean tree carrying one real stash entry
 SUBJSTASHWT = os.path.join(ROOT, "subjstashlane")  # a linked worktree of it: same stack
+SUBJSTASHDIRTY = os.path.join(ROOT, "subjstashdirty")  # a dirty checkout carrying one real stash entry
 SUBJSTAGED = os.path.join(ROOT, "subjstaged")  # a real checkout: a staged edit, a staged new file
 GITBLIND = os.path.join(ROOT, "gitblind")  # a git that answers the repo test and no status read
 # A repository under a scratchpad named after one session. ROOT already sits under the system
@@ -552,6 +557,8 @@ ARCHNEAR_C10 = os.path.join(ROOT, "archnear-c10")      # an open head `c10`: con
 ARCHNEAR_C10X = os.path.join(ROOT, "archnear-c10x")    # an open head `claude/c10-x1`: contains `c1`, is not it
 ARCHNEAR_CI = os.path.join(ROOT, "archnear-ci")        # an open head `claude/fix-ci-retry-x1`: contains `ci`, is not it
 ARCHOPEN_LANE = os.path.join(ROOT, "archopen-lane")    # the slug's pull request is open on the `lane/<slug>` head form
+ARCH_AGENT_SLUG = "lane-agent-own-step"                # the step an agent's own record names, a second step in the same repo
+ARCHOPEN_AGENT = os.path.join(ROOT, "archopen-agent-step")  # the agent record's step's pull request is open; the main step's is not
 # The containment read of an open lane pull request's head against main, by its status. Each fake holds one open
 # pull request on the slug, its head the slug's head sha; the read's answer is what the name says.
 ARCHDRAFT_BEHIND = os.path.join(ROOT, "archdraft-behind")      # an open draft, head behind main: its commits landed
@@ -640,9 +647,39 @@ PUSHLANEMASTER = os.path.join(ROOT, "pushlanemaster")
 PUSHSELF = os.path.join(ROOT, "pushself")
 PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
 PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
-# The rule ids the two new asks name. Each is the one home for its id in this file.
+# PUSHOWNREF is `lane-x`, tracking origin/batch-1, and origin/lane-x exists too. The stray rule
+# reads that ref as a destination already on the remote, so an implied push to its own name is silent there.
+PUSHOWNREF = os.path.join(ROOT, "pushownref")
+# Rule push-main reads the remote a push names (ruling 207 a, judged on its URL). Every push fixture's origin is
+# PUSHREMOTE, a network URL the guard never contacts, so the existing push-main asks keep their meaning.
+# PUSHLOCAL has a local origin (a bare path), PUSHSSH an scp-form origin, and PUSHNOREMOTE no remote at all.
+# PUSHLOCALSTRAY has the same local origin, and its branch `feat` tracks origin/other, so an implied destination
+# on it is a stray push. PUSHLOCAL's `feat` has no upstream.
+PUSHREMOTE = "https://example.invalid/repo.git"
+PUSHSSHURL = "git@github.com:o/r.git"
+PUSHLOCAL = os.path.join(ROOT, "pushlocal")
+PUSHLOCALSTRAY = os.path.join(ROOT, "pushlocalstray")
+# PUSHLOCALMAIN is main with the same local origin and tracks origin/main, as PUSHMAINUP does with an https origin.
+# It is the local-origin twin of PUSHMAINUP: the two differ only in the origin's kind.
+PUSHLOCALMAIN = os.path.join(ROOT, "pushlocalmain")
+PUSHSSH = os.path.join(ROOT, "pushssh")
+PUSHNOREMOTE = os.path.join(ROOT, "pushnoremote")
+# Agent-worktree branch names (rule push-agent-branch). A branch is named by HEAD, so each name has its own
+# checkout. PUSHAGENT holds the name that a stray push sent to origin, with no upstream. The other shapes and
+# the near misses sit beside it.
+PUSHAGENT = os.path.join(ROOT, "pushagent")            # claude/agent-<hex>
+PUSHAGENTWT = os.path.join(ROOT, "pushagentwt")        # worktree-agent-<hex>
+PUSHAGENTBARE = os.path.join(ROOT, "pushagentbare")    # agent-<hex>
+PUSHAGENTNOTES = os.path.join(ROOT, "pushagentnotes")  # agent-notes: a prefix with no hex after it
+PUSHAGENTMYABC = os.path.join(ROOT, "pushagentmyabc")  # my-agent-abc: a prefix, too short to hold hex
+PUSHAGENTMYHEX = os.path.join(ROOT, "pushagentmyhex")  # my-agent-<hex>: hex behind a prefix, not the shape
+PUSHAGENTSHORT = os.path.join(ROOT, "pushagentshort")  # agent-<7 hex>: a hex tail one character short of the shape
+PUSHAGENTEIGHT = os.path.join(ROOT, "pushagenteight")  # agent-<8 hex>: the exact shape, at its lower bound
+PUSHAGENTCFG = os.path.join(ROOT, "pushagentcfg")      # claude/agent-<hex> with push.autoSetupRemote in its own config
+# The rule ids the push asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
+PUSH_AGENT_RULE = "push-agent-branch"   # a non-forced push whose destination is an agent-worktree branch name
 # roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
@@ -1399,6 +1436,8 @@ def build_fixtures():
     make_fake_gh(ARCHMERGED, "main", need=["o/r"], others=[dict(slug_head, state="closed", merged=True)])
     # The same lane's pull request on the `lane/<slug>` head form (decision session-tiers names both forms).
     make_fake_gh(ARCHOPEN_LANE, "main", need=["o/r"], others=[dict(slug_head, ref="lane/" + ARCHIVE_SLUG)])
+    # The agent record's step has the open pull request, and the main record's step has none (see the agent cases).
+    make_fake_gh(ARCHOPEN_AGENT, "main", need=["o/r"], others=[dict(slug_head, ref=ARCH_AGENT_SLUG)])
     # Page two of the open list (two rows a page): the slug's pull request is the third row, so only a read of
     # every page sees it. The two rows before it name other lanes.
     make_fake_gh(ARCHPAGE, "main", need=["o/r"], page_cap=2, others=[
@@ -1557,8 +1596,8 @@ def _build_gitmain():
 
 
 def _build_subject():
-    """The subject-read repos: SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT and
-    SUBJSTAGED."""
+    """The subject-read repos: SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT,
+    SUBJSTASHDIRTY and SUBJSTAGED."""
     # THE SUBJECT READ. Each arm gets both sides, built with real state: a real clean tree, a
     # real uncommitted edit, a real untracked file, a real one-entry stash stack.
     make_repo(SUBJCLEAN, {"f.txt": "base\n", "keep.txt": "base\n"})
@@ -1587,6 +1626,16 @@ def _build_subject():
     # worktree sees the same one-entry stack, and a drop there destroys the primary's entry.
     run_vcs(SUBJSTASH, "worktree", "add", "-q", SUBJSTASHWT, "-b", "stashlane")
     _require_stash(SUBJSTASHWT, 1)
+
+    # A DIRTY checkout that also carries one real stash entry, so `stash create` is judged where
+    # local edits and a stack entry exist together. Its untracked file is made after the push.
+    make_repo(SUBJSTASHDIRTY, {"f.txt": "base\n", "keep.txt": "base\n"})
+    write(os.path.join(SUBJSTASHDIRTY, "f.txt"), "to be stashed\n")
+    run_vcs(SUBJSTASHDIRTY, *IDENT, "stash", "push", "-m", "cases")
+    _require_stash(SUBJSTASHDIRTY, 1)
+    write(os.path.join(SUBJSTASHDIRTY, "f.txt"), "uncommitted\n")
+    write(os.path.join(SUBJSTASHDIRTY, "new.txt"), "untracked\n")
+    _require_dirty(SUBJSTASHDIRTY, "f.txt", "new.txt", "keep.txt")
 
     # A STAGED edit to a tracked file and a STAGED new file: the state `reset --merge HEAD` reverts
     # and deletes. The tree is dirty, and its work is all in the index.
@@ -1822,16 +1871,21 @@ def _build_branch():
 
 def _build_push():
     """The push destinations: the feat, main, trunk and upstream repos and their remotes."""
-    materialize(BRANCHREMOTE)  # every push destination adds the bare remote _build_branch makes
+    materialize(BRANCHREMOTE)  # PUSHLOCAL's origin is this bare remote, a local path
     # ----------------------------------------------------------------- push destinations
     for where, head, branch in ((PUSHFEAT, "main", "feat"), (PUSHMAIN, "main", "main"),
                                 (PUSHTRUNK, "trunk", "feat"), (PUSHTRUNKLOCAL, "trunk", "feat"),
                                 (PUSHNOHEAD, None, "feat"), (PUSHDETACHED, "main", None),
                                 (PUSHSAMETAG, "main", "main"), (RECROADMAP, "main", "roadmap"),
-                                (RECFORK, "main", "roadmap-fork")):
+                                (RECFORK, "main", "roadmap-fork"),
+                                (PUSHLOCAL, "main", "feat"), (PUSHLOCALSTRAY, "main", "feat"),
+                                (PUSHLOCALMAIN, "main", "main"),
+                                (PUSHSSH, "main", "feat"), (PUSHNOREMOTE, None, "feat")):
         make_repo(where, {"base.txt": "base\n"})
         if head:
-            run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+            origin = {PUSHLOCAL: slash(BRANCHREMOTE), PUSHLOCALSTRAY: slash(BRANCHREMOTE),
+                      PUSHLOCALMAIN: slash(BRANCHREMOTE), PUSHSSH: PUSHSSHURL}.get(where, PUSHREMOTE)
+            run_vcs(where, "remote", "add", "origin", origin)
             run_vcs(where, "update-ref", "refs/remotes/origin/" + head, "HEAD")
             run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD",
                     "refs/remotes/origin/" + head)
@@ -1841,6 +1895,31 @@ def _build_push():
             run_vcs(where, "checkout", "-q", "--detach")
         if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
             sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    # Each remote fixture reads back the origin it was given (P7), so a case never judges a remote the build did
+    # not set. PUSHNOREMOTE must have no remote at all.
+    for where, want in ((PUSHLOCAL, slash(BRANCHREMOTE)), (PUSHLOCALSTRAY, slash(BRANCHREMOTE)),
+                        (PUSHLOCALMAIN, slash(BRANCHREMOTE)), (PUSHSSH, PUSHSSHURL)):
+        if run_vcs(where, "config", "--get", "remote.origin.url").stdout.strip() != want:
+            sys.exit("fixture setup failed in build_fixtures: %r needs origin %s" % (where, want))
+    if run_vcs(PUSHNOREMOTE, "remote").stdout.strip():
+        sys.exit("fixture setup failed in build_fixtures: PUSHNOREMOTE must have no remote")
+
+    # PUSHLOCALSTRAY's upstream is set by git (--set-upstream-to), then read back, so a case never judges a
+    # fixture without it.
+    run_vcs(PUSHLOCALSTRAY, "update-ref", "refs/remotes/origin/other", "HEAD")
+    run_vcs(PUSHLOCALSTRAY, "branch", "--set-upstream-to=origin/other", "feat")
+    if run_vcs(PUSHLOCALSTRAY, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip() \
+            != "origin/other":
+        sys.exit("fixture setup failed in build_fixtures: PUSHLOCALSTRAY needs upstream origin/other")
+
+    # PUSHLOCALMAIN tracks origin/main, set by git and read back, the same as PUSHMAINUP. Its checkout is main.
+    run_vcs(PUSHLOCALMAIN, "branch", "--set-upstream-to=origin/main", "main")
+    if run_vcs(PUSHLOCALMAIN, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip() \
+            != "origin/main":
+        sys.exit("fixture setup failed in build_fixtures: PUSHLOCALMAIN needs upstream origin/main")
+    if run_vcs(PUSHLOCALMAIN, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() != "main":
+        sys.exit("fixture setup failed in build_fixtures: PUSHLOCALMAIN must sit on main")
 
     # The feat destination holds the remote-tracking refs that the push cost case's forms read: feat for
     # a HEAD or bare push, lane/foo for a refspec push or HEAD:lane/foo. A local lane/foo is the source.
@@ -1868,7 +1947,7 @@ def _build_push():
     # A dangling origin/HEAD: it names origin/gone, which is missing. origin/main exists, so the read
     # order gives main as the default branch.
     make_repo(PUSHDANGLING, {"base.txt": "base\n"})
-    run_vcs(PUSHDANGLING, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHDANGLING, "remote", "add", "origin", PUSHREMOTE)
     run_vcs(PUSHDANGLING, "update-ref", "refs/remotes/origin/main", "HEAD")
     run_vcs(PUSHDANGLING, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone")
     run_vcs(PUSHDANGLING, "checkout", "-q", "-b", "feat")
@@ -1884,7 +1963,7 @@ def _build_push():
     for where, remote_branch, absent in ((PUSHNOHEADMAIN, "main", "master"),
                                          (PUSHONLYMASTER, "master", "main")):
         make_repo(where, {"base.txt": "base\n"})
-        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
         run_vcs(where, "update-ref", "refs/remotes/origin/" + remote_branch, "HEAD")
         run_vcs(where, "checkout", "-q", "-b", "feat")
         if (run_vcs(where, "symbolic-ref", "-q", "refs/remotes/origin/HEAD").returncode == 0
@@ -1898,7 +1977,7 @@ def _build_push():
     # Two remotes with two default branches. `feat` tracks upstream/main, so a bare push goes there.
     make_repo(PUSHUPSTREAM, {"base.txt": "base\n"})
     for remote, default in (("origin", "develop"), ("upstream", "main")):
-        run_vcs(PUSHUPSTREAM, "remote", "add", remote, slash(BRANCHREMOTE))
+        run_vcs(PUSHUPSTREAM, "remote", "add", remote, PUSHREMOTE)
         run_vcs(PUSHUPSTREAM, "update-ref", "refs/remotes/%s/%s" % (remote, default), "HEAD")
         run_vcs(PUSHUPSTREAM, "symbolic-ref", "refs/remotes/%s/HEAD" % remote,
                 "refs/remotes/%s/%s" % (remote, default))
@@ -1917,7 +1996,7 @@ def _build_push():
     for where, mode, merge in ((PUSHUP, "upstream", "main"), (PUSHUPSELF, "upstream", "feat"),
                                (PUSHNOUP, "upstream", None), (PUSHMATCH, "matching", None)):
         make_repo(where, {"base.txt": "base\n"})
-        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
         run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
         run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
         run_vcs(where, "checkout", "-q", "-b", "feat")
@@ -1931,37 +2010,46 @@ def _build_push():
     # The upstream shapes of rulings 206 a and 207 a. Each upstream is set by git itself (--track and
     # --set-upstream-to), then read back, so a case never judges a fixture that lacks its upstream.
     make_repo(PUSHSTRAY, {"base.txt": "base\n"})
-    run_vcs(PUSHSTRAY, "remote", "add", "origin", slash(BRANCHREMOTE))
-    run_vcs(PUSHSTRAY, "remote", "add", "fork", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTRAY, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHSTRAY, "remote", "add", "fork", PUSHREMOTE)
     run_vcs(PUSHSTRAY, "update-ref", "refs/remotes/origin/lane/x", "HEAD")
     run_vcs(PUSHSTRAY, "checkout", "-q", "-b", "mylocal")
     run_vcs(PUSHSTRAY, "branch", "--set-upstream-to=origin/lane/x", "mylocal")
     run_vcs(PUSHSTRAY, "config", "push.default", "simple")
 
     make_repo(PUSHSELF, {"base.txt": "base\n"})
-    run_vcs(PUSHSELF, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSELF, "remote", "add", "origin", PUSHREMOTE)
     run_vcs(PUSHSELF, "update-ref", "refs/remotes/origin/feat", "HEAD")
     run_vcs(PUSHSELF, "checkout", "-q", "--track", "-b", "feat", "origin/feat")
 
     for where, lane, base in ((PUSHLANE, "lane/foo", "main"), (PUSHLANEMASTER, "lane/bar", "master")):
         make_repo(where, {"base.txt": "base\n"})
-        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
         run_vcs(where, "update-ref", "refs/remotes/origin/" + base, "HEAD")
         run_vcs(where, "checkout", "-q", "--track", "-b", lane, "origin/" + base)
 
     make_repo(PUSHSTACK, {"base.txt": "base\n"})
-    run_vcs(PUSHSTACK, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTACK, "remote", "add", "origin", PUSHREMOTE)
     run_vcs(PUSHSTACK, "update-ref", "refs/remotes/origin/lane/base", "HEAD")
     run_vcs(PUSHSTACK, "checkout", "-q", "--track", "-b", "lane/fix", "origin/lane/base")
 
     make_repo(PUSHMAINUP, {"base.txt": "base\n"})
-    run_vcs(PUSHMAINUP, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHMAINUP, "remote", "add", "origin", PUSHREMOTE)
     run_vcs(PUSHMAINUP, "update-ref", "refs/remotes/origin/main", "HEAD")
     run_vcs(PUSHMAINUP, "branch", "--set-upstream-to=origin/main", "main")
 
+    # Its own name is on origin, so the implied pushes to it are silent. Built by git itself.
+    make_repo(PUSHOWNREF, {"base.txt": "base\n"})
+    run_vcs(PUSHOWNREF, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHOWNREF, "update-ref", "refs/remotes/origin/batch-1", "HEAD")
+    run_vcs(PUSHOWNREF, "update-ref", "refs/remotes/origin/lane-x", "HEAD")
+    run_vcs(PUSHOWNREF, "checkout", "-q", "-b", "lane-x")
+    run_vcs(PUSHOWNREF, "branch", "--set-upstream-to=origin/batch-1", "lane-x")
+
     for where, upstream in ((PUSHSTRAY, "origin/lane/x"), (PUSHSELF, "origin/feat"),
                             (PUSHLANE, "origin/main"), (PUSHLANEMASTER, "origin/master"),
-                            (PUSHSTACK, "origin/lane/base"), (PUSHMAINUP, "origin/main")):
+                            (PUSHSTACK, "origin/lane/base"), (PUSHMAINUP, "origin/main"),
+                            (PUSHOWNREF, "origin/batch-1")):
         got = run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip()
         if got != upstream:
             sys.exit("fixture setup failed in build_fixtures: %r needs upstream %s, reads %r"
@@ -1974,6 +2062,45 @@ def _build_push():
             or run_vcs(PUSHSTRAY, "config", "--get", "push.default").stdout.strip() != "simple"):
         sys.exit("fixture setup failed in build_fixtures: PUSHSTRAY needs remotes fork and origin "
                  "and push.default simple")
+    # Scope before subject (P7). The stray controls need origin/mylocal absent in PUSHSTRAY, and the ruling 432 a
+    # red rows need origin/lane-x present in PUSHOWNREF. Each is read back, so no case judges a fixture without it.
+    for where, ref, present in ((PUSHSTRAY, "refs/remotes/origin/mylocal", False),
+                                (PUSHOWNREF, "refs/remotes/origin/lane-x", True)):
+        if (run_vcs(where, "rev-parse", "-q", "--verify", ref).returncode == 0) != present:
+            sys.exit("fixture setup failed in build_fixtures: %r needs %s %s"
+                     % (where, ref, "present" if present else "absent"))
+
+    # The agent-worktree names and their near misses (rule push-agent-branch). Each reads back its own name
+    # in HEAD and no upstream, so a case judges the name it names and nothing inherited.
+    for where, branch in ((PUSHAGENT, "claude/agent-a22bb0ed47825117b"),
+                          (PUSHAGENTWT, "worktree-agent-a22bb0ed47825117b"),
+                          (PUSHAGENTBARE, "agent-a22bb0ed47825117b"),
+                          (PUSHAGENTNOTES, "agent-notes"),
+                          (PUSHAGENTMYABC, "my-agent-abc"),
+                          (PUSHAGENTMYHEX, "my-agent-a22bb0ed47825117b"),
+                          (PUSHAGENTSHORT, "agent-1234567"),
+                          (PUSHAGENTEIGHT, "agent-12345678")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
+        run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        run_vcs(where, "checkout", "-q", "-b", branch)
+        if run_vcs(where, "symbolic-ref", "-q", "HEAD").stdout.strip() != "refs/heads/" + branch:
+            sys.exit("fixture setup failed in build_fixtures: %r must be on branch %s" % (where, branch))
+        if run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
+            sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % where)
+    # The config-file autoSetupRemote (rule push-agent-branch). The key is written to this repo's own config,
+    # so a bare push reads it there, not from a `-c` override on the call.
+    make_repo(PUSHAGENTCFG, {"base.txt": "base\n"})
+    run_vcs(PUSHAGENTCFG, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHAGENTCFG, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHAGENTCFG, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run_vcs(PUSHAGENTCFG, "checkout", "-q", "-b", "claude/agent-0c1d2e3f4a5b6c7d")
+    run_vcs(PUSHAGENTCFG, "config", "push.autoSetupRemote", "true")
+    if run_vcs(PUSHAGENTCFG, "config", "--get", "push.autoSetupRemote").stdout.strip() != "true":
+        sys.exit("fixture setup failed in build_fixtures: %r must set push.autoSetupRemote in its config" % PUSHAGENTCFG)
+    if run_vcs(PUSHAGENTCFG, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % PUSHAGENTCFG)
 
 def _build_worktrees():
     """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
@@ -2267,8 +2394,8 @@ lazy_fixture([CTXREPO], _build_ctxrepo)
 lazy_fixture([CURREPO], _build_currepo)
 lazy_fixture([GHDEV], _build_ghdev)
 lazy_fixture([GITMAIN, GITWT, AGENTWT, FARWT, SYMWT, DECOYMAIN], _build_gitmain)
-lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT, SUBJSTAGED],
-             _build_subject)
+lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT, SUBJSTASHDIRTY,
+              SUBJSTAGED], _build_subject)
 lazy_fixture([PRIVREPO], _build_privrepo)
 lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, PTRNOORIGIN,
               PTRNOORIGINCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
@@ -2277,7 +2404,10 @@ lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
-              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK],
+              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHOWNREF,
+              PUSHLOCAL, PUSHLOCALSTRAY, PUSHLOCALMAIN, PUSHSSH, PUSHNOREMOTE,
+              PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX,
+              PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -2596,15 +2726,15 @@ sh("stash help pin: stash --help x reads as a push, still denies",
 sh("subject: dropping an empty stash stack destroys nothing", VCS + " stash drop", "allow",
    cwd=SUBJDIRTY)
 sh("subject: dropping a real stash entry still denies", VCS + " stash drop", "deny",
-   "shared-tree", cwd=SUBJSTASH)
+   "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
 sh("subject: dropping a real stash entry from a worktree still denies, the stack is clone-wide",
    VCS + " stash drop", "deny", "shared-tree", cwd=SUBJSTASHWT)
 sh("subject: clearing an empty stash stack destroys nothing", VCS + " stash clear", "allow",
    cwd=SUBJDIRTY)
 sh("subject: clearing a stack holding a real entry still denies", VCS + " stash clear", "deny",
-   "shared-tree", cwd=SUBJSTASH)
+   "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
 sh("subject: popping a real entry from a CLEAN checkout still denies", VCS + " stash pop",
-   "deny", "shared-tree", cwd=SUBJSTASH)
+   "deny", "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
 sh("subject: popping a real entry from a worktree still denies, the stack is clone-wide",
    VCS + " stash pop", "deny", "shared-tree", cwd=SUBJSTASHWT)
 sh("subject: applying a real entry from a CLEAN checkout still denies", VCS + " stash apply",
@@ -2623,6 +2753,26 @@ sh("subject: show reads the entry without taking it", VCS + " stash show stash@{
    cwd=SUBJSTASH)
 sh("subject: a hard reset in the tree that holds the stash takes nothing",
    VCS + " reset --hard HEAD", "allow", cwd=SUBJSTASH)
+# `git stash create` writes a stash commit object and prints its hash. It adds no entry, changes no
+# ref, index or working tree, and loses no work, so it is a read even over a real stack entry. The
+# rows below pin that, with and without a message argument. The SUBJDIRTY row runs over an empty
+# stack in a dirty tree, which pins that a dirty tree alone does not turn `create` into a write.
+sh("stash create: over a real entry in a dirty checkout takes nothing", VCS + " stash create",
+   "allow", cwd=SUBJSTASHDIRTY)
+sh("stash create: a message argument over a real entry takes nothing",
+   VCS + " stash create lane", "allow", cwd=SUBJSTASHDIRTY)
+sh("stash create: captured into a variable over a real entry takes nothing",
+   "WORK=$(" + VCS + " stash create)", "allow", cwd=SUBJSTASHDIRTY)
+sh("stash create: over a real entry in a clean checkout takes nothing", VCS + " stash create",
+   "allow", cwd=SUBJSTASH)
+sh("stash create: over a real entry from a worktree takes nothing, the stack is clone-wide",
+   VCS + " stash create", "allow", cwd=SUBJSTASHWT)
+sh("stash create: over an empty stack in a dirty checkout takes nothing", VCS + " stash create",
+   "allow", cwd=SUBJDIRTY)
+# `store` writes the stack's own ref, so it stays a stack action and keeps its deny.
+sh("stash store: writes the stack ref over a real entry, still denies",
+   VCS + " stash store -m lane HEAD", "deny", "shared-tree", cwd=SUBJSTASH,
+   carries=STACK_FRAGMENT)
 # `_run_dir` cases: the cwd is SUBJDIRTY (real, dirty) and the command only ATTACHES or MENTIONS SUBJCLEAN, so both deny.
 sh("run-dir bypass: an attached `-C<path>` is not a spelling git accepts, so it names no tree",
    VCS + " -C" + SUBJCLEAN + " status; " + VCS + " reset --hard HEAD",
@@ -3857,26 +4007,46 @@ HMMAIN = os.path.join(ROOT, "hmmain")                          # a primary check
 HMLANE = os.path.join(HMMAIN, ".claude", "worktrees", "lane1")  # a real linked tree of it, in home
 HMTMPREPO = os.path.join(TEMP_DIR, "hmtmprepo")                # a repo UNDER the guard's temp folder
 HMSCRATCH = slash(os.path.join(TEMP_DIR, "scratch", "lane-a"))  # a scratch target under temp
+HM_AGENT = "hmagentown1"                                        # an agent id, whose home tree is built
+HM_SIBLING = "hmagentsib2"                                      # a second agent id, named in the denies
+HMHOME = os.path.join(HMMAIN, ".claude", "worktrees", "agent-" + HM_AGENT)  # that agent's own home
+HM_GONE = "hmagentgone4"    # an agent whose home was built, recorded, then removed by the harness
+HM_BADREC = "hmagentbad5"   # an agent whose home record is a folder, so reading it raises
+HMGONE = os.path.join(HMMAIN, ".claude", "worktrees", "agent-" + HM_GONE)  # that agent's gone home
 
 
 def _build_hand_made():
     make_repo(HMMAIN, {"f.txt": "base\n"})
     run_vcs(HMMAIN, "worktree", "add", "-q", HMLANE, "-b", "hmlane1")
+    run_vcs(HMMAIN, "worktree", "add", "-q", HMHOME, "-b", "worktree-agent-" + HM_AGENT)
+    # The record the guard writes on an agent's first call from its home, then the harness removes the
+    # folder and its branch together. The record outlives the folder, in the clone's common directory.
+    run_vcs(HMMAIN, "worktree", "add", "-q", HMGONE, "-b", "worktree-agent-" + HM_GONE)
+    run_vcs(HMMAIN, "worktree", "remove", "--force", HMGONE)
+    run_vcs(HMMAIN, "branch", "-D", "worktree-agent-" + HM_GONE)
+    records = os.path.join(HMMAIN, ".git", "agent-homes")
+    os.makedirs(records, exist_ok=True)
+    write(os.path.join(records, HM_GONE), os.path.realpath(HMGONE))
+    os.makedirs(os.path.join(records, HM_BADREC), exist_ok=True)  # a folder where the record should be
     make_repo(HMTMPREPO, {"f.txt": "base\n"})
     for where in (HMMAIN, HMTMPREPO):
         if run_vcs(where, "rev-parse", "--git-dir").returncode != 0:
             sys.exit("fixture setup failed in _build_hand_made: %r is no repository" % where)
     if not os.path.isdir(HMLANE):
         sys.exit("fixture setup failed in _build_hand_made: no linked tree at %r" % HMLANE)
+    if not os.path.isdir(HMHOME):
+        sys.exit("fixture setup failed in _build_hand_made: no agent home tree at %r" % HMHOME)
+    if os.path.exists(HMGONE):
+        sys.exit("fixture setup failed in _build_hand_made: the gone home still exists at %r" % HMGONE)
 
 
-lazy_fixture([HMMAIN, HMLANE, HMTMPREPO], _build_hand_made)
+lazy_fixture([HMMAIN, HMLANE, HMHOME, HMTMPREPO], _build_hand_made)
 HM = "hand-made-worktree"
 HMADD = VCS + " worktree add "
 HMIN = slash(HMMAIN)
 
 
-def hm_deny(name, command, **kw):
+def hm_refuse(name, command, **kw):
     kw.setdefault("cwd", HMMAIN)
     sh("hand-made worktree: " + name, command, "deny", HM, **kw)
 
@@ -3887,33 +4057,35 @@ def hm_allow(name, command, **kw):
 
 
 # DENY. The new tree lands outside <primary>/.claude/worktrees/.
-hm_deny("a relative sibling path from the primary is refused", HMADD + "../lane-x")
-hm_deny("-C reaches the primary from elsewhere, and a scratch path is refused",
+hm_refuse("a relative sibling path from the primary is refused", HMADD + "../lane-x")
+hm_refuse("-C reaches the primary from elsewhere, and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, cwd=NOGIT)
-hm_deny("cd into a non-temp primary, then a tree in the temp folder, is the incident",
+hm_refuse("cd into a non-temp primary, then a tree in the temp folder, is the incident",
         "cd " + HMIN + " && " + HMADD + HMSCRATCH, cwd=NOGIT)
-hm_deny("-b before the path does not hide it", HMADD + "-b hmx ../lane-x")
-hm_deny("-B before the path does not hide it", HMADD + "-B hmx ../lane-x")
-hm_deny("--detach before the path does not hide it", HMADD + "--detach ../lane-x")
-hm_deny("--lock --reason r before the path does not hide it",
+hm_refuse("-b before the path does not hide it", HMADD + "-b hmx ../lane-x")
+hm_refuse("-B before the path does not hide it", HMADD + "-B hmx ../lane-x")
+hm_refuse("--detach before the path does not hide it", HMADD + "--detach ../lane-x")
+hm_refuse("--lock --reason r before the path does not hide it",
         HMADD + "--lock --reason r ../lane-x")
-hm_deny("a double dash ends the options, and the path after it is judged",
+hm_refuse("a double dash ends the options, and the path after it is judged",
         HMADD + "-- ../lane-x")
-hm_deny("a dash-led name after a double dash is still a path", HMADD + "-- -lane-x")
-hm_deny("a .claude/worktrees-x prefix is outside the home folder",
+hm_refuse("a dash-led name after a double dash is still a path", HMADD + "-- -lane-x")
+hm_refuse("a .claude/worktrees-x prefix is outside the home folder",
         HMADD + ".claude/worktrees-x/foo")
-hm_deny("a .claude/worktreesX name is outside the home folder", HMADD + ".claude/worktreesX")
-hm_deny("a dot-dot that climbs out of the home folder is outside",
+hm_refuse("a .claude/worktreesX name is outside the home folder", HMADD + ".claude/worktreesX")
+hm_refuse("a dot-dot that climbs out of the home folder is outside",
         HMADD + ".claude/worktrees/../../lane-x")
-hm_deny("from inside a linked tree, a sibling of the primary is still outside",
+hm_refuse("from inside a linked tree, a sibling of the primary is still outside",
         HMADD + "../../../lane-x", cwd=HMLANE)
-hm_deny("a PowerShell call is judged the same",
+hm_refuse("a PowerShell call is judged the same",
         "Set-Location " + HMIN + "; " + VCS + " worktree add ../lane-x", tool="PowerShell",
         cwd=NOGIT)
-hm_deny("a PowerShell call with -C and a scratch path is refused",
+hm_refuse("a PowerShell call with -C and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, tool="PowerShell", cwd=NOGIT)
-hm_deny("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
-hm_deny("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
+hm_refuse("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
+hm_refuse("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
+hm_refuse("a for loop that builds the tree path from its variable is the incident",
+        "for c in A B; do " + VCS + " worktree add -q --detach " + HMSCRATCH + "/wt-$c $c; done")
 
 # ALLOW. Nothing here is the act, or the act lands in the home folder, or the repo is a throwaway.
 hm_allow("an absolute path under the primary's home folder passes",
@@ -3941,11 +4113,122 @@ hm_allow("a heredoc body that holds the words passes",
          "cat <<'EOF'\ngit worktree add ../x\nEOF")
 hm_allow("a folder that is no git tree passes, since unknown is no hit",
          HMADD + "../lane-x", cwd=NOGIT)
+
+# AGENT. A call with a valid agent_id that adds a tree inside the primary's folder is refused, unless
+# the tree is the agent's own recorded home or its own red-run folder. Each call runs from that home,
+# so the call itself records the home, and no case depends on another case having run first.
+HMAG = dict(cwd=HMHOME, agent_id=HM_AGENT)
+HMWT = os.path.join(HMMAIN, ".claude", "worktrees")
+HMAGENT_SIB_RED = slash(os.path.join(HMWT, "agent-" + HM_SIBLING + "-red"))
+HMAGENT_PREFIX_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "b-red"))
+HMAGENT_OWN_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "-red"))
+HMAGENT_LANE9 = slash(os.path.join(HMWT, "lane9"))
+hm_refuse("an agent adds a sibling agent's red-run folder, by absolute path, is refused",
+        HMADD + HMAGENT_SIB_RED, **HMAG)
+hm_refuse("an agent adds a sibling agent's red-run folder, by a relative path, is refused",
+        HMADD + "../agent-" + HM_SIBLING + "-red", **HMAG)
+hm_refuse("an agent adds a folder whose name only starts with its own id is refused",
+        HMADD + HMAGENT_PREFIX_RED, **HMAG)
+hm_refuse("an agent adds a non-agent folder, lane9, under the primary's folder is refused",
+        HMADD + HMAGENT_LANE9, **HMAG)
+hm_refuse("a PowerShell call by an agent, adding a sibling's red-run folder, is refused",
+        HMADD + HMAGENT_SIB_RED, tool="PowerShell", **HMAG)
+hm_refuse("an agent adds a tree outside the primary's folder is refused, as before",
+        HMADD + slash(os.path.join(ROOT, "hm-agent-outside")), **HMAG)
+# The agent's own red-run folder, added the way the test-author's red run adds it, and the agent's
+# own home, both pass. The same lane9 add with no agent_id passes too, so the refusal above is the agent's.
+hm_allow("an agent adds its own red-run folder, as the red run does, passes",
+         HMADD + "--detach " + HMAGENT_OWN_RED + " HEAD", **HMAG)
+hm_allow("an agent adds its own recorded home tree passes", HMADD + slash(HMHOME), **HMAG)
+hm_allow("with no agent_id, the lane9 add from the primary passes", HMADD + HMAGENT_LANE9)
+# An agent with no home record yet, called from the primary, has no home to match: a tree in the
+# folder is refused, and its own red-run folder still passes. No case records this id's home.
+HM_NOREC = "hmagentnr3"
+HMNOREC = dict(cwd=HMMAIN, agent_id=HM_NOREC)
+hm_refuse("an agent with no home record adds lane9 under the primary's folder is refused",
+        HMADD + HMAGENT_LANE9, **HMNOREC)
+hm_allow("an agent with no home record adds its own red-run folder, as the red run does, passes",
+         HMADD + "--detach " + slash(os.path.join(HMWT, "agent-" + HM_NOREC + "-red")) + " HEAD",
+         **HMNOREC)
+# Only the agent's home itself passes. A tree nested inside it is a new tree in the folder.
+hm_refuse("an agent adds a tree nested inside its own recorded home is refused",
+        HMADD + slash(os.path.join(HMHOME, "sub")), **HMAG)
+
+# GONE HOME. The agent's record names its home, but the folder it calls from is gone. The shell falls
+# back to the primary with a `cd`, so the add still lands in the folder and must be refused.
+HMGONE_CALL = dict(cwd=HMGONE, agent_id=HM_GONE)
+hm_refuse("an agent whose home folder is gone adds lane9 after a cd into the primary is refused",
+        "cd " + HMIN + " && " + HMADD + ".claude/worktrees/lane9", **HMGONE_CALL)
+hm_allow("an agent whose home folder is gone adds its own red-run folder after a cd, passes",
+         "cd " + HMIN + " && " + HMADD + "--detach .claude/worktrees/agent-" + HM_GONE + "-red HEAD",
+         **HMGONE_CALL)
+
+# AN UNREADABLE RECORD. The record path is a folder, so reading it raises and the status is unknown.
+# An add inside the folder passes: nothing is known about the agent's home, and unknown is no hit.
+hm_allow("an agent whose home record cannot be read adds lane9 under the primary's folder, passes",
+         HMADD + HMAGENT_LANE9, cwd=HMMAIN, agent_id=HM_BADREC)
+
+# A DOT-DOT WALK. The agent's own red-run folder is matched by name before the `..` is applied, so a
+# walk out of it must not pass. The sibling's folder reached the same way is refused too. The caller
+# has no home record, so the worktree-home rule, which reads a recorded home, judges nothing here.
+HMDOT_CALL = dict(cwd=HMWT, agent_id=HM_NOREC)
+hm_refuse("an agent walks out of its own red-run folder with .. to add lane9 is refused",
+        HMADD + "./agent-" + HM_NOREC + "-red/../lane9", **HMDOT_CALL)
+hm_refuse("an agent walks out of its own red-run folder with .. to add a sibling's red-run folder is refused",
+        HMADD + "./agent-" + HM_NOREC + "-red/../agent-" + HM_SIBLING + "-red", **HMDOT_CALL)
+
+# AGENT TYPE ALONE. A payload that names an agent type and no agent_id is an agent's call: other rules
+# already read agent_type alone as an agent. Its tree in the folder is refused. The control with neither
+# field is the lane9 add from the primary, above: "with no agent_id, the lane9 add from the primary passes".
+hm_refuse("a call that names an agent_type and no agent_id adds lane9 under the primary's folder is refused",
+        HMADD + HMAGENT_LANE9, agent_type="test-author")
+
 add("hand-made worktree: an Agent call with no isolation, whose prompt names a worktree path, passes",
     "allow", tool="Agent", cwd=HMMAIN, subagent_type="general-purpose", description="lane",
     prompt="Work in the worktree at ../lane-x. Run `git worktree add ../lane-x` first.")
 add("hand-made worktree: an Explore Agent call with no isolation passes", "allow", tool="Agent",
     cwd=HMMAIN, subagent_type="Explore", description="look", prompt="Read the repo.")
+
+# VARIABLE TARGETS. The shell expands `$S` and `${S}` before git sees the path, so a target that holds a
+# variable is judged by the value the same command gives it. A variable the command does not set reads as
+# unknown, and a worktree add from a non-temp primary with an unknown target is refused.
+HMVAR_SCRATCH = "S=" + HMSCRATCH + "; "
+hm_refuse("a scratch path set in the same command, added from the non-temp primary as $S, is refused",
+        HMVAR_SCRATCH + HMADD + '"$S"')
+hm_refuse("a scratch path set in the same command, added from the non-temp primary as $S/lane-x, is refused",
+        HMVAR_SCRATCH + HMADD + '"$S/lane-x"')
+hm_refuse("a scratch path set in the same command, added from the non-temp primary as ${S}, is refused",
+        HMVAR_SCRATCH + HMADD + '"${S}"')
+hm_refuse("a variable this command does not set, added from the non-temp primary as $S/lane, is refused",
+        HMADD + '"$S/lane"')
+hm_refuse("an agent sets a variable to a tree in its folder that is not its home, and adds it, is refused",
+        "S=.claude/worktrees/lane9; " + HMADD + '"$S"', **HMAG)
+hm_allow("a variable set in the same command to a path under the home folder, with no agent, passes",
+         "S=.claude/worktrees/lane2; " + HMADD + '"$S"')
+hm_allow("a repo under the guard's temp folder adds a variable's path, and the throwaway rule passes it",
+         "S=../hmtmp-sibling; " + HMADD + '"$S"', cwd=HMTMPREPO)
+hm_allow("an agent sets a variable to its own red-run folder, as the red run does, and adds it, passes",
+         "R=" + HMAGENT_OWN_RED + "; " + HMADD + '--detach "$R" HEAD', **HMAG)
+# A variable the command never sets, in a throwaway repo: the throwaway rule judges the repo first, so the
+# unknown target passes there. The refusal for an unknown target sits after that rule.
+hm_allow("a repo under the guard's temp folder runs a variable target no command sets, and the throwaway rule passes it",
+         HMADD + '"$S/lane"', cwd=HMTMPREPO)
+
+# A VARIABLE IN -C. The shell expands `$R` in `-C "$R"` before git runs, so a -C target that holds a
+# variable is judged as unknown, and a worktree add that reaches the primary is refused. The assignment
+# may end its segment with `&&` or a newline: both pin the variable target resolved from the same command.
+hm_refuse("a -C variable set in the same command, from a folder with no repo, reaches the primary and is refused",
+        "R=" + HMIN + "; " + VCS + ' -C "$R" worktree add ' + HMSCRATCH, cwd=NOGIT)
+hm_refuse("a scratch path set with && in the same command, added from the non-temp primary as $S, is refused",
+        "S=" + HMSCRATCH + " && " + HMADD + '"$S"')
+hm_refuse("a scratch path set on its own line in the same command, added from the non-temp primary as $S, is refused",
+        "S=" + HMSCRATCH + "\n" + HMADD + '"$S"')
+# A -C VARIABLE READ FROM THE SAME COMMAND. The -C value is resolved from an earlier assignment, so a tree
+# under the primary's home folder passes, and a throwaway repo passes whatever its target is.
+hm_allow("a -C variable set in the same command to the primary, with a home-folder target and no agent, passes",
+         "R=" + HMIN + "; " + VCS + ' -C "$R" worktree add .claude/worktrees/lane2', cwd=NOGIT)
+hm_allow("a -C variable set in the same command to a throwaway repo, with an unset target, passes",
+         "R=" + slash(HMTMPREPO) + "; " + VCS + ' -C "$R" worktree add "$S/lane"', cwd=NOGIT)
 
 TEMP_DIR = None   # back to the system temp for the sections below
 
@@ -4394,7 +4677,7 @@ sh("kill: xargs kill after a pipe from a plain list is not by name", "echo 1 | x
 sh("kill: pgrep alone only reads", "pgrep -f node", "allow", cwd=NOGIT)
 
 # Four ways to stop a process by port, or every
-# process, passed on main. `kill $(lsof -t ...)` is the `$(pgrep ...)` act: the pid list is made by
+# process, and the guard must refuse each. `kill $(lsof -t ...)` is the `$(pgrep ...)` act: the pid list is made by
 # a pattern, but the guard names only pgrep and pidof. `fuser -k` and `kill-port` kill by port, the
 # same act as `lsof -t | xargs kill`. `kill -9 -1` reads `-1` as a flag, so pid -1 (every process)
 # never reaches the pid check; `kill -9 -- -1` above already denies. Claude writes each of these when
@@ -5553,6 +5836,10 @@ sh("narrate: the script run by path, piped to head",
    "~/.claude/bin/merge 12 --confirm | head -5", "deny", "live-stream", cwd=NOGIT)
 sh("narrate: the launcher script run through python, piped to tail",
    "python merge/launch.py 12 --confirm 2>&1 | tail -5", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: a versioned python runs the merge script, piped to tail",
+   "python3.11 merge/merge.py 12 --confirm | tail -3", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: uv run python runs the merge script, piped to tail",
+   "uv run python merge/merge.py 12 --confirm 2>&1 | tail -3", "deny", "live-stream", cwd=NOGIT)
 sh("narrate: --confirm on a command off the roster", "deploy 12 --confirm 2>&1 | tail -5",
    "allow", cwd=NOGIT)
 sh("narrate: a merge preview is not a wait", "merge 12 2>&1 | tail -5", "allow", cwd=NOGIT)
@@ -5631,6 +5918,120 @@ sh("ln: a trailing slash says the destination is a directory",
    "ln -s /opt/tool/x realdir/", "allow", cwd=TRAPLN)
 sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x realdir", "allow",
    cwd=TRAPLN)
+
+# --- a roster command piped into tail or head (rule check-tail)
+#
+# A backgrounded `merge --lane-lint 1476 2>&1 | tail -8` loses its verdict (decision
+# background-check-through-verdict holds the incident). The roster is named, one spelling per entry: `merge`, `merge.cmd`,
+# `~/.claude/bin/merge`, `python merge/merge.py`, `python merge/launch.py`, and `ci-job checks --lint`.
+# `merge --lane-lint` and `merge --review-record` are refused in the foreground and in the background.
+# `ci-job` is refused only in the background. The whole pipeline is read, so a filter between the check
+# and tail or head does not hide it. A `tee` stage does not end the check's reach: a tee before tail or
+# head is refused, since tail still cuts what the agent reads. A tee with nothing after it is allowed. A pipe out of `verdict` is
+# refused by rule verdict-pipe (decision verdict-pipe-refused), so those rows name that rule. A verdict
+# call with no pipe after it is allowed here.
+# Every backgrounded case names an until note, so background-end decides none of them. sh() takes no
+# run_in_background, so the backgrounded cases use add(), the form the background-end section uses.
+TAIL_BG_UNTIL = "Lane lint in the background. until: the lint prints its verdict"
+
+add("check-tail: the incident line, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8")
+add("check-tail: merge --lane-lint piped to head, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 | head -5")
+add("check-tail: merge.cmd --lane-lint piped to tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge.cmd --lane-lint 7 2>&1 | tail -3")
+add("check-tail: the script run through python piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python merge/merge.py --lane-lint 7 2>&1 | tail -3")
+add("check-tail: the launcher run through python piped to head, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python merge/launch.py --lane-lint 7 | head -3")
+add("check-tail: ci-job checks --lint piped to tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -20")
+add("check-tail: a quoted # does not hide a roster command after it, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='echo "# lint"; merge --lane-lint 7 | tail -3')
+add("check-tail: a lone apostrophe in quotes does not hide a roster command, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='echo "it\'s up"; merge --lane-lint 7 2>&1 | tail -3')
+add("check-tail: merge --lane-lint through grep -v and tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 1476 2>&1 | grep -v DEBUG | tail -8")
+
+# A pipe out of verdict is refused by verdict-pipe, which runs before check-tail. The same call with
+# no pipe keeps the point these rows had: the verdict form is not a check-tail refusal.
+add("verdict-pipe: the incident line through verdict piped to tail, backgrounded, is refused", "deny",
+    "verdict-pipe", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8")
+add("check-tail: the incident line through verdict with no pipe, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 2>&1")
+add("verdict-pipe: a python3 verdict wrapper piped to tail, backgrounded, is refused", "deny",
+    "verdict-pipe", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 ~/.claude/bin/verdict merge --lane-lint 1476 | tail -3")
+add("check-tail: a python3 verdict wrapper with no pipe, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 ~/.claude/bin/verdict merge --lane-lint 1476")
+add("check-tail: wait-pid piped to tail, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/wait-pid 1836 2>&1 | tail -3")
+add("check-tail: output kept in a file, then grep piped to tail, backgrounded, is allowed",
+    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/merge --lane-lint 1476 > /tmp/x/lanelint.log 2>&1; echo \"rc=$?\"; "
+            "grep -E '^(PASS|FAIL)' /tmp/x/lanelint.log | tail -15")
+add("check-tail: merge --lane-lint piped to tee, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 1476 2>&1 | tee run.out")
+add("check-tail: a tee between the check and grep and tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 1476 2>&1 | tee x | grep FAIL | tail -3")
+add("check-tail: merge --lane-lint through tee and tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 2>&1 | tee lint.log | tail -5")
+add("check-tail: ci-job checks --lint through tee and head, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tee lint.log | head -20")
+add("check-tail: merge --lane-lint through tee with nothing after it, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 2>&1 | tee lint.log")
+add("check-tail: grep naming the script, piped to tail, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='grep -n "--lane-lint" merge/merge.py | tail -20')
+add("check-tail: an ordinary command piped to tail, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="make check 2>&1 | tail -40")
+add("check-tail: a roster name inside echo's quotes, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="echo 'merge --lane-lint 1' | tail -1")
+add("check-tail: a roster name after a quoted #, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='echo "# merge --lane-lint 1 | tail -3"')
+add("check-tail: a roster name in a multi-line quote, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='echo "first line\nmerge --lane-lint 1 | tail -3\nlast line"')
+
+# Foreground: merge --lane-lint and merge --review-record piped to tail or head are refused. ci-job is
+# not refused in the foreground. A verdict call piped to tail is refused by verdict-pipe; with no pipe
+# after it, a verdict call is allowed.
+sh("check-tail: the incident line in the foreground is refused",
+   "~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-lint piped to tail in the foreground is refused",
+   "merge --lane-lint 1476 2>&1 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --review-record piped to head in the foreground is refused",
+   "~/.claude/bin/merge 12 --review-record --head 0123456789abcdef0123456789abcdef01234567 | head -20",
+   "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: ci-job piped to tail in the foreground is allowed",
+   "~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -20", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks --lint piped to tail in the foreground is allowed",
+   "~/.claude/bin/ci-job checks --lint 2>&1 | tail -20", "allow", cwd=NOGIT)
+sh("verdict-pipe: a verdict call piped to tail in the foreground is refused",
+   "verdict merge --lane-lint 1476 | tail -3", "deny", "verdict-pipe", cwd=NOGIT)
+sh("check-tail: a verdict call with no pipe in the foreground is allowed",
+   "verdict merge --lane-lint 1476", "allow", cwd=NOGIT)
 
 # =========================================================================== 2c. waiter loops
 #
@@ -7760,10 +8161,11 @@ sh("ask-step-hidden: a force push in a sh -c double-quoted substitution denies",
 sh("ask-step-hidden: control, a heredoc body naming a force push inside bash -c allows",
    "bash -c 'cat <<EOF\n" + HIDDEN_PUSH + "\nEOF'", "allow", cwd=PUSHFEAT)
 
-# ASK, owner rulings 206 a. An implied destination (a bare push, HEAD, @, or a
-# colon-less refspec naming the current branch) that lands off the branch's upstream asks, unless the push
-# carries -u and names the local branch (the silent cases below). PUSHSTRAY is `mylocal`, whose upstream is
-# origin/lane/x.
+# ASK, owner rulings 206 a and 432 a. An implied destination (a bare push, HEAD, @, or a colon-less refspec
+# naming the current branch) that lands off the branch's upstream asks while the destination is not yet on
+# origin, that is, no refs/remotes/origin/<name> (ruling 432 a). A push with -u that names the local branch is
+# silent (the silent cases below). PUSHSTRAY is `mylocal`, whose upstream is origin/lane/x, and origin/mylocal
+# is absent, so its rows ask.
 push_case("stray branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
 push_case("stray branch, @ asks", "origin @", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
 push_case("stray branch, the current branch named by its colon-less refspec asks", "origin mylocal", "ask",
@@ -7779,6 +8181,73 @@ push_case("stray branch, a second refspec that names the current branch asks",
           "origin HEAD:push-guard-asks mylocal", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
 sh("push: stray branch, a bare push under push.default current asks",
    VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
+# The remedy names the explicit form with a placeholder only (ruling 432 a). The real branch names of PUSHSTRAY
+# never appear in it.
+sh("push: stray branch, the ask names the explicit form HEAD:<branch>", VCS + " push origin HEAD", "ask",
+   PUSH_STRAY_RULE, cwd=PUSHSTRAY, carries=("HEAD:<branch>",), lacks=("HEAD:mylocal", "HEAD:lane/x"))
+
+# ASK, rule push-agent-branch. A non-forced push whose destination is an agent-worktree name asks, with or
+# without -u. push-stray-branch stays silent on a branch with no upstream, so this rule carries that case. The
+# names are agent-<hex>, claude/agent-<hex> and worktree-agent-<hex>, with 8 or more hex characters after the
+# prefix. PUSHAGENT sits on its claude/agent- branch, with no upstream.
+push_case("agent branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+push_case("agent branch, -u HEAD asks", "-u origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+push_case("agent branch, @ asks", "origin @", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+push_case("agent branch, the current name as a colon-less refspec asks", "origin claude/agent-a22bb0ed47825117b",
+          "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+sh("push: agent branch, a bare push under push.default current asks",
+   VCS + " -c push.default=current push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+push_case("agent worktree, worktree-agent-<hex>, -u HEAD asks", "-u origin HEAD", "ask",
+          cwd=PUSHAGENTWT, rule=PUSH_AGENT_RULE)
+push_case("agent worktree, agent-<hex>, -u HEAD asks", "-u origin HEAD", "ask",
+          cwd=PUSHAGENTBARE, rule=PUSH_AGENT_RULE)
+# An explicit agent destination from a branch with no upstream (PUSHFEAT, `feat`).
+push_case("explicit agent destination from a branch with no upstream asks",
+          "origin HEAD:claude/agent-a22bb0ed47825117b", "ask", rule=PUSH_AGENT_RULE)
+# Under push.autoSetupRemote, git pushes the current name and sets its upstream itself, so a bare push, `origin`
+# or `-u origin` writes the agent name. The key rides on the call, where the guard reads it.
+sh("push: agent branch, a bare push under autoSetupRemote asks",
+   VCS + " -c push.autoSetupRemote=true push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+sh("push: agent branch, origin under autoSetupRemote asks",
+   VCS + " -c push.autoSetupRemote=true push origin", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+sh("push: agent branch, -u origin under autoSetupRemote asks",
+   VCS + " -c push.autoSetupRemote=true push -u origin", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+# The config-file form: push.autoSetupRemote is in the repo's own config, not on the call, so a bare push asks.
+sh("push: agent branch, a bare push under a config autoSetupRemote asks",
+   VCS + " push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENTCFG)
+# The exact shape: eight hex characters after the prefix ask.
+push_case("agent-12345678, -u HEAD asks (8 hex is the exact shape)", "-u origin HEAD", "ask",
+          cwd=PUSHAGENTEIGHT, rule=PUSH_AGENT_RULE)
+# A side effect pin: under push.autoSetupRemote, a bare push from main with no upstream writes main, so push-main asks.
+sh("push: main with no upstream, a bare push under autoSetupRemote asks push-main",
+   VCS + " -c push.autoSetupRemote=true push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
+
+# SILENT, rule push-agent-branch. Each is an allow that prints nothing. The lane and feature branch controls
+# are the no-upstream rows above (PUSHFEAT, `feat`): their -u and HEAD pushes stay silent under this rule too.
+push_case("agent branch, HEAD to lane-x is silent", "origin HEAD:lane-x", "allow", cwd=PUSHAGENT, silent=True)
+push_case("agent branch, HEAD to refs/heads/lane-x is silent", "origin HEAD:refs/heads/lane-x", "allow",
+          cwd=PUSHAGENT, silent=True)
+push_case("agent branch, a dry run of HEAD is not this rule", "--dry-run origin HEAD", "allow",
+          cwd=PUSHAGENT, silent=True)
+push_case("agent branch, --delete of the agent name is not this rule",
+          "--delete origin claude/agent-a22bb0ed47825117b", "allow", cwd=PUSHAGENT, silent=True)
+push_case("agent branch, a colon delete of the agent name is not this rule",
+          "origin :claude/agent-a22bb0ed47825117b", "allow", cwd=PUSHAGENT, silent=True)
+push_case("agent-notes, -u HEAD is silent (no hex after the prefix)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTNOTES, silent=True)
+push_case("my-agent-abc, -u HEAD is silent (too short to be hex)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTMYABC, silent=True)
+push_case("my-agent-<hex>, -u HEAD is silent (the shape must open the name)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTMYHEX, silent=True)
+push_case("agent-1234567, -u HEAD is silent (7 hex is one short of the shape)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTSHORT, silent=True)
+# The same autoSetupRemote forms on a lane branch with no upstream (PUSHFEAT, `feat`) stay silent.
+sh("push: lane branch, a bare push under autoSetupRemote is silent",
+   VCS + " -c push.autoSetupRemote=true push", "allow", cwd=PUSHFEAT, silent=True)
+sh("push: lane branch, origin under autoSetupRemote is silent",
+   VCS + " -c push.autoSetupRemote=true push origin", "allow", cwd=PUSHFEAT, silent=True)
+sh("push: lane branch, -u origin under autoSetupRemote is silent",
+   VCS + " -c push.autoSetupRemote=true push -u origin", "allow", cwd=PUSHFEAT, silent=True)
 
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
@@ -7803,6 +8272,94 @@ sh("push: main, a bare push under push.default current on main asks",
    VCS + " -c push.default=current push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
 sh("push: main, a bare push under push.default upstream from a branch tracking main asks",
    VCS + " push", "ask", PUSH_MAIN_RULE, cwd=PUSHUP)
+
+# ASK, rule push-main, judged on the remote the push names. A network remote still asks: an scp-form origin, a
+# network URL named on the command line, and a `-C` into a repo whose origin is a network URL. The https
+# origin rows above (PUSHFEAT) and the bare push resolving to main on PUSHUP are the other controls.
+push_case("main, an scp-form origin asks", "origin main", "ask", cwd=PUSHSSH, rule=PUSH_MAIN_RULE)
+push_case("main, a network URL named as the remote asks, from a repo with no remote",
+          "https://example.invalid/r.git main", "ask", cwd=PUSHNOREMOTE, rule=PUSH_MAIN_RULE)
+sh("main, git -C into a repo with a network origin asks, from a repo with no remote",
+   VCS + " -C " + slash(PUSHFEAT) + " push origin main", "ask", PUSH_MAIN_RULE, cwd=PUSHNOREMOTE)
+
+# SILENT, rule push-main. The remote the push names is a local path (absolute, relative or file://), or the
+# repo has no remote of that name, so no network remote is written. Each is an allow that prints nothing.
+push_case("main, an origin that is a local path, a push of main is silent", "origin main", "allow",
+          cwd=PUSHLOCAL, silent=True)
+push_case("main, an origin that is a local path, HEAD:main is silent", "origin HEAD:main", "allow",
+          cwd=PUSHLOCAL, silent=True)
+push_case("main, a local path named as the remote is silent", slash(BRANCHREMOTE) + " main", "allow",
+          cwd=PUSHFEAT, silent=True)
+push_case("main, a relative path named as the remote is silent", "../branchremote.git main", "allow",
+          cwd=PUSHFEAT, silent=True)
+push_case("main, a file URL named as the remote is silent", "file://" + slash(BRANCHREMOTE) + " main",
+          "allow", cwd=PUSHFEAT, silent=True)
+push_case("main, a remote the repo does not have is silent", "upstream main", "allow", cwd=PUSHFEAT,
+          silent=True)
+push_case("main, no remote in the repo is silent", "origin main", "allow", cwd=PUSHNOREMOTE, silent=True)
+sh("main, git -C into a repo with no remote is silent, from a repo with a network origin",
+   VCS + " -C " + slash(PUSHNOREMOTE) + " push origin main", "allow", cwd=PUSHFEAT, silent=True)
+
+# ASK, rules 206 a, 207 a and push-agent-branch, on a local-path origin. A main refspec there is silent, and the
+# refspec after it still decides. The controls ask with no main refspec ahead: HEAD on PUSHLOCALSTRAY (its branch
+# tracks origin/other) is stray, and the agent name on PUSHLOCAL asks the agent rule.
+push_case("local origin, main then HEAD on a branch tracking another name asks stray", "origin main HEAD", "ask",
+          cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
+push_case("local origin, main then the agent name asks the agent rule", "origin main claude/agent-deadbeef01",
+          "ask", cwd=PUSHLOCAL, rule=PUSH_AGENT_RULE)
+push_case("local origin, HEAD on a branch tracking another name asks stray (control)", "origin HEAD", "ask",
+          cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
+push_case("local origin, the agent name alone asks the agent rule (control)", "origin claude/agent-deadbeef01",
+          "ask", cwd=PUSHLOCAL, rule=PUSH_AGENT_RULE)
+# The same two commands on a network origin still ask push-main: the main refspec decides there.
+push_case("network origin, main then HEAD asks push-main", "origin main HEAD", "ask", rule=PUSH_MAIN_RULE)
+push_case("network origin, main then the agent name asks push-main", "origin main claude/agent-deadbeef01", "ask",
+          rule=PUSH_MAIN_RULE)
+# A `git -c remote.origin.url=` override names the remote's URL for the read, so the local origin is a network one.
+sh("main, a local origin made a network remote by git -c remote.origin.url asks push-main",
+   VCS + " -c remote.origin.url=https://example.invalid/r.git push origin main", "ask", PUSH_MAIN_RULE,
+   cwd=PUSHLOCAL)
+
+# ASK, rule push-main, on a remote the shell has not expanded. The token holds `$`, a backtick or `$(`. It names no
+# remote in the repo, yet the shell may expand it to a network remote, so the push asks. PUSHFEAT's origin is https,
+# so only the token decides the ask here.
+push_case("main, a double-quoted shell variable as the remote asks push-main", '"$REMOTE" main', "ask",
+          rule=PUSH_MAIN_RULE)
+push_case("main, an unquoted shell variable as the remote asks push-main", "$REMOTE HEAD:main", "ask",
+          rule=PUSH_MAIN_RULE)
+push_case("main, a backtick as the remote asks push-main", "`printf origin` main", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, a command substitution as the remote asks push-main", "$(printf origin) main", "ask",
+          rule=PUSH_MAIN_RULE)
+sh("main, a bare push with a shell variable as the remote asks push-main under push.default current",
+   VCS + ' -c push.default=current push "$REMOTE"', "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
+
+# SILENT, rule push-main, the controls of that ask. A shell-variable remote on a feature destination writes no main.
+# A `$` in the source of a push to main stays in the refspec: the remote is the local origin, so the push is silent.
+push_case("a shell variable as the remote, HEAD to a feature name, is silent", '"$REMOTE" HEAD:feat-x', "allow",
+          silent=True)
+push_case("a shell variable in the source of a push to main on a local origin is silent", 'origin "$SRC":main',
+          "allow", cwd=PUSHLOCALMAIN, silent=True)
+
+# Local origin on main (PUSHLOCALMAIN, tracking origin/main) and its network twin on the same branch and upstream
+# (PUSHMAINUP). Each form that writes main is silent on the local path and asks on the network remote.
+sh("main tracking origin/main, local origin, a bare push under push.default simple is silent",
+   VCS + " -c push.default=simple push", "allow", cwd=PUSHLOCALMAIN, silent=True)
+sh("main tracking origin/main, network origin, a bare push under push.default simple asks push-main",
+   VCS + " -c push.default=simple push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAINUP)
+push_case("main tracking origin/main, local origin, HEAD is silent", "origin HEAD", "allow", cwd=PUSHLOCALMAIN,
+          silent=True)
+push_case("main tracking origin/main, network origin, HEAD asks push-main", "origin HEAD", "ask", cwd=PUSHMAINUP,
+          rule=PUSH_MAIN_RULE)
+push_case("main tracking origin/main, local origin, --all is silent", "origin --all", "allow", cwd=PUSHLOCALMAIN,
+          silent=True)
+push_case("main tracking origin/main, network origin, --all asks push-main", "origin --all", "ask", cwd=PUSHMAINUP,
+          rule=PUSH_MAIN_RULE)
+
+# ASK, rule push-main. A folder that does not exist cannot be read, and an unreadable config is unknown, which asks.
+# The session's own folder is the local origin, so only the missing folder the push runs in can make it a network one.
+sh("main, cd into a folder that does not exist, then origin main, asks push-main",
+   "cd " + slash(os.path.join(ROOT, "pushmissing")) + " && " + VCS + " push origin main", "ask", PUSH_MAIN_RULE,
+   cwd=PUSHLOCALMAIN)
 
 # SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
 # Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.
@@ -7836,6 +8393,15 @@ sh("push: stacked lane, a bare -u under push.default current writes the local na
    VCS + " -c push.default=current push -u origin", "allow", cwd=PUSHSTACK, silent=True)
 push_case("stray branch, -u with HEAD writes the local name, is silent", "-u origin HEAD", "allow",
           cwd=PUSHSTRAY, silent=True)
+# Decision plain-push-asks, item 432 a.
+# A destination already on origin (refs/remotes/origin/<name>) is no stray. PUSHOWNREF is
+# `lane-x`, tracking origin/batch-1, with origin/lane-x present: each implied push to its own name is silent.
+push_case("own ref on origin, HEAD is silent", "origin HEAD", "allow", cwd=PUSHOWNREF, silent=True)
+push_case("own ref on origin, @ is silent", "origin @", "allow", cwd=PUSHOWNREF, silent=True)
+push_case("own ref on origin, the current name as a colon-less refspec is silent", "origin lane-x", "allow",
+          cwd=PUSHOWNREF, silent=True)
+sh("push: own ref on origin, a bare push under push.default current is silent",
+   VCS + " -c push.default=current push", "allow", cwd=PUSHOWNREF, silent=True)
 # A push that moves no branch: tags are not a branch destination, even on main.
 push_case("--tags on main is silent", "origin --tags", "allow", cwd=PUSHMAIN, silent=True)
 push_case("a tag name on main is silent", "origin v1.0", "allow", cwd=PUSHMAIN, silent=True)
@@ -7876,6 +8442,14 @@ chained_ask("push: a lone quote in a commit message does not hide a push to main
             VCS + ' commit -m "don\'t" && ' + VCS + " push origin main", cwd=PUSHFEAT)
 chained_ask("push: a lone quote in a commit message does not hide a stray push that follows it",
             VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHSTRAY)
+chained_ask("push: agent branch, a lone quote in a commit message does not hide a push to an agent name",
+            VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
+chained_ask("push: agent branch, a comment opener inside a string does not hide a push to an agent name",
+            'echo "#" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
+sh("push: text, an echo that names a push to an agent name, is silent",
+   'echo "' + VCS + ' push origin HEAD:claude/agent-a22bb0ed47825117b"', "allow", cwd=PUSHAGENT, silent=True)
+sh("push: text, a multi-line quoted string naming a push to an agent name, is silent",
+   'echo "one line\n' + VCS + ' push origin HEAD"', "allow", cwd=PUSHAGENT, silent=True)
 
 sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", cwd=NOGIT)
 
@@ -8044,6 +8618,62 @@ for _name, _command in (
     ("a folder, long flags", "rm --recursive --force build/"),
 ):
     sh("delete: " + _name + " is allowed", _command, "allow", cwd=NOGIT)
+# THE SPLIT FLAGS IN QUOTED TEXT. `rm -r -f .` and `del -Recurse -Force C:/` in an echo are text, as
+# `rm -rf .` already is. A shell that runs the same text still refuses it.
+sh("delete: an echo of rm with split flags at the working folder calls nothing",
+   'echo "rm -r -f ."', "allow", cwd=NOGIT)
+sh("delete: an echo of the PowerShell delete at a drive root calls nothing",
+   'echo "del -Recurse -Force C:/"', "allow", cwd=NOGIT)
+sh("delete: sh -c of rm with split flags at the working folder still denies",
+   'sh -c "rm -rf ."', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: bash -c of rm with split flags at the working folder still denies",
+   'bash -c "rm -r -f ."', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: eval of rm at the working folder still denies",
+   'eval "rm -rf ."', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: pwsh -Command of a PowerShell delete at a drive root still denies",
+   'pwsh -Command "Remove-Item -Recurse -Force C:/"', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: pwsh -Command of a PowerShell delete at a drive root with no -Force denies",
+   'pwsh -Command "Remove-Item -Recurse C:/"', "deny", "destructive-delete", cwd=NOGIT)
+# THE SPLIT-FLAG DELETE IN A WRAPPER'S STRING. parallel, script -qc, watch and runuser each run their quoted
+# text as a shell command, so `rm -r -f .` inside the quotes deletes the working folder, as bash -c's does.
+for _name, _command in (
+    ("parallel", 'parallel "rm -r -f ." ::: a'),
+    ("script -qc", 'script -qc "rm -r -f ." /dev/null'),
+    ("watch", 'watch "rm -r -f ."'),
+    ("runuser -c", 'runuser -c "rm -r -f ." u'),
+):
+    sh("delete: the split-flag rm at the working folder behind " + _name + " denies", _command, "deny",
+       "destructive-delete", cwd=NOGIT)
+# A single-quoted substitution is text, as the echo of the split-flag rm above is. It runs nothing.
+sh("delete: an echo of a single-quoted $(rm -r -f .) calls nothing",
+   "echo '$(rm -r -f .)'", "allow", cwd=NOGIT)
+# A LIVE SUBSTITUTION INSIDE DOUBLE QUOTES. `"$( )"` runs the command inside it, so a delete there is a
+# command, not text. The echo cases above stay allowed, since their delete is not inside `$( )`. A `#`, a
+# line break or a lone apostrophe around the substitution does not hide it.
+sh("delete: a live $(rm -r -f .) inside double quotes denies",
+   '''echo "$(rm -r -f .)"''', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a live $(Remove-Item -Recurse -Force C:/) inside double quotes denies",
+   '''echo "$(Remove-Item -Recurse -Force C:/)"''', "deny", "destructive-delete", tool="PowerShell",
+   cwd=NOGIT)
+sh("delete: a live $(rm -r -f .) after a # inside double quotes denies",
+   '''echo "# $(rm -r -f .)"''', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a live $(rm -r -f .) on a second line of a double quote denies",
+   'echo "first line\n$(rm -r -f .)\nlast line"', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a live $(rm -r -f .) after a lone apostrophe denies",
+   '''echo don't && echo "$(rm -r -f .)"''', "deny", "destructive-delete", cwd=NOGIT)
+# THE INDEX-ONLY FORM. `git rm --cached` removes a path from the index and leaves the working folder
+# alone, so `git rm -rf --cached .` deletes nothing on disk. The same words without `--cached` delete
+# every file under the working folder, and a chained delete still denies.
+sh("delete: git rm -rf --cached . touches the index only, and is allowed",
+   VCS + " rm -rf --cached .", "allow", cwd=NOGIT)
+sh("delete: git rm -r -f --cached . touches the index only, and is allowed",
+   VCS + " rm -r -f --cached .", "allow", cwd=NOGIT)
+sh("delete: git rm -rf . with no --cached still denies", VCS + " rm -rf .", "deny",
+   "destructive-delete", cwd=NOGIT)
+sh("delete: git rm -r -f . with no --cached still denies", VCS + " rm -r -f .", "deny",
+   "destructive-delete", cwd=NOGIT)
+sh("delete: git rm -rf --cached . chained with rm -rf . still denies",
+   VCS + " rm -rf --cached . && rm -rf .", "deny", "destructive-delete", cwd=NOGIT)
 
 # Each is a program that runs the real command: find -exec, su -c, a container exec, and flock.
 for _name, _command in (
@@ -8425,7 +9055,8 @@ def nm_case(name, command, expected, cwd, tool="Bash"):
         add(name, expected, tool=tool, cwd=cwd, windows=True, command=command)
 
 
-# THE INSTALLS. Each is refused in a linked folder, and each is allowed in a real folder and an absent one.
+# THE INSTALLS, and the commands that rewrite node_modules too: prune, dedupe, rebuild, link and audit fix.
+# Each is refused in a linked folder, and each is allowed in a real folder and an absent one.
 NM_INSTALLS = (
     ("npm ci", "Bash"), ("npm ci", "PowerShell"),
     ("npm install", "Bash"), ("npm install left-pad", "Bash"),
@@ -8433,6 +9064,8 @@ NM_INSTALLS = (
     ("npm add", "Bash"), ("npm add left-pad", "Bash"),
     ("npm uninstall", "Bash"), ("npm uninstall left-pad", "Bash"),
     ("npm update", "Bash"), ("npm update left-pad", "Bash"),
+    ("npm prune", "Bash"), ("npm dedupe", "Bash"), ("npm rebuild", "Bash"), ("npm link", "Bash"),
+    ("npm audit fix", "Bash"), ("npm audit --json fix", "Bash"),
 )
 # THE RECURSIVE DELETES inside node_modules. A bare `rm -rf node_modules` names the link itself, not a
 # file inside it, so it is not pinned here.
@@ -8486,7 +9119,7 @@ nm_case("linked-nm: npm ci with a repeated --prefix whose last value is real, fr
         "npm ci --prefix " + slash(NMLINKED) + " --prefix " + slash(NMREAL), "allow", NMLINKED)
 
 # THE CONTROLS IN A LINKED FOLDER. Each is the job of a linked folder, and none is refused.
-for _command, _tool in (("npm run setup", "Bash"), ("npm run build", "Bash"), ("npm test", "Bash"),
+for _command, _tool in (("npm run setup", "Bash"),
                         ("rm node_modules", "Bash"), ("Remove-Item node_modules", "PowerShell")):
     nm_case("linked-nm: " + _command + " (" + _tool + ") in a linked folder is allowed",
             _command, "allow", NMLINKED, _tool)
@@ -8541,6 +9174,38 @@ nm_case("linked-nm: refuse npm --loglevel error ci (Bash) in a linked folder",
 nm_case("linked-nm: refuse npm --prefix . ci (Bash) in a linked folder",
         "npm --prefix . ci", "deny", NMLINKED)
 
+# THE OFF-LIST COMMANDS. The guard allows only the read-only commands it lists. Each of these is refused in a
+# linked folder: some rewrite node_modules, and the rest are not on the list. A real folder and a folder with
+# no node_modules allow each, since neither is a link.
+NM_OFF_LIST = (
+    "npm unlink x", "npm ddp", "npm rb", "npm ln x", "npm pru", "npm it", "npm install-test",
+    "npm install-ci-test", "npm sit", "npm edit x", "npm explore x", "npm init", "npm shrinkwrap",
+    "npm instal x", "npm -C . ci",
+)
+for _command in NM_OFF_LIST:
+    nm_case("linked-nm: refuse " + _command + " (Bash) in a linked folder", _command, "deny", NMLINKED)
+    nm_case("linked-nm: " + _command + " (Bash) in a real folder is allowed", _command, "allow", NMREAL)
+    nm_case("linked-nm: " + _command + " (Bash) in a folder with no node_modules is allowed",
+            _command, "allow", NMABSENT)
+
+# THE WORKSPACE FLAGS ON `npm version`. With a workspace flag, npm reifies the linked root, so the command
+# changes the install through the link. Without one it only rewrites package.json (a control below).
+NM_WORKSPACE_VERSION = (
+    "npm version patch -w a", "npm version patch --workspaces", "npm version patch -ws",
+    "npm version patch --workspace=a", "npm -w a version patch",
+)
+# THE DRY RUNS THAT STILL RUN INSTALL SCRIPTS. npm rebuild, rb and edit run install scripts even with
+# --dry-run, so a dry run is no no-change for them. `npm prune --dry-run` and `npm audit fix --dry-run`
+# stay allowed (a control below).
+NM_DRY_RUN_WRITERS = (
+    "npm rebuild --dry-run", "npm rb x --dry-run", "npm edit x --dry-run", "npm --dry-run rebuild",
+)
+for _command in NM_WORKSPACE_VERSION + NM_DRY_RUN_WRITERS:
+    nm_case("linked-nm: refuse " + _command + " (Bash) in a linked folder", _command, "deny", NMLINKED)
+    nm_case("linked-nm: " + _command + " (Bash) in a real folder is allowed", _command, "allow", NMREAL)
+    nm_case("linked-nm: " + _command + " (Bash) in a folder with no node_modules is allowed",
+            _command, "allow", NMABSENT)
+
 # THE FALSE-ALARM CONTROLS in a linked folder. None of these changes the linked install, so none is refused.
 nm_case("linked-nm: npm i -g x (Bash) in a linked folder is allowed, a global install",
         "npm i -g x", "allow", NMLINKED)
@@ -8550,6 +9215,17 @@ nm_case("linked-nm: npm ci --dry-run (Bash) in a linked folder is allowed",
         "npm ci --dry-run", "allow", NMLINKED)
 nm_case("linked-nm: npm ci in a quoted echo, in a linked folder, is allowed",
         'echo "npm ci"', "allow", NMLINKED)
+
+# THE READ-ONLY CONTROLS in a linked folder. Each runs a command on the read-only list or a dry run, or
+# names no command (bare `npm`, `npm -v`), so none is refused.
+NM_READ_ONLY = (
+    "npm", "npm -v", "npm ls", "npm list", "npm -C . ls", "npm view x", "npm outdated", "npm audit",
+    "npm audit signatures", "npm explain x", "npm fund", "npm exec -- tsc", "npm config get registry",
+    "npm help install", "npm prune --dry-run", "npm audit fix --dry-run", "npm version patch",
+    "npm rebuild --help", "npm run build", "npm test",
+)
+for _command in NM_READ_ONLY:
+    nm_case("linked-nm: " + _command + " (Bash) in a linked folder is allowed", _command, "allow", NMLINKED)
 
 # THE JUNCTION WITHOUT os.path.isjunction. Python 3.11, the CI interpreter, has no os.path.isjunction, so
 # the link test must read the junction itself. This case runs the guard with that function removed.
@@ -8825,6 +9501,587 @@ sh("env: a < redirect with a script word is input to the script, node app.js < i
    "node --env-file=" + ENV + " app.js < input.txt", "allow", cwd=NOGIT)
 sh("env: --input-type takes a value and app.mjs is the script, not inline code",
    "node --env-file=" + ENV + " --input-type module app.mjs", "allow", cwd=NOGIT)
+
+# A runner handed the file may run a child command that prints the variables: a program that prints
+# its environment (env, printenv), a child named through a quoted word or an --entrypoint, or a
+# script fed on stdin to python or a shell. A shell string (sh, bash or zsh -c, and npm, npx or pnpm
+# -c) is judged segment by segment with the same env reader as the parent shell form, and a $
+# expansion in it is denied too. A value flag of a runner or container (--pull, --extra) takes the
+# word after it, and an empty --entrypoint is no program, so the child is the words after the image.
+# Each deny form is refused with env-file. The reason is not pinned here, so the builder chooses it.
+# The allow controls are the ordinary uses of the same runners.
+for _child in (
+    "uv run --env-file " + ENV + " env",
+    "uv run --env-file=" + ENV + " printenv",
+    "uv run --env-file " + ENV + " env | grep FOO",
+    "uv run --env-file " + ENV + " printenv FOO",
+    "uv run --env-file " + ENV + " python -c \"import os; print(os.environ)\"",
+    "uv run --env-file " + ENV + " sh -c 'echo $FOO'",
+    "docker run --env-file " + ENV + " alpine env",
+    "docker run --rm --env-file " + ENV + " alpine printenv",
+    "docker run --env-file " + ENV + " -e X=1 --name t alpine env",
+    "docker compose --env-file " + ENV + " run web env",
+    "podman run --env-file " + ENV + " alpine env",
+    "npm --env-file=" + ENV + " exec -c env",
+    "npx --env-file=" + ENV + " -c printenv",
+    "node --env-file=" + ENV + " /c/Users/x/node_modules/npm/bin/npm-cli.js exec -c env",
+    "npm --env-file=" + ENV + " exec -c \"env\"",
+    "npx --env-file=" + ENV + " -c \"printenv\"",
+    "docker run --env-file " + ENV + " alpine \"env\"",
+    "docker run --env-file " + ENV + " --entrypoint printenv alpine DB_URL",
+    "docker run --env-file " + ENV + " --entrypoint=env alpine",
+    "npm --env-file=" + ENV + " exec -c 'echo $DB_URL'",
+    "docker run -i --env-file " + ENV + " alpine sh < s.sh",
+    "docker run --platform linux/amd64 --env-file " + ENV + " alpine env",
+    "docker run -m 512m --env-file " + ENV + " alpine env",
+    "uv run --env-file " + ENV + " -v env",
+    "echo \"import os\" | uv run --env-file " + ENV + " python",
+):
+    sh("env-child: deny, a runner given the file must not print it through a child, " + _child[:60],
+       _child, "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, node runs npm-cli.js exec -c with a shell string that expands a variable",
+   "node --env-file=" + ENV + " /c/Users/x/node_modules/npm/bin/npm-cli.js exec -c 'echo $DB_URL'",
+   "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv runs a python script fed by a heredoc that prints os.environ",
+   "uv run --env-file " + ENV + " python <<'EOF'\nimport os; print(os.environ)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+for _child_ok in (
+    "uv run --env-file " + ENV + " python app.py",
+    "uv run --env-file " + ENV + " pytest",
+    "docker run --env-file " + ENV + " myimage",
+    "docker run --env-file " + ENV + " myimage npm start",
+    "docker run --env-file " + ENV + " -e MODE=env myimage",
+    "npm --env-file=" + ENV + " run build",
+    "npm --env-file=" + ENV + " exec -c \"node app.js\"",
+    "docker run --env-file " + ENV + " alpine sh -c \"npm start\"",
+    "uv run --env-file " + ENV + " python app.py < input.txt",
+    "docker run --env-file " + ENV + " --entrypoint node myimage app.js",
+):
+    sh("env-child: allow, a runner given the file may run its own app, " + _child_ok[:60],
+       _child_ok, "allow", cwd=NOGIT)
+
+# Each deny names one cause: a later segment of a shell string that prints or reads the file, a value
+# flag the list does not hold, or an empty --entrypoint. Each allow is the same runner running an app.
+sh("env-child: deny, uv runs sh -c whose later segment cats the env file, npm start && cat " + ENV,
+   "uv run --env-file " + ENV + " sh -c \"npm start && cat " + ENV + "\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker runs sh -c whose later segment is env after cd, cd /app && env",
+   "docker run --env-file " + ENV + " alpine sh -c \"cd /app && env\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker runs sh -c whose later segment is printenv after a semicolon",
+   "docker run --env-file " + ENV + " alpine sh -c \"echo x; printenv\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, npm exec -c whose later segment is env after &&, npm test && env",
+   "npm --env-file=" + ENV + " exec -c \"npm test && env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv runs bash -c whose later segment is printenv after set -x",
+   "uv run --env-file " + ENV + " bash -c \"set -x; printenv FOO\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker runs sh -c whose first word is exec before env",
+   "docker run --env-file " + ENV + " alpine sh -c \"exec env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker --pull takes a value, so the child after the image is env",
+   "docker run --pull always --env-file " + ENV + " alpine env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv --extra takes a value, so the child is python printing os.environ",
+   "uv run --env-file " + ENV + " --extra dev python -c \"import os; print(os.environ)\"",
+   "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker --entrypoint with an empty value, so the child is env",
+   "docker run --env-file " + ENV + " --entrypoint \"\" alpine env", "deny", "env-file", cwd=NOGIT)
+# A `#` inside quotes is text, and a line break in a shell string starts a new segment. Both are
+# pinned here, so the segment scan must read the quote marks and the line breaks.
+sh("env-child: deny, a comment opener inside a quoted word does not hide a later env segment",
+   "uv run --env-file " + ENV + " sh -c \"echo '#'; env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a line break inside a shell string starts a segment that is env",
+   "uv run --env-file " + ENV + " sh -c \"npm start\nenv\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, a separator inside single quotes is text, echo 'a && env'",
+   "uv run --env-file " + ENV + " sh -c \"echo 'a && env'\"", "allow", cwd=NOGIT)
+sh("env-child: allow, a lone quote in a shell string is text, echo don't",
+   "uv run --env-file " + ENV + " sh -c \"echo don't\"", "allow", cwd=NOGIT)
+sh("env-child: allow, a line break between npm ci and npm test is two app commands",
+   "uv run --env-file " + ENV + " sh -c \"npm ci\nnpm test\"", "allow", cwd=NOGIT)
+sh("env-child: allow, docker runs sh -c whose segments are cd and npm start",
+   "docker run --env-file " + ENV + " alpine sh -c \"cd /app && npm start\"", "allow", cwd=NOGIT)
+sh("env-child: allow, uv runs sh -c whose segments are npm ci and npm test",
+   "uv run --env-file " + ENV + " sh -c \"npm ci; npm test\"", "allow", cwd=NOGIT)
+sh("env-child: allow, docker --pull takes a value, so the child is myimage",
+   "docker run --pull always --env-file " + ENV + " myimage", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --extra takes a value, so the child is pytest",
+   "uv run --env-file " + ENV + " --extra dev pytest", "allow", cwd=NOGIT)
+# A flag that takes no value (-q, --reinstall, --verbose, --rm) is skipped alone, so the word after it is
+# the child. The words after the child are its own arguments: -k env and -m env are pytest's, and serve
+# env is the image's.
+sh("env-child: allow, uv -q takes no value, so the child is pytest with -k env",
+   "uv run --env-file " + ENV + " -q pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --reinstall takes no value, so the child is pytest with -k env",
+   "uv run --env-file " + ENV + " --reinstall pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --verbose takes no value, so the child is pytest with -m env",
+   "uv run --env-file " + ENV + " --verbose pytest -m env", "allow", cwd=NOGIT)
+sh("env-child: allow, docker --rm takes no value, so the child is myimage with serve env",
+   "docker run --env-file " + ENV + " --rm myimage serve env", "allow", cwd=NOGIT)
+# A value flag that the list does not hold takes the word after it, so the child after exec is env.
+sh("env-child: deny, npm --registry takes a value, so exec -c runs env as the child",
+   "npm --env-file=" + ENV + " --registry x exec -c env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm --reporter takes a value, so exec runs env as the child",
+   "pnpm --env-file=" + ENV + " --reporter silent exec env", "deny", "env-file", cwd=NOGIT)
+# `--` ends the runner's options, so the word after it is the child. The two allows are a test
+# filter (vitest env) and jest's own option (jest -c env), and the guard must not read them as env.
+sh("env-child: deny, pnpm exec -- runs env, since -- ends the runner's options",
+   "pnpm --env-file=" + ENV + " exec -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec -- runs printenv, since -- ends the runner's options",
+   "pnpm --env-file=" + ENV + " exec -- printenv", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm exec -- runs vitest, so env is vitest's test filter",
+   "pnpm --env-file=" + ENV + " exec -- vitest env", "allow", cwd=NOGIT)
+sh("env-child: allow, npm exec -- runs jest, so -c env is jest's option, not npm's shell string",
+   "npm --env-file=" + ENV + " exec -- jest -c env", "allow", cwd=NOGIT)
+# A flag that takes no value (--recursive, --parallel, --silent) is skipped alone, so the word after
+# it is the child: env here.
+sh("env-child: deny, pnpm exec --recursive takes no value, so the child is env",
+   "pnpm --env-file=" + ENV + " exec --recursive env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --parallel takes no value, so the child is env",
+   "pnpm --env-file=" + ENV + " exec --parallel env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --silent takes no value, so the child is env",
+   "pnpm --env-file=" + ENV + " exec --silent env", "deny", "env-file", cwd=NOGIT)
+# Controls, green on this head: with no flag before the child, pnpm exec denies env and allows vitest.
+sh("env-child: deny, pnpm exec with no flag runs env, the control for the cases above",
+   "pnpm --env-file=" + ENV + " exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm exec with no flag runs vitest, the control for the cases above",
+   "pnpm --env-file=" + ENV + " exec vitest", "allow", cwd=NOGIT)
+# A glued v in a short-flag cluster takes the next word as its volume, so /a:/b is not the child.
+sh("env-child: deny, docker -itv takes /a:/b as the volume, so env runs in img",
+   "docker run -itv /a:/b --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker -dv takes /a:/b as the volume, so env runs in img",
+   "docker run -dv /a:/b --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+# A flag that takes no value (--stream) is skipped alone, so python is the child and its -c prints os.environ.
+sh("env-child: deny, pnpm exec --stream takes no value, so python -c prints os.environ",
+   "pnpm --env-file=" + ENV + " exec --stream python -c \"import os; print(os.environ)\"",
+   "deny", "env-file", cwd=NOGIT)
+# An unlisted option ahead of -c must not hide env from the shell string.
+sh("env-child: deny, npm exec with an unlisted --foo before -c still runs env",
+   "npm --env-file=" + ENV + " exec --foo x -c \"env\"", "deny", "env-file", cwd=NOGIT)
+# uv -q and --verbose take no value, so vitest is the child and env is its test filter.
+sh("env-child: allow, uv -q takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " -q vitest env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --verbose takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --verbose vitest env", "allow", cwd=NOGIT)
+# npm exec --yes takes no value, so jest -c env is jest's own option, not npm's shell string.
+sh("env-child: allow, npm exec --yes takes no value, so jest -c env is jest's option",
+   "npm --env-file=" + ENV + " exec --yes jest -c env", "allow", cwd=NOGIT)
+
+# Two unlisted value flags in a row. The scan takes each unlisted flag's next word as a possible
+# value, and runs past every unlisted option, so it reaches the image and its child (env). The
+# --label deny is no such shape: --label is a listed flag, so the scan reads it, and that case
+# pins the listed flag green.
+# Each allow is the same runner with a child that prints nothing, so the flags alone are not denied.
+sh("env-child: deny, docker --cap-add X --cap-add Y, two unlisted value flags, so env runs in img",
+   "docker run --env-file " + ENV + " --cap-add X --cap-add Y img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker --pull always --label a=b after the file, so env runs in img",
+   "docker run --env-file " + ENV + " --pull always --label a=b img env", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker --pull always --rm before the file, so env runs in img",
+   "docker run --pull always --rm --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, docker with two unlisted value flags and no child, so img runs its own command",
+   "docker run --env-file " + ENV + " --cap-add X --cap-add Y img", "allow", cwd=NOGIT)
+sh("env-child: allow, docker with one unlisted value flag, so serve env is the image's own arguments",
+   "docker run --env-file " + ENV + " --cap-add X img serve env", "allow", cwd=NOGIT)
+
+# npm, npx and pnpm given the file, with a printing child and no -c. npm's `--` and its `x` alias
+# end the options, so the word after them is the child. npx reads its first word as the child.
+# pnpm's -r and -w take no value, so exec is the command word. The allows run an app's own command.
+sh("env-child: deny, npm exec -- ends npm's options, so env is the child",
+   "npm --env-file=" + ENV + " exec -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npm x -- ends npm's options, so env is the child of the exec alias x",
+   "npm --env-file=" + ENV + " x -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx with no -c runs env as its first word",
+   "npx --env-file=" + ENV + " env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx with no -c runs printenv FOO as its first word",
+   "npx --env-file=" + ENV + " printenv FOO", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm -r takes no value, so exec runs env as the child",
+   "pnpm --env-file=" + ENV + " -r exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm -w takes no value, so exec runs env as the child",
+   "pnpm --env-file=" + ENV + " -w exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npx with no -c runs vitest, an app's own test command",
+   "npx --env-file=" + ENV + " vitest", "allow", cwd=NOGIT)
+sh("env-child: allow, npx with no -c runs tsx app.ts, an app's own script",
+   "npx --env-file=" + ENV + " tsx app.ts", "allow", cwd=NOGIT)
+sh("env-child: allow, npm exec -- runs jest, an app's own test command",
+   "npm --env-file=" + ENV + " exec -- jest", "allow", cwd=NOGIT)
+sh("env-child: allow, pnpm -r takes no value, so exec runs vitest, the control for -r",
+   "pnpm --env-file=" + ENV + " -r exec vitest", "allow", cwd=NOGIT)
+sh("env-child: allow, pnpm -w takes no value, so exec runs vitest, the control for -w",
+   "pnpm --env-file=" + ENV + " -w exec vitest", "allow", cwd=NOGIT)
+sh("env-child: deny, pnpm dlx runs env as its first word, as npx does with no -c",
+   "pnpm --env-file=" + ENV + " dlx env", "deny", "env-file", cwd=NOGIT)
+# uv -v and -vv are boolean flags, so vitest is the child and env is its own test filter.
+sh("env-child: allow, uv -vv takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " -vv vitest env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv -v takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " -v vitest env", "allow", cwd=NOGIT)
+
+# Flags the list does not name that take no value, given the file. uv's --exact and --all-groups and
+# npx's --silent are bools, so the word after each is the program, and env after it is the program's
+# argument. A bun ./x is a script path, not bun's x alias, so env is its argument.
+sh("env-child: allow, uv --exact takes no value, so pytest runs with the filter env",
+   "uv run --env-file " + ENV + " --exact pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --all-groups takes no value, so pytest runs with the filter env",
+   "uv run --env-file " + ENV + " --all-groups pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, npx --silent takes no value, so jest runs with the filter env",
+   "npx --env-file=" + ENV + " --silent jest -t env", "allow", cwd=NOGIT)
+sh("env-child: allow, bun ./x runs the script ./x, not bun's x alias, so env is its argument",
+   "bun --env-file=" + ENV + " ./x env", "allow", cwd=NOGIT)
+
+# Bool flags that take no value, given the file. `--sig-proxy` is docker's bool, so img is the image
+# and env after it is the child. `--active` is uv's bool, so env is the child of the uv run. `bun x`
+# is the exec alias of bunx, so its first word is the child. Each allow runs the program's own
+# command, with env only as an argument. `bunx` is no loader command, so no bunx case is pinned here.
+sh("env-child: deny, docker --sig-proxy takes no value, so env after img is the child",
+   "docker run --env-file " + ENV + " --pull always --sig-proxy img env", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker --rm takes no value after --pull always, so env after img is the child",
+   "docker run --env-file " + ENV + " --pull always --rm img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv --active takes no value, so env is the child of the uv run",
+   "uv run --env-file " + ENV + " --extra dev --active env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, bun x is the exec alias, so env is the child",
+   "bun --env-file=" + ENV + " x env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, docker --sig-proxy takes no value, so serve env is the image's own command",
+   "docker run --env-file " + ENV + " --pull always --sig-proxy img serve env", "allow", cwd=NOGIT)
+sh("env-child: allow, docker with no child after the image, so serve is the image's own command",
+   "docker run --env-file " + ENV + " --pull always img serve", "allow", cwd=NOGIT)
+sh("env-child: allow, bun x runs vitest, an app's own test command",
+   "bun --env-file=" + ENV + " x vitest", "allow", cwd=NOGIT)
+# Each bool flag takes no value, so the word after it is the child. The allow puts vitest after the
+# flag, with env as its filter. The deny puts env after the flag, and env is the child. A bool that
+# ENV_CHILD_BOOL_FLAGS drops reads the next word as the flag's value, so the allow turns to a deny.
+sh("env-child: deny, uv --dev takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --dev env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --dev takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --dev vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --all-packages takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --all-packages env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --all-packages takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --all-packages vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --upgrade takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --upgrade env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --upgrade takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --upgrade vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --refresh takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --refresh env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --refresh takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --refresh vitest env", "allow", cwd=NOGIT)
+# uv's --upgrade-package and --refresh-package take a value, so X is not a flag. The allow is the
+# control: pytest is the child. The deny puts env after X, and env is the child.
+sh("env-child: allow, uv --upgrade-package takes X, so pytest is the child, a control",
+   "uv run --env-file " + ENV + " --upgrade-package X pytest", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --upgrade-package takes X, so env after it is the child",
+   "uv run --env-file " + ENV + " --upgrade-package X env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --refresh-package takes X, so pytest is the child, a control",
+   "uv run --env-file " + ENV + " --refresh-package X pytest", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --refresh-package takes X, so env after it is the child",
+   "uv run --env-file " + ENV + " --refresh-package X env", "deny", "env-file", cwd=NOGIT)
+
+# The false alarms that decision env-file-stays-unread names. Each allow runs its program with env only
+# as an argument, and the flag before the program takes no value. The guard reads that flag's next word
+# as its value, so the program's word starts a child and env is read as the child. Each deny beside it
+# puts env in the child's place with the same flag, so a fix that stops reading these flags fails it.
+sh("env-child: allow, uv --exact takes no value, so pytest runs with the filter -k env",
+   "uv run --env-file " + ENV + " --exact pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --exact takes no value, so env is the child, the control for --exact",
+   "uv run --env-file " + ENV + " --exact env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --all-groups takes no value, so pytest runs with the filter env",
+   "uv run --env-file " + ENV + " --all-groups pytest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --all-groups takes no value, so env is the child, the control for it",
+   "uv run --env-file " + ENV + " --all-groups env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npx --silent takes no value, so jest runs with the filter -t env",
+   "npx --env-file=" + ENV + " --silent jest -t env", "allow", cwd=NOGIT)
+sh("env-child: deny, npx --silent takes no value, so env is the child, the control for --silent",
+   "npx --env-file=" + ENV + " --silent env", "deny", "env-file", cwd=NOGIT)
+# pnpm reads its own flags before `exec`. After `exec` a word is the command's, so the pins put --stream
+# before it, where it takes no value and the word after it is the program.
+sh("env-child: allow, pnpm --stream before exec takes no value, so vitest runs with the filter env",
+   "pnpm --env-file=" + ENV + " --stream exec vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, pnpm --stream before exec takes no value, so env is the child, the control for it",
+   "pnpm --env-file=" + ENV + " --stream exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm --stream before exec takes no value, so jest -c env is jest's option",
+   "pnpm --env-file=" + ENV + " --stream exec jest -c env", "allow", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --stream takes no value, so env is the child, the control for it",
+   "pnpm --env-file=" + ENV + " exec --stream env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --stream then -c env, so pnpm's own -c is a shell string, the control",
+   "pnpm --env-file=" + ENV + " exec --stream -c env", "deny", "env-file", cwd=NOGIT)
+# npm's --color is a bool that owns only the literal words always, true and false, which nopt reads as
+# its value. Any other word after it is the child. The deny puts env straight after --color. The allows
+# put jest after always, and after true with -- before it.
+sh("env-child: deny, npm exec --color is a bool, so env straight after it is the child",
+   "npm --env-file=" + ENV + " exec --color env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npm exec --color owns always, so env after always is the child",
+   "npm --env-file=" + ENV + " exec --color always env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm exec --color owns always, so jest after always is the child, the control",
+   "npm --env-file=" + ENV + " exec --color always jest", "allow", cwd=NOGIT)
+sh("env-child: deny, npm exec --color owns true, so -- ends the options and env is the child",
+   "npm --env-file=" + ENV + " exec --color true -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm exec --color owns true, so -- ends the options and jest is the child",
+   "npm --env-file=" + ENV + " exec --color true -- jest", "allow", cwd=NOGIT)
+# nopt reads a literal true or false after a bool flag as that flag's value. So the word after the flag
+# is not the child: the deny puts env there, and the allow puts the program there.
+sh("env-child: deny, pnpm --stream takes a literal true, so exec then env runs env",
+   "pnpm --env-file=" + ENV + " --stream true exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm --stream takes a literal true, so exec then vitest is the child",
+   "pnpm --env-file=" + ENV + " --stream true exec vitest", "allow", cwd=NOGIT)
+sh("env-child: deny, npm --json takes a literal true, so exec then env runs env",
+   "npm --env-file=" + ENV + " --json true exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm --json takes a literal true, so exec then jest is the child",
+   "npm --env-file=" + ENV + " --json true exec jest", "allow", cwd=NOGIT)
+sh("env-child: deny, npx --json takes a literal true, so env is the child of npx",
+   "npx --env-file=" + ENV + " --json true env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npx --json takes a literal true, so vitest is the child of npx",
+   "npx --env-file=" + ENV + " --json true vitest", "allow", cwd=NOGIT)
+sh("env-child: deny, npm exec --dry-run takes a literal false, so env is the child",
+   "npm --env-file=" + ENV + " exec --dry-run false env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm exec --dry-run takes a literal false, so jest is the child",
+   "npm --env-file=" + ENV + " exec --dry-run false jest", "allow", cwd=NOGIT)
+# npm exec documents --no, which takes no value. The allow runs jest with the filter -t env; the deny
+# puts env in the child's place.
+sh("env-child: allow, npm exec --no takes no value, so jest runs with the filter -t env",
+   "npm --env-file=" + ENV + " exec --no jest -t env", "allow", cwd=NOGIT)
+sh("env-child: deny, npm exec --no takes no value, so env is the child, the control for --no",
+   "npm --env-file=" + ENV + " exec --no env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, bun x --bun takes no value, so vitest runs with the filter -t env",
+   "bun --env-file=" + ENV + " x --bun vitest -t env", "allow", cwd=NOGIT)
+sh("env-child: deny, bun x --bun takes no value, so env is the child, the control for --bun",
+   "bun --env-file=" + ENV + " x --bun env", "deny", "env-file", cwd=NOGIT)
+# `container` is the management word docker and podman give to run, so `container run` starts the same
+# child as `run`. The allows beside it run the image's own command, with env only as an argument.
+sh("env-child: deny, docker container run is docker run, so env runs in img",
+   "docker container run --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker container run --rm takes no value, so printenv runs in alpine",
+   "docker container run --env-file " + ENV + " --rm alpine printenv", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, podman container run is podman run, so env runs in img",
+   "podman container run --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, docker container run with serve as the child, the control for the gap",
+   "docker container run --env-file " + ENV + " img serve", "allow", cwd=NOGIT)
+sh("env-child: allow, podman container run with serve as the child, the control for the gap",
+   "podman container run --env-file " + ENV + " img serve", "allow", cwd=NOGIT)
+
+# A `$` in a shell string refuses only in a segment whose command prints (echo, printf, env, printenv).
+# A `$` in any other segment is an ordinary argument, so an app's own command may use it. The three
+# deny forms below each print a variable through echo or printf, so they stay denied.
+sh("env-child: allow, a $ in a cd segment is an argument, docker runs sh -c cd $APP_DIR && npm start",
+   "docker run --env-file " + ENV + " img sh -c \"cd $APP_DIR && npm start\"", "allow", cwd=NOGIT)
+sh("env-child: allow, a $ in a pytest argument is an argument, uv runs sh -c pytest --basetemp=$TMPDIR",
+   "uv run --env-file " + ENV + " sh -c 'pytest --basetemp=$TMPDIR'", "allow", cwd=NOGIT)
+sh("env-child: allow, a $ in a node script argument is an argument, npm exec -c node $SCRIPT",
+   "npm --env-file=" + ENV + " exec -c 'node $SCRIPT'", "allow", cwd=NOGIT)
+sh("env-child: deny, echo prints a $ variable in a shell string, uv runs sh -c echo $DB_URL",
+   "uv run --env-file " + ENV + " sh -c 'echo $DB_URL'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, printf prints a $ variable in a shell string, docker runs sh -c printf",
+   "docker run --env-file " + ENV + " img sh -c 'printf \"%s\" \"$KEY\"'", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, npm exec -c echo prints a $ variable, npm exec -c echo $X",
+   "npm --env-file=" + ENV + " exec -c 'echo $X'", "deny", "env-file", cwd=NOGIT)
+
+# A child that prints the environment without a word the shell scan reads: a substitution in a child's
+# shell string, perl, ruby or awk over the environment, the printing builtins set and export -p, a /proc
+# environ file, and a grouped or negated env. Each deny is one such child. The allows are the same forms
+# that print nothing: a substitution that is not a variable, an arithmetic expansion, and compose up.
+sh("env-child: deny, sh -c cd $(env) runs env in a substitution, uv run",
+   "uv run --env-file " + ENV + " sh -c 'cd $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c ls $(printenv) runs printenv in a substitution, uv run",
+   "uv run --env-file " + ENV + " sh -c 'ls $(printenv)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c cat <(env) runs env in a process substitution, uv run",
+   "uv run --env-file " + ENV + " sh -c 'cat <(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c ls `env` runs env in backticks, uv run",
+   "uv run --env-file " + ENV + " sh -c 'ls `env`'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npm exec -c ls $(env) runs env in a substitution, npm --env-file",
+   "npm --env-file=" + ENV + " exec -c 'ls $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, perl -e print %ENV prints the environment, uv run",
+   "uv run --env-file " + ENV + " perl -e 'print %ENV'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, ruby -e p ENV prints the environment, uv run",
+   "uv run --env-file " + ENV + " ruby -e 'p ENV'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, awk over ENVIRON prints every variable, uv run",
+   "uv run --env-file " + ENV + " awk 'BEGIN{for(k in ENVIRON) print k\"=\"ENVIRON[k]}'",
+   "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c set prints the shell variables, uv run",
+   "uv run --env-file " + ENV + " sh -c 'set'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c export -p prints the exported variables, uv run",
+   "uv run --env-file " + ENV + " sh -c 'export -p'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, cat /proc/self/environ prints the process environment, uv run",
+   "uv run --env-file " + ENV + " cat /proc/self/environ", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c cat /proc/$$/environ prints the shell's environment, uv run",
+   "uv run --env-file " + ENV + " sh -c 'cat /proc/$$/environ'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c a brace group { env; } runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c '{ env; }'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c a subshell ( env ) runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c '( env )'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c a negated ! env runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c '! env'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c if true; then env; fi runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c 'if true; then env; fi'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker compose --env-file config prints the resolved values",
+   "docker compose --env-file " + ENV + " config", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, sh -c echo $(date) runs date, a substitution that is not a variable, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo $(date)'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c echo $((1+2)) is arithmetic, not a variable, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo $((1+2))'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c ls $(pwd) runs pwd, a substitution that is not a variable, uv run",
+   "uv run --env-file " + ENV + " sh -c 'ls $(pwd)'", "allow", cwd=NOGIT)
+sh("env-child: allow, perl -e print 1 prints a literal, uv run",
+   "uv run --env-file " + ENV + " perl -e 'print 1'", "allow", cwd=NOGIT)
+sh("env-child: allow, awk print $1 reads a field of a file, uv run",
+   "uv run --env-file " + ENV + " awk '{print $1}' file", "allow", cwd=NOGIT)
+sh("env-child: allow, docker compose --env-file up runs the stack, the control for config",
+   "docker compose --env-file " + ENV + " up", "allow", cwd=NOGIT)
+
+# The substitution reader must find a $( ) past a quote, a # inside quotes and a line break. A # outside
+# quotes starts a shell comment, so the $( ) after it never runs. The echo deny is the twin of echo $(date).
+sh("env-child: deny, a # inside double quotes does not hide a $( ) that runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c 'ls \"#\" $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a # inside a quoted word does not hide a later $( ) that runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo \"a # b\"; ls $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, double quotes do not hide a $( ) that runs env in cd, uv run",
+   "uv run --env-file " + ENV + " sh -c 'cd \"$(env)\"'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a lone quote in text does not hide a $( ) that runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c \"echo don't; ls \\$(env)\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a line break in a shell string starts a segment whose $( ) runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c 'npm ci\nls $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, echo prints the output of a $( ) that runs env, the twin of echo $(date), uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, a # outside quotes starts a shell comment, so the $( ) after it never runs, uv run",
+   "uv run --env-file " + ENV + " sh -c 'ls # $(env)'", "allow", cwd=NOGIT)
+
+# A wrapper word before the printing program (timeout, nice, sudo), or a node inline program under npx,
+# is a child the scan must read. Each deny is one such child that prints the environment.
+sh("env-child: deny, timeout 5 wraps env, uv run --env-file runs timeout 5 env",
+   "uv run --env-file " + ENV + " timeout 5 env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, timeout 5 wraps printenv in an image, docker run runs timeout 5 printenv",
+   "docker run --env-file " + ENV + " img timeout 5 printenv", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, nice wraps env in a shell string, uv run sh -c nice env",
+   "uv run --env-file " + ENV + " sh -c \"nice env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sudo wraps env in a shell string, uv run sh -c sudo env",
+   "uv run --env-file " + ENV + " sh -c \"sudo env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx runs node -e that prints process.env",
+   "npx --env-file=" + ENV + " node -e \"console.log(process.env)\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx runs node -p that prints process.env",
+   "npx --env-file=" + ENV + " node -p process.env", "deny", "env-file", cwd=NOGIT)
+
+# Controls for the wrapper and npx cases above: the same runners with an app as the child stay allowed.
+sh("env-child: allow, uv run --env-file runs timeout 5 pytest, the control for timeout 5 env",
+   "uv run --env-file " + ENV + " timeout 5 pytest", "allow", cwd=NOGIT)
+sh("env-child: allow, npx runs node app.js, the control for npx node -e and node -p",
+   "npx --env-file=" + ENV + " node app.js", "allow", cwd=NOGIT)
+
+# A nested substitution, a /proc environ glob, an escaped $ that the child shell expands, and a redirect
+# that writes the environment to a file each print or save a file value, so each is denied.
+sh("env-child: deny, sh -c echo $(echo $X) prints a variable through a nested substitution, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo $(echo $X)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c cat /proc/*/environ reads every process environment, uv run",
+   "uv run --env-file " + ENV + " sh -c 'cat /proc/*/environ'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c ls $(env) with an escaped dollar runs env in the child shell, uv run",
+   "uv run --env-file " + ENV + " sh -c \"ls \\$(env)\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c env > out.txt writes the environment to a file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'env > out.txt'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c set > out.txt writes the shell variables to a file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'set > out.txt'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c printenv >> log appends the environment to a file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'printenv >> log'", "deny", "env-file", cwd=NOGIT)
+
+# A double-quoted substitution is expanded by the parent shell before uv runs, and the parent holds no
+# file value, so it prints HOME and nothing from the file. docker compose config prints service names
+# or nothing. perl -pe rewrites text in a file it reads and prints no variable.
+sh("env-child: allow, bash -c with a double-quoted $(printenv HOME) is expanded by the parent, uv run",
+   "uv run --env-file " + ENV + " bash -c \"echo $(printenv HOME)\"", "allow", cwd=NOGIT)
+sh("env-child: allow, docker compose --env-file config --services prints service names, not values",
+   "docker compose --env-file " + ENV + " config --services", "allow", cwd=NOGIT)
+sh("env-child: allow, docker compose --env-file config -q prints nothing",
+   "docker compose --env-file " + ENV + " config -q", "allow", cwd=NOGIT)
+sh("env-child: allow, perl -pe rewrites text in config.yml and prints no variable, uv run",
+   "uv run --env-file " + ENV + " perl -pe 's/ENV/prod/' config.yml", "allow", cwd=NOGIT)
+
+# A pin beside the deny pins above (perl print %ENV and docker compose config): one variable read by perl.
+sh("env-child: deny, perl -e print $ENV{KEY} prints one variable from the environment, uv run",
+   "uv run --env-file " + ENV + " perl -e 'print $ENV{KEY}'", "deny", "env-file", cwd=NOGIT)
+
+# A child that prints the environment by a route no earlier case named: a quote joined from parts in a shell
+# string, and the exec and system calls of ruby, perl and awk. Each deny has a control beside it that runs
+# date in the same place, so the deny turns on the program that prints, not on the shape of the command.
+sh("env-child: deny, sh -c echo it's; env runs env after a quote joined from parts, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo it'\"'\"'s; env'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, sh -c echo it's; date runs date, the control for the quote-joined env, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo it'\"'\"'s; date'", "allow", cwd=NOGIT)
+sh("env-child: deny, ruby -e system env runs env in a double-quoted program, uv run",
+   "uv run --env-file " + ENV + " ruby -e \"system(\\\"env\\\")\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, ruby -e system date runs date, the control for ruby system env, uv run",
+   "uv run --env-file " + ENV + " ruby -e \"system(\\\"date\\\")\"", "allow", cwd=NOGIT)
+sh("env-child: deny, perl -e exec env runs env in a double-quoted program, uv run",
+   "uv run --env-file " + ENV + " perl -e \"exec(\\\"env\\\")\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, perl -e exec date runs date, the control for perl exec env, uv run",
+   "uv run --env-file " + ENV + " perl -e \"exec(\\\"date\\\")\"", "allow", cwd=NOGIT)
+sh("env-child: deny, awk BEGIN system env runs env in a double-quoted program, uv run",
+   "uv run --env-file " + ENV + " awk \"BEGIN{system(\\\"env\\\")}\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, awk BEGIN system date runs date, the control for awk system env, uv run",
+   "uv run --env-file " + ENV + " awk \"BEGIN{system(\\\"date\\\")}\"", "allow", cwd=NOGIT)
+
+# Words that name the environment and print no value: a ruby string or script argument that holds ENV, a
+# file named with ENV, the printers compgen and declare with a name or -f, a compose config that lists
+# hashes, and a /proc file that is not environ. Each is allowed, since none prints a value.
+sh("env-child: allow, ruby -e puts a string that says ENV prints no variable, uv run",
+   "uv run --env-file " + ENV + " ruby -e 'puts \"the ENV var\"'", "allow", cwd=NOGIT)
+sh("env-child: allow, ruby script.rb ENV passes the word ENV to a script, uv run",
+   "uv run --env-file " + ENV + " ruby script.rb ENV", "allow", cwd=NOGIT)
+sh("env-child: allow, awk prints a file named ENV.txt, not a variable, uv run",
+   "uv run --env-file " + ENV + " awk '{print}' ENV.txt", "allow", cwd=NOGIT)
+sh("env-child: allow, perl -ne prints README.ENV.md, a file read, uv run",
+   "uv run --env-file " + ENV + " perl -ne print README.ENV.md", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c compgen -v lists variable names, not values, uv run",
+   "uv run --env-file " + ENV + " sh -c 'compgen -v'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c compgen -e lists exported names, not values, uv run",
+   "uv run --env-file " + ENV + " sh -c 'compgen -e'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c declare -pf prints function bodies, not variables, uv run",
+   "uv run --env-file " + ENV + " sh -c 'declare -pf'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c declare -fp foo prints one function, not variables, uv run",
+   "uv run --env-file " + ENV + " sh -c 'declare -fp foo'", "allow", cwd=NOGIT)
+sh("env-child: allow, docker compose config --hash lists service hashes, not values",
+   "docker compose --env-file " + ENV + " config --hash=\"*\"", "allow", cwd=NOGIT)
+sh("env-child: allow, cat /proc/self/environ_x reads a file that is not environ, uv run",
+   "uv run --env-file " + ENV + " cat /proc/self/environ_x", "allow", cwd=NOGIT)
+
+# Shell and perl or ruby strings that print the environment: declare -p, -x and typeset print variables,
+# perl and ruby run env through a shell string, and a quote escaped as '\'' is one quote in the child.
+# The allows are the same printers with no variable to print, and compose's --volumes and --images list names.
+sh("env-child: deny, sh -c declare -p prints the variables, uv run",
+   "uv run --env-file " + ENV + " sh -c 'declare -p'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c declare -x prints the exported variables, uv run",
+   "uv run --env-file " + ENV + " sh -c 'declare -x'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c typeset prints the variables, uv run",
+   "uv run --env-file " + ENV + " sh -c 'typeset'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, perl -e system env runs env from a perl string, uv run",
+   "uv run --env-file " + ENV + " perl -e 'system(\"env\")'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, perl -e print qx env prints env output, uv run",
+   "uv run --env-file " + ENV + " perl -e 'print qx(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, ruby -e puts backtick env prints env output, uv run",
+   "uv run --env-file " + ENV + " ruby -e 'puts `env`'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c echo it's; env after an escaped quote runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo it'\\''s; env'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, docker compose config --volumes lists volume names, not values",
+   "docker compose --env-file " + ENV + " config --volumes", "allow", cwd=NOGIT)
+sh("env-child: allow, docker compose config --images lists image names, not values",
+   "docker compose --env-file " + ENV + " config --images", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c export FOO=bar sets a variable and runs pytest, uv run",
+   "uv run --env-file " + ENV + " sh -c 'export FOO=bar && pytest'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c declare -f prints function bodies only, uv run",
+   "uv run --env-file " + ENV + " sh -c 'declare -f'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c typeset -i x=1 sets an integer, uv run",
+   "uv run --env-file " + ENV + " sh -c 'typeset -i x=1'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c set -euo pipefail sets options and runs pytest, uv run",
+   "uv run --env-file " + ENV + " sh -c 'set -euo pipefail; pytest'", "allow", cwd=NOGIT)
+
+# The perl and ruby code reader must not end a string early. A // , a /* or a # inside quotes is text, so the
+# call after it still runs. A lone quote in text is an apostrophe, not a string opener, so the call after it
+# is read too.
+sh("env-child: deny, perl prints // inside a string, then system env runs env, uv run",
+   "uv run --env-file " + ENV + " perl -e 'print \"//\"; system(\"env\")'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, perl prints /* inside a string, then system env runs env, uv run",
+   "uv run --env-file " + ENV + " perl -e 'print \"/*\"; system(\"env\")'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, ruby puts # inside a string, then system env runs env, uv run",
+   "uv run --env-file " + ENV + " ruby -e 'puts \"#\"; system(\"env\")'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a ruby code string whose second line is system env runs env, uv run",
+   "uv run --env-file " + ENV + " ruby -e 'puts 1\nsystem(\"env\")'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, ruby puts a double-quoted don't, a lone quote in text, uv run",
+   "uv run --env-file " + ENV + " ruby -e 'puts \"don'\\''t\"'", "allow", cwd=NOGIT)
 
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
@@ -9341,6 +10598,129 @@ sh("env: heredoc-r3: an unquoted body that runs ls in backticks and names a forc
    "cat > /tmp/n.md <<EOF\nrun `ls` then git push --force later\nEOF", "allow", cwd=NOGIT)
 
 
+# ---- flag-false-alarm: env-file forms that read no file's contents, and the controls. Decision env-file-stays-unread.
+# Each allow row reads no file's contents. The word after a boolean flag is a pattern, a glob that
+# excludes the name reads nothing, a jq or yq word is a key, a folder named with the prefix is only
+# made by mkdir, and a file type after rg -T names no file. Main refuses each allow row except the
+# rg -T one, which main allows.
+# Each refuse row is refused by this guard: the name is a path, a glob that includes it, a loader or
+# in-place write of it, a folder that a commit or a printer reads, or a folder entered by cd or pushd
+# (the next word reads from it). jq, gojq and yq read -C as a
+# colour switch, so the word after it is the program or a file, never a value. ag's --file-search-regex
+# picks the files it reads by name only with a hidden flag, and its -p names a file of ignore patterns it reads.
+FLAG_FALSE_ALARM_ALLOW = (
+    "ag -f " + ENV + " src",
+    "ack -f " + ENV,
+    "grep -r --exclude=" + ENV + " foo .",
+    "grep -r --exclude " + ENV + " foo .",
+    "rg -t py " + ENV,
+    "mkdir " + ENV + "s",
+    "jq " + ENV + "ironment f.json",
+    "jq " + ENV + "From f.json",
+    "jq " + ENV + " f.json",
+    "yq " + ENV + "s f.yaml",
+    "yq e " + ENV + "s f.yaml",
+    "jq -C " + ENV + "s f.json",
+    "jq -L dir " + ENV + " f.yaml",
+    "rg -T " + ENV + " K",
+)
+FLAG_FALSE_ALARM_REFUSE = (
+    "cat " + ENV,
+    "jq . " + ENV,
+    "grep x " + ENV,
+    "grep --include=" + ENV + " -r K .",
+    "rg -g " + ENV + " K",
+    "jq --from-file " + ENV,
+    "jq -f " + ENV,
+    "jq --rawfile x " + ENV + " -n .",
+    "ag -f K " + ENV,
+    "ag -t K " + ENV,
+    "rg -tpy K " + ENV,
+    # rg with a hidden flag searches dotfiles, and -T py excludes only python files, so `.env` is searched.
+    "rg --hidden -T py " + ENV,
+    "rg -uu -T py " + ENV,
+    "rg -. -T py " + ENV,
+    "yq -i .x=1 " + ENV,
+    "yq " + ENV,
+    "yq e " + ENV,
+    "yq -i " + ENV,
+    "yq e -i " + ENV,
+    "yq -i e " + ENV,
+    "jq -L " + ENV + " .",
+    VCS + " add " + ENV + "s",
+    "cat " + ENV + "s",
+    "jq -C . " + ENV + " f.json",
+    "gojq -C . " + ENV + " f.json",
+    "yq -C . " + ENV + " f.yaml",
+    "jq -rC .k " + ENV + " f.json",
+    "jq -C -f " + ENV + " .",
+    "gojq . " + ENV,
+    "yq eval .x " + ENV,
+    "grep --exclude-from " + ENV + " foo .",
+    "ag -fp " + ENV + " K",
+    # -p is --path-to-ignore: ag reads the named file as an ignore file, so `.env` is read.
+    "ag -p " + ENV + " K",
+    "cd " + ENV + "s",
+    "pushd " + ENV + "s",
+    "cd " + ENV + ".d",
+)
+for _cmd in FLAG_FALSE_ALARM_ALLOW:
+    sh("env: flag-false-alarm: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
+for _cmd in FLAG_FALSE_ALARM_REFUSE:
+    sh("env: flag-false-alarm: still refused, " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+
+# ---- a folder move into an env-prefixed name. Decision env-file-stays-unread.
+# A lone cd or pushd into one is refused (FLAG_FALSE_ALARM_REFUSE). The Bash tool keeps its folder, so the
+# move would open the next call's reads. The chained forms are pinned here too. Set-Location is the PowerShell cd.
+sh("env: folder move: cd into .envs, then cat a file in it", "cd " + ENV + "s && cat config.json",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: pushd into .envs, then cat a file in it", "pushd " + ENV + "s && cat config.json",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: cd into .env.d, then cat a file in it", "cd " + ENV + ".d && cat x",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: PowerShell Set-Location into .envs, then Get-Content a file in it",
+   "Set-Location " + ENV + "s; Get-Content config.json", "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: folder move: cd into .envs, then ls in it", "cd " + ENV + "s && ls", "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: cd into .envs, then cd back out", "cd " + ENV + "s && cd ..", "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: PowerShell Set-Location into .envs, alone", "Set-Location " + ENV + "s",
+   "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+# A hidden search reads a dotfile whose name matches its -G regex. `-G e` matches `.env`, and the search
+# reads that file while `.env` is the pattern.
+# The guard tries the regex on a few sample env file names. A suffix outside that sample (.production,
+# .development, .test, .staging) is an env file too. Inside double quotes the shell turns `\\.` into `\.`,
+# the regex ag reads. A regex that will not compile is refused: the guard cannot tell what it matches.
+for _cmd in (
+    "ag --hidden -G e " + ENV,
+    "ag -u -G e " + ENV,
+    "ag --hidden --file-search-regex e " + ENV,
+    "ag --unrestricted -G e " + ENV,
+    "ag --hidden --file-search-regex=e " + ENV,
+    "ag --hidden -Ge " + ENV,
+    r"ag --hidden -G '\.env\.production' K",
+    "ag --hidden -G prod K",
+    r"ag --hidden -G '\.development' K",
+    r"ag --hidden -G '\.test' K",
+    r"ag --hidden -G '\.staging' K",
+    r'ag --hidden -G "\\.(env|rc)$" K',
+    r'ag --hidden -G "\\.e" K',
+    "ag --hidden -G 'rc$' K",
+    "ag --hidden -G local K",
+    r"ag --hidden -G '^\./\.env' K",
+    "ag --hidden -G '(' K",
+):
+    sh("env: ag hidden: refused, " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+# The controls. A hidden search whose -G regex names no env file reads none, so it stays allowed. The last
+# row is allowed here and refused by main: main reads the `e` after -G as the pattern and judges `.env` as
+# a file. ag reads `.env` as the pattern, and without a hidden flag it skips dotfiles, so no env file is read.
+for _cmd in ("ag --hidden -G '\\.py$' KEY", "ag -G e " + ENV):
+    sh("env: ag hidden: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
+# With no hidden flag, ag does not search dotfiles, so a -G or --file-search-regex that names `.env` reads
+# no env file. -f is --follow, not a hidden flag. Decision env-file-stays-unread judges the file regex
+# only with a hidden flag.
+for _cmd in ("ag -G " + ENV + " K", "ag --file-search-regex " + ENV + " K", "ag -fG " + ENV + " K"):
+    sh("env: ag no hidden: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+
 def incident_write_strip_case():
     """strip_heredoc_bodies keeps no body line of the incident cat write.
 
@@ -9684,6 +11064,199 @@ sh("git env set: Bash printf into a profile, a directive split by adjacent quote
 # safe side, pinned.
 sh("git env set: Bash printf into a profile, a doubled backslash before n inside a name, denies",
    r"printf GIT_\\nDIR=/x >> ~/.bashrc", "deny", GIT_ENV_RULE, cwd=NOGIT)
+
+# =========================================================================== hook bypass
+# A git commit, merge or push that skips the git hooks is denied under rule hook-bypass. Five spellings of
+# one act: `-c core.hooksPath=...` on the command (the key in any case), `--no-verify` on commit, merge or
+# push, `-n` on commit alone, and the key set in the environment through GIT_CONFIG_COUNT or
+# GIT_CONFIG_PARAMETERS. `-n` is no bypass on push (--dry-run) or on merge (--no-stat), so both stay allowed.
+# The glued form `-ccore.hooksPath=x` is no spelling: git 2.43.0 refuses it as an unknown option, so no case
+# names it.
+#
+# Each deny has a green control beside it: the same command with the bypass taken out. A control that is not
+# allowed means another rule fires on that shape, so the deny beside it proves nothing about this rule.
+# The hooks path is `x`, a value no hook lives at, so the key alone decides, except in the one env case that
+# names /dev/null, as git's own examples do.
+FAMILY = "hook-bypass"
+HOOK_BYPASS = "hook-bypass"
+
+# (1) The key on the command line, for each verb that runs hooks.
+sh("hook-bypass: core.hooksPath on the command, commit, denies",
+   VCS + " -c core.hooksPath=x commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: core.hooksPath on the command, merge, denies",
+   VCS + " -c core.hooksPath=x merge feature/x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: core.hooksPath on the command, push, denies",
+   VCS + " -c core.hooksPath=x push origin feature/x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: the key in capitals on the command, Core.HooksPath, denies",
+   VCS + " -c Core.HooksPath=x commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, commit with no hooks key, allows",
+   VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, merge with no hooks key, allows",
+   VCS + " merge feature/x", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, push with no hooks key, allows",
+   VCS + " push origin feature/x", "allow", cwd=GITMAIN)
+
+# (2) --no-verify on commit, merge and push.
+sh("hook-bypass: --no-verify on commit, denies",
+   VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify on merge, denies",
+   VCS + " merge --no-verify feature/x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify on push, denies",
+   VCS + " push --no-verify origin feature/x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+
+# (3) -n on commit is --no-verify. Bundled with -m, and after the other flags, it is still the bypass.
+sh("hook-bypass: -n on commit is --no-verify, denies",
+   VCS + " commit -n -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: -n bundled with -m on commit, -nm x, denies",
+   VCS + " commit -nm x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify after the other flags and the message, denies",
+   VCS + " commit -am x --no-verify", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, commit -am x with no bypass, allows",
+   VCS + " commit -am x", "allow", cwd=GITMAIN)
+sh("hook-bypass: -mn on commit is the message n, not -n, allows",
+   VCS + " commit -mn", "allow", cwd=GITMAIN)
+
+# (4) The bypass reached through -C, a chain, a cd and a second line.
+sh("hook-bypass: --no-verify after git -C <dir>, denies",
+   VCS + " -C " + slash(GITMAIN) + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, git -C <dir> commit with no bypass, allows",
+   VCS + " -C " + slash(GITMAIN) + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: --no-verify after a status in an && chain, denies",
+   VCS + " status && " + VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, the same && chain with no bypass, allows",
+   VCS + " status && " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: core.hooksPath after a cd, denies",
+   "cd " + slash(GITMAIN) + " && " + VCS + " -c core.hooksPath=x commit -m x", "deny", HOOK_BYPASS,
+   cwd=GITMAIN)
+sh("hook-bypass: control, a cd and then a commit with no bypass, allows",
+   "cd " + slash(GITMAIN) + " && " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: --no-verify on the second line of a command, denies",
+   VCS + " status\n" + VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, the same two lines with no bypass, allows",
+   VCS + " status\n" + VCS + " commit -m x", "allow", cwd=GITMAIN)
+
+# (5) The key set in the environment. GIT_CONFIG_COUNT and GIT_CONFIG_PARAMETERS, each with a control that sets
+# another key, so the value is read and not only the variable's name.
+sh("hook-bypass: GIT_CONFIG_COUNT sets core.hooksPath for a commit, denies",
+   "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null " + VCS
+   + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, GIT_CONFIG_COUNT sets user.name for a commit, allows",
+   "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=x " + VCS + " commit -m x",
+   "allow", cwd=GITMAIN)
+sh("hook-bypass: GIT_CONFIG_PARAMETERS sets core.hooksPath for a push, denies",
+   "GIT_CONFIG_PARAMETERS=\"'core.hooksPath'='/dev/null'\" " + VCS + " push origin feature/x",
+   "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, GIT_CONFIG_PARAMETERS sets user.name for a push, allows",
+   "GIT_CONFIG_PARAMETERS=\"'user.name'='x'\" " + VCS + " push origin feature/x", "allow", cwd=GITMAIN)
+
+# (6) Scanner shapes: a lone apostrophe, and a # inside quotes, before the bypass. The guard reads the text the
+# shell reads, so neither quote nor comment opener may hide the flag that follows.
+sh("hook-bypass: a lone apostrophe in text before a bypass, denies",
+   "echo don't; " + VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, a lone apostrophe before a plain commit, allows",
+   "echo don't; " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: a # inside a quoted message does not hide a later --no-verify, denies",
+   VCS + ' commit -m "a # b" --no-verify', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, a # inside a quoted message with no bypass, allows",
+   VCS + ' commit -m "a # b"', "allow", cwd=GITMAIN)
+sh("hook-bypass: a # inside an echo string does not hide a bypass after it, denies",
+   'echo "# note"; ' + VCS + " -c core.hooksPath=x commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, a # inside an echo string before a plain commit, allows",
+   'echo "# note"; ' + VCS + " commit -m x", "allow", cwd=GITMAIN)
+
+# (7) PowerShell takes the same key on the command line, and its control with no key allows.
+sh("hook-bypass: PowerShell, core.hooksPath on the command, denies",
+   VCS + " -c core.hooksPath=x commit -m x", "deny", HOOK_BYPASS, tool="PowerShell", cwd=GITMAIN)
+sh("hook-bypass: control, PowerShell commit with no hooks key, allows",
+   VCS + " commit -m x", "allow", tool="PowerShell", cwd=GITMAIN)
+
+# (8) A bypass wrapped in another command: a shell, eval, env -S, xargs or timeout. The guard reads the command the
+# wrapper runs, not only the first word, so each wrapped bypass denies. The controls wrap a commit with no bypass,
+# or text that names one, and allow.
+sh("hook-bypass: --no-verify in a bash -c string, denies",
+   'bash -c "' + VCS + ' commit --no-verify -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: -n in an sh -c string, denies",
+   "sh -c '" + VCS + " commit -n -m x'", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify in an eval string, denies",
+   'eval "' + VCS + ' commit --no-verify -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify in an env -S string, denies",
+   'env -S "' + VCS + ' commit --no-verify -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: core.hooksPath in a bash -c string, denies",
+   'bash -c "' + VCS + ' -c core.hooksPath=/dev/null commit -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify fed to xargs, denies",
+   "echo --no-verify | xargs " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify after timeout 5, denies",
+   "timeout 5 " + VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, a bash -c string with a commit and no bypass, allows",
+   'bash -c "' + VCS + ' commit -m x"', "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a bash -c echo that names a bypass is text, allows",
+   "bash -c 'echo " + VCS + " commit --no-verify'", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a sh -c string with a push -n dry run, allows",
+   'sh -c "' + VCS + ' push -n"', "allow", cwd=GITMAIN)
+
+# (8b) A config write that turns hooks off, with a commit, merge or push after it in the same command, is denied.
+# DECIDED: a config write with nothing after it in the command is allowed. It sets a value and skips no hook; the
+# case below pins that. The controls read the key, unset it, set another key, or name the write in text.
+sh("hook-bypass: config core.hooksPath set, then a commit in the same command, denies",
+   VCS + " config core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --local core.hooksPath set, then a commit, denies",
+   VCS + " config --local core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --worktree core.hooksPath set, then a commit, denies",
+   VCS + " config --worktree core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --global core.hooksPath set, then a commit, denies",
+   VCS + " config --global core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --add core.hooksPath, then a push after a semicolon, denies",
+   VCS + " config --add core.hooksPath x; " + VCS + " push", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config core.hookspath set with -C, then a merge, denies (key case-blind)",
+   VCS + " -C " + slash(GITMAIN) + " config core.hookspath x && " + VCS + " merge y", "deny", HOOK_BYPASS,
+   cwd=GITMAIN)
+sh("hook-bypass: control, a config read of core.hooksPath, allows",
+   VCS + " config core.hooksPath", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a config --get of core.hooksPath, then a commit, allows",
+   VCS + " config --get core.hooksPath && " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a config --unset of core.hooksPath, allows",
+   VCS + " config --unset core.hooksPath", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a config write of user.name, then a commit, allows",
+   VCS + " config user.name x && " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a quoted mention of the config write, then a commit, allows",
+   'echo "git config core.hooksPath /dev/null" && ' + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a config write with no commit, merge or push after it, allows",
+   VCS + " config core.hooksPath /dev/null", "allow", cwd=GITMAIN)
+
+# (9) False alarms. Each names a bypass flag or key as text, or reads the key, and is allowed: no hook is skipped.
+sh("hook-bypass allow: push -n is --dry-run, not a bypass",
+   VCS + " push -n origin feature/x", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: merge -n is --no-stat, not a bypass",
+   VCS + " merge -n feature/x", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: log -n 5 counts commits",
+   VCS + " log -n 5", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: -n as a commit message value",
+   VCS + ' commit -m "-n"', "allow", cwd=GITMAIN)
+sh("hook-bypass allow: --no-verify as a commit message value",
+   VCS + ' commit -m "--no-verify"', "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a quoted --no-verify in a commit message",
+   VCS + " commit -m 'never use --no-verify'", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a quoted core.hooksPath in a commit message",
+   VCS + ' commit -m "refuse core.hooksPath bypass"', "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a heredoc commit message that names --no-verify and core.hooksPath",
+   VCS + " commit -F - <<'EOF'\nrefuse --no-verify and a core.hooksPath bypass\nEOF", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a multi-line quoted commit message that names --no-verify",
+   VCS + ' commit -m "subject\n\nrefuse --no-verify"', "allow", cwd=GITMAIN)
+sh("hook-bypass allow: echo of a bypass command is text",
+   'echo "git commit --no-verify"', "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a trailing shell comment that names --no-verify",
+   VCS + " commit -m x # --no-verify is refused", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: reading core.hooksPath with git config",
+   VCS + " config core.hooksPath", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: -c user.name on a commit, no hooks key",
+   VCS + " -c user.name=x commit -m y", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: -c core.hooksPath on status, which is not commit, merge or push",
+   VCS + " -c core.hooksPath=x status", "allow", cwd=GITMAIN)
+# The exemption: hooks/mutate_shared.py sets core.hooksPath inside Python, for the throwaway worktree it makes.
+# The guard never sees that git call, so the command that runs the file is allowed. The next pin check reads
+# the file, so this allow holds only while that code still sets the key.
+sh("hook-bypass allow: running hooks/mutate_shared.py, whose own checkout sets core.hooksPath",
+   "python3 hooks/mutate_shared.py", "allow", cwd=GITMAIN)
 
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
@@ -10133,6 +11706,8 @@ STEP_COLORS_TAGS = ["cs-build:lane", "cs-step:colors-a", "cs-topic:colors", "cs-
 
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
 ARCH_LANE_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
+# An agent's own record that is a lane on a second step, in the same repo as ARCH_LANE_TAGS.
+ARCH_AGENT_LANE_TAGS = ["cs-build:lane", "cs-step:" + ARCH_AGENT_SLUG, "cs-repo:o/r"]
 # Lanes whose step ids are a substring of a near-miss open head (see ARCHNEAR_C10): their own pull requests are absent.
 ARCH_LANE_C1_TAGS = ["cs-build:lane", "cs-step:c1", "cs-repo:o/r"]
 ARCH_LANE_CI_TAGS = ["cs-build:lane", "cs-step:ci", "cs-repo:o/r"]
@@ -10521,12 +12096,15 @@ def record_push_cost_case():
     """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
-    `git symbolic-ref` and two `git config` reads, and reads push.default. A literal destination
-    (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The conflict-markers push check
-    (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
+    `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
+    (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
+    `HEAD:<branch>` adds no read. A stray push (rule push-stray-branch: an implied destination off the
+    upstream) adds one `git rev-parse --verify -q` of the destination's remote-tracking ref. The conflict-markers
+    push check (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
     order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
     finds the merge base itself). A push with a tracking ref reads one base. A push with no tracking ref
-    and no upstream reads three, and the third, the default base, costs one `git symbolic-ref` for
+    and an upstream reads two. A push with no tracking ref and no upstream reads three, and the third, the
+    default base, costs one `git symbolic-ref` for
     origin/HEAD and one `git rev-parse --verify` per candidate branch tried, until one exists. A `git show`
     runs only when a marker finding needs its line read. The layout and extras files
     are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
@@ -10559,17 +12137,21 @@ def record_push_cost_case():
             kinds[word] = kinds.get(word, 0) + 1
         return kinds, lines
 
-    for label, tail, want in (
+    for label, tail, want, *cwd in (
         ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1, "diff": 1}),
         ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1}),
         ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1}),
-        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "diff": 1}),
-        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "diff": 1}),
+        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "config": 1, "diff": 1}),
+        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "config": 1, "diff": 1}),
         ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1, "diff": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
          {"rev-parse": 2, "symbolic-ref": 1, "diff": 3}),
+        # A stray push: HEAD on a branch tracking another name. The destination's ref is read and is absent, so
+        # the conflict check rejects that base and reads the upstream: two diff reads.
+        ("a stray push, HEAD on a branch tracking another name", "push origin HEAD",
+         {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2}, PUSHSTRAY),
     ):
-        kinds, lines = spawn_kinds(VCS + " " + tail, PUSHFEAT)
+        kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
         if kinds != want:
             problems.append("%s: git spawns %s, want %s" % (label, sorted(kinds.items()), sorted(want.items())))
         if label == "a bare push" and not any("push.default" in line for line in lines):
@@ -10586,8 +12168,80 @@ def record_push_cost_case():
         problems.append("a push to roadmap with an unreadable transcript: %s, want deny" % got)
     if problems:
         return False, "; ".join(problems)
-    return True, "one rev-parse per push, symbolic-ref for HEAD and bare, push.default for bare only; " \
+    return True, "one rev-parse per push, one more for a stray push, symbolic-ref for HEAD and bare, " \
+                 "push.default for bare only; " \
                  "the transcript is read only at the record branch"
+
+
+# The conflict-markers commit check's own git spawns (rule conflict-markers, decision commit-refuses-conflict-markers;
+# guard.py 6c2 states the cost). The probe calls conflict_markers_hit alone, so the stand-in git logs that clause's
+# spawns and none of the records-page check's, which judges a commit too and would be counted by a whole-guard run.
+CMK_COST_PROBE = r'''
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import guard_merge
+print(json.dumps(list(guard_merge.conflict_markers_hit(sys.argv[2], sys.argv[3]))))
+'''
+CMK_NO_HIT = '["", ""]'   # the probe's printed decision for no hit: json of ("", "")
+
+
+def _cmk_cost_check(tag, command, want):
+    """The clause's own git spawns for `command` in a clean repo, by git subcommand, are `want`. The clean repo has
+    no change and no untracked file. With `want` None only the scope is checked. The scope comes first: the probe
+    must run and judge the command as no hit, or the counts measure nothing. Why: the commit check's cost must not
+    grow without a test that notices it."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    log, path = _stand_in_git(tag)
+    if path is None:
+        return False, "no git on PATH"
+    where = os.path.join(ROOT, tag)
+    make_repo(where, {"README.md": "x\n"})
+    if os.path.exists(log):
+        os.remove(log)
+    done = subprocess.run(
+        [sys.executable, "-c", CMK_COST_PROBE, os.path.dirname(GUARD), command, where],
+        capture_output=True, text=True, env=dict(os.environ, PATH=path), timeout=60,
+    )
+    if done.returncode != 0 or done.stdout.strip() != CMK_NO_HIT:
+        return False, "%s: the probe did not judge the clean repo as no hit: exit %d, printed %r, error %r" % (
+            command, done.returncode, done.stdout.strip()[:120], done.stderr.strip()[-200:])
+    if want is None:
+        return True, "%s: judged as no hit" % command
+    kinds = {}
+    for line in (open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []):
+        words = line.split()
+        # The stand-in logs `-C <dir>` and `-c <key>=<value>` before the subcommand; those pairs are skipped.
+        while len(words) >= 2 and words[0] in ("-C", "-c"):
+            words = words[2:]
+        word = words[0] if words else ""
+        kinds[word] = kinds.get(word, 0) + 1
+    if kinds != want:
+        return False, "%s: the clause's git spawns are %s, want %s" % (
+            command, sorted(kinds.items()), sorted(want.items()))
+    return True, "%s: %s" % (command, sorted(kinds.items()))
+
+
+def cmk_cost_control_case():
+    """The green control: the probe runs on a clean commit and judges it as no hit, in the old code and the new."""
+    return _cmk_cost_check("cmkcost-control", VCS + " commit -m x", None)
+
+
+def cmk_cost_add_commit_case():
+    return _cmk_cost_check("cmkcost-add-commit", VCS + " add -A && " + VCS + " commit -m x",
+                           {"rev-parse": 1, "diff": 1, "ls-files": 1})
+
+
+def cmk_cost_add_case():
+    return _cmk_cost_check("cmkcost-add", VCS + " add -A", {})
+
+
+def cmk_cost_commit_case():
+    return _cmk_cost_check("cmkcost-commit", VCS + " commit -m x", {"rev-parse": 1, "diff": 1})
+
+
+FIXTURELESS_CHECKS.update((cmk_cost_control_case, cmk_cost_add_commit_case, cmk_cost_add_case,
+                           cmk_cost_commit_case))  # each builds only the clean repo it runs
 
 
 # =========================================================================== 5f. the trust card in a cs-build session
@@ -10687,19 +12341,20 @@ def fake_gh_path(folder):
     return folder + os.pathsep + PY_PATH
 
 
-def archive_refuse(name, transcript, env_path, carries=(), lacks=()):
+def archive_refuse(name, transcript, env_path, carries=(), lacks=(), agent_id=None):
     """An archive_session of the target the guard refuses. The reason names its rule, never the tool. `lacks`
-    adds fragments the reason must not hold, so a case can tell one refusal reason from another."""
+    adds fragments the reason must not hold, so a case can tell one refusal reason from another. `agent_id`, when
+    given, makes the call an agent's, as the harness sends it."""
     more = (lacks,) if isinstance(lacks, str) else tuple(lacks)
     add("lane-closes-after-records: " + name, "deny", rule=ARCHIVE_RULE, tool=ARCHIVE_TOOL, cwd=NOGIT,
         lacks=ARCHIVE_NAMED + more, carries=carries, transcript=transcript, env=ROLE_ENV, env_path=env_path,
-        session_id=ROLE_OTHER)
+        session_id=ROLE_OTHER, agent_id=agent_id)
 
 
-def archive_allow(name, transcript, env_path):
-    """An archive_session of the target the guard lets through silently."""
+def archive_allow(name, transcript, env_path, agent_id=None):
+    """An archive_session of the target the guard lets through silently. `agent_id` as in archive_refuse."""
     add("lane-closes-after-records: " + name, "allow", tool=ARCHIVE_TOOL, cwd=NOGIT, silent=True,
-        transcript=transcript, env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER)
+        transcript=transcript, env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER, agent_id=agent_id)
 
 
 # A lane whose open pull request has a head exactly equal to its step slug is its own pull request: refused.
@@ -10802,6 +12457,116 @@ archive_refuse("a get_session result whose content is a dict before the lane's r
                role_path("body-dict-then-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
 archive_refuse("a get_session result whose content is an int before the lane's record: the lane's open pull request refuses",
                role_path("body-int-then-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
+
+
+# The agent's own record. An agent (a call with an `agent_id`) made its get_session call in its own transcript, which
+# sits beside the main transcript at `<transcript_path minus .jsonl>/subagents/agent-<agent_id>.jsonl`. The guard reads
+# that file for the agent's call. A lane is refused when either record says lane. An orchestrator call (no agent_id)
+# reads the main record alone. A malformed agent_id reads no file at all.
+AGENT_OWN_ID = "ab12cd34ef56a7890"  # an agent id as the harness sends it: 17 hex characters
+AGENT_QUIET = [role_use("m0", "Bash"), role_result("m0", "ok")]  # a transcript with no get_session call
+# name -> (the main transcript's lines, [(agent_id, the agent file's lines), ...]). An agent id that the guard
+# must refuse still gets its file written at the raw path it names, so a reader that skipped the check would read it.
+AGENT_FIXTURES = {
+    "agent-own-triage": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_call("g1", ARCH_TRIAGE_TAGS))]),
+    "agent-own-lane": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_call("g1", ARCH_LANE_TAGS))]),
+    "agent-no-record": (AGENT_QUIET, [(AGENT_OWN_ID, AGENT_QUIET)]),
+    "agent-quiet-main-triage": (role_target_call("g1", ARCH_TRIAGE_TAGS), [(AGENT_OWN_ID, AGENT_QUIET)]),
+    "orchestrator-agent-file": (role_target_call("g1", ARCH_TRIAGE_TAGS),
+                                [(AGENT_OWN_ID, role_target_call("g1", ARCH_LANE_TAGS))]),
+    "main-triage-agent-lane": (role_target_call("g1", ARCH_TRIAGE_TAGS),
+                               [(AGENT_OWN_ID, role_target_call("g1", ARCH_LANE_TAGS))]),
+    "main-lane-agent-triage": (role_target_call("g1", ARCH_LANE_TAGS),
+                               [(AGENT_OWN_ID, role_target_call("g1", ARCH_TRIAGE_TAGS))]),
+    "agent-malformed-id": (AGENT_QUIET, [("x.y", role_target_call("g1", ARCH_TRIAGE_TAGS))]),
+    "agent-own-triage-slug": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_call("g1", ARCH_TRIAGE_SLUG_TAGS))]),
+    "agent-file-absent": (role_target_call("g1", ARCH_TRIAGE_TAGS), []),
+    "agent-dir-at-file": (role_target_call("g1", ARCH_TRIAGE_TAGS), [(AGENT_OWN_ID, None)]),
+    "main-lane-agent-second-step": (role_target_call("g1", ARCH_LANE_TAGS),
+                                    [(AGENT_OWN_ID, role_target_call("g1", ARCH_AGENT_LANE_TAGS))]),
+}
+
+
+def agent_transcript(name, agent_id):
+    """The agent's own transcript for the main transcript role_path(name): `<main minus .jsonl>/subagents/agent-<id>.jsonl`."""
+    return os.path.join(role_path(name)[:-len(".jsonl")], "subagents", "agent-" + agent_id + ".jsonl")
+
+
+def write_agent_transcripts():
+    """Write each main transcript, and each agent file beside it, as the harness lays them out."""
+    os.makedirs(ROLE_DIR, exist_ok=True)  # this builder may run before write_role_transcripts makes the folder
+    for name, (main, agents) in AGENT_FIXTURES.items():
+        with open(role_path(name), "w", encoding="utf-8") as handle:
+            handle.write("\n".join(main) + "\n")
+        for agent_id, lines in agents:
+            path = agent_transcript(name, agent_id)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if lines is None:  # a folder where the agent's file would be: reading it fails, and not as a missing file
+                os.makedirs(path, exist_ok=True)
+                continue
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(lines) + "\n")
+        if not agents:  # the scope of the no-file case: nothing at its agent path, so the read finds no file
+            assert not os.path.exists(agent_transcript(name, AGENT_OWN_ID)), name
+
+
+lazy_fixture([role_path(name) for name in AGENT_FIXTURES], write_agent_transcripts)
+# An agent whose own record names a non-lane target: allowed, silently, though a slug pull request is open.
+archive_allow("an agent whose own record is a non-lane target is allowed: the record is read from the agent's transcript",
+              role_path("agent-own-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# An agent whose own record is a lane with an open records pull request: refused, for that pull request. The reason pin
+# proves the agent's record was read: a guard that missed it would refuse for having no record.
+archive_refuse("an agent whose own record is a lane with an open records pull request is refused, for the open pull request",
+               role_path("agent-own-lane"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# No record in either transcript: refused for no record, and the open list is not read.
+archive_refuse("an agent with no record in its own transcript or the main one is refused, for no record",
+               role_path("agent-no-record"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
+# An orchestrator call (no agent_id) reads the main transcript only: its lane record refuses for the open pull request.
+archive_refuse("an orchestrator call with a lane record in the main transcript is refused, for the open pull request",
+               role_path("archive-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# An agent whose main record is non-lane, and whose own file reads clean but holds no record of the target: the main record
+# decides, so it is allowed. A fix that refused on a clean agent read with no record would turn this allow into a false alarm.
+archive_allow("an agent whose main record is non-lane is allowed though its own file holds no record of the target",
+              role_path("agent-quiet-main-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# The same agent file, on an orchestrator call with no agent_id: the file is not its record, so the main record decides.
+archive_allow("an orchestrator call with a non-lane main record is allowed though an agent file beside it holds a lane",
+              role_path("orchestrator-agent-file"), fake_gh_path(ARCHOPEN))
+# Precedence: a lane in either record refuses. The agent's own record is a lane, the main record is not.
+archive_refuse("a lane in the agent's own record is refused though the main record says non-lane",
+               role_path("main-triage-agent-lane"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# Precedence the other way: the main record is a lane, the agent's own record is not. It still refuses.
+archive_refuse("a lane in the main record is refused though the agent's own record says non-lane",
+               role_path("main-lane-agent-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# A malformed agent_id: the file its raw text names holds a non-lane record. It is not read, so the call is refused for no
+# record. A reader that skipped the AGENT_ID check would read that record and allow the archive. The id `x.y` has a dot,
+# which AGENT_ID refuses, and its file name is legal on Windows, unlike an id with a path separator.
+archive_refuse("a malformed agent_id reads no agent file: a non-lane record at its raw path is not read, and the call is refused for no record",
+               role_path("agent-malformed-id"), fake_gh_path(ARCHOPEN), agent_id="x.y",
+               carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
+# No file at the agent's path, and a non-lane main record: no agent record is read, so the main record decides and the
+# archive is allowed. A reader that refused on a missing agent file would refuse every agent that has no file of its own.
+archive_allow("an agent with no file at its agent path is allowed: the main record is non-lane and decides",
+              role_path("agent-file-absent"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# A folder at the agent's file path, and a non-lane main record: the read fails with an error other than a missing file, so
+# the archive is refused for no record. A reader that caught every read error as a missing file would allow it.
+archive_refuse("an agent whose file path is a folder is refused, for no record: a read error is not a missing agent file",
+               role_path("agent-dir-at-file"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
+# Both records are lanes on different steps of the same repo. The open pull request is on the agent record's step only, so
+# the archive is refused for it only when the agent record's step is read too. A reader that kept only the main record's
+# step would allow it.
+archive_refuse("a lane in both records, with the open pull request on the agent record's step only, is refused for that pull request",
+               role_path("main-lane-agent-second-step"), fake_gh_path(ARCHOPEN_AGENT), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN)
+# The mirror: the open pull request is on the main record's step only. A reader that kept only the agent record's step
+# would allow it. Together with the case above, each record's step alone fails, whichever record comes first.
+archive_refuse("a lane in both records, with the open pull request on the main record's step only, is refused for that pull request",
+               role_path("main-lane-agent-second-step"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN)
 
 
 # =========================================================================== 5h. one lane, one topic
@@ -10914,6 +12679,58 @@ step_refuse("a heading marker, # Lane brief: x. Topic: icons., to a lane on topi
             role_path("step-colors-lane"), "# Lane brief: x. Topic: icons.")
 step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topic colors is refused",
             role_path("step-colors-lane"), "lane brief: x. topic: icons.")
+
+
+# =========================================================================== 5i. SendMessage to a cloud session
+FAMILY = "sendmessage-session-id"
+#
+# Rule sendmessage-session-id. SendMessage addresses an agent by name. A `session_` id is no agent name, and auto mode
+# refused a SendMessage that named one. So a SendMessage whose `to` starts `session_` is refused: its hand-off could go
+# missing, and whether SendMessage delivers to such an id is unmeasured. The refusal names the right tool,
+# mcp__claude-code-remote__send_message, and its session_id argument. Only SendMessage with such a `to` is refused.
+# An agent name, @parent, an empty, missing or non-string `to`, and the right tool itself all pass.
+# The allows are as load-bearing as the refusals: a false alarm here stops a hand-off to a reviewer or the parent.
+SENDMESSAGE_RULE = "sendmessage-session-id"
+SENDMESSAGE_TOOL = "SendMessage"
+SENDMESSAGE_STEER = (SEND_MESSAGE, "session_id")  # the remedy names the right tool and the argument that takes the id
+SENDMESSAGE_BODY = "Review the diff and report back."
+
+
+def sendmessage_refuse(name, to):
+    """A SendMessage the guard refuses. The reason names its rule, and the right tool with its session_id argument."""
+    add("sendmessage-session-id: " + name, "deny", rule=SENDMESSAGE_RULE, tool=SENDMESSAGE_TOOL, cwd=NOGIT,
+        carries=SENDMESSAGE_STEER, to=to, message=SENDMESSAGE_BODY)
+
+
+def sendmessage_allow(name, **tool_input):
+    """A SendMessage the guard lets through silently. This rule refuses none of them."""
+    add("sendmessage-session-id: " + name, "allow", tool=SENDMESSAGE_TOOL, cwd=NOGIT, silent=True, **tool_input)
+
+
+# Refused: a session_ id in `to`, short and full length.
+sendmessage_refuse("to a session_ id is refused", "session_abc123")
+sendmessage_refuse("to a full-length cloud session id is refused", "session_01AbCdEfGhIjKlMnOpQrStUv")
+# Allowed: an agent name and the parent, which SendMessage reaches as before.
+sendmessage_allow("to an agent name, reviewer-1, is allowed", to="reviewer-1", message=SENDMESSAGE_BODY)
+sendmessage_allow("to @parent is allowed", to="@parent", message=SENDMESSAGE_BODY)
+# Allowed: a `to` with no session_ at its start. The empty string is the empty state, and a name with session_
+# mid-name is a near miss that pins the match to the start of the value.
+sendmessage_allow("to an empty string is allowed", to="", message=SENDMESSAGE_BODY)
+sendmessage_allow("to a name with session_ mid-name is allowed", to="my-session_1", message=SENDMESSAGE_BODY)
+# Allowed: a near miss to the prefix. Each pins the match to the exact `session_` at the start: a looser prefix such as
+# startswith("session") refuses session-abc, a case-insensitive match refuses Session_abc, and a match that drops a
+# leading @ refuses @session_abc.
+sendmessage_allow("to session-abc, a dash not an underscore, is allowed", to="session-abc", message=SENDMESSAGE_BODY)
+sendmessage_allow("to Session_abc, a capital S, is allowed", to="Session_abc", message=SENDMESSAGE_BODY)
+sendmessage_allow("to @session_abc, an @ before the id, is allowed", to="@session_abc", message=SENDMESSAGE_BODY)
+# Allowed: a missing `to`, and a `to` that is not a string.
+sendmessage_allow("a call with no to is allowed", message=SENDMESSAGE_BODY)
+sendmessage_allow("to a number is allowed", to=3, message=SENDMESSAGE_BODY)
+sendmessage_allow("to null is allowed", to=None, message=SENDMESSAGE_BODY)
+sendmessage_allow("to a list that holds a session_ id is allowed", to=["session_abc123"], message=SENDMESSAGE_BODY)
+# The right tool is not refused by this rule, even with a session_ id. A cloud session's id goes in session_id.
+add("sendmessage-session-id: the right tool, send_message, to a session_ id is allowed", "allow", tool=SEND_MESSAGE,
+    cwd=NOGIT, silent=True, session_id=ROLE_OTHER, message=SENDMESSAGE_BODY)
 
 
 # =========================================================================== 5d. cite by id
@@ -12257,6 +14074,20 @@ sh("frozen: cp FROM a frozen hook to scratch is a read", "cp " + CFG_HOOK + " /t
    "allow", cwd=NOGIT)
 sh("frozen: cp FROM the frozen settings to scratch is a read",
    "cp " + CFG_SETTINGS + " /tmp/settings.copy", "allow", cwd=NOGIT)
+# A loop keyword or a wrapper in front of `cp` changes nothing: the copy still reads its source and
+# still writes its destination. Each deny is the matching allow with the frozen path moved to DEST.
+sh("frozen: cp FROM a frozen hook to scratch after a loop keyword is a read",
+   "for f in a; do cp " + CFG_HOOK + " ./x; done", "allow", cwd=NOGIT)
+sh("frozen: sudo cp FROM a frozen hook to scratch is a read",
+   "sudo cp " + CFG_HOOK + " ./x", "allow", cwd=NOGIT)
+sh("frozen: env cp FROM a frozen hook to scratch is a read",
+   "env cp " + CFG_HOOK + " ./x", "allow", cwd=NOGIT)
+sh("frozen: cp TO a frozen hook after a loop keyword still denies",
+   "for f in a; do cp x " + CFG_HOOK + "; done", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sudo cp TO a frozen hook still denies", "sudo cp x " + CFG_HOOK, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: env cp TO a frozen hook still denies", "env cp x " + CFG_HOOK, "deny",
+   "frozen-path", cwd=NOGIT)
 sh("frozen: cp TO a frozen hook still denies", "cp /tmp/x.py " + CFG_HOOK, "deny", "frozen-path",
    cwd=NOGIT)
 sh("frozen: cp from a frozen path TO a frozen path still denies",
@@ -12287,6 +14118,14 @@ sh("frozen: cp FROM a frozen hook with stderr sent to /dev/null is a read",
    "cp " + CFG_HOOK + " /tmp/g 2>/dev/null", "allow", cwd=NOGIT)
 sh("frozen: cp FROM a frozen hook, with a redirect onto a frozen hook, still denies",
    "cp " + CFG_HOOK + " /tmp/g > " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# A line break inside a quoted operand is part of one word, so the frozen file after it is still the
+# target of the write, whichever command carries the quoted text.
+sh("frozen: sed -i whose quoted a-text script holds a line break still denies a frozen hook",
+   "sed -i '/^x/a\\\nnew line' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i -e whose quoted i-text script holds a line break still denies a frozen hook",
+   "sed -i -e '1i\\\nimport os' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp whose quoted source spans two lines still denies onto a frozen hook",
+   "cp '/tmp/a\nb.py' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
@@ -12465,6 +14304,45 @@ sh("frozen dup: cp from a dup before a frozen settings file stays frozen",
    "cp /tmp/x 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen dup: tee after a dup onto a frozen settings file stays frozen",
    "echo x | tee 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# THE AMPERSAND REDIRECT. `&>` and `&>>` send both streams to a file, so a copy into a frozen path with
+# one of them writes the frozen file. The `&` is a redirect, never a copy source. The forms that already
+# refuse stay refused, and a copy FROM a frozen file with `&>` is still a read.
+sh("frozen amp: cp onto a frozen hook with &> /dev/null stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &> /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with &>/dev/null, no space, stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &>/dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen settings file with &>> /dev/null stays denied",
+   "cp /tmp/x.json " + CFG_SETTINGS + " &>> /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with &> /dev/null, then a chained echo, stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &> /dev/null && echo done", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with > /dev/null stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " > /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with >& /dev/null stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " >& /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with 2>&1 stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " 2>&1", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp FROM a frozen hook to scratch with &> /dev/null is still a read",
+   "cp " + CFG_HOOK + " /tmp/guard.bak &> /dev/null", "allow", cwd=NOGIT)
+# THE DESTINATION AFTER A NULL REDIRECT. `cp SRC &> /dev/null DEST` writes DEST whatever the redirect says, so
+# a frozen DEST named after the null redirect is judged, as one named before it is.
+sh("frozen amp: cp /tmp/x.py &> /dev/null onto a frozen hook named last stays denied",
+   "cp /tmp/x.py &> /dev/null " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp /tmp/x.json &> /dev/null onto a frozen settings file named last stays denied",
+   "cp /tmp/x.json &> /dev/null " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# THE FROZEN SOURCE WITH A FILE REDIRECT. `cp FROZEN /tmp/x &> /tmp/build.log` reads the frozen file and writes
+# scratch, so it is allowed: the `&` of `&>` is no copy source. A frozen destination with the same redirect
+# still denies.
+sh("frozen amp: cp FROM a frozen hook to scratch with &> to a build log is still a read",
+   "cp " + CFG_HOOK + " /tmp/x &> /tmp/build.log", "allow", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with &> to a build log stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &> /tmp/build.log", "deny", "frozen-path", cwd=NOGIT)
+# THE LONE >& REDIRECT. `>&` sends both streams to a file, as `&>` does. A copy FROM a frozen hook with `>&` to a
+# build log reads the frozen file and writes scratch, so it is allowed. A copy onto a frozen hook with the same
+# redirect still denies.
+sh("frozen amp: cp FROM a frozen hook to scratch with >& to a build log is still a read",
+   "cp " + CFG_HOOK + " /tmp/x >& /tmp/l", "allow", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with >& to a build log stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " >& /tmp/l", "deny", "frozen-path", cwd=NOGIT)
 
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
@@ -12889,6 +14767,47 @@ sh("frozen shell: fix F4, an echo with a smart close after x, then a Set-Content
 sh("frozen shell: fix F4, a <# #> block comment holding two ASCII quotes pairs them, so a Set-Content "
    "between two echoes is echo data, denies [cap-ask-fix r1 red]",
    "echo <# \" #> ; " + _F4_WRITE + " ; <# \" #>", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+
+# PWSH-C TEXT MODE. PowerShell reads U+201C and U+201D as double quotes, so `Set-Content -Path “P” -Value 1`
+# writes P. The guard's path token keeps the curly quotes, so `is_frozen` does not match P, and the write
+# is allowed. That holds for the PowerShell tool, and for a Bash call that runs the same text in
+# `pwsh -c` or `powershell -Command`. Each write DENIES.
+SMART_CFG_SETTINGS = "“" + CFG_SETTINGS + "”"
+SMART_CFG_WRITE = "Set-Content -Path " + SMART_CFG_SETTINGS + " -Value 1"
+sh("frozen shell: pwsh-c-text-mode, a Bash call that runs a smart-quoted config settings write in pwsh -c "
+   "denies [pwsh-c-text-mode red]",
+   "pwsh -c '" + SMART_CFG_WRITE + "'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: pwsh-c-text-mode, a Bash call that runs a smart-quoted config settings write in "
+   "powershell -Command denies [pwsh-c-text-mode red]",
+   "powershell -Command \"" + SMART_CFG_WRITE + "\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: pwsh-c-text-mode, the PowerShell tool's smart-quoted config settings write denies "
+   "[pwsh-c-text-mode red]",
+   SMART_CFG_WRITE, "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+# Bash reads `\"` inside double quotes as one literal character, so with no PowerShell in the call this
+# echo is text and allowed. A PowerShell reading would end the string at the `\"` and read on.
+sh("frozen shell: pwsh-c-text-mode, a Bash echo of an escaped quote with no PowerShell is allowed "
+   "[pwsh-c-text-mode green]",
+   "echo \"a \\\" b\"", "allow", cwd=NOGIT)
+# NESTED-SCRIPT PINS. `_shell_write_hit` judges the PowerShell text that `cmd /c` or `iex` runs by PowerShell's
+# rules, through `_powershell_scripts_of`. Each DENIES on that step alone. The `cmd /c` text is quoted: a bare `&`
+# in Bash backgrounds the first command, and detached-launch denies that before the write is read.
+sh("frozen shell: pwsh-c-text-mode pin, cmd /c runs a smart-quoted config settings write after a `&` inside "
+   "double quotes and denies [pwsh-c-text-mode pin]",
+   "cmd /c \"echo don’t & copy NUL " + SMART_CFG_SETTINGS + "\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: pwsh-c-text-mode pin, iex runs a smart-quoted config settings write whose comment holds a "
+   "double quote, and denies [pwsh-c-text-mode pin]",
+   "iex 'Set-Content -Path " + SMART_CFG_SETTINGS + " -Value 1 # don\"t'", "deny", "frozen-path", cwd=NOGIT)
+# NESTED SHELL. A Bash, sh or env -S call that runs `pwsh -c` hands that text on as a plain string.
+# `_powershell_scripts_of` reads the `pwsh -c` inside it as PowerShell. Each DENIES.
+sh("frozen shell: pwsh-c-text-mode, bash -c runs a pwsh -c smart-quoted config settings write and denies "
+   "[pwsh-c-text-mode red]",
+   "bash -c \"pwsh -c '" + SMART_CFG_WRITE + "'\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: pwsh-c-text-mode, sh -c runs a pwsh -c smart-quoted config settings write and denies "
+   "[pwsh-c-text-mode red]",
+   "sh -c \"pwsh -c '" + SMART_CFG_WRITE + "'\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: pwsh-c-text-mode, env -S runs a pwsh -c smart-quoted config settings write and denies "
+   "[pwsh-c-text-mode red]",
+   "env -S \"pwsh -c '" + SMART_CFG_WRITE + "'\"", "deny", "frozen-path", cwd=NOGIT)
 
 
 # ================================================================ 6a-2. cap-ask-fix (frozen)
@@ -13900,6 +15819,78 @@ add("builder-test: a session run with --agent builder (no agent_id) is not judge
 add("builder-test: a builder Write of a test file from no repository is refused by shape", "deny",
     rule=BT, tool="Write", file_path="src/test_app.py", carries=("test-author", "Report"),
     agent_id="bld1", agent_type="builder", cwd=NOGIT)
+# THE JOIN WITH AN UNKNOWN HEAD. A builder's script joins a folder it cannot read (a temp folder from
+# tempfile.mkdtemp(), which is in no repository) to test-looking pieces. The unknown head drops out of the
+# join, so the pieces read as a repo test path: a false alarm. A join that resolves to the working folder
+# or to a relative folder is a repo test path, and still refuses.
+sh("builder join: a temp folder from mkdtemp joined to tests is allowed",
+   "python3 - <<'EOF'\nimport os, tempfile\ntmpdir = tempfile.mkdtemp()\n"
+   "open(os.path.join(tmpdir, 'tests', 'test_x.py'), 'w').write('x')\nEOF", "allow", **B)
+sh("builder join: a temp folder from mkdtemp in python -c joined to tests is allowed",
+   "python3 -c \"import os, tempfile; t = tempfile.mkdtemp(); "
+   "open(os.path.join(t, 'tests', 'test_x.py'), 'w').write('x')\"", "allow", **B)
+sh("builder join: a literal folder outside the repository joined to tests is allowed",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join('/tmp/elsewhere', 'tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "allow", **B)
+sh("builder join: a relative folder joined to tests still refuses",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join('tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, **B)
+sh("builder join: a relative folder held in a variable and joined to tests still refuses",
+   "python3 - <<'EOF'\nimport os\nrepo = '.'\nopen(os.path.join(repo, 'tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, **B)
+sh("builder join: the working folder from Path.cwd() joined to tests still refuses",
+   "python3 - <<'EOF'\nfrom pathlib import Path\n(Path.cwd() / 'tests' / 'test_x.py').write_text('x')\nEOF",
+   "deny", rule=BT, **B)
+sh("builder join: the working folder from os.getcwd() joined to tests still refuses",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, **B)
+# THE HEAD OF A JOIN IN python -c. An unknown head drops out of the join, so only a head from a temp source
+# (tempfile.mkdtemp, mkstemp, gettempdir, TemporaryDirectory) is safe. A head the script takes from
+# sys.argv, from subprocess output, from Path(__file__) or from os.path.dirname() names a folder in the repo,
+# so the join to hooks/test_x.py still refuses.
+sh("builder join: a repo head from sys.argv[1] joined to hooks in python -c still refuses",
+   '''python3 -c "import os, sys; repo = sys.argv[1]; open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')" .''',
+   "deny", rule=BT, **B)
+sh("builder join: a repo head from subprocess output joined to hooks in python -c still refuses",
+   '''python3 -c "import os, subprocess; repo = subprocess.check_output(['git', 'rev-parse', '--show-toplevel']).decode().strip(); open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a repo head from Path(__file__).resolve().parents joined to hooks in python -c still refuses",
+   '''python3 -c "import os; from pathlib import Path; repo = Path(__file__).resolve().parents[1]; open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a repo head from os.path.dirname joined to hooks in python -c still refuses",
+   '''python3 -c "import os; repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; tmp = tempfile.mkdtemp(); open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+sh("builder join: a temp folder from gettempdir joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; tmp = tempfile.gettempdir(); open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+sh("builder join: a temp folder from mkstemp joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; fd, tmp = tempfile.mkstemp(); os.close(fd); open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+sh("builder join: a temp folder from TemporaryDirectory joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; with tempfile.TemporaryDirectory() as tmp: open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+# THE dir= ARGUMENT OF mkdtemp. `dir='.'` and `dir=os.getcwd()` put the temp folder in the working folder, so a
+# join to tests from it is a repo test path and refuses. Only the system temp folder is no repo folder. The inline
+# join from the same call refuses too. A bare mkdtemp() inline stays allowed, as its held form does.
+sh("builder join: a temp folder from mkdtemp(dir='.') held in a variable, joined to tests still refuses",
+   '''python3 -c "import os, tempfile; d = tempfile.mkdtemp(dir='.'); open(os.path.join(d, 'tests', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp(dir=os.getcwd()) held in a variable, joined to tests still refuses",
+   '''python3 -c "import os, tempfile; d = tempfile.mkdtemp(dir=os.getcwd()); open(os.path.join(d, 'tests', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp(dir='.') joined inline to tests still refuses",
+   '''python3 -c "import os, tempfile; open(os.path.join(tempfile.mkdtemp(dir='.'), 'tests', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp() joined inline to tests is allowed",
+   '''python3 -c "import os, tempfile; open(os.path.join(tempfile.mkdtemp(), 'tests', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+# A TemporaryDirectory held in a variable and joined through its .name is still a system temp folder: allowed.
+sh("builder join: a TemporaryDirectory held in a variable, joined through .name to tests is allowed",
+   '''python3 -c "import os, tempfile; td = tempfile.TemporaryDirectory(); open(os.path.join(td.name, 'tests', 'test_x.py'), 'w')"''',
+   "allow", **B)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
@@ -13951,7 +15942,7 @@ DESELECT = "      - name: Unit\n        run: python3 -m pytest --deselect a::b\n
 NEW_WORKFLOW = ("on: push\njobs:\n  test:\n    steps:\n      - name: Guard tests\n"
                 "        run: python3 hooks/test_guard.py\n")
 
-# Red on main: main refuses every workflow edit by path, so each allow below fails for that one cause.
+# Each allow below pins one test step a workflow edit may add. A refusal here points at the path check alone.
 for _name, _path, _old, _new in (
     ("a Linux test step inserted after a lint step", WF, LINT, LINT + TEST_LINUX),
     ("a Windows python test step inserted after a lint step", WF, LINT, LINT + TEST_WINDOWS),
@@ -14020,6 +16011,121 @@ add("builder-test: continue-on-error added under a test step is refused", "deny"
 add("builder-test: if: false added under a test step is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + IF_FALSE,
     carries=("test-author", "Report"), **B)
+# A mutation test is a test run too: a disabled mutate step reads green while its mutants go unrun. Its file is
+# named in AUTHOR_MUTATION_TESTS, not a test_ name, so the step check must count that list. The controls keep a
+# non-test script, a near-miss hooks/mutate_x.py and a timeout change on the mutate step allowed.
+MUTATE_GUARD = ("      - name: Guard mutation test\n        run: python3 hooks/mutate_guard.py\n"
+                "        timeout-minutes: 25\n")
+MUTATE_GUARD_CONTINUE = ("      - name: Guard mutation test\n        continue-on-error: true\n"
+                         "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_IF_FALSE = ("      - name: Guard mutation test\n        if: false\n"
+                         "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_TIMEOUT = MUTATE_GUARD.replace("minutes: 25", "minutes: 30")
+MUTATE_SWEEP = "      - name: Mutate sweep\n        run: python3 janitor/mutate_sweep.py\n"
+MUTATE_SWEEP_CONTINUE = ("      - name: Mutate sweep\n        continue-on-error: true\n"
+                         "        run: python3 janitor/mutate_sweep.py\n")
+SOME_TOOL = "      - name: Some tool\n        run: python3 hooks/some_tool.py\n"
+SOME_TOOL_CONTINUE = ("      - name: Some tool\n        continue-on-error: true\n"
+                      "        run: python3 hooks/some_tool.py\n")
+MUTATE_X = "      - name: Mutate tool\n        run: python3 hooks/mutate_x.py\n"
+MUTATE_X_CONTINUE = ("      - name: Mutate tool\n        continue-on-error: true\n"
+                     "        run: python3 hooks/mutate_x.py\n")
+add("builder-test: continue-on-error added under the mutate_guard step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added under the mutate_sweep step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_SWEEP, new_string=LINT + MUTATE_SWEEP_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: if: false added under the mutate_guard step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_IF_FALSE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added to a step running hooks/some_tool.py is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + SOME_TOOL, new_string=LINT + SOME_TOOL_CONTINUE, **B)
+add("builder-test: continue-on-error added to a step running hooks/mutate_x.py is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_X, new_string=LINT + MUTATE_X_CONTINUE, **B)
+add("builder-test: a timeout change on the mutate_guard step is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_TIMEOUT, **B)
+# A YAML comment after a disable value still disables the step, so the disable line must be read without its comment.
+# A lone apostrophe in that comment must not stop the reader from finding the `#`: a quote-aware reader that throws on
+# it would fall open. The controls keep a comment after a false value, and a quoted `#` on a run line, allowed.
+MUTATE_GUARD_CONTINUE_FLAKY = ("      - name: Guard mutation test\n        continue-on-error: true  # flaky\n"
+                               "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_IF_FALSE_FLAKY = ("      - name: Guard mutation test\n        if: false  # flaky\n"
+                               "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_CONTINUE_APOSTROPHE = ("      - name: Guard mutation test\n        continue-on-error: true  # don't\n"
+                                    "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+TEST_GUARD_CONTINUE_FLAKY = ("      - name: Guard tests\n        continue-on-error: true  # flaky\n"
+                             "        run: python3 hooks/test_guard.py\n")
+MUTATE_GUARD_CONTINUE_FALSE = ("      - name: Guard mutation test\n        continue-on-error: false  # never\n"
+                               "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_QUOTED_HASH = ("      - name: Guard mutation test\n"
+                            "        run: echo \"a # b\" && python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+add("builder-test: continue-on-error: true with a trailing # flaky comment under the mutate_guard step is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD,
+    new_string=LINT + MUTATE_GUARD_CONTINUE_FLAKY, carries=("test-author", "Report"), **B)
+add("builder-test: if: false with a trailing # flaky comment under the mutate_guard step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_IF_FALSE_FLAKY,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error: true with a trailing # flaky comment under a test step is refused", "deny",
+    rule=BT, tool="Edit", file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + TEST_GUARD_CONTINUE_FLAKY,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error: true with a lone apostrophe in its # comment under the mutate_guard step "
+    "is refused", "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD,
+    new_string=LINT + MUTATE_GUARD_CONTINUE_APOSTROPHE, carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error: false with a trailing # comment under the mutate_guard step is allowed", "allow",
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_CONTINUE_FALSE, **B)
+add("builder-test: a quoted # on the mutate_guard run line ahead of the script is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_QUOTED_HASH, **B)
+# A mutation test run through `cd hooks &&` or a `working-directory:` line names its script by the bare file name.
+# The step check counts that run by the name (the basename against MUTATION_TEST_NAMES) and resolves no folder, so
+# a disabled step in either form would read green without that count.
+# The pins hold what a test file already keeps: the same forms on a test file are refused, by basename.
+TEST_GUARD_CD = "      - name: Guard tests\n        run: cd hooks && python3 test_guard.py\n"
+TEST_GUARD_CD_CONTINUE = ("      - name: Guard tests\n        continue-on-error: true\n"
+                          "        run: cd hooks && python3 test_guard.py\n")
+TEST_GUARD_WD = "      - name: Guard tests\n        working-directory: hooks\n        run: python3 test_guard.py\n"
+TEST_GUARD_WD_IF_FALSE = ("      - name: Guard tests\n        if: false\n        working-directory: hooks\n"
+                          "        run: python3 test_guard.py\n")
+MUTATE_GUARD_CD = "      - name: Guard mutation test\n        run: cd hooks && python3 mutate_guard.py\n"
+MUTATE_GUARD_CD_CONTINUE = ("      - name: Guard mutation test\n        continue-on-error: true\n"
+                            "        run: cd hooks && python3 mutate_guard.py\n")
+MUTATE_GUARD_WD = ("      - name: Guard mutation test\n        working-directory: hooks\n"
+                   "        run: python3 mutate_guard.py\n")
+MUTATE_GUARD_WD_IF_FALSE = ("      - name: Guard mutation test\n        if: false\n        working-directory: hooks\n"
+                            "        run: python3 mutate_guard.py\n")
+MUTATE_SWEEP_WD = "      - name: Mutate sweep\n        working-directory: janitor\n        run: python3 mutate_sweep.py\n"
+MUTATE_SWEEP_WD_CONTINUE = ("      - name: Mutate sweep\n        continue-on-error: true\n"
+                            "        working-directory: janitor\n        run: python3 mutate_sweep.py\n")
+MUTATE_X_CD = "      - name: Mutate tool\n        run: cd hooks && python3 mutate_x.py\n"
+MUTATE_X_CD_CONTINUE = ("      - name: Mutate tool\n        continue-on-error: true\n"
+                        "        run: cd hooks && python3 mutate_x.py\n")
+add("builder-test: continue-on-error added under the cd hooks mutate_guard step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD_CD, new_string=LINT + MUTATE_GUARD_CD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: if: false added under the working-directory mutate_guard step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD_WD, new_string=LINT + MUTATE_GUARD_WD_IF_FALSE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added under the working-directory mutate_sweep step is refused", "deny",
+    rule=BT, tool="Edit", file_path=WF, old_string=LINT + MUTATE_SWEEP_WD, new_string=LINT + MUTATE_SWEEP_WD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added to a cd hooks mutate_x.py step is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_X_CD, new_string=LINT + MUTATE_X_CD_CONTINUE, **B)
+add("builder-test: continue-on-error added under the cd hooks test step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + TEST_GUARD_CD, new_string=LINT + TEST_GUARD_CD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: if: false added under the working-directory test step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + TEST_GUARD_WD, new_string=LINT + TEST_GUARD_WD_IF_FALSE,
+    carries=("test-author", "Report"), **B)
+# A mutation test's whole step is a test run too: deleting it leaves its mutants unrun, so the deletion is refused by
+# the file name the step runs. The control deletes an upload step beside the kept mutate step, in the same job.
+UPLOAD_REPORT = ("      - name: Upload report\n        uses: actions/upload-artifact@v4\n"
+                 "        with:\n          name: report\n          path: out/report.json\n")
+add("builder-test: a whole mutate_guard step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: a whole mutate_sweep step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_SWEEP, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: an upload step deleted beside the mutate_guard step is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD + UPLOAD_REPORT, new_string=LINT + MUTATE_GUARD, **B)
 add("builder-test: a whole test step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT, carries=("test-author", "Report"), **B)
 add("builder-test: a test step moved within checks.yml is allowed", "allow", tool="Edit", file_path=WF,
@@ -14060,10 +16166,70 @@ add("builder-test: an added run of a test path with --deselect is refused", "den
     file_path=WF, old_string=LINT,
     new_string=LINT + "      - name: X\n        run: python3 hooks/x_test.py --deselect a\n",
     carries=("test-author", "Report"), **B)
+# A wrapper runs the test it wraps, so a wrapped run is judged as the bare run it wraps. A builder's wrap of a bare
+# run keeps its test, a test-author's wrapped single-line run is a test step, and deleting a wrapped run drops its test.
+WRAPPED_RUNS = (
+    "timeout 600 python3 tests/test_a.py",
+    "xvfb-run -a python3 tests/test_a.py",
+    "coverage run tests/test_a.py",
+    "uv run tests/test_a.py",
+    "env FOO=1 python3 tests/test_a.py",
+    "nice python3 tests/test_a.py",
+    "python3 -m coverage run tests/test_a.py",
+)
+for _form in WRAPPED_RUNS:
+    add("builder-test: %s in place of a bare test run is allowed" % _form, "allow", tool="Edit", file_path=WF,
+        old_string=R3_UNIT, new_string="      - name: Unit\n        run: %s\n" % _form, **B)
+for _form in WRAPPED_RUNS:
+    add("test-author: a whole new test step, %s, is allowed" % _form, "allow", tool="Edit", file_path=WF,
+        old_string=LINT, new_string=LINT + "      - name: Unit\n        run: %s\n" % _form, **A)
+for _form in WRAPPED_RUNS:
+    add("builder-test: a wrapped test run, %s, deleted from checks.yml is refused" % _form, "deny", rule=BT,
+        tool="Edit", file_path=WF, old_string=LINT + "      - name: Unit\n        run: %s\n" % _form, new_string=LINT,
+        carries=("test-author", "Report"), **B)
+add("builder-test: a wrapped test run unwrapped to its bare path is allowed", "allow", tool="Edit", file_path=WF,
+    old_string="      - name: Unit\n        run: timeout 600 python3 tests/test_a.py\n", new_string=R3_UNIT, **B)
+# Not a test run: a wrapper around one does not make it a test, so each of these still drops the test it replaces.
+add("builder-test: a bare test run replaced by an echo of its path is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=R3_UNIT, new_string="      - name: Unit\n        run: echo python3 tests/test_a.py\n",
+    carries=("test-author", "Report"), **B)
+add("builder-test: a bare test run replaced by a timeout around a lint run is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=R3_UNIT, new_string="      - name: Unit\n        run: timeout 600 python3 lint/ste_lint.py\n",
+    carries=("test-author", "Report"), **B)
+add("test-author: a whole new test step, timeout around curl, is refused", "deny", rule=TA, tool="Edit",
+    file_path=WF, old_string=LINT, new_string=LINT + "      - name: Unit\n        run: timeout 600 curl -s x\n",
+    carries=("builder", "Report"), **A)
 add("test-author: a whole new test step with if: false is refused", "deny", rule=TA, tool="Edit",
     file_path=WF, old_string=LINT,
     new_string=LINT + "      - name: Guard tests\n        if: false\n        run: python3 hooks/test_guard.py\n",
     carries=("builder", "Report"), **A)
+# A multi-line run: block whose wrapper takes a quoted value with a space. The shell reads the quoted value as one
+# word, so the run is a test. A whitespace split reads `-screen` and `0` as the command and finds no test path, so
+# the deletion would pass. The bare block beside it is the control: the same block shape, no wrapper, is refused.
+XVFB_QUOTED_BLOCK = ("      - name: Xvfb unit\n        run: |\n"
+                     "          xvfb-run -s \"-screen 0 1024x768x24\" python3 tests/test_a.py\n")
+BARE_BLOCK = "      - name: Bare unit\n        run: |\n          python3 tests/test_a.py\n"
+add("builder-test: a multi-line run under xvfb-run with a quoted -s value, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + XVFB_QUOTED_BLOCK, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a multi-line bare test run, no wrapper, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BARE_BLOCK, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+# A backslash in a test path is a separator on Windows, and is_test_rel reads it as `/`. The run line must keep it:
+# shlex in POSIX mode reads an unquoted backslash as an escape, so `tests\test_a.py` loses its separator and reads as
+# no test. Each deletion below is refused on main, so a parse that drops the backslash is a regression.
+BACKSLASH_INLINE = "      - name: Win unit\n        run: python tests\\test_a.py\n"
+BACKSLASH_BLOCK = "      - name: Win unit\n        run: |\n          python tests\\test_a.py\n"
+BACKSLASH_NODE = "      - name: Win node\n        run: node tests\\run.js\n"
+add("builder-test: a bare python run with a backslash test path, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_INLINE, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a multi-line python run with a backslash test path, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_BLOCK, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a node run with a backslash test path, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_NODE, new_string=LINT,
+    carries=("test-author", "Report"), **B)
 
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
@@ -14269,6 +16435,14 @@ sh("builder-test: bash -c with an escaped quote, then a pipe into a cp onto a te
    r'bash -c "echo \"x\"|cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: bash -c with an escaped quote, then a newline and a cp onto a test, is refused",
    'bash -c "echo \\"x\\"\ncp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+# The message after -m keeps its place in the words a git commit is read by, so a pathspec after it is read at its
+# own place: a path named rm or mv is no git rm or git mv. A real git rm after the commit is still refused.
+sh("builder-test: git commit with a message, then a pathspec named rm before a test, is allowed",
+   'git commit -m "docs" rm tests/test_x.py', "allow", **BR)
+sh("builder-test: git commit with a message, then a pathspec named mv before a test, is allowed",
+   'git commit -m "docs" mv tests/test_x.py', "allow", **BR)
+sh("builder-test: git commit with a message, then && and a git rm of a test, is refused",
+   'git commit -m "docs" && git rm tests/test_x.py', "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: python heredoc that reads tests/x.py, rebinds the name, then writes src/app.py is allowed",
    "python3 - <<'EOF'\np='tests/x.py'\nprint(open(p).read())\np='src/app.py'\nopen(p,'w').write('x')\nEOF",
    "allow", **BR)
@@ -14642,6 +16816,112 @@ LOG_CHECKS_EXTRA = _TaggedLogs([
 ])
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
+# FLAG ORDER (pwsh-c-text-mode). POWERSHELL_CALL is one global that each judge sets for its own call. A
+# caller that reads it without setting it reads the last call's tool. Each pin reads one caller on a
+# PowerShell text, with the flag set by a PowerShell call, then judges a Bash call in this process and reads
+# the caller again. The text's `\"` ends a string for PowerShell and hides a write for bash, so a caller
+# that kept the Bash flag gives a different reading, and the pin fails.
+FLAG_BUILD_TEXT = 'echo "x\\" ; Set-Content hooks/test_probe.py -Value 1 ; echo \\"D"'
+FLAG_SESSION_TEXT = 'echo "x\\" ; Set-Content notes/out.txt -Value 1 ; echo \\"D"'
+FLAG_SETTINGS_TEXT = ('echo "C:\\" ; Set-Content .claude/settings.local.json \''
+                      + json.dumps({"env": {"CLAUDE_CODE_SUBAGENT_MODEL": "opus"}, "force": "1"})
+                      + '\' ; echo \\"D"')
+
+
+def _judge_bash_here(guard, cwd):
+    """Judge one Bash call on this module, as the hook does, so POWERSHELL_CALL holds the Bash tool's value."""
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = CFG
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            try:
+                guard.judge({"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": cwd})
+            except SystemExit:
+                pass
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+
+
+def _flag_pin(label, guard, cwd, read):
+    """`read()` is one caller's reading of a PowerShell text. Read with the PowerShell flag, it must find
+    the write; after a Bash call in this process it must read the same."""
+    guard.POWERSHELL_CALL[0] = True
+    with_flag = read()
+    if not with_flag:
+        return False, "%s: the PowerShell reading finds no write, so the pin proves nothing" % label
+    _judge_bash_here(guard, cwd)
+    if guard.POWERSHELL_CALL[0]:
+        return False, "%s: the Bash call left POWERSHELL_CALL set, so the pin proves nothing" % label
+    after_bash = read()
+    if after_bash != with_flag:
+        return False, "%s: after a Bash call the caller read the text by bash rules and saw %r, not %r" % (
+            label, after_bash, with_flag)
+    return True, "%s: the caller reads the PowerShell text the same after a Bash call" % label
+
+
+def flag_builder_case():
+    guard = _load_guard_module()
+    where = os.path.join(ROOT, "flag-builder")
+    make_repo(where, {"hooks/test_seed.py": "x = 1\n"})
+    stripped = guard.strip_heredoc_bodies(FLAG_BUILD_TEXT)
+    return _flag_pin("builder shell-write caller", guard, where,
+                     lambda: guard.builder_shell_test_hit(FLAG_BUILD_TEXT, stripped, where, tool="PowerShell"))
+
+
+def flag_builder_bash_case():
+    """A Bash-tool call on the same text reads it by bash rules, even after a PowerShell call set the flag."""
+    guard = _load_guard_module()
+    where = os.path.join(ROOT, "flag-builder-bash")
+    make_repo(where, {"hooks/test_seed.py": "x = 1\n"})
+    stripped = guard.strip_heredoc_bodies(FLAG_BUILD_TEXT)
+    # The PowerShell call first leaves the flag set, so only the Bash call's own reset can make it read by bash rules.
+    guard.builder_shell_test_hit(FLAG_BUILD_TEXT, stripped, where, tool="PowerShell")
+    bash = guard.builder_shell_test_hit(FLAG_BUILD_TEXT, stripped, where, tool="Bash")
+    if bash != "":
+        return False, "builder shell-write caller: the Bash-tool call read the text by PowerShell rules and saw %r" % (
+            bash,)
+    return True, "builder shell-write caller: the Bash-tool call reads the text by bash rules and sees no write"
+
+
+def flag_session_home_case():
+    guard = _load_guard_module()
+    primary = os.path.join(ROOT, "flag-primary")
+    make_repo(primary, {"src/app.py": "print(1)\n"})
+    session = "shome-" + uuid.uuid4().hex
+    write(os.path.join(primary, ".git", "session-homes", session),
+          os.path.join(primary, ".claude", "worktrees", "gone-lane") + "\n")
+    payload = {"tool_name": "PowerShell", "tool_input": {"command": FLAG_SESSION_TEXT}, "cwd": primary,
+               "session_id": session}
+    return _flag_pin("session-home caller", guard, primary,
+                     lambda: guard.session_home_hit(payload, "PowerShell", payload["tool_input"], primary))
+
+
+def flag_never_lifted_case():
+    guard = _load_guard_module()
+    where = os.path.join(ROOT, "flag-settings")
+    make_repo(where, {"README.md": "x\n"})
+    payload = {"tool_name": "PowerShell", "tool_input": {"command": FLAG_SETTINGS_TEXT}, "cwd": where}
+    return _flag_pin("never-lifted settings clause", guard, where,
+                     lambda: guard.never_lifted(payload, "PowerShell", payload["tool_input"], where))
+
+
+for _label, _check in (
+    ("frozen: a builder's shell write, read after a Bash call, is the same as with the PowerShell flag",
+     flag_builder_case),
+    ("frozen: a Bash-tool call on a builder's shell-write text reads it by bash rules, after a PowerShell call",
+     flag_builder_bash_case),
+    ("frozen: the session-home caller, read after a Bash call, is the same as with the PowerShell flag",
+     flag_session_home_case),
+    ("frozen: the never-lifted settings clause, read after a Bash call, is the same as with the PowerShell flag",
+     flag_never_lifted_case),
+):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = "frozen"
+
+
 # The base-copy cost check is appended here because LOG_CHECKS_EXTRA is defined here. Its family is the
 # base-copy section's, set by hand. MUTATE_ONLY="base copies" runs it.
 BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree stays within its stated git "
@@ -14677,6 +16957,90 @@ sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COM
    cwd=NOGIT, agent_id="bld1", agent_type="builder")
 sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
    "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
+
+# ---- hook-bypass: the one exemption. hooks/mutate_shared.py sets core.hooksPath for the throwaway worktree it
+# makes, and the guard never sees that git call. The allow above holds only while that code path sets the key,
+# so this check reads the file and finds the setting in the function that makes the worktree. A copy of the
+# string in the guard would pass a check that reads the guard alone.
+FAMILY = "hook-bypass"
+
+
+def mutate_shared_hooks_path_case():
+    """Scope first: the file has a _make_checkout function. Then the subject: one call in it runs `worktree add`
+    with a core.hooksPath setting. The file is read with ast, so a comment or a docstring that names the key
+    does not count."""
+    path = os.path.join(REPO, "hooks", "mutate_shared.py")
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), path)
+    funcs = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "_make_checkout"]
+    if not funcs:
+        return False, "hooks/mutate_shared.py has no _make_checkout function"
+    for call in (node for node in ast.walk(funcs[0]) if isinstance(node, ast.Call)):
+        texts = [part.value for part in ast.walk(call)
+                 if isinstance(part, ast.Constant) and isinstance(part.value, str)]
+        if "worktree" in texts and "add" in texts and any(text.startswith("core.hooksPath=") for text in texts):
+            return True, "_make_checkout's worktree add sets core.hooksPath"
+    return False, "_make_checkout's worktree add no longer sets core.hooksPath"
+
+
+LOG_CHECKS_EXTRA.append(("hook-bypass: hooks/mutate_shared.py still sets core.hooksPath in the checkout it makes",
+                         mutate_shared_hooks_path_case))
+FIXTURELESS_CHECKS.add(mutate_shared_hooks_path_case)
+
+# ---- frozen: the main mirror and the live pin name are copied into guard_frozen.py from install.sh and
+# merge/install_from_main.sh. Each shell name is a literal in its script, and the guard keeps its own copy
+# (MAIN_MIRROR_NAME, LIVE_PIN_SUFFIX). Each copy is read as text, never imported, so the check loads no guard.
+# A change to one side alone would leave the frozen check guarding a folder that no install builds.
+FAMILY = "frozen"
+_MIRROR_SHELL = re.compile(r'^MAIN_MIRROR="\$HOME/([^"/$]+)"[ \t\r]*$', re.M)
+_PIN_SHELL = re.compile(r'^pin="\$clone([^"/$]*)"[ \t\r]*$', re.M)
+
+
+def _module_literal(text, name):
+    """The value of the top-level assignment `name = <literal>` in a Python module's text, or None."""
+    for node in ast.parse(text).body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            try:
+                return ast.literal_eval(node.value)
+            except ValueError:
+                return None
+    return None
+
+
+def mirror_name_problems(install_sh, install_from_main, guard_frozen):
+    """One line per copy that differs from its shell literal, or [] when every copy agrees. Each argument is
+    the text of one file."""
+    problems = []
+    mirror = _MIRROR_SHELL.findall(install_sh)
+    pin = _PIN_SHELL.findall(install_from_main)
+    name = _module_literal(guard_frozen, "MAIN_MIRROR_NAME")
+    suffix = _module_literal(guard_frozen, "LIVE_PIN_SUFFIX")
+    if len(mirror) != 1:
+        problems.append("install.sh does not set MAIN_MIRROR to $HOME/<name> exactly once")
+    elif name != mirror[0]:
+        problems.append("MAIN_MIRROR_NAME is %r but install.sh MAIN_MIRROR is $HOME/%s" % (name, mirror[0]))
+    if len(pin) != 1:
+        problems.append('install_from_main.sh does not set pin="$clone<suffix>" exactly once')
+    elif suffix != pin[0]:
+        problems.append("LIVE_PIN_SUFFIX is %r but install_from_main.sh pin suffix is %r" % (suffix, pin[0]))
+    return problems
+
+
+def _mirror_names_tie():
+    """MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX in guard_frozen.py equal the shell names they copy."""
+    def read(*parts):
+        with open(os.path.join(REPO, *parts), encoding="utf-8") as handle:
+            return handle.read()
+
+    problems = mirror_name_problems(read("install.sh"), read("merge", "install_from_main.sh"),
+                                    read("hooks", "guard_frozen.py"))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal install.sh MAIN_MIRROR and the install_from_main.sh pin"
+
+
+LOG_CHECKS_EXTRA.append(("frozen: MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal the shell names they copy",
+                         _mirror_names_tie))
 
 # ---- merge: gh_call_of reads the pr verb past a root flag. Its callers (merge_call_of, the draft-PR read,
 # ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front hides the
@@ -14766,14 +17130,14 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a settings.json matcher rou
 ARCHIVE_CALLS = "calls.log"  # the counted fake's log, beside its state: one line per gh call
 
 
-def archive_judged(transcript, folder):
+def archive_judged(transcript, folder, agent_id=None):
     """The guard's verdict on one archive_session of ROLE_OTHER, from the batch runner, with the fake pull request
     tool at `folder` on PATH. The payload's cwd and the guard's process both run in NOGIT, so a write into the working
     folder shows in the snapshot. MERGECFG is the config folder: its rules file points at the repo, so a guard copy
-    finds the merge tool there."""
+    finds the merge tool there. `agent_id`, when given, makes the call an agent's."""
     return decide({
         "raw": None, "tool": ARCHIVE_TOOL, "cwd": NOGIT, "process_cwd": NOGIT, "session": None,
-        "env_path": fake_gh_path(folder), "config": MERGECFG, "agent_id": None, "agent_type": None,
+        "env_path": fake_gh_path(folder), "config": MERGECFG, "agent_id": agent_id, "agent_type": None,
         "temp": None, "load": None, "env": dict(ROLE_ENV), "tool_input": {"session_id": ROLE_OTHER},
         "transcript": transcript,
     })
@@ -14860,6 +17224,24 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a non-lane archive makes no
                          archive_non_lane_no_read_case))
 LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no file in the session's folders",
                          archive_writes_nothing_case))
+
+
+def archive_agent_non_lane_no_read_case():
+    """An agent's archive of a target that is no lane is allowed and makes no gh call, though its own record carries a
+    step slug that an open-list read would find."""
+    folder = archive_counted_gh()
+    gh_calls_taken(folder)
+    decision, reason = archive_judged(role_path("agent-own-triage-slug"), folder, agent_id=AGENT_OWN_ID)
+    calls = gh_calls_taken(folder)
+    if decision != "allow" or reason:
+        return False, "an agent's non-lane target: %s (%r)" % (decision, reason)
+    if calls:
+        return False, "an agent's non-lane target made %d gh call(s): %r" % (len(calls), calls)
+    return True, "allowed, and no gh call"
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an agent's non-lane archive makes no gh call",
+                         archive_agent_non_lane_no_read_case))
 
 
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
@@ -15504,10 +17886,10 @@ def _f1b_push_reset(w):
     _must(w, *IDENT, "commit", "-q", "-m", "product work")
 
 
-def _f2_conflict_merge(w):
+def _f2_conflict_open(w):
     """Cut at main. Reset to a lane tip that adds test cases to the test file. Main then adds a different
-    line at the same place in that file. The builder merges main, the test file conflicts, and the builder
-    takes its own side and commits the merge by hand (reflog `commit (merge)`)."""
+    line at the same place in that file. The builder merges main, and the test file conflicts. The merge is
+    left in progress: MERGE_HEAD is set, the test file is unmerged, and nothing is committed."""
     main = w + "-main"
     _test_author_lane(w)
     _must(w, "reset", "-q", "--hard", "lane")
@@ -15517,6 +17899,12 @@ def _f2_conflict_merge(w):
     merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
     if merged.returncode == 0:
         sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+
+
+def _f2_conflict_merge(w):
+    """The open merge of _f2_conflict_open. The builder takes its own side of the test file and commits the
+    merge by hand (reflog `commit (merge)`)."""
+    _f2_conflict_open(w)
     write(os.path.join(w, TEST_A), LANE_TEXT)
     _must(w, "add", "-A")
     _must(w, *IDENT, "commit", "-q", "--no-edit")
@@ -15571,15 +17959,17 @@ def _push_main(w):
     _must(w + "-main", "push", "-q", "origin", "main")
 
 
-def _c1_mid_merge(w):
+def _c1_mid_merge(w, extra_tests=()):
     """Cut at main. The builder commits product work. Main then changes a test file and the product file the
-    builder changed. The builder merges main: the product file conflicts and the test file merges clean. The
-    builder resolves the product file and stops before the commit."""
+    builder changed, and adds each of `extra_tests`. The builder merges main: the product file conflicts and the
+    test files merge clean. The builder resolves the product file and stops before the commit."""
     main = w + "-main"
     _origin(w)
     _push_main(w)
     _product_commit(w)
     write(os.path.join(main, TEST_A), MAIN_FIRST + BASE_FILES[TEST_A])
+    for rel in extra_tests:
+        write(os.path.join(main, rel), "def test_clean():\n    assert 2\n")
     write(os.path.join(main, "src/app.py"), "x = 10\n")
     _must(main, "add", "-A")
     _must(main, *IDENT, "commit", "-q", "-m", "main changes a test file and the product file")
@@ -15594,6 +17984,294 @@ def _c1_mid_merge(w):
 def _c1_committed(w):
     _c1_mid_merge(w)
     _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+# Twenty test files that main adds and the builder never touches: each merges clean into the builder's tree.
+MANY_CLEAN_TESTS = ["tests/test_clean_%02d.py" % n for n in range(1, 21)]
+
+
+def _c1_many_clean(w):
+    """The _c1_mid_merge shape, with twenty more test files that main adds and that merge clean beside TEST_A."""
+    _c1_mid_merge(w, MANY_CLEAN_TESTS)
+
+
+def _open_test_conflict_left(w):
+    """The open merge of _f2_conflict_open, with the builder's product edit staged. The conflicted test file stays
+    as git's merge wrote it, with its conflict markers: a test file that still holds markers is a builder's test
+    change, so the builder's commit is refused until the test-author resolves it."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    write(os.path.join(w, "src/app.py"), "x = 7\n")
+    _must(w, "add", "src/app.py")
+
+
+def _open_test_conflict_edited(w):
+    """The open merge of _f2_conflict_open, where the builder rewrites the conflicted test file to its own side.
+    The bytes are no text git's merge wrote, so this is the builder's own change."""
+    _open_test_conflict_left(w)
+    write(os.path.join(w, TEST_A), LANE_TEXT)
+
+
+def _open_test_conflict_mode(w):
+    """The open merge of _f2_conflict_open, where the builder sets the exec bit on the conflicted test file and keeps
+    git's bytes. The file stays unmerged in the index, so the mode change is the builder's only change to it."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    os.chmod(os.path.join(w, TEST_A), 0o755)
+    if not os.stat(os.path.join(w, TEST_A)).st_mode & 0o111:
+        sys.exit("fixture setup failed: chmod +x did not land on %r" % TEST_A)
+
+
+MAIN_CASE = "def test_main_case():\n    assert 3\n"
+BUILDER_CASE = "def test_builder_case():\n    assert 4\n"
+
+
+def _main_test_merge_open(w, builder_text=None):
+    """Cut at main. The builder commits product work. Main appends MAIN_CASE to TEST_A, which the builder never
+    touches, so git's merge takes it clean. The merge is left open. `builder_text`, when given, then replaces
+    TEST_A in the worktree."""
+    main = w + "-main"
+    _product_commit(w)
+    write(os.path.join(main, TEST_A), BASE_FILES[TEST_A] + MAIN_CASE)
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main adds a case")
+    _must(w, *IDENT, "merge", "-q", "--no-commit", "--no-ff", "main")
+    _require_says(w, ["show", ":" + TEST_A], MAIN_CASE)
+    if builder_text is not None:
+        write(os.path.join(w, TEST_A), builder_text)
+
+
+def _main_test_merge_committed(w):
+    """The _main_test_merge_open merge, committed as the merge commit. Then the builder appends BUILDER_CASE to
+    TEST_A, the test file git's merge took clean."""
+    _main_test_merge_open(w)
+    _commit_merge(w)
+    _require_says(w, ["show", "HEAD:" + TEST_A], MAIN_CASE)
+    write(os.path.join(w, TEST_A), BASE_FILES[TEST_A] + MAIN_CASE + BUILDER_CASE)
+
+
+def _main_test_merge_clean_committed(w):
+    """The _main_test_merge_open merge, committed as the builder's merge commit with no builder edit to a test file.
+    The commit is git's merge of its two parents, so it holds main's clean test change and nothing the builder wrote."""
+    _main_test_merge_open(w)
+    _commit_merge(w)
+    _require_says(w, ["show", "HEAD:" + TEST_A], MAIN_CASE)
+    if len(run_vcs(w, "rev-list", "--parents", "-n", "1", "HEAD").stdout.split()) != 3:
+        sys.exit("fixture setup failed: HEAD in %r is not a merge commit" % w)
+
+
+def _f2_conflict_staged(w):
+    """The open merge of _f2_conflict_open, with git's markers staged by `git add`: the index holds them as the bytes
+    of the test file, and the merge is still open."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    _must(w, "add", "-A")
+
+
+def _resolve_test_conflict_open(w, text):
+    """The open merge of _f2_conflict_open, where the builder rewrites the conflicted test file to `text`, with no
+    marker left in it."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    write(os.path.join(w, TEST_A), text)
+
+
+def _strip_test_conflict_markers(w):
+    """The open merge of _f2_conflict_open, where the builder deletes git's three marker lines and keeps both sides."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    path = os.path.join(w, TEST_A)
+    with open(path, encoding="utf-8") as handle:
+        kept = [line for line in handle if not line.startswith(("<<<<<<< ", "=======", ">>>>>>> "))]
+    text = "".join(kept)
+    if "<<<<<<<" in text or "def test_lane_1" not in text or "# main's newer case" not in text:
+        sys.exit("fixture setup failed: the markers did not strip to both sides in %r" % w)
+    write(path, text)
+
+
+# A top-level test file that an add/add merge conflicts. The base holds no such file, so the lane and main each add it;
+# _f2_conflict_open changes tests/test_a.py, which the base holds. The builder's untracked file of the same name sits
+# under src/, so the guard must tell the two apart by their folders.
+TOP_TEST = "test_x.py"
+
+
+def _top_test_conflict_open(w):
+    """The open merge of an add/add conflict on TOP_TEST: the lane adds the file with one case, main adds it with
+    another, and the builder merges main. The conflicted file stays as git's merge wrote it, unmerged, and nothing is
+    committed. The builder then adds an untracked test file of the same name under src/."""
+    main = w + "-main"
+    _test_author_lane(w, TOP_TEST, "def test_x():\n    assert 1\n")
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(main, TOP_TEST), "def test_x():\n    assert 2\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main adds the same test file")
+    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+    _require_conflict(w, TOP_TEST)
+    write(os.path.join(w, "src", TOP_TEST), "def test_x_builder():\n    assert 3\n")
+
+
+# An empty test file is still a test file: the rows below refuse one added or deleted in a merge. They also refuse a
+# test file whose only change is one invalid UTF-8 byte. Both bytes decode to the same character, so only a comparison
+# of the bytes tells the two versions apart.
+EMPTY_TEST = "tests/test_empty.py"
+TEST_BYTES = "tests/test_bytes.py"
+COST_PATHS = ["src/app.py", "tests/test_cost_one.py", "tests/test_cost_two.py"]
+
+
+def _put_bytes(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(data)
+
+
+def _rewrite_bytes(path, change):
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    _put_bytes(path, change(raw))
+
+
+def _clean_merge_open(w, main_adds=None):
+    """Cut at main. The builder commits product work. Main adds each file in `main_adds` (path: bytes) and changes a
+    product file. The builder merges main with no commit: the merge is clean and stays in progress, so git's own
+    merge is the base the builder's change is judged against."""
+    main = w + "-main"
+    _product_commit(w)
+    for rel, data in (main_adds or {}).items():
+        _put_bytes(os.path.join(main, rel), data)
+    write(os.path.join(main, "src/other.py"), "z = 1\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main adds files")
+    _must(w, *IDENT, "merge", "-q", "--no-commit", "--no-ff", "main")
+
+
+def _empty_add_open(w):
+    """A clean merge left open, where the builder adds an empty test file that git's merge does not have."""
+    _clean_merge_open(w)
+    write(os.path.join(w, EMPTY_TEST), "")
+
+
+def _empty_delete_open(w):
+    """A clean merge left open, where git's merge holds an empty test file and the builder deletes it."""
+    _clean_merge_open(w, {EMPTY_TEST: b""})
+    os.remove(os.path.join(w, EMPTY_TEST))
+
+
+def _commit_merge(w):
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+def _empty_add_committed(w):
+    """The _empty_add_open change, committed as the builder's merge commit (reflog `commit (merge)`)."""
+    _empty_add_open(w)
+    _commit_merge(w)
+
+
+def _empty_delete_committed(w):
+    """The _empty_delete_open change, committed as the builder's merge commit."""
+    _empty_delete_open(w)
+    _commit_merge(w)
+
+
+def _conflict_crlf(w):
+    """The open conflict of _f2_conflict_open, where the builder rewrites the conflicted test file with each LF as
+    CRLF. Only the line endings change."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    _rewrite_bytes(os.path.join(w, TEST_A), lambda raw: raw.replace(b"\n", b"\r\n"))
+
+
+def _conflict_cr(w):
+    """As _conflict_crlf, with each LF as a lone CR."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    _rewrite_bytes(os.path.join(w, TEST_A), lambda raw: raw.replace(b"\n", b"\r"))
+
+
+def _invalid_byte_open(w):
+    """A clean merge left open, where git's merge holds a test file with one stray byte, 0x80, and the builder
+    rewrites that byte to 0x81. Both are invalid UTF-8, so both decode to the same replacement character."""
+    _clean_merge_open(w, {TEST_BYTES: b"# \x80\n"})
+    _put_bytes(os.path.join(w, TEST_BYTES), b"# \x81\n")
+
+
+# A gitlink (a submodule entry) and a mode-only change under a test path are refused. A gitlink has no
+# bytes in this repository, and a mode-only change keeps the same bytes, so only the mode can refuse either. The rows
+# check a gitlink to a commit the clone lacks, a gitlink to a commit the clone holds, and a mode-only change. The
+# fixtures read each change back with git first: a change that did not land would give an allow for the wrong reason.
+GITLINK = "tests/sub_lib"
+GITLINK_MISSING = "0123456789abcdef0123456789abcdef01234567"   # a commit this clone does not hold
+
+
+def _head_sha(w):
+    return run_vcs(w, "rev-parse", "HEAD").stdout.strip()
+
+
+def _require_says(where, args, want):
+    """Stop the suite unless git's answer for `args` in `where` holds `want`."""
+    done = run_vcs(where, *args)
+    if done.returncode != 0 or want not in done.stdout:
+        sys.exit("fixture setup failed: git %s in %r does not show %r: %s"
+                 % (" ".join(args), where, want, (done.stdout + done.stderr).strip()))
+
+
+def _gitlink_stage(w, sha=GITLINK_MISSING):
+    """A gitlink under tests/ at `sha`, staged, with the empty folder a checkout would make."""
+    os.makedirs(os.path.join(w, GITLINK), exist_ok=True)
+    _must(w, "update-index", "--add", "--cacheinfo", "160000," + sha + "," + GITLINK)
+    _require_says(w, ["ls-files", "-s", "--", GITLINK], "160000 " + sha)
+
+
+def _gitlink_open(w):
+    """A clean merge left open, where the builder stages a gitlink under tests/ that git's merge does not have."""
+    _clean_merge_open(w)
+    _gitlink_stage(w)
+
+
+def _gitlink_committed(w, sha=GITLINK_MISSING):
+    """The _gitlink_open change at `sha`, committed as the builder's merge commit."""
+    _clean_merge_open(w)
+    _gitlink_stage(w, sha)
+    _commit_merge(w)
+    _require_says(w, ["ls-tree", "HEAD", "--", GITLINK], "160000 commit " + sha)
+
+
+def _gitlink_committed_held(w):
+    """The _gitlink_committed change, to the commit this clone holds (the work branch's HEAD), as a control."""
+    _gitlink_committed(w, _head_sha(w))
+
+
+def _mode_exec(rel):
+    """chmod +x on a test file in the worktree: the bytes stay, and only the mode changes."""
+    def go(w):
+        os.chmod(os.path.join(w, rel), 0o755)
+        _require_says(w, ["diff", "--raw", "--", rel], "100644 100755")
+    return go
+
+
+def _mode_exec_committed(w):
+    """A clean merge, where the builder sets the exec bit on a test file and commits it as the merge commit."""
+    _clean_merge_open(w)
+    _must(w, "update-index", "--chmod=+x", TEST_A)
+    os.chmod(os.path.join(w, TEST_A), 0o755)
+    _commit_merge(w)
+    _require_says(w, ["ls-tree", "HEAD", "--", TEST_A], "100755 ")
+    _require_says(w, ["ls-tree", "HEAD^1", "--", TEST_A], "100644 ")
+
+
+def _mode_exec_open(w):
+    """A clean merge left open, where the builder sets the exec bit on a test file in the worktree."""
+    _clean_merge_open(w)
+    _mode_exec(TEST_A)(w)
+
+
+def _cost_files(w):
+    """The builder's change for the cost checks: a product edit and two new test files."""
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+    write(os.path.join(w, "tests/test_cost_one.py"), "def test_one():\n    assert 1\n")
+    write(os.path.join(w, "tests/test_cost_two.py"), "def test_two():\n    assert 2\n")
 
 
 def _g_lane_and_product(w):
@@ -15991,6 +18669,408 @@ diff_repo("bd-i1-rebase-ours", _i1_rebase_ours)
 LOG_CHECKS_EXTRA.append(("builder-refuse: a rebase conflict in a test file resolved to the upstream side is logged only",
                          logged_builder_case("bd-i1-rebase-ours")))
 
+# A builder never writes test content. A test file that still holds git's conflict markers is a builder's test change,
+# so the builder's commit is refused while the file is unresolved. The rows check that refusal. The test-author resolves
+# that file. The same merge is denied once the builder rewrites the conflicted file to its own side. Both share one setup.
+_bd_m_left = diff_repo("bd-m-test-left", _open_test_conflict_left)
+sh("builder-refuse: a builder's merge in progress, with a product edit staged and a conflicted test file left as git "
+   "wrote it, is denied at commit by builder-diff", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_left, agent_id="bld1",
+   agent_type="builder")
+_bd_m_edited = diff_repo("bd-m-test-edited", _open_test_conflict_edited)
+sh("builder-refuse: a builder's merge in progress that rewrites a conflicted test file to its own side is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_edited, agent_id="bld1", agent_type="builder")
+
+# The same two merges, run from a subfolder. The guard reads each file from the top of the checkout, whatever folder
+# the command runs in: a conflicted test file left as git wrote it is denied, as is one rewritten to the builder's side.
+sh("builder-refuse: a builder's merge in progress, with a conflicted test file left as git wrote it, is denied at "
+   "commit by builder-diff from a subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_m_left, "src"),
+   agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's merge in progress that rewrites a conflicted test file is denied at commit from a "
+   "subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_m_edited, "src"), agent_id="bld1",
+   agent_type="builder")
+
+# A builder's own edit to a test file that a clean merge of main took in is refused, in an open merge and in a merge
+# commit. Main's own change, merged clean and left alone, is allowed: the control row below pins that.
+_bd_m_main_open = diff_repo("bd-m-main-test-open", lambda w: _main_test_merge_open(w, BASE_FILES[TEST_A] + MAIN_CASE
+                                                                                  + BUILDER_CASE))
+sh("builder-refuse: a builder's own case in a test file that main changed and git's open merge took clean is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_main_open, agent_id="bld1", agent_type="builder")
+_bd_m_main_commit = diff_repo("bd-m-main-test-commit", _main_test_merge_committed)
+sh("builder-refuse: a builder's own case in a test file that main changed and a merge commit took clean is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_main_commit, agent_id="bld1", agent_type="builder")
+_bd_m_main_clean = diff_repo("bd-m-main-test-clean", lambda w: _main_test_merge_open(w))
+sh("builder-refuse: a merge in progress where main changed a test file that merged clean, with no builder edit, is "
+   "allowed at commit", COMMIT, "allow", cwd=_bd_m_main_clean, agent_id="bld1", agent_type="builder")
+# The same clean change, committed as the builder's merge commit with no builder edit: git's merge of the two parents
+# is the commit's tree, so main's test change is allowed at commit and push, and at the stop.
+_bd_m_main_merge_clean = diff_repo("bd-m-main-test-merge-clean", _main_test_merge_clean_committed)
+sh("builder-refuse: a builder's merge commit that carries main's clean test change, with no builder edit, is allowed "
+   "at commit", COMMIT, "allow", cwd=_bd_m_main_merge_clean, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's merge commit that carries main's clean test change, with no builder edit, is allowed "
+   "at push", PUSH, "allow", cwd=_bd_m_main_merge_clean, agent_id="bld1", agent_type="builder")
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's merge commit that carries main's clean test change, with no "
+                         "builder edit, is allowed at commit, push and stop, and logs no builder-diff line",
+                         clean_builder_case("bd-m-main-test-merge-clean")))
+
+# git's three conflict markers left in a conflicted test file of an open merge are denied by builder-diff, since a test
+# file that still holds markers is the builder's change. An unmerged file that is not staged is refused by builder-diff
+# too, pinned by the bd-m-test-left row above, so these rows stage the markers first.
+_bd_m_markers_chain = diff_repo("bd-m-markers-chain", _f2_conflict_open)
+sh("builder-refuse: a builder's open merge that leaves git's markers in a conflicted test file, staged and committed in "
+   "one call, is denied by builder-diff", VCS + " add -A && " + COMMIT, "deny", rule=BDIFF,
+   cwd=_bd_m_markers_chain, agent_id="bld1", agent_type="builder")
+_bd_m_markers_staged = diff_repo("bd-m-markers-staged", _f2_conflict_staged)
+sh("builder-refuse: a builder's open merge that stages git's markers in a conflicted test file, then commits, is denied "
+   "by builder-diff", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_markers_staged, agent_id="bld1",
+   agent_type="builder")
+# The same staged markers behind a leading `echo ok;`: builder-diff refuses the test file at commit by itself.
+sh("builder-refuse: a builder's open merge, with a test file still holding git's markers, staged and committed after "
+   "`echo ok;`, is denied at commit by builder-diff", "echo ok; " + VCS + " add -A && " + COMMIT, "deny", rule=BDIFF,
+   cwd=_bd_m_markers_chain, agent_id="bld1", agent_type="builder")
+
+# A builder's resolution of a conflicted test file to main's side, or to a blend of both sides, is refused by
+# builder-diff, as its resolution to its own side is (_open_test_conflict_edited).
+_bd_m_keep_main = diff_repo("bd-m-keep-main", lambda w: _resolve_test_conflict_open(
+    w, BASE_FILES[TEST_A] + "# main's newer case\n"))
+sh("builder-refuse: a builder's merge in progress that resolves a conflicted test file to main's side is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_keep_main, agent_id="bld1", agent_type="builder")
+_bd_m_blend = diff_repo("bd-m-blend", _strip_test_conflict_markers)
+sh("builder-refuse: a builder's merge in progress that strips git's markers from a conflicted test file and keeps both "
+   "sides is denied at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_blend, agent_id="bld1", agent_type="builder")
+
+# A builder's edit to sub/tests/test_b.py is refused when it runs from sub/ with `diff.relative` set, as it is under the
+# default config. With diff.relative, git prints the path relative to sub/ (tests/test_b.py), so the rows check that the
+# refusal holds when git names the file that way. The default-config row is the control. The sibling pin for
+# `git diff --check` under diff.relative is CMK_REL (conflict-markers).
+SUB_TEST = "sub/tests/test_b.py"
+SUB_FILES = {**BASE_FILES, "tests/test_b.py": "def test_top():\n    assert 1\n",
+             SUB_TEST: "def test_sub():\n    assert 1\n"}
+SUB_EDIT = "def test_sub():\n    assert 2\n"
+
+
+def _folder_names(where, folder, *revs, flags=()):
+    """The names `git diff --name-only` prints from `folder`, with `flags` added. A fixture checks them before a case
+    relies on them."""
+    done = run_vcs(os.path.join(where, folder), "diff", *flags, "--name-only", *revs)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed: git diff in %s/ of %r: %s" % (folder, where, done.stderr.strip()))
+    return done.stdout.split()
+
+
+def _sub_open_edit(w, relative):
+    """The open merge of a clean merge, with the builder's edit to SUB_TEST. `relative` sets diff.relative."""
+    _clean_merge_open(w)
+    write(os.path.join(w, SUB_TEST), SUB_EDIT)
+    if relative:
+        _must(w, "config", "diff.relative", "true")
+        if _folder_names(w, "sub", "HEAD") != ["tests/test_b.py"]:
+            sys.exit("fixture setup failed: diff.relative did not name %r relative to sub/ in %r" % (SUB_TEST, w))
+    elif SUB_TEST not in _folder_names(w, "sub", "HEAD"):
+        sys.exit("fixture setup failed: the default config did not name %r from sub/ in %r" % (SUB_TEST, w))
+
+
+def _sub_commit_edit(w):
+    """The open merge of _sub_open_edit, committed as the builder's merge commit, with diff.relative set."""
+    _clean_merge_open(w)
+    write(os.path.join(w, SUB_TEST), SUB_EDIT)
+    _commit_merge(w)
+    _must(w, "config", "diff.relative", "true")
+    if _folder_names(w, "sub", "HEAD^1", "HEAD") != ["tests/test_b.py"]:
+        sys.exit("fixture setup failed: diff.relative did not name the merge commit's %r relative to sub/ in %r"
+                 % (SUB_TEST, w))
+
+
+_bd_sub_open_rel = diff_repo("bd-sub-open-rel", lambda w: _sub_open_edit(w, True), files=SUB_FILES)
+sh("builder-refuse: a builder's edit to sub/tests/test_b.py in an open merge, from sub/ with diff.relative set, is "
+   "denied at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_sub_open_rel, "sub"), agent_id="bld1",
+   agent_type="builder")
+_bd_sub_commit_rel = diff_repo("bd-sub-commit-rel", _sub_commit_edit, files=SUB_FILES)
+sh("builder-refuse: a builder's merge commit that edits sub/tests/test_b.py, from sub/ with diff.relative set, is "
+   "denied at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_sub_commit_rel, "sub"), agent_id="bld1",
+   agent_type="builder")
+_bd_sub_open_default = diff_repo("bd-sub-open-default", lambda w: _sub_open_edit(w, False), files=SUB_FILES)
+sh("builder-refuse: the same open-merge edit to sub/tests/test_b.py under the default config, from sub/, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_sub_open_default, "sub"), agent_id="bld1",
+   agent_type="builder")
+
+# With `diff.relative` set, `git diff` names only the paths under the folder it runs in, so from docs/ a builder's edit
+# to the top-level tests/test_a.py is named by no plain diff. Only `--no-relative` on each name-producing diff keeps the
+# refusal. Each red row runs from docs/ and reads the edit down one call path: the working tree against HEAD, against
+# git's open merge, a committed change at push, and a merge commit at commit. Each fixture checks that premise first.
+# Each control builds the same change under the default config, where the refusal holds with or without the flag.
+DOCS_FILES = {**BASE_FILES, "docs/notes.md": "notes\n"}
+
+
+def _docs_edit(w):
+    write(os.path.join(w, TEST_A), "def test_a():\n    assert 2\n")
+
+
+def _docs_relative(w, relative, *revs):
+    """With `relative`, set diff.relative and check that the plain diff from docs/ names no path while --no-relative
+    names the test file. Without it, check that the default diff from docs/ names the test file."""
+    if not relative:
+        if TEST_A not in _folder_names(w, "docs", *revs):
+            sys.exit("fixture setup failed: the default config did not name %r from docs/ in %r" % (TEST_A, w))
+        return
+    _must(w, "config", "diff.relative", "true")
+    if _folder_names(w, "docs", *revs):
+        sys.exit("fixture setup failed: diff.relative still named a path from docs/ in %r" % w)
+    if TEST_A not in _folder_names(w, "docs", *revs, flags=("--no-relative",)):
+        sys.exit("fixture setup failed: --no-relative did not name %r from docs/ in %r" % (TEST_A, w))
+
+
+def _docs_plain(w, relative):
+    """A builder's uncommitted edit to the top-level test file."""
+    _docs_edit(w)
+    _docs_relative(w, relative, "HEAD")
+
+
+def _docs_open(w, relative):
+    """A builder's edit to the top-level test file, made while git's clean merge of main is still open."""
+    _clean_merge_open(w)
+    _docs_edit(w)
+    _docs_relative(w, relative, "HEAD")
+
+
+def _docs_committed(w, relative):
+    """A builder's plain commit of the top-level test file, read again at push."""
+    _docs_edit(w)
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "builder edit")
+    _docs_relative(w, relative, "HEAD^", "HEAD")
+
+
+def _docs_merge_committed(w, relative):
+    """A builder's merge commit that edits the top-level test file, read again at commit."""
+    _clean_merge_open(w)
+    _docs_edit(w)
+    _commit_merge(w)
+    _docs_relative(w, relative, "HEAD^1", "HEAD")
+
+
+_bd_docs_plain = diff_repo("bd-docs-plain-rel", lambda w: _docs_plain(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's edit to tests/test_a.py, from docs/ with diff.relative set, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_plain, "docs"), agent_id="bld1", agent_type="builder")
+_bd_docs_plain_ctl = diff_repo("bd-docs-plain-ctl", lambda w: _docs_plain(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same edit to tests/test_a.py, from docs/ under the default config, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_plain_ctl, "docs"), agent_id="bld1", agent_type="builder")
+
+_bd_docs_open = diff_repo("bd-docs-open-rel", lambda w: _docs_open(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's edit to tests/test_a.py in an open merge, from docs/ with diff.relative set, is "
+   "denied at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_open, "docs"), agent_id="bld1",
+   agent_type="builder")
+_bd_docs_open_ctl = diff_repo("bd-docs-open-ctl", lambda w: _docs_open(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same open-merge edit to tests/test_a.py, from docs/ under the default config, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_open_ctl, "docs"), agent_id="bld1",
+   agent_type="builder")
+
+_bd_docs_committed = diff_repo("bd-docs-committed-rel", lambda w: _docs_committed(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's committed edit to tests/test_a.py, from docs/ with diff.relative set, is denied at "
+   "push", PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_committed, "docs"), agent_id="bld1",
+   agent_type="builder")
+_bd_docs_committed_ctl = diff_repo("bd-docs-committed-ctl", lambda w: _docs_committed(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same committed edit to tests/test_a.py, from docs/ under the default config, is denied at "
+   "push", PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_committed_ctl, "docs"), agent_id="bld1",
+   agent_type="builder")
+
+_bd_docs_merge = diff_repo("bd-docs-merge-rel", lambda w: _docs_merge_committed(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's merge commit that edits tests/test_a.py, from docs/ with diff.relative set, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_merge, "docs"), agent_id="bld1",
+   agent_type="builder")
+_bd_docs_merge_ctl = diff_repo("bd-docs-merge-ctl", lambda w: _docs_merge_committed(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same merge commit that edits tests/test_a.py, from docs/ under the default config, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_merge_ctl, "docs"), agent_id="bld1",
+   agent_type="builder")
+
+# An untracked file is listed from the checkout's top, whatever folder the command runs in. The builder's test file
+# under src/ is judged as src/test_x.py. The conflicted top-level file of that name holds git's markers, so builder-diff
+# refuses it either way: this row does not tell the two readings apart.
+_bd_m_top = diff_repo("bd-m-top-test", _top_test_conflict_open)
+sh("builder-refuse: a builder's merge in progress, with a conflicted top-level test file left as git wrote it and an "
+   "untracked test file of the same name under src/, is denied at commit from a subfolder", COMMIT, "deny", rule=BDIFF,
+   cwd=os.path.join(_bd_m_top, "src"), agent_id="bld1", agent_type="builder")
+
+# A merge in progress where the merged branch added twenty test files that merged clean is git's, and allowed.
+_bd_m_many = diff_repo("bd-m-many-clean", _c1_many_clean)
+sh("builder-refuse: a builder's merge in progress, with twenty test files that merged clean and a product file "
+   "resolved, is allowed at commit", COMMIT, "allow", cwd=_bd_m_many, agent_id="bld1", agent_type="builder")
+
+# An empty test file that a builder adds or deletes is a builder's change in a merge as in a plain change. The two
+# plain cases are the controls: the same change, outside a merge, is refused.
+_bd_empty_plain_add = diff_repo("bd-empty-plain-add", _put(EMPTY_TEST, ""))
+sh("builder-refuse: a new empty test file in a builder's plain change is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_empty_plain_add, agent_id="bld1", agent_type="builder")
+_bd_empty_plain_del = diff_repo("bd-empty-plain-del", _rm(EMPTY_TEST), files={**BASE_FILES, EMPTY_TEST: ""})
+sh("builder-refuse: a deleted empty test file in a builder's plain change is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_empty_plain_del, agent_id="bld1", agent_type="builder")
+
+_bd_m_empty_add = diff_repo("bd-m-empty-add", _empty_add_open)
+sh("builder-refuse: a builder's merge in progress that adds an empty test file git's merge lacks is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_add, agent_id="bld1", agent_type="builder")
+_bd_m_empty_del = diff_repo("bd-m-empty-del", _empty_delete_open)
+sh("builder-refuse: a builder's merge in progress that deletes an empty test file git's merge has is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_del, agent_id="bld1", agent_type="builder")
+_bd_m_empty_add_c = diff_repo("bd-m-empty-add-commit", _empty_add_committed)
+sh("builder-refuse: a builder's merge commit that adds an empty test file git's merge lacks is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_add_c, agent_id="bld1", agent_type="builder")
+_bd_m_empty_del_c = diff_repo("bd-m-empty-del-commit", _empty_delete_committed)
+sh("builder-refuse: a builder's merge commit that deletes an empty test file git's merge has is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_del_c, agent_id="bld1", agent_type="builder")
+
+# A conflicted test file whose bytes change only in line endings, LF to CRLF or a lone CR, is the builder's change. A
+# line-ending change alters the bytes of the file, so the two rows check that each is refused.
+_bd_m_crlf = diff_repo("bd-m-crlf", _conflict_crlf)
+sh("builder-refuse: a builder's merge in progress that changes only the line endings of a conflicted test file "
+   "(LF to CRLF) is denied at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_crlf, agent_id="bld1",
+   agent_type="builder")
+_bd_m_cr = diff_repo("bd-m-cr", _conflict_cr)
+sh("builder-refuse: a builder's merge in progress that changes only the line endings of a conflicted test file "
+   "(a lone CR) is denied at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_cr, agent_id="bld1",
+   agent_type="builder")
+
+# A test file that differs only in one invalid UTF-8 byte is the builder's change: both bytes decode alike.
+_bd_m_byte = diff_repo("bd-m-invalid-byte", _invalid_byte_open)
+sh("builder-refuse: a builder's merge in progress that changes only an invalid UTF-8 byte of a test file is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_byte, agent_id="bld1", agent_type="builder")
+
+# A gitlink under tests/, and a mode-only change to a test file, are the builder's changes in a merge, refused as on
+# main. The plain changes are the controls: the same change outside a merge is refused.
+_bd_m_gitlink = diff_repo("bd-m-gitlink", _gitlink_open)
+sh("builder-refuse: a builder's merge in progress that adds a gitlink under tests/ is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_gitlink, agent_id="bld1", agent_type="builder")
+_bd_m_gitlink_c = diff_repo("bd-m-gitlink-commit", _gitlink_committed)
+sh("builder-refuse: a builder's merge commit that adds a gitlink under tests/ to a commit the clone lacks is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_gitlink_c, agent_id="bld1", agent_type="builder")
+_bd_m_gitlink_h = diff_repo("bd-m-gitlink-held", _gitlink_committed_held)
+sh("builder-refuse: a builder's merge commit that adds a gitlink under tests/ to a commit the clone holds is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_gitlink_h, agent_id="bld1", agent_type="builder")
+_bd_gitlink_plain = diff_repo("bd-gitlink-plain", _gitlink_stage)
+sh("builder-refuse: a builder's plain change that adds a gitlink under tests/ is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_gitlink_plain, agent_id="bld1", agent_type="builder")
+
+# A mode-only change is no byte change, so the exec bit needs a POSIX checkout. The committed one sets the bit in the
+# index too, so it reads the same on every platform.
+_MODE_OPEN_CASE = ("builder-refuse: a builder's merge in progress that changes only the mode of a test file (chmod +x) "
+                   "is denied at commit")
+_MODE_PLAIN_CASE = ("builder-refuse: a builder's plain change that changes only the mode of a test file (chmod +x) "
+                    "is denied at commit")
+# The conflicted test file of an open merge, unmerged in the index, whose only change is the exec bit: the mode change
+# is the builder's change, whatever git's raw entry for an unmerged path holds.
+_MODE_CONFLICT_CASE = ("builder-refuse: a builder's merge in progress that only sets the exec bit on a conflicted test "
+                       "file, keeping git's bytes, is denied at commit")
+if os.name != "nt":
+    _bd_m_mode = diff_repo("bd-m-mode", _mode_exec_open)
+    sh(_MODE_OPEN_CASE, COMMIT, "deny", rule=BDIFF, cwd=_bd_m_mode, agent_id="bld1", agent_type="builder")
+    _bd_mode_plain = diff_repo("bd-mode-plain", _mode_exec(TEST_A))
+    sh(_MODE_PLAIN_CASE, COMMIT, "deny", rule=BDIFF, cwd=_bd_mode_plain, agent_id="bld1", agent_type="builder")
+    _bd_m_conf_mode = diff_repo("bd-m-conflict-mode", _open_test_conflict_mode)
+    sh(_MODE_CONFLICT_CASE, COMMIT, "deny", rule=BDIFF, cwd=_bd_m_conf_mode, agent_id="bld1", agent_type="builder")
+else:
+    skip_case(_MODE_OPEN_CASE, NO_EXEC_BIT)
+    skip_case(_MODE_PLAIN_CASE, NO_EXEC_BIT)
+    skip_case(_MODE_CONFLICT_CASE, NO_EXEC_BIT)
+_bd_m_mode_c = diff_repo("bd-m-mode-commit", _mode_exec_committed)
+sh("builder-refuse: a builder's merge commit that changes only the mode of a test file is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_mode_c, agent_id="bld1", agent_type="builder")
+
+
+def _reaches_merge_check_case(where, rel, committed):
+    """A builder's change to `rel` in a merge reaches the merge check: own_changes answers, and git's diff of the
+    merge's old side lists `rel` before the merge check judges it. So a deny above comes from the merge check, and an
+    allow from an unread change fails here instead."""
+    materialize(where)
+    guard = _load_guard_module()
+    if guard.own_changes(where) is None:
+        return False, "own_changes returned None, so git could not answer for %s" % rel
+    if committed:
+        old = guard.merge_tree(where, run_vcs(where, "rev-parse", "HEAD^1").stdout.strip(),
+                               run_vcs(where, "rev-parse", "HEAD^2").stdout.strip())
+        paths = guard.changed_paths(where, old, "HEAD") if old else None
+    else:
+        old = guard.merge_tree(where, "HEAD", run_vcs(where, "rev-parse", "MERGE_HEAD").stdout.strip())
+        paths = guard.changed_paths(where, old) if old else None
+    if paths is None:
+        return False, "git could not list the change against the merge's old side"
+    if rel not in paths:
+        return False, "git's diff against the merge's old side does not list %s" % rel
+    return True, "git lists %s against the merge's old side, and own_changes answers" % rel
+
+
+# Each red above must reach the merge check and fail there, not on an unread change.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's gitlink in a merge in progress reaches the merge check",
+                         lambda: _reaches_merge_check_case(_bd_m_gitlink, GITLINK, False)))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's gitlink in a merge commit reaches the merge check",
+                         lambda: _reaches_merge_check_case(_bd_m_gitlink_c, GITLINK, True)))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's mode-only change in a merge commit reaches the merge check",
+                         lambda: _reaches_merge_check_case(_bd_m_mode_c, TEST_A, True)))
+if os.name != "nt":
+    LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's mode-only change in a merge in progress "
+                             "reaches the merge check", lambda: _reaches_merge_check_case(_bd_m_mode, TEST_A, False)))
+    LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's exec-bit change on a conflicted test file in a merge in "
+                             "progress reaches the merge check",
+                             lambda: _reaches_merge_check_case(_bd_m_conf_mode, TEST_A, False)))
+
+
+# The git reader a guard call goes through: `_git`, which guard_core imports from git_reads. The guard calls it as
+# guard_core._git, so a patch on the core module counts each call the guard makes.
+COUNTED_READERS = ("_git",)
+
+
+def _counted_own_changes(where):
+    """own_changes(where) with every git call the guard makes counted: the changes, and the argument tuples of the
+    calls in order. The count is taken at the readers the guard calls, so it is the guard's own. A reader that another
+    counted reader calls is not counted again: a chain of readers is one call."""
+    guard = _load_guard_module()
+    core = sys.modules["guard_core"]
+    calls = []
+    depth = [0]
+    real = {name: getattr(core, name) for name in COUNTED_READERS if hasattr(core, name)}
+
+    def counted(real_call):
+        def call(root, *args):
+            if not depth[0]:
+                calls.append(args)
+            depth[0] += 1
+            try:
+                return real_call(root, *args)
+            finally:
+                depth[0] -= 1
+        return call
+
+    for name, real_call in real.items():
+        setattr(core, name, counted(real_call))
+    try:
+        changes = guard.own_changes(where)
+    finally:
+        for name, real_call in real.items():
+            setattr(core, name, real_call)
+    return changes, calls
+
+
+def _calls_naming(calls, rels):
+    """{rel: how many git calls name rel} for each path in `rels`."""
+    return {rel: sum(1 for args in calls if any(rel in part for part in args)) for rel in rels}
+
+
+def plain_commit_reads_case():
+    """A builder's plain commit: own_changes makes no git call that names one of its changed paths."""
+    where = diff_repo("bd-cost-plain", _cost_files, commit=True)
+    materialize(where)
+    changes, calls = _counted_own_changes(where)
+    if changes is None:
+        return False, "own_changes returned None for the plain commit"
+    found = {path for _old, _new, paths, _kind in changes for path in paths}
+    if found != set(COST_PATHS):
+        return False, "own_changes found paths %r, want %r" % (sorted(found), COST_PATHS)
+    named = {rel: n for rel, n in _calls_naming(calls, COST_PATHS).items() if n}
+    if named:
+        return False, "the plain commit's git calls name paths %r, want none" % (named,)
+    return True, "the plain commit's three paths are read through no git call"
+
+
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's plain commit makes no git call that names a changed path",
+                         plain_commit_reads_case))
+
 # Undo route: a new test file is refused, and the reason says to delete it and names no test path.
 _bd_u2 = diff_repo("bd-u2-new-file", _u2_new_test)
 sh("builder-refuse: a new test file is denied at commit, and the reason says to delete it and names no path",
@@ -15999,6 +19079,10 @@ sh("builder-refuse: a new test file is denied at commit, and the reason says to 
 sh("builder-refuse: a new test file is denied at push, and the reason says to delete it and names no path",
    PUSH, "deny", rule=BDIFF, cwd=_bd_u2, agent_id="bld1", agent_type="builder",
    lacks=("tests/", "test_new"), carries=("delete",))
+# Untracked files are listed from the checkout's top, so the same new test file, under tests/, is refused from a
+# subfolder too.
+sh("builder-refuse: a builder's plain change with an untracked test file in another folder is denied at commit from "
+   "a subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_u2, "src"), agent_id="bld1", agent_type="builder")
 
 
 def stop_pair_case():
@@ -16034,6 +19118,28 @@ def stop_pair_case():
 
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's first stop with a test change is blocked, and its "
                          "second stop is allowed and logs role-diff-unresolved", stop_pair_case))
+
+
+# A test-config file is read from the run folder, so a commit run from src/ reads src/src/pytest.ini,
+# finds no text, and allows a testpaths line that disables tests. The rows from the top are the control:
+# the same file read from the top is refused.
+_bd_src_ini = diff_repo("bd-src-ini-untracked", _put("src/pytest.ini", "[pytest]\ntestpaths = nowhere\n"))
+sh("builder-refuse: a builder's commit from src/ with an untracked src/pytest.ini that sets testpaths is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's push from src/ with an untracked src/pytest.ini that sets testpaths is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: the same untracked src/pytest.ini, committed from the top, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_src_ini, agent_id="bld1", agent_type="builder")
+
+# The same join for a tracked src/pytest.ini: the base holds it, and the builder adds a testpaths line from src/.
+_bd_src_ini_t = diff_repo("bd-src-ini-tracked", _put("src/pytest.ini", "[pytest]\naddopts = -q\ntestpaths = nowhere\n"),
+                          files={**BASE_FILES, "src/pytest.ini": "[pytest]\naddopts = -q\n"})
+sh("builder-refuse: a builder's commit from src/ that adds testpaths to a tracked src/pytest.ini is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini_t, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's push from src/ that adds testpaths to a tracked src/pytest.ini is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini_t, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: the same tracked src/pytest.ini edit, committed from the top, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_src_ini_t, agent_id="bld1", agent_type="builder")
 
 
 # =========================================================================== failing open
@@ -19871,6 +22977,273 @@ add("brief-claim: an empty brief is allowed", "allow", tool="Agent", prompt="", 
     model="sonnet")
 
 
+# ---- A spawn's brief that orders a discard of the working tree (rule brief-destructive-git, rule
+# shared-trees-no-destructive-git). An Agent, Task or Workflow brief is denied when a command span in it is one that
+# shared_tree_match reads as a discard: a backtick span, a fenced line, or a line led by "$ ". A negation before the
+# span on its line (never, do not, don't, no), a "Must deny:" or "Add a case:" line, prose with no span, a git span that
+# discards nothing, and a repo under a session scratchpad are false alarms the rule must leave alone. Each deny is red
+# on main, where no rule reads a brief. Selector: MUTATE_ONLY=brief-destructive-git: runs these cases and log checks.
+BRIEF_DESTRUCTIVE = "brief-destructive-git"
+# A session id is 8 or more characters, so a short folder name would not read as a scratchpad (in_any_session_scratchpad).
+# The spans below single-quote this path: the brief reader tokenizes a span like bash, which drops the backslashes of an
+# unquoted Windows path, so the path would stop reading as a scratchpad. The forward-slash form needs no quotes.
+SCRATCH_REPO = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "repo")
+from agent_brief import COMMON  # noqa: E402  the standing-rules text the SubagentStart hook gives every agent
+STANDING_LINE_ONE = "\n".join(text for _, text in COMMON[:2])   # the heading, then the first rule line
+STANDING_ALL = "\n".join(text for _, text in COMMON)
+# Paragraphs 7 to 12 of the brief that set these cases, as a brief would carry them. Paragraph 12's scratch path is the
+# session-shaped one above, so the text reads the same way the rule reads it.
+BRIEF_ALLOW_PARAGRAPHS = (
+    'A prohibition: "Never run `git reset --hard`." and "Do not run `git stash`." '
+    "(a negation word before the span on its line: never, do not, don't, no).\n"
+    "Case data: a line that starts with `Must deny:` or `Add a case:` holding `git reset --hard`.\n"
+    "The standing-rules text from hooks/agent_brief.py COMMON line 1 pasted in a brief.\n"
+    'Prose with no command span: "the reset with the hard flag lost work".\n'
+    "A non-discarding git span: `git reset HEAD file.py`, `git stash list`, `git status`.\n"
+    "A scratch repo: `git -C '" + SCRATCH_REPO + "' reset --hard` (a path under a session scratchpad, as "
+    "`in_any_session_scratchpad` reads it) passes, mirroring the shell guard, which allows the session's own scratchpad."
+)
+add("brief-destructive-git: builder brief that orders `git reset --hard origin/main` is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Then run `git reset --hard origin/main` and re-apply your change.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that orders the reset in a fenced block is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Undo the bad commit first.\n```\ngit reset --hard HEAD~1\n```\nThen re-apply your change.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief with a `$ ` line that runs a bare git stash is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Set the work aside first.\n$ git stash\nThen redo the edit.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief with a `$ ` line that runs git clean -fd is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Clear the untracked files.\n$ git clean -fd\nThen redo the edit.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that orders `git checkout -- .` in a backtick span is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Drop your edits: `git checkout -- .`, then redo the change.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: Workflow agent prompt that holds `git reset --hard` is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Workflow",
+    script=_step_flow("'Run `git reset --hard` and redo the edit.'", "agentType: 'builder', model: 'sonnet'"))
+add("brief-destructive-git: Task spawn whose brief orders `git reset --hard origin/main` is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Task", prompt="Then run `git reset --hard origin/main` and re-apply your change.",
+    subagent_type="builder", model="sonnet")
+# The scanner reads a brief and a Workflow script as text, so each case below holds a comment opener in a string, a
+# lone quote, or a multi-line template literal in front of the ordered reset.
+add("brief-destructive-git: builder brief with a lone apostrophe before the ordered reset is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="It's late. Then run `git reset --hard origin/main` and re-apply your change.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief with a hash opener inside the reset span is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Then run `git reset --hard HEAD~1 # undo the change` and re-apply it.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: Workflow reset after a // inside a string on the same line is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Workflow",
+    script="const home = 'https://compass.example'; "
+           + _step_flow("'Run `git reset --hard origin/main`.'", "agentType: 'builder', model: 'sonnet'"))
+add("brief-destructive-git: Workflow reset after a /* inside a string on the same line is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Workflow",
+    script="const tag = '/* keep */'; "
+           + _step_flow("'Run `git reset --hard origin/main`.'", "agentType: 'builder', model: 'sonnet'"))
+add("brief-destructive-git: Workflow reset in a multi-line template literal prompt is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Workflow",
+    script="const r = await agent(`Keep the scan.\nRun \\`git reset --hard origin/main\\` and redo the edit.`, "
+           "{agentType: 'builder', model: 'sonnet'}); return r")
+add("brief-destructive-git: builder brief with the reset on line 30 of a long brief is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt=LONG_BRIEF + "\nThen run `git reset --hard origin/main` and re-apply your change.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that prohibits `git reset --hard` is allowed", "allow",
+    tool="Agent", prompt="Never run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that prohibits `git stash` is allowed", "allow",
+    tool="Agent", prompt="Do not run `git stash`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that prohibits `git clean -fd` with don't is allowed", "allow",
+    tool="Agent", prompt="Don't run `git clean -fd`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that prohibits `git checkout -- .` with no is allowed", "allow",
+    tool="Agent", prompt="No `git checkout -- .` in this lane.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a Must deny line holding `git reset --hard` is allowed", "allow",
+    tool="Agent", prompt="Must deny: `git reset --hard origin/main` is refused.",
+    subagent_type="test-author")
+add("brief-destructive-git: an Add a case line holding `git stash` is allowed", "allow",
+    tool="Agent", prompt="Add a case: `git stash` on a dirty tree is denied.", subagent_type="test-author")
+add("brief-destructive-git: the standing-rules heading and first rule from agent_brief COMMON are allowed", "allow",
+    tool="Agent", prompt=STANDING_LINE_ONE, subagent_type="builder", model="sonnet")
+add("brief-destructive-git: the whole standing-rules text from agent_brief COMMON is allowed", "allow",
+    tool="Agent", prompt=STANDING_ALL, subagent_type="builder", model="sonnet")
+add("brief-destructive-git: prose with the reset and the hard flag and no span is allowed", "allow",
+    tool="Agent", prompt="Earlier, the reset with the hard flag lost work.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a reset that only unstages a path is allowed", "allow",
+    tool="Agent", prompt="Run `git reset HEAD file.py` to unstage it.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: git stash list is a read and is allowed", "allow",
+    tool="Agent", prompt="Run `git stash list` to see the stack.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: git status is allowed", "allow",
+    tool="Agent", prompt="Run `git status`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a reset --hard in a scratch repo under a session scratchpad is allowed", "allow",
+    tool="Agent", prompt="Try it first: `git -C '" + SCRATCH_REPO + "' reset --hard`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a reset --hard in a scratch repo named with forward slashes is allowed", "allow",
+    tool="Agent", prompt="Try it first: `git -C " + SCRATCH_REPO.replace(os.sep, "/") + " reset --hard`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: the brief's own allow paragraphs, as a test-author brief, are allowed", "allow",
+    tool="Agent", prompt=BRIEF_ALLOW_PARAGRAPHS, subagent_type="test-author")
+add("brief-destructive-git: an empty brief is allowed", "allow",
+    tool="Agent", prompt="", subagent_type="builder", model="sonnet")
+# Brief-scan cases for these causes: a negation word the scan does not read, a Never heading over bullets, a read-only
+# role, a branch or worktree act, a scratch segment joined to a reset, and an inline triple-backtick span.
+add("brief-destructive-git: builder brief that says `git reset --hard` must not run is allowed", "allow",
+    tool="Agent", prompt="You must not run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that says `git reset --hard` should not run is allowed", "allow",
+    tool="Agent", prompt="You should not run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that says to avoid `git reset --hard` is allowed", "allow",
+    tool="Agent", prompt="Avoid `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that says you cannot run `git reset --hard` is allowed", "allow",
+    tool="Agent", prompt="You cannot run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that says to work without `git reset --hard` is allowed", "allow",
+    tool="Agent", prompt="Work without `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: bullets under a `Never run:` heading that name `git reset --hard` and `git stash` are allowed",
+    "allow", tool="Agent", prompt="Never run:\n- `git reset --hard`\n- `git stash`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: reviewer brief that says `git reset --hard origin/main` is refused is allowed", "allow",
+    tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.", subagent_type="reviewer", model="sonnet")
+add("brief-destructive-git: Explore brief that says `git reset --hard origin/main` is refused is allowed", "allow",
+    tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.", subagent_type="Explore")
+add("brief-destructive-git: Plan brief that says `git reset --hard origin/main` is refused is allowed", "allow",
+    tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.", subagent_type="Plan")
+add("brief-destructive-git: builder brief that orders `git branch -D old-lane` is allowed", "allow",
+    tool="Agent", prompt="Delete it locally: `git branch -D old-lane`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that orders `git worktree prune` is allowed", "allow",
+    tool="Agent", prompt="Then run `git worktree prune`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that orders `git worktree remove x` is allowed", "allow",
+    tool="Agent", prompt="Then run `git worktree remove x`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a brief whose scratch `git -C` segment is joined to a reset outside it is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Compare: `git -C '" + SCRATCH_REPO + "' status && git reset --hard origin/main`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a reset under an inline ``` span line that is not a fence is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="```git status```\nRun `git reset --hard origin/main`.",
+    subagent_type="builder", model="sonnet")
+# Brief-scan cases for these causes: a heading negator read across the whole heading, a negator that is not the word
+# before its span ("without", "avoid"), emphasis marks inside a negator, a bold heading, a blank line before the list, a
+# fence or a nested bullet under a negating heading, an inline triple-backtick span with text after it, and a read-only
+# role with a plugin prefix. Each deny is red on a brief that the scan lets through; each allow is red on a refusal the
+# scan makes, and its reason names this rule.
+add("brief-destructive-git: heading Do not skip any step: does not cover a numbered list that orders a reset is denied",
+    "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Do not skip any step:\n1. `git fetch`\n2. `git reset --hard origin/main`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: heading Without losing the log, run: does not cover a bullet that orders a discard is denied",
+    "deny", BRIEF_DESTRUCTIVE, tool="Agent", prompt="Without losing the log, run:\n- `git checkout -- .`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: without that is not the word before the span does not cancel a reset is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Reset without asking: `git reset --hard origin/main`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: avoid that is not the word before the span does not cancel a clean is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="To avoid conflicts run `git clean -fd`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: an inline triple-backtick span with text after it opens no fence, so the reset after it "
+    "is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="```git status``` first\nThen:\n```\ngit reset --hard origin/main\n```",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: emphasis marks inside the negator, Do **not** run, are allowed", "allow",
+    tool="Agent", prompt="Do **not** run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a bold Never run: heading over discard bullets is allowed", "allow",
+    tool="Agent", prompt="**Never run:**\n- `git reset --hard`\n- `git stash`", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a blank line between Never run: and its discard bullets is allowed", "allow",
+    tool="Agent", prompt="Never run:\n\n- `git reset --hard`\n- `git stash`", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a fenced discard under a Never run: heading is allowed", "allow",
+    tool="Agent", prompt="Never run:\n```\ngit reset --hard\n```", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a nested discard bullet under a - Never run: bullet heading is allowed", "allow",
+    tool="Agent", prompt="- Never run:\n  - `git stash`", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a plugin-prefixed reviewer role my-plugin:reviewer that says a reset is refused is allowed",
+    "allow", tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.",
+    subagent_type="my-plugin:reviewer", model="sonnet")
+# Failure classes: a false allow on a Workflow spawn that names no model, or names one through a variable (spawn_inputs
+# skips both, so no brief is read), and a false deny on prohibitions joined by commas (the comma ends the clause the
+# negator sits in, so the second span reads as an order).
+add("brief-destructive-git: Workflow builder agent with no model key that orders `git reset --hard origin/main` "
+    "is denied", "deny", BRIEF_DESTRUCTIVE, tool="Workflow",
+    script=_step_flow("'Run `git reset --hard origin/main`'", "agentType: 'builder'"))
+add("brief-destructive-git: Workflow builder agent whose model is held in a variable and that orders "
+    "`git reset --hard origin/main` is denied", "deny", BRIEF_DESTRUCTIVE, tool="Workflow",
+    script="const m = 'sonnet'; "
+           + _step_flow("'Run `git reset --hard origin/main`'", "agentType: 'builder', model: m"))
+add("brief-destructive-git: builder brief whose comma list of prohibitions names `git stash`, `git reset --hard` and "
+    "`git clean -fd` is allowed", "allow", tool="Agent",
+    prompt="Never run `git stash`, `git reset --hard`, or `git clean -fd`.", subagent_type="builder", model="sonnet")
+# A prose word that ends in x, then a comma, then a reset order. The comma-list join reads that x as a span placeholder
+# and drops the clause, so the negator before the comma covers the order. Each is an order, so each is denied.
+add("brief-destructive-git: builder brief, tests fail and you can't fix, then a reset order is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="If the tests fail and you can't fix, `git reset --hard` and restart.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief, no need to fix, then a reset order is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="No need to fix, `git reset --hard` instead.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief, never leave the box, then a reset order is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Never leave the box, `git reset --hard` first.", subagent_type="builder", model="sonnet")
+# The x cases above fail on the no-case half only: the join reads a lower-case x. An upper-case X at the end of a
+# word is read the same way, so this case pins the word-start half that a case-only fix would leave open.
+add("brief-destructive-git: builder brief, a word ending in capital X (INBOX,) then a reset order is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Never edit the INBOX, `git reset --hard` first.", subagent_type="builder", model="sonnet")
+# Control, green on the old code: a comma before an order is a clause break too, so the order is still denied. A
+# builder that drops the comma from the clause split would let this through.
+add("brief-destructive-git: control, a comma before the order keeps it an order and is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Don't skip tests, run `git reset --hard`.",
+    subagent_type="builder", model="sonnet")
+# Controls: a clause break before an order keeps it an order, a negation covers a span after an earlier span, and a
+# builder's refusal text still orders a reset.
+add("brief-destructive-git: control, a semicolon before the order keeps it an order and is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Don't skip tests; run `git reset --hard`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, a never over an earlier span still covers the reset after it is allowed", "allow",
+    tool="Agent", prompt="Never run `a` or `git reset --hard`", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, builder brief that says `git reset --hard origin/main` is refused is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.",
+    subagent_type="builder", model="sonnet")
+
+
+# The owner's override lifts this refusal the way it lifts an Opus spawn's (decision owner-override): a one-act override
+# lets the first brief through, a timed one lets every brief through until it ends. Each story is refused with no override.
+BRIEF_DESTRUCTIVE_SPAWN = {"prompt": "Then run `git reset --hard origin/main` and re-apply your change.",
+                           "model": "sonnet", "subagent_type": "builder"}
+
+
+def brief_destructive_override_check(timed):
+    kind = "timed" if timed else "once"
+
+    def check():
+        config, session = ov_config("brief-destructive-" + kind), "ov-brief-destructive-" + kind
+
+        def call(seconds):
+            return lambda: ov_call("Agent", dict(BRIEF_DESTRUCTIVE_SPAWN), NOGIT, config, session, seconds)
+
+        ok, why = ov_story([("with no override", call(0), "deny", BRIEF_DESTRUCTIVE)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, "override 15m" if timed else "override")
+        if timed:
+            steps = [("first brief", call(60), "allow", BRIEF_DESTRUCTIVE),
+                     ("brief just before the end", call(OV_TIMED_SECONDS - 1), "allow", BRIEF_DESTRUCTIVE),
+                     ("brief at the end instant", call(OV_TIMED_SECONDS), "deny", BRIEF_DESTRUCTIVE)]
+        else:
+            steps = [("first brief", call(60), "allow", BRIEF_DESTRUCTIVE),
+                     ("second brief, override spent", call(120), "deny", BRIEF_DESTRUCTIVE)]
+        ok, why = ov_story(steps, note)
+        if not ok:
+            return False, why
+        return True, "a brief's discard order was refused with no override, then went through %s" % (
+            "until the end" if timed else "once")
+    return check
+
+
+for _is_timed in (False, True):
+    _override_check = brief_destructive_override_check(_is_timed)
+    LOG_CHECKS_EXTRA.append((
+        "brief-destructive-git: an owner override lifts a brief's discard order %s"
+        % ("until it ends" if _is_timed else "for one brief"), _override_check))
+    FIXTURELESS_CHECKS.add(_override_check)  # it builds its own config folders and reads no lazy fixture
+
+
 # ---- Brief-claim edges (rule brief-claim-has-probe). A claim can hide behind a backticked subject, a fence, a passive
 # form, another verb, a probe for a longer input, a plain-quoted input, a path locator, or a quoted red-case text. It
 # can also sit apart from its inputs (both, them, or a list above it), be negated, use "lets ... through", or sit
@@ -20469,6 +23842,8 @@ REASON_MAY_NAME = {
     # The refusal names the handoff the session must read: under the config folder, which is ROOT here
     # and ~/.claude in a session. That path is the remedy, so the rule may name its folder.
     "handoff-unread": (ROOT, slash(ROOT), ".claude"),
+    # The refusal names the missing sections and may name the handoff it judges: under the config folder.
+    "handoff-sections": (ROOT, slash(ROOT), ".claude"),
 }
 
 
@@ -21471,6 +24846,70 @@ def worktree_home_cross_checkout_case():
     return True, "sibling, nested, primary, shell and outside-clone writes judged; reads pass"
 
 
+def worktree_home_cross_checkout_copy_case():
+    """Rule 0, `other-checkout`, the false alarms on a copy, beside
+    `worktree_home_cross_checkout_case`. A copy reads its SOURCE, so a source in another checkout
+    is a read; only the target is a write. An interpreter runs its body as code: a write it makes through
+    os.system, subprocess, a copy call, or open() is judged. A substitution in an unquoted heredoc and
+    a bash body are judged too. Why:
+    docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
+    """
+    primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcocp")
+    write(os.path.join(lane_b, "bin", "ci-job"), "#!/bin/sh\n")
+    write(os.path.join(lane_b, "x"), "x\n")
+    write(os.path.join(lane_b, "y"), "y\n")
+    other = slash(lane_b)
+    problems = []
+
+    def check(label, expect, tool, cwd, **tool_input):
+        got, reason = _decide_full(tool, cwd, **tool_input)
+        if got != expect:
+            problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+        elif expect == "deny" and ("other-checkout" not in reason or primary in reason):
+            problems.append("%s: the refusal must name other-checkout and no path: %s" % (
+                label, reason[:160]))
+
+    # A copy reads its source: the source may sit in another checkout. Only the target is judged.
+    check("for-loop copy of another checkout's file into its own", "allow", "Bash", lane_a,
+          command='B=%s; for f in bin/ci-job; do cp "$B/$f" "$f"; done' % other)
+    check("copy from another checkout, inside a loop body", "allow", "Bash", lane_a,
+          command='for f in a; do cp "%s/bin/ci-job" bin/ci-job; done' % other)
+    check("copy from another checkout into an unresolved quoted target", "allow", "Bash", lane_a,
+          command='cp "%s/x" "$f"' % other)
+    # Controls: each write into another checkout stays refused.
+    check("control: copy into another checkout's file, quoted target", "deny", "Bash", lane_a,
+          command='B=%s; cp bin/x "$B/bin/ci-job"' % other)
+    check("control: copy into another checkout inside a loop", "deny", "Bash", lane_a,
+          command='B=%s; for f in a; do cp a "$B/$f"; done' % other)
+    check("control: move out of another checkout", "deny", "Bash", lane_a,
+          command="mv %s/x ./x" % other)
+    check("control: move out of another checkout inside a loop", "deny", "Bash", lane_a,
+          command='B=%s; for f in a; do mv "$B/$f" "$f"; done' % other)
+    check("control: unquoted heredoc whose substitution copies into another checkout", "deny",
+          "Bash", lane_a, command='python3 - <<EOF\nx="$(cp a %s/y)"\nEOF' % other)
+    check("control: quoted heredoc whose interpreter copies into another checkout", "deny",
+          "Bash", lane_a,
+          command="python3 - <<'PY'\nimport shutil; shutil.copy('a', '%s/x')\nPY" % other)
+    check("control: bash heredoc body that copies into another checkout", "deny", "Bash", lane_a,
+          command="bash <<'EOF'\ncp a %s/x\nEOF" % other)
+    # A quoted heredoc whose interpreter writes a file in another checkout.
+    check("quoted heredoc whose interpreter opens a file in another checkout", "deny", "Bash",
+          lane_a, command="python3 - <<'PY'\nopen('%s/x','w').write('1')\nPY" % other)
+    # Interpreter bodies that run a write through another call: the body stays in the shell scan.
+    check("python os.system runs a copy into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os; os.system('cp a %s/x')\nPY" % other)
+    check("python os.system runs an echo redirect into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os; os.system('echo 1 > %s/x')\nPY" % other)
+    check("python subprocess.run lists a copy into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport subprocess; subprocess.run(['cp','a','%s/x'])\nPY" % other)
+    check("python from-import copy into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nfrom shutil import copy; copy('a','%s/x')\nPY" % other)
+
+    if problems:
+        return False, "; ".join(problems)
+    return True, "copy sources in another checkout pass; writes refused"
+
+
 def _stand_in_git(tag):
     """A stand-in `git` first on PATH. It appends each call's arguments to its log, then runs the real git.
     Returns (log, PATH) for a case to pass the guard, or (None, None) when no git is on PATH."""
@@ -21631,7 +25070,8 @@ def worktree_home_cross_checkout_cost_case():
     checkout; none for a Read, a Grep, a shell call that writes no file (a `2>&1` or `/dev/null`
     redirect included), a git verb that stays in its own checkout (`commit`, `checkout -b`, `stash list`),
     a `cd` within its own checkout, or a write from a cwd with no `.git` at or above it. A `git -C` into a
-    separate clone spends its one list. A stand-in git on PATH logs each spawn."""
+    separate clone spends its one list. A python heredoc that prints spends none; one that opens a
+    file in another checkout spends one. A stand-in git on PATH logs each spawn."""
     if os.name == "nt":
         return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
     primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcocost")
@@ -21676,6 +25116,10 @@ def worktree_home_cross_checkout_cost_case():
          {"command": VCS + " status"}, 0, 0, {"CLAUDE_PROJECT_DIR": primary}),
         ("shell git -C a separate clone commit", "Bash", lane_a,
          {"command": VCS + " -C " + slash(XCL_SEP) + " commit -m x"}, None, 1, {"CLAUDE_PROJECT_DIR": primary}),
+        ("shell python heredoc that prints, from its own checkout", "Bash", lane_a,
+         {"command": "python3 - <<'PY'\nprint(1)\nPY"}, None, 0),
+        ("shell python heredoc that opens a file in another checkout", "Bash", lane_a,
+         {"command": "python3 - <<'PY'\nopen('" + slash(lane_b) + "/x','w')\nPY"}, None, 1),
     ):
         if os.path.exists(log):
             os.remove(log)
@@ -22765,6 +26209,14 @@ sh("other-checkout: a git -C log into a separate clone of the same repo is allow
    VCS + " -C " + slash(XCL_SEP) + " log --oneline -1", "allow", cwd=XCL_PRIMARY)
 sh("other-checkout: a git -C show HEAD into a separate clone of the same repo is allowed",
    VCS + " -C " + slash(XCL_SEP) + " show HEAD", "allow", cwd=XCL_PRIMARY)
+# `git stash create` writes a stash commit object and takes no entry, so it is a read through `git -C`
+# as well. The clone's stack is judged as its own: a pop and a drop stay refused.
+sh("other-checkout: a git -C stash create into a separate clone of the same repo is allowed",
+   VCS + " -C " + slash(XCL_SEP) + " stash create", "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a git -C stash pop into a separate clone of the same repo is refused",
+   VCS + " -C " + slash(XCL_SEP) + " stash pop", "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a git -C stash drop into a separate clone of the same repo is refused",
+   VCS + " -C " + slash(XCL_SEP) + " stash drop", "deny", "other-checkout", cwd=XCL_PRIMARY)
 sh("other-checkout: a git -C commit into a clone of a different repo is allowed",
    VCS + " -C " + slash(XCL_DIFF) + " commit -m x", "allow", cwd=XCL_PRIMARY)
 sh("other-checkout: a stranded cwd with CLAUDE_PROJECT_DIR unset takes a git commit",
@@ -22956,6 +26408,9 @@ LOG_CHECKS = (
      "unreadable", worktree_home_case),
     ("worktree-home: any session's write into another checkout of its clone is refused; outside "
      "the clone and its own checkout pass", worktree_home_cross_checkout_case),
+    ("worktree-home: a copy whose source is in another checkout is allowed; a write into another "
+     "checkout, from a copy or an interpreter body, is refused",
+     worktree_home_cross_checkout_copy_case),
     ("worktree-home: a write into a worktree in the session's own scratchpad is allowed; another "
      "session's, an agent's, a sessionless, a symlinked and a climbing write are refused",
      worktree_home_scratchpad_case),
@@ -22963,9 +26418,17 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_override_case),
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
-    ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for a refspec, HEAD and bare, push.default "
-     "for bare only, no read for a literal destination, and reads the transcript only at the record branch",
+    ("roadmap-one-writer: a push starts one rev-parse, one more for a stray push, symbolic-ref for a refspec, "
+     "HEAD and bare, push.default for bare only, one config read of the remote for a literal main destination, "
+     "no read for HEAD:<branch>, "
+     "and reads the transcript only at the record branch",
      record_push_cost_case),
+    ("conflict-markers: the cost probe judges a clean commit as no hit, under a stand-in git (the control)",
+     cmk_cost_control_case),
+    ("conflict-markers: git add -A && git commit -m x spawns one rev-parse, one diff --check and one ls-files",
+     cmk_cost_add_commit_case),
+    ("conflict-markers: git add -A alone spawns no git", cmk_cost_add_case),
+    ("conflict-markers: git commit -m x spawns one rev-parse and one diff --check", cmk_cost_commit_case),
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
      worktree_home_cd_into_other_checkout_case),
@@ -23570,6 +27033,109 @@ LOG_CHECKS_EXTRA.append(("session-home: a write to the lost home path is refused
 LOG_CHECKS_EXTRA.append(("session-home: while lost, git verbs that change the primary's files or branch are "
                          "refused; reads, fetch, branch, worktree add and a live -C commit pass",
                          session_home_git_verbs_case))
+
+
+# sh_lost_lane sets up the state the stash cases below judge: a primary whose session has lost its
+# worktree. The session's lane call writes its session record naming the lane, then the lane and its
+# branch are removed, so the record names a folder that is gone. The session-home reader judges a stash
+# call in that primary by its action word. `create` reads the tree and index and writes an unreachable
+# commit with no entry, so it is allowed. `pop` and `drop` take or destroy an entry, so they stay refused.
+def sh_lost_lane(name):
+    """A primary whose session has lost its worktree. The session's lane call wrote its record, then
+    the harness removed the lane and its branch. Returns (primary, session, lane, recorded): `recorded`
+    is False when the lane call wrote no record naming the lane."""
+    primary = sh_new_primary(name)
+    lane, branch = sh_add_lane(primary, "lane-" + name)
+    session = sh_session()
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    recorded = sh_holds(primary, session, lane)
+    sh_lose_lane(primary, lane, branch)
+    return primary, session, lane, recorded
+
+
+def session_home_stash_create_case():
+    """Rule session-home: `git stash create` in the primary checkout of a session whose worktree is gone
+    is allowed, with a real entry on the stack. It reads the stack and takes no entry."""
+    primary, session, lane, recorded = sh_lost_lane("stashcreate")
+    if not recorded:
+        return False, "the lane call wrote no session record naming the lane"
+    write(os.path.join(primary, "src", "app.py"), "print(2)\n")
+    if run_vcs(primary, *IDENT, "stash", "push", "-m", "cases").returncode != 0:
+        return False, "fixture setup failed: the stash push in the primary"
+    command = VCS + " stash create"
+    got, reason = _decide_full("Bash", primary, session=session, command=command)
+    if got != "allow":
+        return False, "%s: want allow, got %s (%s)" % (command, got, reason[:120])
+    return True, "git stash create in the primary of a lost session is allowed"
+
+
+def session_home_stash_take_case():
+    """Rule session-home: while the record is lost, `git stash pop` and `git stash drop` in the primary
+    checkout are refused, naming session-home and EnterWorktree. A take and a drop are the stack's own
+    acts, so the create allowance does not reach them."""
+    primary, session, lane, recorded = sh_lost_lane("stashtake")
+    if not recorded:
+        return False, "the lane call wrote no session record naming the lane"
+    problems = []
+    for verb in ("pop", "drop"):
+        command = VCS + " stash " + verb
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        problems += sh_refusal_problems(command, got, reason, primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "git stash pop and drop in the primary of a lost session stay refused, naming session-home"
+
+
+def session_home_stash_agent_case():
+    """Rule session-home: an agent's `git stash create` from the primary of a lost session is allowed.
+    The rule judges a top-level call only, so the agent's call is not refused by it."""
+    primary, session, lane, recorded = sh_lost_lane("stashagent")
+    if not recorded:
+        return False, "the lane call wrote no session record naming the lane"
+    command = VCS + " stash create"
+    got, reason = _decide_full("Bash", primary, agent_id=SH_AGENT, session=session, command=command)
+    if got != "allow":
+        return False, "%s from an agent: want allow, got %s (%s)" % (command, got, reason[:120])
+    return True, "an agent's git stash create from the primary of a lost session is allowed"
+
+
+def session_home_stash_quiet_pop_case():
+    """Rule session-home: `git stash -q pop` in the primary of a lost session stays refused. The reader
+    skips the -q option and reads `pop` as the action, so the option does not hide the take."""
+    primary, session, lane, recorded = sh_lost_lane("stashquiet")
+    if not recorded:
+        return False, "the lane call wrote no session record naming the lane"
+    command = VCS + " stash -q pop"
+    got, reason = _decide_full("Bash", primary, session=session, command=command)
+    problems = sh_refusal_problems(command, got, reason, primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "git stash -q pop in the primary of a lost session stays refused, naming session-home"
+
+
+def session_home_stash_help_case():
+    """Rule session-home: a sole `git stash -h` in the primary of a lost session is allowed. The help
+    flag prints usage and reads nothing, so the call is a read."""
+    primary, session, lane, recorded = sh_lost_lane("stashhelp")
+    if not recorded:
+        return False, "the lane call wrote no session record naming the lane"
+    command = VCS + " stash -h"
+    got, reason = _decide_full("Bash", primary, session=session, command=command)
+    if got != "allow":
+        return False, "%s: want allow, got %s (%s)" % (command, got, reason[:120])
+    return True, "git stash -h in the primary of a lost session is allowed"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: git stash create from the primary of a lost session is allowed",
+                         session_home_stash_create_case))
+LOG_CHECKS_EXTRA.append(("session-home: git stash pop and drop in the primary of a lost session stay refused, "
+                         "naming session-home and EnterWorktree", session_home_stash_take_case))
+LOG_CHECKS_EXTRA.append(("session-home: an agent's git stash create from the primary of a lost session is "
+                         "allowed; the rule judges top-level calls only", session_home_stash_agent_case))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, git stash -q pop in the primary is refused, naming "
+                         "session-home and EnterWorktree", session_home_stash_quiet_pop_case))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, git stash -h in the primary is allowed as a read",
+                         session_home_stash_help_case))
 
 
 def session_home_clean_refuses_case():
@@ -25114,11 +28680,13 @@ OV_ACTS = (
      "kill %d" % FOREIGN, NOGIT, "deny", "machine-wide-kill", None),
     ("ask-linked-discard", "a hard reset in a linked worktree, which asks",
      VCS + " reset --hard", GITWT, "ask", "shared-tree", None),
-    # The two new asks of rulings 206 a and 207 a are lifted by an owner override like any ask.
+    # The asks of rulings 206 a and 207 a, and of rule push-agent-branch, are lifted by an owner override like any ask.
     ("push-stray", "a non-forced push that lands on a stray branch",
      VCS + " push origin HEAD", PUSHSTRAY, "ask", PUSH_STRAY_RULE, None),
     ("push-main", "a non-forced push of main",
      VCS + " push origin main", PUSHMAIN, "ask", PUSH_MAIN_RULE, None),
+    ("push-agent", "a non-forced push of an agent-worktree branch name",
+     VCS + " push origin HEAD", PUSHAGENT, "ask", PUSH_AGENT_RULE, None),
     # The owner's refused wait for a clock time, from the main session (no agent id, so a once override reaches it).
     ("wait-until-clock-loop", "a foreground loop that waits for a clock time",
      WAIT_UNTIL_CLOCK_LOOP, NOGIT, "deny", "waiter", None),
@@ -26813,6 +30381,520 @@ for _label, _check in (
     LOG_CHECKS_EXTRA.append((_label, _check))
 
 
+# =========================================================================== handoff-sections
+# A write that leaves a session's handoff without a section that the prompt's step 4 marker names is refused,
+# and the reason names the missing sections. The marker is read at run time from the installed prompt (the
+# config folder's hooks/precompact_handoff_prompt.md). No code copies its list: a name the marker adds is
+# required, and a name it drops is not. The rule fails open: a prompt with no marker, or one that cannot be
+# read, refuses nothing. Cost: a call it allows writes no file and starts no process; a refusal writes its
+# guard.log line and nothing else.
+FAMILY = "handoff-sections"
+HS_RULE = "handoff-sections"
+HS_SID = "5d2a7c10-0000-4000-8000-00000000f00d"      # the session that writes
+HS_OTHER = "9e41b0c3-0000-4000-8000-00000000beef"    # another session's handoff
+HS_SECTIONS = ("Goal", "Working premises", "Where things stand", "Work in flight", "Next steps",
+               "Files and commands")
+HS_TAIL = ("Work in flight", "Next steps", "Files and commands")   # the three a cut tail loses
+HS_BODIES = {
+    "Goal": "Ship the handoff section check (owner message, 2026-11-08).\n",
+    "Working premises": "- P1 [ruling] Six sections are required. Source: owner, 2026-11-08. Checked 2026-11-08.\n",
+    "Where things stand": "Branch hsk-tests at 2ac382cc6. No pull request.\n",
+    "Work in flight": "Nothing in flight.\n",
+    "Next steps": "The builder adds the check.\n",
+    "Files and commands": "hooks/guard.py and hooks/precompact_handoff.py.\n",
+}
+HS_MARKER = re.compile(r"<!--\s*handoff-sections:\s*(.*?)\s*-->")
+HS_GAP = "3c6e9a41-0000-4000-8000-00000000d1ce"    # a session whose handoff already lacks Next steps
+HS_CFG = os.path.join(ROOT, "hs-cfg")              # the installed prompt, as the repo holds it
+HS_CFG_NOMARK = os.path.join(ROOT, "hs-nomark")    # the installed prompt with its marker line removed
+HS_CFG_DIR = os.path.join(ROOT, "hs-dir")          # the prompt path is a directory
+HS_CFG_BYTES = os.path.join(ROOT, "hs-bytes")      # the prompt is not UTF-8
+HS_CFG_EXTRA = os.path.join(ROOT, "hs-extra")      # the marker names one section more
+HS_CFG_LESS = os.path.join(ROOT, "hs-less")        # the marker drops Files and commands
+HS_CFG_PUNCT = os.path.join(ROOT, "hs-punct")      # the marker names Goal) and Next steps., with their punctuation
+HS_PUNCT_NAMES = {"Goal": "Goal)", "Next steps": "Next steps."}   # a section's name in the marker and its heading
+HS_PROMPT = os.path.join(HERE, "precompact_handoff_prompt.md")
+HS_OPEN = "Open questions"                         # the section HS_CFG_EXTRA's marker adds
+
+
+def hs_text(omit=()):
+    """A handoff holding every section but those in `omit`, each under its own `## ` heading."""
+    parts = ["# Handoff\n\n"]
+    for name in HS_SECTIONS:
+        if name not in omit:
+            parts.append("## %s\n%s\n" % (name, HS_BODIES[name]))
+    return "".join(parts)
+
+
+HS_FULL = hs_text()
+HS_LAST = HS_FULL[HS_FULL.index("## Work in flight\n"):]   # the cut tail: three sections, to the end
+
+
+def hs_prompt_text():
+    with open(HS_PROMPT, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def hs_marker_names(text):
+    """The names on the marker line of `text`, in order; the six sections when it has none."""
+    m = HS_MARKER.search(text)
+    return [n.strip() for n in m.group(1).split("|")] if m else list(HS_SECTIONS)
+
+
+def hs_prompt_with(text, names):
+    """`text` with its marker line set to `names`, appended when it has none."""
+    line = "<!-- handoff-sections: %s -->" % " | ".join(names)
+    if HS_MARKER.search(text):
+        return HS_MARKER.sub(lambda _m: line, text, count=1)
+    return text + "\n" + line + "\n"
+
+
+def hs_prompt_path(config):
+    with hu_config(config):
+        return ph.prompt_path()
+
+
+def hs_handoff(config, session=HS_SID):
+    with hu_config(config):
+        return ph.handoff_path(session)
+
+
+def hs_install(config, text):
+    write(hs_prompt_path(config), text)
+
+
+def hs_write_bytes(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(data)
+
+
+def _build_hs_intact():
+    hs_install(HS_CFG, hs_prompt_text())
+    write(hs_handoff(HS_CFG), HS_FULL)   # the Edit and MultiEdit cases edit this file on disk
+    write(hs_handoff(HS_CFG, HS_GAP), hs_text(omit=("Next steps",)))   # a handoff that already lacks Next steps
+
+
+def _build_hs_nomark():
+    hs_install(HS_CFG_NOMARK, HS_MARKER.sub("", hs_prompt_text()))
+
+
+def _build_hs_dir():
+    os.makedirs(hs_prompt_path(HS_CFG_DIR), exist_ok=True)
+
+
+def _build_hs_bytes():
+    hs_write_bytes(hs_prompt_path(HS_CFG_BYTES), b"\xff\xfe" + hs_prompt_text().encode("utf-8"))
+
+
+def _build_hs_extra():
+    text = hs_prompt_text()
+    hs_install(HS_CFG_EXTRA, hs_prompt_with(text, hs_marker_names(text) + [HS_OPEN]))
+
+
+def _build_hs_less():
+    text = hs_prompt_text()
+    hs_install(HS_CFG_LESS, hs_prompt_with(text, [n for n in hs_marker_names(text)
+                                                  if n != "Files and commands"]))
+
+
+def hs_punct_text(omit=()):
+    """A handoff holding every section but those in `omit`, each heading the marker's name verbatim: Goal) and
+    Next steps. keep their punctuation."""
+    parts = ["# Handoff\n\n"]
+    for name in HS_SECTIONS:
+        if name not in omit:
+            parts.append("## %s\n%s\n" % (HS_PUNCT_NAMES.get(name, name), HS_BODIES[name]))
+    return "".join(parts)
+
+
+def _build_hs_punct():
+    text = hs_prompt_text()
+    hs_install(HS_CFG_PUNCT, hs_prompt_with(text, [HS_PUNCT_NAMES.get(n, n) for n in HS_SECTIONS]))
+
+
+lazy_fixture([HS_CFG], _build_hs_intact)
+lazy_fixture([HS_CFG_NOMARK], _build_hs_nomark)
+lazy_fixture([HS_CFG_DIR], _build_hs_dir)
+lazy_fixture([HS_CFG_BYTES], _build_hs_bytes)
+lazy_fixture([HS_CFG_EXTRA], _build_hs_extra)
+lazy_fixture([HS_CFG_LESS], _build_hs_less)
+lazy_fixture([HS_CFG_PUNCT], _build_hs_punct)
+HS_HANDOFF = hs_handoff(HS_CFG)
+
+# A refusal names every missing section, and names no section that is present. The reason may name the
+# handoff it judges, which sits under the config folder (REASON_MAY_NAME).
+add("handoff-sections: a Write that drops Work in flight, Next steps and Files and commands is refused, naming the three",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_TAIL, lacks=("Goal", "Working premises", "Where things stand"),
+    file_path=HS_HANDOFF, content=hs_text(omit=HS_TAIL))
+add("handoff-sections: a Write that keeps all six sections passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF, content=hs_text())
+add("handoff-sections: a full-size handoff that keeps all six sections passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF,
+    content=HS_FULL.replace(HS_BODIES["Where things stand"],
+                            "Branch hsk-tests at 2ac382cc6.\n" + "A line of state, kept.\n" * 6000))
+add("handoff-sections: a Write that empties the handoff is refused, naming all six sections",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_SECTIONS, file_path=HS_HANDOFF, content="")
+HS_HEADINGS = (
+    "# goal\n\n## WORKING PREMISES\n- P1 [read] The file says so. Source: hooks/guard.py:1. Checked 2026-11-08.\n\n"
+    "## Where things stand (as of 15:26)\nBranch hsk-tests.\n\n"
+    "## Work in flight:\nNothing in flight.\n\n## Next steps\nThe builder adds the check.\n\n"
+    "## Files and commands that matter\nhooks/guard.py\n")
+add("handoff-sections: headings match on the name, in any case, with text after the name, and pass",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF, content=HS_HEADINGS)
+HS_WRONG_LEVEL = (
+    "# Handoff\n\n## Goal\nShip it.\n\n## Working premises\n- P1 [assumed] A guess. Source: none. Checked never.\n\n"
+    "## Where things stand\nBranch.\n\n## Work in flight\nNothing.\n\n### Next steps\nGo on.\n\n"
+    "Next steps are below.\n\n## Files and commands\nhooks/guard.py\n")
+add("handoff-sections: Next steps at ### level, or named only in a sentence, is no heading and is refused",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=("Next steps",), lacks=("Goal", "Working premises", "Where things stand", "Work in flight",
+                                    "Files and commands"),
+    file_path=HS_HANDOFF, content=HS_WRONG_LEVEL)
+add("handoff-sections: another session's handoff is refused the same way, naming the three",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_TAIL, lacks=("Goal", "Working premises", "Where things stand"),
+    file_path=hs_handoff(HS_CFG, HS_OTHER), content=hs_text(omit=HS_TAIL))
+add("handoff-sections: a repo's own HANDOFF.md is not a session handoff, and passes",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=os.path.join(NOGIT, "HANDOFF.md"), content=hs_text(omit=HS_TAIL))
+add("handoff-sections: a file named handoff.md outside the config folder is not a session handoff, and passes",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=os.path.join(NOGIT, "notes", "handoff.md"), content=hs_text(omit=HS_TAIL))
+add("handoff-sections: an Edit that cuts the tail after Where things stand is refused, naming the three",
+    "deny", HS_RULE, tool="Edit", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_TAIL, lacks=("Goal", "Working premises", "Where things stand"),
+    file_path=HS_HANDOFF, old_string=HS_LAST, new_string="")
+add("handoff-sections: an Edit that keeps all six sections passes, silently",
+    "allow", tool="Edit", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF, old_string="Nothing in flight.\n",
+    new_string="Nothing in flight; the red run is recorded.\n")
+add("handoff-sections: a MultiEdit whose second edit cuts the tail is refused, naming the three",
+    "deny", HS_RULE, tool="MultiEdit", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_TAIL, lacks=("Goal", "Working premises", "Where things stand"),
+    file_path=HS_HANDOFF,
+    edits=[{"old_string": "Branch hsk-tests at", "new_string": "Branch hsk-tests2 at"},
+           {"old_string": HS_LAST, "new_string": ""}])
+add("handoff-sections: a MultiEdit that keeps all six sections passes, silently",
+    "allow", tool="MultiEdit", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF,
+    edits=[{"old_string": "The builder adds the check.", "new_string": "The builder adds the check, then the red run."},
+           {"old_string": "Nothing in flight.\n", "new_string": "Nothing in flight; the red run is recorded.\n"}])
+
+# The marker is the one list. A name it adds is required; a name it drops is not, and the control shows
+# the same write is refused while the marker still names that section.
+add("handoff-sections: a name the marker adds is required: a Write without it is refused, naming it",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG_EXTRA,
+    carries=(HS_OPEN,), lacks=HS_SECTIONS,
+    file_path=hs_handoff(HS_CFG_EXTRA), content=hs_text())
+add("handoff-sections: a name the marker drops is not required: a Write without it passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG_LESS, silent=True,
+    file_path=hs_handoff(HS_CFG_LESS), content=hs_text(omit=("Files and commands",)))
+add("handoff-sections: with the same marker, a Write without Next steps is still refused",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG_LESS,
+    carries=("Next steps",), lacks=("Goal", "Working premises", "Where things stand", "Work in flight",
+                                    "Files and commands"),
+    file_path=hs_handoff(HS_CFG_LESS), content=hs_text(omit=("Next steps",)))
+
+
+# A handoff that already lacks a section drops nothing when an edit leaves it that way, so an edit to its Goal
+# passes. Only a write that removes a section the handoff holds is refused. HS_GAP's handoff lacks Next steps on
+# disk; the scope check below proves the Edit cases edit the text they name.
+HS_GOAL_OLD = "Ship the handoff section check (owner message, 2026-11-08)."
+HS_GOAL_NEW = "Ship the handoff section check, with its red cases (owner message, 2026-11-08)."
+HS_WORK_BLOCK = "## Work in flight\n%s\n" % HS_BODIES["Work in flight"]
+add("handoff-sections: an Edit that changes only the Goal of a handoff that already lacks Next steps passes, silently",
+    "allow", tool="Edit", cwd=NOGIT, session=HS_GAP, config=HS_CFG, silent=True,
+    file_path=hs_handoff(HS_CFG, HS_GAP), old_string=HS_GOAL_OLD, new_string=HS_GOAL_NEW)
+add("handoff-sections: a MultiEdit that changes only the Goal and Where things stand of a handoff that already "
+    "lacks Next steps passes, silently",
+    "allow", tool="MultiEdit", cwd=NOGIT, session=HS_GAP, config=HS_CFG, silent=True,
+    file_path=hs_handoff(HS_CFG, HS_GAP),
+    edits=[{"old_string": HS_GOAL_OLD, "new_string": HS_GOAL_NEW},
+           {"old_string": "Branch hsk-tests at", "new_string": "Branch hsk-tests2 at"}])
+add("handoff-sections: an Edit that removes Work in flight from a handoff that already lacks Next steps is refused, "
+    "naming Work in flight",
+    "deny", HS_RULE, tool="Edit", cwd=NOGIT, session=HS_GAP, config=HS_CFG,
+    carries=("Work in flight",), lacks=("Goal", "Working premises", "Where things stand", "Files and commands"),
+    file_path=hs_handoff(HS_CFG, HS_GAP), old_string=HS_WORK_BLOCK, new_string="")
+add("handoff-sections: a Write that lacks Next steps is refused even though the old handoff lacked it, naming Next steps",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_GAP, config=HS_CFG,
+    carries=("Next steps",), lacks=("Goal", "Working premises", "Where things stand", "Work in flight",
+                                    "Files and commands"),
+    file_path=hs_handoff(HS_CFG, HS_GAP), content=hs_text(omit=("Next steps",)))
+
+
+def hs_gap_scope():
+    """The gap handoff is on disk as the fixture wrote it, with the Goal text the Edit cases replace. An Edit whose
+    old text is absent is allowed by the rule, so the Edit cases prove nothing unless the file holds that text."""
+    materialize(HS_CFG)
+    try:
+        with open(hs_handoff(HS_CFG, HS_GAP), "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError as e:
+        return False, "the gap handoff is unreadable: %s" % e
+    if text != hs_text(omit=("Next steps",)):
+        return False, "the gap handoff on disk is not the handoff without Next steps"
+    if HS_GOAL_OLD not in text:
+        return False, "the gap handoff lacks the Goal text the Edit cases replace"
+    return True, "the gap handoff on disk lacks Next steps and holds the Goal text the Edit cases replace"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-sections: scope: the gap handoff on disk is the one the Edit cases edit", hs_gap_scope))
+
+
+# A heading numbered like the prompt's steps holds its section: `## 1. Goal`, and `# 5. Next steps` at H1. A `N)`
+# heading does not: the prompt numbers its steps with `N.` only, and the premises reader reads unnumbered headings.
+def hs_numbered(omit=()):
+    """A handoff whose headings carry the prompt's step numbers, one `#` or `##` heading per section."""
+    parts = ["# Handoff\n\n"]
+    for number, name in enumerate(HS_SECTIONS, 1):
+        if name not in omit:
+            parts.append("%s %d. %s\n%s\n" % ("#" if name == "Next steps" else "##", number, name, HS_BODIES[name]))
+    return "".join(parts)
+
+
+add("handoff-sections: headings numbered like the prompt's steps count as present: a Write with `## 1. Goal` and "
+    "`# 5. Next steps` passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF, content=hs_numbered())
+add("handoff-sections: a numbered Write without Next steps is refused, naming Next steps only",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=("Next steps",), lacks=("Goal", "Working premises", "Where things stand", "Work in flight",
+                                    "Files and commands"),
+    file_path=HS_HANDOFF, content=hs_numbered(omit=("Next steps",)))
+add("handoff-sections: a heading numbered `3)` is no step heading: a Write with `## 3) Where things stand` is "
+    "refused, naming Where things stand only",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=("Where things stand",), lacks=("Goal", "Working premises", "Work in flight", "Next steps",
+                                            "Files and commands"),
+    file_path=HS_HANDOFF, content=hs_text().replace("## Where things stand\n", "## 3) Where things stand\n"))
+
+
+# The rule judges only the session's handoff, <sid>.md, in the handoffs folder. The owner-feedback inbox sits beside
+# it as <sid>.inbox.md and holds item lines, not sections, so a Write to it passes. Its path is local_time's, the one
+# home of the inbox names.
+def hs_inbox(config, session=HS_SID):
+    """The session's owner-feedback inbox, as local_time.inbox_paths builds it."""
+    with hu_config(config):
+        return local_time.inbox_paths(session)[0]
+
+
+HS_INBOX_TEXT = "### 2026-11-08 16:40 CST (UTC-06:00)\n- fb-0958-7 [page] -> page:98\n"
+HS_INBOX_FULL = "### 2026-11-08 16:40 CST (UTC-06:00)\n" + "".join(
+    "- fb-0958-%d [page] -> page:98\n" % n for n in range(1, 2001))
+
+
+def hs_inbox_scope():
+    """The inbox cases write <sid>.inbox.md beside <sid>.md in the handoffs folder: the file the rule must not judge."""
+    inbox, handoff = hs_inbox(HS_CFG), hs_handoff(HS_CFG)
+    if os.path.basename(inbox) != HS_SID + ".inbox.md":
+        return False, "the inbox is %r, want %s.inbox.md" % (os.path.basename(inbox), HS_SID)
+    if os.path.basename(handoff) != HS_SID + ".md" or os.path.dirname(inbox) != os.path.dirname(handoff):
+        return False, "the inbox is not beside the session handoff in the handoffs folder"
+    return True, "the inbox is <sid>.inbox.md, beside <sid>.md in the handoffs folder"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-sections: scope: the inbox cases write <sid>.inbox.md beside the session handoff",
+                         hs_inbox_scope))
+add("handoff-sections: a Write to the owner-feedback inbox, item lines and no sections, passes silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=hs_inbox(HS_CFG), content=HS_INBOX_TEXT)
+add("handoff-sections: an empty owner-feedback inbox passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=hs_inbox(HS_CFG), content="")
+add("handoff-sections: a full-size owner-feedback inbox passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=hs_inbox(HS_CFG), content=HS_INBOX_FULL)
+add("handoff-sections: control: the same item lines written to the session handoff are refused, naming all six sections",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_SECTIONS, file_path=HS_HANDOFF, content=HS_INBOX_TEXT)
+
+
+# A marker name that ends in punctuation matches its verbatim heading. The heading matcher ends each name with (?!\w):
+# a `\b` after `)` or `.` needs a word character next, so `## Goal)` never matched, and the marker refused every write
+# that held it.
+def hs_punct_scope():
+    """The punctuated fixture's installed marker names Goal) and Next steps., verbatim, so the cases below judge the
+    punctuation. A marker that did not change would allow the punctuated write for the wrong reason."""
+    materialize(HS_CFG_PUNCT)
+    with hu_config(HS_CFG_PUNCT):
+        names = ph.required_sections()
+    want = [HS_PUNCT_NAMES.get(n, n) for n in HS_SECTIONS]
+    if names != want:
+        return False, "the installed marker reads %r, want %r" % (names, want)
+    return True, "the installed marker names Goal) and Next steps. verbatim, and the other four as before"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-sections: scope: the punctuated fixture's marker names Goal) and Next steps.",
+                         hs_punct_scope))
+add("handoff-sections: a marker name ending in punctuation matches its verbatim heading: a Write with `## Goal)` and "
+    "`## Next steps.` passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG_PUNCT, silent=True,
+    file_path=hs_handoff(HS_CFG_PUNCT), content=hs_punct_text())
+add("handoff-sections: a punctuated marker still refuses a Write without its `## Next steps.` heading, naming Next steps.",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG_PUNCT,
+    carries=("Next steps.",), lacks=("Working premises", "Where things stand", "Work in flight", "Files and commands"),
+    file_path=hs_handoff(HS_CFG_PUNCT), content=hs_punct_text(omit=("Next steps",)))
+
+
+def hs_case(config, tool, tool_input, session=HS_SID):
+    """A case dict for decide(), with each key decide() reads, built as add() builds one."""
+    return {"name": "handoff-sections", "expected": None, "rule": None, "raw": None, "tool": tool,
+            "cwd": NOGIT, "env_path": None, "session": session, "carries": (), "lacks": (),
+            "config": config, "transcript": None, "agent_id": None, "agent_type": None, "event": None,
+            "stop_active": False, "no_root": False, "max_seconds": None, "env": None, "guard": None,
+            "silent": False, "temp": TEMP_DIR, "tool_input": tool_input, "family": FAMILY,
+            "windows": False}
+
+
+def hs_write(config, content, session=HS_SID):
+    return decide(hs_case(config, "Write", {"file_path": hs_handoff(config, session),
+                                            "content": content}, session))
+
+
+def hs_fail_open(label, config):
+    """The rule allows a drop that the intact prompt refuses, silently. The intact prompt is the control:
+    without it, an allow would prove nothing, since a rule that never refuses also allows."""
+    def check():
+        control = hs_write(HS_CFG, hs_text(omit=HS_TAIL))
+        if control[0] != "deny":
+            return False, "the intact prompt does not refuse the drop: %r" % (control[0],)
+        got = hs_write(config, hs_text(omit=HS_TAIL))
+        if got != ("allow", ""):
+            return False, "%s: the drop got %r, want a silent allow" % (label, got)
+        return True, "%s: the drop is allowed silently, and the intact prompt refuses it" % label
+    return check
+
+
+for _label, _config in (("the prompt has no marker line", HS_CFG_NOMARK),
+                        ("the prompt path is a directory", HS_CFG_DIR),
+                        ("the prompt is not UTF-8", HS_CFG_BYTES)):
+    LOG_CHECKS_EXTRA.append(("handoff-sections: fail open when %s" % _label, hs_fail_open(_label, _config)))
+
+
+# The probe runs one guard call in-process and counts what it does: each file write (open in a write mode,
+# or an os-level write) and each process start (Popen, os.system, os.spawn*). The counts go to stderr, so
+# the guard's own stdout stays the decision. Bytecode writes are off, or a compiled module would hide one.
+HS_PROBE = r"""
+import builtins, io, json, os, runpy, subprocess, sys
+guard, payload = sys.argv[1], sys.argv[2]
+seen = {"writes": [], "starts": []}
+real_open = builtins.open
+
+
+def counted_open(file, mode="r", *args, **kwargs):
+    if any(c in str(mode) for c in "wax+"):
+        seen["writes"].append(os.path.basename(str(file)))
+    return real_open(file, mode, *args, **kwargs)
+
+
+builtins.open = counted_open
+
+
+class CountingPopen(subprocess.Popen):
+    def __init__(self, *args, **kwargs):
+        seen["starts"].append("Popen")
+        super().__init__(*args, **kwargs)
+
+
+subprocess.Popen = CountingPopen
+
+
+def counted(bucket, name, real):
+    def call(*args, **kwargs):
+        # A folder call that finds the folder already there changes nothing, so it is no write.
+        if name in ("makedirs", "mkdir") and args and os.path.exists(args[0]):
+            return real(*args, **kwargs)
+        seen[bucket].append("os." + name)
+        return real(*args, **kwargs)
+    return call
+
+
+for name in ("remove", "unlink", "rename", "replace", "makedirs", "mkdir", "rmdir", "utime", "truncate",
+             "chmod"):
+    if hasattr(os, name):
+        setattr(os, name, counted("writes", name, getattr(os, name)))
+for name in ("system", "spawnv", "spawnve", "spawnvp", "spawnvpe", "posix_spawn", "posix_spawnp",
+             "startfile"):
+    if hasattr(os, name):
+        setattr(os, name, counted("starts", name, getattr(os, name)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(guard)))
+sys.argv = [guard]
+sys.stdin = io.StringIO(payload)
+code = 0
+try:
+    runpy.run_path(guard, run_name="__main__")
+except SystemExit as e:
+    code = e.code
+finally:
+    sys.stderr.write("HS_COST " + json.dumps(seen) + "\n")
+sys.exit(code)
+"""
+
+
+def hs_probe(config, tool, tool_input, session=HS_SID):
+    """One guard call under HS_PROBE. Returns (decision, reason, writes, starts), or None for the counts
+    when the probe printed none (the probe itself failed, so the counts prove nothing)."""
+    materialize(config)   # the config folder's installed prompt, built before the guard reads it
+    env = dict(os.environ)
+    for name in ("CLAUDE_CODE_REMOTE", "PYTHONPATH", "CLAUDE_CODE_SESSION_ID",
+                 "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR"):
+        env.pop(name, None)
+    env["CLAUDE_CONFIG_DIR"] = config
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    payload = json.dumps({"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT, "session_id": session})
+    run = subprocess.run([sys.executable, "-c", HS_PROBE, GUARD, payload], capture_output=True,
+                         text=True, env=env, timeout=120)
+    counts = None
+    for line in run.stderr.splitlines():
+        if line.startswith("HS_COST "):
+            counts = json.loads(line[len("HS_COST "):])
+    decision, reason = read_decision(run.stdout)
+    if counts is None:
+        return decision, reason, None, None
+    return decision, reason, counts["writes"], counts["starts"]
+
+
+def hs_cost_check():
+    """A call the rule allows writes no file and starts no process. A refusal writes its guard.log line and
+    starts no process. The control is a refusal the guard already makes (git-env-set): a probe that counts
+    nothing would also show zero writes, so the control must show the refusal's log line."""
+    control = hs_probe(HS_CFG, "Bash", {"command": "GIT_DIR=/nowhere " + VCS + " status"})
+    if control[2] is None:
+        return False, "the probe printed no count for the control call"
+    if control[0] != "deny" or control[2] != ["guard.log"]:
+        return False, "the control refusal gave %r with writes %r, want deny with one guard.log write" % (
+            control[0], control[2])
+    allowed = hs_probe(HS_CFG, "Write", {"file_path": hs_handoff(HS_CFG), "content": hs_text()})
+    if allowed[2] is None:
+        return False, "the probe printed no count for an allowed handoff Write"
+    if allowed[0] != "allow" or allowed[1]:
+        return False, "a complete handoff Write gave %r, want a silent allow" % (allowed[0],)
+    if allowed[2] or allowed[3]:
+        return False, "an allowed handoff Write made writes %r and starts %r, want none" % (
+            allowed[2], allowed[3])
+    refused = hs_probe(HS_CFG, "Write", {"file_path": hs_handoff(HS_CFG), "content": hs_text(omit=HS_TAIL)})
+    if refused[2] is None:
+        return False, "the probe printed no count for a refused handoff Write"
+    if refused[0] != "deny":
+        return False, "a handoff Write that drops three sections gave %r, want deny" % (refused[0],)
+    if refused[2] != ["guard.log"] or refused[3]:
+        return False, "a refused handoff Write wrote %r and started %r, want one guard.log write and no start" % (
+            refused[2], refused[3])
+    return True, "an allowed handoff Write writes no file and starts no process; a refusal writes its guard.log line only"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-sections: an allowed write writes no file and starts no process; a refusal "
+                         "writes its guard.log line only", hs_cost_check))
+
+
 # =========================================================================== the machine-load brake
 # The brake's local cases are local runs. A cloud container sets CLAUDE_CODE_REMOTE=true, which turns the brake off, so the
 # suite drops it here, and a cloud case passes its own value to lb_decision_check (`remote`). No other case reads it.
@@ -28010,7 +32092,7 @@ lb_add("a lane session's Bash, memory 91.7%: busy, allowed, the reader runs once
 lb_add("a lane session's Edit, 9.4 GB free of 926 GB: busy, allowed, the reader runs once",
        lb_decision_check("Edit", LB_BUSY_EDIT, "allow", tool_input=LB_LANE_EDIT, own_env=LB_OWN, transcript=LB_LANE))
 # An agent of a lane makes an agent's call, so it reads the load once, as an agent's write does, and the lane check never
-# reads it again. Both are green on main: they pin the cost of the new check on an agent's call.
+# reads it again. Both pin the cost of the new check on an agent's call, which must not add a second read.
 lb_add("a lane session's agent Bash (agent_id set), memory 91.7%: busy, allowed, the reader runs once",
        lb_decision_check("Bash", LB_BUSY, "allow", tool_input=LB_LANE_BASH, agent=LB_AGENT, own_env=LB_OWN,
                          transcript=LB_LANE))
@@ -28153,10 +32235,29 @@ ROLE_TABLE_RULES = ROLE_TABLE_HEAD + (
 ROLE_RULES_WANT = {"Explore": "haiku", "claude-code-guide": "haiku", "test-author": "haiku",
                    "reviewer": "haiku", "builder": "sonnet", "planner": "sonnet",
                    "general-purpose": "sonnet", "claude": "sonnet"}
+# The refuter role is read-only and runs Opus by its own standing grant (decision plan-refuter). Its name is
+# guard_core's REFUTER_ROLE, the one home of the name, read here and never typed. A guard_core with no such name
+# reads as REFUTER_MISSING: a spawn of that name is then refused as a role with no grant, and refuter_name_check
+# fails on the missing name itself (the same reading as the PowerShellScript cases).
+REFUTER_MISSING = "<no REFUTER_ROLE in guard_core>"
+_load_guard_module()  # sets sys.modules["guard_core"] for the read below
+REFUTER = getattr(sys.modules["guard_core"], "REFUTER_ROLE", REFUTER_MISSING)
+
+
+def refuter_name_check():
+    """guard_core names the refuter role in REFUTER_ROLE, a non-empty string. Every refuter case reads that name
+    from guard_core, so a guard_core without it fails this check and says so."""
+    if REFUTER == REFUTER_MISSING:
+        return False, "guard_core has no REFUTER_ROLE, the one home of the refuter role's name"
+    if not isinstance(REFUTER, str) or not REFUTER.strip():
+        return False, "guard_core.REFUTER_ROLE is %r, want a non-empty name" % (REFUTER,)
+    return True, "guard_core.REFUTER_ROLE names the refuter role"
+
+
 # The owner's real decision file: each role, with the first word of its Model cell.
 ROLE_REAL_WANT = {"Explore": "haiku", "claude-code-guide": "haiku", "test-author": "haiku",
                   "reviewer": "haiku", "record-writer": "haiku", "builder": "sonnet", "Plan": "opus",
-                  "designer": "opus", "design-reviewer": "opus", "general-purpose": "sonnet",
+                  "designer": "opus", "design-reviewer": "opus", REFUTER: "opus", "general-purpose": "sonnet",
                   "claude": "sonnet"}
 # Bytes that are not text, so no reader can take the decision file as a table.
 ROLE_TABLE_UNREADABLE = b"# Agent model cap\n\xff\xfe\x80 not text\n"
@@ -28340,12 +32441,23 @@ role_opus_refuse("role-model: a role with no row on opus is denied under agent-m
                "scout", "opus", "Look around.")
 role_opus_refuse("role-model: reviewer on opus with Round 3 of 3 is denied under agent-model-cap (item 127)",
                "reviewer", "opus", "Round 3 of 3. Re-check the diff.")
-# Standing grants stay allowed on Opus (rule 9d): Plan, the design reviewer, and a builder's third round.
+# Standing grants stay allowed on Opus (rule 9d): Plan, the design reviewer, the refuter, and a builder's third round.
 role_model_allow("role-model: Plan on opus is allowed (standing grant)", "Plan", "opus", "Plan the change.")
 role_model_allow("role-model: design-reviewer on opus is allowed (standing grant)", "design-reviewer", "opus",
                  "Review the mockup.")
 role_model_allow("role-model: builder on opus with Round 3 of 3 is allowed (standing grant)", "builder", "opus",
                  "Round 3 of 3. Finish the fix.")
+# The refuter's grant (page item 279, pick d): an Agent or Task spawn on Opus is allowed. Failure class: a false deny,
+# the spawn refused above its row, and a false allow, a reviewer or a near-miss name given the grant (the controls below).
+for _tool, _model in (("Agent", "opus"), ("Task", "claude-opus-5-5")):
+    role_model_allow("role-model: %s refuter on %s is allowed (standing grant)" % (_tool, _model), REFUTER, _model,
+                     "Refute the plan.", tool=_tool)
+# Controls, green on the old code too: a reviewer on Opus stays refused, and a near-miss of the role name earns no grant.
+role_opus_refuse("role-model: reviewer on opus with no round line is still denied (the refuter grant is not a reviewer's)",
+                 "reviewer", "opus", "Check the diff for typos.")
+for _near in (REFUTER + "s", REFUTER.title()):
+    role_opus_refuse("role-model: a near-miss of the refuter role, %s, on opus is denied (no standing grant)" % _near,
+                     _near, "opus", "Refute the plan.")
 
 # ---- H: a Workflow agent() call faces the role row and the Opus ceiling, as an Agent spawn does (decision agent-model-cap).
 # The guard reads each agent() call in the script and judges its agentType and model as an Agent spawn is judged: the
@@ -28820,6 +32932,8 @@ for _label, _check in (
     ("role-list: test-author moved from a haiku row to sonnet drifts HAIKU_ROLES", role_list_haiku_check),
     ("role-list: a new opus row role drifts OPUS_STANDING_ROLES", role_list_opus_check),
     ("role-list: builder moved to an opus row drifts the override's OPUS_ROLES", role_list_builder_check),
+    ("refuter: guard_core names the refuter role in REFUTER_ROLE, the one home the cases read",
+     refuter_name_check),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)
@@ -28977,6 +33091,123 @@ _BRIEF_MARKER_CHECKS = (
 for _label, _check in _BRIEF_MARKER_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)
+
+
+# ---- B4: the fix check marker (owner item 444 a). A reviewer's fix check carries no round, so it
+# lifts to Sonnet on FIX_CHECK_MARKER. The marker counts only when the brief's first non-blank line starts with it, leading
+# spaces and tabs aside, and it is case-sensitive: text ahead of it on that line does not count. It lifts a reviewer on
+# Sonnet only: Haiku passes on its own row, Opus stays under the ceiling, and a builder, a test-author or an Explore gets no
+# lift. The constant is read from shared_names at module load, never copied. A missing constant reads as FIX_UNBUILT, so
+# each case fails on its assert, not on an import error.
+FIX_UNBUILT = "FIX_CHECK_NOT_BUILT"
+try:
+    FIX_MARKER = getattr(_shared_names_under_test(), "FIX_CHECK_MARKER", FIX_UNBUILT)
+except Exception:
+    FIX_MARKER = FIX_UNBUILT
+FIX_MARKER_LOWER = FIX_MARKER.lower()
+
+
+def fix_check_row_check():
+    """BRIEF_MARKERS has a fixcheck row on the first line, and that row reads FIX_CHECK_MARKER."""
+    try:
+        names = _shared_names_under_test()
+    except Exception as exc:
+        return False, "shared_names.py does not load: %r" % (exc,)
+    marker = getattr(names, "FIX_CHECK_MARKER", None)
+    if not isinstance(marker, str) or not marker:
+        return False, "shared_names has no FIX_CHECK_MARKER yet"
+    rows = [row for row in getattr(names, "BRIEF_MARKERS", ())
+            if isinstance(row, tuple) and len(row) == 3 and row[0] == "fixcheck"]
+    if not rows:
+        return False, "BRIEF_MARKERS has no fixcheck row yet"
+    problems = []
+    if not any(row[2] == "first-line" for row in rows):
+        problems.append("the fixcheck row is not first-line")
+    try:
+        reads_marker = any(re.search(row[1], marker) for row in rows)
+    except re.error as exc:
+        return False, "the fixcheck row does not compile: %s" % (exc,)
+    if not reads_marker:
+        problems.append("no fixcheck row reads FIX_CHECK_MARKER")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "BRIEF_MARKERS has a first-line fixcheck row that reads FIX_CHECK_MARKER"
+
+
+_FIX_CHECK_CHECKS = (
+    ("brief markers: BRIEF_MARKERS has a first-line fixcheck row that reads FIX_CHECK_MARKER", fix_check_row_check),
+    ("brief markers: the fix check marker on the first line counts as fixcheck, with no n",
+     marker_rows_check((FIX_MARKER + ". Re-run the cases.", "fixcheck", None, True))),
+    ("brief markers: the fix check marker after prose on the first line does not count as fixcheck",
+     marker_rows_check(("Reviewer, " + FIX_MARKER + ". Re-run the cases.", "fixcheck", None, False))),
+    ("brief markers: the fix check marker after markup on the first line does not count as fixcheck",
+     marker_rows_check(("**" + FIX_MARKER + ":** re-run the cases.", "fixcheck", None, False))),
+    ("brief markers: the fix check marker on the first non-blank line after blank lines counts as fixcheck",
+     marker_rows_check(("\n\n" + FIX_MARKER + ". Re-run the cases.", "fixcheck", None, True))),
+    ("brief markers: the fix check marker on line two does not count as fixcheck",
+     marker_rows_check(("Find X.\n" + FIX_MARKER + ". Re-run the cases.", "fixcheck", None, False))),
+    ("brief markers: a lowercase fix check on the first line does not count as fixcheck (case-sensitive)",
+     marker_rows_check((FIX_MARKER_LOWER + ". Re-run the cases.", "fixcheck", None, False))),
+)
+for _label, _check in _FIX_CHECK_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    FIXTURELESS_CHECKS.add(_check)
+
+# A reviewer on Sonnet with the marker on its first line passes. A reviewer's refusal names the marker in its remedy; a
+# test-author's and an Explore's refusals never name it.
+role_model_allow("role-model: fix check: reviewer on sonnet with the marker on line one is allowed", "reviewer", "sonnet",
+                 FIX_MARKER + ". Re-run the cases.")
+role_model_refuse("role-model: fix check: reviewer on sonnet with a role word ahead of the marker on line one is denied",
+                  "reviewer", "sonnet", "Reviewer, " + FIX_MARKER + ". Re-run the cases.", carries=(ROLE_REMEDY, FIX_MARKER))
+role_model_refuse("role-model: fix check: reviewer on sonnet with markup ahead of the marker on line one is denied",
+                  "reviewer", "sonnet", "**" + FIX_MARKER + ":** re-run the cases.", carries=(ROLE_REMEDY, FIX_MARKER))
+role_model_allow("role-model: fix check: reviewer on sonnet with the marker first on line one and a Round 1 of 3 after it is "
+                 "allowed", "reviewer", "sonnet", FIX_MARKER + ". Round 1 of 3 finding F1, head abc1234.")
+role_model_allow("role-model: fix check: reviewer on sonnet with the marker after leading spaces on line one is allowed",
+                 "reviewer", "sonnet", "   " + FIX_MARKER + ", PR 7")
+role_model_allow("role-model: fix check: reviewer on sonnet with the marker after a leading tab on line one is allowed",
+                 "reviewer", "sonnet", "\t" + FIX_MARKER + ", PR 7")
+role_model_refuse("role-model: fix check: reviewer on sonnet with Round 1 of 3 first on line one and the marker after it is denied",
+                  "reviewer", "sonnet", "Round 1 of 3. New lane after " + FIX_MARKER + " FAIL on PR 12. Review it.",
+                  carries=(ROLE_REMEDY, FIX_MARKER))
+role_model_refuse("role-model: fix check: reviewer on sonnet with Re: ahead of the marker on line one is denied",
+                  "reviewer", "sonnet", "Re: " + FIX_MARKER + " of PR 7", carries=(ROLE_REMEDY, FIX_MARKER))
+# The row ends on \b, so a longer word that starts with the marker does not lift a reviewer on Sonnet.
+role_model_refuse("role-model: fix check: reviewer on sonnet with Fix checkpoint on line one is denied",
+                  "reviewer", "sonnet", FIX_MARKER + "point for PR 2296",
+                  carries=(ROLE_REMEDY, ROUND_MARKER, FIX_MARKER) + FREE_ROUND_MARKERS)
+role_model_allow("role-model: fix check: reviewer on sonnet with the marker after blank lines, as its first non-blank "
+                 "line, is allowed", "reviewer", "sonnet", "\n\n" + FIX_MARKER + ". Re-run the cases.")
+role_model_allow("role-model: fix check: the same reviewer spawn as a Task on sonnet is allowed", "reviewer", "sonnet",
+                 FIX_MARKER + ". Re-run the cases.", tool="Task")
+workflow_allow("role-model: fix check: Workflow reviewer on sonnet with the marker on line one is allowed",
+               _step_flow("'%s. Re-run the cases.'" % FIX_MARKER, "agentType: 'reviewer', model: 'sonnet'"))
+role_model_allow("role-model: fix check: reviewer on haiku with the marker is allowed, at its own row", "reviewer",
+                 "haiku", FIX_MARKER + ". Re-run the cases.")
+role_model_refuse("role-model: fix check: reviewer on sonnet with no marker is denied, and its remedy names the marker",
+                  "reviewer", "sonnet", "Check the diff for typos.",
+                  carries=(ROLE_REMEDY, ROUND_MARKER, FIX_MARKER) + FREE_ROUND_MARKERS)
+role_model_refuse("role-model: fix check: the marker on line two does not lift a reviewer on sonnet, and the remedy names it",
+                  "reviewer", "sonnet", "Check the diff.\n" + FIX_MARKER + ". Re-run the cases.",
+                  carries=(ROLE_REMEDY, FIX_MARKER))
+role_model_refuse("role-model: fix check: a lowercase marker on line one does not lift a reviewer on sonnet, and the "
+                  "remedy names the marker", "reviewer", "sonnet", FIX_MARKER_LOWER + ". Re-run the cases.",
+                  carries=(ROLE_REMEDY, FIX_MARKER))
+# The lift reaches only a model below the top rank. A model the table does not rank counts above it, so the marker does not
+# lift a reviewer on it. Its refusal still names the marker, as every reviewer refusal does.
+role_model_refuse("role-model: fix check: reviewer on claude-fable-5-1 with the marker on line one is denied, the lift "
+                  "does not reach an unranked model", "reviewer", "claude-fable-5-1", FIX_MARKER + ". Re-run the cases.",
+                  carries=(ROLE_REMEDY, FIX_MARKER))
+role_opus_refuse("role-model: fix check: reviewer on opus with the marker is denied under agent-model-cap, the ceiling holds",
+                 "reviewer", "opus", FIX_MARKER + ". Re-run the cases.")
+role_opus_refuse("role-model: fix check: builder on opus with the marker is denied under agent-model-cap, no lift",
+                 "builder", "opus", FIX_MARKER + ". Fix the failing case.")
+role_model_refuse("role-model: fix check: test-author on sonnet with the marker is denied and names no fix check marker",
+                  "test-author", "sonnet", FIX_MARKER + ". Write the failing cases.",
+                  lacks=ROLE_LACKS + (ROUND_MARKER, FIX_MARKER) + FREE_ROUND_MARKERS)
+role_model_refuse("role-model: fix check: Explore on sonnet with the marker is denied, only the audit marker lifts an Explore",
+                  "Explore", "sonnet", FIX_MARKER + ". Find where X is defined.", carries=(EXPLORE_MARKER,),
+                  lacks=ROLE_LACKS + (FIX_MARKER,))
 
 
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
@@ -29692,7 +33923,7 @@ LEASE_RULE = "simulator-boot-lease"
 LEASE_CARRIES = ("sim-test", "lease")
 LEASE_SLOT_UDID = {"1": "3553660D-315C-4B9C-8614-039D7A5B637E",     # Duo 1
                    "2": "801F55F4-F666-4C6D-AB04-7DF77C953974",     # Duo 2
-                   "pro": "8787FE1C-48CC-4213-9B5C-8605AFE7F9B3"}   # iPhone 18 Pro
+                   "pro": "86F9268A-A905-4B82-9BC0-D7EBB682D341"}   # iPhone 18 Pro
 LEASE_DUO1, LEASE_DUO2, LEASE_PRO = LEASE_SLOT_UDID["1"], LEASE_SLOT_UDID["2"], LEASE_SLOT_UDID["pro"]
 LEASE_DECOY = "1A2B3C4D-0000-4000-8000-0000000000D6"  # named "Duo 1", but not Duo 1's UDID: a name match would allow it
 LEASE_PID = os.getpid()    # a live holder for the whole run
@@ -30082,6 +34313,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: a builder write to a path in no repository from a /c/ cwd", "worktree-home"),
     ("cite-by-id: a -F file that cannot be read", "cite"),
     ("env: heredoc-allow-strip", "env"),
+    ("roadmap-one-writer: a push starts one rev-parse", "push-delete"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
     _hits = [label for label in LOG_FAMILY if label.startswith(_prefix)]

@@ -19,6 +19,11 @@ from guard_core import (
 # `-o` is read in the short-flag loop, where its value may be glued on.
 PUSH_VALUE_OPTS = {"--receive-pack", "--exec", "--push-option"}
 DEFAULT_BRANCH_FALLBACK = ("main", "master")
+# Rule push-agent-branch. push-stray-branch is silent on a branch with no upstream, and an agent-worktree
+# branch (`claude/agent-<hex>`) has none. The three shapes the tools name a worktree branch by, with 8 or more
+# lowercase hex characters after the prefix. Cost: a string match, and a bare push reads one more config key in
+# the spawn it already makes.
+AGENT_BRANCH = re.compile(r"(?:claude/|worktree-)?agent-[0-9a-f]{8,}")
 
 
 def _push_config(cwd: str, key: str, overrides=None):
@@ -423,43 +428,111 @@ def _push_tags_only(args) -> bool:
 
 
 def _push_branch_config(cwd: str, current: str, with_default: bool, overrides=None):
-    """(remote, merge, push.default) of `current`: '' for a key that is unset, None for all three when git
-    cannot answer. One `git config --get-regexp` spawn answers all of them. A `git -c push.default=`
-    override wins, as in `_push_config`."""
-    pattern = r"^(branch\.|push\.default$)" if with_default else r"^branch\."
+    """(remote, merge, push.default, push.autoSetupRemote) of `current`: '' for a key that is unset, None for
+    all four when git cannot answer. The last two are read only with `with_default`. One
+    `git config --get-regexp` spawn answers all of them. A `git -c` override of either wins, as in
+    `_push_config`."""
+    pattern = r"^(branch\.|push\.(default|autosetupremote)$)" if with_default else r"^branch\."
     answer = guard_core._git(cwd, "config", "--get-regexp", pattern) if cwd else None
     if answer is None or answer.returncode not in (0, 1):
-        return None, None, None
+        return None, None, None, None
     found = {}
     for line in answer.stdout.splitlines():
         key, _, value = line.partition(" ")
         found.setdefault(key, value.strip())
-    default = overrides["push.default"] if overrides and "push.default" in overrides else found.get(
-        "push.default", "")
+    def key(name):
+        return overrides[name] if overrides and name in overrides else found.get(name, "")
+
     return (found.get("branch." + current + ".remote", ""),
-            found.get("branch." + current + ".merge", "").removeprefix("refs/heads/"), default)
+            found.get("branch." + current + ".merge", "").removeprefix("refs/heads/"),
+            key("push.default"), key("push.autosetupremote"))
+
+
+# Rule push-main judges the remote a push goes to. A URL is a network remote when it carries a scheme
+# (`https://`, `ssh://`, `git://`) or is scp-like (`host:path`, `user@host:path`).
+_PUSH_URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+_PUSH_URL_SCP = re.compile(r"[^/:\\]+:")
+# A remote token the shell expands at run time: a variable, a `$( )` or a backtick substitution.
+_PUSH_SHELL_EXPANSION = re.compile(r"[$`]")
+_PUSH_LOCAL_PATH = re.compile(r"(?:/|\.{1,2}(?:[/\\]|$)|~|[A-Za-z]:[/\\]|file://)", re.I)
+_PUSH_REMOTE_KEYS = (r"^(branch\..+\.(remote|pushremote)|remote\.pushdefault"
+                     r"|remote\.[^ ]+\.(url|pushurl))$")
+
+
+def _is_local_path(url: str) -> bool:
+    """True for a path on this machine: absolute, `./` or `../` relative, `~`, a Windows drive path or `file://`."""
+    return bool(_PUSH_LOCAL_PATH.match(url))
+
+
+def _push_url_is_network(url: str) -> bool:
+    """True when a remote URL reaches the network. An empty URL and a local path do not."""
+    if not url:
+        return False
+    if _is_local_path(url):
+        return False
+    return bool(_PUSH_URL_SCHEME.match(url) or _PUSH_URL_SCP.match(url))
+
+
+def _push_goes_to_network(remote: str, cwd: str, current, overrides=None) -> bool:
+    """True when a push to `remote` ('' for a bare push) writes to a network remote.
+
+    A remote argument that is itself a URL or path is judged directly. A name is resolved to
+    `remote.<name>.pushurl`, else `remote.<name>.url`. A bare push names `branch.<cur>.pushRemote`, else
+    `remote.pushDefault`, else `branch.<cur>.remote`, else origin. A name with no URL is no remote at all, and
+    git refuses that push itself. Unreadable config is unknown, and unknown is never safe. A `git -c` override wins.
+    A remote the shell has not expanded (`$`, a backtick, `$(`) cannot be resolved, so it is unknown too.
+    """
+    if _PUSH_SHELL_EXPANSION.search(remote):
+        return True
+    if remote and (_is_local_path(remote) or ":" in remote):
+        return _push_url_is_network(remote)
+    answer = guard_core._git(cwd, "config", "--get-regexp", _PUSH_REMOTE_KEYS) if cwd else None
+    if answer is None or answer.returncode not in (0, 1):
+        return True
+    found = {}
+    for line in answer.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        found.setdefault(key, value.strip())
+
+    def get(key):
+        return overrides[key.lower()] if overrides and key.lower() in overrides else found.get(key, "")
+
+    if not remote:
+        cur = current() or ""
+        remote = (get("branch." + cur + ".pushremote") or get("remote.pushdefault")
+                  or get("branch." + cur + ".remote") or "origin")
+    return _push_url_is_network(get("remote." + remote + ".pushurl") or get("remote." + remote + ".url"))
 
 
 def push_ask_hit(args, cwd: str, overrides=None) -> str:
-    """'main', 'stray' or '' for the `git push` arguments `args`, a push `push_verdict` let through.
+    """'main', 'agent', 'stray' or '' for the `git push` arguments `args`, a push `push_verdict` let through.
+
+    'agent' (rule push-agent-branch): a push whose destination name is an agent-worktree branch name
+    (`AGENT_BRANCH`), with or without `-u`, checked before 'stray'. An implied destination is the current
+    branch (a bare push with no upstream too, under push.autoSetupRemote); an explicit one is the part
+    after `:`, `refs/heads/` stripped; a colon-less refspec is its own name. A destination after `:` adds
+    no read. A colon-less refspec other than `main` or `master` reads the current branch once
+    (`symbolic-ref`), to tell an implied destination from a literal one.
 
     'main' (rule push-main): a non-forced push whose destination is literally `main` or `master`, `--all`
-    included. The remote's HEAD is never read. 'stray' (rule push-stray-branch): a push with an implied
+    included, to a network remote (`_push_goes_to_network`): a push to a path, a `file://` URL or a remote
+    with no URL is silent. The remote's HEAD is never read. 'stray' (rule push-stray-branch): a push with an implied
     destination (a bare push, `HEAD`, `@`, or a colon-less refspec naming the current branch) that writes a
     name other than the branch's upstream. It needs an upstream, the pushed remote equal to
     branch.<cur>.remote, and an upstream that is not main or master. A `-u` push is silent here: its
     implied destination is the local name, which becomes the new upstream. A bare push under push.default
     simple writes the current branch only when the upstream carries its name, else git refuses it. A
     deletion, a forced push, a mirror, and a push of tags alone are never judged here. A destination that
-    cannot be read is allowed. Reads: none for a literal destination; the current branch for an implied
-    one; one `git config --get-regexp` when the upstream is needed.
+    cannot be read is allowed. A 'stray' is silent when the implied destination already exists as
+    `refs/remotes/<pushed remote>/<name>`: that push updates the branch's own ref. A failed ref read keeps
+    the ask. Reads: none for a destination after `:`; one `symbolic-ref` for the current
+    branch for a bare push or a colon-less refspec; one `git config --get-regexp` when the upstream is
+    needed; one `git rev-parse --verify -q` of the destination's remote-tracking ref, on the stray path only;
+    one more `git config --get-regexp` on the main path only, for the remote's URL (none when the
+    remote argument is itself a URL or path).
     """
     force, mirror, every, includes, unpinned, leased, delete, upstream, remote, plain = _push_parse(args)
     if force or leased or mirror or delete or any(spec.startswith(("+", ":")) for spec in plain):
-        return ""
-    if every:
-        return "main"
-    if not plain and _push_tags_only(args):
         return ""
     state = {}
 
@@ -467,6 +540,16 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
         if "cur" not in state:
             state["cur"] = _push_current_branch(cwd)
         return state["cur"]
+
+    def main():
+        if "main" not in state:
+            state["main"] = "main" if _push_goes_to_network(remote, cwd, current, overrides) else ""
+        return state["main"]
+
+    if every:
+        return main()
+    if not plain and _push_tags_only(args):
+        return ""
 
     def config():
         if "cfg" not in state:
@@ -476,11 +559,12 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     implied = False
     if not plain:
         cur = current()
-        merge, mode = config()[1:] if cur else (None, None)
+        merge, mode, auto = config()[1:] if cur else (None, None, None)
         if cur is None or mode is None:
             return ""
         if mode in ("", "simple"):
-            dest = cur if merge == cur else None
+            # With no upstream, autoSetupRemote makes git push the current name and set it as the upstream.
+            dest = cur if merge == cur or (not merge and auto.lower() in ("true", "yes", "on", "1")) else None
         elif mode == "current":
             dest = cur
             implied = True
@@ -489,27 +573,42 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
         else:
             dest = None
         if dest in DEFAULT_BRANCH_FALLBACK:
-            return "main"
+            return main()
+        agent = bool(dest and AGENT_BRANCH.fullmatch(dest))
     else:
+        agent = False
         for spec in plain:
             source, colon, target = spec.partition(":")
             if colon:
-                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
+                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK and main():
                     return "main"
+                agent = agent or bool(AGENT_BRANCH.fullmatch(target.removeprefix("refs/heads/")))
             elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
-                return "main"
+                # A local origin makes main() empty; the other refspecs are still read for agent and stray.
+                if main():
+                    return "main"
             elif source in ("HEAD", "@") or (current() is not None and source == current()):
                 implied = True
-        if implied and current() in DEFAULT_BRANCH_FALLBACK:
+                agent = agent or bool(current() and AGENT_BRANCH.fullmatch(current()))
+            else:
+                agent = agent or bool(AGENT_BRANCH.fullmatch(source.removeprefix("refs/heads/")))
+        if implied and current() in DEFAULT_BRANCH_FALLBACK and main():
             return "main"
+    if agent:
+        return "agent"
     if not implied or current() is None:
         return ""
-    remote_cfg, merge, _mode = config()
+    remote_cfg, merge = config()[:2]
     pushed = remote or remote_cfg
     if not merge or not remote_cfg or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:
         return ""
     # A -u push of the local name sets that name as the new upstream on purpose (a lane stacked on a lane).
-    return "stray" if merge != current() and not upstream else ""
+    if merge == current() or upstream:
+        return ""
+    # A destination already on the pushed remote is that branch's own ref, so the push is no stray. A read that
+    # fails (git unavailable, an error other than "no such ref") keeps the ask.
+    seen = guard_core._git(cwd, "rev-parse", "--verify", "-q", "refs/remotes/" + pushed + "/" + current())
+    return "" if seen is not None and seen.returncode == 0 else "stray"
 
 
 # ------------------------------------------------------------------ a rewrite and a wide delete
@@ -544,23 +643,84 @@ def delete_text(segment):
         lambda m: m.group(0) if m.group(1) in ("'", '"') else "/" + norm(m.group(1)), segment))
 
 
+def _substitution_end(text, index):
+    """Where the command substitution that opens at `text[index]` ends, else -1. `$(` ends at its
+    matching `)` and a backtick at the next one; an unclosed one runs to the end of the text.
+    PowerShell has `$( )` only, as a backtick is its escape."""
+    if text.startswith("$(", index):
+        depth = 0
+        for at in range(index + 1, len(text)):
+            depth += (text[at] == "(") - (text[at] == ")")
+            if depth == 0:
+                return at
+        return len(text)
+    if text[index] == "`" and not is_powershell(text):
+        close = text.find("`", index + 1)
+        return len(text) if close < 0 else close
+    return -1
+
+
+_TEXT_COMMANDS = ("echo", "printf", "write-host", "write-output")
+_LIVE_UNQUOTED = re.compile(r"\$\(|`|[<>]\(")
+
+
+def _quotes_are_text(segment):
+    """True when a segment only prints its quoted words or stores them as a commit message: its
+    command is a printer or `git commit`, with no substitution outside single quotes. Any other
+    command may run a quoted word (`parallel`, `script -c`, `watch`, `runuser -c`)."""
+    if _LIVE_UNQUOTED.search(re.sub(r"'[^']*'", "", segment)):
+        return False
+    words = [word for word in segment_tokens(segment) or () if not re.match(r"[A-Za-z_]\w*=", word)]
+    if not words:
+        return False
+    if words[0].lower() in _TEXT_COMMANDS:
+        return True
+    return words[0] in ("git", "git.exe") and words[_git_subcommand_index(words, 0):][:1] == ["commit"]
+
+
 class UnquotedStart:
     """A compiled pattern whose `search` skips a match that starts inside quotes. It has a
     pattern's own `search`, so a caller loops over it without knowing the difference. An
     apostrophe shaped like a contraction is text, as in split_segments' second reading: a lone
-    `don't` must not turn the rest of the line into one quote."""
+    `don't` must not turn the rest of the line into one quote. `printers_only` skips quotes only in
+    a segment whose quoted words are text (`_quotes_are_text`) and not piped on; elsewhere it reads
+    the raw text."""
 
-    def __init__(self, pattern):
+    def __init__(self, pattern, nested=False, printers_only=False):
         self.pattern = pattern
+        self.nested = nested
+        self.printers_only = printers_only
 
     def search(self, text):
-        inside, quote, index = set(), "", 0
+        if self.printers_only:
+            ends = []
+            for segment, end in zip(split_segments(text, ends), ends):
+                text_only = end != "|" and _quotes_are_text(segment)
+                found = self._search_unquoted(segment) if text_only else self.pattern.search(segment)
+                if found:
+                    return found
+            return None
+        found = self._search_unquoted(text)
+        if found or not self.nested:
+            return found
+        # The script a shell, `eval` or `pwsh -Command` runs is quoted text, so it is read again as a command.
+        for segment in split_segments(text):
+            for script in inner_commands(segment_tokens(segment) or []):
+                found = self.search(script)
+                if found:
+                    return found
+        return None
+
+    def _search_unquoted(self, text):
+        inside, quote, index, live_to = set(), "", 0, -1
         while index < len(text):
+            if quote == '"' and index > live_to:
+                live_to = max(live_to, _substitution_end(text, index))   # `$( )` and backticks run in double quotes
             if not quote and text[index] == "'" and CONTRACTION.match(text, index):
                 width, after = 1, ""
             else:
                 width, after = quote_advance(text, index, quote)
-            if quote:
+            if quote and index >= live_to:
                 inside.update(range(index, index + width))
             quote, index = after, index + width
         return next((m for m in self.pattern.finditer(text) if m.start() not in inside), None)
@@ -572,19 +732,20 @@ RM_RAW = UnquotedStart(re.compile(
 
 
 DESTRUCTIVE_DELETE = (
-    re.compile(
+    UnquotedStart(re.compile(
         r"(?i)\b(?:remove-item|ri|rd|rmdir|del|erase|rm)\b"
+        r"(?![^\n;|&]*\s--cached\b)"   # the index-only form of `git rm`
         r"(?=[^\n;|&]*\s-r(?:ec(?:urse)?)?\b)"
         r"(?=[^\n;|&]*\s-f(?:o(?:rce)?)?\b)"
         r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|\)|$)"
-    ),
+    ), printers_only=True),
     # Recursion alone is enough for the PowerShell names. `rm` is read by tokens, not here. A match
     # that starts inside quotes is text (an echo, a commit message), so it is not read.
     UnquotedStart(re.compile(
         r"(?i)\b(?:remove-item|ri|rd|rmdir|del|erase)\b"
         r"(?=[^\n;|&]*\s-r(?:ec(?:urse)?)?\b)"
         r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|\)|$)"
-    )),
+    ), nested=True),
 )
 # The one set of wide targets, read by the pattern fallbacks and, by tokens, by `rm -rf`: a root, a
 # home, the working directory or a glob of one, with an optional trailing slash and `*`. `.*` and
@@ -640,14 +801,16 @@ def _in_group(args, tick=False):
 def _git_subcommands(words):
     """The indexes of the words that name a git subcommand, such as the `rm` of `git rm -r .`. Such
     a word is no command word. A force flag keeps the word read: `git rm` without one refuses to drop an edited
-    file, so git can restore what it removes, and `git rm -f` discards the edits."""
+    file, so git can restore what it removes, and `git rm -f` discards the edits. `--cached` removes from the
+    index only, so it names the subcommand whatever the other flags say."""
     found = set()
     for at, word in enumerate(words):
         if basename(word) in ("git", "git.exe"):
             sub = _git_subcommand_index(words, at)
             args = words[sub + 1:]
             args = args[:args.index("--")] if "--" in args else args
-            if not any(a == "--force" or (a[:1] == "-" and a[1:2] != "-" and "f" in a) for a in args):
+            if "--cached" in args or not any(
+                    a == "--force" or (a[:1] == "-" and a[1:2] != "-" and "f" in a) for a in args):
                 found.add(sub)
     return found
 
@@ -815,22 +978,36 @@ def parent_delete_hit(segments, number: int, cwd: str):
 # Through that link a hand-run `npm ci`, or a recursive delete of what is inside it, empties the
 # other checkout's install. The rule reads the filesystem: a real folder, or none, is judged as it
 # always was. A bare `rm node_modules` removes only the link, so it stays allowed.
-# ponytail: `-w` and `--workspace` are not read; the install is judged against the working folder
-# alone, and `install-test` and its aliases are not listed.
-NPM_ALIASES = {
-    "ci": "ci", "clean-install": "ci", "install-clean": "ci", "ic": "ci", "cit": "ci",
-    "install": "install", "i": "install", "in": "install", "ins": "install", "isntall": "install",
-    "add": "install", "uninstall": "uninstall", "remove": "uninstall", "rm": "uninstall",
-    "r": "uninstall", "un": "uninstall", "update": "update", "up": "update", "upgrade": "update",
+# `--prefix` is read (npm_prefix_flag): its folder is the one judged. A workspace flag is read for
+# `npm version` only (NPM_WORKSPACE_FLAGS).
+# THE READ-ONLY LIST: every npm subcommand and alias that never rewrites node_modules, by the npm 10.9.9
+# list in lib/utils/cmd-list.js. A subcommand off this list is refused in a linked folder, so a new npm
+# command, a typo and an abbreviation fail closed. The list is a curated copy because the guard cannot
+# read npm's own at hook time.
+NPM_READ_ONLY = {
+    "access", "adduser", "add-user", "login", "logout", "audit", "bugs", "issues", "cache",  # glossary-ok: "bugs" is npm's own subcommand name
+    "completion", "config", "c", "get", "set", "deprecate", "diff", "dist-tag", "dist-tags", "docs",
+    "home", "doctor", "exec", "x", "explain", "why", "find-dupes", "fund", "help", "hlep",
+    "help-search", "hook", "ll", "la", "ls", "list", "org", "ogr", "outdated", "owner", "author",
+    "pack", "ping", "pkg", "prefix", "profile", "publish", "query", "repo", "root", "run-script",
+    "run", "rum", "urn", "sbom", "search", "s", "se", "find", "star", "stars", "unstar", "start",
+    "stop", "restart", "test", "t", "tst", "team", "token", "unpublish", "version", "verison", "view",
+    "v", "info", "show", "whoami",
 }
 # Global options that take the next word as their value, so that word is not the subcommand.
 NPM_VALUE_FLAGS = {
     "--loglevel", "--prefix", "--cache", "--registry", "--userconfig", "--globalconfig",
     "--workspace", "-w", "--tag", "--otp", "--scope", "--before", "--omit", "--include",
-    "--install-strategy", "--logs-dir",
+    "--install-strategy", "--logs-dir", "-C", "-L", "--location", "-c", "--call", "-m", "--message",
+    "--reg",
 }
 # Options after which the command changes nothing in the working folder's install.
 NPM_NO_CHANGE = {"-g", "--global", "--location=global", "--help", "-h", "--dry-run"}
+# Subcommands that run install scripts even with --dry-run, so a dry run is no exemption for them.
+NPM_DRY_RUN_WRITERS = {"rebuild", "rb", "edit"}
+# With one of these, `npm version` reifies the linked root, so it changes the install. Without one it
+# only rewrites package.json.
+NPM_WORKSPACE_FLAGS = {"-w", "-ws"}
 DELETE_WORDS = ("rm", "remove-item", "ri", "del", "erase", "rd", "rmdir")
 
 
@@ -917,7 +1094,15 @@ def linked_nm_hit(segment: str, where: str) -> str:
             elif words[at].startswith("-"):
                 at += 1
             else:
-                subcommand = NPM_ALIASES.get(words[at].lower(), "")
+                word = words[at].lower()
+                version_in_workspace = word == "version" and any(
+                    flag in NPM_WORKSPACE_FLAGS or flag.startswith("--workspace") for flag in words)
+                # `audit` rewrites the install when `fix` follows it, after any flag.
+                if word not in NPM_READ_ONLY or (word == "audit" and "fix" in words[at + 1:]) or (
+                        version_in_workspace):
+                    subcommand = word
+                if word in NPM_DRY_RUN_WRITERS:
+                    words = [flag for flag in words if flag != "--dry-run"]
                 break
         if subcommand and not NPM_NO_CHANGE.intersection(words) and is_link(
                 os.path.join(npm_prefix_flag(words, where) or npm_prefix(where), "node_modules")):
@@ -997,7 +1182,14 @@ PUSH_MAIN_REASON = (
 )
 PUSH_STRAY_REASON = (
     "Rule (Git): this push writes a branch name other than the one this branch tracks (its upstream), "
-    "so it may land on a stray branch. Check the destination (decision plain-push-asks). "
+    "so it may land on a stray branch, and no such branch exists on the remote yet (rule push-stray-branch, "
+    "decision plain-push-asks). Name the destination: `git push origin HEAD:<branch>`. "
+    "Approving the prompt lets this one push through; it is not a grant."
+)
+PUSH_AGENT_REASON = (
+    "Rule (Git): this push writes a branch named like an agent worktree (agent-<hex>, claude/agent-<hex> or "
+    "worktree-agent-<hex>), not a lane branch (decision plain-push-asks). Push the lane branch by name: "
+    "`git push origin HEAD:<lane-branch>`. "
     "Approving the prompt lets this one push through; it is not a grant."
 )
 PUSH_ASK_REASON = (
