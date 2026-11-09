@@ -746,6 +746,26 @@ class GhLock(Lock):
 
 # ------------------------------------------------------------------ the GitHub half (the seam)
 
+PUSHED_HEAD_WAIT = "GitHub to show the pushed head"
+PUSHED_HEAD_WAIT_MINUTES = 5  # --lane-lint's bound on that wait; a push shows on GitHub in seconds, so a head still missing after this is not lag
+
+def wait_pushed_head(host, n, info, end, progress=None):
+    """The one wait for GitHub to show a pushed head: read pull request `n` again until its head is no longer the one in `info` (the head
+    before the push), or `end` (a `host.now()` time) passes. -> the fresh info, or None at `end`. wait_checks and fetch_pr_head call it.
+    With no `progress`, it prints one wait line."""
+    stale, said = info["head"], False
+    while info["head"] == stale:
+        if progress:
+            progress(PUSHED_HEAD_WAIT)
+        elif not said:
+            say("merge: waiting on " + PUSHED_HEAD_WAIT)
+            said = True
+        if host.now() >= end:
+            return None
+        host.pause(host.minute)
+        info = host.pr(n)
+    return info
+
 class Host:
     """The GitHub half: `gh` for the pull request, the required checks, the wait and the merge.
     Tests pass a fake with the same pr, wait_checks and merge, or a `gh` shim on PATH."""
@@ -1117,11 +1137,10 @@ class Host:
         while True:
             info = self.pr(n)
             if info["head"] == prior and prior != sha:
-                progress("GitHub to show the pushed head")
-                if self.now() >= end:
+                info = wait_pushed_head(self, n, info, end, progress)
+                if info is None:
                     return None, f"the deadline of {deadline_minutes} minutes passed. GitHub still shows the head before the push. {GREEN_CITE}"
-                self.pause(self.minute)
-                continue
+                # the fresh read goes through the checks below like any other
             if info["base"] != base:
                 return False, f"the base of the pull request changed from {base} to {info['base']} during the wait {BASE_CITE}."
             if info["head"] != sha:
@@ -2475,16 +2494,28 @@ def refuse_bad_pr(info):
     if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
         raise Stop("the pull request is CONFLICTING. Merge the base into the branch and run again. Nothing was claimed. " + BASE_CITE)
 
-def open_worktree(root, info, base):
-    """Fetch, check that the head is the one gh named, and make a detached worktree there."""
+def fetch_pr_head(root, info, base, host=None, n=None):
+    """Fetch, and check that the head is the one gh named. -> `info`, or the fresh read of pull request `n` once GitHub showed the pushed head.
+    Raises Stop on a head that differs. With `host`, a head that lags origin waits, bounded, for GitHub to show it (wait_pushed_head);
+    with none, it refuses at once."""
     for ref in (base, info["branch"]):
         c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{ref}:refs/remotes/origin/{ref}")
         if c:
             raise Stop(f"git fetch origin {ref} failed: {out}")
     got = git(root, "rev-parse", f"refs/remotes/origin/{info['branch']}")[1]
+    if got != info["head"] and host is not None:
+        stale = info["head"]
+        info = wait_pushed_head(host, n, info, host.now() + PUSHED_HEAD_WAIT_MINUTES * 60)
+        if info is None:
+            raise Stop(f"{got[:9]} is pushed to origin, but GitHub never showed it: after {PUSHED_HEAD_WAIT_MINUTES} minutes the pull request still reads {stale[:9]}. "
+                       "Run again. Nothing was claimed.")
     if got != info["head"]:
         raise Stop(f"{info['branch']} moved: gh says {info['head'][:9]}, origin holds {got[:9]}. Run again. Nothing was claimed.")
-    return add_worktree(root, info["head"])
+    return info
+
+def open_worktree(root, info, base):
+    """Fetch, check that the head is the one gh named, and make a detached worktree there."""
+    return add_worktree(root, fetch_pr_head(root, info, base)["head"])
 
 def add_worktree(root, head):
     """Make a detached, locked worktree at `head`. -> (tmp, wt). The one home of the temporary tree: open_worktree and lane_lint call it."""
@@ -2564,9 +2595,13 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names."""
     if target.isdigit():
-        info = (host or Host()).pr(int(target))
-        head, base = info["head"], info["base"]
-        tmp, wt = open_worktree(root, info, base)
+        host = host or Host()
+        n = int(target)
+        info = host.pr(n)
+        base = info["base"]
+        info = fetch_pr_head(root, info, base, host, n)  # a lane lints right after its push, when GitHub may still show the old head
+        head = info["head"]
+        tmp, wt = add_worktree(root, head)
     else:
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
