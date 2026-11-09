@@ -5625,6 +5625,15 @@ sh("git-after-cd: UNFAILING-TAIL, an elif body after an if test of pytest with |
    cwd=NOGIT, carries=("&&",))
 sh("git-after-cd: UNFAILING-TAIL, an elif body after an if test of pytest with || echo bad >&2, whose tail cannot fail, passes",
    "if pytest -q || echo bad >&2; then :; elif [ -f x ]; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
+# A NULL DEVICE CANNOT FAIL, SO A TAIL WITH `>/dev/null` STILL NEVER FAILS. The redirect opens always, so the tail
+# succeeds, the else never runs, and its push passes. Reading the null redirect as one that can fail refuses it.
+sh("git-after-cd: UNFAILING-TAIL, an else body after an if test of pytest with || true >/dev/null, whose tail cannot fail, passes",
+   "if pytest -q || true >/dev/null; then :; else %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
+# THE SWALLOW READ IGNORES A REDIRECT ON THE TAIL. `echo bad >/no/dir` succeeds whenever the file opens, so the then
+# body runs after a failed pytest and its push is refused. A read that drops a tail with a failing redirect passes it.
+sh("git-after-cd: UNFAILING-TAIL, an if test of pytest with || echo bad >/no/dir, then a git push -u in its then body, is refused",
+   "if pytest -q || echo bad >/no/dir; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
 # A `||` TAIL THAT IS NOT THE LAST STEP. `echo "$(date)"` exits 0 whatever pytest did, so the then body runs after a
 # failed check. `true && [ -f x ]` ends on the `[` status, so the then body runs after a failed pytest when x exists.
 sh('git-after-cd: UNFAILING-TAIL, an if test of pytest with || echo "$(date)", then a git push -u in its then body, is refused',
