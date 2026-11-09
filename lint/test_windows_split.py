@@ -319,7 +319,8 @@ MUTATE_JOB = "checks-mutate-guard"
 SHOOT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs'
 SHOOT_JOB = "checks-shoot"
 # The scope flag each job skips on when the flag is not its own name.
-FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot", "checks-macos-b": "checks_macos"}
+FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot", "checks-macos-b": "checks_macos",
+           "checks-guard-2": "checks_guard"}
 # The lint jobs run on every PR with no scope condition: the Linux pair, read from its one home CHECKS_SUITE_JOBS.
 LINT_JOBS = CHECKS_SUITE_JOBS
 # all-jobs-passed is the one required check. Its needs are checked in lint/test_all_jobs_passed.py.
@@ -868,6 +869,18 @@ class WindowsSplit(unittest.TestCase):
         for name in (GUARD_JOB, MUTATE_JOB):
             self.assertIn(name, jobs, f"no job named {name}")
             self.assertEqual(job_check_problems(name, jobs[name], FLAG_OF[name]), [])
+        # checks-guard-2 is the Linux guard shard, on checks_guard through FLAG_OF. Named failure: its steps name another flag,
+        # so the shard starts on that flag's scope. The defect swaps the flag in every step: one scope condition, not steps that
+        # disagree (which would be a different cause).
+        job = job_block(self.text, "checks-guard-2")
+        self.assertIsNotNone(job, "no job named checks-guard-2")
+        self.assertEqual(self.text.count(job), 1, "the fixture: checks-guard-2's block appears once in checks.yml")
+        self.assertEqual(job.count(LINUX_GUARD_IF), len(step_blocks(job)),
+                         "the fixture: every step of checks-guard-2 carries LINUX_GUARD_IF")
+        swapped = job.replace(LINUX_GUARD_IF, "needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'")
+        problems = [p for p in scope_problems(self.text.replace(job, swapped, 1)) if p.startswith("checks-guard-2:")]
+        self.assertEqual(len(problems), 1, f"checks-guard-2 problems: {problems}")
+        self.assertIn("does not read needs.scope.outputs.checks_guard", problems[0])
 
     def test_the_check_form_sees_its_defects(self):
         scope_condition = "needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'"
