@@ -1017,18 +1017,21 @@ TRUST_REASON = (
 )
 
 
-def trust_card_hit(tool: str, transcript: str) -> str:
+def trust_card_hit(tool: str, transcript: str, agent_id=None) -> str:
     """Return the tool name when it opens a trust card and the own record does not prove an untagged
-    session, else ''. Fails closed: any error in the reads is a refusal, because the guard-wide crash
-    path fails open."""
+    session, else ''. For an agent's call (`agent_id`, checked by the caller against guard.AGENT_ID) the agent's own
+    transcript is read too: some record must exist, and no readable record in either file may carry a cs-build tag
+    or be followed by a set_session_tags call. Fails closed: any error in the reads is a refusal, because the
+    guard-wide crash path fails open. cost: one transcript read, only on these two calls, and the agent's own file as a
+    second for an agent's call; no file written."""
     if tool not in TRUST_TOOLS:
         return ""
-    try:  # cost: one transcript read, only on these two calls
+    try:
         from override import remote_session_id
         own_id = remote_session_id()
         if own_id and transcript:
-            tags, tagged_after = _own_session_read(transcript, own_id)
-            if tags is not None and not tagged_after and not any(str(t).startswith(ROLE_TAG_PREFIX) for t in tags):
+            records, tagged_after = _session_records(transcript, agent_id, lambda path: _own_session_read(path, own_id))
+            if records and not tagged_after and not any(str(t).startswith(ROLE_TAG_PREFIX) for tags in records for t in tags):
                 return ""
     except Exception:
         pass
@@ -1076,27 +1079,40 @@ def _head_landed(module, repo: str, row) -> bool:
         raise RuntimeError("the compare read failed: " + str(e))
 
 
-def _archive_tags(transcript: str, target, agent_id):
-    """The tags that decide an archive of `target`, or None when no transcript holds a record of it. The main
-    transcript and, for an agent's call (agent_id already checked by the caller), the agent's own transcript are
-    both read. A record with the lane tag decides: its tags, or the two records' tags joined when both are lanes.
-    Else a record without one decides. An agent file that does not exist holds no record; any other read error
-    raises. cost: one more transcript read per agent archive call, no file written, no gh call."""
-    records = []
-    main = _own_get_session_tags(transcript, target)
-    if main is not None:
-        records.append(main)
-    if agent_id:
+def _session_records(transcript: str, agent_id, read):
+    """([tags of each file that holds a record], whether any file shows a set_session_tags call after its record, or with no record in that file).
+    `read(path)` is one of the own_session reads, returning (tags, tagged_after). The main transcript and, for an
+    agent's call (agent_id already checked by the caller), the agent's own transcript are both read. An agent file
+    that does not exist holds no record; any other read error raises. cost: one transcript read, and the agent's
+    own file as a second for an agent's call; no file written."""
+    records, tagged_after = [], False
+    paths = [transcript] + ([own_session.agent_transcript_path(transcript, agent_id)] if agent_id else [])
+    for at, path in enumerate(paths):
         try:
-            own = _own_get_session_tags(own_session.agent_transcript_path(transcript, agent_id), target)
+            tags, after = read(path)
         except FileNotFoundError:
-            own = None
-        if own is not None:
-            records.append(own)
+            if at == 0:
+                raise
+            continue
+        tagged_after = tagged_after or after
+        if tags is not None:
+            records.append(tags)
+    return records, tagged_after
+
+
+def _deciding_tags(records):
+    """The tags that decide among the records of one target, or None for no record. A record with the lane tag
+    decides: its tags, or the lane records' tags joined when both files hold a lane. Else the first record decides."""
     lanes = [tags for tags in records if ARCHIVE_LANE_TAG in tags]
     if lanes:
         return [tag for tags in lanes for tag in tags]
     return records[0] if records else None
+
+
+def _archive_tags(transcript: str, target, agent_id):
+    """The tags that decide an archive of `target`, or None when no transcript holds a record of it.
+    cost: _session_records."""
+    return _deciding_tags(_session_records(transcript, agent_id, lambda path: _own_session_read(path, target))[0])
 
 
 def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
@@ -1172,13 +1188,17 @@ BRIEF_STEP_REASON = (
 )
 
 
-def brief_hit(tool: str, tool_input, transcript: str):
+def brief_hit(tool: str, tool_input, transcript: str, agent_id=None):
     """Return (matched, reason) when this send_message is a lane brief for a topic the target lane does not
     hold, else None. Only a message whose first non-blank line starts with LANE_BRIEF_MARKER is read; the
-    transcript is read for that message alone. A target whose newest record (get_session, or the
+    transcript is read for that message alone. A target with no record refuses. A set_session_tags call on the
+    target after a record, or with no record in that file, makes the record stale and refuses, whatever tags
+    the deciding record holds. Otherwise a target whose newest record (get_session, or the
     create_session that made it) has no cs-build:lane tag passes. A lane with a cs-topic tag is judged by the
-    brief's Topic, an older lane without one by the brief's step against its cs-step tags. Fails closed: any
-    error in the reads is a refusal, because the guard-wide crash path fails open."""
+    brief's Topic, an older lane without one by the brief's step against its cs-step tags. For an agent's call
+    (`agent_id`, checked by the caller against guard.AGENT_ID) the agent's own transcript is read too: a lane record
+    in either file decides and the tags of the lane records are joined. Fails closed: any error in the reads is a refusal, because the guard-wide crash path
+    fails open."""
     if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
         return None
     message = tool_input.get("message")
@@ -1186,17 +1206,18 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if not _BRIEF_MARKER_LINE.match(first):
         return None
     target = tool_input.get("session_id")
-    try:  # cost: one transcript read per brief
-        tags, tagged_after = _own_session_read(transcript, target, created=True) \
-            if transcript and isinstance(target, str) and target else (None, False)
+    try:  # cost: one transcript read per brief, and the agent's own file as a second for an agent's call
+        records, tagged_after = _session_records(transcript, agent_id, lambda path: _own_session_read(path, target, created=True)) \
+            if transcript and isinstance(target, str) and target else ([], False)
+        tags = _deciding_tags(records)
     except Exception:
         tags, tagged_after = None, False
     if tags is None:
         return "lane brief to a target with no record", BRIEF_NO_RECORD_REASON
+    if tagged_after:  # a set_session_tags call on the target followed its record, so the tags may have changed, a lane tag included
+        return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
     if ARCHIVE_LANE_TAG not in tags:
         return None
-    if tagged_after:  # a set_session_tags call on the target followed its record, so the topic or steps may have changed
-        return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
     found = _BRIEF_LINE.match(first)
     step, topic = (found.group("step"), found.group("topic")) if found else (None, None)
     topics = [str(t)[len(TOPIC_TAG_PREFIX):].strip() for t in tags if str(t).startswith(TOPIC_TAG_PREFIX)]
