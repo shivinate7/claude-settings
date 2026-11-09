@@ -125,6 +125,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
+  gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
+                       ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
+                       or input flag and no method. Judged per segment from the command word. A read, `gh api` with an
+                       explicit GET and the merge tool pass. A local session skips it. An override lifts it.
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
   conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker
@@ -408,8 +412,8 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            conflict_markers_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
+            conflict_markers_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
@@ -4091,6 +4095,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     for text, _in_message in _substitutions(stripped)[0]:
         if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
             refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
+
+    # 6b2. A gh write in a cloud session (rule gh-write-cloud): the GitHub MCP tools and the merge tool write there.
+    if is_cloud():
+        for text, _in_message in _substitutions(stripped)[0]:
+            for seg in split_segments(text):
+                label = gh_write_of(seg) if seg.strip() else ""
+                if label:
+                    refuse(tool, "deny", "gh-write-cloud", GH_WRITE_CLOUD_REASON, "gh " + label)
 
     # 6c. A lane commit of the generated records page (decision records-index-at-merge).
     matched = records_page_hit(stripped, cwd)
