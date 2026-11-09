@@ -691,6 +691,27 @@ def _glob_pattern(word):
     return "".join(out), magic
 
 
+_GLOB_MAGIC = re.compile(r"[*?\[]")
+
+
+def _collapsed_glob(cwd, target):
+    """The glob `target` joined under the escaped folder `cwd`, with each `..` that follows a literal folder
+    folded away by text. The shell reads `out/../tests/*.py` through `out` on disk, but `cwd` may be a folder
+    the same command makes and `..` cannot pass through a folder that is not there yet. A `..` after a glob
+    part stays: that part may match a folder or a file."""
+    parts = [(glob.escape(each), False) for each in cwd.split(os.sep)]
+    names = target.split("/")
+    for at, each in enumerate(names):
+        if each == "..":
+            if len(parts) > 1 and parts[-1][0] and not parts[-1][1]:
+                parts.pop()
+                continue
+        elif each == "." or not each and at < len(names) - 1:
+            continue
+        parts.append((each, bool(_GLOB_MAGIC.search(each))))
+    return os.sep.join(name for name, _ in parts)
+
+
 def _written_sources(word, cwd):
     """(paths, capped) the source word `word` of a `cp` names once the shell has expanded its braces and
     globs against `cwd`. A glob that matches nothing stays its text, as in the shell. `capped` is True when
@@ -707,8 +728,8 @@ def _written_sources(word, cwd):
             else:
                 # The folder is joined escaped, so a glob character in it matches itself, then cut from each match.
                 head = os.path.join(cwd, "")
-                matches = (found[len(head):] if found.startswith(head) else found
-                           for found in glob.iglob(os.path.join(glob.escape(cwd), target)))
+                matches = (found[len(head):] if found.startswith(head) else os.path.relpath(found, cwd)
+                           for found in glob.iglob(_collapsed_glob(cwd, target)))
             matched = list(itertools.islice(matches, _WALK_LIMIT + 1 - len(paths)))
             paths.extend(matched or [_unquoted(each)])
         else:
