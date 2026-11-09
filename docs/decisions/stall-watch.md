@@ -51,6 +51,9 @@ guard rule, so the watcher does the waiting and the session is told once.
   `STALL_WATCH_BEAT`, and passes to the watcher as `--beat`. The watcher relays the file's new bytes to its
   own output, the harness output file. So a redirect in the command (`2>&1 | grep`, `2>/dev/null`)
   hides the line from neither the watcher nor the Stop check.
+  `hooks/test_guard.py` does the same. It prints a stderr line and appends to `STALL_WATCH_BEAT` at most once
+  per `GUARD_HEARTBEAT` seconds (default 60) of quiet, read at checkpoints between cases. It starts no
+  thread, timer or process. `hooks/test_guard_beat.py` (`BeatCost`) pins the cost.
 - A job that sends that line to a log it names is still writing, so it is no stall (owner ruling,
   2026-10-26: the watcher reads named logs, in place of the rule that it does not change). Reason:
   `merge.py ... > LOG 2>&1` was reported stalled while it worked, and a false STALL teaches the reader to
