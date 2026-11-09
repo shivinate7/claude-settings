@@ -5556,6 +5556,31 @@ sh("git-after-cd: a make a, then || builtin true, then || exit 1 and ; a git pus
 sh("git-after-cd: a make a, then || /bin/true, then || exit 1 and ; a git push -u, is refused",
    "make a || /bin/true || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&",))
+# A `|| true` OR `|| :` TAIL ON A CHECK. `true` and `:` exit 0 whatever the check did, so the `||` tail makes the check
+# unfailing: the then body, and the push after `;` or `&&`, run on a failed check. Each push below runs on that failure.
+# The first two are refused today; the next two are pins, refused today too. The control is the `if pytest -q` then-body
+# push pass above, which this block cites rather than copies.
+sh("git-after-cd: an if test of pytest with || true, then a git push -u in its then body, is refused",
+   "if pytest -q || true; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: an elif test of make check with || :, then a git push -u in its then body, is refused",
+   "if [ -f a ]; then :; elif make check || :; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: pytest with || true, then ; a git push -u, is refused",
+   "pytest -q || true; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: pytest with || true, then && a git push -u, is refused",
+   "pytest -q || true && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check protected by || exit 1, then ; a git push -u origin b, passes",
+   "pytest -q || exit 1; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+# A GLUED `(if true` WITH A PUSH IN ITS ELSE BODY. The `true` test always runs its then body, so the push in the else
+# body never runs on a failed check and passes. The unglued form and the spaced `( if` form pass today. The glued `(if`
+# is refused as a false alarm: `_push_segment_inert` does not pop the `(` in front of `if`.
+sh("git-after-cd: an if true whose else body pushes, passes",
+   "if true; then :; else %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a spaced subshell holding an if true whose else body pushes, passes",
+   "( if true; then :; else %s push -u origin b; fi )" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a subshell glued to an if true whose else body pushes, passes",
+   "(if true; then :; else %s push -u origin b; fi)" % VCS, "allow", cwd=NOGIT)
 # A PUSH THAT RUNS ON A FAILED CHECK, AND A PIPE THAT HIDES ONE. A brace group after `||` runs when pytest fails, so
 # the push in it runs on that failure. A pipe's status is its last command's, so `pytest | tail` clears the `&&` whatever
 # pytest did, and the push runs on its failure too. `set -o pipefail` makes the pipe fail when pytest fails, so the `&&`
