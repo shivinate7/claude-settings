@@ -694,22 +694,24 @@ def _glob_pattern(word):
 _GLOB_MAGIC = re.compile(r"[*?\[]")
 
 
-def _collapsed_glob(cwd, target):
-    """The glob `target` joined under the escaped folder `cwd`, with each `..` that follows a literal folder
-    folded away by text. The shell reads `out/../tests/*.py` through `out` on disk, but `cwd` may be a folder
-    the same command makes and `..` cannot pass through a folder that is not there yet. A `..` after a glob
-    part stays: that part may match a folder or a file."""
-    parts = [(glob.escape(each), False) for each in cwd.split(os.sep)]
-    names = target.split("/")
+def _folded(path, held=None):
+    """`path` (absolute) with each `..` folded away by text where the folder before it is not on disk. The
+    shell reads `out/../tests` through `out`, but `out` may be a folder the same command makes, and `..`
+    cannot pass through a folder that is not there yet. Where the folder exists, `..` stays for the
+    filesystem to resolve, as a symlink's `..` is its target's parent. A relative path is returned as is.
+    `held` is set for a glob: the count of leading parts that are a literal folder. They come back escaped,
+    and a later part with a glob character is never folded past, as it may match a file."""
+    names = path.split("/")
+    rooted = not names[0] and len(names) > 1
+    kept = []
     for at, each in enumerate(names):
-        if each == "..":
-            if len(parts) > 1 and parts[-1][0] and not parts[-1][1]:
-                parts.pop()
-                continue
-        elif each == "." or not each and at < len(names) - 1:
-            continue
-        parts.append((each, bool(_GLOB_MAGIC.search(each))))
-    return os.sep.join(name for name, _ in parts)
+        foldable = held is None or at < held or not _GLOB_MAGIC.search(each)
+        if rooted and each == ".." and len(kept) > 1 and kept[-1][1] and kept[-1][0] \
+                and not os.path.exists("/".join(name for name, _, _ in kept)):
+            kept.pop()
+        else:
+            kept.append((each, foldable, held is not None and at < held))
+    return "/".join(glob.escape(name) if held_part else name for name, _, held_part in kept)
 
 
 def _written_sources(word, cwd):
@@ -724,12 +726,12 @@ def _written_sources(word, cwd):
             # writes each name under DEST, so a match made absolute would write the cwd's own folders there.
             target = _expanded(pattern, "")
             if os.path.isabs(target) or not cwd:
-                matches = glob.iglob(target)
+                matches = glob.iglob(_folded(target, 0))
             else:
                 # The folder is joined escaped, so a glob character in it matches itself, then cut from each match.
                 head = os.path.join(cwd, "")
                 matches = (found[len(head):] if found.startswith(head) else os.path.relpath(found, cwd)
-                           for found in glob.iglob(_collapsed_glob(cwd, target)))
+                           for found in glob.iglob(_folded(head.replace(os.sep, "/") + target, head.count(os.sep))))
             matched = list(itertools.islice(matches, _WALK_LIMIT + 1 - len(paths)))
             paths.extend(matched or [_unquoted(each)])
         else:
@@ -775,7 +777,7 @@ def _copy_written_hit(raw, cwd, predicate, fed, filters, made=frozenset()) -> st
             return written
         if fed and _may_hold_a_test(dest, cwd, predicate):
             walked = _first_test_under(source, cwd, predicate, (filters or {}).get(source), dest)
-        elif not fed and base and os.path.isdir(_expanded(source, cwd)) and _may_hold_a_test(dest, cwd, predicate):
+        elif not fed and base and os.path.isdir(_folded(_expanded(source, cwd))) and _may_hold_a_test(dest, cwd, predicate):
             walked = _first_test_under(source, cwd, predicate, None, written, True)
         else:
             continue
@@ -860,7 +862,7 @@ def _first_test_under(path: str, cwd: str, predicate, names=None, dest=None, tre
     if not _unquoted(path).strip():
         return ""
     try:
-        top = _expanded(path, cwd)
+        top = _folded(_expanded(path, cwd))
         if not os.path.isdir(top):
             return ""
     except (OSError, ValueError):
