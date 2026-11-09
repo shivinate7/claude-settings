@@ -142,6 +142,7 @@ class FakeHost:
         self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
         self.pr_calls = []  # each n the run read through pr(): a refusal before any host read leaves it empty
         self.readies, self.ready_refuse = [], None  # readies: each n a draft confirm asked to mark ready; ready_refuse: the reason the host refuses
+        self.posted = []  # (n, body) of each comment post_comment was asked to make: a lane-lint PASS
 
     def pr(self, n):
         self.pr_calls.append(n)
@@ -188,6 +189,9 @@ class FakeHost:
             return False, self.ready_refuse
         self.draft = False
         return True, ""
+
+    def post_comment(self, n, body):  # the fake of Host.post_comment: a comment on pull request n, recorded for the case
+        self.posted.append((n, body))
 
 def wait_sites(src):
     """-> (count, in_loop) over the `wait_checks` calls in a Python source. A call inside a for or while may run many
@@ -3695,6 +3699,8 @@ try:
     include = "include" in flags
     if path.split("/")[0] == "graphql":
         graphql()
+    if method == "GET" and path == "user":  # the authenticated login: a case sets it with `login`, else it is the owner's
+        finish(one({"login": S.get("login", "o")}, jq), 0, include)
     m = re.match(r"^repos/(\{owner\}/\{repo\}|[^/{}]+/[^/{}]+)(?:/(.*))?$", path)
     if not m:
         raise Refused(api_error(404, "Not Found"))
@@ -3848,6 +3854,11 @@ try:
             answer_list(cur["check_runs"], "check_runs", {"total_count": len(cur["check_runs"])})
         answer_list(cur["statuses"], "statuses", {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])})
 
+    elif method == "POST" and re.fullmatch(r"issues/\d+/comments", rel):  # a comment a lane posts (Host.post_comment): kept in the state, as GitHub files it
+        S.setdefault("posted", []).append({"n": int(rel.split("/")[1]), "body": params.get("body")}); save()
+        finish(one({"id": 555, "body": params.get("body")}, jq), 0, include)
+    elif method == "GET" and rel == "issues/comments" and S.get("comments_fail"):  # a case's failed comment read: the text gh prints
+        raise Refused(S["comments_fail"])
     elif method == "GET" and rel == "issues/comments" and "issue_comments" in S:  # the repo's issue comments, seeded by a case (the review record reads them)
         answer_list(S["issue_comments"], None)
 
