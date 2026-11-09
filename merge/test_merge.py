@@ -13684,10 +13684,29 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         # so OWN_TWO is no base, though it is the earlier record's Head
         earlier = review_comment(1, 7, record_text(head=self.OWN_TWO, rounds=(f"Round 1: reviewer, haiku, PASS, {self.OWN}",)))
         self.assertIsNotNone(review_fn(self, "parse_review")(earlier["body"]), "scope: the earlier record does not parse, so the case tests nothing")
-        host = self.record_host(earlier, diffs=self.own_replies(self.OWN))
+        host = self.record_host(earlier, diffs=self.own_replies(self.OWN, self.OWN_TWO))  # OWN_TWO answers as an own commit, so only the named fix base rule can refuse it
         rc, out, err = self.write_at(host, (f"1:reviewer:haiku:PASS:{self.OWN}",), extra=("--fix-check", f"{self.OWN_TWO}:reviewer:sonnet:PASS"))
         self.assertTrue(any("comments" in rel for rel, _ in host.list_calls), "scope: the write did not read the comment list:\n" + err)
         self.assert_refused_without_record(rc, out, err, "a fix base that is an earlier plain record's Head, when the top round names another head")
+        self.assertIn(merge.FIX_NAMED_BASE_REMEDY, err, "the refusal is not the named fix base refusal:\n" + err)
+
+    def test_fix_base_top_round_plain_earlier_head_is_refused_after_an_older_fix_check_fail_or_wide(self):
+        # a chain link needs a passed fix check. The older record at OWN_TWO carries a fix check that FAILed or went WIDE, which counts as the second
+        # round, so the write must carry a second-round line on OWN_THREE, and the newest record is a plain one. OWN_TWO is no base: its reads answer,
+        # so only the named fix base rule refuses it
+        for verdict in ("FAIL", "WIDE"):
+            with self.subTest(verdict=verdict):
+                older = review_comment(1, 7, record_text(head=self.OWN_TWO, rounds=(f"Round 1: reviewer, haiku, PASS, {self.OWN}",),
+                                                         fix=(fix_check_line(verdict=verdict, head=self.OWN, model="haiku"),)))
+                newer = review_comment(2, 7, record_text(head=self.HEAD_B, rounds=(f"Round 1: reviewer, haiku, PASS, {self.OWN}",)))
+                for label, body in (("the older", older["body"]), ("the newer", newer["body"])):
+                    self.assertIsNotNone(review_fn(self, "parse_review")(body), f"scope: the {label} record does not parse, so the case tests nothing")
+                host = self.record_host(older, newer, diffs=self.own_replies(self.OWN, self.OWN_TWO, self.OWN_THREE))
+                rc, out, err = self.write_at(host, (f"1:reviewer:haiku:PASS:{self.OWN}", f"2:reviewer:haiku:FAIL:{self.OWN_THREE}"),
+                                             extra=("--fix-check", f"{self.OWN_TWO}:reviewer:sonnet:PASS"))
+                self.assertTrue(any("comments" in rel for rel, _ in host.list_calls), "scope: the write did not read the comment list:\n" + err)
+                self.assert_refused_without_record(rc, out, err, f"a fix base that is the Head of an older record whose fix check is {verdict}")
+                self.assertIn(merge.FIX_NAMED_BASE_REMEDY, err, f"the refusal after an older fix check {verdict} is not the named fix base refusal:\n" + err)
 
     def test_fix_base_top_round_chain_link_with_a_passed_fix_check_is_written(self):
         # control: the earlier record at OWN_TWO carries a passed fix check, so its Head is a chain link, and a fix check may start from it
