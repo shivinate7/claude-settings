@@ -48,9 +48,11 @@
                           FAILs, naming each PR and file, with its remedy (--lint-unknown-ok never lifts it). PRs in one stack (one head
                           holds the other) are skipped. Added cost: exactly one PR-list read plus one `git merge-tree --write-tree`
                           process per other PR compared; none for a stack-skipped PR, none when there is no other PR. (A PR-list read is
-                          one `gh api` call per 100 PRs. When any PR is compared there is also one `git fetch` of origin's heads and the
-                          stack reads of `git merge-base --is-ancestor`, never a merge-tree.) A merge-tree that cannot read is an unknown
-                          stop, never a pass.
+                          one `gh api` call per 100 PRs, and the PR-list read still runs when there is no other PR. When any PR is
+                          compared there is also one `git fetch` of origin's heads, which covers every origin branch, and the stack reads
+                          of `git merge-base --is-ancestor`, never a merge-tree. A shallow clone that cuts a stack read runs
+                          `git fetch --unshallow` once.) A merge-tree that cannot read is an unknown stop, never a pass. A PR whose head
+                          origin does not hold (a fork's head) is an unknown stop that names the PR: running again never clears it.
                           --with PR,PR,...: also compare against each named open PR, one comma list (a blank or non-digit item, a PR that
                           is not open or not found, and the linted PR itself are each a stop; a repeated number is read once). Missed
                           case: a PR posted under another session id is not found as this lane's, unless --with names it. A PR body
@@ -2615,8 +2617,12 @@ def cross_measure(root, head, n, body, host, with_prs):
     if c:
         raise Stop(f"the cross-measure of {head[:9]} is unknown: git fetch origin failed: {out} {LANE_LINT_CITE}")
     conflicts, unknown = [], []
+    unfetched = []
     for m in picked:
         other = rows[m]["head"]["sha"]
+        if git(root, "rev-parse", "--verify", "-q", f"{other}^{{commit}}")[0]:  # a fork's head is not on origin, so no fetch brings it
+            unfetched.append(f"  #{m}: its head {other[:9]} could not be fetched from origin (a fork's head), so it cannot be compared")
+            continue
         held = head_holds(root, other, head)
         if held is False:
             held = head_holds(root, head, other)
@@ -2632,8 +2638,11 @@ def cross_measure(root, head, n, body, host, with_prs):
                 unknown.append(f"  #{m}: {files[0]}")
     if conflicts:
         raise Stop("\n".join([f"the lint of {head[:9]} FAILs: its head conflicts with another PR's head (git merge-tree), file by file:", *conflicts,
-                              *(["and these PRs could not be compared:", *unknown] if unknown else []),
-                              "Merge the other PR's head into this lane, or this head into that PR's, so the two stack. " + LANE_LINT_REMEDY]))
+                              *(["and these PRs could not be compared:", *unknown, *unfetched] if unknown or unfetched else []),
+                              "Merge one head into the other, or rebase one on the other, so the two stack (either way, for a PR on main or on a release base). " + LANE_LINT_REMEDY]))
+    if unfetched:  # no run clears it: the fork's owner must push the head to origin, or the lane compares it by hand
+        raise Stop("\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unfetched, *unknown,
+                              f"Ask the owner of that head to push it to origin, or compare it with this head by hand. {LANE_LINT_CITE}"]))
     if unknown:
         raise Stop("\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unknown, "Run again. " + LANE_LINT_REMEDY]))
 
