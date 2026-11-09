@@ -10,6 +10,7 @@ Two counts are held shut:
 
 - A crash is not a kill. A mutant is killed only when a suite prints a `FAIL` line. A throw, an import error and a timeout leave no `FAIL` line, or end at the timeout, so they count as crashed.
 - A suite that is not green on the clean source is not a killer. Each suite first runs on the clean source after the same parse and unparse that every mutant carries. A suite that is red there is listed as unusable for that file. A file with no usable suite, a parse error or a missing target reads UNKNOWN, never a rate.
+- A usable suite that stays green on a wholly broken copy of the file never loaded it: the report lists it as `unloaded`. A file whose every usable suite is unloaded reads UNKNOWN, never a rate.
 
 `--report` makes its mutants with `ast_mutants` only. The JS engine serves the replay below. For a JavaScript or TypeScript file the engine makes the same kinds of mutant, from `hooks/mutate_js.mjs`, run by `js_mutants` in `hooks/mutate_shared.py`. The engine parses with the TypeScript compiler API, loaded only through the plain-english-map loader (`lazy-typescript.mjs`, the one home of that import). It reads sites from the parse tree. A string, template text, a comment or JSX text that holds `a === b` gets no mutant. A `true` or `false` in a type position is a literal type and gets none. Each mutant is one text edit on the original source, and nothing else is reprinted. `js_mutants` samples as `ast_mutants` does. `classify_node_tap` reads a `node --test` run as `classify_run` reads a Python suite: only an assertion in a `not ok` block is a kill, and any other red is a crash.
 
@@ -74,9 +75,7 @@ Measured 2026-11-02. Per repo: its last 50 merged pull requests (PRs). Five muta
 - banchi had no per-file `select` in these scores. A survivor may sit in code that no changed suite reaches.
 - banchi `t7/cli_identify.py` was not green on the clean source (assert) in PRs 898, 923, 926, 930 and 956. Cause unread.
 
-Open items, each a debt:
-
-- `replay-big-file-unknown`: a file that does not parse is skipped, and its row still gives a rate.
+A file that does not parse is skipped, and its row reads UNKNOWN with no rate, never OK.
 
 ## The CI report
 
@@ -86,7 +85,7 @@ The job's ruling and its reason are in decision `mutation-ci-report-and-replay`.
 - `--known-defects` plants each defect of `.github/known-defects.json` in a checkout of HEAD, prepared with the profile's install as `--changed` prepares its own (a second install in the action), and runs its catcher suite. A suite that goes red with an assertion on the planted copy is CAUGHT. A suite that passes, crashes or times out is a MISS. A stale or ambiguous anchor, a catcher not green on the clean copy, and an install or link that fails, are UNKNOWN. It exits 1 on any MISS or UNKNOWN (decision `ci-unknown-is-red`), and is the only part of the job that can fail it. With `--base REF` it also exits 1 on a `MISSING <id>`: an id on REF's list that the head list dropped, with no `Known-defect-removed: <id>` trailer in REF..HEAD. It exits 1 on a `CHANGED <id>` too: an entry that differs from REF's, with no `Known-defect-changed: <id>` trailer there.
 - `--tests-for PATH` prints the suites that test one file: the `REPORT_TARGETS` suites when the file is listed, else each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, plus each tracked `test_*.py` that imports or loads the file (read with `ast`). It is the `select` of the `claude_settings` profile in `REPLAY_PROFILES`.
 
-`hooks/test_mutate_ci.py` pins the three modes and the list. A file that no tracked `test_*.py` beside it or importing it covers has no suite, so its mutants are not run and its lines read untested. A load whose path is a function parameter is not followed (debt `tests-for-misses-param-loads`), so an untested line may be a file that `--tests-for` does not map.
+`hooks/test_mutate_ci.py` pins the three modes and the list. A file that no tracked `test_*.py` beside it or importing it covers has no suite, so its mutants are not run and its lines read untested. A load whose path is a function parameter is followed to that function's calls in the same file (`_loads_module`). Only the forms `_loads_module` lists as handled are followed. Other forms are not, and the list of examples is not complete. Examples are an attribute call, an imported loader and a wrapper that calls a wrapper. More are a path parameter left to its default, a lambda loader and a bare alias of the loader. More are a loader that takes the path as `*args` or `**kwargs`, and a call that spreads the path in. More are a name bound only as a `for` or comprehension target. More are a name bound by tuple unpacking, augmented assignment, `with ... as`, a walrus or an attribute store. Also a class constructor that takes the path, `functools.partial(load, "widget.py")`, `map(load, [...])` and a split literal `"widget" + ".py"`. So an untested line may be a file that `--tests-for` does not map. The read also selects a suite wrongly in two cases. A bare call `load(path=X)` feeds a method of the same name. A loader that reassigns its path reads the argument its calls pass.
 
 On 2026-11-02 no CI check read the replay. The CI report above is the first.
 

@@ -23,8 +23,13 @@ Contract the builder codes against. Every case is red until hooks/daily_note.py 
   3. An agent-end reap run on a window day that was killed (a started row, no done row) or crashed
      (an error key). The reader is <config dir>/state/agent-end-payloads.jsonl. Unreadable: unknown.
   4. <config dir>/janitor/launchd-sweep.err.log is not empty and was last written on a window day.
+  5. <config dir>/state/agent-end-drops.jsonl holds a drop row on a window day: a row log() wrote when
+     it dropped the new row (janitor/agent_end_reap.py). One line gives the count, says "dropped", and
+     ends with `Read:` and the file's path. A malformed row is skipped, and so is a row whose `at` cannot
+     be converted to Central (year 9999, late, with a negative offset). A missing file is silent. A
+     directory at the path is unknown, and the start still writes its stamp.
   No volume check. A day of high but steady denies, or a ramp of growing volume, prints nothing.
-- Cost of checks 3 and 4: they read files on disk after the stamp check, start no process, and
+- Cost of checks 3, 4 and 5: they read files on disk after the stamp check, start no process, and
   write nothing beyond the stamp. Watched in this process, since main() catches every error.
 - Each line: plain text, names what failed, and names the reader command by its ABSOLUTE path,
   built from the hook's own folder: <hook folder>/../lint/guard_log_report.py. Nothing else goes
@@ -175,6 +180,22 @@ class NoteCase(unittest.TestCase):
         os.makedirs(os.path.dirname(self.payload_path()), exist_ok=True)
         with open(self.payload_path(), "w", encoding="utf-8") as handle:
             handle.write("".join(lines))
+
+    def drops_path(self):
+        return os.path.join(self.config, "state", "agent-end-drops.jsonl")
+
+    def write_drops(self, lines):
+        os.makedirs(os.path.dirname(self.drops_path()), exist_ok=True)
+        with open(self.drops_path(), "w", encoding="utf-8") as handle:
+            handle.write("".join(lines))
+
+    def stamp_day(self):
+        """The Central day the done-today stamp records, or None when no stamp was written."""
+        path = os.path.join(self.config, "daily-note.stamp")
+        if not os.path.isfile(path):
+            return None
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip()
 
     def sweep_err_path(self):
         return os.path.join(self.config, "janitor", "launchd-sweep.err.log")
@@ -470,6 +491,12 @@ def errored_row(run):
     return json_line({"raw": "{}", "run": run, "state": "done", "error": "RuntimeError('boom')"})
 
 
+def drop_row(when, run, error="PermissionError(13, 'payload log held')"):
+    """A row log() writes when it drops the new row: `at` in the log's own format (%z, so -0500 with no colon),
+    the record's run (null when it has none) and the error's repr."""
+    return json_line({"at": datetime.fromisoformat(when).strftime("%Y-%m-%dT%H:%M:%S%z"), "run": run, "error": error})
+
+
 MALFORMED_ROWS = [
     "not json at all\n",
     json_line(["a", "list"]),
@@ -592,6 +619,73 @@ class AgentEndTests(NoteCase):
         self.assert_short_head_kept(lines[0], unreadable_payload_head(err), tail, keep="unknown")
 
 
+class DropRowTests(NoteCase):
+    """The drops check: one line when log() dropped a row on a window day. The drops file holds one JSON row per
+    drop (janitor/agent_end_reap.py). One line gives the count, says "dropped", and ends with `Read:` and the
+    file's path. The count sits in the head, before `Read:`, so a digit in the path cannot pass for it."""
+
+    def drops_line(self, result):
+        """The one drops line's head (before `Read:`). Its tail must be the drops file's path."""
+        lines = self.failure_lines(result)
+        self.assertEqual(len(lines), 1, "want one drops line, got %r" % lines)
+        head, sep, tail = lines[0].rpartition("Read: ")
+        self.assertEqual(sep, "Read: ", "the drops line has no Read: tail: %r" % lines[0])
+        self.assertEqual(tail, self.drops_path(), "the drops line does not end with its reader path: %r" % lines[0])
+        return head
+
+    def assert_count(self, head, count):
+        self.assertRegex(head, r"(?<!\d)%d(?!\d)" % count, "the drops line does not carry the count %d: %r" % (count, head))
+        self.assertIn("dropped", head, "the drops line does not say dropped: %r" % head)
+
+    def test_two_drop_rows_on_a_window_day_give_one_line_with_the_count(self):
+        self.write_drops([drop_row(YESTERDAY_NOON, "refused-run"), drop_row(YESTERDAY_NOON, None)])
+        self.assert_count(self.drops_line(self.run_note(MORNING)), 2)
+
+    def test_a_drop_row_from_before_the_window_is_not_counted(self):
+        self.write_drops([drop_row("2026-10-12T12:00:00-05:00", "old-run"), drop_row(YESTERDAY_NOON, "new-run")])
+        self.assert_count(self.drops_line(self.run_note(MORNING)), 1)
+
+    def test_a_drop_row_from_before_the_window_alone_is_silent(self):
+        """The control: a row from before the window is not a failure, so the note prints nothing."""
+        self.write_drops([drop_row("2026-10-12T12:00:00-05:00", "old-run")])
+        self.assert_silent(self.run_note(MORNING))
+
+    def test_malformed_drop_rows_are_skipped_and_do_not_count(self):
+        self.write_drops(["not json at all\n", json_line(["a", "list"]),
+                          json_line({"run": "no-at", "error": "x"}),
+                          json_line({"at": "not a time", "run": "bad-at", "error": "x"}),
+                          drop_row(YESTERDAY_NOON, "good-run")])
+        self.assert_count(self.drops_line(self.run_note(MORNING)), 1)
+
+    def test_a_missing_drops_file_is_silent(self):
+        """The control: no drops file is no failure."""
+        self.assert_silent(self.run_note(MORNING))
+
+    def test_an_unreadable_drops_file_prints_one_unknown_line_and_still_writes_the_stamp(self):
+        """A directory at the drops path cannot be read as a log. The note prints one unknown line that ends with
+        the drops path, and the start still writes its stamp. The OSError branch covers it."""
+        os.makedirs(self.drops_path())
+        lines = self.failure_lines(self.run_note(MORNING))
+        self.assertEqual(len(lines), 1, "want one unknown line, got %r" % lines)
+        self.assertIn("unknown", lines[0].lower(), "the drops line does not say unknown: %r" % lines[0])
+        self.assertTrue(lines[0].endswith("Read: " + self.drops_path()),
+                        "the drops line does not end with its reader path: %r" % lines[0])
+        self.assertEqual(self.stamp_day(), TODAY, "the start with an unreadable drops file did not write its stamp")
+
+    def test_a_drop_row_whose_at_overflows_is_skipped_and_the_other_rows_still_count(self):
+        """A row whose `at` is late on 9999-12-31 with a negative offset overflows the UTC-to-Central conversion
+        (OverflowError). That row is skipped: the valid row still counts, the line still prints, and the stamp is written."""
+        import local_time
+        overflow_at = "9999-12-31T23:00:00-05:00"
+        with self.assertRaises(OverflowError, msg="control: the row's at does not overflow the Central conversion"):
+            local_time.line(lambda: datetime.strptime(overflow_at, "%Y-%m-%dT%H:%M:%S%z"))
+        self.write_drops([drop_row(YESTERDAY_NOON, "good-run"), drop_row(overflow_at, "far-run")])
+        result = self.run_note(MORNING)
+        self.assertEqual(result.stderr, "", "the note wrote to stderr on a drop row whose at overflows: %r" % result.stderr)
+        self.assert_count(self.drops_line(result), 1)
+        self.assertEqual(self.stamp_day(), TODAY, "the start with an overflowing drop row did not write its stamp")
+
+
 class SweepErrorLogTests(NoteCase):
     """The daily sweep's error log: one line when it is not empty and was last written on a window day."""
 
@@ -705,6 +799,15 @@ class StartCostTests(NoteCase):
         self.assertEqual(err, "", "the note raised while a process call was refused: %r" % err)
         self.assertEqual(len(out.splitlines()), 2,
                          "control: both checks should print a line, got %r" % out)
+
+    def test_the_first_start_reads_the_drops_file_and_a_second_start_does_not(self):
+        self.write_drops([drop_row(YESTERDAY_NOON, "refused-run")])
+        module = self.load_note()
+        first, _out1, err1 = self.touched_paths(module, MORNING)
+        self.assertEqual(err1, "", "the note raised on the first start: %r" % err1)
+        self.assertIn(self.drops_path(), first, "the first start never read the drops file")
+        second, _out2, _err2 = self.touched_paths(module, LATER_SAME_DAY)
+        self.assertNotIn(self.drops_path(), second, "a second start on the same day read the drops file")
 
     def test_the_first_start_writes_only_the_stamp(self):
         self.fail_both_checks()

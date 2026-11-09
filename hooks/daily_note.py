@@ -20,13 +20,17 @@ lint/guard_log_report.py, beside this hook's folder, so the path holds from any 
   <config dir>/state/agent-end-payloads.jsonl (janitor/agent_end_reap.py `log`). A run counts when
   its run id's time (the part after the pid) falls on a window day, and it has a `started` row
   that no `done` row follows, or a row with an `error` key. A malformed row is skipped. A started
-  row can also be a done row the log lost (debt agent-end-log-loses-row). A missing file is not a
-  failure; an unreadable one is unknown.
+  row can also be a done row that `log()` dropped; the drops line below names that. A missing file
+  is not a failure; an unreadable one is unknown.
+- dropped payload-log rows. The reader is the drops file, <config dir>/state/agent-end-drops.jsonl
+  (janitor/agent_end_reap.py `log`, which appends one JSON row, `at`, `run`, `error`, only when a
+  write fails). A row counts when its `at` falls on a window day. A malformed row is skipped.
+  A missing file is not a failure; an unreadable one is unknown.
 - the daily sweep's error log, <config dir>/janitor/launchd-sweep.err.log
   (janitor/install_launchd.py `build_plist`), exists, is not empty, and was last written on a window
   day. The line names it and launchd-sweep.log, its stdout log. A missing file is not a failure.
-Both read files already on disk, after the done-today stamp check: they start no process and write
-nothing beyond the stamp.
+The agent-end, drops and sweep checks read files already on disk, after the done-today stamp check: they
+start no process and write nothing beyond the stamp. The drops file grows only on a failed write.
 There is no volume check: refusals grow with use, so a count jump over a 7-day baseline
 fires on ordinary days (debt note daily-note-no-volume-check).
 A line carries its UTC offset (an old line has none). Its day is the date of the reader-local `when`.
@@ -139,9 +143,36 @@ def agent_end_failures(path, window):
            if (seen["bad"] or (seen["started"] and not seen["done"])) and run_day(run) in days]
     if not bad:
         return []
-    return [fit("%d agent-end reap run(s) killed or crashed, %s: servers may be left (or a lost row, debt "
-                "agent-end-log-loses-row)." % (len(bad), span_of(window)),
+    return [fit("%d agent-end reap run(s) killed or crashed, %s: servers may be left (or a done row "
+                "that log() dropped, see the drops line)." % (len(bad), span_of(window)),
                 "%d agent-end reap run(s) killed or crashed:" % len(bad), "Read: " + path)]
+
+
+def drops_failures(path, window):
+    """One line when log() dropped a payload-log row on a window day, from the drops file at PATH.
+    A row counts when its `at` (the log's time format, with a UTC offset) falls on a window day."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            rows = handle.readlines()
+    except FileNotFoundError:
+        return []
+    except OSError as err:
+        return [fit("agent-end drops file cannot be read (%s): its state is unknown." % type(err).__name__,
+                    "agent-end drops file cannot be read (%s):" % type(err).__name__, "Read: " + path)]
+    days = set(window)
+    count = 0
+    for text in rows:
+        try:
+            when = datetime.strptime(json.loads(text)["at"], "%Y-%m-%dT%H:%M:%S%z")
+            day = central_day(when)
+        except (ValueError, KeyError, TypeError, OverflowError, OSError):  # OverflowError: `at` near year 9999
+            continue
+        if day in days:
+            count += 1
+    if not count:
+        return []
+    return [fit("%d agent-end payload-log row(s) dropped, %s: log() could not write them." % (count, span_of(window)),
+                "%d agent-end payload-log row(s) dropped:" % count, "Read: " + path)]
 
 
 def sweep_error_failures(err_path, out_path, window):
@@ -164,7 +195,8 @@ def sweep_error_failures(err_path, out_path, window):
 
 def main():
     try:
-        config = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+        from shared_names import config_dir  # the one home of the config dir; inside the try, so a lone copy exits 0
+        config = config_dir()
         stamp_path = os.path.join(config, "daily-note.stamp")
         today = central_today()
         try:
@@ -192,6 +224,7 @@ def main():
                        "guard.log cannot be read (%s):" % type(err).__name__,
                        "Read: python %s" % READER)]
         out += agent_end_failures(os.path.join(config, "state", "agent-end-payloads.jsonl"), window)
+        out += drops_failures(os.path.join(config, "state", "agent-end-drops.jsonl"), window)
         out += sweep_error_failures(os.path.join(config, "janitor", "launchd-sweep.err.log"),
                                     os.path.join(config, "janitor", "launchd-sweep.log"), window)
         os.makedirs(config, exist_ok=True)
