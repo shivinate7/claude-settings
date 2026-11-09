@@ -903,18 +903,43 @@ def _own_tier_proved(transcript: str, tier: str) -> bool:
     return False
 
 
+def _open_substitutions(text: str) -> int:
+    """How many `$(` spans in `text` are still open at its end. Inside a span, a `(` opens and a `)` closes."""
+    depth = index = 0
+    while index < len(text):
+        if text.startswith("$(", index):
+            depth, index = depth + 1, index + 2
+            continue
+        if depth and text[index] in "()":
+            depth += 1 if text[index] == "(" else -1
+        index += 1
+    return depth
+
+
 def _command_words(args):
     """`args` up to the end of their command. The segment splitter cuts at `&&`, `||`, `;`, `|` and a
     newline, but not at `(`, `)` or a lone `&`. A `)` glued to a word closes the subshell the command
-    sits in, and a glued `&` sends it to the background: either ends that word and the command."""
+    sits in, and a glued `&` sends it to the background: either ends that word and the command.
+    A `)` that closes a `$(` does neither. The words of a `$( )` span join into one word, whose text
+    is unknown until the shell runs it, so `$(printf origin) main` keeps its `main`."""
     words = []
+    span = ""
     for arg in args:
+        arg = span + " " + arg if span else arg
         word = arg.rstrip(")&")
+        tail = arg[len(word):]
+        opened, closes = _open_substitutions(word), len(tail) - len(tail.lstrip(")"))
+        span = arg if opened > closes else ""
+        if span:
+            continue
+        word = arg[:len(word) + opened]
         if word != arg:
             if word:
                 words.append(word)
             break
         words.append(arg)
+    if span:
+        words.append(span)
     return words
 
 
