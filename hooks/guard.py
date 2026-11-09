@@ -151,6 +151,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
+                       A merge's own page at MERGE_HEAD, on the base's first-parent line, passes.
                        (records-index-at-merge)
   conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker
                        line in one file's added lines, read with `git diff --check`: the index, or the working

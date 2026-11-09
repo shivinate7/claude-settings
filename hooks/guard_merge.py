@@ -321,7 +321,12 @@ def undrafted_pr_create(segment: str) -> bool:
 #
 # The page is rebuilt only at merge. The commit is refused when the page it would hold differs from
 # HEAD's page, the base tip's page AND origin/<base>'s page: a merge of the base into the lane brings
-# the base's page, so it passes. The base is `resolve_default_base`, read at its TIP.
+# the base's page, so it passes. The base is `resolve_default_base`, read at its TIP. A merge that brought
+# a page the base has since moved past also passes: the page equals MERGE_HEAD's page by exact blob id,
+# and MERGE_HEAD is on origin/<base>'s first-parent line (`rev-list --first-parent`), so a branch merged
+# into the base is no pass. Those reads run only on the path that would refuse, and a failed read is refused.
+# A rebuilt page, a page of a merge of any commit off that line, and a page taken after the merge state
+# is gone are refused.
 # The hook runs BEFORE the shell chain, so `commit -a` (a tracked page), `commit <page>` and a `git add`
 # that reaches the page earlier in the same command read the working tree, and any other commit reads
 # the index. A commit that names paths (`--`, --only) holds only those paths. A non-git segment whose
@@ -447,6 +452,19 @@ def _runs_generator(segment):
     return word == _GENERATOR and not _GENERATOR_READS & set(rest)
 
 
+def _merge_head_page(top, base):
+    """The blob id of the page at MERGE_HEAD when a merge is in progress and MERGE_HEAD is a commit on
+    origin/<base>'s first-parent line (a past base tip), else ''. A failed or short read gives ''."""
+    # One read gives MERGE_HEAD's commit and its page: it fails when no merge is in progress.
+    done = _git(top, "rev-parse", "MERGE_HEAD", "MERGE_HEAD:" + RECORDS_PAGE)
+    ids = done.stdout.split() if done is not None and done.returncode == 0 else []
+    if len(ids) != 2:
+        return ""
+    origin = base if base.startswith("origin/") else "origin/" + base
+    line = _git(top, "rev-list", "--first-parent", origin)   # one id per base tip, newest first
+    return ids[1] if line is not None and line.returncode == 0 and ids[0] in line.stdout.split() else ""
+
+
 def _commit_page_id(top, working):
     """The blob id of the page the commit will hold: the working tree's (as `git add` would store
     it) or the index's. '' for no page, None for a failed read or an unmerged page."""
@@ -464,8 +482,8 @@ def _commit_page_id(top, working):
 
 
 def records_page_hit(stripped: str, cwd: str) -> str:
-    """Return the commit when it would hold a records page that is none of HEAD's, the base tip's
-    and origin/<base>'s, else ''. Each segment is judged from its own command word."""
+    """Return the commit when it would hold a records page that is none of HEAD's, the base tip's,
+    origin/<base>'s and MERGE_HEAD's (MERGE_HEAD on origin/<base>'s first-parent line), else ''. Each segment is judged from its own command word."""
     staged = generated = False   # an earlier `git add` reaches the page / an earlier segment rewrites it
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
@@ -502,7 +520,8 @@ def records_page_hit(stripped: str, cwd: str) -> str:
             return "git commit " + RECORDS_PAGE
         page_id = _commit_page_id(top, working)
         if page_id is not None and page_id not in (head_id, base_id, origin_id):
-            return "git commit " + RECORDS_PAGE
+            if not page_id or page_id != _merge_head_page(top, base):
+                return "git commit " + RECORDS_PAGE
     return ""
 
 
