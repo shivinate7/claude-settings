@@ -29569,6 +29569,241 @@ role_model_refuse("role-model: fix check: Explore on sonnet with the marker is d
                   lacks=ROLE_LACKS + (FIX_MARKER,))
 
 
+# ---- B5: a fix check reviewer's chain (lane fix-check-render-first). A reviewer on Sonnet with the fix check marker is refused
+# when the merge tool would refuse to record its fix check: its reviewed head (a `Reviewed head: <40-hex>` line) must be the Head
+# of the newest earlier review record on the pull request (the `PR <n>` line, line 2), that record must have no Fix check line,
+# and the reviewed head must differ from the live head. The chain comes through `fix_check_read`, the guard's module-level name
+# (patched below), which returns (records, live_head): merge's parse_review results, oldest first, None for a malformed body.
+# Fail open: a read that raises, no PR line and no reviewed head each allow the spawn and log one agent-role-model-unread row,
+# which role_model_check's unread flag gives. A brief that is not a fix check never reads the chain.
+FIX_CHAIN_READ = "fix_check_read"
+FIX_CHAIN_SENTENCE = ("the reviewed head must be the Head of the newest earlier review record on this pull request, "
+                      "and that record must have no Fix check line")  # the tool's reason, as merge.py prints it
+FIX_EMPTY_REASON = "the fix diff is empty"
+FIX_H0, FIX_H1, FIX_H2, FIX_H3 = "0a" * 20, "1b" * 20, "2c" * 20, "3d" * 20
+
+
+def fix_check_merge():
+    """merge/merge.py, imported for its own parse_review and review_body, so each case's records have the tool's shape."""
+    lane = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "merge")
+    if lane not in sys.path:
+        sys.path.append(lane)
+    import merge as merge_module
+    return merge_module
+
+
+def fix_check_record(head, fix=None, verdict="FAIL"):
+    """One review record on pull request 12 at `head`, parsed by merge's own parse_review. `fix` is the fix check tuple, or None."""
+    merge_module = fix_check_merge()
+    rec = merge_module.parse_review(merge_module.review_body(12, head, "normal", "yes", [(1, "reviewer", "sonnet", verdict)], "not owed", fix=fix))
+    if rec is None:
+        raise RuntimeError("merge.parse_review refused the fixture record at " + head)
+    return rec
+
+
+def fix_brief(head=FIX_H1, pr_line="PR 12", pre=(), extra=()):
+    """A fix check reviewer's brief as lines: the marker first, the PR line second, `pre` lines, the reviewed head, then `extra`.
+    A None `pr_line` or `head` leaves that line out."""
+    lines = [FIX_MARKER + ". Re-check the fix on the new head."]
+    if pr_line is not None:
+        lines.append(pr_line)
+    lines.extend(pre)
+    if head is not None:
+        lines.append("Reviewed head: " + head)
+    lines.extend(extra)
+    return lines
+
+
+def fix_check_judged(lines, records=(), live=FIX_H3, read_error=None):
+    """(reason, unread, reads) for one reviewer spawn on Sonnet whose brief is `lines`, judged in this process by role_model_check
+    against the rules fixture's pointer. The chain read is replaced by `fix_check_read`: it records each PR it is asked for, then
+    returns (`records`, `live`), or raises `read_error`. The config folder is restored after the call."""
+    module = _load_guard_module()
+    reads = []
+
+    def fake_read(pr):
+        reads.append(pr)
+        if read_error is not None:
+            raise read_error
+        return list(records), live
+    config = role_config("fixcheck", ROLE_RULES_POINTER)
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = config
+    try:
+        with mock.patch.object(module, FIX_CHAIN_READ, fake_read, create=True):
+            reason, _matched, unread = module.role_model_check(
+                "Agent", {"subagent_type": "reviewer", "model": "sonnet", "prompt": "\n".join(lines) + "\n"})
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+    return reason, unread, reads
+
+
+def fix_check_scope_problem():
+    """None when the fixture loads the reviewer's Haiku row, else the cause. A plain reviewer on Sonnet with no round or fix marker
+    is refused above its row, and that refusal is not unread, so a missing table or pointer shows here, not as a green allow."""
+    reason, unread, reads = fix_check_judged(["Check the diff.", "PR 12", "Reviewed head: " + FIX_H1])
+    if not reason:
+        return "the scope fixture did not load the reviewer row: a plain reviewer on sonnet was allowed"
+    if unread or reads:
+        return "the scope fixture for a plain reviewer read a chain or was logged unread"
+    return None
+
+
+def fix_check_refuses_a_fixed_chain():
+    scope = fix_check_scope_problem()
+    if scope:
+        return False, scope
+    chain = [fix_check_record(FIX_H1), fix_check_record(FIX_H2, fix=(FIX_H1, "reviewer", "sonnet", "PASS"))]
+    reason, unread, reads = fix_check_judged(fix_brief(head=FIX_H2), chain)
+    if reads != [12]:
+        return False, "the chain was read for %r, want PR 12 once, so the fix check was not judged on its chain" % (reads,)
+    if not reason:
+        return False, "a fix check whose newest record already has a fix check was allowed"
+    if FIX_CHAIN_SENTENCE not in reason:
+        return False, "the refusal does not carry the tool's reason: %r" % reason
+    if unread:
+        return False, "a refused fix check was also logged as unread"
+    return True, "a fix check on a chain whose newest record has a fix check is refused, with the tool's reason"
+
+
+def fix_check_allows_an_eligible_chain():
+    scope = fix_check_scope_problem()
+    if scope:
+        return False, scope
+    chain = [fix_check_record(FIX_H0), fix_check_record(FIX_H1)]
+    reason, unread, reads = fix_check_judged(fix_brief(head=FIX_H1, pre=("Files: hooks/guard.py.",)), chain, live=FIX_H2)
+    if reads != [12]:
+        return False, "an eligible fix check's chain was read for %r, want PR 12 once" % (reads,)
+    if reason:
+        return False, "an eligible fix check was refused: %s" % reason
+    if unread:
+        return False, "an eligible fix check was logged as unread"
+    return True, "a fix check on a chain whose newest record has no fix check and names its head is allowed, and its reviewed head may sit on a later line"
+
+
+def fix_check_refuses_a_head_that_is_not_the_newest():
+    scope = fix_check_scope_problem()
+    if scope:
+        return False, scope
+    reason, unread, reads = fix_check_judged(fix_brief(head=FIX_H0), [fix_check_record(FIX_H1)], live=FIX_H2)
+    if reads != [12]:
+        return False, "the chain was read for %r, want PR 12 once" % (reads,)
+    if not reason:
+        return False, "a reviewed head that is not the newest record's head was allowed"
+    if FIX_CHAIN_SENTENCE not in reason:
+        return False, "the refusal does not carry the tool's reason: %r" % reason
+    if unread:
+        return False, "a refused fix check was also logged as unread"
+    return True, "a reviewed head that is not the newest record's head is refused, with the tool's reason"
+
+
+def fix_check_refuses_the_live_head_as_its_own_base():
+    scope = fix_check_scope_problem()
+    if scope:
+        return False, scope
+    reason, unread, reads = fix_check_judged(fix_brief(head=FIX_H2), [fix_check_record(FIX_H2)], live=FIX_H2)
+    if reads != [12]:
+        return False, "the chain was read for %r, want PR 12 once" % (reads,)
+    if not reason:
+        return False, "a fix check from the live head, whose fix diff is empty, was allowed"
+    if FIX_EMPTY_REASON not in reason:
+        return False, "the refusal does not name the empty fix diff: %r" % reason
+    return True, "a fix check from the live head is refused as an empty fix diff"
+
+
+def fix_check_fails_open_on_a_read_error():
+    scope = fix_check_scope_problem()
+    if scope:
+        return False, scope
+    reason, unread, reads = fix_check_judged(fix_brief(head=FIX_H1), live=FIX_H2, read_error=RuntimeError("gh read failed"))
+    if reads != [12]:
+        return False, "the chain read was never attempted for PR 12, so the fail-open path never ran: reads %r" % (reads,)
+    if reason:
+        return False, "a chain read that raised refused the fix check: %s" % reason
+    if not unread:
+        return False, "a chain read that raised was allowed without a log row"
+    return True, "a fix check whose chain read raises is allowed and logged (fail open)"
+
+
+def fix_check_fails_open_with_no_pr_line():
+    scope = fix_check_scope_problem()
+    if scope:
+        return False, scope
+    reason, unread, reads = fix_check_judged(fix_brief(head=FIX_H1, pr_line=None), [fix_check_record(FIX_H1)], live=FIX_H2)
+    if reads:
+        return False, "a fix check with no PR line read the chain for %r" % (reads,)
+    if reason:
+        return False, "a fix check with no PR line was refused: %s" % reason
+    if not unread:
+        return False, "a fix check with no PR line was allowed without a log row"
+    return True, "a fix check with no PR line is allowed and logged, and reads no chain (fail open)"
+
+
+def fix_check_fails_open_with_no_reviewed_head():
+    scope = fix_check_scope_problem()
+    if scope:
+        return False, scope
+    reason, unread, reads = fix_check_judged(fix_brief(head=None), [fix_check_record(FIX_H1)], live=FIX_H2)
+    if reads:
+        return False, "a fix check with no reviewed head read the chain for %r" % (reads,)
+    if reason:
+        return False, "a fix check with no reviewed head was refused: %s" % reason
+    if not unread:
+        return False, "a fix check with no reviewed head was allowed without a log row"
+    return True, "a fix check with no reviewed head is allowed and logged, and reads no chain (fail open)"
+
+
+def fix_check_reads_the_pr_on_line_two_only():
+    scope = fix_check_scope_problem()
+    if scope:
+        return False, scope
+    lines = fix_brief(head=FIX_H1, extra=("Context: PR 99 was reviewed before this fix.",))
+    reason, unread, reads = fix_check_judged(lines, [fix_check_record(FIX_H1)], live=FIX_H2)
+    if reads != [12]:
+        return False, "the chain was read for %r, want PR 12 from line two, not a PR named later in the brief" % (reads,)
+    if reason:
+        return False, "an eligible chain on PR 12 was refused: %s" % reason
+    return True, "the chain is read for the PR on line two, and a PR named later in the brief is ignored"
+
+
+def fix_check_control_reads_no_chain_for_a_round_reviewer():
+    scope = fix_check_scope_problem()
+    if scope:
+        return False, scope
+    lines = ["Round 2 of 3. Re-check the diff.", "PR 12", "Reviewed head: " + FIX_H1]
+    reason, unread, reads = fix_check_judged(lines, [fix_check_record(FIX_H1)], live=FIX_H2)
+    if reads:
+        return False, "a round 2 reviewer brief read the chain for %r, which only a fix check does" % (reads,)
+    if reason:
+        return False, "a round 2 reviewer on sonnet was refused: %s" % reason
+    if unread:
+        return False, "a round 2 reviewer on sonnet was logged as unread"
+    return True, "a round 2 reviewer on sonnet is allowed and reads no chain (the control)"
+
+
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a fix check whose newest record has a fix check is refused, with the tool's reason",
+                         fix_check_refuses_a_fixed_chain))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: an eligible chain is read and allowed, with the reviewed head on a later line",
+                         fix_check_allows_an_eligible_chain))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a reviewed head that is not the newest record's head is refused, with the tool's reason",
+                         fix_check_refuses_a_head_that_is_not_the_newest))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a reviewed head equal to the live head is refused as an empty fix diff",
+                         fix_check_refuses_the_live_head_as_its_own_base))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a chain read that raises fails open, allows the spawn and logs the unread row",
+                         fix_check_fails_open_on_a_read_error))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a fix check with no PR line fails open, allows the spawn and logs the unread row",
+                         fix_check_fails_open_with_no_pr_line))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a fix check with no reviewed head fails open, allows the spawn and logs the unread row",
+                         fix_check_fails_open_with_no_reviewed_head))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: the PR is read from line two only, a PR named later in the brief is ignored",
+                         fix_check_reads_the_pr_on_line_two_only))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a round 2 reviewer brief reads no chain (control)",
+                         fix_check_control_reads_no_chain_for_a_round_reviewer))
+
+
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 
 # The log checkers tagged "windows". Each one reads a live process's start time (guard.py
