@@ -217,6 +217,11 @@ def second_checkout(t):
     sh(co, "git", "add", "-A"); sh(co, "git", "commit", "-q", "-m", "mailaudit: feat"); sh(co, "git", "push", "-q", "origin", "feat")
     return co, other
 
+def checkout_key(p):
+    """One key for comparing a checkout path: git prints C:/ paths on Windows and os.path prints C:\\ paths for the same folder.
+    None stays None, so a missing value still fails the assert that names it."""
+    return None if p is None else os.path.normcase(os.path.normpath(p))
+
 class RepoDirRuns:
     """Mixin for a case that runs merge.main from one checkout and names another with -C or --repo-dir. Needs self.co, self.b_co, self.b_other, self.now."""
 
@@ -12585,7 +12590,8 @@ class RepoDirFlag(RepoDirRuns, Env):
         """A control: with no flag, the process directory names the checkout, and the lock and the stamp config come from it."""
         rc, out, seen = self.run_from(self.b_co, ["7"])
         self.assertEqual(rc, 0, out)
-        self.assertEqual(seen["locks"], [self.b_co], "without the flag, the lock is not at the process directory's checkout")
+        self.assertEqual([checkout_key(p) for p in seen["locks"]], [checkout_key(self.b_co)],
+                         "without the flag, the lock is not at the process directory's checkout")
         self.assertEqual(seen["hosts"][0].required, [MAILAUDIT_CHECK], "without the flag, the stamp config is not the process directory's")
 
     def test_the_named_checkout_is_the_one_the_host_the_lock_and_the_config_read(self):
@@ -12594,8 +12600,9 @@ class RepoDirFlag(RepoDirRuns, Env):
                 rc, out, seen = self.run_from(self.co, argv)
                 self.assertTrue(seen["hosts"], "merge built no host, so it did not read the named checkout (rc %r): %s" % (rc, out))
                 cwd = seen["hosts"][0].built_with.get("cwd")
-                self.assertEqual(cwd, self.b_co, "the host's gh reads ran in %r, not the named checkout" % (cwd,))
-                self.assertEqual(seen["locks"], [self.b_co], "the merge lock was taken in %r, not the named checkout" % (seen["locks"],))
+                self.assertEqual(checkout_key(cwd), checkout_key(self.b_co), "the host's gh reads ran in %r, not the named checkout" % (cwd,))
+                self.assertEqual([checkout_key(p) for p in seen["locks"]], [checkout_key(self.b_co)],
+                                 "the merge lock was taken in %r, not the named checkout" % (seen["locks"],))
                 self.assertEqual(seen["hosts"][0].required, [MAILAUDIT_CHECK],
                                  "the stamp config was read from another checkout: %r" % (seen["hosts"][0].required,))
 
@@ -12620,7 +12627,8 @@ class RepoDirFlag(RepoDirRuns, Env):
         host = PullsHost([batch_pull(7, head)], {head: green()}, comments=[record_of(7, head)])
         rc, out, seen = self.run_from(self.co, ["--reviewed", "-C", self.b_co], host=host)
         self.assertEqual(rc, 0, "-C alone with --reviewed was refused or failed:\n" + out)
-        self.assertEqual(seen["locks"], [self.b_co], "--reviewed read the process directory's checkout, not the -C one: %r" % (seen["locks"],))
+        self.assertEqual([checkout_key(p) for p in seen["locks"]], [checkout_key(self.b_co)],
+                         "--reviewed read the process directory's checkout, not the -C one: %r" % (seen["locks"],))
         self.assertTrue(any(line.startswith("#7 ") for line in out.splitlines()), "--reviewed printed no line for #7:\n" + out)
 
     def test_a_path_that_is_no_checkout_stops_before_any_read(self):
@@ -12650,7 +12658,7 @@ class RepoDirFlag(RepoDirRuns, Env):
     def test_a_repeated_flag_takes_its_last_value(self):
         rc, out, seen = self.run_from(self.co, ["--repo-dir", self.co, "--repo-dir", self.b_co, "7"])
         self.assertTrue(seen["locks"], "merge stopped before any read: " + out)
-        self.assertEqual(seen["locks"], [self.b_co], "merge read the first -C value, not the last")
+        self.assertEqual([checkout_key(p) for p in seen["locks"]], [checkout_key(self.b_co)], "merge read the first -C value, not the last")
 
     def test_an_abbreviation_of_the_flag_is_a_parse_error(self):
         """A control: `--repo` is refused on the old parser and on the new one. The prefix cases below are the red ones."""
