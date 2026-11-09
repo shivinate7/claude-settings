@@ -36,6 +36,10 @@ Limits:
 - A pull-list read that fails on a push to main stays an ask, as before.
 - GitHub auto-merge fires later, so a batch that turns busy after auto-merge is on is missed.
 - The merge tool's own refusal offers no `override`: nothing lifts a Stop there.
+- A raw `gh api` merge path the guard cannot read as a number or a plain `$VAR` is not matched: `pulls/${PR:-1}/merge`, `pulls/$(…)/merge`, a backtick number, an absolute URL, and `-X=PUT`. Main allowed these too. A plain `$PR` or `$REPO` is matched and denied as unknown.
+- The legacy `repos/:owner/:repo/pulls/5/merge` form reads as a repo that cannot resolve, so it is denied as unknown: a false alarm, never a bypass.
+- The variable-path refusal says to wait, but waiting never resolves `$PR`: name the pull request by its number.
+- Each batch read has its own 25 s deadline, so two hung reads in one command add up to about 50 s, near the guard's 60 s hook timeout.
 - For the rest, the rule binds the owner by the owner's own word.
 - A required check with no entry and no workflow run on the other head does not count. So in the seconds after a PR goes ready, before GitHub creates its runs, a merge is not refused.
 - A claim or heal commit at merge changes this PR's head. The running batch does not hold the new head, so the brake refuses again, and the claim is reverted. Build the next batch on this batch's head at ready, after its records step.
@@ -48,7 +52,7 @@ Why: batch 13's lanes, roadmap steps c182 and c187 (PRs #777 and #778), each con
 
 - Risk: named incident, batch 13 against batch 12, Oct 28. Landed 2026-10-28; overlapping batches 2026-11-02.
 - Check: `merge/test_merge.py` classes BatchRunningReads and BatchBrake, and the `hooks/test_guard.py` cases named `merge-batch:` and `merge-route:`. The overlap cases replay PR #63 merging while PR #65 (head b8416ca, which contains #63's head 476f456c) runs.
-- Cost: one batch read is one read of the open pull list. When another ready PR is on the base, it adds one read of the required checks (none with a pinned list). Each such PR adds three reads (check runs, commit statuses, workflow runs), and each busy one adds up to two compare reads. Per `--confirm`, two batch reads. Per preview, one. Per guarded merge call of a settled head, one, inside the guard's one read deadline. A raw API merge and auto-merge cost the same as a guarded merge call. A push that writes main adds one `git rev-parse` for the pushed head and one pull-list read (the `merge-route:` cost case pins the spawn count); a push to any other branch adds none. No process outlives the call, no file is written, no timer.
+- Cost: one batch read is one read of the open pull list. When another ready PR is on the base, it adds one read of the required checks (none with a pinned list). Each such PR adds three reads (check runs, commit statuses, workflow runs), and each busy one adds up to two compare reads. Per `--confirm`, two batch reads. Per preview, one. Per guarded merge call of a settled head, one, inside the guard's one read deadline. A raw API merge and auto-merge cost the same as a guarded merge call. A push that writes main adds one `git rev-parse` for the pushed head and one pull-list read (the `merge-route:` cost case pins the spawn count); when a busy PR blocks it, one more compare read tests whether the pushed head equals main's tip (a push that moves nothing keeps its ask), inside the same deadline. A push to any other branch adds none. No process outlives the call, no file is written, no timer.
 
 Kind: process
 Home: merge/merge.py
