@@ -4644,7 +4644,7 @@ caseK11() {
 }
 
 # ---- caseL: the merge allow rules come from the source checkout, and the log says what was written ----
-# The log names `merge allow rules`, not `merge --confirm allow rules`: the file holds the role rules as well as the confirm rules.
+# The log names `cloud allow rules`, not `merge allow rules` or `merge --confirm allow rules`: the file holds the gh rules and the role rules as well as the confirm rules.
 # allow_case NAME HAS [SETTINGS]: a session's own checkout at $work/NAME-co with settings.json `{}`. HAS=1 adds this repo's
 # merge/cloud_allow.json; HAS=0 is a checkout on a commit from before the rules landed. SETTINGS=repo puts this repo's
 # settings.json in the checkout instead of `{}`, so the install carries the repo's own permissions too. Then one piped
@@ -4699,8 +4699,8 @@ caseL2() {
     bad "$name" "install.sh exited $rc: $(install_problems)"
   elif [ "$(written_allow)" != "$(want_allow)" ]; then
     bad "$name" "allow rules [$(written_allow | tr '\n' ' ')] != the file's [$(want_allow | tr '\n' ' ')]"
-  elif ! printf '%s\n' "$out" | grep -qF "+ $count merge allow rules from $co at $sha)"; then
-    bad "$name" "the log does not name the count, the checkout and its commit: $(settings_lines)"
+  elif ! printf '%s\n' "$out" | grep -qF "+ $count cloud allow rules from $co at $sha)"; then
+    bad "$name" "the log does not say '+ $count cloud allow rules from $co at $sha)': $(settings_lines)"
   else
     ok "$name"
   fi
@@ -4796,8 +4796,9 @@ move_install() {
   rc=$?
 }
 merge_rule_count() { jq '[.permissions.allow[]? | select(startswith("Bash(~/.claude/bin/merge"))] | length' "$h/.claude-cfg/settings.json" 2>/dev/null; }
-# The count main's merge/cloud_allow.json holds, read from the fixture's main (move_fixture set fx): install must write that many.
-want_merge_count() { git -C "$fx/src" show HEAD:merge/cloud_allow.json | jq '.permissions.allow | length'; }
+# The merge-shim rules main's merge/cloud_allow.json holds, read from the fixture's main (move_fixture set fx): install must write that many.
+# The filter is merge_rule_count's, so the gh rules of ruling 163 a are not counted here.
+want_merge_count() { git -C "$fx/src" show HEAD:merge/cloud_allow.json | jq '[.permissions.allow[] | select(startswith("Bash(~/.claude/bin/merge"))] | length'; }
 
 # The count comes from the rules file, which holds the role rules as well as the confirm rules, so a tier added to the file needs no edit here.
 # A file with no rules fails: an empty file would otherwise pass as 0 = 0.
