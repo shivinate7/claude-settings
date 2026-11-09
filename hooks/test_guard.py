@@ -16,9 +16,10 @@ GUARD_HEARTBEAT=<seconds> sets the quiet time after which the run prints a progr
 and appends it to STALL_WATCH_BEAT when that is set (default 60; a number above 0). A run that prints
 nothing for minutes is cut by the stall watch. A malformed value stops the run before a case runs.
 
-GUARD_SHARD=<i>/<n> runs every n-th selected case, starting at the i-th (1-based), after the other
-filters. The n shards of one selection are disjoint and together hold every case, so CI can split
-the suite across jobs and drop none. A malformed value stops the run before a case runs.
+GUARD_SHARD=<i>/<n> or GUARD_SHARD=<i>-<n> runs every n-th selected case, starting at the i-th
+(1-based), after the other filters. The n shards of one selection are disjoint and together hold
+every case, so CI can split the suite across jobs and drop none. A malformed value stops the run
+before a case runs.
 
 Each case drives the guard as Claude Code drives it: one JSON object on stdin, and the decision read
 back off stdout. An empty stdout is an allow. Anything else is parsed for permissionDecision.
@@ -197,12 +198,15 @@ def beat(where):
 
 
 def parse_shard(value):
-    """(i, n) from GUARD_SHARD's "<i>/<n>", 1 <= i <= n; (1, 1) when unset. Anything else stops the run."""
+    """(i, n) from GUARD_SHARD's "<i>-<n>" or "<i>/<n>", 1 <= i <= n; (1, 1) when unset.
+    Anything else stops the run. Builders use "<i>-<n>" because the harness refuses `VAR=i/n cmd`
+    in a worktree (bandaid); CI keeps "<i>/<n>"."""
     if not value:
         return 1, 1
-    m = re.fullmatch(r"([1-9][0-9]*)/([1-9][0-9]*)", value)
+    m = re.fullmatch(r"([1-9][0-9]*)[/-]([1-9][0-9]*)", value)
     if not m or int(m.group(1)) > int(m.group(2)):
-        sys.exit("GUARD_SHARD=%r: want <i>/<n> with 1 <= i <= n. Nothing ran." % value)
+        sys.exit("GUARD_SHARD=%r: want <i>-<n> (builders; the harness refuses VAR=i/n cmd in a worktree) "
+                 "or <i>/<n> (CI), with 1 <= i <= n. Nothing ran." % value)
     return int(m.group(1)), int(m.group(2))
 
 
