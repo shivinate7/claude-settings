@@ -52,7 +52,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `self-repository` audit. It flags each local `uses: ./...` call, an action such as `./actions/a`
    too, not only a workflow. A floating version once turned a PR red.
    Pins of claude-settings' `ste-lint` and `zizmor` actions follow the session's tools (decision
-   `action-pins-follow-sessions`). `bin/ste-changed` reads those pins. It prints drift and exits 3. The
+   `action-pins-follow-sessions`). `bin/ste-changed` reads those pins. It prints drift. A direct run exits 3; lane lint shows it as a note. The
    session then moves the pin in a lane of its own. No bot and no schedule moves it. That tool reads
    only the `ste-lint` and `zizmor` pins. Other claude-settings pins can drift unseen.
    Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.

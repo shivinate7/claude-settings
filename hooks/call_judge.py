@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """PreToolUse judge for an Agent spawn, an AskUserQuestion call and an ArtifactData write of a
 waiting-page item. One command hook replaces the settings.json `prompt` hook on Agent and the `agent`
-hook on AskUserQuestion: a hook of those types sees only the call's JSON and cannot read the override
-file, so no owner override reached it (decision owner-override).
+hook on AskUserQuestion. A prompt hook sees only the call's JSON. An agent hook reads files with tools and
+returns ok. Neither has a command field, so neither runs guard_core.refuse, the one home of the owner
+override (decision owner-override).
 
 An AskUserQuestion box runs hooks/question_form.py chat_hit first. A hit refuses with the rule it
 names, through the same refuse(), and makes no model call; the model sees only a box that passes.
@@ -123,8 +124,8 @@ PAST_RULING_ITEM = (
     "a re-ask the ruling allows is fine. This item passes when no list follows. "
     "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date."
 )
-# The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 15 s.
-PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 15
+# The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 60 s.
+PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 60
 # The seven items, then the eighth, a question to the owner is judged on: one text, for the chat box and the page.
 JUDGE_ITEMS = (
     "1. The Goal is in the owner's terms.\n"
@@ -230,13 +231,15 @@ def sets_options(write):
 
 def is_reask(write):
     """True for a judged set or update whose data has non-empty `options` and a `lastAnswer` dict with no `choice` or
-    choice "none", and a note that is a string, non-empty after strip."""
+    choice "none", no `done`, and a note that is a string, non-empty after strip."""
     if not sets_options(write):
         return False
     data = write["data"]
     answer = data.get("lastAnswer")
     if not isinstance(answer, dict) or answer.get("choice", "none") != "none":
         return False  # step 4 keeps a picked choice: that write is no "none of these" re-ask
+    if "done" in answer:
+        return False  # a task's answer: it gives no "none of these" direction
     note = answer.get("note")
     return isinstance(note, str) and bool(note.strip())
 
