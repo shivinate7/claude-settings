@@ -10142,6 +10142,41 @@ PFR_LINES = {
     "fail-gh-pr-comment": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL) + pfr_gh_post("toolu_c1", PFR_FAIL_RECORD),
     "fail-gh-api-comment": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
                            + pfr_gh_post("toolu_c1", PFR_FAIL_RECORD, form="api"),
+    # A command that only names `gh pr create` opens no PR. The real create is the control.
+    "gh-mention-grep": pfr_bash("toolu_g1", 'grep -rn "gh pr create" docs', "docs/review.md:12:gh pr create --draft")
+                       + pfr_call("toolu_rev1", PFR_FAIL),
+    "gh-mention-echo": pfr_bash("toolu_g1", "echo 'run gh pr create later'", "run gh pr create later")
+                       + pfr_call("toolu_rev1", PFR_FAIL),
+    "gh-mention-comment": pfr_bash("toolu_g1", "# gh pr create --draft --title t", "")
+                          + pfr_call("toolu_rev1", PFR_FAIL),
+    "gh-mention-heredoc": pfr_bash("toolu_g1", "cat <<'EOF'\ngh pr create --draft\nEOF", "gh pr create --draft")
+                          + pfr_call("toolu_rev1", PFR_FAIL),
+    "gh-real-create": pfr_bash("toolu_pr1", "cd x && gh pr create --draft --title t",
+                               "https://github.com/shivinate7/claude-settings/pull/1467\n")
+                      + pfr_call("toolu_rev1", PFR_FAIL),
+    # An interpreter that runs a heredoc body opens the PR the body names.
+    "gh-heredoc-bash": pfr_bash("toolu_pr1", "bash <<'EOF'\ngh pr create --draft --title t\nEOF",
+                                "https://github.com/shivinate7/claude-settings/pull/1467\n")
+                       + pfr_call("toolu_rev1", PFR_FAIL),
+    "gh-heredoc-sh": pfr_bash("toolu_pr1", "sh <<EOF\ngh pr create --draft --title t\nEOF",
+                              "https://github.com/shivinate7/claude-settings/pull/1467\n")
+                     + pfr_call("toolu_rev1", PFR_FAIL),
+    # A command substitution runs its gh pr create, so the PR it opens is known to the session.
+    "gh-subst-assign": pfr_bash("toolu_pr1", "URL=$(gh pr create --draft --title t)",
+                                "https://github.com/shivinate7/claude-settings/pull/1467\n")
+                       + pfr_call("toolu_rev1", PFR_FAIL),
+    "gh-subst-dquote": pfr_bash("toolu_pr1", 'echo "PR: $(gh pr create --draft --title t)"',
+                                "PR: https://github.com/shivinate7/claude-settings/pull/1467\n")
+                       + pfr_call("toolu_rev1", PFR_FAIL),
+    # Single quotes make the substitution text, so no PR opens.
+    "gh-subst-squote": pfr_bash("toolu_g1", "echo '$(gh pr create)'", "$(gh pr create)")
+                       + pfr_call("toolu_rev1", PFR_FAIL),
+    # A verdict in backticks or with a verdict word is still the Done verdict.
+    "fail-backtick": pfr_pr() + pfr_call("toolu_rev1", pfr_report("`%s`" % pfr_verdict("FAIL", 1, "claude-haiku-5-5"),
+                                                                  PFR_FINDING)),
+    "fail-bold-verdict": pfr_pr() + pfr_call("toolu_rev1", pfr_report("**FAIL**, round 1 of 3, m", PFR_FINDING)),
+    "pass-backtick-record": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
+        "`%s`" % pfr_verdict("PASS", 1, "claude-haiku-5-5"), PFR_FINDING)) + pfr_post("toolu_c1", PFR_PASS_RECORD),
     # A Done label line that holds the verdict itself, in a word order the ruled form does not use.
     "label-haiku": pfr_pr() + pfr_call("toolu_rev1", "Done: round 1 reviewer haiku FAIL\n" + PFR_FINDING),
     "label-claude-haiku": pfr_pr() + pfr_call("toolu_rev1",
@@ -10354,6 +10389,33 @@ pfr_allow("a git commit whose message says push, beside a FAIL", VCS + ' commit 
           pfr_path("incident"))
 pfr_allow("a builder push: the parent holds no report, the agent's own file holds a FAIL", PFR_PUSH,
           pfr_path("builder-clean"), agent_id=PFR_AGENT_ID)
+# A command that only names `gh pr create` (a search, an echo, a comment, a quoted heredoc body) opens no PR.
+pfr_allow("a grep that names gh pr create, then an unrecorded FAIL, then the push", PFR_PUSH,
+          pfr_path("gh-mention-grep"))
+pfr_allow("an echo that names gh pr create, then an unrecorded FAIL, then the push", PFR_PUSH,
+          pfr_path("gh-mention-echo"))
+pfr_allow("a comment that names gh pr create, then an unrecorded FAIL, then the push", PFR_PUSH,
+          pfr_path("gh-mention-comment"))
+pfr_allow("gh pr create inside a quoted heredoc body, then an unrecorded FAIL, then the push", PFR_PUSH,
+          pfr_path("gh-mention-heredoc"))
+# The control: a real create in a compound command opens the PR, so the same FAIL denies.
+pfr_refuse("a cd and a real gh pr create --draft, then an unrecorded FAIL, then the push", PFR_PUSH,
+           pfr_path("gh-real-create"))
+pfr_refuse("a bash heredoc whose body is a gh pr create --draft, then an unrecorded FAIL, then the push", PFR_PUSH,
+           pfr_path("gh-heredoc-bash"))
+pfr_refuse("an sh heredoc whose body is a gh pr create --draft, then an unrecorded FAIL, then the push", PFR_PUSH,
+           pfr_path("gh-heredoc-sh"))
+pfr_refuse("a gh pr create --draft in an assigned command substitution, then an unrecorded FAIL, then the push",
+           PFR_PUSH, pfr_path("gh-subst-assign"))
+pfr_refuse("a gh pr create --draft in a double-quoted command substitution, then an unrecorded FAIL, then the push",
+           PFR_PUSH, pfr_path("gh-subst-dquote"))
+pfr_allow("a single-quoted $(gh pr create) in an echo, then an unrecorded FAIL, then the push", PFR_PUSH,
+          pfr_path("gh-subst-squote"))
+# A Done line in backticks, or with a verdict word, reads as its verdict: a FAIL with no record denies.
+pfr_refuse("a FAIL Done line in backticks with no record, then the push", PFR_PUSH, pfr_path("fail-backtick"))
+pfr_refuse("a FAIL Done line with a verdict word and no record, then the push", PFR_PUSH, pfr_path("fail-bold-verdict"))
+pfr_allow("a PASS Done line in backticks, with its PASS record posted, then the push", PFR_PUSH,
+          pfr_path("pass-backtick-record"))
 
 
 # A verdict on the Done label line is read. Each shape below is refused with no record, and the record of the
