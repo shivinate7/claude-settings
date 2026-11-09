@@ -12511,6 +12511,9 @@ sh("frozen: sed -i in a multi-line for loop over files outside the config folder
    cwd=NOGIT)
 sh("frozen: sed -i on a brace list that names the config settings file", "sed -i 's/a/b/' " + CFG_BRACE, "deny",
    "frozen-path", cwd=NOGIT)
+# An empty alternative in a whole-word brace expands to an empty word the sed reader cannot index, and the guard fails open.
+sh("frozen: sed -i on a whole-word brace whose empty alternative names the config settings file",
+   "sed -i 's/a/b/' {" + CFG_SETTINGS + ",}", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: sed -i in a for loop over a file outside the config folder is allowed",
    'for f in ' + slash(os.path.join(NOGIT, "f.txt")) + '; do sed -i "s/a/b/" "$f"; done', "allow", cwd=NOGIT)
 sh("frozen: sed -n on a config hook, with no -i, is a read",
@@ -15282,6 +15285,29 @@ SHELL_SCAN_COST_LABEL = ("frozen: the shell scan of a for list one word past the
 LOG_CHECKS_EXTRA.append((SHELL_SCAN_COST_LABEL, shell_scan_cost_check))
 LOG_FAMILY[SHELL_SCAN_COST_LABEL] = "frozen"
 FIXTURELESS_CHECKS.add(shell_scan_cost_check)
+
+# The allow of the whole-word brace above is read with its run's guard.log: a crash also allows, so the decision alone
+# cannot tell a crash from a judgment.
+BRACE_EMPTY_LABEL = ("frozen: sed -i on a whole-word brace with an empty alternative, on a file in no frozen folder, is "
+                     "allowed, and its run logs no crash line")
+
+
+def brace_empty_no_crash_check():
+    """(ok, note): the whole-word brace with an empty alternative is allowed, and its run logs no `crash` line."""
+    cfg = tempfile.mkdtemp(prefix="brace-empty-cfg-", dir=ROOT)
+    command = "sed -i 's/a/b/' {%s,}" % slash(os.path.join(NOGIT, "f.txt"))
+    decision, reason = decide({"raw": None, "tool": "Bash", "cwd": NOGIT, "session": None, "env_path": None,
+                               "config": cfg, "tool_input": {"command": command}})
+    crashes = [line for line in _guard_log_lines(cfg) if "\tcrash\t" in line]
+    if crashes:
+        return False, "the guard logged a crash: %s" % crashes[0][-100:]
+    if decision != "allow":
+        return False, "want allow, got %s: %s" % (decision, reason[:90])
+    return True, "allowed, and no crash line logged"
+
+
+LOG_CHECKS_EXTRA.append((BRACE_EMPTY_LABEL, brace_empty_no_crash_check))
+LOG_FAMILY[BRACE_EMPTY_LABEL] = "frozen"
 
 
 # The wait-until remedy checks are defined beside the wait-until cases. They are log checks, so they are
@@ -27183,6 +27209,10 @@ cs_shell("loop_glob_over_docs_subfolders_denied", "deny", 'for f in docs/*/x.md;
 cs_shell("while_read_loop_denied", "deny", 'while read f; do sed -i "s/a/b/" "$f"; done < docs/decisions/list.txt')
 cs_shell("loop_list_one_word_past_cap_denied", "deny",
          'for f in %s; do sed -i "s/a/b/" "$f"; done' % " ".join(CS_LOOP_WORDS))
+# A brace list in a for list expands to its items, so each cp is judged on its own target: a record allowed, a product file refused.
+cs_shell("loop_brace_list_with_product_file_cp_denied", "deny",
+         'for f in {hooks/a,docs/decisions/b}.md; do cp /tmp/y "$f"; done', "hooks/a.md")
+cs_shell("loop_brace_list_of_records_cp_allowed", "allow", 'for f in {docs/decisions/a,docs/decisions/b}.md; do cp /tmp/y "$f"; done')
 
 # ---- a commit holds the staged paths: `git commit -m x` in a worktree whose index holds them
 CS_COMMIT_FILES = dict(BASE_FILES, **{"docs/decisions/a.md": "a\n", "docs/todo.md": "- a\n"})
