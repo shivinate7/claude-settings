@@ -985,7 +985,7 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
         self.assertEqual(tm.GhHalf.gh_state(self, "posted") or [], [], "the failed post was kept as a posted comment")
 
 
-class LintGateReviewed(tm.ReviewEnv):
+class LintCheckReviewed(tm.ReviewEnv):
     """`merge --reviewed` leaves a pull request not done unless a lane-lint PASS names its live head (decision lanes-run-no-full-ci-job). The
     one review record here is done, so only the lint comment decides. A PASS for an older head, a FAIL, and a PASS by a non-owner each leave
     the pull request not done, and name `merge --lane-lint 7`. The lint comments come from the one comment list read the records use (decision
@@ -1037,7 +1037,7 @@ class LintGateReviewed(tm.ReviewEnv):
         self.assert_not_ready(out)
 
 
-class LintGateJoin(tm.CloudSession):
+class LintCheckJoin(tm.CloudSession):
     """The batch runner's join: `merge <pr> --confirm` in a cloud session with the batch-runner role refuses a pull request whose live head has
     no lane-lint PASS (decision lanes-run-no-full-ci-job). The refusal comes before any claim, push or merge, and names `merge --lane-lint <pr>`.
     The comment list is read through the gh shim, the list the review record reads. A failed read of it refuses the join as lane lint unknown. GhHalf's helpers are called unbound and its setUp is mirrored: subclassing GhHalf would run its cases again."""
