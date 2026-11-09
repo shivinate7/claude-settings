@@ -52,7 +52,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `self-repository` audit. It flags each local `uses: ./...` call, an action such as `./actions/a`
    too, not only a workflow. A floating version once turned a PR red.
    Pins of claude-settings' `ste-lint` and `zizmor` actions follow the session's tools (decision
-   `action-pins-follow-sessions`). `bin/ste-changed` reads those pins. It prints drift and exits 3. The
+   `action-pins-follow-sessions`). `bin/ste-changed` reads those pins. It prints drift. A direct run exits 3; lane lint shows it as a note. The
    session then moves the pin in a lane of its own. No bot and no schedule moves it. That tool reads
    only the `ste-lint` and `zizmor` pins. Other claude-settings pins can drift unseen.
    Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
@@ -73,8 +73,16 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    A left-out lane gets a reason after its number or in the label: `Dropped (macOS CI red): #n`.
    A late lane goes on a `Next batch (late): #n` line.
    The draft step and a ready `merge <pr> --confirm` refuse, before the lock, a handed PR the body does not name as merged or held (decision `batch-body-names-handed`, the body names each handed lane).
-   When the integration run is red, read the failing job. Find the lane whose files it touches. Drop
-   that lane and any lane that depends on it. Rebuild the branch from main without them. Never
+   When the integration run is red, read the failing job. Find the lane whose files it touches.
+   Search one lane merge commit at a time: for each lane merge commit `M` on the integration branch,
+   run `git diff --name-only M^1 M` or `git log -1 -m -S<text> M` as its own command, and print the
+   lane's name on the line before its hits. Each hit then names exactly one lane. Never run one
+   search over the whole range, such as `git log -p -S<text> main..<integration>`, and never run
+   two searches in one command: their output joins and the hits blame the wrong lane. A hit in two
+   lanes is two names, so read each lane's diff before you drop either. Example: the failing job
+   reads `lint/foo.py`. Lane A's own search lists `lint/foo.py` and lane B's lists nothing. Blame A.
+   (At 17:10 CST on Nov 8 two searches printed together, so the runner blamed lane B for lane A's
+   red.) Drop that lane and any lane that depends on it. Rebuild the branch from main without them. Never
    revert. A lane dropped by a revert re-applies its diff after it merges main, and checks that each
    file is there. A job that ends at its cap with no red CI step is re-capped or split. That is not a
    reason to drop the lane.
