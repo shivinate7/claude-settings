@@ -1,11 +1,11 @@
 {
   "title": "A push whose new commits hold a merge with more than two parents is refused before it leaves, or the silent-undo check reads it pairwise",
   "why": "Lane record-after-each-round (session_013NEJL3gDkEvHawhJUPygWa, PR #1908), 18:46 CST Nov 8: the lane joined a replay to two old heads with one three-parent `git commit-tree` and pushed it (333c91a6f). lint/check_silent_undo.py line 388 reads only two-parent merges and answers UNKNOWN, so the lane lint fails, and the merge stays in main..head, so only a history rewrite or a new PR clears it.",
-  "note": "Two fix shapes: the push guard refuses new commits with more than two parents, or check_silent_undo reads an octopus merge as pairwise merges. The lane proposed `step:refuse-octopus-merge-push`. The coordinator routes it.",
+  "note": "Two fix shapes: the push guard refuses new commits with more than two parents, or check_silent_undo reads an octopus merge as pairwise merges. The lane proposed `step:refuse-octopus-merge-push`. The coordinator routes it. Routed by the coordinator 18:48 CST Nov 8. The lane reads #2339 first; if #2339 already makes check_silent_undo judge octopus merges, the step may close.",
   "phase": "now",
   "owner": "coordinator",
-  "lane": "",
-  "status": "todo",
+  "lane": "session_013NEJKzvB3W9ncBB7N3RBEo",
+  "status": "doing",
   "order": 853,
-  "updatedAt": "2026-11-08T18:48:00-06:00"
+  "updatedAt": "2026-11-08T18:52:00-06:00"
 }
