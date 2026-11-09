@@ -313,7 +313,6 @@
 - stamp-quote-fence-closes-early: a quoted fence line >code with no space closes the fence early, giving a false alarm (actions/stamp/stamp.mjs)
 - stash-all-ignored-tree-passes: git stash -a over a tree of only ignored files passes the guard (hooks/guard_shared_tree.py _tree_subject)
 - stash-allow-any-linked-worktree: the allow passes any linked worktree, not only the caller's own (hooks/guard_shared_tree.py)
-- stash-create-false-refusal: git stash create reads as a take and is refused over a non-empty stack; false refusal unmeasured (hooks/guard_shared_tree.py)
 - stash-export-comment-stale: a comment in the test file says import and export are not git subcommands; git 2.55 lists both (hooks/test_guard.py line 1737)
 - stash-read-to-run-race: a session that dirties the tree or pushes an entry between the guard's read and the run is not covered (hooks/guard_shared_tree.py)
 - ste-autofix-tests-linux-only: lint/test_ste_autofix.py runs on the Linux job only; macOS and Windows cost unmeasured (CI)
