@@ -15004,6 +15004,109 @@ LOG_CHECKS_EXTRA.append(("builder-cap: a filtered find past the list cap is refu
                          builder_cap_list_remedy_check))
 LOG_CHECKS_EXTRA.append(("builder-cap: an unfiltered capped walk's remedy names both a narrower path and a -name filter",
                          builder_cap_unfiltered_remedy_check))
+
+
+# ---- _folded (guard_frozen) on its own: a `//server/share` UNC prefix keeps its `//`, a root folds to `/` and never
+# to '', and a normal absolute path folds as before. The helper is judged on the module the loaded guard imports, so a
+# GUARD_UNDER_TEST copy is the one judged. Each check names one cause in its message. The absent folder name is unique
+# per run, so no folder on disk can hold it.
+def _folded_module():
+    """guard_frozen as the loaded guard imports it, or None when guard.py loaded no guard_frozen."""
+    _load_guard_module()
+    return sys.modules.get("guard_frozen")
+
+
+def fold_unc_prefix_check():
+    """A `//server/share` path keeps its leading `//`, plain and as a glob with held=5, the count _written_sources passes
+    for a cwd of //server/share/repo/. The empty-part drop read the `//` as empty parts and cut it to `/`, so a relative
+    cp glob under a UNC cwd matched nothing."""
+    frozen = _folded_module()
+    if frozen is None:
+        return False, "guard.py did not load guard_frozen, so _folded cannot be judged"
+    path = "//server/share/repo/tests/*.py"
+    for held in (None, 5):
+        got = frozen._folded(path, held)
+        if got != path:
+            return False, ("_folded(%r, held=%r) returned %r: the UNC prefix's leading // was dropped"
+                           % (path, held, got))
+    return True, "_folded keeps the leading // of a UNC path, plain and as a glob"
+
+
+def fold_root_dot_check():
+    """`/.` folds to the root `/`. Its `.` part is dropped, and the root's empty part is all that is left, which joins to
+    '' rather than '/'. An empty path names no file, so a glob under the root matches nothing."""
+    frozen = _folded_module()
+    if frozen is None:
+        return False, "guard.py did not load guard_frozen, so _folded cannot be judged"
+    got = frozen._folded("/.")
+    if got != "/":
+        return False, "_folded('/.') returned %r, want '/': the root came back as an empty path" % got
+    return True, "_folded('/.') folds to the root '/'"
+
+
+def fold_root_dotdot_check():
+    """`/<absent>/..` folds to the root `/`. The absent folder is popped, and the root's empty part is all that is left,
+    which joins to '' rather than '/'."""
+    frozen = _folded_module()
+    if frozen is None:
+        return False, "guard.py did not load guard_frozen, so _folded cannot be judged"
+    absent = "/" + uuid.uuid4().hex
+    if os.path.exists(absent):
+        return False, "%s exists on this machine, so it cannot stand for an absent folder" % absent
+    got = frozen._folded(absent + "/..")
+    if got != "/":
+        return False, "_folded('%s/..') returned %r, want '/': the root came back as an empty path" % (absent, got)
+    return True, "_folded of an absent folder's '..' folds to the root '/'"
+
+
+def fold_plain_paths_check():
+    """A root, an empty path, a path with empty and dot parts, a plain absolute path, a `..` after an absent folder and a
+    relative `..` fold as before. Each row names its input in the message. Green on the old code: the fix must keep them."""
+    frozen = _folded_module()
+    if frozen is None:
+        return False, "guard.py did not load guard_frozen, so _folded cannot be judged"
+    absent = "/" + uuid.uuid4().hex
+    rows = (("/", "/"),
+            ("", ""),
+            ("/a//b/./c", "/a/b/c"),
+            ("/home/u/repo/tests/test_a.py", "/home/u/repo/tests/test_a.py"),
+            (absent + "/b/..", absent),
+            (absent + "/../tests/test_a.py", "/tests/test_a.py"),
+            ("a/../b", "a/../b"))
+    for path, want in rows:
+        got = frozen._folded(path)
+        if got != want:
+            return False, "_folded(%r) returned %r, want %r: a path that folded as before changed" % (path, got, want)
+    return True, "_folded folds the seven pinned rows as before"
+
+
+def fold_root_builder_find_check():
+    """A builder's find at cwd `/` past the walk cap is too large to check, as a find at any other cwd is. The find's path
+    `_expanded('.', '/')` is `/.`, which the fold must return as `/`: a `/.` that folds to '' never starts the walk."""
+    if os.name == "nt":
+        return SKIP, "cwd / is not a folder on Windows"
+    guard = _load_guard_module()
+    calls = {("guard_frozen", "_may_hold_a_test"): None}
+    decision, reason, _took = _cap_judge("find . | xargs sed -i s/a/b/", "/",
+                                         patches={"guard_frozen": {"_WALK_LIMIT": 1}}, calls=calls)
+    if not calls[("guard_frozen", "_may_hold_a_test")].call_args_list:
+        return False, ("the find at cwd / never reached its walk, as its path '/.' folded to '' (got %s %r)"
+                       % (decision, reason))
+    if decision != "deny" or guard.BUILDER_TOO_LARGE_REASON not in reason:
+        return False, "the find at cwd / got %s %r, want deny with BUILDER_TOO_LARGE_REASON" % (decision, reason)
+    return True, "a builder's find at cwd / past the walk cap is too large to check"
+
+
+LOG_CHECKS_EXTRA.append(("fold: _folded keeps the leading // of a UNC path, plain and as a glob", fold_unc_prefix_check))
+LOG_CHECKS_EXTRA.append(("fold: a builder's find at cwd / past the walk cap is too large to check, not allowed",
+                         fold_root_builder_find_check))
+LOG_CHECKS_EXTRA.append(("fold: _folded('/.') folds to the root '/', not an empty path", fold_root_dot_check))
+LOG_CHECKS_EXTRA.append(("fold: _folded of an absent folder's '..' folds to the root '/', not an empty path",
+                         fold_root_dotdot_check))
+LOG_CHECKS_EXTRA.append(("fold: _folded folds a root, a normal absolute path and a real '..' as before",
+                         fold_plain_paths_check))
+
+
 # ---- a builder's copy, move and find, judged on the files they write. The guard refuses a copy or move only when it
 # lands a test file, so a harmless one passes. The cases check that a copy's destination is not a walk root, that a
 # find's -path and -regex narrow only the names it lists, and that mv and install read a glued -t target as cp does.
