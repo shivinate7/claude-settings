@@ -1482,8 +1482,9 @@ GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
 _ROUTE_NUMBER = r"(\d+|\$\w+|\$\{\w+\})"   # a number, or a shell variable holding one: the guard sees the word before the shell fills it
 _COMMENTS_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/" + _ROUTE_NUMBER + r"/comments/?")
 # A comment edited in place, by comment id. The route is read in every form gh takes: a full URL, a query string or fragment after the id, and a
-# command substitution (`$(...)`) in the id or in the repo, quoted or not (substitution_words joins an unquoted one). The guard judges the route it
-# reads, so a form this pattern misses is an edit it never judges.
+# command substitution (`$(...)`) in the id or in the repo (substitution_words joins an unquoted one). The guard judges the route it reads, so a
+# form this pattern misses is an edit it never judges: a `)` inside the id, a backtick id, a `|`, `;` or `&&` inside an unquoted `$(...)`
+# (step record-guard-wrapper-forms).
 _EDIT_ID = r"(\d+|\$\w+|\$\{\w+\}|\$\([^)]*\))"
 _COMMENT_EDIT_ROUTE = re.compile(r"(?:https?://[^/\s]+)?/?repos/(.+?)/issues/comments/" + _EDIT_ID + r"/?(?:[?#].*)?", re.DOTALL)
 PR_COMMENT_VALUE_FLAGS = {"-b", "--body", "-F", "--body-file", "-R", "--repo"}
