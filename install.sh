@@ -369,11 +369,38 @@ cloud_git() {
 mirror_refresh() {
   mr_dir="$1"
   mr_sha=$(git -C "$mr_dir" config --get claude-settings.mirrorSha 2>/dev/null)
+  mr_differs=0
+  mr_depth="--depth 1"
   if [ -n "$mr_sha" ] && [ "$(git -C "$mr_dir" rev-parse -q --verify main 2>/dev/null)" != "$mr_sha" ]; then
-    log "WARN: the clone $mr_dir has local commits on main that $REF lacks; keeping it as it is"
-  elif ! cloud_git -C "$mr_dir" fetch -q --depth 1 origin "$REF"; then
-    log "WARN: could not refresh the clone $mr_dir to $REF; keeping it as it is"
-  elif git -C "$mr_dir" checkout -q -B main FETCH_HEAD \
+    mr_differs=1
+    # A depth-1 fetch cuts the history under the tip, so main would never read as its ancestor. Take the ref's commits from a
+    # day before main's, which keeps every path from the tip down to main whole, and leaves the mirror a little deeper.
+    mr_ct=$(git -C "$mr_dir" log -1 --format=%ct main 2>/dev/null)
+    case "$mr_ct" in
+      ''|*[!0-9]*) ;;
+      *) mr_depth="--shallow-since=$((mr_ct - 86400))" ;;
+    esac
+  fi
+  # shellcheck disable=SC2086  # mr_depth is one option word
+  if ! cloud_git -C "$mr_dir" fetch -q $mr_depth origin "$REF"; then
+    if [ "$mr_differs" = 1 ]; then
+      log "WARN: could not refresh the clone $mr_dir to $REF, and it is unknown whether main there holds local commits; keeping it as it is"
+    else
+      log "WARN: could not refresh the clone $mr_dir to $REF; keeping it as it is"
+    fi
+    return 0
+  fi
+  # A main that differs from mirrorSha may be a stale record, left when the write below failed after main moved. Only a main
+  # that origin's ref lacks holds a local commit. Exit 1 means lacks; any other nonzero means the history to tell is missing.
+  if [ "$mr_differs" = 1 ]; then
+    git -C "$mr_dir" merge-base --is-ancestor main FETCH_HEAD 2>/dev/null
+    case $? in
+      0) ;;
+      1) log "WARN: the clone $mr_dir has local commits on main that $REF lacks; keeping it as it is"; return 0 ;;
+      *) log "WARN: could not tell whether the clone $mr_dir holds local commits on main that $REF lacks (unknown); keeping it as it is"; return 0 ;;
+    esac
+  fi
+  if git -C "$mr_dir" checkout -q -B main FETCH_HEAD \
        && git -C "$mr_dir" config claude-settings.mirrorSha "$(git -C "$mr_dir" rev-parse main)"; then
     log "refreshed the clone $mr_dir to $REF"
   else
