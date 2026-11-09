@@ -10,12 +10,13 @@ Interface the check must meet (the builder builds to it):
 - A product file is a .py file in those folders whose name is not test_*.py, _test*.py or *_test.py.
 - A `# novermin` line comment excuses its line, as vermin's marker does. The same text in a string does not.
 - Exit 0 with no output when clean. Exit 1 with one line per offending file, naming the file and the
-  feature, when a file needs more than 3.9. Exit 2, naming the cause, when vermin cannot run. No case
-  covers exit 2: the brief names no way to make vermin missing from a test.
+  feature, when a file needs more than 3.9. Exit 2, naming the cause, when vermin cannot run. The vermin
+  command is FLOOR_VERMIN_CMD when set, so a test makes vermin missing or odd with that variable.
 
 A case that expects a finding fails on a check that flags nothing. The controls expect silence.
 """
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -70,12 +71,18 @@ def tree(files):
     return root
 
 
-def run_check(root=None):
-    """Run the check on `root`, or on the repo root when none is given. -> (exit code, stdout and stderr)."""
+def run_check(root=None, env=None):
+    """Run the check on `root`, or on the repo root when none is given. -> (exit code, stdout and stderr).
+
+    An inherited FLOOR_VERMIN_CMD is removed, so each case sets its own vermin or uses the default.
+    """
     need_check()
     cmd = [sys.executable, CHECK] + (["--root", root] if root else [])
+    environ = dict(os.environ)
+    environ.pop("FLOOR_VERMIN_CMD", None)
+    environ.update(env or {})
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          timeout=120)
+                          timeout=120, env=environ)
     return proc.returncode, proc.stdout + proc.stderr
 
 
@@ -180,6 +187,34 @@ class RealTree(unittest.TestCase):
         code, out = run_check()
         self.assertEqual(code, 0, "a product file in the repo's hooks/ or lint/ needs more than 3.9: "
                                   "exit %d, output %r" % (code, out))
+
+
+MISSING_CMD = "vermin-not-installed-for-floor-test"  # a name no PATH holds
+
+
+class Vermin(unittest.TestCase):
+    """vermin cannot run: exit 2, and the output names the cause. An unread file is never clean."""
+
+    def test_missing_vermin_command_exits_two_and_names_it(self):
+        # One product file, so the check reaches vermin.
+        code, out = run_check(tree({"hooks/ok.py": CLEAN}), env={"FLOOR_VERMIN_CMD": MISSING_CMD})
+        self.assertEqual(code, 2, "a vermin command that cannot start gave exit %d, not 2: %r" % (code, out))
+        self.assertIn(MISSING_CMD, out, "the output does not name the missing vermin command: %r" % out)
+
+    def test_vermin_exiting_three_exits_two_and_names_the_exit(self):
+        # An exit other than 0 or 1 is vermin failing, not a finding.
+        cmd = shlex.join([sys.executable, "-c", "import sys; sys.stderr.write('odd\\n'); sys.exit(3)"])
+        code, out = run_check(tree({"hooks/ok.py": CLEAN}), env={"FLOOR_VERMIN_CMD": cmd})
+        self.assertEqual(code, 2, "a vermin that exited 3 gave exit %d, not 2: %r" % (code, out))
+        self.assertIn("exit 3", out, "the output does not name vermin's exit 3: %r" % out)
+
+    def test_vermin_exiting_one_with_no_finding_exits_two(self):
+        # Exit 1 means findings. Exit 1 with none is output the check cannot read.
+        cmd = shlex.join([sys.executable, "-c", "import sys; sys.exit(1)"])
+        code, out = run_check(tree({"hooks/ok.py": CLEAN}), env={"FLOOR_VERMIN_CMD": cmd})
+        self.assertEqual(code, 2, "a vermin that exited 1 with no finding gave exit %d, not 2: %r"
+                         % (code, out))
+        self.assertIn("exit 1", out, "the output does not name vermin's exit 1: %r" % out)
 
 
 if __name__ == "__main__":
