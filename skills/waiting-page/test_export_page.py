@@ -1879,7 +1879,8 @@ class PictureHold(PictureChecks):
 
 
 class PictureFalseAlarm(PictureChecks):
-    """A good item is not held. Each case also holds item 292 in the same fetch, so the scope assert fails on main."""
+    """A good item is not held. Each case also holds item 292 in the same fetch. Its held line proves the check ran
+    on this export, so a good item left unheld is a real pass, not a check that never ran."""
 
     def test_a_good_item_beside_item_292_is_not_held(self):
         good = good_item()
