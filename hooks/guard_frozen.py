@@ -699,7 +699,11 @@ def _written_sources(word, cwd):
     for each in _brace_words(word):
         pattern, magic = _glob_pattern(each)
         if magic:
-            matched = list(itertools.islice(glob.iglob(_expanded(pattern, cwd)), _WALK_LIMIT + 1 - len(paths)))
+            # A relative pattern is matched from `cwd` and its matches stay relative, as `cp` names them: `--parents`
+            # writes each name under DEST, so a match made absolute would write the cwd's own folders there.
+            target = _expanded(pattern, "")
+            matches = glob.iglob(target) if os.path.isabs(target) else glob.iglob(target, root_dir=cwd or None)
+            matched = list(itertools.islice(matches, _WALK_LIMIT + 1 - len(paths)))
             paths.extend(matched or [_unquoted(each)])
         else:
             paths.append(_unquoted(each))
@@ -770,6 +774,9 @@ def _made_folders(raw, cwd) -> set:
     start = _cp_start(raw, True, ("mkdir",))
     made, skip = set(), False
     for word in (raw[start + 1:] if start is not None else []):
+        # An unquoted `)` or backtick glued to the word (`(mkdir -p a)`) ends the subshell, not the folder name.
+        if not word.endswith(("'", '"')):
+            word = word.rstrip(")`") or word
         plain = _unquoted(word)
         if skip:
             skip = False
