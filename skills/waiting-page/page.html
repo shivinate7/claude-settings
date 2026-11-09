@@ -54,8 +54,12 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .who { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
 .who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding-top: 10px; }
-.tabs a { padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); text-decoration: none; font-weight: 600; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+/* One row at every width and text size: the bar scrolls sideways on its own, so the page never does. The border line is an inset
+   shadow, inside the scroll box, so the selected tab still covers it; the ring sits inside the tab, so the scroll box never cuts it. */
+.tabs { display: flex; gap: 4px; box-shadow: inset 0 -1px var(--line); padding-top: 10px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.tabs a { flex: none; padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); text-decoration: none; font-weight: 600; border: 1px solid transparent; border-bottom: none; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs a:focus-visible { outline-offset: -2px; }
 .tabs a[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
 .tabs .cnt { font: 600 12px/1 var(--mono); color: var(--muted); }
 
@@ -115,7 +119,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .tier > header { display: flex; align-items: center; }
 .tier > header h2 { font: 700 19px/1.25 var(--body); display: flex; align-items: center; gap: 10px; }
 .tier > header .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
-.empty { color: var(--muted); padding: 20px; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface); }
+.empty { color: var(--muted); padding: 20px; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface); overflow-wrap: anywhere; }
 
 /* Item card */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: clamp(16px, 2.4vw, 24px); display: grid; gap: 14px; align-content: start; scroll-margin-top: 64px; min-width: 0; }
@@ -426,8 +430,8 @@ body.sheet-open { overflow: hidden; }
 .tabs .tl { display: flex; gap: 4px; }
 .tabs .cnt:empty { display: none; }
 .tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
-/* Three tabs with a count box each must fit a 320 phone: the page never scrolls sideways. The row wraps when a wide fallback font makes them too wide. Both the tab list and the row wrap in reverse, so the first tab stays on the bottom row, on the border, and the overflow moves above. */
-@media (max-width: 400px) { .tabs a { padding-inline: 6px; gap: 4px; } .tabs, .tabs .tl { gap: 2px; } .tabs .tl { flex-wrap: wrap-reverse; } .tabs { flex-wrap: wrap-reverse; } }
+/* Three tabs with a count box each fit a 320 phone at the default text; a wider font or larger text scrolls the bar, as above. */
+@media (max-width: 400px) { .tabs a { padding-inline: 6px; gap: 4px; } .tabs, .tabs .tl { gap: 2px; } }
 .tabs #qCount:empty { display: inline-block; }
 .svwrap { container-type: inline-size; padding-block: 18px 40px; }
 .sv { display: grid; gap: 16px; min-width: 0; }
@@ -527,10 +531,11 @@ body.sheet-open { overflow: hidden; }
 /* The view switch sits right above the view it changes. What every view shares sits above the switch. */
 .views { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 3px; max-width: 520px; background: var(--chip); border-radius: 11px; }
 .views button { min-height: 44px; padding: 4px 2px; font-size: 14.5px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; white-space: nowrap; text-align: center; }
-/* Below 340px four equal columns cut "Reference": each column takes its label's width, and the rest is shared. */
+/* Below 340px four equal columns cut "Reference": each press takes its label's width, and the rest is shared. Where the four do not
+   fit one line (under about 260px), they wrap to a second line, so the page never scrolls sideways. */
 @container (max-width: 339px) {
-  .views { grid-template-columns: repeat(4, auto); }
-  .views button { padding-inline: 4px; font-size: 14px; }
+  .views { display: flex; flex-wrap: wrap; }
+  .views button { flex: 1 1 auto; padding-inline: 4px; font-size: 14px; }
 }
 .views button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
 .sview { display: grid; gap: 14px; min-width: 0; }
@@ -569,7 +574,7 @@ body.sheet-open { overflow: hidden; }
 .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); border-block: 1px solid var(--line); }
 .tile { background: var(--surface); padding: 10px 14px; display: grid; gap: 4px; min-width: 0; align-content: start; text-align: left; }
 button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surface)); }
-.tile .tl { font-size: 13.5px; color: var(--muted); }
+.tile .tl { font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }
 .tile .row { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
 .tile .v { font: 600 20px/1.1 var(--mono); overflow-wrap: anywhere; }
 .tile .v small { font-size: 14px; font-weight: 400; color: var(--muted); }
@@ -634,6 +639,8 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .feed { list-style: none; margin: 0; padding: 4px 0; }
 .feed li { display: grid; grid-template-columns: 76px 16px minmax(0, 1fr); gap: 8px; align-items: start; padding: 6px 14px; font-size: 14px; }
 .feed .when, .ev .when { font: 13px var(--mono); color: var(--muted); padding-top: 1px; }
+/* Under 260px the time column leaves the step's words no room: the time takes its own line above the glyph and the words. */
+@container (max-width: 259px) { .feed li, .ev { grid-template-columns: 16px minmax(0, 1fr); } .feed .when, .ev .when { grid-column: 1 / -1; } }
 .lnk { display: inline; min-height: 32px; color: var(--ink); text-align: left; }
 .lnk .id { color: var(--muted); }
 .morelink { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; font-weight: 600; color: var(--acc); }
@@ -689,7 +696,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 @container (max-width: 559px) { .hl li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 
 /* No roadmap: unknown, why, and one control that leads on. */
-.nob { padding: 16px; display: grid; gap: 10px; justify-items: start; }
+.nob { padding: 16px; display: grid; gap: 10px; justify-items: start; overflow-wrap: anywhere; }
 .nob h3 { font: 700 17px/1.3 var(--body); display: flex; gap: 8px; align-items: center; }
 .nob p { max-width: 62ch; }
 .nob details { font-size: 14px; color: var(--muted); }
@@ -939,6 +946,19 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   .askrow .slot { grid-column: 1; grid-row: 4; }
   /* Send ask's sizer ("Send 99 asks") may wrap, so no press runs past the box. */
   .askrow .btn { white-space: normal; max-inline-size: 100%; justify-self: start; }
+}
+/* A reply form in the same box keeps the arrangement the 520px rule gives it: the hint on its own line, then Close at the start and
+   Send reply at the end of one line. Where those two no longer fit side by side, Send reply takes the first line and Close the next. */
+@container askf (width < 16.5em) {
+  .replyform .askrow { grid-template-columns: minmax(0, 1fr) auto; }
+  .replyform .askrow .askhint { grid-column: 1 / -1; }
+  .replyform .askrow .btn.rx { grid-column: 1; grid-row: 2; }
+  .replyform .askrow .btn.askgo { grid-column: 2; grid-row: 2; }
+}
+@container askf (width < 12.5em) {
+  .replyform .askrow { grid-template-columns: minmax(0, 1fr); }
+  .replyform .askrow .btn.askgo { grid-column: 1; grid-row: 2; }
+  .replyform .askrow .btn.rx { grid-column: 1; grid-row: 3; }
 }
 .asks .empty.unk { color: var(--due); border-color: var(--due); }
 /* The rail row for asks: the head of an overview tier, no chips. With no waiting ask it is grey, as an empty tier is. */

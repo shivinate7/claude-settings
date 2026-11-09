@@ -79,4 +79,7 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
 ## 5. Not drawn
 
 - `.stack > li` (asks not sent yet) and the reply box's `.askrow`. They take the same rules: the reply box's row is an
-  `.askrow` inside `.askform`'s container, so it shares 2b. Its Cancel (`.btn.rx`) needs its own row there, after Send. The Send bar, item cards and `.rfoot` (each is flex-wrap today).
+  `.askrow` inside `.askform`'s container, so it shares 2b's `16.5em` query. There it keeps the arrangement the 520 px rule
+  gives it: the hint on its own line, then Close (`.btn.rx`) at the start and Send reply at the end of one line. Under
+  `12.5em`, where those two no longer fit side by side, Send reply takes its own line and Close the next. The Send bar, item
+  cards and `.rfoot` (each is flex-wrap today).
