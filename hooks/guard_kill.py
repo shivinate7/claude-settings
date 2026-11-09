@@ -627,12 +627,14 @@ def _mask_arithmetic(segment: str) -> str:
         at = end
 
 
-def glued_background_hit(cmd: str) -> str:
+def glued_background_hit(cmd: str, trailing: bool = False) -> str:
     """The matched text when a lone `&` with a word after it touches a word on either side (`sleep 2 &echo ok`,
-    `sleep 2& echo ok`, `a&b`, a trailing `rm -rf ..&`) after a command word, with no pid captured anywhere in the command, else ''. Bash reads it as a
+    `sleep 2& echo ok`, `a&b`) after a command word, with no pid captured anywhere in the command, else ''. Bash reads it as a
     background job as it reads a spaced `&`, but the tokens never hold a bare `&` for `bare_background_hit`
     to find. A printer or a `cd` before it (`echo x&sed ...`, `cd sub &sed ...`) ends at once, so it
-    detaches nothing. The waiter judges the command first: it reads `sleep 99 &echo ok` as a long pause."""
+    detaches nothing. The waiter judges the command first: it reads `sleep 99 &echo ok` as a long pause.
+    `trailing` reads instead the `&` glued to the last word of a segment (`rm -rf ..&`). The caller asks it last,
+    so a rule that reads the command's own act (a push, a simulator boot) keeps its own refusal."""
     if is_powershell(cmd):
         return ""   # PowerShell reads `&word` as its call operator, never a job
     shell = _strip_heredoc_bodies_unconditionally(cmd)
@@ -642,8 +644,10 @@ def glued_background_hit(cmd: str) -> str:
         pieces = split_background(_mask_arithmetic(segment))
         for at in range(len(pieces) - 1):
             left, right = pieces[at], pieces[at + 1]
-            if not (left[-1:] not in (" ", "\t") or (right.strip() and right[:1] not in (" ", "\t"))):
-                continue   # a spaced `&` is bare_background_hit's; one that ends the segment is read when glued (`rm -rf ..&`)
+            ends_segment = not right.strip()
+            glued = left[-1:] not in (" ", "\t") or (not ends_segment and right[:1] not in (" ", "\t"))
+            if ends_segment != trailing or not glued:
+                continue   # a spaced `&` is bare_background_hit's
             tokens = segment_tokens(left) if left.strip() else None
             index = resolve_command(tokens) if tokens else None
             if index is not None and basename(tokens[index]) not in QUIET_COMMANDS:

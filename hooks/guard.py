@@ -4959,6 +4959,11 @@ def judge(payload) -> None:
                     remedies.setdefault(n[0], remedy)
             if names:
                 sim_boot_refusal(tool, names, remedies)
+            # A glued `&` that ends the command is a background job too. Asked last, so a push or a simulator boot
+            # that carries one keeps its own refusal.
+            matched = glued_background_hit(command, trailing=True)
+            if matched:
+                refuse(tool, "deny", "detached-launch", DETACHED_LAUNCH_REASON, matched)
         return
     if tool == SIM_MCP:
         # `udid` is an alias of `device`: judge each non-empty name, so one field hides no other.
