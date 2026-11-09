@@ -1611,8 +1611,7 @@ class SessionStartLiveHooksLagTests(GitFixtureMixin, SessionStartAgentWorktreeNo
         added = len(starts_on) - len(starts_off)
         self.assertLessEqual(added, 2, "the lag check starts %d git processes, want at most 2; with the stamp %r, "
                              "without it %r" % (added, starts_on, starts_off))
-        # Coordinator ruling (after the 15:34 CST start): a cloud session's lag check reuses the block's one fetch helper,
-        # so the cloud session fetches once. The lag check adds no fetch of its own.
+        # The lag check reuses the block's one fetch helper, so a cloud session fetches once. The check adds no fetch of its own.
         fetches = [start for start in starts_on if start.split()[0] == "fetch"]
         self.assertEqual(len(fetches), 1, "want the block's one git fetch in a cloud session, got %r" % fetches)
 

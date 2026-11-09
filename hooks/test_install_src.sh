@@ -5268,11 +5268,11 @@ config_listing() {
         done )
 }
 
-# ---- stampS4: a cloud install adds one file to the config dir, the stamp, against the install.sh before the stamp ----
-# The baseline is install.sh as it stood before the stamp (commit 624dcc188). Both installs run on one fixture, and
-# the two config-dir listings are compared.
+# ---- stampS4: a cloud install adds exactly one file to the config dir, the stamp ----
+# The baseline is the same install.sh with no stamp step, read from git, so the two listings differ by the stamp alone.
+# Both installs run on one fixture.
 stampS4() {
-  name="stampS4: a cloud install adds one file to the config dir, the stamp, against the install.sh before the stamp"
+  name="stampS4: a cloud install adds exactly one file to the config dir, the stamp"
   fx="$work/s4-fx"; bin="$work/s4-bin"; scratch="$work/s4-scratch"
   ha="$work/s4-old-home"; hb="$work/s4-new-home"
   mkdir -p "$ha" "$hb" "$scratch"
