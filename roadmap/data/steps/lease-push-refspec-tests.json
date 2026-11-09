@@ -1,0 +1,12 @@
+{
+  "title": "Tests prove the refspec-form lease push allow entry passes a lane's own branch and refuses every other target",
+  "why": "Owner chat 18:31 CST Nov 8 (via the coordinator, 18:31 CST): the owner pushes a refspec form of Own Branch Lease Push (`origin <src>:<branch>`) straight to main from a local session, with no tests of its own.",
+  "note": "Blocked until the owner's four autoMode.allow entries are on main (steps lease-push-c-and-d and debt-classifier-lease-push close then). Cases to prove: a lease push of the lane's own branch through a refspec passes; a refspec whose target is main, another lane's branch, or an archive branch does not. The coordinator routes it once the entries land.",
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "todo",
+  "order": 851,
+  "blockedBy": "the owner's autoMode.allow push to main",
+  "updatedAt": "2026-11-08T18:32:00-06:00"
+}
