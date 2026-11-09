@@ -577,7 +577,8 @@ class Stale(unittest.TestCase):
         r.put("app.txt", BODY.replace("line 5\n", "line 5\nA new 1 \nA new 2.\n"))
         r.sh("add", "-A")
         r.sh("commit", "-q", "-m", "Merge main", date=self.T2)
-        self.assertEqual(r.verdict(), [])
+        # Roadmap step merge-keeps-main-verbatim: a hand rewrite of main's line in a clean merge is a rewrite finding, not a lost line.
+        assert_rewrite_kind(self, r.verdict())
 
 
 class Value(unittest.TestCase):
@@ -696,7 +697,8 @@ class Flips(unittest.TestCase):
         assert_rewrite_kind(self, self.resolve("run(a, b)", "run(a, b, env=e)", "run(a, b, env=e, timeout=T)"))
 
     def test_a_third_value_still_passes(self):
-        self.assertEqual(self.resolve("RULE_FLOOR = 80", "RULE_FLOOR = 91", "RULE_FLOOR = 94"), [])
+        # Roadmap step merge-keeps-main-verbatim: the hand edit of main's line is a rewrite finding, and no lost line is read.
+        assert_rewrite_kind(self, self.resolve("RULE_FLOOR = 80", "RULE_FLOOR = 91", "RULE_FLOOR = 94"))
 
 
 class OwnHistory(unittest.TestCase):
@@ -3060,6 +3062,29 @@ class MergeKeepsMain(unittest.TestCase):
         self.assert_merge_holds(m, "retries = 5")
         self.assert_merge_holds(m, "retries = 4", present=False)
         self.assertEqual(r.verdict(), [], "git's own auto-merge of main's in-place edit was flagged")
+
+    def rule(self, value):
+        """lib.txt with one value line between the lines the other cases of this class use."""
+        return "".join("l%d\n" % i for i in range(1, 6)) + value + "\ntail\n"
+
+    def test_a_hand_edit_of_a_line_both_sides_wrote_is_quiet(self):
+        """Boundary of the merge-keeps-main-verbatim step: a line both sides changed is a value both wrote, so its hand
+        edit is no rewrite of main's line. Both sides can change one line with no conflict only when they write the same
+        text. Different texts conflict, and a conflict resolution is read by its own rule."""
+        self.start(self.rule("RULE_FLOOR = 80"), self.rule("RULE_FLOOR = 91"), lane=self.rule("RULE_FLOOR = 91"))
+        self.assertIn("RULE_FLOOR = 91", self.r.sh("show", "feat:lib.txt"), "premise: the lane does not write the line")
+        self.assertIn("RULE_FLOOR = 91", self.r.sh("show", "main:lib.txt"), "premise: main does not write the line")
+        m = self.merge_by_hand(self.rule("RULE_FLOOR = 94"))
+        self.assert_merge_holds(m, "RULE_FLOOR = 94")
+        self.assertEqual(self.r.verdict(), [], "a line both sides wrote was flagged as a rewrite of main's line")
+
+    def test_a_hand_edit_of_a_line_only_main_changed_is_a_rewrite_finding(self):
+        """The same shape with only main writing the line: the hand edit is a rewrite finding (merge-keeps-main-verbatim)."""
+        self.start(self.rule("RULE_FLOOR = 80"), self.rule("RULE_FLOOR = 91"))
+        self.assertIn("RULE_FLOOR = 80", self.r.sh("show", "feat:lib.txt"), "premise: the lane wrote the line too")
+        m = self.merge_by_hand(self.rule("RULE_FLOOR = 94"))
+        self.assert_merge_holds(m, "RULE_FLOOR = 94")
+        assert_rewrite_kind(self, self.r.verdict())
 
 
 if __name__ == "__main__":
