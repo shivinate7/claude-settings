@@ -15085,12 +15085,17 @@ class BatchFreeze(CloudSession):
 
     def advance(self, n):
         """Lane PR #n gets one more commit, so its head on origin moves. -> the new head."""
+        return self.lane_commit(n, os.path.join("lanes", f"{n}-more.txt"), "more\n", f"lane {n}, second commit")
+
+    def lane_commit(self, n, path, text, message):
+        """Lane PR #n gets one commit of its own that adds `path` with `text`: its head on origin moves, and its diff against main touches
+        `path`. -> the new head."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", f"lane-{n}", f"origin/lane-{n}")
-        put(os.path.join(o, "lanes", f"{n}-more.txt"), "more\n")
+        put(os.path.join(o, path), text)
         sh(o, "git", "add", "-A")
-        sh(o, "git", "commit", "-q", "-m", f"lane {n}, second commit")
+        sh(o, "git", "commit", "-q", "-m", message)
         sh(o, "git", "push", "-q", "origin", f"lane-{n}")
         self.heads[n] = self.head(f"lane-{n}")
         return self.heads[n]
@@ -15105,6 +15110,17 @@ class BatchFreeze(CloudSession):
         sh(o, "git", "commit", "-q", "-m", f"{branch}: heal")
         sh(o, "git", "push", "-q", "origin", branch)
         return self.head(branch)
+
+    def drift_batch(self, name, numbers):
+        """origin's batch/NAME is force-pushed to origin/main with only the lanes `numbers` merged in, as a hand edit leaves it. The pull
+        request body is not touched, so the body and the branch now disagree. -> the new head."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", f"batch/{name}", "origin/main")
+        for n in numbers:
+            sh(o, "git", "merge", "-q", "--no-ff", "-m", f"merge lane {n}", self.heads[n])
+        sh(o, "git", "push", "-q", "-f", "origin", f"batch/{name}")
+        return self.head(f"batch/{name}")
 
     def frozen_batch(self, name, numbers, on=None, draft=False):
         """The batch a build made: origin's batch/NAME merges each lane in `numbers` no-ff onto origin/main (or, with `on`, onto
@@ -15185,9 +15201,9 @@ class BatchFreeze(CloudSession):
     @contextlib.contextmanager
     def no_lint_or_ready_check(self, ready_state=None):
         """The ready checks, patched to fail the run if called: draft_step and run_ready_checks always. With no `ready_state`, the lane lint
-        too: a build or a drop runs none. With `ready_state` ("pass", "fail" or "unknown"), the run is a --batch-build --ready: lane_lint runs
-        for real under a spy that counts its calls, ci-job's answer is scripted to that state, and the temp tree lives in this run's folder.
-        Yields {name: mock}: read after the run."""
+        too: a build or a drop runs none. With `ready_state` ("pass", "fail" or "unknown", or a ci_job_run answer as a tuple), the run is a
+        --batch-build --ready: lane_lint runs for real under a spy that counts its calls, ci-job's answer is scripted to that state, and the
+        temp tree lives in this run's folder. Yields {name: mock}: read after the run."""
         with contextlib.ExitStack() as stack:
             mocks = {name: stack.enter_context(unittest.mock.patch.object(
                          merge, name, side_effect=AssertionError(f"merge.{name} ran: a batch run runs no ready check")))
@@ -15196,8 +15212,9 @@ class BatchFreeze(CloudSession):
                 mocks["lane_lint"] = stack.enter_context(unittest.mock.patch.object(
                     merge, "lane_lint", side_effect=AssertionError("merge.lane_lint ran: a batch build or drop runs no lane lint")))
             else:
+                answer = LINT_STATES[ready_state] if isinstance(ready_state, str) else ready_state
                 mocks["lane_lint"] = stack.enter_context(unittest.mock.patch.object(merge, "lane_lint", wraps=merge.lane_lint))
-                stack.enter_context(unittest.mock.patch.object(merge, "ci_job_run", return_value=LINT_STATES[ready_state]))
+                stack.enter_context(unittest.mock.patch.object(merge, "ci_job_run", return_value=answer))
                 stack.enter_context(unittest.mock.patch.object(tempfile, "tempdir", self.run_dir))
             yield mocks
 
@@ -15210,6 +15227,19 @@ class BatchFreeze(CloudSession):
             a.apply_defaults()
             calls.append((a.arguments["target"], a.arguments["base"], a.arguments["unknown_ok"]))
         return calls
+
+    def lint_fail_naming(self, *paths):
+        """ci_job_run's answer for a batch head whose lint FAILs on a step that names each of `paths`. ci-job's FAIL line names the step and
+        the verdict log (`log=`), not a path: the step's own output, which names the failing paths, is in that log. -> the answer as
+        ci_job_run returns it: (state, lines, log, liftable)."""
+        log = os.path.join(self.t, "ci-job-batch.log")
+        put(log, "".join(f"lint/check_lane_paths.py: FAIL {p}:1: the lane header is missing\n" for p in paths))
+        verdict = f"FAIL python3 lint/check_lane_paths.py rc=1 (0.2s) log={log}"
+        return ("fail", ["%-15s %s: %s" % ("FAIL", "Check lane paths", verdict)], [f"log={log}"], False)
+
+    def drop_pr_numbers(self, out, name):
+        """The PR numbers of each `merge --batch-drop NAME <pr>` command the run printed, in order."""
+        return re.findall(rf"merge --batch-drop {re.escape(name)} (\d+)", out)
 
     # Build: the branch, the pull request, the lock and the lint.
 
@@ -15459,6 +15489,79 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.readies, [], "a refused cloud --ready called Host.ready: %s" % out)
         self.assertEqual(self.host.pr_calls, [], "a refused cloud --ready read a pull request: %s" % out)
         self.assert_untouched(pr, snap, out)
+
+    # Blame: a lint FAIL of the batch head names the lane whose files the failing path touches. The gap these cases hold: lane_lint's FAIL
+    # output names no path. ci-job prints the FAIL line and the `log=` line, and keeps the step's own output, which names the path, in the
+    # verdict log that `log=` names. So the tool must read the path from that log, then map it to each frozen lane's diff against the base.
+    # lint_fail_naming writes that log as ci-job leaves it.
+
+    def test_ready_lint_fail_names_the_one_lane_that_touches_the_failing_path_with_its_drop_command(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming("lanes/102.txt")) as mocks:
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(self.drop_pr_numbers(out, "nightly"), ["102"],
+                         "the lint FAIL names lanes/102.txt but prints no `merge --batch-drop nightly 102` for the lane that touches it: %s" % out)
+        self.assertIn("#102", out, "the lint FAIL names lanes/102.txt but does not name #102, the one frozen lane whose diff touches it: %s" % out)
+        self.assertEqual(len(self.lint_calls(mocks)), 1, "--ready did not lint the batch head once: %s" % out)
+        self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
+        self.assertTrue(self.host.prs[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
+
+    def test_ready_lint_fail_names_both_lanes_that_touch_the_failing_path(self):
+        for n in (101, 102):
+            self.lane(n)
+        self.lane_commit(101, "lanes/shared.txt", "shared\n", "lane 101 touches lanes/shared.txt")
+        self.lane_commit(102, "lanes/shared.txt", "shared\n", "lane 102 touches lanes/shared.txt")
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming("lanes/shared.txt")):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        for n in (101, 102):
+            self.assertIn(f"#{n}", out, "the lint FAIL names lanes/shared.txt, which #101 and #102 both touch, but does not name #%d: %s" % (n, out))
+        self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
+        self.assertTrue(self.host.prs[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
+
+    def test_ready_lint_fail_on_a_path_no_lane_touches_says_the_blame_is_unknown_and_prints_no_drop_command(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming("docs/unrelated.md")):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertRegex(out, r"blame[^\n]*unknown|unknown[^\n]*blame",
+                         "the lint FAIL names docs/unrelated.md, which no frozen lane touches, but does not say the blame is unknown: %s" % out)
+        self.assertEqual(self.drop_pr_numbers(out, "nightly"), [],
+                         "the lint FAIL names docs/unrelated.md, which no frozen lane touches, yet prints a drop command: a guess: %s" % out)
+        self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
+        self.assertTrue(self.host.prs[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
+
+    def test_a_blamed_lane_dropped_leaves_a_draft_that_needs_ready_again_and_the_next_ready_lints_once(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)  # a draft: a FAILing lint never leaves a batch ready, and a ready one is not linted
+        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming("lanes/102.txt")) as mocks:
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(len(self.lint_calls(mocks)), 1, "--ready did not lint the batch head once: %s" % out)
+        self.assertEqual(self.drop_pr_numbers(out, "nightly"), ["102"],
+                         "the lint FAIL names lanes/102.txt but prints no `merge --batch-drop nightly 102` to run: %s" % out)
+        self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
+        with self.no_lint_or_ready_check() as mocks:
+            rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertEqual(rc, 0, "the drop the lint named exited %s: %s" % (rc, out))
+        self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the drop did not take lane #102 off batch/nightly: %s" % out)
+        self.assertTrue(self.host.prs[pr]["draft"], "the drop of a draft batch changed its draft flag: %s" % out)
+        self.assertEqual(self.host.to_drafts, [], "the drop of a draft batch called to_draft: %s" % out)
+        self.assertIn("merge --batch-build nightly --ready", out, "the drop does not say the batch needs --ready again: %s" % out)
+        self.assertEqual(self.host.readies, [], "the drop called Host.ready: %s" % out)
+        with self.no_lint_or_ready_check(ready_state="pass") as mocks:
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(self.lint_calls(mocks), [("batch/nightly", "main", "")],
+                         "the --ready after the drop did not lint the batch head once, and no other lint: %s" % out)
+        self.assertEqual(self.host.readies, [pr], "the --ready after the drop did not mark the batch PR ready once: %s" % out)
+        self.assertFalse(self.host.prs[pr]["draft"], "the batch PR is still a draft after the --ready that passed: %s" % out)
+        self.assertEqual(rc, 0, "the --ready after the drop exited %s: %s" % (rc, out))
 
     # Drop: one lane off the branch, the block rewritten, nothing else touched.
 
@@ -16073,6 +16176,71 @@ class BatchFreeze(CloudSession):
         self.assertIn("#101", out, "the refusal of #102 does not name its base lane #101: %s" % out)
         self.assertEqual(self.host.created, [], "the refused build opened a pull request: %s" % out)
         self.assertEqual(self.head("batch/nightly"), "", "the refused build pushed batch/nightly: %s" % out)
+
+    # Heal: a rebuild of a drifted batch branch is a push to a batch that may be ready. It returns the batch to draft once, before its push,
+    # as a drop does. A refused return warns and the heal goes on. A rerun that pushes nothing never calls to_draft.
+
+    def test_a_build_rerun_that_heals_a_drifted_ready_batch_returns_it_to_draft_once_before_its_push(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])  # ready
+        drifted = self.drift_batch("nightly", [101])  # origin's batch/nightly lost lane #102; the body still lists it
+        seen = []
+        self.host.on_to_draft = lambda n: seen.append(self.head("batch/nightly"))
+        self.record_pushes()
+        with self.no_lint_or_ready_check() as mocks:
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(self.host.to_drafts, [pr], "the heal of a drifted ready batch did not return it to draft once: %s" % out)
+        self.assertEqual(seen, [drifted], "the return to draft did not come before the heal's push to batch/nightly: %s" % out)
+        self.assertTrue(self.on_origin(self.heads[102], "batch/nightly"), "the heal did not put lane #102 back on batch/nightly: %s" % out)
+        self.assertTrue(self.host.prs[pr]["draft"], "the heal left the batch PR ready: %s" % out)
+        self.assertIn("merge --batch-build nightly --ready", out, "the heal does not say the batch needs --ready again: %s" % out)
+        self.assertEqual(self.host.readies, [], "the heal called Host.ready: %s" % out)
+        self.assertEqual(rc, 0, "the heal exited %s: %s" % (rc, out))
+        for name, mock in mocks.items():
+            self.assertFalse(mock.called, "the heal called merge.%s: a build runs no lane lint and no ready check" % name)
+
+    def test_a_drop_rerun_that_heals_a_ready_batch_returns_it_to_draft_once_before_its_push(self):
+        self.host.to_draft_refuse = "no mark-draft route is open to this session"
+        pr = self.killed_drop((101, 102, 103), 102)  # the lanes are made here; the return to draft was refused, then the push was killed: still ready
+        self.assertFalse(self.host.prs[pr]["draft"], "setup: the killed drop left the batch a draft, so the rerun would not heal a ready batch")
+        self.host.to_draft_refuse = None
+        drifted = self.head("batch/nightly")
+        seen, before = [], len(self.host.to_drafts)
+        self.host.on_to_draft = lambda n: seen.append(self.head("batch/nightly"))
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertEqual(self.host.to_drafts[before:], [pr], "the rerun drop that heals a ready batch did not return it to draft once: %s" % out)
+        self.assertEqual(seen, [drifted], "the return to draft did not come before the heal's push to batch/nightly: %s" % out)
+        self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the rerun drop left dropped lane #102 on batch/nightly: %s" % out)
+        self.assertTrue(self.host.prs[pr]["draft"], "the rerun drop left the batch PR ready: %s" % out)
+        self.assertEqual(rc, 0, "the rerun drop exited %s: %s" % (rc, out))
+
+    def test_a_refused_return_to_draft_on_a_heal_warns_and_the_heal_still_pushes(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])  # ready
+        self.drift_batch("nightly", [101])
+        self.host.to_draft_refuse = "no mark-draft route is open to this session"
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertIn("could not return to draft: no mark-draft route is open to this session; the push restarts CI", out,
+                      "the refused return to draft on a heal does not warn, with its reason: %s" % out)
+        self.assertTrue(self.on_origin(self.heads[102], "batch/nightly"), "a refused return to draft blocked the heal of batch/nightly: %s" % out)
+        self.assertFalse(self.host.prs[pr]["draft"], "a refused return to draft changed the batch PR's draft flag: %s" % out)
+        self.assertEqual(rc, 0, "the heal with a refused return to draft exited %s, not 0: %s" % (rc, out))
+
+    def test_green_control_a_same_set_rerun_that_pushes_nothing_never_calls_to_draft(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])  # ready, and origin's batch/nightly holds both lanes
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "102", "101")
+        self.assertEqual(self.pushes(), [], "the same-set rerun pushed batch/nightly: %s" % out)
+        self.assertEqual(self.host.to_drafts, [], "a rerun that pushes nothing called to_draft: %s" % out)
+        self.assertFalse(self.host.prs[pr]["draft"], "the same-set rerun changed the batch PR's draft flag: %s" % out)
+        self.assertEqual(rc, 0, "the same-set rerun exited %s: %s" % (rc, out))
 
     # Green control: the fixtures and the push recorder work on main, where no batch code exists.
 
