@@ -883,7 +883,7 @@ class Host:
         """-> (records, lints): one list read of the repo's issue comments updated since `since`. The number comes from the comment's issue_url.
         records is {PR number: [review record bodies, oldest first]}: a body counts only when the review record marker is its whole first line.
         lints is {PR number: [lane-lint comment bodies, oldest first]}: the lint marker is the whole first line and the author is the repo's owner.
-        A failed read is a Stop. The one home of the comment read: review_comments and the lane-lint gate each take their half."""
+        A failed read is a Stop. The one home of the comment read: review_comments and the lane-lint check each take their half."""
         records, lints = {}, {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
             body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
@@ -2596,7 +2596,8 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     short = head[:9]
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
-        say(f"PASS: lint of {short} against {base} passes{named}. The batch runner may take this head, or join it to a batch.", *pin_notes)
+        tail = "The batch runner may take this head, or join it to a batch." if target.isdigit() else "No comment is posted for a ref or commit, so this does not satisfy the join."
+        say(f"PASS: lint of {short} against {base} passes{named}. {tail}", *pin_notes)
         if target.isdigit():  # a ref or commit has no pull request to carry the comment
             n = int(target)
             try:
@@ -2975,7 +2976,7 @@ def draft_step(root, cfg, n, host, info):
 
 WAITS = 3  # the host.wait_checks calls in confirm, none in a loop: the head, the claim, the merge commit that heals the page
 
-def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok=""):
+def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None):
     m = cfg.get("merge", {})
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read: acquire never waits, so the head cannot move before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
@@ -2991,6 +2992,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     try:
         info = host.pr(n)
         refuse_bad_pr(info)
+        if expected_head and info["head"] != expected_head:  # the lane-lint PASS names expected_head; a push since then was not linted
+            raise Stop(f"the head of #{n} moved from {expected_head[:9]} to {info['head'][:9]} after its lane-lint was read. Run `merge --lane-lint {n}` on the new head, then join again. {LANE_LINT_CITE} Nothing was claimed or pushed.")
         if info["base"] != base:
             raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken {BASE_CITE}. Nothing was claimed or pushed.")
         host.take_base = base
@@ -3233,7 +3236,7 @@ REVIEW_MARKER = "<!-- review-record -->"
 
 # The lane-lint comment (decision lanes-run-no-full-ci-job): `merge --lane-lint <pr>` posts it on a PASS, and `--reviewed` and the join read it. The one home of its form.
 LANE_LINT_MARKER = "<!-- lane-lint -->"
-LANE_LINT_AUTHOR = "OWNER"  # the gate trusts the comment's author, not its text
+LANE_LINT_AUTHOR = "OWNER"  # the check trusts the comment's author, not its text
 
 def lint_body(n, head, result="PASS"):
     """-> the lane-lint comment text: the marker, the pull request, the head the lint read, and its result, one per line."""
@@ -3360,10 +3363,11 @@ def review_state(rec, head):
         return "done", "docs-only change, no round owed"
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
-def lint_gate(h, n, info):
+def lint_check(h, n, info):
     """The batch runner's join needs a lane-lint PASS at the live head (decision lanes-run-no-full-ci-job): read from the repo's comment list, the one read the
     review record uses. No PASS at the head, a FAIL, an unreadable result, or a failed read is a Stop that names `merge --lane-lint <n>`; a failed read
-    is `lane lint unknown`, never a pass. It runs before the lock, so nothing is claimed, pushed or merged. A head pushed after this read is not rechecked."""
+    is `lane lint unknown`, never a pass. It runs before the lock, so nothing is claimed, pushed or merged. The caller passes info["head"] to confirm as
+    expected_head, so a head pushed after this read is refused there."""
     try:
         lints = h.issue_comments(info.get("created") or "1970-01-01T00:00:00Z")[1]
     except Stop as e:
@@ -3714,11 +3718,13 @@ def main(argv, host=None, lock=None, hosts=None):
         if not host:
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
             h.refuse_pinned_mismatch()
+        checked = None  # the head the lane-lint PASS names; confirm refuses any other
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and isinstance(h, Host) and not info["draft"]:  # a scripted host that is no Host brings its own reads; a draft is the records step, never a join
-            lint_gate(h, a.pr, info)
+            lint_check(h, a.pr, info)
+            checked = info["head"]
         if a.confirm:
             with release_on_signals():
-                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok) or 0
+                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok, checked) or 0
         return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
         print(f"merge: {e}" + ("" if isinstance(e, (Liftable, Unproven)) else " No override lifts this refusal, because this tool runs after the guard."), file=sys.stderr)
