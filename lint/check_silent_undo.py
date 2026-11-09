@@ -376,14 +376,31 @@ class Blobs:
 
 
 def merge_bases(cwd, p, parents):
-    """The commits a line must be absent from to count as added by parent p: the merge bases of p with each
-    other parent. A two-parent merge has the one pair."""
+    """The commits a line must be absent from to count as added by parent p. A two-parent merge has the merge
+    bases of p with the other parent. Three or more parents have one octopus base, the same for every
+    parent: a pairwise base can sit past a line all the parents inherit, and would hide its drop."""
+    if len(parents) > 2:
+        rc, out = git(cwd, "merge-base", "--octopus", *parents, ok=(0, 1))
+        return out.split() if rc == 0 else []
     bases = []
     for q in parents:
         if q != p:
             rc, out = git(cwd, "merge-base", "--all", p, q, ok=(0, 1))
             bases += [b for b in (out.split() if rc == 0 else []) if b not in bases]
     return bases
+
+
+def sibling_bases(cwd, p, parents):
+    """[(q, merge bases of p and q)] for each other parent q of an n-parent merge, else []. A line that q
+    deleted from its base with p is no loss of p's: the merge keeps q's deletion."""
+    if len(parents) < 3:
+        return []
+    res = []
+    for q in parents:
+        if q != p:
+            rc, out = git(cwd, "merge-base", "--all", p, q, ok=(0, 1))
+            res.append((q, out.split() if rc == 0 else []))
+    return res
 
 
 def lost_lines(cwd, m, refs=()):
@@ -399,14 +416,15 @@ def lost_lines(cwd, m, refs=()):
     blobs = Blobs(cwd)
     try:
         for p in parents:
-            found += lost_in_parent(cwd, m, p, merge_bases(cwd, p, parents), refs, blobs)
+            found += lost_in_parent(cwd, m, p, merge_bases(cwd, p, parents), refs, blobs, sibling_bases(cwd, p, parents))
     finally:
         blobs.close()
     return found
 
 
-def lost_in_parent(cwd, m, p, bases, refs, blobs):
-    """lost_lines for one parent p of merge m; blobs reads every file text."""
+def lost_in_parent(cwd, m, p, bases, refs, blobs, siblings=()):
+    """lost_lines for one parent p of merge m; blobs reads every file text. siblings is sibling_bases: a line one
+    of those parents deleted is skipped."""
     found = []
     pool = pool_of(cwd, p, m)
     paths, from_base = set(), {}
@@ -425,9 +443,19 @@ def lost_in_parent(cwd, m, p, bases, refs, blobs):
         in_p, in_m = counts(blobs.get(p, path)), counts(text_m)
         in_b = [counts(blobs.get(b, from_base[b][path][0] if path in from_base[b] else path)) for b in bases]
         lost, hs = [], None
+        gone = None  # the lines a sibling parent deleted from its base with p, read once per path and only if a line needs it
         for l, n in in_p.items():
             if any(l in c for c in in_b):
                 continue
+            if siblings:
+                if gone is None:
+                    gone = set()
+                    for q, qbases in siblings:
+                        in_q = counts(blobs.get(q, path))
+                        for qb in qbases:
+                            gone |= {x for x in counts(blobs.get(qb, path)) if x not in in_q}
+                if l in gone:
+                    continue
             missing = n - in_m.get(l, 0)
             if missing <= 0 or l in flat:
                 continue

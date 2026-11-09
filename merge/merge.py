@@ -309,8 +309,7 @@ def lift_message(lifts):
 def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
     """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
     A finding refuses. An unreadable history refuses too, unless the run has the reason flag
-    --undo-check-unknown-ok "<reason>", which Claude may type with a reason: that is the way out when the check cannot run (octopus merge,
-    git older than 2.38, shallow clone). A lift is logged and returns its reason, for record_lift; it does not excuse a finding. Any other pass returns None."""
+    --undo-check-unknown-ok "<reason>", which Claude may type with a reason: that is the way out when the check cannot run (git older than 2.38, shallow clone). A lift is logged and returns its reason, for record_lift; it does not excuse a finding. Any other pass returns None."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_silent_undo as undo
     # The scan is slow on a merge-heavy branch and merge runs it twice. Its answer depends only on the head, the base tip, the PR body,
