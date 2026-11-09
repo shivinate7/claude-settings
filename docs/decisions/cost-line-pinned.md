@@ -60,6 +60,12 @@ Cost: one python start per CI run, and no file written (unmeasured). It reads `l
 - These extensions mark a file: md, py, mjs, js, ts, tsx, json, jsonl, sh, ps1, cmd, bat, html, css, swift. So do jsx, cjs, mts, cts, yml, yaml, toml, txt, log, csv, tmpl, sql, cfg, ini, lock and xml. A file with another extension is not seen.
 - A path with no extension is not a file token, so `bin/verdict` is not seen. A name outside backticks is not read at all.
 - A heading with an underline of `===` or `---` is not a heading here. A table row that starts with `| Cost` opens no paragraph.
+- A range suffix such as `:12-14` is not stripped from a file token. Note: `cost-pin-line-range`.
+- Three documented rules have no test case: fenced code, the whole-name lookbehind and the `\.name` lookahead. Note: `cost-pin-rules-untested`.
+- A Cost opener other than the bold form starts no paragraph. Note: `cost-pin-cost-opener-forms`.
+- "no test file" and "no testing" exempt a whole sentence. Note: `cost-exempt-no-word-end`.
+- A hyphenated range such as "2-3 reads" is read as one word and passes. Note: `cost-count-hyphen-range`.
+- Marks with extra words, and sentences reworded to add a pin, pass. Note: `cost-mark-extra-words`.
 
 Kind: process
 Home: lint/check_cost_pins.py
