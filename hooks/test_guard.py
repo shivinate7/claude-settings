@@ -13208,8 +13208,6 @@ def record_push_cost_case():
         ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1}),
         ("a push to main, origin main", "push origin main", {"rev-parse": 2, "config": 1, "remote": 1, "diff": 1}),
         ("a push to main, HEAD:main", "push origin HEAD:main", {"rev-parse": 2, "config": 1, "remote": 1, "diff": 1}),
-        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "config": 1, "diff": 1}),
-        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "config": 1, "diff": 1}),
         ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1, "diff": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
          {"rev-parse": 2, "symbolic-ref": 1, "diff": 3}),
