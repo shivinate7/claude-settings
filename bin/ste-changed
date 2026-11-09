@@ -3,7 +3,8 @@
 # It runs actions/ste-lint/run.sh, the one home of the step, with the step's env and defaults
 # read from actions/ste-lint/action.yml. Same output lines, same exit code. <base>: main or origin/main.
 # Excludes: .ste-lint-exclude at the git top level of the repo being linted. EXCLUDE is set to the
-# input default, so an EXCLUDE in the caller's environment is ignored.
+# input default, so an EXCLUDE in the caller's environment is ignored. STE_CHANGED_EXCLUDE (guard_ste.EXCLUDE_ENV) adds
+# pathspecs to it: the rule ste-push passes the pinned step's own `exclude` input there.
 # TREE_CITES=true in the env runs tree mode, as an opted-in repo's CI does; the workflow's tree-cites setting is not read.
 # Pin check: when the repo's CI pins this repo's ste-lint or zizmor action at a commit whose files for that
 # action differ from this copy's, it says so on stderr and exits 3 even if the lint passed, so a session moves
@@ -11,36 +12,38 @@
 # (PINNED below). A pin this clone does not hold is reported as unknown and changes no exit code. A pin the
 # clone holds but whose history a shallow clone cut is unknown too, in its own line with the remedy
 # `git fetch --unshallow`; unlike the line above, it still exits 3, because the files differ, and that is a fact.
+# When the ste-lint pin's files differ, stdout also gets guard_ste.PIN_DRIFT after the step's lines: a FAIL keeps exit 1,
+# and rule ste-push reads that line to tell a drifted FAIL (unknown) from CI's own FAIL.
 # Pin note: with STE_CHANGED_PIN_NOTE=1 (bin/ci-job sets it for its ste-lint step) every pin line still prints, but the
 # exit code is the lint's own, never 3, so a lane keeps its place. A drift line then starts `ste-changed: pin note: `
 # (NOTE below), which ci-job reads back into its PASS line. A failing lint keeps its exit code either way.
 # Checkout: the clone this file lives in; a copy install (~/.claude/bin) has no actions/, so it uses the clone the
 # global CLAUDE.md names on its `@<dir>/CLAUDE.md` line (hooks/guard_pointer.pointer_checkout).
+# Exit codes: the step's own (0 pass, 1 FAIL), 3 pin drift, and 2 for a fault of this command (no checkout, no bash, a crash).
+# The guard rule ste-push reads the `ste-lint: PASS|FAIL,` line of stdout, so a fault never reads as FAIL (hooks/guard_ste.py).
 # Windows: bin\ste-changed.cmd. Needs bash (Git for Windows has it) and python3 on PATH.
 import os, re, subprocess, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import git_reads  # noqa: E402  the one home of the ancestry read (hooks/git_reads.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (hooks/git_bash.py)
+import guard_ste  # noqa: E402  the one home of the action defaults, the pin pattern and the checkout lookup (hooks/guard_ste.py)
 from pin_note import ENV as PIN_NOTE_ENV, MARKER as NOTE  # noqa: E402  the one home of the pin note's names (hooks/pin_note.py)
 
-LINT_ACTION = os.path.join("actions", "ste-lint", "action.yml")
+LINT_ACTION = guard_ste.LINT_ACTION
+FAULT_EXIT = 2   # this command's own faults. Exit 1 is the step's FAIL, so a crash never reads as one (rule ste-push)
+
+
+def fault(message):
+    print(message, file=sys.stderr)
+    sys.exit(FAULT_EXIT)
 
 
 def find_root():
     """The checkout that holds the lint step: this file's own clone, else the one the global CLAUDE.md points at."""
-    own = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    if os.path.isfile(os.path.join(own, LINT_ACTION)):
-        return own
-    try:
-        import guard_pointer  # noqa: E402  the one reader of the pointer line (hooks/guard_pointer.py)
-        pointed = guard_pointer.pointer_checkout()
-    except ImportError:
-        pointed = ""
-    if pointed and os.path.isfile(os.path.join(pointed, LINT_ACTION)):
-        return pointed
-    sys.exit("ste-changed: no claude-settings checkout found. Looked at the `@<dir>/CLAUDE.md` pointer line "
-             "in the CLAUDE.md of the config dir.")
+    root = guard_ste.find_checkout(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    return root or fault("ste-changed: no claude-settings checkout found. Looked at the `@<dir>/CLAUDE.md` pointer "
+                         "line in the CLAUDE.md of the config dir.")
 
 
 ROOT = find_root()
@@ -55,7 +58,7 @@ LINT_FILES = ("actions/ste-lint/action.yml", "actions/ste-lint/run.sh", "lint/st
 # remedy's clause on who may move the pin)}. The "with no question" grant is the owner's for ste-lint pins only.
 PINNED = {"ste-lint": (LINT_FILES, "lint", ", with no question (rule git-integration-branch-merge)"),
           "zizmor": (("actions/zizmor/action.yml", "actions/zizmor/run.sh"), "zizmor run", "")}
-PIN = re.compile(r"[\w.-]+/claude-settings/actions/(%s)@([0-9a-f]{40})" % "|".join(map(re.escape, PINNED)))
+PIN = guard_ste.pin_pattern(PINNED)
 
 
 def out(*a):
@@ -69,21 +72,13 @@ def here(*a):
 
 def pins():
     """{(action, sha): first "file:line" that pins it}, from the linted repo's .github/workflows."""
-    top, found = out("rev-parse", "--show-toplevel"), {}
-    wf = os.path.join(top, ".github", "workflows")
-    for name in sorted(os.listdir(wf)) if os.path.isdir(wf) else ():
-        if name.endswith((".yml", ".yaml")):
-            with open(os.path.join(wf, name), encoding="utf-8", errors="replace") as f:
-                for n, line in enumerate(f, 1):
-                    for key in PIN.findall(line.split("#", 1)[0]):
-                        found.setdefault(key, ".github/workflows/%s:%d" % (name, n))
-    return found
+    return guard_ste.workflow_pins(out("rev-parse", "--show-toplevel"), PIN)
 
 
 def pin_report(note=False):
-    """One stderr line per pinned action and commit. True when a pin's files for its action differ from this copy's.
+    """One stderr line per pinned action and commit. Returns the set of actions whose pinned files differ from this copy's.
     `note`: a drift line starts with NOTE instead of `ste-changed: `."""
-    head, drift = here("rev-parse", "HEAD"), False
+    head, drift = here("rev-parse", "HEAD"), set()
     for (action, sha), where in pins().items():
         files, what, grant = PINNED[action]
         pin = "ste-changed: CI pins %s at %s" % (action, sha[:7])
@@ -96,7 +91,7 @@ def pin_report(note=False):
         elif _nowindow.run(["git", "-C", ROOT, "diff", "--quiet", sha, "HEAD", "--", *files]).returncode == 0:
             print("%s (%s), the same %s as this copy." % (pin, where, what), file=sys.stderr)
         else:
-            drift = True
+            drift.add(action)
             day = here("log", "-1", "--format=%cs", sha)
             older = git_reads.branch_is_ancestor(ROOT, "HEAD", sha)  # None in a shallow clone: the cut reads exit 1
             if older is None:
@@ -118,32 +113,41 @@ def pin_report(note=False):
     return drift
 
 
-def default(text, name):
-    return re.search(r"^  %s:.*?\n    default: \"([^\"]*)\"" % re.escape(name), text, re.M | re.S).group(1)
-
-
 def find_bash():
     if os.path.exists("/bin/bash"):
         return "/bin/bash"
-    return find_git_bash() or sys.exit("ste-changed: bash not found")  # never the WSL launcher
+    return find_git_bash() or fault("ste-changed: bash not found")  # never the WSL launcher
 
 
 def main(argv):
     if len(argv) != 1:
-        sys.exit("usage: ste-changed <base>")
+        fault("usage: ste-changed <base>")
     base = re.sub(r"^origin/", "", argv[0])
-    text = open(os.path.join(ACTION, "action.yml")).read()
+    with open(os.path.join(ACTION, "action.yml")) as handle:
+        defaults = guard_ste.lint_inputs(handle.read())
+    missing = [name for name, value in defaults.items() if value is None]
+    if missing:
+        fault("ste-changed: action.yml has no default for input %s" % ", ".join(missing))
     env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF=base, DEFAULT_BRANCH=base,
                REF_NAME=out("rev-parse", "--abbrev-ref", "HEAD"), SCOPE="changed", FAIL="true",
-               PATHS_GLOB=default(text, "paths"), EXCLUDE=default(text, "exclude"),
-               CHANGED_PATHS_GLOB=default(text, "changed_paths"),
-               DECISIONS_DIR=default(text, "decisions-dir"))
+               PATHS_GLOB=defaults["paths"],
+               EXCLUDE="\n".join(filter(None, (defaults["exclude"], os.environ.get(guard_ste.EXCLUDE_ENV, "")))),
+               CHANGED_PATHS_GLOB=defaults["changed_paths"], DECISIONS_DIR=defaults["decisions-dir"])
     run = os.path.join(ACTION, "run.sh").replace("\\", "/")
     # nowindow: the lint step prints its findings on the caller's terminal; the wrapper's no-window flag could hide that output
     rc = subprocess.run([find_bash(), run], env=env).returncode
     note = os.environ.get(PIN_NOTE_ENV) == "1"
     drift = pin_report(note)
+    if "ste-lint" in drift:
+        print(guard_ste.PIN_DRIFT, flush=True)
     sys.exit(rc or (3 if drift and not note else 0))
 
 
-main(sys.argv[1:])
+try:
+    main(sys.argv[1:])
+except SystemExit:
+    raise
+except BaseException:   # an uncaught error exits 1, which is the step's FAIL
+    import traceback
+    traceback.print_exc()
+    sys.exit(FAULT_EXIT)
