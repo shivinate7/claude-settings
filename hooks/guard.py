@@ -4271,8 +4271,6 @@ def page_stale_hit(tool_input, cwd):
 # file the last allowed publish stamped (stale_pages.PUBLISHED). The checker runs the page's own code, so the
 # sentence a miss quotes is the page's. A miss denies. Unknown (no node, no stamp, the file gone, the checker
 # unable to render, a run past its cap) allows and logs one `noted` line. A write with no picture starts no node.
-CHECK_DESIGNS = "check_designs.mjs"
-CHECK_DESIGNS_CAP = 25  # seconds for one run; the checker caps itself at 20
 # One deadline for every pictured item of one call, under the 60 s hook timeout. A run never outlasts what is left of it.
 PAGE_ITEM_DESIGN_BATCH_SECONDS = 45
 _design_deadline = [None]  # time.monotonic() of the deadline of the call being judged; read by _run_check_designs
@@ -4281,39 +4279,18 @@ PAGE_ITEM_DESIGN_FIX = " (decision page-item-design, a waiting item's design pic
 
 def _run_check_designs(page_file, item):
     """(code, text) from the checker on `item` (a dict) against `page_file`: code 0 pass, 1 miss with the page's
-    sentence as text, 3 unknown with the reason as text. The one seam that starts node."""
-    import shutil
-    import subprocess  # TimeoutExpired only; the child starts through _nowindow
-    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
-    import tempfile
-    node = shutil.which("node")
-    folder = _waiting_page_folder(CHECK_DESIGNS)
-    if node is None or folder is None:
-        return 3, "node is not installed" if node is None else CHECK_DESIGNS + " not found"
-    cap = CHECK_DESIGNS_CAP
+    sentence as text, 3 unknown with the reason as text. The seam of the guard; skills/waiting-page/page_check.py
+    is the one home that starts node, and this call only sets the cap from the call's deadline."""
+    folder = _waiting_page_folder("page_check.py")
+    if folder is None:
+        return 3, "page_check.py not found"
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    page_check = importlib.import_module("page_check")
+    cap = page_check.CHECK_DESIGNS_CAP
     if _design_deadline[0] is not None:
         cap = max(1.0, min(cap, _design_deadline[0] - time.monotonic()))
-    with tempfile.TemporaryDirectory() as scratch:
-        item_file = os.path.join(scratch, "item.json")
-        with open(item_file, "w", encoding="utf-8") as handle:
-            json.dump(item, handle)
-        try:
-            run = _nowindow.run([node, os.path.join(folder, CHECK_DESIGNS), "--page", page_file, "--item", item_file],
-                                capture_output=True, text=True, timeout=cap)
-        except subprocess.TimeoutExpired:
-            return 3, "no answer in %d s" % cap
-        except OSError as err:
-            return 3, str(err.strerror or err)
-    lines = run.stdout.strip().splitlines()
-    try:
-        problem = json.loads(lines[-1]).get("problem") if lines else None
-    except ValueError:
-        return 3, "no answer line; exit %d" % run.returncode
-    if run.returncode == 1 and isinstance(problem, str) and problem:
-        return 1, problem
-    if run.returncode == 0:
-        return 0, ""
-    return 3, (run.stderr.strip().splitlines() or ["exit %d" % run.returncode])[-1]
+    return page_check.run_check_designs(page_file, item, cap)
 
 
 # ------------------------------------------------------------------ a design names its file, in a mockup home
