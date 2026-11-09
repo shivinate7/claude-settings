@@ -1459,7 +1459,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     # One walk gives every segment's folders; asking per segment would walk the segments before it each time.
     places = dir_before_segment(segments, len(segments) - 1, cwd, ends, each=True) if follow_cd and segments else ()
-    bodies = guard_core.case_arm_bodies(segments) if follow_cd else ()   # a case arm's command, past its pattern
+    bodies = guard_core.case_arm_bodies(segments, ends) if follow_cd else ()   # a case arm's command, past its pattern
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     for number, raw in enumerate(parsed):
         linked = _cp_link_source(raw, holds, cwd, bool(fed))
