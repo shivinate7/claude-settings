@@ -2433,8 +2433,8 @@ def merge_conflicts(root: str):
 # whose own newest get_session record carries cs-build:lane or cs-build:coordinator, with no set_session_tags
 # call after it, does not write a non-.md file or commit a merge that conflicts one while a merge is in progress: the
 # whole merge goes to a role agent. A call with no agent_id and no merge pays one MERGE_HEAD probe and reads no
-# transcript. An unreadable record, a session id the env does not give and a git failure allow, and log one
-# `orchestrator-merge-write-unread` line. The owner's typed override lifts the refusal.
+# transcript. A session id the env does not give (a local session) allows with no log. An unreadable record and a git
+# failure allow, and log one `orchestrator-merge-write-unread` line. The owner's typed override lifts the refusal.
 ORCH_MERGE_REASON = (
     "A lane or coordinator session does not resolve or finish a merge that holds a product, test or config file: "
     "choosing each side is a build and a test choice, which the role agents own. Abort the merge, then send the "
@@ -2448,23 +2448,24 @@ ORCH_MERGE_UNREAD = "orchestrator-merge-write-unread"
 def orchestrator_session(payload):
     """True when this session's own newest get_session record carries cs-build:lane or cs-build:coordinator
     and no other cs-build tag, with no set_session_tags call after it; False when the record or a later tag call
-    shows another tier; None when the record could not be read (no env id, no transcript, no record, a read error)."""
+    shows another tier, or when the env gives no session id (a local session, which the rule does not cover);
+    None when the record could not be read (no transcript, no record, a read error)."""
     try:
         import override
         import own_session
         own_id = override.remote_session_id()
+        if own_id is None:
+            return False
         transcript = payload.get("transcript_path") if isinstance(payload, dict) else None
-        if own_id is None or not isinstance(transcript, str) or not transcript:
+        if not isinstance(transcript, str) or not transcript:
             return None
-        tags, tagged_after, _parent = own_session.own_session_read(transcript, own_id)
+        build, tagged_after = own_session.own_build_tags(transcript, own_id)
     except Exception:
         return None
-    if tags is None:
+    if build is None:
         return None
     if tagged_after:
         return False
-    names = [t.strip().casefold() for t in tags if isinstance(t, str)] if isinstance(tags, list) else []
-    build = [n for n in names if n.startswith(BUILD_TAG)]
     return bool(build) and all(n in (LANE_TAG, COORDINATOR_TAG) for n in build)
 
 
@@ -2783,7 +2784,7 @@ REMOTE_SERVER = "mcp__claude-code-remote"
 CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
-from shared_names import BUILD_TAG, COORDINATOR_TAG, LANE_TAG  # noqa: E402  the one home of the tier tags, shared with lint/report_guard.py
+from shared_names import COORDINATOR_TAG, LANE_TAG  # noqa: E402  the one home of the tier tags, shared with lint/report_guard.py
 LANE_EFFORT_REASON = (
     "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
     "prompt. Start the lane with that prompt, then send the brief by send_message (decision agent-model-cap)."
@@ -3922,9 +3923,8 @@ def lane_session_hit(payload, tool: str) -> tuple:
         if not full or not isinstance(transcript, str) or not transcript:
             return "", ""
         import own_session
-        tags, tagged_after, _parent = own_session.own_session_read(transcript, own_id)
-        names = [t.strip().casefold() for t in tags if isinstance(t, str)] if isinstance(tags, list) else []
-        if tagged_after or LANE_TAG not in names or any(n.startswith("cs-build:") and n != LANE_TAG for n in names):
+        build, tagged_after = own_session.own_build_tags(transcript, own_id)
+        if tagged_after or not build or any(n != LANE_TAG for n in build):
             return "", ""
     except Exception:
         return "", ""

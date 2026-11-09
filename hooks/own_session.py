@@ -10,6 +10,8 @@ import json
 import os
 import re
 
+from shared_names import BUILD_TAG  # the one home of the tier tag prefix; standard library only
+
 # A get_session result for another session arrives as its untrusted text: an opening tag with a nonce, a preamble,
 # the record, then a closing tag. Only a closing tag with the opening nonce ends the wrapper.
 _OTHER_SESSION = re.compile(
@@ -62,6 +64,27 @@ def own_session_read(transcript, own_id, created=False):
     are the call's input.tags, its parent is None unless the input names parent_session_id. The newest
     record of either kind decides. Without it, only get_session counts."""
     return _scan(transcript, own_id, created)[:3]
+
+
+def own_build_tags(transcript, own_id, fold=True):
+    """(build, tagged_after): the cs-build: tags of the newest get_session result whose ccr.id is own_id, and
+    whether a set_session_tags call follows it. Only string tags count. With `fold`, each is stripped and
+    casefolded (the lane and coordinator readers); without it, each is kept exact (the tier proof). The one
+    reader of the own tier, so a caller never repeats the filter.
+
+    Never raises, as own_session_ccr does: `build` is None when no record names own_id and when the transcript
+    cannot be read (no path, a missing file, bad text). Every caller treats None as no proof of any tier. The
+    type check comes first because open() reads an int as a file descriptor."""
+    if not isinstance(transcript, (str, os.PathLike)) or not isinstance(own_id, str):
+        return None, False
+    try:
+        tags, tagged_after, _parent = own_session_read(transcript, own_id)
+    except (OSError, TypeError, ValueError, RecursionError):
+        return None, False
+    if tags is None:
+        return None, tagged_after
+    names = [t.strip().casefold() if fold else t for t in tags if isinstance(t, str)] if isinstance(tags, list) else []
+    return [n for n in names if n.startswith(BUILD_TAG)], tagged_after
 
 
 def own_session_ccr(transcript, own_id):
