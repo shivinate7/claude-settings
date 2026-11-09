@@ -5,6 +5,6 @@
   "order": 266.90999999999997,
   "owner": "coordinator",
   "why": "guard_rm_var's _cd_word (rm-after-cd) keeps its own textual cd walk, apart from #1508's dir_before_segment: two homes for one capability.",
-  "note": "Starts after #1508 and #1670 merge. Done check: rm-after-cd reads dir_before_segment, and its tests keep the same verdicts. Gap from lane git-write-after-failed-cd via the coordinator, 21:00 CST Nov 7; the coordinator starts the lane then. Filed 21:00 CST Nov 7.",
-  "updatedAt": "2026-11-07T21:00:00-06:00"
+  "note": "Starts after #1508 and #1670 merge. Done check: rm-after-cd reads dir_before_segment, and its tests keep the same verdicts. Gap from lane git-write-after-failed-cd via the coordinator, 21:00 CST Nov 7; the coordinator starts the lane then. Filed 21:00 CST Nov 7. Coordinator, Nov 8 19:02 CST: stays todo until #1670 merges (#1508 is merged).",
+  "updatedAt": "2026-11-08T19:03:00-06:00"
 }

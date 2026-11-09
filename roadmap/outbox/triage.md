@@ -126,3 +126,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - source-chain-dead-non-carry (same source): source_chain_problem is dead for a non-carry source (merge/merge.py 4003).
 - carry-cost-line-short (same source): decision pr-review-record's Cost line omits the source-PR read and the notes-step tree reads.
 - copy-source-empty-unreachable (same source): copy_source(read[1] or [last]) has an unreachable empty-list case (merge/merge.py 3971).
+- session-start-fetch-bound (lane grants-read-from-main, #2340, via the coordinator 18:55 CST Nov 8): unknown reads on cloud lane clones are likely the 2 s fetch bound, not a shallow or single-branch clone (`git rev-parse --is-shallow-repository` false; refspec `+refs/heads/*:refs/remotes/origin/*`, coordinator clone, 2026-11-08 18:54 CST). It becomes a debt after a measured incident (hooks/session_start.sh bounded_fetch, CLAUDE_SETTINGS_FETCH_TIMEOUT).
+- record-post-pipe-long-wait (#2355 round 3, via the coordinator Nov 8 19:06 CST): hooks/guard_stream.py narrating_stage refuses `merge <pr> --review-record ... --confirm | tail` as a long wait; a false alarm only when piped.
+- report-guard-remedy-reviewer (#2355 round 3, same source, Decision: record-tool-posts-itself): lint/report_guard.py's remedy tells "the reviewer" to run the posting form, but the decision says the lane runs it.
