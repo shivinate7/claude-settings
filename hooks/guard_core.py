@@ -1161,8 +1161,9 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     real shell keeps: `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes
     back, a `cd` inside `( ... )` ends with the parenthesis, and `popd` is not tracked. A `cd` to
     `$VAR`, `"$VAR"` or `"${VAR}"` is read as the value a plain `NAME=value` segment set in this shell
-    (`_track_variables`); a prefix assignment, one in a pipe, a subshell or after `||`, and any step that
-    may set a variable (`unset`, `read`, a loop) leave it unknown. A path that still holds `$` after that
+    (`_track_variables`); a prefix assignment, one in a pipe, a subshell, after `||` or after an `&&` whose
+    left side may fail, and any step that may set a variable (`unset`, `read`, a loop, `$(...)`) leave it
+    unknown. A path that still holds `$` after that
     (unassigned, a substitution), or holds `%` or a backtick, is not tracked. A `cd` into a folder that does not exist is not trusted (the
     shell stays where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
     in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
