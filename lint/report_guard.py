@@ -158,7 +158,7 @@ A failed cutover read never refuses by itself. Only an unstamped record, otherwi
 A Stamp line that does not match, or a malformed field, is refused as with a known cutover. Cost: 2 gh reads, and for the cutover up to two git log runs
 (the repo's salt read, plus the tool-checkout read when the repo has no salt commit; a deepen adds the passes counted below; review_stamp_since, cached per (repo top, base, default branch) in the process: one per distinct key per Stop; the default branch comes from the pull, never a third gh read),
 plus the guard_merge and merge module imports. A repo whose history holds no salt commit adds one git log of the merge tool's own checkout (tool_stamp_since), with no fetch. A full clone, or a shallow one whose boundary is not the first salt commit, runs that one git log and no fetch. In a shallow clone
-whose first salt commit is the shallow boundary, the read deepens first (this Stop keeps the deepen by the orchestrator's ruling, filed in decision pr-review-record): up to
+whose first salt commit is the shallow boundary, the read deepens first (this Stop keeps the deepen by the ruling of lane review-record-provenance, filed in decision pr-review-record): up to
 merge/merge.py REVIEW_DEEPEN_TRIES fetches of REVIEW_DEEPEN_STEP commits each, with a git log pass after each, so up to 4 git log passes and 3 fetches, more log calls when another
 process races the clone (REVIEW_RACE_TRIES). Each fetch makes a network call and writes objects, the clone's shallow file and origin/<default branch>. The deepen is once per
 clone: when it leaves the boundary older than the salt commit, later reads in any process fetch nothing. Budget: every gh read and the cutover read of one Stop share REVIEW_HOOK_BUDGET

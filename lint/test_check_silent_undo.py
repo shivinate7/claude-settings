@@ -2634,5 +2634,80 @@ class RevivedNote(unittest.TestCase):
         self.assertEqual(self.r.verdict(), [], "a note a merge brought back, then deleted and re-added on purpose, was refused")
 
 
+class OctopusMerge(unittest.TestCase):
+    """A merge of three parents: the fixture branch, a lane branch and main. Main is the last parent, so a
+    read that stops at the first two parents never sees the line this merge drops."""
+
+    def setUp(self):
+        self.r = base_repo()
+        r = self.r
+        base = r.sh("rev-parse", "HEAD")
+        r.sh("checkout", "-q", "-b", "fixture")
+        r.commit("fixture edits other", other_txt="other v2\n")
+        self.fixture = r.sh("rev-parse", "HEAD")
+        r.sh("checkout", "-q", "-b", "lane", base)
+        r.commit("lane adds a file", lane_txt="lane line\n")
+        self.lane = r.sh("rev-parse", "HEAD")
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds a line", app_txt=BODY + "function Card() {}\nadded by main\n")
+        r.push()
+        self.main = r.sh("rev-parse", "HEAD")
+        r.sh("checkout", "-q", "fixture")
+
+    def merge_into_fixture(self, parents, drop, msg="Merge the lanes"):
+        """Merges `parents` into fixture in one commit. With drop, app.txt is written back without main's line first."""
+        r = self.r
+        r.sh("merge", "-q", "--no-commit", "--no-ff", *parents)
+        if drop:
+            r.put("app.txt", BODY + "function Card() {}\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", msg)
+        return r.sh("rev-parse", "HEAD")
+
+    def assert_merge(self, head, parents, main_line_kept):
+        """Premise: the merge has these parents, and its app.txt keeps or drops main's line as the case says."""
+        got_parents = self.r.sh("rev-list", "--parents", "-n", "1", head).split()[1:]
+        self.assertEqual(got_parents, parents, "premise: the merge does not have the parents the case names")
+        self.assertEqual("added by main" in self.r.sh("show", head + ":app.txt"), main_line_kept,
+                         "premise: app.txt at the merge does not keep or drop main's line as the case says")
+
+    def verdict(self):
+        """The check's problems. A read that raises UNKNOWN fails the case with the reason it gives."""
+        try:
+            return self.r.verdict()
+        except C.Unknown as e:
+            self.fail("the check did not read the merge: %s" % e)
+
+    def assert_main_line_dropped(self, got, head):
+        """The drop is a lost-line finding for this merge, and the finding names main as the parent that added the line."""
+        want = "app.txt: merge %s drops 1 line(s) that parent %s added" % (head[:9], self.main[:9])
+        named = [p for p in got if p.startswith(want)]
+        self.assertTrue(named, "the merge's drop of main's line is not reported as a drop: %r" % (got,))
+        self.assertIn("added by main", named[0])
+
+    def test_octopus_merge_dropping_a_parent_line_is_a_fail(self):
+        head = self.merge_into_fixture([self.lane, "main"], drop=True)
+        self.assert_merge(head, [self.fixture, self.lane, self.main], main_line_kept=False)
+        self.assert_main_line_dropped(self.verdict(), head)
+
+    def test_octopus_merge_keeping_every_parent_line_passes(self):
+        head = self.merge_into_fixture([self.lane, "main"], drop=False)
+        self.assert_merge(head, [self.fixture, self.lane, self.main], main_line_kept=True)
+        self.assertEqual(self.verdict(), [])
+        self.assertEqual(self.r.notes, [])
+
+    def test_octopus_merge_drop_named_by_a_trailer_is_allowed(self):
+        head = self.merge_into_fixture([self.lane, "main"], drop=True,
+                                       msg="Merge the lanes\n\nDrops-lines: app.txt -- the main line is superseded")
+        self.assert_merge(head, [self.fixture, self.lane, self.main], main_line_kept=False)
+        self.assertEqual(self.verdict(), [])
+        self.assertEqual(self.r.notes, ["ALLOWED app.txt: the main line is superseded"])
+
+    def test_two_parent_merge_dropping_a_parent_line_is_a_fail(self):  # control
+        head = self.merge_into_fixture(["main"], drop=True)
+        self.assert_merge(head, [self.fixture, self.main], main_line_kept=False)
+        self.assert_main_line_dropped(self.verdict(), head)
+
+
 if __name__ == "__main__":
     unittest.main()
