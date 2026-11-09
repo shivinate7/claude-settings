@@ -1116,9 +1116,11 @@ def _covered(module, host, branch: str, tip, rows, pool) -> bool:
     contained in the head of an open or merged pull request (compare of that head...tip reads behind or identical).
     Those heads come from `pool`, the rows already read: the repo's open list rows on a lane head form and the rows
     of every other branch of the lane that was read. A merged pull request on a head no read reached is not seen,
-    so that case refuses. Last, the branch's `archive/<branch>` copy covers when the tip is contained in it (compare
-    of archive/<branch>...tip reads behind or identical); a 404 means no copy, so the branch is not covered. This adds
-    one tip read when the caller had none, one compare per head to test, and one copy compare, all on the refusal path."""
+    so that case refuses. Last, an archive copy covers when the tip is contained in it (compare of copy...tip reads
+    behind or identical). The copies are those listed at git/matching-refs/heads/archive/<branch> that are named
+    exactly `archive/<branch>` or `archive/<branch>-<digits>`; any other listed name does not count, and an empty
+    listing means no copy, so the branch is not covered. This adds one tip read when the caller had none, one compare
+    per head to test, one copy listing and one compare per counted copy, all on the refusal path."""
     if _is_open(rows):
         return True
     if tip is None:
@@ -1129,7 +1131,12 @@ def _covered(module, host, branch: str, tip, rows, pool) -> bool:
         heads = [str(row["head"]["sha"]) for row in [*rows, *pool] if row["state"] == "open" or _is_merged(row)]
         if any(sha == tip or _compare_status(module, host, sha, tip) in _CONTAINED for sha in dict.fromkeys(heads)):
             return True
-    return _compare_status(module, host, "archive/" + branch, tip, missing_ok=True) in _CONTAINED
+    copy_name = re.compile(re.escape("archive/" + branch) + r"(-[0-9]+)?")
+    for ref in host.pages("git/matching-refs/heads/archive/" + branch):
+        name = str(ref["ref"])[len("refs/heads/"):]
+        if copy_name.fullmatch(name) and _compare_status(module, host, name, tip, missing_ok=True) in _CONTAINED:
+            return True
+    return False
 
 
 def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:
