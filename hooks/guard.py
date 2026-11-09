@@ -3036,7 +3036,7 @@ def _brief_target(segment: str, moved):
     """(this segment's own target, the `cd` target in force after it): its `git -C` path, else the `cd` before it."""
     # A Windows brief carries `git -C C:\Users\me\scratchpad\repo`. Posix shlex eats its backslashes (`C:Users...`), so the
     # target is no absolute path and the scratchpad pass misses it. The code chooses by os.name, not by the shell the
-    # subagent will use: on Windows the `git -C` path is read with PowerShell's rules, where a backslash is a path
+    # brief's agent runs in: on Windows the `git -C` path is read with PowerShell's rules, where a backslash is a path
     # character. The `cd` target stays posix-read on every platform. Git Bash eats the backslashes of a `cd` path, the `cd`
     # fails, and the next command runs in the start folder, so a `cd` into a scratchpad must not clear the segments after it.
     # `shared_tree_match` judges the original text.
