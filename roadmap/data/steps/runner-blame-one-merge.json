@@ -1,11 +1,11 @@
 {
   "title": "The batch runner's blame runs one diff search per merge commit, so a red names the lane that caused it",
   "why": "Runner 8 blamed #1867 at 17:10 CST Nov 8 when #1774 was the cause, because two diff searches printed together (runner 8, 18:58 CST; via the coordinator 19:04 CST).",
-  "note": "Filed by triage, Nov 8 19:04 CST. The coordinator routes it. Hold lifted 20:28 CST Nov 8 (owner's 20:24 CST word, via the coordinator).",
+  "note": "Filed by triage, Nov 8 19:04 CST. The coordinator routes it. Hold lifted 20:28 CST Nov 8 (owner's 20:24 CST word, via the coordinator). Done: #2358 merged in batch 67 (#2397, 81a720c42, 03:37 CST Nov 9).",
   "phase": "now",
   "owner": "coordinator",
   "lane": "",
-  "status": "todo",
+  "status": "done",
   "order": 855,
-  "updatedAt": "2026-11-08T20:28:00-06:00"
+  "updatedAt": "2026-11-09T03:40:00-06:00"
 }
