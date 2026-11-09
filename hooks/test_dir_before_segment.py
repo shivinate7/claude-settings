@@ -177,6 +177,52 @@ case("a comment that holds an assignment, # R=<B>, is text: cd \"$R\" reads A or
 case("a comment opener inside double quotes is text: the assignment after it still counts",
      'R=%s; echo "# x"; R=%s; cd "$R" && git status' % (TARGET, OTHER), "git status", OTHER)
 
+# --- An assignment after `&&` runs only when the command before it succeeds. The walk cannot tell that
+# for a command that may fail, so the assignment is not read: None. Red on 5b6135cbf, which reads it as run.
+# The `true` row may go either way. `R=<dir> && cd "$R"` is the control at line 169.
+case("[ -d <missing> ] && R=<B>, then cd \"$R\": the assignment may not run, so None",
+     '[ -d %s ] && R=%s; cd "$R" && git status' % (MISSING, OTHER), "git status", None)
+case("test -d <missing> && R=<B>, then cd \"$R\": the assignment may not run, so None",
+     'test -d %s && R=%s; cd "$R" && git status' % (MISSING, OTHER), "git status", None)
+case("false && R=<B>, then cd \"$R\": the assignment does not run, so None",
+     'false && R=%s; cd "$R" && git status' % OTHER, "git status", None)
+case("a mkdir that fails, mkdir <dir>/x/y && R=<B>, then cd \"$R\": the assignment may not run, so None",
+     'mkdir %s/x/y && R=%s; cd "$R" && git status' % (TARGET, OTHER), "git status", None)
+case("control: true && R=<B>, then cd \"$R\": either answer, the assignment may run",
+     'true && R=%s; cd "$R" && git status' % OTHER, "git status", (OTHER, None))
+
+# --- A paren group inside a segment does not undo that segment's own clear. A group that balances inside
+# the segment (`$(...)`, `<(...)`, `((...))`, `$((...))`) is not a subshell, so the variable it clears stays
+# cleared. Red on 5b6135cbf, which restores the value from before the segment. The subshell rows are controls.
+case("R=<A>; R=$(cmd); cd \"$R\": the substitution clears R, so None, not A",
+     'R=%s; R=$(pwd); cd "$R" && git status' % TARGET, "git status", None)
+case("R=<A>; export R=$(cmd); cd \"$R\": the export clears R, so None, not A",
+     'R=%s; export R=$(pwd); cd "$R" && git status' % TARGET, "git status", None)
+case("R=<A>; declare R=$(cmd); cd \"$R\": the declare clears R, so None, not A",
+     'R=%s; declare R=$(pwd); cd "$R" && git status' % TARGET, "git status", None)
+case("R=<A>; eval $(cmd); cd \"$R\": the eval may set R, so None, not A",
+     'R=%s; eval $(pwd); cd "$R" && git status' % TARGET, "git status", None)
+case("R=<A>; source <(cmd); cd \"$R\": the source may set R, so None, not A",
+     'R=%s; source <(pwd); cd "$R" && git status' % TARGET, "git status", None)
+case("R=<A>; read R < <(cmd); cd \"$R\": the read sets R, so None, not A",
+     'R=%s; read R < <(pwd); cd "$R" && git status' % TARGET, "git status", None)
+case("R=<A>; ((R=1)); cd \"$R\": the arithmetic sets R, so None, not A",
+     'R=%s; ((R=1)); cd "$R" && git status' % TARGET, "git status", None)
+case("R=<A>; echo $((R=1)); cd \"$R\": the arithmetic in an argument sets R, so None, not A",
+     'R=%s; echo $((R=1)); cd "$R" && git status' % TARGET, "git status", None)
+case("control: R=<A>; (R=<B>); cd \"$R\" reads A, the subshell assignment does not persist",
+     'R=%s; (R=%s); cd "$R" && git status' % (TARGET, OTHER), "git status", TARGET)
+case("control: R=<A>; (cd <B>); cd \"$R\" reads A, the subshell cd does not persist",
+     'R=%s; (cd %s); cd "$R" && git status' % (TARGET, SECOND), "git status", TARGET)
+
+# --- A prefix assignment on the cd is not in effect when the cd's word is expanded: bash expands "$R"
+# before `R=<value>` applies. Red on 5b6135cbf, which reads the prefix value as the folder. With R=<A>
+# first, the cd target is A, never B.
+case("R=<A> cd \"$R\": the prefix assignment is not the cd target, the target is unset: None",
+     'R=%s cd "$R" && git status' % TARGET, "git status", None)
+case("R=<A>; R=<B> cd \"$R\": the cd target is the old value A, never B",
+     'R=%s; R=%s cd "$R" && git status' % (TARGET, OTHER), "git status", (TARGET, None))
+
 
 @contextlib.contextmanager
 def pinned_home(home):
