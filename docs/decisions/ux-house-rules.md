@@ -40,7 +40,7 @@ WCAG level, is not taken on by choice (owner, 2026-11-01 12:23 CST, by triage).
   - `ux-variant-extends-home` (L): a variant extends its shared component, never copies it.
   - `ux-fluid-tokens` (L): sizes that grow with the box come from tokens.
 - Guidance, not house rules: `ux-order-holds-still`, `ux-statements-are-true`, `ux-no-dead-end`,
-  `ux-machine-text-hidden`, `ux-a11y-floor` (P) and `ux-control-beside-area` (L). Each entry says
+  `ux-machine-text-hidden`, `ux-a11y-floor`, `ux-text-zooms` (P) and `ux-control-beside-area` (L). Each entry says
   "Guidance", and a miss is advice, not a finding.
 - Not adopted: `ux-press-moves-nothing` (P), item 183 option b (owner, 2026-11-06 13:11 CST). A lane checks
   `ux-swift-same-intent` (L), roadmap step ux-swift-same-intent-check.
