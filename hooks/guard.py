@@ -3201,11 +3201,26 @@ def role_model_check(tool: str, tool_input):
     return unread
 
 
+def fix_check_chain_verdict(key):
+    """(why, remedy, unread) for one fix check's `(pull request, reviewed head)` key: the merge tool's refusal text for its review chain
+    (merge.fix_check_refusal) and the remedy that goes with it, or "" for both when the chain passes. `unread` is true when the read raised
+    (fail open). Cost: one chain read (gh REST calls through the merge tool)."""
+    try:
+        records, live = fix_check_read(key[0])
+        merge = merge_module()
+        why = merge.fix_check_refusal(records, key[1], live)
+    except (Exception, SystemExit):
+        return "", "", True
+    remedy = ROLE_FIX_CHECK_EMPTY_REMEDY if why == merge.FIX_CHECK_EMPTY else ROLE_FIX_CHECK_CHAIN_REMEDY
+    return why or "", remedy, False
+
+
 def fix_check_chain_hit(brief, pointer):
     """(reason, matched, unread) for a fix check brief judged on its pull request's review chain. The pull request is read from the line after the
     first non-blank line only, the reviewed head from any later line, and the verdict is merge.fix_check_refusal's. A brief that names no pull
-    request or no reviewed head, a tool that does not load and a read that raises each pass as unread (fail open). Cost: one chain read (gh REST
-    calls through the merge tool) per fix check spawn, however many times the judgment runs in the process (FIX_CHECK_MEMO)."""
+    request or no reviewed head, a tool that does not load and a read that raises each pass as unread (fail open). The memo holds only the
+    verdict, so every return here is a literal tuple that the refusal audit reads (rule building-allow-list-is-the-constant). Cost: one chain
+    read per fix check spawn, however many times the judgment runs in the process (FIX_CHECK_MEMO)."""
     lines = brief.split("\n") if isinstance(brief, str) else []
     first = next((i for i, line in enumerate(lines) if line.strip()), None)
     rest = lines[first + 1:] if first is not None else []
@@ -3214,18 +3229,14 @@ def fix_check_chain_hit(brief, pointer):
     if not pr or not head:
         return "", pointer, True
     key = (int(pr.group(1)), head.group(1))
-    if key in FIX_CHECK_MEMO:
-        return FIX_CHECK_MEMO[key]
-    try:
-        records, live = fix_check_read(key[0])
-        merge = merge_module()
-        why = merge.fix_check_refusal(records, key[1], live)
-    except (Exception, SystemExit):
-        FIX_CHECK_MEMO[key] = ("", pointer, True)
-        return FIX_CHECK_MEMO[key]
-    remedy = ROLE_FIX_CHECK_EMPTY_REMEDY if why == merge.FIX_CHECK_EMPTY else ROLE_FIX_CHECK_CHAIN_REMEDY
-    FIX_CHECK_MEMO[key] = (ROLE_FIX_CHECK_REASON % (why, remedy), key[1], False) if why else ("", "", False)
-    return FIX_CHECK_MEMO[key]
+    if key not in FIX_CHECK_MEMO:
+        FIX_CHECK_MEMO[key] = fix_check_chain_verdict(key)
+    why, remedy, unread = FIX_CHECK_MEMO[key]
+    if unread:
+        return "", pointer, True
+    if why:
+        return ROLE_FIX_CHECK_REASON % (why, remedy), key[1], False
+    return "", "", False
 
 
 def role_model_one(tool_input):
@@ -3278,19 +3289,22 @@ def role_model_one(tool_input):
     # Only a chain refusal returns here. A chain that passes falls through, so a fix check with no default and no pin is refused as any
     # spawn with no model is. A chain that could not be read keeps its unread row when the checks below allow the spawn.
     # A default that ranks top (Opus) is left to the ceiling, as a spawn that names Opus is.
+    # The refusal returns the call itself, and a pass returns a literal "" with the chain's other two fields, not the name `chain`: the refusal
+    # audit follows a reason through a fixed number of hops (MAX_DEPTH in lint/test_rule_audit.py), and a name here took one too many.
+    # Past the refusal `chain[0]` is "", so no text is lost. The second call reads the memo (FIX_CHECK_MEMO).
     chain = ("", "", False)
     if (role == "reviewer" and table.get(role) is not None and ("fixcheck", None) in marker_hits(tool_input.get("prompt"))
             and (not default_model or role_model_rank(default_model) != len(ROLE_MODEL_RANK) - 1)):
         chain = fix_check_chain_hit(tool_input.get("prompt"), pointer)
         if chain[0]:
-            return chain
+            return fix_check_chain_hit(tool_input.get("prompt"), pointer)
     if default_model:
-        return chain
+        return "", chain[1], chain[2]
     pinned = role_has_model_pin(pointer, role)
     if pinned is None:
         return "", pointer, True
     if pinned:
-        return chain
+        return "", chain[1], chain[2]
     row = table.get(role, "sonnet")
     # A remedy never names Haiku: a role on a Haiku row has an agent file that pins it, so it rarely gets here.
     return ROLE_NO_MODEL_REASON % ("" if row == ROLE_MODEL_RANK[0] else " (%s)" % row), ROLE_NO_MODEL_MATCH + role, False
