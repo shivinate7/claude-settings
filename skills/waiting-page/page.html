@@ -33,10 +33,13 @@
   --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark }
 
 * { box-sizing: border-box; }
-/* The fixed send bar covers the bottom of the viewport, so a focused or scrolled-to element stops above it. */
-html { scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+/* The fixed send bar covers the bottom of the viewport, so a focused or scrolled-to element stops above it. The bar wraps and grows at
+   narrow widths and large text, so the room under the page follows its real height, and is never under 96px. --bar-h is the bar's own
+   height, set from the bar (see barRoom in the script); until then, or with the bar hidden, the room is 96px. */
+:root { --bar-room: max(calc(96px + env(safe-area-inset-bottom, 0px)), calc(var(--bar-h, 0px) + 8px)); }
+html { scroll-padding-bottom: var(--bar-room); }
 [hidden] { display: none !important; }
-body { margin: 0; background: var(--ground); color: var(--ink); font: 1rem/1.55 var(--body); padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 1rem/1.55 var(--body); padding-bottom: var(--bar-room); }
 body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--hdr); }
 button, input, textarea { font: inherit; color: inherit; }
 a { color: var(--acc); }
@@ -60,8 +63,14 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .tabs a { flex: none; padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); text-decoration: none; font-weight: 600; border: 1px solid transparent; border-bottom: none; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
 .tabs::-webkit-scrollbar { display: none; }
 .tabs a:focus-visible { outline-offset: -2px; }
-/* Forced colours drop box shadows, so the line under the bar comes back as a border. */
-@media (forced-colors: active) { .tabs { border-bottom: 1px solid CanvasText; } }
+/* Forced colours drop box shadows, so the line under the bar comes back as a border. The bar scrolls, so a border on it could not be
+   covered by the selected tab; the line is the tab list's own bottom border (and the Designs tab's), which the selected tab overlaps by 1px. */
+@media (forced-colors: active) {
+  .tabs { gap: 0; }
+  .tabs .tl { flex: 1 0 auto; padding-inline-end: 4px; border-bottom: 1px solid CanvasText; }
+  .tabs > a { border-bottom: 1px solid CanvasText; }
+  .tabs .tl a[aria-selected="true"] { margin-bottom: -1px; }
+}
 .tabs a[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
 .tabs .cnt { font: 600 12px/1 var(--mono); color: var(--muted); }
 
@@ -252,6 +261,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .ready.on::before, .readyfit::before { content: "\2713  "; }
 /* The row under the body: None of these on a decision, Mark done on a task. */
 .alts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.alts > .btn { max-inline-size: 100%; overflow-wrap: anywhere; }
 .btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
 .btn.alt { background: transparent; color: var(--acc); }
 .btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
@@ -367,7 +377,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .bar .st { flex: 1 1 0; font-size: 14.5px; color: var(--muted); min-width: 0; }
 .bar .st b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .bar textarea { flex: 1 1 100%; font: 13px var(--mono); background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
-.btn.send { min-height: 48px; padding-inline: 18px; white-space: nowrap; }
+.btn.send { min-height: 48px; padding-inline: 18px; max-inline-size: 100%; overflow-wrap: anywhere; }
 .sent { background: var(--surface); border-bottom: 1px solid var(--line); }
 .sent .in { padding-block: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; font-size: 15px; }
 .sent-head { flex: 1 1 320px; min-width: 0; display: flex; gap: 16px; align-items: center; }
@@ -410,11 +420,13 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 @media (prefers-reduced-motion: no-preference) { .dfitwrap.scroll .dcue, .dfitwrap.scroll .dtop { transition: opacity 150ms linear; } }
 .dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
 .dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
-.dsh-head .in { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding-block: 8px; }
+.dsh-head .in { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding-block: 8px; container: dsh / inline-size; }
 .dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsh-head .btn { flex: none; white-space: nowrap; }
 .dsh-head .sm { display: none; }
-@media (max-width: 520px) { .dsh-head .lg { display: none; } .dsh-head .sm { display: inline; font-size: 20px; line-height: 1; } .dsh-head .btn { min-width: 40px; padding-inline: 8px; } #dBack { display: none; } }
+#dPos { --pos-short: 0; }
+/* The head reads its own width in em, so larger text trips the short labels sooner; 30.5em is the 520px window's content at the default size. */
+@container dsh (width <= 30.5em) { #dPos { --pos-short: 1; } .dsh-head .lg { display: none; } .dsh-head .sm { display: inline; font-size: 20px; line-height: 1; } .dsh-head .btn { min-width: 40px; padding-inline: 8px; } #dBack { display: none; } }
 .dsh-head .btn { min-height: 40px; }
 .dsh-head .btn { border-color: color-mix(in srgb, var(--on-hdr) 50%, transparent); }
 .dsh-head .btn:focus-visible { outline-color: var(--on-hdr); }
@@ -714,7 +726,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .nob textarea { width: 100%; background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
 .sv-tip { position: fixed; z-index: 12; pointer-events: none; background: var(--ink); color: var(--surface); font-size: 13px; padding: 4px 7px; border-radius: 4px; max-width: 240px; opacity: 0; transition: opacity .08s; left: 0; top: 0; }
 .sv-tip.on { opacity: 1; }
-.sv-toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 12; background: var(--ink); color: var(--surface); font-size: 14px; padding: 8px 14px; border-radius: 8px; max-width: calc(100vw - 32px); }
+.sv-toast { position: fixed; left: 50%; bottom: var(--bar-room); transform: translateX(-50%); z-index: 12; background: var(--ink); color: var(--surface); font-size: 14px; padding: 8px 14px; border-radius: 8px; max-width: calc(100vw - 32px); }
 @media (pointer: coarse) { .now li .tx, .feed .lnk, .ev .lnk { min-height: 44px; } }
 /* Arbiter rulings: a section after the open tiers; each ruling is a quiet card with one Overturn toggle. */
 /* Its own shape: a hollow diamond, unlike the square, triangle, ring, dot and check of the other sections. */
@@ -756,6 +768,9 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .unfold[aria-expanded="false"] .chev::before { content: "\25B8"; }
 .unfold[aria-expanded="true"] .chev::before { content: "\25BE"; }
 .unfold .uf-labels { display: grid; min-width: 0; }
+/* The Show dismissed toggle's words break inside a box narrower than one of them, so the toggle never sets the page's width. */
+.older .uf-labels { grid-template-columns: minmax(0, 1fr); }
+.older .uf-labels > span { overflow-wrap: anywhere; }
 .unfold .uf-labels > span { grid-area: 1 / 1; visibility: hidden; }
 .unfold[aria-expanded="false"] .uf-show, .unfold[aria-expanded="true"]:not([aria-disabled="true"]) .uf-hide, .unfold[aria-disabled="true"] .uf-lock { visibility: visible; }
 /* Locked open: the card holds an answer Send would submit, so the fold cannot close. */
@@ -767,10 +782,10 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
    columns: the heading in the rail's column, the box and the asks in the list's. Not .ask: the Status tab already uses that class. */
 .asks { border-top: 1px solid var(--line); padding-block: 24px 40px; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; scroll-margin-top: 64px; }
 @media (max-width: 960px) { .asks { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
-.asks-head { display: grid; gap: 4px; align-content: start; }
-.asks-head h2 { font: 700 1.1875rem/1.25 var(--body); display: flex; align-items: center; gap: 12px; }
+.asks-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; align-content: start; }
+.asks-head h2 { font: 700 1.1875rem/1.25 var(--body); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; overflow-wrap: anywhere; }
 .asks-head h2 .ct { font: 600 .8125rem var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
-.asks-head p { margin: 0; font-size: .90625rem; color: var(--muted); max-width: 44ch; }
+.asks-head p { margin: 0; font-size: .90625rem; color: var(--muted); max-width: 44ch; overflow-wrap: anywhere; }
 .asks-body { display: grid; gap: 16px; min-width: 0; }
 /* Pending: a half-filled disc, its own shape. The hollow ring already means Whenever, and the check means answered. */
 .g.wait { border: 2px solid var(--acc); border-radius: 50%; background: linear-gradient(90deg, var(--acc) 50%, transparent 50%); }
@@ -786,6 +801,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askrow .btn.askadd { grid-column: 3; }
 .askrow .btn.askgo { grid-column: 4; }
 .askhint { margin: 0; min-height: 44px; display: flex; align-items: center; gap: 8px; font-size: .875rem; color: var(--muted); }
+.askhint > * { min-width: 0; overflow-wrap: anywhere; }
 .askhint.bad { color: var(--due); font-weight: 600; }
 .btn.askgo, .btn.askadd { min-height: 48px; white-space: nowrap; }
 /* Off, they keep their box and label, marked by a dashed edge as .btn.mv is at an end of the order; the hint beside them says why. */
@@ -794,14 +810,21 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .btn.fixw { display: inline-grid; justify-items: center; }
 .btn.fixw > span { grid-area: 1 / 1; }
 .btn.fixw > .sz { visibility: hidden; }
+/* A press never runs past the box that holds it: its one track may shrink below the widest label, whose words then break. */
+.btn.fixw { grid-template-columns: minmax(0, max-content); max-inline-size: 100%; }
+.btn.fixw > span { min-width: 0; overflow-wrap: anywhere; }
+/* The ask list's busy label ("Dismissing…") and its hidden sizer only set the press's width: where the track is narrower each clips on one line, so neither sets the press's height. */
+.asklist .btn.fixw > :is(.sz, .busy) { white-space: nowrap; overflow: hidden; max-inline-size: 100%; }
+.asklist .btn.fixw > .busy { text-overflow: ellipsis; }
 @media (pointer: coarse) { .askhint .kbd { display: none; } }
-@media (max-width: 520px) {
-  .askrow { grid-template-columns: minmax(0, 1fr) auto; }
+/* The Ask box reads its own width in em, so larger text trips the phone arrangement sooner; 28.375em is its content in the 520px window at the default size. */
+@container askf (width <= 28.375em) {
+  :where(.askform:not(.replyform)) .askrow { grid-template-columns: minmax(0, 1fr) auto; }
   /* Three lines reserved, so typing or a new count never moves the buttons under the hint. */
-  .askrow .askhint { grid-column: 1 / -1; min-height: 66px; }
-  .askrow .btn.askadd { grid-column: 1; grid-row: 2; justify-self: start; }
-  .askrow .btn.askgo { grid-column: 2; grid-row: 2; }
-  .askrow .slot { grid-column: 1 / -1; grid-row: 3; justify-self: start; }
+  :where(.askform:not(.replyform)) .askrow .askhint { grid-column: 1 / -1; min-height: 66px; }
+  :where(.askform:not(.replyform)) .askrow .btn.askadd { grid-column: 1; grid-row: 2; justify-self: start; }
+  :where(.askform:not(.replyform)) .askrow .btn.askgo { grid-column: 2; grid-row: 2; }
+  :where(.askform:not(.replyform)) .askrow .slot { grid-column: 1 / -1; grid-row: 3; justify-self: start; }
 }
 /* The tray under the row: the line that answers Send or Undo, then the asks not sent yet. */
 .tray { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
@@ -835,15 +858,18 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   .stack .sacts { grid-column: 2; justify-content: flex-start; }
   .stack .serr { grid-column: 2; }
 }
+/* One track that never grows past its box: no element of the list, such as the Show dismissed toggle, sets the width of the list or of the Ask box above it. */
+.asks-body, #askList { grid-template-columns: minmax(0, 1fr); }
 #askList { display: grid; gap: 8px; }
 .asklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; container: askl / inline-size; }
 .askc { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; display: grid; gap: 8px; min-width: 0; }
 .ahead { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; min-height: 44px; font-size: .875rem; color: var(--muted); }
 .ahead .aby { min-width: 0; }
+.ahead .newmark { min-width: 0; max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
 .ahead .morebtn { margin-inline-start: auto; min-height: 44px; padding-inline: 4px; }
 @media (pointer: coarse) { .ahead .morebtn { min-width: 44px; } }
 .atext { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; font-size: 1rem; }
-.astate { margin: 0; font-size: .90625rem; color: var(--ink); font-weight: 600; }
+.astate { margin: 0; font-size: .90625rem; color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
 .astate .t { color: var(--muted); font-weight: 400; }
 /* The one "new since your baseline" mark: an ask's New answer, a card's New reply, a step's Updated. Green, the answered colour. */
 .newmark { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; white-space: nowrap; }
@@ -856,7 +882,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .rrow .meta .newmark { font-size: 12.5px; line-height: 19px; min-height: 0; }
 .prail .nm .newmark, .fold .newmark { min-height: 0; }
 .prail .nmr { display: inline-flex; align-items: center; gap: 6px; }
-.askc .thread .lhead { margin: 0; font-size: .875rem; color: var(--muted); }
+.askc .thread .lhead { margin: 0; font-size: .875rem; color: var(--muted); overflow-wrap: anywhere; }
 .askc .thread .reply { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
 .askc .thread .filed { margin: 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: .875rem; color: var(--muted); }
 /* A folded answer is one button: the whole row unfolds it. */
@@ -864,16 +890,17 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .frow { width: 100%; min-height: 48px; padding: 4px 16px; background: none; border: 0; border-radius: 12px; text-align: left; cursor: pointer; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 4px 12px; color: var(--ink); }
 .frow:hover { background: var(--acc-soft); }
 .frow .ftext { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.frow .fwhen { font-size: .875rem; color: var(--muted); white-space: nowrap; }
+.frow .fwhen { font-size: .875rem; color: var(--muted); white-space: nowrap; overflow-wrap: anywhere; }
 .frow .fgo { color: var(--acc); font-weight: 600; font-size: .90625rem; white-space: nowrap; }
-@media (max-width: 520px) {
+/* The ask list reads its own width in em: a row takes its phone arrangement when the list is as narrow as the 520px window's, 30.5em at the default size. */
+@container askl (width <= 30.5em) {
   .frow { grid-template-columns: auto minmax(0, 1fr) auto; padding-block: 8px; }
   .frow .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .frow .fwhen { grid-column: 2; grid-row: 2; white-space: normal; min-width: 0; }
   .frow .fdate { display: inline-block; }
-  .frow .fgo { grid-column: 3; grid-row: 1 / span 2; }
+  .frow .fgo { grid-column: 3; grid-row: 1 / span 2; white-space: normal; overflow-wrap: anywhere; min-width: 0; }
 }
-.older { justify-self: start; width: auto; }
+.older { justify-self: start; width: auto; max-inline-size: 100%; }
 /* The owner's reply sits inside the thread it follows, on the surface ground of "You asked", so his words and a session's differ by ground. */
 .askc .thread .myreply { display: grid; gap: 4px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); min-width: 0; }
 .askc .thread .myreply .lhead { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
@@ -885,16 +912,24 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .replyform { padding: 12px; border-radius: var(--r); background: var(--ground); }
 .replyform textarea { background: var(--surface); }
 .replyform .askrow .btn.rx { grid-column: 3; min-height: 48px; }
-@media (max-width: 520px) { .replyform .askrow .btn.rx { grid-column: 1; grid-row: 2; justify-self: start; } }
+/* The reply form's own stacked arrangement starts at 26.75em, its content in the 520px window at the default size. The rules are the Ask box's
+   for that width, written with :where so the narrower rules below still win by order. */
+@container askf (width <= 26.75em) {
+  :where(.replyform) .askrow { grid-template-columns: minmax(0, 1fr) auto; }
+  :where(.replyform) .askrow .askhint { grid-column: 1 / -1; min-height: 66px; }
+  .replyform .askrow .btn.rx { grid-column: 1; grid-row: 2; justify-self: start; }
+  :where(.replyform) .askrow .btn.askgo { grid-column: 2; grid-row: 2; }
+  :where(.replyform) .askrow .slot { grid-column: 1 / -1; grid-row: 3; justify-self: start; }
+}
 /* A folded thread with a reply that waits or a new answer to one: the row stays one button; the reply shows under it, outside the fold. */
 .askc.folded .fwait { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 2px 12px; margin: 0; padding: 8px 16px 12px; border-top: 1px solid var(--line); }
 .askc.folded .fwait > .g { margin-top: 5px; }
 .askc.folded .fwait .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .askc.folded .fwait .astate { grid-column: 2; }
-@media (max-width: 520px) { .askc.folded .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
+@container askl (width <= 30.5em) { .askc.folded .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
 /* Dismiss: it shares the thread's end with Reply, Reply first. It is the quieter act, kept 44 px. Off while a reply waits: a dashed edge, with the reason beside it. */
 .replyend .endrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
-.replyend .endrow > .btn { min-height: 44px; }
+.replyend .endrow > .btn { min-height: 44px; max-inline-size: 100%; overflow-wrap: anywhere; }
 .btn.dismiss, .btn.restore { min-height: 44px; }
 .btn.dismiss[aria-disabled="true"] { border: 1.5px dashed var(--faint); color: var(--muted); cursor: default; }
 .endrow .dwhy { font-size: .875rem; color: var(--muted); min-width: 0; }
@@ -909,7 +944,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askc.dropped .sline > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .askc.dropped .sline .dt { color: var(--muted); }
 .asklist.dlist .askc.folded { background: transparent; border-style: dashed; border-color: var(--faint); }
-@media (max-width: 520px) {
+@container askl (width <= 30.5em) {
   /* With a side press, the row has no room for "Show answer" on a phone: the words stay in the row button's name, and the row is the press. */
   .askc.folded.withd .frow { grid-template-columns: auto minmax(0, 1fr); padding-inline-end: 4px; }
   .askc.folded.withd .frow .fwhen { grid-column: 2; grid-row: 2; }
@@ -929,7 +964,10 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   .frow .fwhen { grid-column: 2; grid-row: 2; white-space: normal; min-width: 0; }
   .frow .fdate { display: inline-block; }
   /* A row with no side press (a reply waits): Show answer goes under the date, at the text's start. */
-  .frow .fgo { grid-column: 2; grid-row: 3; justify-self: start; }
+  .frow .fgo { grid-column: 2; grid-row: 3; justify-self: start; white-space: normal; overflow-wrap: anywhere; min-width: 0; }
+  /* The words need 94 px at the default size and the text column is 90 px at 180 wide, so the label takes 12 px of the row's 16 px end padding to stay on one line.
+     At larger text the column is far too narrow either way and the words wrap inside the window. A bandaid for one narrow width, kept because it moves nothing else. */
+  .frow .fgo { margin-inline-end: -12px; }
   /* A row with Dismiss or Restore is one column. As on the phone row, the words "Show answer" stay in the row button's name. */
   .askc.folded.withd { grid-template-columns: minmax(0, 1fr); padding-inline-end: 0; }
   .askc.folded.withd .frow { padding-inline-end: 16px; }
@@ -944,6 +982,9 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   /* Under the text, these margins set where the Dismiss (quiet) and Restore (outlined) boxes start; each label stays centred in its box. */
   .askc.folded.withd > .btn { justify-self: start; margin: 0 0 8px 28px; }
   .askc.folded.withd > .btn.restore { margin-inline-start: 40px; }
+  /* The cap counts the start margin, so the press ends inside the row. */
+  .askc.folded.withd > .btn.fixw { max-inline-size: calc(100% - 28px); }
+  .askc.folded.withd > .btn.restore.fixw { max-inline-size: calc(100% - 40px); }
 }
 /* The Ask box: Add to list and Send ask no longer fit side by side, so each gets its own line, in the same order. The hint keeps
    three lines in em, so typing moves no button at any text size. */
@@ -953,8 +994,8 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   .askrow .btn.askadd { grid-column: 1; grid-row: 2; }
   .askrow .btn.askgo { grid-column: 1; grid-row: 3; }
   .askrow .slot { grid-column: 1; grid-row: 4; }
-  /* Send ask's sizer ("Send 99 asks") may wrap, so no press runs past the box. */
-  .askrow .btn { white-space: normal; max-inline-size: 100%; justify-self: start; }
+  /* Send ask's sizer ("Send 99 asks") may wrap, and a word wider than the box breaks inside it, so no press or label runs past the box. */
+  .askrow .btn { white-space: normal; max-inline-size: 100%; overflow-wrap: anywhere; justify-self: start; }
 }
 /* A reply form in the same box keeps the arrangement the 520px rule gives it: the hint on its own line, then Close at the start and
    Send reply at the end of one line. Where those two no longer fit side by side, Send reply takes the first line and Close the next. */
@@ -2684,7 +2725,7 @@ function askFoldedMine(r) {
 /* Dismiss and Restore: one write of `dismissed` on the thread's root ask, with update. It never sets, deletes or touches the text or a reply (SKILL.md, "The database"). */
 // The label of a press that waits for its write sits in the box of the widest label, so the button does not move.
 const askPress = (cls, id, k, t, verb, busy, busyWord, onclick) => h("button", { class: "btn " + cls + " fixw", type: "button", id: id + k, "data-ask": k, "aria-label": verb + ": " + askShort(t.text), onclick },
-  h("span", {}, busy ? busyWord : verb), h("span", { class: "sz", "aria-hidden": "true" }, busyWord));
+  h("span", busy ? { class: "busy" } : {}, busy ? busyWord : verb), h("span", { class: "sz", "aria-hidden": "true" }, busyWord));
 const gonePress = (k, kind) => { const g = askState.gone[k]; return !!g && g.kind === kind && g.state === "busy"; };
 const restoreBtn = (t) => { const k = t.id; return askPress("alt restore", "res-", k, t, "Restore", gonePress(k, "restore"), "Restoring…", () => restoreAsk(k)); };
 // Off while a record in the thread waits: a dismissed thread would hide the answer the owner waits for. Off, not absent, so the reason sits beside it.
@@ -2978,11 +3019,14 @@ const STAGE = {};
 function capFit() { const t = $("dTitle"); $("dCap").classList.toggle("on", t.scrollWidth > t.clientWidth); }
 const openStateLabel = (d) => "Open the " + stateWords(stateOf(d)) + " state of the full mockup in a new tab";
 function stageFrame(d) { const k = d.slug + "|" + stateOf(d) + "|" + d.label; if (!STAGE[k]) { STAGE[k] = fitFrame(d.slug, designTitle(d), false, "", 2, null, d.drawn, capFit, stateOf(d)); $("dStage").append(STAGE[k]); } return STAGE[k]; }
+// The position reads "1/2" or "1 of 2" by the head's box: the dsh container rule sets --pos-short on #dPos, so one 30.5em floor serves the labels and the position.
+function setDPos() { if (dList.length) $("dPos").textContent = (dAt + 1) + (getComputedStyle($("dPos")).getPropertyValue("--pos-short").trim() === "1" ? "/" : " of ") + dList.length; }
+if (window.ResizeObserver) new ResizeObserver(() => { if (!$("dsheet").hidden) setDPos(); }).observe(document.querySelector(".dsh-head .in"));
 function showDesign(i) {
   dAt = (i + dList.length) % dList.length; const d = dList[dAt];
   // The head fields come first: they set the head's width, and the fit reads the stage's width.
   const vl = designTitle(d);
-  $("dTitle").textContent = vl; $("dPos").textContent = (dAt + 1) + (window.matchMedia("(max-width: 520px)").matches ? "/" : " of ") + dList.length;
+  $("dTitle").textContent = vl; setDPos();
   $("dCap").textContent = vl;
   $("dPrev").hidden = $("dNext").hidden = dList.length < 2;
   $("dBack").textContent = "Answer No. " + d.it.n;
@@ -3686,6 +3730,8 @@ function shown() {
   if (hasData && measureRows()) { ui.page = phaseMap(); renderPlan(); }
 }
 document.addEventListener("statusshown", shown);
+// barRoom: the room under the page follows the send bar's real height (--bar-room in the style). The bar's own box is read, so a wrap or a text zoom moves it.
+if (window.ResizeObserver && $("bar")) new ResizeObserver(() => document.documentElement.style.setProperty("--bar-h", $("bar").getBoundingClientRect().height + "px")).observe($("bar"));
 let lastSize = pageSize(), sizeT = null;
 window.addEventListener("resize", () => {
   clearTimeout(sizeT);
