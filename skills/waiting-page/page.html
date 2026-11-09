@@ -434,7 +434,8 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .dsh-head .dnav { flex: none; display: flex; gap: 8px; }
 #dClose { margin-inline-start: auto; }
 .dsh-head .sm { display: none; }
-#dPos { --pos-short: 0; }
+/* The position takes the title's cap (24cqw of the head), so at large text in a narrow window it is never larger than the title. */
+#dPos { --pos-short: 0; font-size: min(1rem, 24cqw); }
 /* The head reads its own width in em, so larger text trips the short labels sooner; 30.5em is the 520px window's content at the default size. */
 @container dsh (width <= 30.5em) { #dPos { --pos-short: 1; } .dsh-head .lg { display: none; } .dsh-head .sm { display: inline; font-size: 20px; line-height: 1; } .dsh-head .btn { min-width: 40px; padding-inline: 8px; } #dBack { display: none; } }
 .dsh-head .btn { min-height: 40px; }
@@ -445,7 +446,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .dsh-body .dfitwrap { width: min(100%, 780px); }
 .dsh-body .dfitwrap.off { display: none; }
 /* The caption shows only while the head cuts the title. Its min-height keeps a grid row the stage overflows from squeezing it to 0. */
-.dcap { display: none; margin: 0 0 6px; justify-self: stretch; min-width: 0; min-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.4 var(--body); color: var(--muted); }
+.dcap { display: none; margin: 0 0 6px; justify-self: stretch; min-width: 0; min-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 .875rem/1.4 var(--body); color: var(--muted); }
 .dcap.on { display: block; }
 body.sheet-open { overflow: hidden; }
 
@@ -839,13 +840,15 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .sline b { color: var(--good); }
 .sline .bad { color: var(--due); font-weight: 600; }
 .sline .btn { font-variant-numeric: tabular-nums; }
-/* The line's words never break: its text is the line's own size (.90625rem), but never larger than the text column (the line's width,
-   less the glyph and the gap, 24px) over 5.6, so "Restored." (5.5em wide in DejaVu Sans Bold, the widest fallback measured) fits one line.
-   overflow-wrap stays as the last resort, so a wider font breaks a word inside the window, never past it. The line reads its own width
-   (container), so --dl-fs is set at the glyph and the text, inside it.
+/* Only the Restored. line is capped: its text is the line's own size (.90625rem), but never larger than the text column (the line's width,
+   less the glyph and the gap, 24px) over 4, so "Re-stored." (soft hyphen after "Re") reads at 22.5px or more at 180px wide with text doubled
+   or tripled. The Not restored and Not dismissed lines keep the reader's size (--dl-fs stays .90625rem). overflow-wrap stays as the last
+   resort, so a wider font breaks a word inside the window, never past it. The line reads its own width (container), so --dl-fs is set
+   at the glyph and the text, inside it.
    The glyph sits on the first line: the items start at the row's top, the glyph is moved to the middle of the first line box, and the row
    itself is centred in the line's 44px floor, so a line that does not wrap looks as before. */
-.sline.dline { container-type: inline-size; --dl-fs: min(.90625rem, calc((100cqw - 24px) / 5.6)); align-items: start; align-content: center; }
+.sline.dline { container-type: inline-size; --dl-fs: .90625rem; align-items: start; align-content: center; }
+.sline.dline.dok { --dl-fs: min(.90625rem, calc((100cqw - 24px) / 4)); }
 .sline.dline > span { overflow-wrap: anywhere; font-size: var(--dl-fs); }
 /* The second selector outranks a dismissed row's own glyph rule (.askc.dropped .sline > .g), whose em is the line's size, not the text's. */
 .sline.dline > .g, .askc.dropped .sline.dline > .g { margin-block-start: calc((1.55 * var(--dl-fs) - 12px) / 2); }
@@ -2767,8 +2770,8 @@ function askRowLine(t) {
   const g = askState.gone[t.id];
   if (!g || (g.state !== "fail" && !(g.kind === "restore" && g.state === "done"))) return null;
   const bad = g.state === "fail";
-  return h("p", { class: "sline dline", role: "status" }, glyph(bad ? "due" : "done"), h("span", { class: bad ? "bad" : "" },
-    ...(bad ? [g.kind === "dismiss" ? "Not dismissed (" + g.code + "). The ask stays on the list." : "Not restored (" + g.code + "). It stays dismissed."] : [h("b", {}, "Restored."), " It joins the list at the next load."])));
+  return h("p", { class: bad ? "sline dline" : "sline dline dok", role: "status" }, glyph(bad ? "due" : "done"), h("span", { class: bad ? "bad" : "" },
+    ...(bad ? [g.kind === "dismiss" ? "Not dismissed (" + g.code + "). The ask stays on the list." : "Not restored (" + g.code + "). It stays dismissed."] : [h("b", {}, "Re\u00ADstored."), " It joins the list at the next load."])));
 }
 async function writeDismissed(k, to) {
   const s = askState, g = s.gone[k], kind = to ? "dismiss" : "restore";

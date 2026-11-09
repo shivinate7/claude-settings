@@ -118,12 +118,14 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
 ## 7. Named limits at narrow widths and large text (lane uxz-base-gaps)
 
 - The tab bar is one row that scrolls on its own. A tab is never wider than the bar (`.tabs` is a size container, each tab has
-  `max-inline-size: 100cqw` and `overflow-wrap: anywhere`), so at 180 wide with text doubled, or tripled up to 240 wide, a label
-  wraps inside its tab. When the Designs sheet closes, `revealTab()` scrolls the selected tab fully into the bar, as a tab press does.
+  `max-inline-size: 100cqw` and `overflow-wrap: anywhere`), so a label wraps inside its tab and never past the bar. A label breaks
+  mid-word at 180 to 190 wide at 150% text, 180 to 220 at 200% and 180 to 300 at 300% (a named limit, measured on the built page;
+  at 300% and 300 wide one letter sits alone). When the Designs sheet closes, `revealTab()` scrolls the selected tab fully into the bar, as a tab press does.
 - The Designs sheet's head wraps (`.dsh-head .in`, `flex-wrap: wrap`). The title's basis is 0 and its floor is 4em (`min-width: 4em`),
   so the row breaks where the buttons leave the title under 4em. The title keeps the first line, alone if no button fits beside it.
   Then the last buttons take a second line and Close sits at its end, inside the window. Prev and Next sit in one box (`.dnav`), so they
-  wrap as a pair, never one on each row.
+  wrap as a pair, never one on each row. The head takes a third row, with Close alone on it, at 180 to 215 wide at the default text, to
+  220 at 200% and to 290 at 300% (measured on the built page).
 - The title's text grows with the root size, `min(1.0625rem, 24cqw)`: 17 px at the default text, 21.25 px at 125%, 25.5 px at 150%, 34 px
   at 200%. The cap, 24% of the head's content width, keeps 4em of the title inside one line of the head. It sets the size only at large
   text in a narrow window: at 300%, 35.5 px at 180 wide, 40.3 at 200, 45.1 at 220 and 49.9 at 240, not 51 px. There the title is
@@ -142,22 +144,24 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   anywhere. So a long unbroken token stays inside the card and never scrolls the page. The note's wrap breaks the token; the track keeps
   any child that does not wrap from setting the thread's width. With neither, a 60-character token in the owner's note makes the thread
   477 px wide at 180 wide.
-- After a Restore, the "Restored." line keeps each word whole. Its text is the line's size (`.90625rem`), capped at the text column over
-  5.6 (`--dl-fs` on `.sline.dline`, a size container). "Restored." is 4.7em wide in Inter Bold and 5.5em in DejaVu Sans Bold, so it fits
-  one line in either. Atkinson Hyperlegible Next, first in the font stack, was not measured. `overflow-wrap: anywhere` stays as the last
-  resort, so a wider font breaks a word inside the window, never past it. The glyph sits on the first line: the line's items start at
-  the top, the glyph is moved to the middle of the first line box, and the row is centred in the 44 px floor, so a line that does not
-  wrap looks as before.
-- The cap sets the size at 180 to 250 wide with text doubled and at 180 to 330 wide with text tripled. It is the same at both: 16.1 px
-  at 180, 19.6 at 200, 23.2 at 220, 26.8 at 240, then 30.4 at 260, 33.9 at 280, 37.5 at 300 and 41.1 at 320 with text tripled (29 and
-  43.5 px uncapped). At the default text it never sets the size from 180 wide up. At 125% it sets it at 180 to 190 wide (16.1 px at 180), and at 150% at
-  180 to 210 (16.1 px at 180, 19.6 at 200; window widths in 5 px steps). On the page before this lane
-  the word was wider than its column at 180 to 225 wide doubled and 180 to 290 wide tripled. It ran past the window at 180 to 190
-  doubled and 180 to 260 tripled.
-- Departs from: the page before this lane (PR 2383's head) in four places, as window widths in 10 px steps (5 px under 225). Folded rows with Dismiss or Restore take the phone
+- After a Restore, the "Restored." line keeps its words whole where it can. Its text is the line's size (`.90625rem`), capped at the
+  text column over 4 (`--dl-fs` on `.sline.dline.dok`, a size container; the "Not restored" and "Not dismissed" lines are not `dok`, so
+  they keep the reader's size). The word is written with a soft hyphen ("Re&shy;stored.") so it may break there and nowhere else.
+  `overflow-wrap: anywhere` stays as the last resort, so a wider font breaks a word inside the window, never past it. The glyph sits on
+  the first line: the line's items start at the top, the glyph is moved to the middle of the first line box, and the row is centred in
+  the 44 px floor, so a line that does not wrap looks as before.
+- The cap sets the size at 180 to 205 wide with text doubled and at 180 to 260 wide with text tripled (window widths in 5 px steps).
+  At both it is 22.5 px at 180, 25 at 190 and 27.5 at 200; with text tripled it is then 30 at 210, 32.5 at 220, 35 at 230, 37.5 at 240,
+  40 at 250 and 42.5 at 260 (29 and 43.5 px uncapped). At the default text, 125% and 150% it never sets the size from 180 wide up (21.75 px
+  at 150%, against a 22.5 px cap at 180). The page before this lane drew the word wider than its column at 180 to 225 wide doubled and
+  180 to 290 wide tripled, and ran it past the window at 180 to 190 doubled and 180 to 260 tripled.
+- Departs from: the page before this lane (PR 2383's head) in seven places, as window widths in 10 px steps (5 px under 225). Folded rows with Dismiss or Restore take the phone
   arrangement at 530 to 670 at the default text, 650 to 830 and 970 to 1100 at 125%, and 770 to 960 and from 1040 up to 1920 at 150%.
   The Designs head takes a second row at 220 to 320 and 530 to 620 at the default text, 220 to 340 and 650 to 730 at 125%, and 220 to
-  360 and 770 to 840 at 150%; its title is larger at every width at 125% and 150%. The bar status takes its own line at 180 to 205 at
+  360 and 770 to 840 at 150%; its title is larger at every width at 125% and 150%. Its third row (Close alone) is new at 180 to 215
+  at the default text, to 220 doubled and to 290 tripled. The position "1/2" is smaller than before at 180 to 230 wide tripled (35.5
+  to 47.5 px, not 48), where it takes the title's cap. The design caption (`.dcap`) is in rem, so it grows with the text (17.5 px at
+  125%, 28 px doubled, 42 px tripled; 14 px before). The bar status takes its own line at 180 to 205 at
   the default text, 210 to 230 at 125% and 240 to 260 at 150% (it did before at 180 to 205 at 125% and 180 to 230 at 150%). The
-  "Restored." line is smaller than its text at 180 to 190 at 125%, 180 to 210 at 150%, 180 to 250 doubled and 180 to 330 tripled; at the
-  default text it does not move.
+  "Restored." line is smaller than its text at 180 to 205 doubled and 180 to 260 tripled, and spells "Re-stored." with a soft hyphen; at
+  the default text, 125% and 150% it does not move.
