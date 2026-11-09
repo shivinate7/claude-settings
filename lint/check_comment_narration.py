@@ -6,7 +6,7 @@
 Rule: building-comments-say-why. A comment says what complex code does and why.
 Only lines the diff against the merge base adds can fail, so old lines never do.
 --exclude PREFIX (repeatable) drops each path that starts with PREFIX, a folder prefix such as `vendor/`.
-Languages come from the rows of actions/code-check/standard.json (extensions, and shebangs for a file with no
+Languages come from the rows of lint/code_check_standard.json (extensions, and shebangs for a file with no
 extension): python, typescript, javascript, astro and swift. Python comments come from `tokenize`, docstrings from
 `ast`. JS, TS and Astro comments come from one lint/comment_scan.mjs process that parses with the pinned
 TypeScript. Swift comments come from a one-pass scanner in this file. The same words in any string never fail.
@@ -67,7 +67,7 @@ PATTERNS = {
 }
 REMEDY = "say what and why; the history goes in git or the decision"
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@")
-STANDARD = os.path.join(HERE, "..", "actions", "code-check", "standard.json")
+STANDARD = os.path.join(HERE, "code_check_standard.json")
 SCAN_SCRIPT = os.path.join(HERE, "comment_scan.mjs")
 NODE_LANGUAGES = ("typescript", "javascript", "astro")
 SCANNED = ("python", "swift") + NODE_LANGUAGES
