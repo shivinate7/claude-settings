@@ -14,7 +14,7 @@ from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
     _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
     _strip_heredoc_bodies_unconditionally, strip_heredoc_bodies, bare_words, basename, command_indexes, inner_commands,
-    is_powershell, norm, resolve_command, segment_tokens, split_segments, PowerShellScript,
+    is_powershell, norm, resolve_command, segment_tokens, split_segments, PowerShellScript, PosixScript,
 )
 from shared_names import MACHINE_TAGS, TASK_NOTIFICATION_TAG
 
@@ -865,7 +865,7 @@ _GH_HEAD = re.compile(r"(?:--head|-H)[ =]+[\"']?([^\s\"']+)")
 _PR_URL = re.compile(r"/pull/(\d+)")
 # The Done line, markdown leads and indent allowed. The verdict word is checked against the merge tool's own
 # constants (REVIEW_VERDICTS), so none is named here.
-_DONE_LABEL = re.compile(r"[\s>*#_-]*Done\b[\s*_:]*")
+_DONE_LABEL = re.compile(r"[\s>*#_`-]*Done\b[\s*_:]*")
 # A backtick may wrap the line, and `**` may wrap the verdict word or the whole line.
 _VERDICT_LINE = re.compile(r"[\s>*#_`-]*([A-Z]+)\**, (round \d+ of \d+|fix check), [\w.-]+[\s*_`]*")
 # A Done label line that holds its verdict in a word order the ruled line does not use: a round or fix check
@@ -888,8 +888,8 @@ def _gh_pr_create_segment(command: str, tool: str, depth: int = 0) -> str:
     nothing), each command word of a segment is resolved, and the script a shell or runner gets is read again. A
     PowerShell call is read with PowerShell's rules."""
     text = strip_heredoc_bodies(command)
-    if tool == "PowerShell":
-        text = PowerShellScript(text)
+    # A Bash call's text is read with bash's rules even when the current push comes through the PowerShell tool.
+    text = PowerShellScript(text) if tool == "PowerShell" else PosixScript(text)
     for segment in split_segments(text):
         tokens = segment_tokens(segment)
         if not tokens:
