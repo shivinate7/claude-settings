@@ -1502,25 +1502,23 @@ _ROUTE_NUMBER = r"(\d+|\$\w+|\$\{[^}\s]*\}|\$\(.*|`[^`]*`)"
 
 def _issue_route(middle: str, after: str, any_form: bool = False):
     """The pattern of `repos/<repo>/issues/<middle><number><after>`. With `any_form`, the route may also lead with a full URL host
-    and end in a query string or a fragment, the forms an edit takes (a post by full URL stays a named limit)."""
+    and end in a query string or a fragment, the forms a post and an edit both take."""
     head, tail = (r"(?:https?://[^/\s]+)?", r"(?:[?#].*)?") if any_form else ("", "")
     return re.compile(head + r"/?repos/" + _ROUTE_REPO + "/issues/" + middle + _ROUTE_NUMBER + after + tail, re.DOTALL)
 
 
-_COMMENTS_ROUTE = _issue_route("", "/comments/?")
+_COMMENTS_ROUTE = _issue_route("", "/comments/?", any_form=True)
 _COMMENT_EDIT_ROUTE = _issue_route("comments/", "/?", any_form=True)   # a comment edited in place, by comment id
 ENDPOINT_NUMBER = "<endpoint>"   # the number of a route whose whole endpoint is a shell expansion (`$URL`, `$(...)`)
 _API_VALUE_FLAGS = {"-X", "--method", "-H", "--header", "-q", "--jq", "-t", "--template", "--input", "--hostname", "--cache",
                     "-p", "--preview"} | set(GH_API_FIELD_FLAGS)
 
 
-def _open_substitutions(text: str, quotes: bool = True) -> int:
-    """Return how many `$(..)` and backtick substitutions `text` leaves open at its end, the one count both joins below read. With
-    `quotes`, a parenthesis or backtick inside quotes is text (`$(echo '(' 12)` closes); without, `text` is a word the tokenizer
-    already unquoted."""
+def _open_substitutions(text: str) -> int:
+    """Return how many `$(..)` and backtick substitutions `text` leaves open at its end, the one count both joins below read. A
+    parenthesis or backtick inside quotes is text (`$(echo '(' 12)` closes)."""
     depth, ticks = 0, 0
-    steps = walk_quotes(text) if quotes else ((index, char, "") for index, char in enumerate(text))
-    for index, char, quote in steps:
+    for index, char, quote in walk_quotes(text):
         if quote:
             continue
         if char == "(" and (depth or text[index - 1:index] == "$"):
@@ -1532,11 +1530,17 @@ def _open_substitutions(text: str, quotes: bool = True) -> int:
     return depth + ticks
 
 
-def review_segments(segments, ends, offsets):
-    """Yield (segment, before, piped) for the review-record loop. The splitter cuts at an unquoted `|`, `;`, `&&` or newline even
+_WRAPPED_DEPTH = 4   # nested `bash -c` scripts read; a deeper one is left unjudged
+
+
+def review_segments(segments, ends, offsets, raw, depth=0):
+    """Yield (segment, before, piped, raw) for the review-record loop. The splitter cuts at an unquoted `|`, `;`, `&&` or newline even
     inside a `$(..)`, so a gh call whose substitution it cut is joined with the segments up to the close, each cut put back as it
     was: the call is judged whole, and its inner call never stands alone. Only a gh call joins, so a stray `$(` in other text
-    hides no later call. `before` is the first segment's heredoc offset (`offsets`), and `piped` the group before, when it ends in `|`."""
+    hides no later call. `before` is the first segment's heredoc offset (`offsets`), and `piped` the group before, when it ends in `|`.
+    `raw` is the text the segments were cut from, which holds their heredoc bodies.
+    A call a shell, `eval` or a runner starts from text (`bash -c "gh ..."`, `eval "gh ..."`) is read by `inner_commands`: each script
+    is yielded after its segment as segments of its own, with itself as `raw`."""
     index, previous, previous_end = 0, "", ""
     while index < len(segments):
         text, before, last = segments[index], offsets[index], index
@@ -1544,24 +1548,43 @@ def review_segments(segments, ends, offsets):
             while last < len(segments) - 1 and ends[last] and _open_substitutions(text):
                 text += ends[last] + segments[last + 1]
                 last += 1
-        yield text, before, (previous if previous_end == "|" else "")
+        yield text, before, (previous if previous_end == "|" else ""), raw
+        tokens = segment_tokens(ansi_c_decoded(text)) if depth < _WRAPPED_DEPTH and "gh" in text else None
+        for script in inner_commands(tokens) if tokens else ():
+            inner_ends = []
+            inner = split_segments(script, inner_ends)
+            yield from review_segments(inner, inner_ends, heredoc_offsets(inner, inner_ends), script, depth + 1)
         previous, previous_end, index = text, ends[last], last + 1
 
 
-def _joined_substitutions(args):
-    """Return `args` with each route-shaped word that opens a `$(` or a backtick the tokenizer split at a space joined with the words
-    up to its close, so the inner call of a substitution is no word of its own. Only a word that starts a route or an endpoint
-    (`repos/`, `/repos/`, a full URL to one, `$(`, a backtick) is joined: a body field that holds `$(` as text is left alone."""
-    out, depth = [], 0
-    for arg in args:
-        if depth > 0:
-            out[-1] += " " + arg
-        else:
-            out.append(arg)
-            if not re.search(r"\$\(|`", arg) or not re.match(r"(https?://[^/\s]+)?(/?repos/|\$\(|`)", arg):
+_ROUTE_WORD_START = re.compile(r"(https?://[^/\s]+)?(/?repos/|\$\(|`)")
+
+
+def _joined_substitutions(text: str) -> str:
+    """Return the segment `text` with each space inside an open `$(..)` or backtick substitution escaped, so the tokenizer reads the
+    substitution as one word and its inner call is no word of its own. Only a word that starts a route or an endpoint (`repos/`,
+    `/repos/`, a full URL to one, `$(`, a backtick) is joined: a body field that holds `$(` as text is left alone. The count reads
+    the text, as `review_segments` does, so a quoted parenthesis is text."""
+    out, start = [], None
+    for index, char, quote in walk_quotes(text):
+        if not quote and char in " \t\r\n":
+            word = text[start:index] if start is not None else ""
+            if _ROUTE_WORD_START.match(re.sub("['\"]", "", word)) and _open_substitutions(word):
+                out.append("\\ ")
                 continue
-        depth = _open_substitutions(out[-1], quotes=False)
-    return out
+            start = None
+        elif start is None:
+            start = index
+        out.append(char)
+    return "".join(out)
+
+
+def _graphql_string(text: str) -> str:
+    """Return the text a GraphQL string literal holds, its escapes (`\\n`, `\\"`, `\\uHHHH`) decoded, else the text as it stands."""
+    try:
+        return json.loads('"' + text + '"')
+    except ValueError:
+        return text
 
 
 def _api_endpoint(args):
@@ -1644,8 +1667,8 @@ def _api_input_named(args) -> bool:
     return any(a == "--input" or a.startswith("--input=") for a in args)
 
 
-def _api_bodies(args):
-    """Return (texts, files, stdin) for the `body` fields of a `gh api` call. A `body` field
+def _api_bodies(args, keys=("body",)):
+    """Return (texts, files, stdin) for the fields of a `gh api` call named in `keys` (every field when None). A `body` field
     is text for -f and --raw-field, and for -F and --field text too unless it starts with `@`, which names a file (`@-` is stdin)."""
     texts, files, stdin, index = [], [], False, 1
     while index < len(args):
@@ -1664,7 +1687,7 @@ def _api_bodies(args):
         if value is None:
             continue
         key, _, text = value.partition("=")
-        if key != "body":
+        if keys is not None and key not in keys:
             continue
         if typed and text.startswith("@"):
             if text == "@-":
@@ -1676,16 +1699,20 @@ def _api_bodies(args):
     return texts, files, stdin
 
 
+_GRAPHQL_COMMENT = re.compile(r"\b(addComment|updateIssueComment)\b")
+_GRAPHQL_BODY = re.compile(r'\bbody\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
+
 def review_post_hit(segment: str, raw: str, where: str, before: int, previous: str = ""):
     """Return (matched, reason) when this segment posts a review record the guard must refuse, else None. Judges `gh pr comment` and `gh issue comment`
     (--body, -b, --body-file, -F) and `gh api repos/O/R/issues/<n>/comments` (-f, -F, --field, --raw-field `body=`, `body=@file`),
     each with the bodies of the heredocs its own header holds. A body of exactly `$(cat FILE)`, and a stdin body piped from
     `cat FILE` (`previous` is the segment piped in), are read from FILE. A file that cannot be read allows, with a note. No body
-    whose first line is the marker: no read."""
+    whose first line is the marker: no read. A GraphQL `addComment` or `updateIssueComment` names its comment by node id, so no
+    word of the call names the pull request: a marked body is refused with no read, and a call with no marked body is left alone."""
     rest = gh_call_of(ansi_c_decoded(segment))   # bash sends a `$'...'` body decoded
     if rest is None:
         return None
-    edit, variable = None, ()
+    edit, variable, graphql = None, (), False
     if rest[:2] in (["pr", "comment"], ["issue", "comment"]):   # an issue comment reaches the same pull request
         args = rest[2:]
         selector, repo = _comment_target(args)
@@ -1694,18 +1721,27 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
         variable = tuple(name for name, part in (("number", selector), ("repo", repo)) if shell_expanded(part))
         texts, files, stdin = message_sources(args, "comment")
     elif rest[:1] == ["api"]:
-        rest = _joined_substitutions(rest)
-        route = _comment_route(rest)
-        if route is None:
-            return None
-        routes, repo, number = route
-        texts, files, stdin = _api_bodies(rest)
-        variable = _variable_parts(repo, number)
-        if routes is _COMMENT_EDIT_ROUTE:   # an edit names a comment, not a pull request
-            edit = ("comment", "" if variable else number)
-            selector = ""
+        rest = gh_call_of(_joined_substitutions(ansi_c_decoded(segment))) or rest
+        if _api_endpoint(rest) == "graphql":
+            mutation = _GRAPHQL_COMMENT.search(" ".join(_api_bodies(rest, ("query",))[0]))
+            if mutation is None:
+                return None
+            texts, files, stdin = _api_bodies(rest, None)   # a variable body has any key
+            texts += [_graphql_string(text) for query in list(texts) for text in _GRAPHQL_BODY.findall(query)]
+            repo, selector, variable, graphql = "", "", ("graphql",), True
+            edit = ("comment", "") if mutation.group(1) == "updateIssueComment" else None
         else:
-            selector = str(number)
+            route = _comment_route(rest)
+            if route is None:
+                return None
+            routes, repo, number = route
+            texts, files, stdin = _api_bodies(rest)
+            variable = _variable_parts(repo, number)
+            if routes is _COMMENT_EDIT_ROUTE:   # an edit names a comment, not a pull request
+                edit = ("comment", "" if variable else number)
+                selector = ""
+            else:
+                selector = str(number)
     else:
         return None
     texts, files = list(texts), list(files)
@@ -1738,7 +1774,7 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
     if unseen_stdin and edit is None:
         review_note("the body comes from stdin and cannot be read")
     return review_record_hit(texts, repo, selector, where, edit, variable=variable, unseen=bool(unseen), unread=unread,
-                             stdin_unseen=bool(unseen_stdin))
+                             stdin_unseen=bool(unseen_stdin), marked_only=graphql)
 
 
 def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
@@ -4346,8 +4382,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 6b2. A review record posted as a comment with a hand-typed head or number (rule pr-review-record).
     # Cost: one pull request read per post that holds the record marker, none for any other command.
-    for segment, before, piped in review_segments(segments, ends, heredoc_offsets(segments, ends, stripped == raw)):
-        hit = review_post_hit(segment, raw, cite_where, before, piped) if segment.strip() else None
+    for segment, before, piped, source in review_segments(segments, ends, heredoc_offsets(segments, ends, stripped == raw), raw):
+        hit = review_post_hit(segment, source, cite_where, before, piped) if segment.strip() else None
         if hit:
             refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
 
