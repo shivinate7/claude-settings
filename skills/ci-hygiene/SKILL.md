@@ -68,8 +68,10 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    **When the build starts, freeze the lane set** (decision `batch-freeze-lane-set`, a batch's lane set
    freezes at its build). A release or a drop that arrives after that goes to the next batch. It never
    triggers a rebuild. The one change after the freeze is the drop of a red run's blamed lane, with any
-   lane that depends on it. Mark the integration PR ready at the first build, once its one batch-head
-   lint passes. A draft run skips every job, so never rebuild a draft batch only to close it. The
+   lane that depends on it. Build the batch as a draft,
+   run the batch-head lane lint, then mark the integration PR ready, with no rebuild between
+   (decision `draft-until-reviewed`). A draft run skips every job, so never rebuild a draft batch
+   only to close it. The
    next batch builds and runs on top of the one in CI. While its head holds the running batch's head,
    the running batch may merge (decision `no-merge-during-batch-ci`, the contains rule). A drop
    changes the running batch's head, so the brake refuses that merge until the next batch is built
