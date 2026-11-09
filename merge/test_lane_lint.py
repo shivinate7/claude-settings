@@ -183,6 +183,20 @@ class LagHost(tm.FakeHost):
         return info
 
 
+class IntermediateHeadHost(LagHost):
+    """A LagHost whose pull request shows `middle` on the read after its stale reads, before the pushed head: a third head GitHub shows mid-wait."""
+
+    def __init__(self, root, other, stale, lag, middle, clock):
+        super().__init__(root, other, stale, lag, clock)
+        self.middle = middle
+
+    def pr(self, n):
+        info = super().pr(n)  # appends this read to pr_calls, and reports the stale or the pushed head
+        if len(self.pr_calls) == self.lag + 1:
+            info["head"] = self.middle
+        return info
+
+
 class LaneLint(CiJobStub, tm.CloudSession):
     @classmethod
     def setUpClass(cls):
@@ -475,6 +489,34 @@ class LaneLint(CiJobStub, tm.CloudSession):
                 self.assertEqual(clock.pauses, [], "a commit or ref target paused: %s" % clock.pauses)
                 self.assertNotIn(WAIT_LINE, text, "a commit or ref target printed a wait: " + text)
         self.assertEqual(self.host.pr_calls, [], "a commit or ref target read the pull request, which it never needs")
+
+    def test_lane_lint_refuses_when_the_pull_request_base_changes_during_the_wait(self):
+        stale, pushed = self.push_lane_commit()
+        self.lagging_host(stale, LAG_POLLS)
+        self.host.base_seq = ["main", "develop"]  # the base reads main on the first read, then develop on every later one
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertIn(WAIT_LINE, text, "lane_lint did not wait for GitHub to show the pushed head, so the base never moved during a wait: " + text)
+        self.assertEqual(rc, 1, "lane_lint did not refuse after the pull request's base moved from main to develop during the wait: " + text)
+        refusal = "\n".join(line for line in text.splitlines() if WAIT_LINE not in line)
+        self.assertIn("develop", refusal, "the refusal does not name the new base: " + text)
+        self.assertIn("main", refusal, "the refusal does not name the base the lint was about to use: " + text)
+        self.assertEqual(pass_lines(text), [], "lane_lint printed PASS against the base the pull request had before the wait: " + text)
+        self.assertEqual(self.lint_calls(), [], "the lint ran although the pull request's base had changed: %s" % self.lint_calls())
+
+    def test_lane_lint_keeps_waiting_through_an_intermediate_head_then_lints_the_pushed_head(self):
+        stale, pushed = self.push_lane_commit()
+        middle = self.head("main")  # a head GitHub shows after the stale ones and before the pushed one: a commit that is neither
+        self.assertNotIn(middle, (stale, pushed), "the case needs a third head")
+        self.host = IntermediateHeadHost(self.co, self.other, stale, LAG_POLLS, middle, tm.Clock())
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertIn(WAIT_LINE, text, "lane_lint did not wait for GitHub to show the pushed head: " + text)
+        self.assertEqual(rc, 0, "lane_lint refused the pushed head after GitHub showed an intermediate head first: " + text)
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
+        self.assertEqual(runs[0]["head"], pushed, "the lint ran on a head other than the pushed one")
+        self.assertEqual(len(pass_lines(text)), 1, text)
 
     def stop_run(self, proc):
         """Cleanup for a run this case started: it is ours, so a live one is killed. The stub ends by itself when its run is gone."""
