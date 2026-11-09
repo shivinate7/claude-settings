@@ -1307,7 +1307,9 @@ def _env_words(segment: str, walk: bool = False):
             words[0] = "" if words[0] == "{" else words[0].lstrip("(")
             if not words[0]:
                 words.pop(0)
-        if words and words[-1].endswith(")") and not words[-1].startswith(("'", '"')):
+        # A `)` after a backslash is find's escaped paren, a word of the command, and not a subshell's close.
+        if (words and words[-1].endswith(")") and not words[-1].endswith("\\)")
+                and not words[-1].startswith(("'", '"'))):
             words[-1] = words[-1].rstrip(")")
             if not words[-1]:
                 words.pop()
@@ -1949,6 +1951,19 @@ ENV_WALK_REASON_EXEC = ("this command would search a name that find hands to its
                         "an environment file")
 
 
+def _find_group_end(expression, start: int) -> int:
+    """The index of the `)` that closes the `(` at `expression[start]`, or -1 when none does."""
+    level = 0
+    for at in range(start, len(expression)):
+        if expression[at] == "(":
+            level += 1
+        elif expression[at] == ")":
+            level -= 1
+            if level == 0:
+                return at
+    return -1
+
+
 def _find_names_no_env(expression, runners: bool = False) -> bool:
     """True when each name a find expression prints matches a `-name` or `-iname` glob that no env file name
     fits. The words are dequoted. Without a paren, find's `-a` binds tighter than `-o`, so each part between
@@ -1956,6 +1971,8 @@ def _find_names_no_env(expression, runners: bool = False) -> bool:
     `-not` turns round. Any other test in it, negated or not, only narrows the names. When an explicit
     `-print` or `-print0` sits in the expression, only an alternative that holds one prints (a `-prune`
     branch with none prints nothing), and only its tests before the first print narrow what it prints. A
+    paren group is one test: it narrows the names when each alternative inside it does (`\\( -name '*.py' -o
+    -name '*.md' \\)`), and narrows nothing otherwise. A group that holds a print or a program, an unmatched
     paren, or an action that prints other text than the name, is not read, and the answer is False. With
     `runners` set, the names are the ones find hands to its `-exec` programs (`{}`), not the ones it prints: a
     runner and its program words, up to the `;` or `+` that ends them, then count as a `-print` in its
@@ -1969,7 +1986,16 @@ def _find_names_no_env(expression, runners: bool = False) -> bool:
             printed = True
             while at < len(expression) and expression[at] not in ENV_FIND_RUNNER_ENDS:
                 at += 1
-        elif word in ("(", ")") or word in ENV_FIND_OTHER_OUTPUT:
+        elif word == "(":
+            end = _find_group_end(expression, at)
+            group = expression[at + 1:end] if end > at else []
+            if end < 0 or any(w in ("-print", "-print0") or w in ENV_FIND_OTHER_OUTPUT for w in group):
+                return False
+            negated = at > 0 and expression[at - 1] in ("!", "-not")
+            if not negated and not printed:
+                current.append(_find_names_no_env(group))
+            at = end
+        elif word == ")" or word in ENV_FIND_OTHER_OUTPUT:
             return False
         elif word in ("-o", "-or"):
             alternatives.append(current)
@@ -2028,15 +2054,11 @@ def _find_pruned(expression):
         else:
             current.append(word)
     alternatives.append(current)
-    prunes = []
-    for words in alternatives:
-        # find reaches an alternative only when each one before it is false for the entry, so a `-prune` after an
-        # alternative with no `-prune` of its own (`-print -o -path ./big -prune`) is not reached for what that one
-        # holds for, and find enters the folder. Only the prunes in front of the first such alternative are read.
-        if "-prune" not in words:
-            break
-        tests, at, readable = [], 0, True
-        while at < words.index("-prune"):
+    def read_tests(words, stop: int):
+        """The `-path` and `-name` tests in `words[:stop]` as (kind, glob, ignores case), or None when any other
+        test or a `!` stands there. A `-type d` test is read as no test: it only narrows."""
+        tests, at = [], 0
+        while at < stop:
             word = words[at]
             if word in ("-a", "-and"):
                 at += 1
@@ -2047,11 +2069,26 @@ def _find_pruned(expression):
             elif word == "-type" and words[at + 1:at + 2] == ["d"]:
                 at += 2
             else:
-                readable = False
+                return None
+        return tests
+
+    # Find reaches an alternative only when each one before it is false for the entry. An earlier alternative with
+    # no `-prune` (`-name '*.py'`, or `-print` with no test) holds for the entries its tests pick, and find stops
+    # there: it neither prunes nor enters differently for them. Such an alternative shadows the prunes after it for
+    # those entries (`shadows`). One whose tests are not `-path` or `-name` tests, with at most a closing print,
+    # ends the reading, so no prune after it is counted.
+    prunes, shadows = [], []
+    for words in alternatives:
+        if "-prune" not in words:
+            end = len(words) - (1 if words[-1:] in (["-print"], ["-print0"]) else 0)
+            shadow = read_tests(words, end)
+            if shadow is None or any(w in ("-prune", "-print", "-print0") for w in words[:end]):
                 break
-        if readable:
-            prunes.append(tests)
-    prunes = [tests for tests in prunes if tests]
+            shadows.append(shadow)
+            continue
+        tests = read_tests(words, words.index("-prune"))
+        if tests:
+            prunes.append((tests, list(shadows)))
     if not prunes:
         return None
 
@@ -2061,7 +2098,9 @@ def _find_pruned(expression):
                 return _glob_picks(name, name, glob_text, fold, by_name=True)
             shown = path.lower() if fold else path
             return fnmatch.fnmatchcase(shown, _glob_unescaped(glob_text.lower() if fold else glob_text))
-        return any(all(holds(*test) for test in tests) for tests in prunes)
+        return any(all(holds(*test) for test in tests) and not any(all(holds(*test) for test in shadow)
+                                                                    for shadow in earlier)
+                   for tests, earlier in prunes)
     return pruned
 
 
@@ -2246,7 +2285,18 @@ def _feed_source(command: str, rest, here: str, reads_folders: bool = True,
             starts.append((rest[at], bare[at]))
             at += 1
         if any(bare[i + 1:i + 2] == ["d"] for i, w in enumerate(bare) if w == "-type"):
-            return unknown
+            # A `-exec` program gets each folder find prints, and a search that reads folders reads each whole. Every
+            # folder find prints is the start folder or lies below it, so the start folders hold what is read.
+            if not exec_feed:
+                return unknown
+            folders = []
+            for word, start in starts or [(".", ".")]:
+                if re.search(r"[$`]", start):
+                    return unknown
+                target = os.path.join(here, os.path.expanduser(start))
+                expand = re.search(r"[*?\[]", start) and word == start
+                folders += [f for f in (glob.glob(target) if expand else [target]) if os.path.isdir(f)]
+            return "", False, folders
         names_no_env = _find_names_no_env(bare[at:], exec_feed)
         prints_folder, globs = _find_folder_names(bare[at:])
         # A search that reads no folder it is given reads only the files find prints.
@@ -2511,11 +2561,11 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
                                     given = f[len(head):] if not os.path.isabs(typed) and f.startswith(head) else f
                                 if os.path.isdir(f) and (f, given) not in folders:
                                     folders.append((f, given))
-                        if via_xargs:
+                        if sources:
                             _, walks_here, named = sources[here]
                             folders += [(d, None) for d in named if (d, None) not in folders]
                             folders += [(here, None)] * (walks_here and (here, None) not in folders)
-                        elif len(paths) <= extras["unknown"] and (
+                        if not via_xargs and len(paths) <= extras["unknown"] and (
                                 grep or not ((fed and part == 0) or "<" in words)):
                             folders += [(here, None)] * ((here, None) not in folders)
                         for folder, given in folders:
