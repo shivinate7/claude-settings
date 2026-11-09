@@ -730,6 +730,14 @@ def write(path, text):
         handle.write(text)
 
 
+def write_exact(path, text):
+    """Write `text` as its UTF-8 bytes, with no newline translation: a blob then holds the same bytes on
+    every platform, so a tree id computed from the text (see tree_id) is the id git writes."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(text.encode("utf-8"))
+
+
 def run_vcs(cwd, *args):
     return subprocess.run([VCS, *args], cwd=cwd, capture_output=True, text=True)
 
@@ -943,12 +951,13 @@ def _require_staged(where, tracked, untracked):
         )
 
 
-def make_repo(where, files):
-    """Build a real checkout holding `files`, committed, with an explicit identity."""
+def make_repo(where, files, exact=False):
+    """Build a real checkout holding `files`, committed, with an explicit identity. `exact` writes each text
+    as its bytes (see write_exact), so the committed blobs match on every platform."""
     os.makedirs(where, exist_ok=True)
     run_vcs(where, "init", "-q", "-b", "main", ".")
     for name, text in files.items():
-        write(os.path.join(where, name), text)
+        (write_exact if exact else write)(os.path.join(where, name), text)
     run_vcs(where, "add", "-A")
     commit = run_vcs(where, *IDENT, "commit", "-q", "-m", "first")
     if commit.returncode != 0:
@@ -15405,15 +15414,16 @@ DIFFROOT = os.path.join(ROOT, "diffrepos")
 # `MUTATE_ONLY` selects one or two cases. So a repo is built LAZILY, the first time a case runs in
 # it (`materialize`, called from `decide`). MEASURED on Windows CI: building all of them at import
 # cost 1 min 52 s per run of this module.
-def diff_repo(name, change, commit=False, cut_from=None, files=None):
+def diff_repo(name, change, commit=False, cut_from=None, files=None, exact=False):
     """A real linked worktree, as a builder runs in: a main checkout with a base commit, and a
     worktree on a new branch `work` cut from `cut_from` (default HEAD). `change` edits the
-    worktree; `commit` then commits there. Returns the worktree's path. Built on first use."""
+    worktree; `commit` then commits there. `exact` writes the base files as bytes (see make_repo).
+    Returns the worktree's path. Built on first use."""
     main = os.path.join(DIFFROOT, name + "-main")
     where = os.path.join(DIFFROOT, name)
 
     def build():
-        make_repo(main, files or BASE_FILES)
+        make_repo(main, files or BASE_FILES, exact)
         made = run_vcs(main, "worktree", "add", "-q", "-b", "work", where,
                        *([cut_from] if cut_from else []))
         if made.returncode != 0:
@@ -15630,8 +15640,9 @@ def role_log_case():
     return (not problems), ("; ".join(problems) or "each unjudged stop is logged")
 
 
-def _diff_log_run(folder, repo, agent_type, agent_id, commit=True):
+def _diff_log_run(folder, repo, agent_type, agent_id, commit=True, commands=None):
     """Run commit, push and stop for one agent in `repo`, or push and stop alone when `commit` is False.
+    `commands`, when given, is the Bash calls to run instead, and no stop is judged: the one call a case reads.
     Returns (stdout seen, guard.log rows)."""
     materialize(repo)
     os.makedirs(folder, exist_ok=True)
@@ -15643,10 +15654,12 @@ def _diff_log_run(folder, repo, agent_type, agent_id, commit=True):
     env["CLAUDE_CONFIG_DIR"] = folder
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    calls = commands if commands is not None else ((COMMIT, PUSH) if commit else (PUSH,))
     bodies = [{"tool_name": "Bash", "tool_input": {"command": c}, "cwd": repo,
-               "agent_id": agent_id, "agent_type": agent_type} for c in ((COMMIT, PUSH) if commit else (PUSH,))]
-    bodies.append({"hook_event_name": "SubagentStop", "cwd": repo, "agent_id": agent_id,
-                   "agent_type": agent_type})
+               "agent_id": agent_id, "agent_type": agent_type} for c in calls]
+    if commands is None:
+        bodies.append({"hook_event_name": "SubagentStop", "cwd": repo, "agent_id": agent_id,
+                       "agent_type": agent_type})
     out = ""
     for body in bodies:
         got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
@@ -17289,6 +17302,182 @@ def _u2_new_test(w):
     """The builder adds a test file that no base holds."""
     write(os.path.join(w, "tests/test_new.py"), "def test_new():\n    assert 5\n")
 
+
+# ---- plumbing commits (decision builders-cannot-edit-tests). A role session that builds a commit from git
+# objects (write-tree, read-tree, update-index, commit-tree) gets past the porcelain judge, which reads `git
+# commit` and `git push` only. A `commit-tree <tree> [-p parent]...` call is judged on the tree it would commit:
+# each path that differs from the first parent (for a merge, from git's own merge of the parents) is judged
+# as that role's commit would be. The command names its tree by id, and tree_id computes that id here, so the
+# command text is fixed at import. The fixtures store each tree and check git's id against tree_id.
+PLUMB = "plumbing-commit-diff"
+PLUMB_TEST_NEW = "tests/test_plumb_new.py"
+PLUMB_ADD = {PLUMB_TEST_NEW: "def test_plumb_new():\n    assert 1\n"}
+PLUMB_PRODUCT = {"src/app.py": "x = 2\n"}
+PLUMB_TEST_ONLY = {TEST_A: "pass\n"}
+PLUMB_MARKDOWN = {"latest_results.md": "ok two\n"}
+PLUMB_MERGE_BAD = {"src/app.py": "x = 9\n", TEST_A: "pass\n"}
+PLUMB_MERGE_CLEAN = {"src/app.py": "x = 9\n", TEST_A: LANE_TEXT}
+PLUMB_EDITS = (PLUMB_ADD, PLUMB_PRODUCT, PLUMB_TEST_ONLY, PLUMB_MARKDOWN)
+
+
+def _git_id(kind, body):
+    """The id git gives an object of `kind` (b"blob" or b"tree") with these bytes."""
+    return hashlib.sha1(b"%s %d\0" % (kind, len(body)) + body).hexdigest()
+
+
+def tree_id(files):
+    """The id git gives the tree of `files` (path -> text; a path carries its folders). Git sorts a folder's
+    entry as if its name ended in `/`, and a folder's mode is 40000."""
+    top = {}
+    for path, text in files.items():
+        head, folder, rest = path.partition("/")
+        if folder:
+            top.setdefault(head, {})[rest] = text
+        else:
+            top[head] = text
+    rows = []
+    for name, value in top.items():
+        if isinstance(value, dict):
+            rows.append((name + "/", b"40000", name, bytes.fromhex(tree_id(value))))
+        else:
+            rows.append((name, b"100644", name, bytes.fromhex(_git_id(b"blob", value.encode("utf-8")))))
+    body = b"".join(mode + b" " + name.encode("utf-8") + b"\0" + sha for _, mode, name, sha in sorted(rows))
+    return _git_id(b"tree", body)
+
+
+def plumb_tree(edits):
+    """The id of the tree of BASE_FILES with `edits` laid over it."""
+    return tree_id({**BASE_FILES, **edits})
+
+
+PLUMB_EMPTY = tree_id({})
+PLUMB_UNKNOWN = "1" * 40   # no store holds it
+PLUMB_BLOB = _git_id(b"blob", b"pass\n")
+
+
+def plumb_call(tree, *parents):
+    """The `git commit-tree` call that commits `tree` on `parents`, named as an agent types them."""
+    return VCS + " commit-tree " + tree + "".join(" -p " + parent for parent in parents) + " -m x"
+
+
+def _store_tree(w, edits):
+    """Store `edits` over HEAD's files as a tree, and check git's id against tree_id. Each blob is hashed from
+    its bytes. The index is read from HEAD before and after, so the worktree and its commits are left as they were."""
+    _must(w, "read-tree", "HEAD")
+    for rel, text in edits.items():
+        made = subprocess.run([VCS, "hash-object", "-w", "--stdin"], cwd=w, input=text.encode("utf-8"),
+                              capture_output=True)
+        if made.returncode != 0:
+            sys.exit("fixture setup failed: hash-object in %r: %s"
+                     % (w, made.stderr.decode("utf-8", "replace").strip()))
+        _must(w, "update-index", "--add", "--cacheinfo", "100644," + made.stdout.decode().strip() + "," + rel)
+    written = run_vcs(w, "write-tree")
+    if written.returncode != 0 or written.stdout.strip() != plumb_tree(edits):
+        sys.exit("fixture setup failed: write-tree in %r gave %r, not the id tree_id computes"
+                 % (w, written.stdout.strip()))
+    _must(w, "read-tree", "HEAD")
+
+
+def _plumb_change(w):
+    for edits in PLUMB_EDITS:
+        _store_tree(w, edits)
+
+
+def _plumb_dirty_change(w):
+    """The product tree is stored, and the builder's worktree holds a dirty test file."""
+    _store_tree(w, PLUMB_PRODUCT)
+    write(os.path.join(w, TEST_A), "pass\n")
+
+
+def _plumb_merge_change(w):
+    """Cut at main. The builder's product work P, then `lane`, a test-author's commit that holds TEST_A's cases.
+    Git's own merge of P and lane is the base that a two-parent commit-tree is judged against."""
+    main = w + "-main"
+    _must(main, "checkout", "-q", "-b", "lane")
+    write_exact(os.path.join(main, TEST_A), LANE_TEXT)
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "test-author cases")
+    _must(main, "checkout", "-q", "main")
+    write_exact(os.path.join(w, "src/app.py"), "x = 3\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "product work")
+    merged = run_vcs(w, "merge-tree", "--write-tree", "--no-messages", "HEAD", "lane")
+    if merged.returncode != 0 or merged.stdout.split()[:1] != [plumb_tree({"src/app.py": "x = 3\n", TEST_A: LANE_TEXT})]:
+        sys.exit("fixture setup failed: git's merge of P and lane in %r is not the tree tree_id computes" % w)
+    _store_tree(w, PLUMB_MERGE_BAD)
+    _store_tree(w, PLUMB_MERGE_CLEAN)
+
+
+_plumb = diff_repo("plumb-base", _plumb_change, exact=True)
+_plumb_dirty = diff_repo("plumb-dirty", _plumb_dirty_change, exact=True)
+_plumb_merge = diff_repo("plumb-merge", _plumb_merge_change, exact=True)
+
+# Deny cases run in a clean worktree, so the offence lives only in the tree: a fix that judges the working
+# tree alone stays red on them. Each allow beside them is a control the base already passes.
+sh("builder-refuse: commit-tree of a tree that adds a test file is denied for a builder",
+   plumb_call(plumb_tree(PLUMB_ADD), "HEAD"), "deny", rule=PLUMB, cwd=_plumb,
+   agent_id="bld1", agent_type="builder")
+sh("builder-refuse: commit-tree of a tree that changes a product file is denied for a test-author",
+   plumb_call(plumb_tree(PLUMB_PRODUCT), "HEAD"), "deny", rule=PLUMB, cwd=_plumb,
+   agent_id="auth1", agent_type="test-author")
+sh("builder-refuse: commit-tree of a product-only tree is allowed for a builder with a dirty test file",
+   plumb_call(plumb_tree(PLUMB_PRODUCT), "HEAD"), "allow", cwd=_plumb_dirty,
+   agent_id="bld1", agent_type="builder")
+sh("builder-refuse: commit-tree of a test-only tree is allowed for a test-author",
+   plumb_call(plumb_tree(PLUMB_TEST_ONLY), "HEAD"), "allow", cwd=_plumb,
+   agent_id="auth1", agent_type="test-author")
+sh("builder-refuse: a two-parent commit-tree whose test file differs from git's merge is denied for a builder",
+   plumb_call(plumb_tree(PLUMB_MERGE_BAD), "HEAD", "lane"), "deny", rule=PLUMB, cwd=_plumb_merge,
+   agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a two-parent commit-tree whose test file is git's clean merge is allowed for a builder",
+   plumb_call(plumb_tree(PLUMB_MERGE_CLEAN), "HEAD", "lane"), "allow", cwd=_plumb_merge,
+   agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a refused commit-tree names no test path and no bypass route",
+   plumb_call(plumb_tree(PLUMB_ADD), "HEAD"), "deny", rule=PLUMB, cwd=_plumb,
+   agent_id="bld1", agent_type="builder",
+   lacks=(PLUMB_TEST_NEW, "test_plumb_new", "tests/", "--no-verify", "commit-tree", "hash-object", "mktree",
+          "update-ref", "update-index", "write-tree", "read-tree"))
+# A builder holds a test change in its worktree and runs each plumbing call that builds a tree, with no commit: all allowed.
+sh("builder-refuse: read-tree HEAD with a test change held, and no commit, is allowed",
+   VCS + " read-tree HEAD", "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: update-index of a test file with a test change held, and no commit, is allowed",
+   VCS + " update-index --add --cacheinfo 100644," + PLUMB_BLOB + "," + PLUMB_TEST_NEW, "allow",
+   cwd=_dirty, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: write-tree with a test change held, and no commit, is allowed",
+   VCS + " write-tree", "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: mktree with a test change held, and no commit, is allowed",
+   VCS + " mktree", "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: hash-object -w of a test file with a test change held, and no commit, is allowed",
+   VCS + " hash-object -w " + TEST_A, "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a session with no role may commit-tree a test change", plumb_call(plumb_tree(PLUMB_ADD), "HEAD"),
+   "allow", cwd=_plumb)
+sh("builder-refuse: commit-tree of a product change is denied for a record-writer",
+   plumb_call(plumb_tree(PLUMB_PRODUCT), "HEAD"), "deny", rule=PLUMB, cwd=_plumb,
+   agent_id="rw1", agent_type="record-writer")
+sh("builder-refuse: commit-tree of an all-.md tree is allowed for a record-writer",
+   plumb_call(plumb_tree(PLUMB_MARKDOWN), "HEAD"), "allow", cwd=_plumb,
+   agent_id="rw1", agent_type="record-writer")
+sh("builder-refuse: commit-tree of a product change is denied for a designer",
+   plumb_call(plumb_tree(PLUMB_PRODUCT), "HEAD"), "deny", rule=PLUMB, cwd=_plumb,
+   agent_id="dsg1", agent_type="designer")
+sh("builder-refuse: commit-tree of the empty tree, which drops every file, is denied for a builder",
+   plumb_call(PLUMB_EMPTY, "HEAD"), "deny", rule=PLUMB, cwd=_plumb,
+   agent_id="bld1", agent_type="builder")
+
+
+def plumb_unread_case():
+    """A tree git cannot read is allowed, and logged as role-diff-unread: unknown, never clear."""
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-plumb-unread"), _plumb, "builder", "bld1",
+                              commands=[plumb_call(PLUMB_UNKNOWN, "HEAD")])
+    if out:
+        return False, "expected a silent allow, got %r" % out[:60]
+    if not any(len(r) == 6 and r[2] == "noted" and r[3] == "role-diff-unread" for r in rows):  # six: session last
+        return False, "no role-diff-unread line for a tree git cannot read"
+    return True, "allowed silently, and the unreadable tree is logged role-diff-unread"
+
+
+LOG_CHECKS_EXTRA.append(("builder-refuse: a commit-tree whose tree git cannot read is allowed and logs role-diff-unread",
+                         plumb_unread_case))
 
 _bd_inc = diff_repo("bd-incident", _incident)
 # Case 1: the incident. A reset to the lane tip, then a removed line, is refused at commit and push.
