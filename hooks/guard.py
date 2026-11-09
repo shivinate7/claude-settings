@@ -390,7 +390,7 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
+            FROZEN_REASON, MUTATING_COMMAND, _resolve_vars, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
             is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
@@ -817,6 +817,15 @@ def worktree_add_target(args):
     return words[0] if words else None
 
 
+def _segment_with_vars(segments, number: int) -> str:
+    """`segments[number]` with each variable read as the value an earlier segment of the same
+    command assigned (`_resolve_vars`, the one home). Unassigned variables stay as written."""
+    if "$" not in segments[number]:
+        return segments[number]
+    mark = " ;\x00; "
+    return _resolve_vars(mark.join(segments[:number + 1])).split(mark)[-1]
+
+
 def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=None) -> str:
     """The new-tree path when `segments[number]` is a real worktree add whose tree lands
     outside `<primary>/.claude/worktrees/`, else "". The primary is the one of the repo the call
@@ -824,13 +833,19 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=Non
     and passes, so the repo is judged, never the target. A call whose PAYLOAD carries a valid
     `agent_id`, or an `agent_type` alone, is refused inside that folder too, unless the tree is the agent's recorded home
     (`agent_worktree_home` status "home") or its own red-run folder (`_own_red_run`); a "no-record"
-    agent has no home to match. Anything unreadable allows."""
-    tokens = segment_tokens(segments[number])
+    agent has no home to match. A variable target is read from an assignment earlier in the same
+    command; one left unresolved (or a substitution) is refused from a non-temp repo, since its
+    value is unknown; a `-C` variable is read the same way. Other unreadable parts (a repo, a
+    cwd) allow."""
+    if "worktree" not in segments[number]:
+        return ""   # cheap gate: resolving variables re-reads every earlier segment, so it runs only for a segment that holds the word `worktree`
+    read = _segment_with_vars(segments, number)
+    tokens = segment_tokens(read)
     index = resolve_command(tokens) if tokens else None
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
         return ""
     target = None
-    for subcommand, args in git_calls(segments[number]):
+    for subcommand, args in git_calls(read):
         if subcommand == "worktree" and args and args[0] == "add":
             target = worktree_add_target(args[1:])
             break
@@ -840,7 +855,7 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=Non
     named = _segment_git_c_target(tokens)
     if named is not None:
         where = None if _unexpanded(named) else shell_abs(named, where)
-    if not where or _unexpanded(target):
+    if not where:
         return ""
     primary = primary_checkout(where)
     if not primary:
@@ -848,6 +863,8 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=Non
     import tempfile   # lazy: only a real worktree add reaches here
     if path_is_inside(primary, tempfile.gettempdir()):
         return ""
+    if _unexpanded(target):
+        return target   # a variable the command does not set: the shell's value is unknown
     tree = shell_abs(target, where)
     if tree is None:
         return ""
@@ -872,7 +889,9 @@ WORKTREE_HAND_MADE_REASON = (
     "'worktree' option or from the EnterWorktree tool, never from a tree made by hand. "
     "A hand-made tree sends an agent or a session to work in the main clone and loses the isolation. "
     "Remedy: start the work with one of those two tools. Call EnterWorktree with a `name` and no "
-    "`path`. If the tool's isolation was refused, "
+    "`path`. A path the guard cannot read, such as one held in a variable or a substitution, is "
+    "refused too. If the tree is your own red-run checkout, write its path out in full, with no "
+    "variable or substitution. If the tool's isolation was refused, "
     "make no tree by hand: stop and report to the owner which layer refused and its exact "
     "message. A guard refusal starts \"Rule (\" and names its rule. Any other refusal is the "
     "harness's."
