@@ -3393,18 +3393,25 @@ async function dismissRowAt(t, { folded, width, pct, scheme }) {
 // The row's edges against one element's, in px. The element sits in the row when both its edges fall inside the row's, to half a pixel.
 // id: the ask whose row holds the element; the Dismiss row by default.
 // box: the box's selector, sel: the element's inside it (the first match, or every match when all is true). boxName reads in the message.
-const inBoxFault = (page, { box, sel, name, boxName, all = false }) => page.evaluate(({ box, sel, name, boxName, all }) => {
+// text: true reads the text the element draws, from the rects of its text runs, not its box, so text that runs past its box counts.
+const inBoxFault = (page, { box, sel, name, boxName, all = false, text = false }) => page.evaluate(({ box, sel, name, boxName, all, text }) => {
   const b = document.querySelector(box);
   if (!b) return `${boxName} is not drawn`;
   const els = all ? [...b.querySelectorAll(sel)] : [b.querySelector(sel)].filter(Boolean);
   if (!els.length) return `${name} is not in ${boxName}`;
   const r = b.getBoundingClientRect(), faults = [];
   for (const el of els) {
-    const e = el.getBoundingClientRect();
+    let rs = [el.getBoundingClientRect()];
+    if (text) {
+      rs = []; const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let n = w.nextNode(); n; n = w.nextNode()) { if (!n.data.trim()) continue; const g = document.createRange(); g.selectNodeContents(n); rs.push(...g.getClientRects()); }
+      if (!rs.length) return `${name} draws no text in ${boxName}`;
+    }
+    const e = { left: Math.min(...rs.map((x) => x.left)), right: Math.max(...rs.map((x) => x.right)) };
     if (!(e.left >= r.left - 0.5 && e.right <= r.right + 0.5)) faults.push(`${name} runs from ${Math.round(e.left)} to ${Math.round(e.right)} px, past ${boxName}, which runs from ${Math.round(r.left)} to ${Math.round(r.right)} px`);
   }
   return faults.length ? faults.join("; ") : null;
-}, { box, sel, name, boxName, all });
+}, { box, sel, name, boxName, all, text });
 const inRowFault = (page, sel, name, id = DIS_ROW) => inBoxFault(page, { box: "#row-" + id, sel, name, boxName: "its row" });
 const ROW_CLAIMS = {
   sideways: { what: "the page does not scroll sideways", check: (page) => sidewaysFault(page) },
@@ -3563,9 +3570,12 @@ for (const width of [180, 240]) for (const scheme of SCHEMES) {
   });
 }
 
-// ---------------------------------------------------------------- narrow word breaks: the parked block, the folded date and the Dismiss reason
-// Each claim is one test after its scope (the width, the text size and the element drawn), so a failure names one cause. A case that passes on
-// the old page is named "(control)".
+// ---------------------------------------------------------------- narrow word breaks: the parked block, the folded date, the Dismiss reason and the probe
+// Each claim is one test after its scope (the width, the text size and the element drawn), so a failure names one cause.
+// Reference pages: 390dd3f97 is the old page, and a case green on it is named "(control)". 30a2dd126 is the lane head before the date and
+// Dismiss-reason fixes. Red on 390dd3f97: the parked block's window case at 200% at 180 and 200 wide and at 300% at every width; its press case
+// at 150% at 180 wide, at 200% at 180 to 220 wide, and at 300% at every width; the Dismiss reason at 180 wide; and the probe. Red on 30a2dd126
+// only: the date line at 180 wide, which is a control against the old page. Green on 30a2dd126: the parked block, its presses and the probe.
 // The page's sideways scroll against its client width, in px: null when the page fits. The cause is named: the text run whose right edge sets the
 // scroll width (a run can pass its element's box, which no box shows), else the element sidewaysFault names.
 const sidewaysClaim = async (page) => {
@@ -3598,10 +3608,36 @@ async function parkedPageAt(t, { width, pct, scheme }) {
 }
 // The block and its two presses sit inside the window. The page's own scroll width is not the claim here: at 180 and 200 wide doubled, the tab
 // list's count and the Unpark press both end at 209 px, so the page width would name the tab list. The tab list has its own tests.
-// Green on the old page (390dd3f97): the block fits the window at 220 wide and wider doubled, and the presses fit the block at 240 and wider doubled.
-const parkControl = (pct, width, claim) => pct === 200 && width >= (claim === "window" ? 220 : 240) ? " (control)" : "";
-for (const pct of [200, 300]) for (const width of [180, 200, 220, 240, 260]) for (const scheme of SCHEMES) {
-  const where = `at ${width} wide with the root font size ${pct === 200 ? "doubled" : "tripled"}`;
+// The words of each press sit inside the press. A press is clamped to its block (max-inline-size: 100%), so a label that does not wrap can run
+// past the press's own box, which a box test does not see.
+const ROOT_SIZE = (pct) => ({ 150: "at 150%", 200: "doubled", 300: "tripled" })[pct];
+// The words of every Unpark and Drop press in the parked block, against the press's own box. A press with no span is a fault of its own.
+const pressTextFault = (page) => page.evaluate(() => {
+  const presses = [...document.querySelectorAll(".parked .btn.pkb")];
+  if (!presses.length) return "no Unpark or Drop press is drawn in the parked block";
+  const faults = [];
+  for (const b of presses) {
+    // The label the press shows: its span that is drawn (the other span, the pressed mark, is hidden in its cell).
+    const pr = b.getBoundingClientRect(), spans = [...b.querySelectorAll(":scope > span")].filter((s) => getComputedStyle(s).visibility === "visible");
+    if (!spans.length) return `the press "${b.textContent.trim()}" shows no label span`;
+    const runs = [];
+    for (const s of spans) { const w = document.createTreeWalker(s, NodeFilter.SHOW_TEXT); for (let n = w.nextNode(); n; n = w.nextNode()) { if (!n.data.trim()) continue; const g = document.createRange(); g.selectNodeContents(n); runs.push(...g.getClientRects()); } }
+    const label = spans[0].textContent.trim();
+    if (!runs.length) return `the press "${label}" draws no words`;
+    const left = Math.min(...runs.map((x) => x.left)), right = Math.max(...runs.map((x) => x.right));
+    if (left < pr.left - 0.5 || right > pr.right + 0.5) faults.push(`the words of "${label}" run from ${Math.round(left)} to ${Math.round(right)} px, past their press, which runs from ${Math.round(pr.left)} to ${Math.round(pr.right)} px`);
+  }
+  return faults.length ? faults.join("; ") : null;
+});
+// A control is a case green on the old page, 390dd3f97, measured at each root font size and width. At 300% the old page fails every width.
+const PARK_CONTROL = {
+  window: (pct, width) => pct === 150 || (pct === 200 && width >= 220),
+  press: (pct, width) => (pct === 150 && width >= 200) || (pct === 200 && width >= 240),
+  words: () => true,
+};
+const parkControl = (pct, width, claim) => PARK_CONTROL[claim](pct, width) ? " (control)" : "";
+for (const pct of [150, 200, 300]) for (const width of [180, 200, 220, 240, 260]) for (const scheme of SCHEMES) {
+  const where = `at ${width} wide with the root font size ${ROOT_SIZE(pct)}`;
   test(`narrow word breaks, ${scheme}: the parked block ${where}${parkControl(pct, width, "window")}: the block and its acts sit inside the window`, async (t) => {
     const page = await parkedPageAt(t, { width, pct, scheme }); if (!page) return;
     const fault = await inBoxFault(page, { box: "html", sel: ".parked, .parked .btn.pkb", name: "the parked block or one of its acts", boxName: "the window", all: true });
@@ -3612,16 +3648,22 @@ for (const pct of [200, 300]) for (const width of [180, 200, 220, 240, 260]) for
     const fault = await inBoxFault(page, { box: ".parked", sel: ".btn.pkb", name: "the Unpark or Drop press", boxName: "the parked block", all: true });
     assert.ok(!fault, fault && `${fault}, ${where}`);
   });
+  test(`narrow word breaks, ${scheme}: the parked block ${where}${parkControl(pct, width, "words")}: the Unpark and Drop words sit inside their presses`, async (t) => {
+    const page = await parkedPageAt(t, { width, pct, scheme }); if (!page) return;
+    const fault = await pressTextFault(page);
+    assert.ok(!fault, fault && `${fault}, ${where}`);
+  });
 }
 
-// The folded row's date (.frow .fwhen > .fdate) stays inside its card at 180 and 220 wide, at 300% text: Dismiss, Restore, and a waiting reply's Show answer.
-// 220 and 390 wide are green on the old page (30a2dd126): controls.
-for (const [width, note] of [[180, ""], [220, " (control)"], [390, " (control)"]]) for (const kind of Object.keys(FOLD_ROWS)) for (const scheme of SCHEMES) {
+// The folded row's date line (.frow .fwhen) stays inside its card at 180, 220 and 390 wide, at 300% text: Dismiss, Restore, and a waiting reply's
+// Show answer. The text is read as runs, so a date that runs past its card counts even when its box does not. All six at 180 wide are red on
+// 30a2dd126, the lane head before the date fix, and green on 390dd3f97: controls against the old page.
+for (const [width, note] of [[180, " (control)"], [220, " (control)"], [390, " (control)"]]) for (const kind of Object.keys(FOLD_ROWS)) for (const scheme of SCHEMES) {
   test(`narrow word breaks, ${scheme}: folded answered row ${FOLD_ROWS[kind].label} at ${width} wide with the root font size tripled${note}: the date does not run past its card`, async (t) => {
     const page = await foldedRowPage(t, kind, width, scheme); if (!page) return;
     await zoomedTo(page, 300);
     foldedScope(await foldedDate(page, FOLD_ROWS[kind].ask.id), kind, width);
-    const fault = await inBoxFault(page, { box: "#row-" + FOLD_ROWS[kind].ask.id, sel: ".frow .fwhen > .fdate", name: "the date", boxName: "its card" });
+    const fault = await inBoxFault(page, { box: "#row-" + FOLD_ROWS[kind].ask.id, sel: ".frow .fwhen", name: "the date line", boxName: "its card", text: true });
     assert.ok(!fault, fault && `${fault}, at ${width} wide with the root font size tripled`);
   });
 }
@@ -3640,6 +3682,83 @@ for (const [width, note] of [[180, ""], [390, " (control)"]]) for (const scheme 
     assert.ok(!fault, fault && `${fault}, with the Dismiss reason at ${width} wide with the root font size tripled`);
   });
 }
+
+// The probe: each label the word-break fix sets (the ten `overflow-wrap: break-word; hyphens: manual` rules), at 180, 220 and 260 wide, at 150%,
+// 200% and 300% text, light and dark, in one test. A word that fits its room must not break across lines. With anywhere, a word breaks when
+// the words before it leave too little room on the line; with break-word it moves to the next line. A word wider than its room may break.
+// The room is read per label in PROBE_LABELS. The probe page holds a card with long option labels and the ask list (PRESS_ASKS). Parked
+// presses are not read: their label is `.pkb > span`, under its own rule, and the parked cases cover it.
+const PROBE_ITEM = { ...DECISION, id: "pick-probe", n: 29, pick: "a", options: [
+  { key: "a", label: "Keep the archive branches for thirty days", how: "h", gain: "g", lose: "l" },
+  { key: "b", label: "Antidisestablishmentarianism and its uncommonly long companions", how: "h", gain: "g", lose: "l" },
+] };
+// room: "self" reads the label's own content box; "press" reads its press's content box (a press is as wide as its text or its container
+// allows); a selector reads that ancestor's content box. The option label takes its head row: its own flex box shrinks to its shortest word
+// under anywhere, so it is no room. The date and Show answer keep their own boxes: a folded row's track does not size them to their words.
+const PROBE_LABELS = [
+  { name: "the option label", sel: ".opt .lab", room: ".opt .head" },
+  { name: "the Send answers label", sel: "#send", room: "press" },
+  { name: "the Dismiss or Restore label", sel: ".btn.fixw > span:not(.sz):not(.busy)", room: "press" },
+  { name: "the Reply or Dismiss press", sel: ".replyend .endrow > .btn", room: "press" },
+  { name: "the show or hide label of an older list", sel: ".older .uf-labels > span", room: "self" },
+  { name: "the folded date line", sel: ".frow .fwhen", room: "self" },
+  { name: "the folded Show answer label", sel: ".frow .fgo", room: "self" },
+  { name: "the ask row press", sel: ".askrow .btn", room: "press" },
+  { name: "the alternates press", sel: ".alts > .btn:not(.pkb)", room: "press" },
+];
+// Each label's words, read against its room in the page. Returns the labels seen, and a fault per word that breaks across lines though it fits.
+// A word's broken width is the sum of its line fragments; its room is the content width of the box named by the label's room.
+const wordBreakFaults = (page, labels) => page.evaluate((labels) => {
+  const inner = (x) => { const s = getComputedStyle(x); return x.getBoundingClientRect().width - ["padding-left", "padding-right", "border-left-width", "border-right-width"].reduce((a, p) => a + (parseFloat(s.getPropertyValue(p)) || 0), 0); };
+  const out = { seen: {}, faults: [] };
+  for (const { name, sel, room } of labels) {
+    const els = [...document.querySelectorAll(sel)].filter((e) => e.getClientRects().length > 0);
+    out.seen[name] = els.length;
+    for (const el of els) {
+      const box = room === "self" ? el : room === "press" ? el.closest(".btn") : el.closest(room);
+      if (!box) { out.faults.push({ name, text: `${name} has no ${room} around it` }); continue; }
+      const w = inner(box);
+      const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        const re = /\S+/g; let m;
+        while ((m = re.exec(n.data))) {
+          const g = document.createRange(); g.setStart(n, m.index); g.setEnd(n, m.index + m[0].length);
+          const rs = [...g.getClientRects()];
+          if (new Set(rs.map((x) => Math.round(x.top))).size > 1) {
+            const natural = rs.reduce((a, x) => a + x.width, 0);
+            // A word fits when it is at least a pixel narrower than its box, so a sub-pixel rounding never reads as a fit.
+            if (natural <= w - 1) out.faults.push({ name, text: `the word "${m[0]}" in ${name} breaks across lines, though it is ${Math.round(natural)} px and its box is ${Math.round(w)} px wide` });
+          }
+        }
+      }
+    }
+  }
+  return out;
+}, labels);
+// One page per window width and scheme: the card with long option labels, and the ask list with its folded and answered rows.
+const probePage = async (t, { width, scheme }) => {
+  const page = await open(t, { items: [PROBE_ITEM], dbExtra: { asks: PRESS_ASKS() }, storage: PRESS_SEEN, viewport: { width, height: 800 }, scheme }); if (!page) return null;
+  await mustHave(page, "#askDismissed", "Show dismissed asks control");
+  return page;
+};
+test("narrow word breaks, light and dark: each fixed label at 180, 220 and 260 wide, at 150%, 200% and 300% text: a word that fits its box does not break", async (t) => {
+  const faults = [];
+  for (const scheme of SCHEMES) for (const width of [180, 220, 260]) {
+    const page = await probePage(t, { width, scheme }); if (!page) return;
+    for (const pct of [150, 200, 300]) {
+      await zoomText(page, pct + "%");
+      const where = `at ${width} wide with the root font size at ${pct}%, ${scheme}`;
+      const r = await wordBreakFaults(page, PROBE_LABELS);
+      for (const { name } of PROBE_LABELS) if (!r.seen[name]) faults.push({ name, text: `no ${name} is drawn, ${where}` });
+      for (const f of r.faults) faults.push({ name: f.name, text: `${f.text}, ${where}` });
+    }
+  }
+  // One clause per label: how many words break though they fit, and the first one.
+  const count = {};
+  for (const f of faults) count[f.name] = (count[f.name] || 0) + 1;
+  const clause = Object.keys(count).map((n) => `${count[n]} in ${n}, first: ${faults.find((f) => f.name === n).text}`);
+  assert.equal(faults.length, 0, clause.join("; "));
+});
 
 // ---------------------------------------------------------------- the ask list at narrow widths: the presses' heights, the send bar and the page width
 // The ask list holds one unfolded answer, a folded Dismiss row, a folded row whose reply waits, a dismissed row behind Show dismissed asks,
