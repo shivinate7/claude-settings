@@ -375,6 +375,17 @@ class Blobs:
         self.proc.wait()
 
 
+def merge_bases(cwd, p, parents):
+    """The commits a line must be absent from to count as added by parent p: the merge bases of p with each
+    other parent. A two-parent merge has the one pair."""
+    bases = []
+    for q in parents:
+        if q != p:
+            rc, out = git(cwd, "merge-base", "--all", p, q, ok=(0, 1))
+            bases += [b for b in (out.split() if rc == 0 else []) if b not in bases]
+    return bases
+
+
 def lost_lines(cwd, m, refs=()):
     """[(path, parent, [line])] for merge commit m. With refs (upstream, then the default branch),
     a lost line whose adding commit no ref holds is the branch's own work and is skipped. The
@@ -384,15 +395,11 @@ def lost_lines(cwd, m, refs=()):
     parents = out.split()[1:]
     if len(parents) < 2:
         return []
-    if len(parents) > 2:
-        raise Unknown("%s has %d parents; only two-parent merges are read" % (m[:9], len(parents)))
-    rc, out = git(cwd, "merge-base", "--all", *parents, ok=(0, 1))
-    bases = out.split() if rc == 0 else []
     found = []
     blobs = Blobs(cwd)
     try:
         for p in parents:
-            found += lost_in_parent(cwd, m, p, bases, refs, blobs)
+            found += lost_in_parent(cwd, m, p, merge_bases(cwd, p, parents), refs, blobs)
     finally:
         blobs.close()
     return found
