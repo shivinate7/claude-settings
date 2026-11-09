@@ -1345,7 +1345,7 @@ class Rebuild(Base):
 
     def test_merge_of_a_full_size_copy_into_an_empty_live_page_writes_every_doc(self):
         data = full_size()
-        copy = self.exported(data)  # its page folder rides along and is no doc
+        copy = self.exported(data, page=False)  # no page, so no designData: the merge needs no --live-page here
         live = self.fetch()  # five empty collections, each with its marker
         batches = os.path.join(self.tmp.name, "batches")
         r = self.merge_run(copy, live, batches)
