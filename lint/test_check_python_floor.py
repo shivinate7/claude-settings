@@ -12,10 +12,11 @@ Interface the check must meet (the builder builds to it):
 - Exit 0 with no output when clean. Exit 1 with one line per offending file, naming the file and the
   feature, when a file needs more than 3.9. Exit 2, naming the cause, when vermin cannot run. The vermin
   command is FLOOR_VERMIN_CMD when set, so a test makes vermin missing or odd with that variable.
-- A `|` between types needs 3.10 when it runs. The check flags a `|` with an operand that is None, a builtin
-  type name or a subscript of one, in an annotation (not evaluated under `from __future__ import annotations`),
-  a module or class assignment value, or isinstance/issubclass's second argument. Its line names file:line
-  and says union type `|` needs 3.10. vermin does not flag these by default, so the check runs an ast pass.
+- A `|` between types needs 3.10 when it runs. In an annotation (not evaluated under `from __future__
+  import annotations`) the check flags any `|`, since a flag OR is never an annotation. In a module or class
+  assignment value, or as isinstance/issubclass's second argument, it flags a `|` with a None, builtin-type or
+  builtin-subscript operand. Its line names file:line and says union type `|` needs 3.10. vermin does not
+  flag these by default, so the check runs an ast pass.
 
 A case that expects a finding fails on a check that flags nothing. The controls expect silence.
 """
@@ -360,6 +361,95 @@ class UnionNegatives(unittest.TestCase):
         for label, text in cases:
             with self.subTest(form=label):
                 self.assert_silent(label, {"hooks/x.py": text})
+
+    def test_local_annotation_at_each_form_is_not_evaluated(self):
+        # A local annotation in a function body is never evaluated, whatever its union.
+        for form in UNION_TYPES:
+            with self.subTest(form=form):
+                self.assert_silent(form, {"hooks/x.py": "def f():\n    x: %s = None\n    return x\n" % form})
+
+    def test_string_annotations_at_each_position_are_not_flagged(self):
+        for form in UNION_TYPES:
+            with self.subTest(form=form):
+                text, _ = positions_file('"%s"' % form)
+                self.assert_silent(form, {"hooks/x.py": text})
+
+    def test_novermin_on_the_union_line_excuses_each_position(self):
+        for form in UNION_TYPES:
+            with self.subTest(form=form):
+                text, _ = positions_file(form, marker="  # novermin")
+                self.assert_silent(form, {"hooks/x.py": text})
+
+    def test_future_import_exempts_each_position(self):
+        for form in UNION_TYPES:
+            with self.subTest(form=form):
+                text, _ = positions_file(form, prefix=["from __future__ import annotations"])
+                self.assert_silent(form, {"hooks/x.py": text})
+
+    def test_test_file_is_excluded_at_each_position(self):
+        # Scope first: the same union in hooks/x.py is flagged in the same run, so the scan reached hooks/.
+        for form in UNION_TYPES:
+            with self.subTest(form=form):
+                text, _ = positions_file(form)
+                code, out = run_check(tree({"hooks/x.py": "mod_scope: %s\n" % form, "hooks/test_foo.py": text}))
+                self.assertEqual(code, 1, "scope control hooks/x.py (%s) was not flagged: exit %d" % (form, code))
+                self.assertTrue(flagged_at(out, "hooks/x.py", 1), "scope control is not named: %r" % out)
+                self.assertEqual(naming(out, "test_foo.py"), [], "hooks/test_foo.py was named: %r" % out)
+
+
+# Annotation positions, each holding one union. `{U}` is the union and `{i}` a unique suffix. The union sits on
+# the line that holds `{U}`, which is the line the check names.
+ANNOTATION_POSITIONS = (
+    ("function argument", ["def arg_{i}(a: {U}):", "    return a"]),
+    ("function return", ["def ret_{i}() -> {U}:", "    return None"]),
+    ("vararg", ["def var_{i}(*args: {U}):", "    return args"]),
+    ("kwarg", ["def kw_{i}(**kwargs: {U}):", "    return kwargs"]),
+    ("positional-only", ["def posonly_{i}(a: {U}, /):", "    return a"]),
+    ("keyword-only", ["def kwonly_{i}(*, a: {U}):", "    return a"]),
+    ("async function", ["async def afn_{i}(a: {U}):", "    return a"]),
+    ("nested function", ["def outer_{i}():", "    def inner(a: {U}):", "        return a", "    return inner"]),
+    ("method", ["class Box_{i}:", "    def m(self, a: {U}):", "        return a"]),
+    ("module annotation", ["mod_{i}: {U}"]),
+    ("class annotation", ["class Holder_{i}:", "    attr: {U}"]),
+)
+# Forms that are not builtin types: a flag OR is never an annotation, so each must be flagged in every position.
+UNION_TYPES = (
+    "ast.FunctionDef | ast.AsyncFunctionDef",
+    "Foo | Bar",
+    "List[int] | Dict[int, int]",
+    "typing.List[int] | typing.Dict[str, int]",
+    "pathlib.Path | pathlib.PurePath",
+    "Sequence[Segment] | Segment",
+)
+
+
+def positions_file(union, prefix=(), marker=""):
+    """A fixture with every annotation position holding `union`. -> (text, {position: line of the union})."""
+    lines = list(prefix)
+    where = {}
+    for index, (label, block) in enumerate(ANNOTATION_POSITIONS):
+        if lines:
+            lines.append("")
+        for line in block:
+            if "{U}" in line:
+                where[label] = len(lines) + 1
+                lines.append(line.replace("{U}", union).replace("{i}", str(index)) + marker)
+            else:
+                lines.append(line.replace("{i}", str(index)))
+    return "\n".join(lines) + "\n", where
+
+
+class AnnotationPositions(unittest.TestCase):
+    def test_each_form_is_flagged_at_each_annotation_position(self):
+        for form in UNION_TYPES:
+            text, where = positions_file(form)
+            code, out = run_check(tree({"hooks/x.py": text}))
+            for label, lineno in where.items():
+                with self.subTest(form=form, position=label):
+                    named = flagged_at(out, "hooks/x.py", lineno)
+                    self.assertTrue(any("union" in line and "3.10" in line for line in named),
+                                    "union type `|` at the %s, hooks/x.py:%d, was not flagged: exit %d, output %r"
+                                    % (label, lineno, code, out))
 
 
 if __name__ == "__main__":
