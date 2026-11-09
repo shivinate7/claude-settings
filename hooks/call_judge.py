@@ -124,8 +124,8 @@ PAST_RULING_ITEM = (
     "a re-ask the ruling allows is fine. This item passes when no list follows. "
     "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date."
 )
-# The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 15 s.
-PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 15
+# The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 60 s.
+PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 60
 # The seven items, then the eighth, a question to the owner is judged on: one text, for the chat box and the page.
 JUDGE_ITEMS = (
     "1. The Goal is in the owner's terms.\n"
