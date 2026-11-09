@@ -46,8 +46,8 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   The glyph sits on the title's first line (`align-items: start`), not on the middle of the block.
   The press may shrink below its busy label's box (`grid-template-columns: minmax(0, max-content)`), never past the row.
   Loss: at 180 px a busy label ("Restoring…") can be wider than its press for the moment it shows.
-- Option "Press under the text, at its start" (`#s=start`, pick). The press keeps its width. Dismiss (quiet) lines its label
-  up with the text (28 px). Restore (outlined) lines its edge up with the text (40 px). Add to list and Send ask stack at the
+- Option "Press under the text, at its start" (`#s=start`, pick). The press keeps its width. Dismiss (quiet) keeps its label
+  centred in its box, as on main. Restore (outlined) lines its edge up with the text (40 px). Add to list and Send ask stack at the
   start. Gain: the quiet act stays quiet; the row reads as today's, one line taller. Loss: a ragged right edge.
 - Option "Press under the text, full width" (`#s=full`). The press spans the row inside 16 px. Dismiss gets a `--line` edge,
   or a full-width quiet press reads as floating text. Gain: the biggest target. Loss: Dismiss looks as loud as Reply,
