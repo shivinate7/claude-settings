@@ -10201,6 +10201,31 @@ sh("env: walk false alarm, find -maxdepth 1 names no env file, the env file is a
 sh("env: walk pin, find -maxdepth 1 names the env file at depth 1, refused: " + _FIND_MAXDEPTH, _FIND_MAXDEPTH, "deny",
    "env-file", cwd=ENVWALK_HELD)
 
+# find prints a folder as well as its files, and grep -r reads every file below each folder it is given. A depth limit
+# bounds the names find prints, not what grep reads below them, so each form hands grep a folder with an env file below.
+_MAXDEPTH_ZERO = "find . -maxdepth 0 | xargs grep -r K"
+sh("env: walk safety hole, find -maxdepth 0 names the start folder, grep -r reads the env file below it, refused: "
+   + _MAXDEPTH_ZERO, _MAXDEPTH_ZERO, "deny", "env-file", cwd=ENVWALK_HELD)
+_MAXDEPTH_ONE_FOLDERS = "find . -maxdepth 1 | xargs grep -r K"
+sh("env: walk safety hole, find -maxdepth 1 names sub, grep -r reads the env file below it, refused: "
+   + _MAXDEPTH_ONE_FOLDERS, _MAXDEPTH_ONE_FOLDERS, "deny", "env-file", cwd=ENVWALK_NESTED)
+_PRUNE_NAMED_FOLDER = "find . -path ./node_modules -prune -o -name sub -print | xargs grep -r K"
+sh("env: walk safety hole, find names the sub folder that holds an env file, grep -r reads it, refused: "
+   + _PRUNE_NAMED_FOLDER, _PRUNE_NAMED_FOLDER, "deny", "env-file", cwd=ENVWALK_NESTED)
+
+# A -print prints each name before a later test runs, so a name test after -print does not bound the names printed.
+_PRINT_THEN_NAME = "find . -print -name '*.js' | xargs grep K"
+sh("env: walk pin, find -print before -name '*.js' prints every name, refused: " + _PRINT_THEN_NAME, _PRINT_THEN_NAME,
+   "deny", "env-file", cwd=ENVWALK_HELD)
+
+# -mindepth 2 names no file at depth 1, so an env file only there is not read. The same form with the env file at
+# depth 2 is refused.
+_MINDEPTH_TWO = "find . -mindepth 2 -type f | xargs grep K"
+sh("env: walk pin, find -mindepth 2 names no env file at depth 1, allowed: " + _MINDEPTH_TWO, _MINDEPTH_TWO, "allow",
+   cwd=ENVWALK_HELD)
+sh("env: walk pin, find -mindepth 2 names the env file at depth 2, refused: " + _MINDEPTH_TWO, _MINDEPTH_TWO, "deny",
+   "env-file", cwd=ENVWALK_NESTED)
+
 # A cd in a branch or loop body may not run, so the search reaches the held folder when it does not. Each form is
 # refused over the held folder and allowed over a folder with no env file.
 for _label, _cmd in (
