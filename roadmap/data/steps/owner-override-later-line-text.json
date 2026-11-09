@@ -1,0 +1,10 @@
+{
+  "title": "Decision owner-override's later-line sentence matches the code",
+  "why": "#1463's round 3 (coordinator 21:07 CST Nov 8): docs/decisions/owner-override.md says a later line that starts with the keyword grants nothing, but the code asks the judge, so `thanks\\noverride 15m` grants 15m. An accuracy edit to the sentence.",
+  "note": "Starts after #1463 and #2220 merge. Points to decision owner-override.",
+  "phase": "next",
+  "owner": "coordinator",
+  "status": "todo",
+  "order": 867,
+  "updatedAt": "2026-11-08T21:07:00-06:00"
+}
