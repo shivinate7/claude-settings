@@ -56,6 +56,26 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 - A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open until round 3 is done, even after a fix check PASSes (item 402 a, owner, 2026-11-08 06:08 CST). The rule owes rounds 2 and 3 when round 1 finds a safety hole.
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
 
+The review a changed head owes. Coordinator pick (owner session coordinator, 2026-11-08 to 2026-11-09). Process-only, not the owner's words. A lane reads it instead of asking.
+
+- A chain gets one fix check.
+- The PR gets one fresh full review at the live head when any of these holds:
+  - the newest record already holds a fix check;
+  - a fix check failed;
+  - a round read an older head than the live one;
+  - the record was made or edited by hand;
+  - the head moved after round 3.
+- The fresh review has these parts:
+  - its brief line 1 is `Round 3 of 3`;
+  - it runs on Sonnet;
+  - it reads the whole diff against main;
+  - it runs the net-value test (record `hold-unsafe-after-round-3`, hold a change with negative net value after round 3).
+- Post it with the lines the merge tool prints: the real round 1 and round 2 lines, the new round 3 line, and no `Fix check` line.
+- Free text goes only below `---`. A record is never edited or deleted.
+- A round 3 FAIL with net value at or above zero merges (round 3 done rule above).
+- A lane merges origin/main once, after the pending batch lands. It uses an ordinary merge commit. It never replays, rebases or force-pushes.
+- A merge with both test and product conflicts waits for the mixed-merge route (decision `mixed-merge-resolver`, not on main yet).
+
 ## The cost
 
 Counted as real `gh` calls, one call per page of a list read. Most reads fit one page of 100.
