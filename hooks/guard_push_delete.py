@@ -868,7 +868,7 @@ _PR_URL = re.compile(r"/pull/(\d+)")
 _DONE_LABEL = re.compile(r"[\s>*#_-]*Done\b[\s*_:]*")
 _VERDICT_LINE = re.compile(r"[\s>*#_-]*([A-Z]+), (round \d+ of \d+|fix check), [\w.-]+[\s*_]*")
 # A Done label line that holds its verdict in a word order the ruled line does not use: a round or fix check
-# marker in any case, and a verdict word among its all-capitals words, as in `Done: Round 1 reviewer haiku FAIL`.
+# marker in any case, and a verdict word among its all-capitals words, as in `Done: Round N reviewer haiku FAIL`.
 _LABEL_ROUND = re.compile(r"\bround (\d+)\b|\b(fix check)\b", re.I)
 _LABEL_WORD = re.compile(r"\b[A-Z]{4,}\b")
 # A held report's sha candidates: hex words above its agentId trailer, at most _HELD_SHA_CAP read per report.
@@ -889,7 +889,7 @@ def _blocks_text(content) -> str:
 
 def _label_verdict(line: str):
     """The first all-capitals word of a Done label line that is a review verdict (the merge tool's REVIEW_VERDICTS),
-    as a match, else None: `Done: HEAD round 1 FAIL` reads FAIL. Called only for a label line that holds a round
+    as a match, else None: `Done: HEAD round N FAIL` reads FAIL. Called only for a label line that holds a round
     or fix check marker, so the merge module loads only then. An unloadable module reads no verdict."""
     from guard_merge import merge_module   # here, not at the top: guard_merge imports this file
     merge = merge_module()
