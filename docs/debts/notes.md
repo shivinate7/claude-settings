@@ -213,7 +213,8 @@
 - printf-quote-walk-bandaid: walk_quotes reads a quote inside $( ) as the outer string's own; discards_output cuts and rereads to cover it (hooks/guard_core.py, hooks/guard.py)
 - process-record-dead-plan-line: a Kind: process record holds a dead Plan: line that the Kind check ignores (decisions record, lint/check_ruling_kind.py)
 - prune-symlink-positive-unproven: prune1, prune3, prune5 are proven only where symlink privilege is absent (hooks/test_install_src.sh)
-- ps-quote-forms-unread: smart-quoted frozen paths and <# #> comment text read as plain text, so a write is allowed (hooks/guard_frozen.py, guard_core.py)
+- ps-curly-unfrozen-unpinned: no test pins an allow for curly-quoted PowerShell text aimed at an unfrozen path, such as `Set-Content -Path “notes.txt” -Value “hello”`, which main allows; the only curly-quoted PowerShell pins deny a frozen write (hooks/test_guard.py, F4 cases).
+- ps-quote-forms-unread: smart-quoted frozen paths and <# #> comment text read as plain text, so a write is allowed (hooks/guard_frozen.py, guard_core.py). Also a curly-quoted frozen path in a heredoc or echo piped to pwsh allows, and the straight-quoted form denies.
 - ps-script-block-not-read: _substitutions has no { } branch, so a silenced write inside a PowerShell script block may pass (hooks/guard_env.py)
 - purge-bad-row-key-raises: a log row with a list or dict branch or commit raises TypeError and stops purge; nothing writes such a row (janitor/sweep.py)
 - purge-confirm-total-wrong: the 'purge: N' confirm total counts rows whose ref was kept (janitor/sweep.py)
@@ -331,7 +332,7 @@
 - unknown-reads-nonbool-skips: the check prints SKIP for any non-bool answer such as 0, None or []; no real member returns one (lint/check_unknown_reads_contract.py)
 - unknown-stash-word-tree-only: a future git stash action that takes an entry would pass over a clean tree (hooks/guard_shared_tree.py)
 - until-note-unjudged: background-end accepts any non-empty until: text, such as until: n/a (hooks/guard_stream.py, hooks/stall_watch.py)
-- walk-curly-quotes-plain: PowerShell may take U+2018 to U+201E as quotes; the quote walk reads them as plain text and can hide a step (hooks/guard_core.py)
+- walk-curly-quotes-plain: PowerShell may take U+2018 to U+201E as quotes; the quote walk reads them as plain text and can hide a step (hooks/guard_core.py). A `#` after a space inside curly-quoted text is read as a comment (`_split_reading`), so a straight-quoted frozen write later on that line allows: `Write-Host “a # b” ; Set-Content -Path "<frozen>" -Value 1` allows. The same line with no `#`, or with `<#`, denies.
 - win-slice-hides-skip-rows: nine guard cases skip on Windows but are outside the Windows slice, so a Windows PR run shows one SKIP row (hooks/test_guard.py)
 - win-split-min-jobs-untested: the MIN_JOBS branch has no case; a miss costs CI wall time only (lint/test_windows_split.py)
 - wsl-bare-bash-not-refused: a bare bash.exe -c is not refused and runs System32 bash when Git bash is not first on PATH (hooks/guard_wsl.py)
