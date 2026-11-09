@@ -409,6 +409,26 @@ class ReviewRecordTests(unittest.TestCase):
         self.serve(comments=[{"body": unstamped(record()), "created_at": BEFORE, "updated_at": AFTER}], base="fixture")
         self.assert_blocked(self.stop(self.lane_turn(report(CLAIM))))
 
+    def test_a_hand_edited_newest_record_blocks_a_pass_claim(self):
+        # Catches: _newest_record taking the newest record without its edit, so a record that merge --reviewed reads bad (its updated_at
+        # differs from its created_at) satisfies a PASS claim. The body alone reads done, so only the edit can block the claim.
+        body = record()
+        self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body), LIVE)[0], "done",
+                         "fixture: merge/merge.py does not call the body done with no edit")
+        self.serve(comments=[{"body": body, "created_at": BEFORE, "updated_at": AFTER}])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assertIsNotNone(out, "the PASS claim passed on a hand-edited newest record, which merge --reviewed reads bad")
+        self.assert_blocked(out)
+        self.assertIn("PR #12", out["reason"], out)
+
+    def test_an_unedited_newest_record_satisfies_a_pass_claim(self):
+        # The control: the same body, with updated_at equal to created_at, is no edit, and it satisfies the claim on two reads.
+        self.serve(comments=[{"body": record(), "created_at": BEFORE, "updated_at": BEFORE}])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_two_rest_reads()
+        self.assertIsNone(out, out)
+
     def test_record_whose_rounds_hold_no_pass_does_not_satisfy_a_pass_claim(self):
         # Catches: a record for the live head read as satisfying a PASS claim when none of its rounds passed.
         for verdict in ("FAIL", "PARTIAL"):

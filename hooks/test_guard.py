@@ -11525,6 +11525,21 @@ for _label, _command in (
     bash_post("review-record: a hand-typed record under a variable id or number is refused, %s" % _label, _command, "deny",
               rule=REVIEW_RULE)
 
+# THE EDIT ROUTE IN OTHER FORMS. A marked edit is refused whatever form its comment route takes: a full URL, a query string after the
+# comment id, or a command substitution in the id or in the route. The guard judges the route it reads, so a route its pattern does not
+# match is an edit it never judges. Each form takes the edit refusal. An unmarked body on the same route is allowed.
+EDIT_ROUTE_FORMS = (
+    ("a full URL", "\"https://api.github.com/repos/y/x/issues/comments/%d\"" % REVIEW_COMMENT_ID),
+    ("a query string after the id", "\"repos/y/x/issues/comments/%d?x=1\"" % REVIEW_COMMENT_ID),
+    ("a command substitution in the id", "\"repos/y/x/issues/comments/$(echo %d)\"" % REVIEW_COMMENT_ID),
+    ("a command substitution in the route", "\"repos/$(echo y/x)/issues/comments/%d\"" % REVIEW_COMMENT_ID),
+)
+for _what, _route in EDIT_ROUTE_FORMS:
+    bash_post("review-record: a marked edit is refused, %s, gh api -X PATCH" % _what,
+              "gh api -X PATCH %s -f 'body=%s'" % (_route, review_record()), "deny", rule=REVIEW_RULE, carries=(EDIT_REFUSAL,))
+    bash_post("review-record: an edit with no marker is allowed, %s, gh api -X PATCH" % _what,
+              "gh api -X PATCH %s -f 'body=%s'" % (_route, UNMARKED_BODY), "allow")
+
 # `-e` is gh's --editor, not --edit-last. A post with -e is a post: judged on its pull request, with one head read, and allowed.
 REVIEW_LOG_CHECKS.append(("review-record:a fresh post with -e (--editor) is judged as a post, gh pr comment -e --body",
                          review_reads("Bash", {"command": "%s -e --body '%s'" % (PR_CMD, review_record())}, "allow", 1)))

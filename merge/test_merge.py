@@ -13894,6 +13894,28 @@ class ReviewedList(ReviewEnv):
         self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: ", "the older unedited record counted under the hand-edited newest record")
         self.assertIn("hand-edited", line, "the hand-edited newest record is not named hand-edited on pull request 7's line:\n" + out)
 
+    def test_an_older_unedited_pass_does_not_read_done_under_a_newer_edited_comment_whose_marker_is_gone(self):
+        # The newest record decides (decision pr-review-record). A newer comment that was a record, and was then edited so that its marker
+        # line is gone, is not a record to review_comments. Left there, the older unedited record is the newest one it sees, and it reads
+        # done. The edit marks the newer comment hand-edited, so the pull request must not read done.
+        stripped = record_text(rounds=REVIEW_PASS).split("\n", 1)[1]  # the marker line taken out, the rest of the record kept
+        self.assertFalse(merge.review_marked(stripped), "fixture: the body with its marker line taken out still reads as a record")
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE),
+                    review_comment(2, 7, stripped, created=REVIEW_BEFORE, updated=REVIEW_AFTER)]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(out, r"(?m)^(#7 |no record: .*#7\b)", "pull request 7 is not named in the output:\n" + out)
+        self.assertNotRegex(out, r"(?m)^#7 .* done: ", "the older unedited record read done under a newer edited comment whose marker is gone:\n" + out)
+
+    def test_an_unedited_comment_with_no_marker_leaves_the_older_record_done(self):
+        # The control for the case above: the same newer comment, never edited, is no record, so the older record still reads done.
+        stripped = record_text(rounds=REVIEW_PASS).split("\n", 1)[1]
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE),
+                    review_comment(2, 7, stripped, created=REVIEW_BEFORE)]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "the older unedited record is not done under an unedited comment with no marker")
+
     def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
         # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
