@@ -3901,7 +3901,7 @@ HMADD = VCS + " worktree add "
 HMIN = slash(HMMAIN)
 
 
-def hm_deny(name, command, **kw):
+def hm_refuse(name, command, **kw):
     kw.setdefault("cwd", HMMAIN)
     sh("hand-made worktree: " + name, command, "deny", HM, **kw)
 
@@ -3912,33 +3912,33 @@ def hm_allow(name, command, **kw):
 
 
 # DENY. The new tree lands outside <primary>/.claude/worktrees/.
-hm_deny("a relative sibling path from the primary is refused", HMADD + "../lane-x")
-hm_deny("-C reaches the primary from elsewhere, and a scratch path is refused",
+hm_refuse("a relative sibling path from the primary is refused", HMADD + "../lane-x")
+hm_refuse("-C reaches the primary from elsewhere, and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, cwd=NOGIT)
-hm_deny("cd into a non-temp primary, then a tree in the temp folder, is the incident",
+hm_refuse("cd into a non-temp primary, then a tree in the temp folder, is the incident",
         "cd " + HMIN + " && " + HMADD + HMSCRATCH, cwd=NOGIT)
-hm_deny("-b before the path does not hide it", HMADD + "-b hmx ../lane-x")
-hm_deny("-B before the path does not hide it", HMADD + "-B hmx ../lane-x")
-hm_deny("--detach before the path does not hide it", HMADD + "--detach ../lane-x")
-hm_deny("--lock --reason r before the path does not hide it",
+hm_refuse("-b before the path does not hide it", HMADD + "-b hmx ../lane-x")
+hm_refuse("-B before the path does not hide it", HMADD + "-B hmx ../lane-x")
+hm_refuse("--detach before the path does not hide it", HMADD + "--detach ../lane-x")
+hm_refuse("--lock --reason r before the path does not hide it",
         HMADD + "--lock --reason r ../lane-x")
-hm_deny("a double dash ends the options, and the path after it is judged",
+hm_refuse("a double dash ends the options, and the path after it is judged",
         HMADD + "-- ../lane-x")
-hm_deny("a dash-led name after a double dash is still a path", HMADD + "-- -lane-x")
-hm_deny("a .claude/worktrees-x prefix is outside the home folder",
+hm_refuse("a dash-led name after a double dash is still a path", HMADD + "-- -lane-x")
+hm_refuse("a .claude/worktrees-x prefix is outside the home folder",
         HMADD + ".claude/worktrees-x/foo")
-hm_deny("a .claude/worktreesX name is outside the home folder", HMADD + ".claude/worktreesX")
-hm_deny("a dot-dot that climbs out of the home folder is outside",
+hm_refuse("a .claude/worktreesX name is outside the home folder", HMADD + ".claude/worktreesX")
+hm_refuse("a dot-dot that climbs out of the home folder is outside",
         HMADD + ".claude/worktrees/../../lane-x")
-hm_deny("from inside a linked tree, a sibling of the primary is still outside",
+hm_refuse("from inside a linked tree, a sibling of the primary is still outside",
         HMADD + "../../../lane-x", cwd=HMLANE)
-hm_deny("a PowerShell call is judged the same",
+hm_refuse("a PowerShell call is judged the same",
         "Set-Location " + HMIN + "; " + VCS + " worktree add ../lane-x", tool="PowerShell",
         cwd=NOGIT)
-hm_deny("a PowerShell call with -C and a scratch path is refused",
+hm_refuse("a PowerShell call with -C and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, tool="PowerShell", cwd=NOGIT)
-hm_deny("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
-hm_deny("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
+hm_refuse("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
+hm_refuse("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
 
 # ALLOW. Nothing here is the act, or the act lands in the home folder, or the repo is a throwaway.
 hm_allow("an absolute path under the primary's home folder passes",
@@ -3976,17 +3976,17 @@ HMAGENT_SIB_RED = slash(os.path.join(HMWT, "agent-" + HM_SIBLING + "-red"))
 HMAGENT_PREFIX_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "b-red"))
 HMAGENT_OWN_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "-red"))
 HMAGENT_LANE9 = slash(os.path.join(HMWT, "lane9"))
-hm_deny("an agent adds a sibling agent's red-run folder, by absolute path, is refused",
+hm_refuse("an agent adds a sibling agent's red-run folder, by absolute path, is refused",
         HMADD + HMAGENT_SIB_RED, **HMAG)
-hm_deny("an agent adds a sibling agent's red-run folder, by a relative path, is refused",
+hm_refuse("an agent adds a sibling agent's red-run folder, by a relative path, is refused",
         HMADD + "../agent-" + HM_SIBLING + "-red", **HMAG)
-hm_deny("an agent adds a folder whose name only starts with its own id is refused",
+hm_refuse("an agent adds a folder whose name only starts with its own id is refused",
         HMADD + HMAGENT_PREFIX_RED, **HMAG)
-hm_deny("an agent adds a non-agent folder, lane9, under the primary's folder is refused",
+hm_refuse("an agent adds a non-agent folder, lane9, under the primary's folder is refused",
         HMADD + HMAGENT_LANE9, **HMAG)
-hm_deny("a PowerShell call by an agent, adding a sibling's red-run folder, is refused",
+hm_refuse("a PowerShell call by an agent, adding a sibling's red-run folder, is refused",
         HMADD + HMAGENT_SIB_RED, tool="PowerShell", **HMAG)
-hm_deny("an agent adds a tree outside the primary's folder is refused, as before",
+hm_refuse("an agent adds a tree outside the primary's folder is refused, as before",
         HMADD + slash(os.path.join(ROOT, "hm-agent-outside")), **HMAG)
 # The agent's own red-run folder, added the way the test-author's red run adds it, and the agent's
 # own home, both pass. The same lane9 add with no agent_id passes too, so the refusal above is the agent's.
@@ -3998,19 +3998,19 @@ hm_allow("with no agent_id, the lane9 add from the primary passes", HMADD + HMAG
 # folder is refused, and its own red-run folder still passes. No case records this id's home.
 HM_NOREC = "hmagentnr3"
 HMNOREC = dict(cwd=HMMAIN, agent_id=HM_NOREC)
-hm_deny("an agent with no home record adds lane9 under the primary's folder is refused",
+hm_refuse("an agent with no home record adds lane9 under the primary's folder is refused",
         HMADD + HMAGENT_LANE9, **HMNOREC)
 hm_allow("an agent with no home record adds its own red-run folder, as the red run does, passes",
          HMADD + "--detach " + slash(os.path.join(HMWT, "agent-" + HM_NOREC + "-red")) + " HEAD",
          **HMNOREC)
 # Only the agent's home itself passes. A tree nested inside it is a new tree in the folder.
-hm_deny("an agent adds a tree nested inside its own recorded home is refused",
+hm_refuse("an agent adds a tree nested inside its own recorded home is refused",
         HMADD + slash(os.path.join(HMHOME, "sub")), **HMAG)
 
 # GONE HOME. The agent's record names its home, but the folder it calls from is gone. The shell falls
 # back to the primary with a `cd`, so the add still lands in the folder and must be refused.
 HMGONE_CALL = dict(cwd=HMGONE, agent_id=HM_GONE)
-hm_deny("an agent whose home folder is gone adds lane9 after a cd into the primary is refused",
+hm_refuse("an agent whose home folder is gone adds lane9 after a cd into the primary is refused",
         "cd " + HMIN + " && " + HMADD + ".claude/worktrees/lane9", **HMGONE_CALL)
 hm_allow("an agent whose home folder is gone adds its own red-run folder after a cd, passes",
          "cd " + HMIN + " && " + HMADD + "--detach .claude/worktrees/agent-" + HM_GONE + "-red HEAD",
@@ -4025,15 +4025,15 @@ hm_allow("an agent whose home record cannot be read adds lane9 under the primary
 # walk out of it must not pass. The sibling's folder reached the same way is refused too. The caller
 # has no home record, so the worktree-home rule, which reads a recorded home, judges nothing here.
 HMDOT_CALL = dict(cwd=HMWT, agent_id=HM_NOREC)
-hm_deny("an agent walks out of its own red-run folder with .. to add lane9 is refused",
+hm_refuse("an agent walks out of its own red-run folder with .. to add lane9 is refused",
         HMADD + "./agent-" + HM_NOREC + "-red/../lane9", **HMDOT_CALL)
-hm_deny("an agent walks out of its own red-run folder with .. to add a sibling's red-run folder is refused",
+hm_refuse("an agent walks out of its own red-run folder with .. to add a sibling's red-run folder is refused",
         HMADD + "./agent-" + HM_NOREC + "-red/../agent-" + HM_SIBLING + "-red", **HMDOT_CALL)
 
 # AGENT TYPE ALONE. A payload that names an agent type and no agent_id is an agent's call: other rules
 # already read agent_type alone as an agent. Its tree in the folder is refused. The control with neither
 # field is the lane9 add from the primary, above: "with no agent_id, the lane9 add from the primary passes".
-hm_deny("a call that names an agent_type and no agent_id adds lane9 under the primary's folder is refused",
+hm_refuse("a call that names an agent_type and no agent_id adds lane9 under the primary's folder is refused",
         HMADD + HMAGENT_LANE9, agent_type="test-author")
 
 add("hand-made worktree: an Agent call with no isolation, whose prompt names a worktree path, passes",
