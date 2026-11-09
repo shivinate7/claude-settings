@@ -152,13 +152,16 @@ ARGV_GAP = re.compile(r"[\s,]*(?:\{\s*args\s*:\s*\[[\s,]*)?")
 # PUSH_QUOTED reads raw quotes and ignores backslashes, so a quote here could pair with a
 # quote in a neighbouring word and blank the words between.
 ARGV_UNSAFE = re.compile(r"[^\w@%+=:,./-]")
-# Inside a script, the names of a call that runs its string argument as a command, even inside a
-# print: the one list of run calls.
-RUN_NAME = (r"\bos\.(?:system|popen|exec\w*|spawn\w*)|\bsubprocess\.\w+|\bPopen|\bexec\w*|\bsystem|\bpopen"
-            r"|\bcheck_(?:output|call)|\bshell_exec|\bspawn\w*")
+# The names of a call that runs its string argument as a command, even inside a print: the one list
+# of run calls. RUN_NAME_ANYWHERE is read in any quoted text. RUN_NAME adds the bare names a script
+# imports (`check_output`, `shell_exec`, `spawn`), which in a commit message or an echo are words.
+RUN_NAME_ANYWHERE = (r"\bos\.(?:system|popen|exec\w*|spawn\w*)|\bsubprocess\.\w+|\bPopen|\bexec\w*|\bsystem"
+                     r"|\bpopen")
+RUN_NAME = RUN_NAME_ANYWHERE + r"|\bcheck_(?:output|call)|\bshell_exec|\bspawn\w*"
 RUN_NAME_END = re.compile(r"(?:" + RUN_NAME + r")$")
 RUN_CALL = r"(?:" + RUN_NAME + r")\s*\(\s*"
 CALL_RUNNER = re.compile(RUN_CALL + r"\[?\s*$")
+CALL_RUNNER_ANYWHERE = re.compile(r"(?:" + RUN_NAME_ANYWHERE + r")\s*\(\s*\[?\s*$")
 # An argv call: `new Deno.Command("git", {args: ["push", "-f"]})` and a run call with a list
 # (`subprocess.run(["git", "push", "-f"])`) name the program and its arguments as separate strings,
 # so the pairs of one call are read as one command line.
@@ -190,6 +193,19 @@ def _argv_word(arg: str) -> str:
     return escaped or "\\ "
 
 
+def _handed_on(words) -> list:
+    """Every command line a list hands on, however deep: `sh -c` inside `docker exec` inside `flock`. Each
+    text that inner_commands returns is read again, one segment at a time, until no new text turns up.
+    A text already read is skipped, so the walk ends."""
+    found, queue = [], [words]
+    while queue:
+        for text in inner_commands(queue.pop()):
+            if text not in found:
+                found.append(text)
+                queue.extend(tokens for part in split_segments(text) if (tokens := segment_tokens(part)))
+    return found
+
+
 class _Statement:
     """The statement a script walk is in: where it starts and which calls are open in it. A pair is
     held as printed text when a printer holds it: the statement starts with a printer command
@@ -205,6 +221,8 @@ class _Statement:
         """Read the unquoted character at `index`: a statement end clears the state, a `(` opens a
         call or a group, a `)` closes one."""
         char = self.body[index]
+        if char == "\n" and any(self.calls):
+            return   # a call split over lines (`print(` and its string) is still one statement
         if char in ";&|\n":
             self.start, self.calls, self.command = index + 1, [], None
         elif char == "(":
@@ -252,7 +270,7 @@ def _nested_commands(span: str, before: str = "", mark: str = '\\"') -> str:
         if words:
             # A list whose program runs an element as a command line (`sh -c`, `ssh`, `su -c`,
             # `watch`: inner_commands) hands that line on as it stands. Any other element is one word.
-            handed = inner_commands(words)
+            handed = _handed_on(words)
             # A list of one string runs as a command line under shell=True, so it is read as one.
             lines.append("".join(text + "\n" for text in handed) if handed else words[0] + "\n"
                          if len(words) == 1 else " ".join(map(_argv_word, words)) + "\n")
@@ -276,11 +294,11 @@ def _nested_commands(span: str, before: str = "", mark: str = '\\"') -> str:
                 ahead = body[max(0, index - 256):index]
                 if not (argv and ARGV_GAP.fullmatch(body[closed:index])):
                     emit()
-                    run = CALL_RUNNER.search(ahead) is not None
+                    run = (CALL_RUNNER if script else CALL_RUNNER_ANYWHERE).search(ahead) is not None
                     if script and not run:
                         close = body.find(mark, index + mark_width)
                         run = not statement.printed(index) or (close >= 0 and piped_into_shell(close))
-                    argv = run and ARGV_CALL.search(ahead) is not None
+                    argv = run and script and ARGV_CALL.search(ahead) is not None
             inner = not inner
             width = mark_width
         else:
@@ -295,6 +313,20 @@ def _nested_commands(span: str, before: str = "", mark: str = '\\"') -> str:
         (words if argv else lines).append("".join(piece) if argv else "".join(piece) + "\n")
     emit()
     return "".join(lines)
+
+
+def _joined_splices(segment: str, start: int, end: int):
+    """(span, end) of the single-quoted span at `start`, with each `'\\''` splice that follows it joined in.
+    The shell closes the quote, writes one apostrophe and reopens it, so the pieces are one script and
+    the splice is an apostrophe in its text. `end` is where the last piece closes."""
+    pieces = [segment[start + 1:end]]
+    while segment.startswith("\\''", end + 1):
+        more = _span_end(segment, end + 3, False)
+        if more < 0:
+            break
+        pieces.append(segment[end + 4:more])
+        end = more
+    return "'" + "'".join(pieces) + "'", end
 
 
 def _push_scan(segment: str) -> str:
@@ -326,18 +358,24 @@ def _push_scan(segment: str) -> str:
             ahead = segment[max(0, index - 512):index]
             if char == '"' and '\\"' in span:
                 span = _nested_commands(span, segment[:index])
-            elif char == "'" and '"' in span and INTERPRETER_RUNNER.search(ahead):
+            elif char == "'" and INTERPRETER_RUNNER.search(ahead) and '"' in (
+                    joined := _joined_splices(segment, index, end))[0]:
                 # The runner's script sits in single quotes, so its own strings are plain pairs.
-                span = _nested_commands(span, ahead, '"')
+                span, end = _nested_commands(joined[0], ahead, '"'), joined[1]
+            elif char == '"' and "'" in span and INTERPRETER_RUNNER.search(ahead):
+                # The runner's script sits in double quotes, so its own strings are single-quoted pairs.
+                span = _nested_commands(span, ahead, "'")
             elif char == '"' and ARGV_CALL.search(ahead[-256:]):
                 # An argv call on a heredoc line (see below): the rest of the line is the call's
                 # arguments, so its pairs join into one command line as in a deno eval script.
                 out.append(_nested_commands("'" + segment[max(0, index - 256):] + "'", "deno eval ", '"'))
                 break
-            elif char == '"' and CALL_RUNNER.search(ahead[-256:]):
+            elif char == '"' and (CALL_RUNNER.search(ahead[-256:])
+                                  or not (ahead.strip() or segment[end + 1:].strip())):
                 # BANDAID: an interpreter heredoc body reaches this reader a line at a time, with
                 # no runner word ahead of it. A string handed to a call that runs it is a command
-                # wherever the call stands; no shell line has that shape.
+                # wherever the call stands, and so is a line that is one string alone (the string
+                # of a call split over lines). No shell line has either shape.
                 span = "\n" + span[1:-1] + "\n"
             out.append(span)
             index = end + 1
