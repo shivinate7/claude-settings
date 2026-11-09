@@ -1,0 +1,10 @@
+{
+  "title": "A message cites only a GitHub comment id that a tool result printed",
+  "why": "Lane comment-check-scans-shell (session_013NEJL37UFXTQuAcox7s8fD), 21:14 CST Nov 8: it wrote a review-record comment id into a message to the coordinator before the post call returned it. The id was wrong, and it sent a correction. Harm: a session or runner acts on a record that does not exist.",
+  "note": "Proposed guard: in a send_message body, refuse a GitHub comment id that no earlier tool result in the session printed. Compare steps review-record-post-check and record-variable-id-forms.",
+  "phase": "next",
+  "owner": "coordinator",
+  "status": "todo",
+  "order": 869,
+  "updatedAt": "2026-11-08T21:14:00-06:00"
+}
