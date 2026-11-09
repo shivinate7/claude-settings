@@ -26,7 +26,8 @@ The modes, as the builder implements them. This file is their interface.
   no list prints an `UNKNOWN` line and exits 1. A REF with no list file checks nothing against it. An entry on REF's list with no `id` reads UNKNOWN. A base entry whose fields differ on the head, compared as parsed objects,
   reads `CHANGED <id>` and exits 1, unless a commit in `REF..HEAD` has a `Known-defect-changed: <id>` trailer. A
   `Known-defect-removed` trailer does not count for it.
-- `--tests-for PATH`. It prints the REPORT_TARGETS suites for PATH when listed, and nothing else. Else it prints each
+- `--tests-for PATH`. It prints the REPORT_TARGETS suites for PATH when listed, and nothing else. A path with a row in
+  GUARD_MODULE_FAMILIES prints its `hooks/test_guard.py::<family>` lines and nothing else. Else it prints each
   tracked `test_<stem>.py` and `test_<stem>_*.py` beside PATH. A .py PATH also gets each tracked `test_*.py` in the
   repository that loads the module `<stem>`: an `import`, an `importlib.import_module` or `__import__` call, or a file
   loader (`spec_from_file_location`, `SourceFileLoader`, `runpy.run_path`) whose path names `<stem>.py`. The loads are
@@ -50,6 +51,7 @@ that module's own run global. The sweep of old run folders is proven once, in ho
 Process checks use os.killpg and so run on POSIX only, as the CI step does (ubuntu-latest).
 """
 import ast
+import fnmatch
 import json
 import os
 import re
@@ -1235,6 +1237,64 @@ class ReplayChangedOnlyTests(unittest.TestCase):
         self.assertEqual(row["killed"], row["made"], "the changed suite pins mul: every mutant dies")
 
 
+# `--changed` on a select that lists `path::family`: the family suite runs with GUARD_FAMILY set, from its file `path`. The
+# change adds mul to calc.py, so the mutants of the change are mul's. SELECTED's select script names one suite per fixture.
+CALC_ADD_ONLY = "def add(a, b):\n    return a + b\n"
+MUL_ADDED = "\n\ndef mul(a, b):\n    return a * b\n"
+FAMILY_CHECK = ("import os\nimport sys\n\nfrom calc import mul\n\n"
+                "if os.environ.get('GUARD_FAMILY') == 'kill' and mul(2, 3) != 6:\n"
+                "    print('FAIL: mul(2, 3) is not 6 under the kill family')\n"
+                "    sys.exit(1)\n"
+                "print('ok')\n")
+PLAIN_CHECK = ("import sys\n\nfrom calc import mul\n\n"
+               "if mul(2, 3) != 6:\n"
+               "    print('FAIL: mul(2, 3) is not 6')\n"
+               "    sys.exit(1)\n"
+               "print('ok')\n")
+FAMILY_SELECT = "import sys\nif sys.argv[1] == 'calc.py':\n    print('test_kill.py::kill')\n"
+PLAIN_SELECT = "import sys\nif sys.argv[1] == 'calc.py':\n    print('test_plain.py')\n"
+
+
+def family_repo(select_text, suite_name, suite_text):
+    """main holds add, the select script and one suite. The feat branch adds mul to calc.py."""
+    repo = new_repo()
+    put(repo, {"calc.py": CALC_ADD_ONLY, "select_for.py": select_text, suite_name: suite_text})
+    commit(repo, "Base: add, the select script and its suite")
+    topic(repo, "feat", {"calc.py": CALC_ADD_ONLY + MUL_ADDED}, "Add mul")
+    return repo
+
+
+class FamilySuiteChangedTests(unittest.TestCase):
+    """`--changed` on a select that lists `path::family`. The family suite runs with its family set, so it kills the mutants
+    of the change. A plain suite line kills them too: the control that the plain path is unchanged."""
+
+    def mul_mutants(self, repo):
+        """How many mutants the change makes on mul's return line."""
+        text = show(repo, "feat", "calc.py")
+        mul_line = text.split("\n").index("    return a * b") + 1
+        want = mutants_on(text, [mul_line])
+        self.assertGreater(want, 0, "the fixture needs a mutant on mul's return")
+        return want
+
+    def test_the_family_suite_runs_under_its_family_and_kills_the_change_mutants(self):
+        repo = family_repo(FAMILY_SELECT, "test_kill.py", FAMILY_CHECK)
+        want = self.mul_mutants(repo)
+        code, out, err = changed_run(repo, SELECTED)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        killed, _ran, _percent = share_of(out)
+        self.assertEqual(killed, want, "test_kill.py::kill must run under GUARD_FAMILY=kill and kill mul's mutants, "
+                                       "got %d of %d" % (killed, want))
+
+    def test_a_plain_suite_line_kills_the_same_change_mutants(self):
+        repo = family_repo(PLAIN_SELECT, "test_plain.py", PLAIN_CHECK)
+        want = self.mul_mutants(repo)
+        code, out, err = changed_run(repo, SELECTED)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        killed, _ran, _percent = share_of(out)
+        self.assertEqual(killed, want, "a plain suite line kills mul's mutants with no family set, got %d of %d"
+                         % (killed, want))
+
+
 # The --tests-for fixture: one product module, the suites beside it, and one tracked file per form that loads it or only
 # mentions it. Each dict maps a path to its text. A load is printed; a mention, a parse failure, a non-test file, an
 # untracked file and a different module name are not.
@@ -1472,8 +1532,8 @@ class TestsForTests(unittest.TestCase):
                          "the fixture: %s binds the guard_rm_var path inside a function" % loader)
         code, out, err = run_cli(["--tests-for", target])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        self.assertIn(loader, out.splitlines(),
-                      "%s loads guard_rm_var inside a function, so --tests-for %s must print it" % (loader, target))
+        self.assertEqual(out.splitlines(), ["%s::rm-var" % loader],
+                         "guard_rm_var is a family row, so its suite is the rm-var family line of %s, not the file" % loader)
 
     def test_the_real_suites_that_load_a_module_through_a_parameter_are_printed(self):
         """Each suite passes the module's path to a function of its own, which loads it by that parameter. The call text is
@@ -1493,6 +1553,124 @@ class TestsForTests(unittest.TestCase):
                 self.assertIn(call, show(REPO, "HEAD", suite), "the fixture: %s calls its loader with %s" % (suite, target))
                 self.assertIn(suite, printed[target],
                               "%s loads %s through a parameter, so --tests-for %s must print it" % (suite, target, target))
+
+
+# GUARD_MODULE_FAMILIES (hooks/mutate_guard.py) sends a guard module to its family suites, hooks/test_guard.py::<family>, in
+# place of the import walk. A name these cases read from mutate_guard has a default, so a case fails on the row it lacks, not
+# on a missing name.
+
+
+def guard_table():
+    """GUARD_MODULE_FAMILIES. A missing table reads as no rows."""
+    return getattr(mutate_guard, "GUARD_MODULE_FAMILIES", None) or {}
+
+
+def guard_exempt():
+    """GUARD_MODULE_EXEMPT: each module shared by every family, with the reason it has no row."""
+    return getattr(mutate_guard, "GUARD_MODULE_EXEMPT", None) or {}
+
+
+def guard_family_names():
+    """The keys of FAMILIES in hooks/test_guard.py, read from its source by ast. The file runs its cases on import, so it is
+    never imported here."""
+    with open(os.path.join(HERE, "test_guard.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "FAMILIES"
+                                                for target in node.targets):
+            return set(ast.literal_eval(node.value))
+    raise AssertionError("hooks/test_guard.py has no FAMILIES dict")
+
+
+def guard_modules_on_disk(folder):
+    """Each hooks/guard_*.py under `folder`, read from the folder itself, so a new file is listed with no list to update."""
+    return sorted("hooks/" + name for name in os.listdir(os.path.join(folder, "hooks"))
+                  if fnmatch.fnmatchcase(name, "guard_*.py"))
+
+
+def unlisted_guard_modules(folder, table, exempt):
+    """The check. Each guard module under `folder` that has no row in `table`, is not REPORT_GOLD's file, and has no exemption
+    in `exempt` with a non-empty reason. An exemption with a blank reason is no exemption, so the check never skips silently."""
+    gold = mutate_guard.REPORT_GOLD[0]
+    reasoned = {path for path, reason in exempt.items() if isinstance(reason, str) and reason.strip()}
+    return [path for path in guard_modules_on_disk(folder)
+            if path not in table and path != gold and path not in reasoned]
+
+
+class GuardModuleFamilyTests(unittest.TestCase):
+    """GUARD_MODULE_FAMILIES. Each hooks/guard_*.py on disk has a row, is REPORT_GOLD's file, or is exempt with a reason."""
+
+    def test_every_guard_module_on_disk_has_a_row_or_is_gold_or_exempt(self):
+        missing = unlisted_guard_modules(REPO, guard_table(), guard_exempt())
+        self.assertEqual(missing, [], "each hooks/guard_*.py needs a row in GUARD_MODULE_FAMILIES, or a reason in "
+                                      "GUARD_MODULE_EXEMPT")
+
+    def test_a_new_guard_module_with_no_row_fails_the_check_and_no_other_does(self):
+        folder = fresh()
+        put(folder, {path: "" for path in guard_modules_on_disk(REPO)})
+        table, exempt = guard_table(), guard_exempt()
+        self.assertEqual(unlisted_guard_modules(folder, table, exempt), [],
+                         "the fixture of the real guard modules flags nothing: each one needs its row or its exemption")
+        put(folder, {"hooks/guard_zzz_new.py": ""})
+        self.assertEqual(unlisted_guard_modules(folder, table, exempt), ["hooks/guard_zzz_new.py"],
+                         "a new guard module with no row fails the check, and no other module does")
+
+    def test_an_exemption_with_a_blank_reason_is_no_exemption(self):
+        folder = fresh()
+        put(folder, {"hooks/guard_core.py": "", "hooks/guard_kill.py": ""})
+        flagged = unlisted_guard_modules(folder, {"hooks/guard_kill.py": ["kill"]}, {"hooks/guard_core.py": " "})
+        self.assertEqual(flagged, ["hooks/guard_core.py"], "an exemption with a blank reason is no exemption")
+
+    def test_guard_core_is_exempt_with_a_reason_and_has_no_row(self):
+        reason = guard_exempt().get("hooks/guard_core.py")
+        self.assertIsInstance(reason, str, "guard_core.py is shared by every family: GUARD_MODULE_EXEMPT must name it "
+                                           "with a reason")
+        self.assertTrue(reason.strip(), "guard_core.py's exemption has a blank reason")
+        self.assertNotIn("hooks/guard_core.py", guard_table(), "guard_core.py is exempt, not a family row")
+
+    def test_every_row_is_a_non_empty_list(self):
+        table = guard_table()
+        self.assertIn("hooks/guard_kill.py", table, "GUARD_MODULE_FAMILIES has no row for hooks/guard_kill.py")
+        for module, families in sorted(table.items()):
+            with self.subTest(module=module):
+                self.assertIsInstance(families, list, "%s: a row is a list of families" % module)
+                self.assertTrue(families, "%s has an empty row: --tests-for would print nothing for it" % module)
+
+    def test_every_family_a_row_names_is_a_key_of_test_guard_families(self):
+        table = guard_table()
+        self.assertIn("hooks/guard_kill.py", table, "GUARD_MODULE_FAMILIES has no row for hooks/guard_kill.py")
+        named = {family for families in table.values() for family in families}
+        self.assertEqual(sorted(named - guard_family_names()), [],
+                         "a row names a family that hooks/test_guard.py does not have")
+
+    def test_tests_for_guard_kill_prints_only_the_kill_family_line(self):
+        code, out, err = run_cli(["--tests-for", "hooks/guard_kill.py"])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertEqual(out.splitlines(), ["hooks/test_guard.py::kill"],
+                         "guard_kill.py's suite is the kill family alone, with no import-walk suite beside it")
+
+    def test_tests_for_guard_env_prints_its_two_family_lines(self):
+        code, out, err = run_cli(["--tests-for", "hooks/guard_env.py"])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertEqual(out.splitlines(), ["hooks/test_guard.py::env", "hooks/test_guard.py::git-env"],
+                         "guard_env.py's suites are the env and git-env families, one line each")
+
+    def test_every_table_module_prints_exactly_its_family_lines(self):
+        table = guard_table()
+        self.assertIn("hooks/guard_kill.py", table, "GUARD_MODULE_FAMILIES has no row for hooks/guard_kill.py")
+        for module, families in sorted(table.items()):
+            with self.subTest(module=module):
+                code, out, err = run_cli(["--tests-for", module])
+                self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+                self.assertEqual(out.splitlines(), sorted("hooks/test_guard.py::%s" % family for family in families),
+                                 "%s prints its family lines and no other suite" % module)
+
+    def test_guard_wsl_is_report_gold_and_no_row_and_no_report_target(self):
+        gold = mutate_guard.REPORT_GOLD[0]
+        self.assertEqual(gold, "hooks/guard_wsl.py", "the fixture: REPORT_GOLD scores guard_wsl.py")
+        self.assertNotIn(gold, guard_table(), "REPORT_GOLD's file is scored once, against the whole test_guard.py")
+        self.assertFalse(set(guard_table()) & set(dict(mutate_guard.REPORT_TARGETS)),
+                         "a table module is no REPORT_TARGETS row, so the report does not score it twice")
 
 
 # The `_loads_module` table, called directly. Each row is a form's name and a Python text, read with the stem `widget`.
