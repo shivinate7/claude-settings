@@ -2647,7 +2647,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
     Before that run, step_cite_check refuses a `step:<slug>` cite, in a changed decision, debt or CLAUDE.md or (for a PR number) the PR body, that names no step
-    file on origin's record branch; a record branch that cannot be read refuses as unknown. Cost: one fetch of that branch and one ls-tree per run with a cite, none otherwise."""
+    file on origin's record branch; a record branch that cannot be read, or a changed record whose fence never closes, refuses as unknown. Cost: one fetch of that branch and one ls-tree per run with a cite, none otherwise."""
     body = ""  # a ref target has no pull request body
     if target.isdigit():
         host = host or Host()
