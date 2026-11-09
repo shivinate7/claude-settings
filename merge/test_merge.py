@@ -15585,7 +15585,7 @@ class TouchesRead(Env):
 
     def touches_run(self, rows, *argv):
         """`merge --touches --run RUN` beside argv, over the run of `rows` (run_jobs) and the incident's open pulls. -> (rc, out, err). The scope
-        is read first: the run's jobs were listed, and the log of each failed job was read (the gate job's log is not asked for), so a verdict
+        is read first: the run's jobs were listed, and the log of each failed job was read (the rollup job's log is not asked for), so a verdict
         below is about the log lines and never about a read that did not run."""
         jobs, logs = run_jobs(*rows)
         host = incident_host(jobs=jobs, job_logs=logs, count_gh=True)
@@ -15641,11 +15641,11 @@ class TouchesRead(Env):
                 self.assertNotIn("merge: unknown", err, f"a job with conclusion {conclusion!r} printed unknown beside a parsed failed job:\n" + err)
                 self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"], out)
 
-    def test_the_all_jobs_passed_gate_failing_beside_a_parsed_failure_is_not_read_unknown(self):
+    def test_the_all_jobs_passed_rollup_failing_beside_a_parsed_failure_is_not_read_unknown(self):
         rc, out, err = self.touches_run(((201, "tests", "failure", failed_case(TOUCH_CASE_A)),
-                                         (202, REQUIRED_CHECK, "failure", f"{REQUIRED_CHECK}: failure")))  # the gate fails in every red run, with this one line
-        self.assertEqual(rc, 0, "the gate job's failure read as unknown beside a parsed failed job:\n" + out + err)
-        self.assertNotIn("merge: unknown", err, "the gate job's failure printed unknown beside a parsed failed job:\n" + err)
+                                         (202, REQUIRED_CHECK, "failure", f"{REQUIRED_CHECK}: failure")))  # the rollup fails in every red run, with this one line
+        self.assertEqual(rc, 0, "the rollup job's failure read as unknown beside a parsed failed job:\n" + out + err)
+        self.assertNotIn("merge: unknown", err, "the rollup job's failure printed unknown beside a parsed failed job:\n" + err)
         self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"], out)
 
     def test_two_failed_jobs_that_each_log_a_case_read_clear(self):
