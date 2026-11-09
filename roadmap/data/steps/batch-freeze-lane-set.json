@@ -1,0 +1,11 @@
+{
+  "title": "The batch runner freezes a batch's lane set at build start, and a red drops one lane with no re-lint",
+  "why": "No batch merged from 14:50 to 20:28 CST Nov 8 with about 60 PRs queued: the batch runner rebuilt 6+ times as releases arrived mid-build, re-linted after each red, and never ran batches on top of each other (coordinator 20:28 CST Nov 8).",
+  "note": "Filed by triage, Nov 8 20:28 CST. From batch 67 on (in process now): the lane set freezes at build start, late releases go to the next batch, batches run on top of each other, and a red drops one lane with no re-lint. Lane session_013NEJL1oJqBhSKif1484UZ4 writes it into skill ci-hygiene step 8 and a decision.",
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "session_013NEJL1oJqBhSKif1484UZ4",
+  "status": "doing",
+  "order": 863,
+  "updatedAt": "2026-11-08T20:28:00-06:00"
+}

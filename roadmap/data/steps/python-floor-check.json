@@ -1,11 +1,11 @@
 {
   "title": "A check holds the hooks to their Python 3.9 floor",
   "why": "README.md:206 and lint/ste_lint.py:8 set Python 3.9 as the hooks' floor, but all 18 CI jobs pin 3.11. A builder on #2331 used `glob.iglob(root_dir=...)` (3.10+); on 3.9 the guard crashes and fails open. Round 3 review caught it, not a check (lane notes-fix-large-1, 20:20 CST Nov 8).",
-  "note": "Filed by triage, Nov 8 20:21 CST. Proposed check: a CI job on 3.9 for the hook suites, or a static floor check over hooks/ (vermin -t=3.9 or similar). Related: lane-lint-parses-at-ci-python (parse at the pinned version). Waits on the lane-inflow hold (decision lane-inflow-hold): no new lane until batches 66 and 67 merge.",
+  "note": "Filed by triage, Nov 8 20:21 CST. Proposed check: a CI job on 3.9 for the hook suites, or a static floor check over hooks/ (vermin -t=3.9 or similar). Related: lane-lint-parses-at-ci-python (parse at the pinned version). The lane-inflow hold was lifted 20:28 CST Nov 8 (owner's 20:24 CST word).",
   "phase": "now",
   "owner": "coordinator",
   "lane": "",
   "status": "todo",
   "order": 861,
-  "updatedAt": "2026-11-08T20:21:00-06:00"
+  "updatedAt": "2026-11-08T20:28:00-06:00"
 }
