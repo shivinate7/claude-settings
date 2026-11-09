@@ -15762,19 +15762,23 @@ class ReviewStampSince(unittest.TestCase):
             yield
 
     def safe_path_read(self, pythonpath=None):
-        """-> the outcome of the merge tool's stamp read in a child run under PYTHONSAFEPATH=1: {"raised": the class name of what it raised, "message": its text}.
-        `pythonpath`, when given, is the only path that holds merge/. The tool checkout has no salt commit, so the read stops."""
+        """-> (the outcome of the merge tool's stamp read in a child run under PYTHONSAFEPATH=1: {"raised": the class name of what it raised, "message": its text},
+        the checkout MERGE_TOOL_SOURCE names in that run, as launch.py sets it). `pythonpath`, when given, is the only path that holds merge/. The tool checkout
+        has no salt commit, so the read stops."""
         tool = self.repo(salt_at=None, branch="fixture")
         cwd = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
         self.addCleanup(shutil.rmtree, cwd, True)
+        source = os.path.realpath(tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder()))  # the checkout launch.py started from
+        self.addCleanup(shutil.rmtree, source, True)
         env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONSAFEPATH", "MERGE_TOOL_SOURCE")}
         env["PYTHONSAFEPATH"] = "1"
+        env["MERGE_TOOL_SOURCE"] = source
         if pythonpath is not None:
             env["PYTHONPATH"] = pythonpath
         r = subprocess.run([sys.executable, "-c", self.SAFE_PATH_CHILD, os.path.join(HERE, "merge.py"), os.path.join(tool, "merge", "merge.py")],
                            cwd=cwd, env=env, capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, "the child run of the merge tool's stamp read failed:\n" + r.stderr)
-        return json.loads(r.stdout.strip().splitlines()[-1])
+        return json.loads(r.stdout.strip().splitlines()[-1]), source
 
     def test_a_tool_stop_with_no_salt_adds_no_temporary_copy_note_when_the_source_is_the_tool(self):
         # launch.py passes the checkout it started from. When that is the tool checkout itself, no temporary copy ran, so the Stop adds no note.
@@ -15870,16 +15874,20 @@ class ReviewStampSince(unittest.TestCase):
         self.assertEqual(len(reads), 1, "the merge tool's checkout was read %d times in one process, not once: %r" % (len(reads), reads))
 
     def test_a_tool_stamp_read_under_pythonsafepath_raises_stop_not_module_not_found(self):
-        # PYTHONSAFEPATH=1 keeps merge/ off sys.path. tool_source_note imports `launch` by its bare name, so a tool Stop raised ModuleNotFoundError
-        # where it should raise Stop.
-        outcome = self.safe_path_read()
+        # PYTHONSAFEPATH=1 keeps merge/ off sys.path, and tool_source_env imports `launch` by its bare name. The read puts merge/ on sys.path
+        # itself, so the import works and the Stop names the checkout MERGE_TOOL_SOURCE holds. Without that, the import fails quietly.
+        outcome, source = self.safe_path_read()
         self.assertEqual(outcome["raised"], "Stop", "under PYTHONSAFEPATH=1 the merge tool's stamp read raised %s instead of Stop: %s" % (outcome["raised"], outcome["message"]))
         self.assertIn("lacks the review stamp salt", outcome["message"], "the Stop is not the tool checkout's salt Stop:\n" + outcome["message"])
+        self.assertIn("a temporary copy of " + source, outcome["message"],
+                      "under PYTHONSAFEPATH=1 with no PYTHONPATH the Stop does not name the checkout MERGE_TOOL_SOURCE holds, so launch was not imported:\n" + outcome["message"])
 
     def test_the_same_tool_stamp_read_under_pythonsafepath_raises_stop_when_merge_is_on_the_path(self):
-        # The control for the case above: with merge/ on PYTHONPATH, `launch` imports under PYTHONSAFEPATH=1, and the same read raises Stop.
-        outcome = self.safe_path_read(pythonpath=HERE)
+        # The control for the case above: with merge/ on PYTHONPATH, `launch` imports under PYTHONSAFEPATH=1, and the same read names the same checkout.
+        outcome, source = self.safe_path_read(pythonpath=HERE)
         self.assertEqual(outcome["raised"], "Stop", "with merge/ on PYTHONPATH and PYTHONSAFEPATH=1 the merge tool's stamp read raised %s instead of Stop: %s" % (outcome["raised"], outcome["message"]))
+        self.assertIn("a temporary copy of " + source, outcome["message"],
+                      "with merge/ on PYTHONPATH and PYTHONSAFEPATH=1 the Stop names no checkout that MERGE_TOOL_SOURCE holds:\n" + outcome["message"])
 
     def test_the_cutover_is_the_committer_time_of_the_first_salt_commit(self):
         root = self.repo(salt_at=2)
