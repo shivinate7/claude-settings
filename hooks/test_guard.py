@@ -11158,8 +11158,8 @@ sh("merge-checks: pr merge, -R o/r after the group word, is judged, and a pendin
 sh("merge-checks: pr merge, -R o/r after the group word, is allowed on a green head",
    "gh pr -R o/r merge 12", "allow", cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 # The control for the rows above: the same repo flag after the verb is already read, so this head read must answer
-# for the repo the flag names. It passes on the base; a red on the rows above with "could not run" would mean the
-# fake answers no read for that repo.
+# for the repo the flag names. A red on the rows above with "could not run" would mean the fake answers no read
+# for that repo.
 sh("merge-checks: pr merge 12 -R o/r, a flag after the verb, denies a pending head: the control for the "
    "rows after the group word",
    "gh pr merge 12 -R o/r", "deny", "merge-checks", carries="pending", cwd=NOGIT,
