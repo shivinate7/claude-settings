@@ -45,6 +45,9 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   (454 px); the reply box's Close at `askf (width <= 26.75em)` (428 px); the Designs viewer's head at `dsh (width <= 30.5em)`.
   The 19.5em and 16.5em floors above stay. At 100% text each box is the same as the 520 px rule drew it at 320, 390 and 1280.
 - Readable minimum: 8em of text column beside a press (128 px at 100%, 256 at 200%). 360 keeps 146 px, so it stays beside.
+  A folded row with Dismiss or Restore beside it keeps that floor from 30.5em to 40em too (`askl (30.5em < width <= 40em)`): the date,
+  "Show answer" and the press leave the title 0 px at 530 wide and 65 px at 600. From 40em (640 px) the title has 128 px or more
+  beside them. Up to that width the row takes the phone arrangement, "Show answer" in the button's name only.
 - Stacked row: the row button is two columns (glyph, text). Title up to 3 lines, then the date, then "Show answer" on a row
   with no side press. On a row with Dismiss or Restore, "Show answer" stays in the button's name only, as today's phone row.
   The glyph sits on the title's first line (`align-items: start`), not on the middle of the block.
@@ -97,8 +100,11 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
 - The Designs head's position reads `1/2` or `1 of 2` by the `dsh` container: its `30.5em` rule sets `--pos-short` on `#dPos`,
   and the script reads that custom property. The script sets the text, because the tests read it as text.
 - In the ask list, a press's hidden sizer ("Dismissing…", "Restoring…") and its busy label (`.busy`) each clip on one line
-  (`max-inline-size: 100%`), so neither sets a press's height: the presses stay 44 px at 180 wide, busy or not. Show answer takes
-  12 px of the row's end padding at 180 wide so it stays on one line (a bandaid for that one width; at larger text it wraps inside the window).
+  (`max-inline-size: 100%`), so neither sets a press's height. A press holds its resting height while its write waits, at every
+  text size. Its resting verb wraps in a narrow press (at 180 wide with text doubled, 117 px tall). A second hidden copy of the verb
+  (`.sz.vz`) wraps the same way and keeps that height under the clipped busy label. At the default size that is 44 px at 180 wide, busy or
+  not. A waiting press is `aria-busy="true"` (askPress sets it, and it goes when the write ends); its name stays "Dismiss: ...".
+  Show answer takes 12 px of the row's end padding at 180 wide so it stays on one line (a bandaid for that one width; at larger text it wraps inside the window).
 - The room under the page follows the send bar's real height (`--bar-h`, set from the bar by a `ResizeObserver`), never under 96 px.
   So the bar covers no list element where it wraps and grows at 180 to 360 wide with text doubled or tripled. The Status view's
   copy notice (`.sv-toast`) sits that same room above the window's foot (`bottom: var(--bar-room)`), so it never covers the bar.
@@ -107,3 +113,16 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   and a card's waiting line (`.astate`) breaks anywhere, so no word sets the card's width.
 - Under `16.5em` of the Ask box or reply form, a press's word that is wider than the box breaks inside it (`overflow-wrap: anywhere`).
   So at 180 and 220 wide, doubled or tripled, "Close" and "Send reply" stay inside their presses, and the presses inside the card.
+
+## 7. Named limits at narrow widths and large text (lane uxz-base-gaps)
+
+- The tab bar is one row that scrolls on its own. A tab is never wider than the bar (`.tabs` is a size container, each tab has
+  `max-inline-size: 100cqw` and `overflow-wrap: anywhere`), so at 180 wide with text doubled, or tripled up to 240 wide, a label
+  wraps inside its tab. When the Designs sheet closes, `revealTab()` scrolls the selected tab fully into the bar, as a tab press does.
+- The Designs sheet's head wraps (`.dsh-head .in`, `flex-wrap: wrap`). The title's basis is 0, so the row breaks only where the buttons
+  alone are wider than the head's content. Then the last buttons take a second line and Close sits at its end, inside the window.
+  At the default text the head wraps below about 254 px. At 220 and 240 wide Close was outside the window, or 2 px from its edge, before.
+- The send bar's status is never under 2em wide (`.bar .st`, `min-width: 2em`, 27 px). Where the buttons would leave it less, they wrap
+  under it and it takes the line: at 180 and 200 wide at the default text. At 220 it stays beside Send answers, 41 px wide, as before.
+- An answered thread has one `minmax(0, 1fr)` track (`.thread`), and its filed path breaks anywhere (`.askc .thread .filed`), so a long
+  unbroken path never scrolls the page.
