@@ -1,0 +1,11 @@
+{
+  "title": "Lane lint runs its quick checks first and stops at the first fail",
+  "why": "Coordinator, 05:00 CST Nov 9: lane stack-cross-measure (#2410) lost a lane-lint run of about 15 min to a silent-undo fail that the 0.2 s silent-undo check would have shown first.",
+  "note": "Fix: `merge --lane-lint` runs the silent-undo check and the other quick checks before the long steps, and stops at the first fail. It touches merge.py, so it starts after #2378, with steps lane-lint-checks-from-batch and lint-verdict-in-reviewed. Related: step lane-lint-mutant-anchors. Filed 05:01 CST Nov 9.",
+  "phase": "now",
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "lane": "",
+  "status": "todo",
+  "order": 905,
+  "updatedAt": "2026-11-09T05:00:00-06:00"
+}
