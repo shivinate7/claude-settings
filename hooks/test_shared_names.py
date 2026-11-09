@@ -61,7 +61,11 @@ MACHINE_TAGS = (  # pinned; shared_names.py holds the one copy
 )
 GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN = "shivinate7", "ssemwal-cdc"  # the default and fallback gh logins (decision `act-in-place`)
 CLOCK = "2026-07-04T10:30:00-05:00"
-TIME_LINE = "Local time: 2026-07-04 10:30 CDT (UTC-05:00)\n"
+def time_line():
+    """The line local_time prints at CLOCK. Its prefix is the hook's own, so a change to it reaches here."""
+    return importlib.import_module("local_time").TIME_PREFIX + "2026-07-04 10:30 CDT (UTC-05:00)\n"
+
+
 # What local_time may load beyond the standard library: itself, shared_names, and the light
 # siblings it already loaded before this lane (stdlib only at import: precompact_handoff,
 # override, _nowindow).
@@ -243,11 +247,11 @@ def case_local_time_output_unchanged():
         s1 = os.path.exists(os.path.join(cfg, "handoffs", "s1.inbox.md"))
         override = _run_local_time(cfg, "override", "s3").stdout
     want_inbox = "### 2026-07-04 10:30 CDT (UTC-05:00)\n```\nfb real note\n```\n"
-    want_override = TIME_LINE + ("Override: the next refused act goes through, once. "
+    want_override = time_line() + ("Override: the next refused act goes through, once. "
                                  "It ends at 10:40 CDT if unused.\n")
-    ok = (outs == [TIME_LINE] * 4 and saved == want_inbox and not s1 and override == want_override)
+    ok = (outs == [time_line()] * 4 and saved == want_inbox and not s1 and override == want_override)
     return ok, "stdouts ok=%s, s2 inbox ok=%s, tagged prompts saved nothing=%s, override ok=%s" % (
-        outs == [TIME_LINE] * 4, saved == want_inbox, not s1, override == want_override)
+        outs == [time_line()] * 4, saved == want_inbox, not s1, override == want_override)
 
 
 def case_local_time_fails_open_on_bad_shared_names():
@@ -270,7 +274,7 @@ def case_local_time_fails_open_on_bad_shared_names():
             done = subprocess.run([sys.executable, os.path.join(hooks, "local_time.py")],
                                   input=json.dumps({"session_id": "s1", "prompt": "override"}),
                                   capture_output=True, text=True, env=env)
-            if not (done.returncode == 0 and done.stdout.startswith(TIME_LINE)
+            if not (done.returncode == 0 and done.stdout.startswith(time_line())
                     and "Override:" in done.stdout):
                 bad.append("%s: rc=%s stdout=%r" % (label, done.returncode, done.stdout[:60]))
     return not bad, "bad states: %s" % (bad or "none")
