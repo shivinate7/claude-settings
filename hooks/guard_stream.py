@@ -219,6 +219,7 @@ def sleep_seconds(tokens, index) -> float:
     for token in tokens[index + 1:]:
         if token.lower() in ("-milliseconds", "-m"):
             unit = 0.001
+        token = token.split("&", 1)[0]   # a glued `sleep 1&p=$!` waits as the spaced form does
         if DURATION.match(token):
             return float(token.rstrip("smhd")) * scale.get(token[-1], 1) * unit
     return float("inf")

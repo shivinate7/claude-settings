@@ -607,6 +607,25 @@ def bare_background_hit(cmd: str) -> str:
     return ""
 
 
+def _mask_arithmetic(segment: str) -> str:
+    """`segment` with each `((...))` span (`(( a&b ))`, `$((1&2))`) replaced by `x` of the same length, so an `&`
+    inside it reads as the AND it is while an `&` outside it still splits. A span with no closing `))` runs to the
+    end of the segment."""
+    out, at = [], 0
+    while True:
+        start = segment.find("((", at)
+        if start < 0:
+            return "".join(out) + segment[at:]
+        depth, end = 0, len(segment)
+        for i in range(start, len(segment)):
+            depth += {"(": 1, ")": -1}.get(segment[i], 0)
+            if depth == 0:
+                end = i + 1
+                break
+        out.append(segment[at:start] + "x" * (end - start))
+        at = end
+
+
 def glued_background_hit(cmd: str) -> str:
     """The matched text when a lone `&` with a word after it touches a word on either side (`sleep 2 &echo ok`,
     `sleep 2& echo ok`, `a&b`) after a command word, with no pid captured anywhere in the command, else ''. Bash reads it as a
@@ -619,9 +638,7 @@ def glued_background_hit(cmd: str) -> str:
     if "$!" in cmd:
         return ""
     for segment in split_segments(cmd):
-        if "((" in segment:
-            continue   # `((` or `$((` holds an arithmetic `&`
-        pieces = split_background(segment)
+        pieces = split_background(_mask_arithmetic(segment))
         for at in range(len(pieces) - 1):
             left, right = pieces[at], pieces[at + 1]
             if not right.strip() or not (left[-1:] not in (" ", "\t") or right[:1] not in (" ", "\t")):
