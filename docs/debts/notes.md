@@ -188,6 +188,10 @@
 - net-error-colon-http-refusal: refusal text ending ': HTTP 5xx (url)', such as a PR title, reads as a network error and retries (merge/merge.py NET_ERROR)
 - no-start-lock-has-no-pid-check: agent lock with no start time has no pid-reuse check; a reused pid keeps the tree, the safe side (janitor/sweep.py)
 - off-line-fork-reads-pre-cut: a branch cut from a later-merged PR branch makes the silent-undo window flag a deliberate removal (lint/check_silent_undo.py)
+- octopus-push-bare-remote-origin: a bare `git push` reads origin even when the branch pushes to another remote, so an octopus held only by that other remote's refs is refused (hooks/guard_merge.py octopus_push_hit)
+- octopus-push-chain-unread: `git merge a b && git push` passes, because the octopus does not exist when the hook reads the range; conflict-markers has a chain rule and octopus-push has none (hooks/guard_merge.py octopus_push_hit)
+- octopus-push-shell-source: a push source given as a shell variable is read as HEAD, so an octopus on that branch passes; the reader is shared with conflict-markers (hooks/guard_merge.py _plain_source)
+- octopus-push-wrapped-pushes: a push inside `bash -c` or `eval`, and `--all`, `--mirror` or `--tags` alone, are not read (hooks/guard_merge.py octopus_push_hit)
 - old-before-was-flags-history: the history rule flags the word old followed later by was and a colon in one block, so a plain description fails as history (lint/hook_catalog.py)
 - one-term-per-meaning-unchecked: no check reads the 'one term per meaning' clause of output-write-in-ste (CLAUDE.md, lint/rule_mechanisms.json)
 - override-agent-text-unmeasured: no check shows whether a session-sent message reading exactly `override` fires the prompt hook and grants an override. Decision: owner-override
