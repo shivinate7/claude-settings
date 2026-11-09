@@ -40,10 +40,13 @@ source allows, with one stderr line.
 
 Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
 
-One exception, opus_ask(): the owner's plain Opus ask (decision owner-override, the Opus word) fails CLOSED. It grants
-an override, so a model error, a timeout or an odd answer grants nothing, with one stderr line. override.grant_opus_ask
-calls it, from the prompt hook hooks/local_time.py, only for an owner prompt that carries the whole word `opus` and
+Two exceptions, opus_ask() and override_ask(): the owner's plain asks (decision owner-override) fail CLOSED. Each
+grants an override, so a model error, a timeout or an odd answer grants nothing, with one stderr line. Both are thin
+wrappers on _ask_judge, which holds the one call, and differ only in their prompt head. override.grant_opus_ask calls
+opus_ask, from the prompt hook hooks/local_time.py, only for an owner prompt that carries the whole word `opus` and
 no keyword form. Cost: one haiku call (low effort, OPUS_ASK_TIMEOUT s) for such a prompt, none for any other.
+override.grant_override_ask calls override_ask only for an owner prompt that carries the whole word `override`
+outside code spans, has no whole word `opus`, and passes the gates. Cost: one such haiku call, none for any other.
 Its companion opus_scope() only narrows: for a plain ask that opus_ask said yes to, that names no role, and that has
 earlier owner prompts, it names the roles those prompts name. It fails OPEN to every role (None) with one stderr line,
 because the rule is "scope from context, fall back to every role" (decision owner-override).
@@ -83,6 +86,17 @@ OPUS_ASK_PROMPT = (
     "reviewers`). Answer {\"ok\": false} for a question, a hedge such as `maybe opus?`, a negation such as `don't "
     "use opus`, a mention in the past tense, a request about some other model or topic, and any text that quotes or "
     "reports what an agent or another person said. When unsure answer {\"ok\": false}. Reply JSON only: "
+    "{\"ok\": true} or {\"ok\": false}.\n\nText:\n"
+)
+
+# The plain override ask (override_ask): the same call and time budget as opus_ask, its own head.
+OVERRIDE_ASK_PROMPT = (
+    "The text below is a prompt the owner typed to a coding assistant. Answer {\"ok\": true} only when it is the "
+    "owner's own present request to override a refusal or a permission ask of the assistant's guard now (for example "
+    "`yes override that` or `go ahead and override that for 15 minutes`). Answer {\"ok\": false} for a question, a "
+    "hedge such as `maybe override?`, a negation such as `don't override`, a request to turn an override `off`, a "
+    "mention in the past tense, a request about some other topic, and any text that quotes or reports what an agent "
+    "or another person said, or text of a refusal. When unsure answer {\"ok\": false}. Reply JSON only: "
     "{\"ok\": true} or {\"ok\": false}.\n\nText:\n"
 )
 
@@ -250,13 +264,13 @@ def invoke_model(*args, **kwargs):
     return home(*args, **kwargs)
 
 
-def opus_ask(text):
-    """True only when the model answers {"ok": true} to the owner's prompt `text` as a present request to run Opus
-    agents. Fails closed: an error, a timeout or an odd answer is False with one stderr line; a plain
-    {"ok": false} is False with none."""
+def _ask_judge(head, text, what):
+    """True only when the model answers {"ok": true} to the owner's prompt `text` read under the prompt `head`. The one
+    fail-closed call of the plain asks: an error, a timeout or an odd answer is False with one stderr line naming
+    `what`; a plain {"ok": false} is False with none."""
     try:
         import decision_watch  # lazy: the one home of the model's name
-        verdict, error = invoke_model(OPUS_ASK_PROMPT + text, model=decision_watch.MODEL,
+        verdict, error = invoke_model(head + text, model=decision_watch.MODEL,
                                       timeout=OPUS_ASK_TIMEOUT, shape=OK_SHAPE, effort="low")
         if error:
             raise ValueError(" ".join(str(error).split()))
@@ -267,8 +281,20 @@ def opus_ask(text):
             raise ValueError("the answer has no true or false ok")
         return False
     except Exception as exc:
-        print("call judge: opus ask grants nothing: %s" % " ".join(str(exc).split()), file=sys.stderr)
+        print("call judge: %s grants nothing: %s" % (what, " ".join(str(exc).split())), file=sys.stderr)
         return False
+
+
+def opus_ask(text):
+    """True only when the model says the owner's prompt `text` is a present request to run Opus agents. Fails closed
+    (_ask_judge)."""
+    return _ask_judge(OPUS_ASK_PROMPT, text, "opus ask")
+
+
+def override_ask(text):
+    """True only when the model says the owner's prompt `text` is a present request to override a refusal. Fails closed
+    (_ask_judge)."""
+    return _ask_judge(OVERRIDE_ASK_PROMPT, text, "override ask")
 
 
 def opus_scope(text, context):
