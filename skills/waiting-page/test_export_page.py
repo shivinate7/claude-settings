@@ -292,6 +292,28 @@ RED = [
     ("password that starts with !0", "password:" + "!0hunter2", "!0hunter2"),
     ("credential name with a value that starts with return", "api_key=" + "return9fQ2xZ7Lk3", "return9fQ2xZ7Lk3"),
 ]
+# Dashed and short vendor-style keys, each set in four credential-name carriers. Each value is joined from parts, so no
+# key-looking literal sits whole in the source. A hyphen-joined value of letters and digits is a key shape, so the
+# hyphen-words rule must not pass it. The underscored row and the six-character last part are refused today; they pin
+# that a fix keeps the refusal.
+DASHED_KEYS = (
+    ("dashed sk live key", "sk-" + "live-" + "ab12"),
+    ("underscored sk live key", "sk_" + "live_" + "ab12"),
+    ("dashed sk test key", "sk-" + "test-" + "ab12"),
+    ("dashed pk live key", "pk-" + "live-" + "ab12"),
+    ("dashed sk live key with a six-character last part", "sk-" + "live-" + "ab12cd"),
+    ("dashed sk key of seven characters", "sk-" + "ab12"),
+    ("dashed ghp token", "ghp-" + "ab12cd"),
+    ("dashed rk live key", "rk-" + "live-" + "ab12"),
+)
+KEY_CARRIERS = (
+    ("KEY single-quoted", "KEY='%s'"),
+    ("api_key unquoted", "api_key=%s"),
+    ("token with a colon", "token: %s"),
+    ("SECRET_KEY double-quoted", 'SECRET_KEY="%s"'),
+)
+RED += [("%s in %s" % (name, carrier), fmt % value, value)
+        for name, value in DASHED_KEYS for carrier, fmt in KEY_CARRIERS]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
 GREEN = [
@@ -299,6 +321,10 @@ GREEN = [
     # Code text the scan misread: a localStorage key name, a minified JS boolean, a URL-looking run that crosses quotes,
     # brackets and `|`, and keyCode handling.
     ("key name of lower-case words joined by hyphens", "KEY='automations-v3-review'"),
+    # Hyphen-joined lower-case words with a digit take the hyphen-words path, the path a fix to the key shape narrows. Each
+    # has a short part (`key`, `v`), so a fix that refuses short parts goes red here.
+    ("key name of hyphen words with a short part and a digit", "KEY='cache-key-v2'"),
+    ("token name of hyphen words with a short part and a digit", "token: page-length-v2"),
     ("minified JS boolean after a password word", "password:!0"),
     ("minified code with :// and a colon and @ across quotes and brackets", '"https://a"})];U&&(c=I==null||x:y@b'),
     ("minified keyCode comparison", "e.keyCode===13&&e.preventDefault()"),
