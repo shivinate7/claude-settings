@@ -2575,7 +2575,10 @@ def fetch_pr_head(root, info, base, host=None, n=None):
     Raises Stop on a head that differs. With `host`, a head that lags origin waits, bounded, for GitHub to show that head (wait_pushed_head),
     and the base GitHub then shows must be the one read before the wait; with none, a lagging head refuses at once."""
     for ref in (base, info["branch"]):
-        got = fetch_branch(root, ref, UNKNOWN_CITE)  # the last ref read is the branch
+        c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{ref}:refs/remotes/origin/{ref}")
+        if c:
+            raise Stop(f"git fetch origin {ref} failed: {out} {UNKNOWN_CITE}")
+    got = git(root, "rev-parse", f"refs/remotes/origin/{info['branch']}")[1]
     if got != info["head"] and host is not None:
         stale = info["head"]
         info = wait_pushed_head(host, n, info, host.now() + PUSHED_HEAD_WAIT_MINUTES * 60, want=got)
