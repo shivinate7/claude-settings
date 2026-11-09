@@ -1,11 +1,11 @@
 {
   "title": "Lane lint judges a lane's added lines with the check scripts the batch will run, not only the head's own copies",
   "why": "Lane lint runs the check scripts from the lane's head, so a lane that branched before a newer check passes lane lint and is then flagged at the batch, after the drop.",
-  "note": "Lane lane-lint-runs-comment-check (session_013NEJKz3Pbvh8FJVoT2ydk8) read-only audit, 04:20 CST Nov 9. Incident: #1998 passed lane lint, but runner 8's batch-head narration check flagged hooks/test_guard.py \"Rows marked (pin) pass on main today.\" (607cc31f8, line 2806), because the batch held draft #1879's newer pattern (narration-red-on-head-3, 0c4e2b294) and #1998's head did not. Unknowns: runner 8's batch head is not on origin; which head lane lint passed is unknown. Coordinator's pick, route 2 (process only, 04:24 CST Nov 9): the batch runner runs `merge --lane-lint` on the integration tree after the draft step. Route 1 would not have caught it, because the check was in unmerged #1879, and open lanes' scripts would raise false alarms from unmerged rules. No build: done when runner 8 takes the instruction, which the coordinator sends when #2382 lands.",
+  "note": "Lane lane-lint-runs-comment-check (session_013NEJKz3Pbvh8FJVoT2ydk8) read-only audit, 04:20 CST Nov 9. Incident: #1998 passed lane lint, but runner 8's batch-head narration check flagged hooks/test_guard.py \"Rows marked (pin) pass on main today.\" (607cc31f8, line 2806), because the batch held draft #1879's newer pattern (narration-red-on-head-3, 0c4e2b294) and #1998's head did not. Unknowns: runner 8's batch head is not on origin; which head lane lint passed is unknown. Coordinator's pick (04:24 CST, made mechanical 04:28 CST Nov 9): the merge tool's draft or ready step runs `--lane-lint` on the integration tree itself and refuses to mark the PR ready when the tree fails. Route 1 would not have caught it, because the check was in unmerged #1879, and open lanes' scripts would raise false alarms from unmerged rules. A build lane on merge.py; the coordinator starts it after #2378 merges, alongside step batch-confirm-uses-ready.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJL2hB1pLZPDpzas7VgB",
-  "status": "ready",
+  "lane": "",
+  "status": "todo",
   "order": 898,
-  "updatedAt": "2026-11-09T04:23:00-06:00"
+  "updatedAt": "2026-11-09T04:24:00-06:00"
 }
