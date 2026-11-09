@@ -198,3 +198,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - mutate-walk-suites-copy (same source): WALK_SUITES in hooks/test_mutate_ci.py is a hard-coded copy (rule building-allow-list-is-the-constant). Fix: import the constant the mutation report uses.
 - mutate-timeout-reads-crashed (same source): a mutant past the suite timeout reads crashed. Fix: report a timed-out mutant as timeout, apart from crashed.
 - mutate-wsl-no-suite (same source, older than #2430): guard_wsl has no suite under --changed. Fix: map hooks/guard_wsl.py to its test_guard.py family.
+- frozen-guard-long-command (lane notes-fix-large-1, from #2418 round 3, 07:30 CST Nov 9): the frozen-file guard takes about 35 s on a 1000-line command (1000 `echo` lines), on both #2418's base and head, so it is not new. Measured once. Becomes a debt if a normal command nears the Stop or PreToolUse time limit.

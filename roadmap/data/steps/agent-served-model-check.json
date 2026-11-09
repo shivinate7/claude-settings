@@ -1,0 +1,11 @@
+{
+  "title": "A reviewer spawned with a named model runs that model, or the spawn is refused",
+  "why": "Coordinator, 07:34 CST Nov 9: in lanes mutate-guard-cap-45 (#2436) and guard-shard-value-no-slash, a reviewer spawned with model sonnet reported itself running claude-haiku-5-5, so round 1 did not run on Sonnet. A review record then names a model the review did not run on.",
+  "note": "First find which layer swaps the model (the spawn guard's model cap, the agent file's frontmatter, or the harness). Then check the served model against the requested one at spawn or at record time. Related: step report-model-from-role (reads each agent's served model for reports) and report-guard-spawn-model (#2307). Filed 07:34 CST Nov 9.",
+  "phase": "now",
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "lane": "",
+  "status": "todo",
+  "order": 910,
+  "updatedAt": "2026-11-09T07:33:00-06:00"
+}
