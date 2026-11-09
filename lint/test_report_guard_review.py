@@ -792,12 +792,12 @@ class ReviewRecordTests(unittest.TestCase):
 
     def test_stamp_cause_wins_over_the_ci_line_cause_for_an_unstamped_record_with_a_note(self):
         # Catches: an unstamped record with a note after its CI line, and no cutover, named with the CI-line cause. The record
-        # has no Stamp line, so the Stamp cause is the one to name.
+        # has no Stamp line, so the Stamp cause is the one to name. The hook has no cwd, so the guard reads no cutover, as the
+        # sibling no-cutover test does.
         body = unstamped(record()) + "\n" + INCIDENT_NOTE + "\n"
-        self.assertIsNone(self.in_process_cutover("main"), "fixture: a cutover is set for main")
         self.assertIsNone(merge_mod.parse_review(body, None, None), "fixture: merge reads the record with a note after the CI line")
         self.serve(comments=[body])
-        out = self.stop(self.lane_turn(report(CLAIM)))
+        out = self.stop_without_cwd(self.lane_turn(report(CLAIM)))
         self.assert_reads_of(PR)
         self.assert_blocked(out)
         self.assertIn("has no Stamp line", out["reason"], "the refusal does not name the missing Stamp line: %r" % out["reason"])
