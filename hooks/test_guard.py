@@ -9398,9 +9398,9 @@ for _cmd in ("rg -uuu X .", "rg --hidden X .", "ag --hidden X ."):
     sh("env: walk control, folder has no env file, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_CLEAN)
     sh("env: walk control, folder is empty, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_EMPTY)
 
-# grep -r reads dotfiles, so a recursive grep of a folder that holds an env file reads that file. Owner
-# ruling (decision env-file-stays-unread, Queue item 159 a, 2026-11-02 00:56 CST): each form below is
-# refused over a folder that holds an env file. The `dir` form names the held folder by its path.
+# grep -r reads dotfiles, so a recursive grep of a folder that holds an env file reads that file. Each
+# form below is refused over a folder that holds an env file (decision env-file-stays-unread). The `dir`
+# form names the held folder by its path.
 for _cmd, _cwd in (
     ("grep -r X .", ENVWALK_HELD),
     ("grep -rn X", ENVWALK_HELD),
@@ -9515,9 +9515,9 @@ sh("env: grep walk safety hole, exclude before include, refused: grep -r --exclu
 sh("env: grep walk control, include before exclude, allowed: grep -r --include='*' --exclude=.env K .",
    "grep -r --include='*' --exclude=.env K .", "allow", cwd=ENVWALK_HELD)
 
-# False alarms, allowed: a whole exclude word in quotes, an unquoted brace list that bash expands to folder
-# names, and a file type or glob that picks no env file. Owner ruling 2026-11-08 06:03 CST: bash expands an
-# unquoted brace list and a quoted one stays literal, so the quoted form is not expanded and is refused.
+# False alarms, allowed. A whole exclude word in quotes is one option, and its glob .env* skips the env files.
+# Bash expands an unquoted brace list into folder names, so node_modules is skipped. A quoted brace list stays
+# literal: grep matches no folder, node_modules is walked, and the walk is refused.
 sh("env: false alarm, whole exclude word quoted, allowed: grep -r '--exclude=.env*' K .",
    "grep -r '--exclude=.env*' K .", "allow", cwd=ENVWALK_HELD)
 sh("env: false alarm, unquoted brace list skips node_modules, allowed: grep -rn K --exclude-dir={node_modules,.git} .",
