@@ -16751,14 +16751,14 @@ def _build_find_cp():
     # no file, so bash passes that text on as the source. tests/test_a.py is the test the made-folder cases copy out
     # of tests/ into out/, by a glob and by name. tests/unit/test_x.py is the test the made-folder folder walk copies.
     # tests/list.txt names tests/test_a.py, so a substitution of it is a test path. src/x.py has no test name, and
-    # test_b.py is a second root test, so a root glob matches two tests.
+    # test_b.py is a second root test, so a root glob matches two tests. fix.sed is the script the sed rows pass with -f.
     make_repo(FINDCP, {"src/app.py": "x\n", "src/a.py": "x\n", "src/b.txt": "x\n", "src/test_a.py": "x\n",
                        "src/test_x.py": "x\n", "src/x.py": "x\n", "test_x.py": "x\n", "test_b.py": "x\n",
                        "tests/notes.txt": "x\n", "tests/test_a.py": "x\n", "tests/list.txt": "tests/test_a.py\n",
                        "tests/unit/test_x.py": "x\n",
                        "pkg/keep.py": "x\n", "hooks/keep.py": "x\n", "hooks/test_x.py": "x\n",
                        "hooks/guard.py": "x\n", "hooks/notes.txt": "x\n", "docs/keep.txt": "x\n",
-                       "assets/logo.css": "x\n"})
+                       "assets/logo.css": "x\n", "fix.sed": "s/a/b/\n"})
 
 
 lazy_fixture([FINDCP], _build_find_cp)
@@ -17032,6 +17032,38 @@ sh("builder-find: cp x test_* at the root, writes the root tests, is refused",
 sh("builder-find: for f in src/x.py tests/test_a.py, echo x > \"$f\", writes the test item, is refused",
    'for f in src/x.py tests/test_a.py; do echo x > "$f"; done', "deny", rule=BT, carries=("test-author",),
    **dict(BR, cwd=FINDCP))
+# ---- a sed reads the word after `-f SCRIPT` as its script, so a variable or a substitution there hides the test it
+# edits. The first three rows are refused. A glob loop after a `cd` is not expanded in the folder it runs in, so its
+# loop variable names no test, and the three loops over src/test_a* are refused. The controls are existing rows above:
+# the root `for d in test_*` deny, the `for f in src/*.py` backup allow, and the `n=$(grep -c foo tests/test_a.py)`
+# allow. The find substitution in the script slot is a control too: it is a deny, with its test named by the command.
+# The backup copies write .bak names, which no test name matches, so the three copies below are allowed.
+sh("builder-find: f=$(find tests -name '*.py'), sed -i -f fix.sed $f, edits the test the variable holds, is refused",
+   "f=$(find tests -name '*.py'); sed -i -f fix.sed $f", "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDCP))
+sh('builder-find: f=$(ls tests/*.py), sed -i --file fix.sed "$f", edits the test the variable holds, is refused',
+   'f=$(ls tests/*.py); sed -i --file fix.sed "$f"', "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDCP))
+sh("builder-find: f=$(echo tests/test_a.py), sed -i -s -f fix.sed $f, edits the test the variable holds, is refused",
+   "f=$(echo tests/test_a.py); sed -i -s -f fix.sed $f", "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDCP))
+sh("builder-find: sed -i -f fix.sed on a find substitution of tests/*.py, edits each test it names, is refused",
+   "sed -i -f fix.sed $(find tests -name '*.py')", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh('builder-find: cd src, for f in test_a*, echo x > "$f", writes the test it globs, is refused',
+   'cd src && for f in test_a*; do echo x > "$f"; done', "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDCP))
+sh('builder-find: cd src, for f in test_a*, rm "$f", deletes the test it globs, is refused',
+   'cd src && for f in test_a*; do rm "$f"; done', "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDCP))
+sh('builder-find: cd src, for f in test_a*, sed -i s/a/b/ "$f", edits the test it globs, is refused',
+   'cd src && for f in test_a*; do sed -i s/a/b/ "$f"; done', "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDCP))
+sh('builder-find: cd src, for f in *.py, cp "$f" "$f.bak", writes backups with no test name, is allowed',
+   'cd src && for f in *.py; do cp "$f" "$f.bak"; done', "allow", **dict(BR, cwd=FINDCP))
+sh('builder-find: for f in $(git ls-files src), cp "$f" "$f.bak", writes backups with no test name, is allowed',
+   'for f in $(git ls-files src); do cp "$f" "$f.bak"; done', "allow", **dict(BR, cwd=FINDCP))
+sh("builder-find: for f in $(git ls-files '*.py'), cp \"$f\" \"$f.bak\", writes backups with no test name, is allowed",
+   "for f in $(git ls-files '*.py'); do cp \"$f\" \"$f.bak\"; done", "allow", **dict(BR, cwd=FINDCP))
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
     ("new-test", _put("tests/test_new.py", "pass\n")),
