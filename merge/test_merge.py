@@ -13974,7 +13974,7 @@ class ReviewedLedger(ReviewEnv):
         self.assertRegex(list_line(self, out, 8), r"^#8 feat8 blocked on #7 \d+h$")
 
     def test_control_a_listed_pr_is_one_line_led_by_its_number_and_branch(self):
-        # passes on main too: the fixture reaches the per-pull-request line, so the reds above fail on the act, not on setup
+        # a control: the fixture reaches the per-pull-request line, so the reds above fail on the act, not on setup
         host, rc, out, err = self.ledger([batch_pull(7, REVIEW_HEAD, created_at=ago(50))], [ledger_record(1, 7, 2, rounds=REVIEW_PASS)])
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(list_line(self, out, 7).startswith("#7 feat7 "), out)
