@@ -42,7 +42,7 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
 - The orchestrator gives a test to a test-author, before or after the build. The builder reports the test change it needs and never writes it (`agents/builder.md`).
 - A refusal is final: an agent never writes a refused path another way. The write tool refuses by path. At commit, push and stop, a builder's test change is judged on the builder's own change, so a test file written by shell is refused there too. Other refused paths rest on prose only (owner), in `agents/builder.md` and `agents/test-author.md`. A test-author's shell write of such a path is logged only (`author-diff`), in debt `refusal-route-around-guard` (no guard refuses a test-author that routes around a refusal).
 
-**Test paths and test config.** The guard's own suites (`hooks/test_guard.py`, `lint/test_*.py`) are test paths. A test-author changes them.
+**Test paths and test config.** The guard's own suites (`hooks/test_guard.py`, `lint/test_*.py`) are test paths. A test-author changes them. The three mutation tests (`hooks/mutate_guard.py`, `hooks/mutate_shared.py`, `janitor/mutate_sweep.py`) are test content too: a builder never changes them, a test-author does (owner ruling, 2026-11-08 17:19 CST, waiting-page item 447 a).
 
 - A builder change to a test-runner config file that ADDS a line disabling tests counts as a test change.
 - A test-author owns test config files and `requirements-dev.txt`. Two files are partly owned: `package.json` (only `devDependencies`, `jest` and the test scripts) and `pyproject.toml` (only the `[tool.pytest*]` sections).
