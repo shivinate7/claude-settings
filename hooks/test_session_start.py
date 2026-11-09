@@ -55,15 +55,15 @@ def merge_role_sentence(line):
     return line[0 if start < 0 else start + 2:len(line) if end < 0 else end + 1]
 
 
-def sh_exe():
-    """Git's own sh.exe on Windows, by full path. A bare `sh` can resolve to the WSL stub."""
+def sh_exe(name="sh"):
+    """Git's own sh.exe (or bash.exe, with name="bash") on Windows, by full path. A bare name can resolve to the WSL stub."""
     if os.name != "nt":
-        return shutil.which("sh") or "sh"
+        return shutil.which(name) or name
     for var in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
-        candidate = os.path.join(os.environ.get(var) or "", "Git", "bin", "sh.exe")
+        candidate = os.path.join(os.environ.get(var) or "", "Git", "bin", name + ".exe")
         if os.path.isfile(candidate):
             return candidate
-    sys.exit("fixture setup failed: Git sh.exe not found")
+    sys.exit("fixture setup failed: Git %s.exe not found" % name)
 
 
 def vcs(where, *args):
@@ -1429,6 +1429,216 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.assertTrue(wired("SessionStart"), "scope: SessionStart runs no session_start hook")
         for event in ("UserPromptSubmit", "PreToolUse"):
             self.assertEqual(wired(event), [], "session_start is wired to %s" % event)
+
+
+# The platform's Stop-hook script, trimmed to what the stop-push cases need. The anchor line and the two lines around it
+# are verbatim from the platform text (~/.claude/stop-hook-git-check.sh, lines 172-175); the rest is cut.
+PLATFORM_ANCHOR = '  unpushed=$(git rev-list "$upstream..HEAD" --count 2>/dev/null) || unpushed=0'
+PLATFORM_TEXT = """#!/bin/bash
+
+input=$(cat)
+
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  exit 0
+fi
+
+if [[ -z "$(git remote)" ]]; then
+  exit 0
+fi
+
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "There are uncommitted changes in the repository. Please commit and push these changes to the remote branch." >&2
+  exit 2
+fi
+
+untracked_files=$(git ls-files --others --exclude-standard)
+if [[ -n "$untracked_files" ]]; then
+  echo "There are untracked files in the repository. Please commit and push these changes to the remote branch." >&2
+  exit 2
+fi
+
+current_branch=$(git branch --show-current)
+if [[ -n "$current_branch" ]]; then
+  if git rev-parse "origin/$current_branch" >/dev/null 2>&1; then
+    upstream="origin/$current_branch"
+  else
+    upstream="origin/HEAD"
+  fi
+
+  unpushed=$(git rev-list "$upstream..HEAD" --count 2>/dev/null) || unpushed=0
+  if [[ "$unpushed" -gt 0 ]]; then
+    if [[ "$upstream" == "origin/$current_branch" ]]; then
+      echo "There are $unpushed unpushed commit(s) on branch '$current_branch'. Please push these changes to the remote repository." >&2
+    else
+      echo "Branch '$current_branch' has $unpushed unpushed commit(s) and no remote branch. Please push these changes to the remote repository." >&2
+    fi
+    exit 2
+  fi
+fi
+
+exit 0
+"""
+STOP_MARKER = "# claude-settings: skip-merged"  # the marker the patch leaves; the platform script holds it once
+STOP_CITATION = "owner, page item 464 b, 2026-11-09 13:09 CST"  # the ruling the patch cites
+
+
+def full_size_text():
+    """The trimmed text with 150 comment lines after the shebang, about the size of the platform's own script."""
+    filler = "".join("# filler line %03d: the platform script carries its own comment block here\n" % number
+                     for number in range(150))
+    return PLATFORM_TEXT.replace("#!/bin/bash\n", "#!/bin/bash\n" + filler, 1)
+
+
+class SessionStartStopHookPatchTests(SessionStartAgentWorktreeNoticeTests):
+    """The session-start hook patches the platform Stop-hook script once, so its unpushed-commits check skips a
+    branch already merged into origin/main (owner, page item 464 b, 2026-11-09 13:09 CST). Real git repos, the hook
+    run as the harness runs it. The platform script is a fixture file in the config folder, never the live one."""
+
+    def setUp(self):
+        super().setUp()
+        self.platform = os.path.join(self.config, "stop-hook-git-check.sh")
+
+    def write_platform(self, text):
+        with open(self.platform, "wb") as handle:
+            handle.write(text.encode("utf-8"))
+        os.chmod(self.platform, 0o755)
+
+    def read_platform(self):
+        with open(self.platform, "rb") as handle:
+            return handle.read()
+
+    def commit_file(self, where, name, text, message):
+        self.put(os.path.join(where, name), text)
+        vcs(where, "add", "--", name)
+        vcs(where, "commit", "-q", "-m", message)
+        return vcs(where, "rev-parse", "HEAD").stdout.strip()
+
+    def make_work(self, local_commit=False):
+        """A clone whose origin/main holds the feature commit, with origin/HEAD stale at the base commit and no
+        origin/feat. The branch `feat` is checked out at that feature commit, which origin/main contains. Returns the
+        clone's path."""
+        seed = os.path.join(self.root, "seed")
+        origin = os.path.join(self.root, "origin.git")
+        work = os.path.join(self.root, "work")
+        vcs(self.root, "init", "-q", "-b", "main", seed)
+        base = self.commit_file(seed, "f.txt", "base\n", "base")
+        feature = self.commit_file(seed, "g.txt", "feature\n", "feature work")
+        self.commit_file(seed, "h.txt", "main moves on\n", "main moves on")
+        vcs(self.root, "clone", "-q", "--bare", seed, origin)
+        vcs(self.root, "clone", "-q", origin, work)
+        vcs(work, "update-ref", "--no-deref", "refs/remotes/origin/HEAD", base)
+        vcs(work, "checkout", "-q", "-b", "feat", feature)
+        if local_commit:
+            self.commit_file(work, "k.txt", "local work\n", "local work")
+        return work
+
+    def run_stop(self, work):
+        """The platform script's exit code and stderr, run as the harness runs it: bash, the payload on stdin, in the clone."""
+        answer = subprocess.run([sh_exe("bash"), self.platform], input="{}", capture_output=True, text=True,
+                                cwd=work, timeout=120)
+        return answer.returncode, answer.stderr
+
+    def test_patch_adds_one_block_after_the_anchor(self):
+        """One hook run puts one block right after the anchor: the is-ancestor line, the marker, the citation. The lines
+        above and below keep their order, and the file keeps its mode."""
+        for label, text in (("trimmed", PLATFORM_TEXT), ("full-size", full_size_text())):
+            with self.subTest(text=label):
+                self.write_platform(text)
+                self.run_hook()
+                self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+                patched = self.read_platform().decode("utf-8")
+                count = patched.count(STOP_MARKER)
+                self.assertEqual(count, 1, "one hook run leaves the skip-merged marker %d times in the platform script, want 1"
+                                 % count)
+                old, new = text.splitlines(), patched.splitlines()
+                at = old.index(PLATFORM_ANCHOR)
+                grown = len(new) - len(old)
+                self.assertEqual(new[:at + 1], old[:at + 1], "the lines above the anchor changed")
+                self.assertEqual(new[at + 1 + grown:], old[at + 1:], "the lines below the inserted block changed")
+                block = new[at + 1:at + 1 + grown]
+                ancestor = [line for line in block
+                            if "unpushed=0" in line and "merge-base --is-ancestor HEAD origin/main" in line]
+                self.assertEqual(len(ancestor), 1, "the block holds %d lines that set unpushed=0 on the is-ancestor check, "
+                                 "want 1: %r" % (len(ancestor), block))
+                self.assertTrue(any(STOP_MARKER in line for line in block), "the block holds no marker line: %r" % block)
+                self.assertTrue(any(STOP_CITATION in line for line in block),
+                                "the block does not cite the owner ruling: %r" % block)
+                if os.name != "nt":
+                    self.assertEqual(os.stat(self.platform).st_mode & 0o777, 0o755,
+                                     "the patch changed the platform script's mode")
+
+    def test_second_run_inserts_nothing(self):
+        """Idempotent: the first run leaves one marker, and a second run leaves the bytes it found."""
+        self.write_platform(PLATFORM_TEXT)
+        self.run_hook()
+        self.assertEqual(self.last_stderr, "", "the first run wrote to stderr: %r" % self.last_stderr)
+        first = self.read_platform()
+        count = first.decode("utf-8").count(STOP_MARKER)
+        self.assertEqual(count, 1, "one hook run leaves the skip-merged marker %d times, want 1" % count)
+        self.run_hook()
+        self.assertEqual(self.last_stderr, "", "the second run wrote to stderr: %r" % self.last_stderr)
+        self.assertEqual(self.read_platform(), first, "a second hook run changed the platform script")
+
+    def test_merged_branch_without_a_remote_branch_exits_zero_after_the_patch(self):
+        """A branch whose head origin/main contains, with no origin/feat: the patched check exits 0, not 2."""
+        work = self.make_work()
+        self.write_platform(PLATFORM_TEXT)
+        rc, err = self.run_stop(work)
+        # Control, green on main: the unpatched text names the merged branch as unpushed, so the fixture shows the defect.
+        self.assertEqual(rc, 2, "control: the unpatched check exits %d for the merged branch, want 2" % rc)
+        self.assertIn("has 1 unpushed commit(s) and no remote branch", err,
+                      "control: the unpatched check gave another message: %r" % err)
+        self.run_hook()
+        rc, err = self.run_stop(work)
+        self.assertEqual(rc, 0, "after the hook ran, the check exits %d for a branch merged into origin/main, want 0: %r"
+                         % (rc, err))
+        self.assertEqual(err, "", "after the hook ran, the check still names a merged branch: %r" % err)
+
+    def test_branch_with_a_real_unpushed_commit_still_exits_two_after_the_patch(self):
+        """A branch with a commit origin/main lacks: the patch is applied, and the check still exits 2 with its nudge."""
+        work = self.make_work(local_commit=True)
+        self.write_platform(PLATFORM_TEXT)
+        self.run_hook()
+        count = self.read_platform().decode("utf-8").count(STOP_MARKER)
+        self.assertEqual(count, 1, "the patch is not applied, so the skip-merged marker count is %d, want 1" % count)
+        rc, err = self.run_stop(work)
+        self.assertEqual(rc, 2, "a branch with a real unpushed commit exits %d after the patch, want 2" % rc)
+        self.assertIn("has 2 unpushed commit(s) and no remote branch", err,
+                      "the check did not print its unpushed nudge: %r" % err)
+
+    def test_changed_platform_text_is_left_alone_and_one_line_says_so(self):
+        """The anchor changed or doubled, or the file is empty: the file stays byte-identical, and the hook prints one
+        line saying the patch was not applied because the platform text changed."""
+        self.assertEqual(PLATFORM_TEXT.count(PLATFORM_ANCHOR), 1,
+                         "fixture setup failed: the anchor is not once in the trimmed text")
+        baseline = self.run_hook()  # no platform file yet, so these are the baseline lines
+        self.assertTrue(any(line.startswith("checkout ") for line in baseline),
+                        "the hook printed no checkout line: %r" % baseline)
+        variants = (
+            ("anchor token changed", PLATFORM_TEXT.replace("--count ", "--number ", 1)),
+            ("anchor twice", PLATFORM_TEXT.replace(PLATFORM_ANCHOR + "\n", PLATFORM_ANCHOR + "\n" + PLATFORM_ANCHOR + "\n", 1)),
+            ("empty file", ""),
+        )
+        for label, text in variants:
+            with self.subTest(variant=label):
+                self.write_platform(text)
+                before = self.read_platform()
+                lines = self.run_hook()
+                self.assertEqual(self.read_platform(), before, "the hook changed the platform script (%s)" % label)
+                extra = [line for line in lines if line not in baseline]
+                self.assertEqual(len(extra), 1, "want one line saying the patch was not applied (%s), got %r" % (label, extra))
+                self.assertIn("not applied", extra[0], "the line does not say the patch was not applied: %r" % extra[0])
+                self.assertIn("changed", extra[0], "the line does not say the platform text changed: %r" % extra[0])
+                self.assertEqual(self.last_stderr, "", "the hook wrote to stderr (%s): %r" % (label, self.last_stderr))
+
+    def test_control_missing_platform_file_stays_silent(self):
+        """Green control, passes on main too: with no platform file the hook writes nothing, prints nothing about the
+        patch and exits 0. It guards the new step's silence."""
+        lines = self.run_hook()
+        self.assertFalse(os.path.exists(self.platform), "the hook created the platform script")
+        noise = [line for line in lines if STOP_MARKER in line or "not applied" in line or "stop-hook" in line]
+        self.assertEqual(noise, [], "the hook printed about a missing platform script: %r" % noise)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
 
 
 if __name__ == "__main__":
