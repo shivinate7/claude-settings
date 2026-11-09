@@ -5168,6 +5168,27 @@ sh("detached: ((python3 server.py) & (python3 worker.py)) is two background jobs
    "((python3 server.py) & (python3 worker.py))", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: (( (x+1) & (y) )) is arithmetic with parens inside, allows [arithmetic control]",
    "(( (x+1) & (y) ))", "allow", cwd=NOGIT)
+# A glued `&` after a bash -c string's last word, or after a pipe, is a background job as a spaced `&` is. The spaced
+# forms are the controls.
+sh('detached: bash -c "npm run dev&" glues the job to the command, is refused [glued red]',
+   'bash -c "npm run dev&"', "deny", "detached-launch", cwd=NOGIT)
+sh('detached: bash -c "npm run dev &", the spaced form, is refused [glued control]',
+   'bash -c "npm run dev &"', "deny", "detached-launch", cwd=NOGIT)
+sh("detached: npm run dev|cat& glues the job after a pipe, is refused [glued red]",
+   "npm run dev|cat&", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: npm run dev | cat &, the spaced form, is refused [glued control]",
+   "npm run dev | cat &", "deny", "detached-launch", cwd=NOGIT)
+# Scanner pins for the arithmetic mask (building-scanner-respects-strings). A single-quoted `((` is text, so the spaced
+# `&` after it is a job. A lone apostrophe in text does not hide the arithmetic after it. A `#` inside quotes is text.
+# A quoted `((` whose string closes on a later line, before a spaced `&`, is text, and that `&` is a job.
+sh("detached: echo '((' & make test, a spaced & after a single-quoted (( , is refused as a detached launch "
+   "[scanner pin]", "echo '((' & make test", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: echo don't && ((a & b)), arithmetic after a lone apostrophe, allows [scanner pin]",
+   "echo don't && ((a & b))", "allow", cwd=NOGIT)
+sh('detached: echo "#" && (( a & b )), arithmetic after a # inside quotes, allows [scanner pin]',
+   'echo "#" && (( a & b ))', "allow", cwd=NOGIT)
+sh('detached: echo "((" with its quote closed on the next line, then & make test, is refused as a detached launch '
+   "[scanner pin]", 'echo "((\n" & make test', "deny", "detached-launch", cwd=NOGIT)
 # `&>` redirects both streams, so this is a pause, not a job. The waiter refuses it today, and the pin holds that.
 sh("waiter: sleep 1&>/dev/null is a pause the waiter refuses, as today [redirect pin]",
    "sleep 1&>/dev/null", "deny", "waiter", cwd=NOGIT)
@@ -12843,6 +12864,50 @@ sh("frozen shell: an if body holding a heredoc whose body has a line fi, then cd
 sh("frozen shell: the same if body with an empty heredoc body, then cd docs and sed -i on settings.json, "
    "from the config folder, denies [heredoc closer control]",
    "if test -f x; then\npython3 - <<'PY'\nPY\ncd docs\nfi\nsed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=CFG)
+# A `bash -c` or `sh -c` string that cds into the config folder runs the cd as typed, so the sed after the cd in the
+# same string writes the frozen settings.json. The notes.txt rows are the same strings on a file that is not frozen.
+sh("frozen shell: bash -c with a cd into the config folder, then sed -i on settings.json, from outside, denies "
+   "[bash -c cd red]", 'bash -c "cd ' + slash(CFG) + '; sed -i s/a/b/ settings.json"', "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen shell: sh -c with a cd into the config folder and &&, then sed -i on settings.json, from outside, denies "
+   "[sh -c cd red]", "sh -c 'cd " + slash(CFG) + " && sed -i s/a/b/ settings.json'", "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen shell: bash -c with a cd into the config folder, then sed -i on notes.txt, from outside, allows "
+   "[bash -c cd control]", 'bash -c "cd ' + slash(CFG) + '; sed -i s/a/b/ notes.txt"', "allow", cwd=NOGIT)
+sh("frozen shell: sh -c with a cd into the config folder and &&, then sed -i on notes.txt, from outside, allows "
+   "[sh -c cd control]", "sh -c 'cd " + slash(CFG) + " && sed -i s/a/b/ notes.txt'", "allow", cwd=NOGIT)
+# A `case` arm that cds may run its cd, so the sed after `esac` may write the frozen settings.json. The notes.txt row is
+# the same command on a file that is not frozen.
+sh("frozen shell: a case arm with a cd into the config folder, then esac and sed -i on settings.json, from outside, "
+   "denies [case arm red]", "case x in x) cd " + slash(CFG) + " ;; esac; sed -i s/a/b/ settings.json", "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen shell: the same case arm, then sed -i on notes.txt, from outside, allows [case arm control]",
+   "case x in x) cd " + slash(CFG) + " ;; esac; sed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
+# A `)` on a heredoc body line is text, not a subshell close. This subshell closes on its own `)` line after EOF, so the
+# sed runs in the folder the subshell started from, outside the config folder, and it is allowed. The body with no paren
+# is the control.
+sh("frozen shell: a subshell with a cd into the config folder and a heredoc body line 1) item, closed after EOF, then "
+   "sed -i on settings.json, from outside, allows [subshell body paren pin]",
+   "(cd " + slash(CFG) + " && cat -n <<EOF\n1) item\nEOF\n); sed -i s/a/b/ settings.json", "allow", cwd=NOGIT)
+sh("frozen shell: the same subshell with a body line that holds no paren, then sed -i on settings.json, from outside, "
+   "allows [subshell body control]",
+   "(cd " + slash(CFG) + " && cat -n <<EOF\nitem\nEOF\n); sed -i s/a/b/ settings.json", "allow", cwd=NOGIT)
+# A cd on a heredoc header line runs with the header's command. Its body is text, and the cd is not lost when the body
+# closes, so the sed after the body writes the frozen settings.json.
+sh("frozen shell: cat <<EOF > f.txt; cd into the config folder on the header, then sed -i on settings.json after the "
+   "body, from outside, denies [heredoc header cd pin]",
+   "cat <<EOF > f.txt; cd " + slash(CFG) + "\nbody\nEOF\nsed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: the same header, then sed -i on notes.txt after the body, from outside, allows "
+   "[heredoc header cd control]", "cat <<EOF > f.txt; cd " + slash(CFG) + "\nbody\nEOF\nsed -i s/a/b/ notes.txt",
+   "allow", cwd=NOGIT)
+# A cd after `&&` on a heredoc header may run, so the sed after the bodies may run in the config folder. The cd counts
+# as one that may run, as the F2 rows do.
+sh("frozen shell: source /dev/stdin <<X <<Y && cd into the config folder on the header, then sed -i on settings.json, "
+   "from outside, denies [two heredocs header cd red]",
+   "source /dev/stdin <<X <<Y && cd " + slash(CFG) + "\nx\nX\ny\nY\nsed -i s/a/b/ settings.json", "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen shell: the same header, then sed -i on notes.txt, from outside, allows [two heredocs header cd control]",
+   "source /dev/stdin <<X <<Y && cd " + slash(CFG) + "\nx\nX\ny\nY\nsed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
 # Five cds, then a frozen write. The absolute chain is refused. The `../` chain reaches the same folders, and the walk
 # normalises each `..` step, so it is refused too. Both chains end on the config folder, and the notes.txt rows are the
 # same chains on a file that is not frozen.
