@@ -3836,6 +3836,8 @@ hm_deny("a PowerShell call with -C and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, tool="PowerShell", cwd=NOGIT)
 hm_deny("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
 hm_deny("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
+hm_deny("a for loop that builds the tree path from its variable is the incident",
+        "for c in A B; do " + VCS + " worktree add -q --detach " + HMSCRATCH + "/wt-$c $c; done")
 
 # ALLOW. Nothing here is the act, or the act lands in the home folder, or the repo is a throwaway.
 hm_allow("an absolute path under the primary's home folder passes",

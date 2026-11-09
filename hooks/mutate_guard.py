@@ -2065,7 +2065,7 @@ MUTATIONS = [
      '    named = _segment_git_c_target(tokens)\n    if named is not None:\n        where = None if _unexpanded(named) else shell_abs(named, where)\n    if not where:\n        return ""\n    primary = primary_checkout(where)',
      '    named = _segment_git_c_target(tokens)\n    if _unexpanded(_segment_git_c_target(segment_tokens(segments[number])) or ""):\n        return target\n    if named is not None:\n        where = None if _unexpanded(named) else shell_abs(named, where)\n    if not where:\n        return ""\n    primary = primary_checkout(where)',
      "guard", 'hand-made worktree: a -C variable set in the same command to the primary, with a home-folder target'),
-    ("hand-made-worktree: the cheap gate is dropped, so every segment re-resolves its variables",
+    ("hand-made-worktree: the early exit is dropped, so every segment re-resolves its variables",
      '    if "worktree" not in segments[number]:\n        return ""',
      '    if False:\n        return ""',
      "guard", "rm-var: 4000 bindings and 4000 flagged deletes scale linearly in CPU"),
