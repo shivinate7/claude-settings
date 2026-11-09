@@ -12669,7 +12669,7 @@ def no_record_numbers(out):
     """The pull request numbers named on the `no record:` line."""
     return {int(m) for l in out.splitlines() if l.startswith("no record:") for m in re.findall(r"#(\d+)", l)}
 
-REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict; every fix check runs on that model (owner, 2026-11-08 15:04 CST, item 444 a)
+REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict; every fix check runs on that model (owner item 444 a)
 REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "FAIL")
 
 def fix_state(test, fix, **kw):
@@ -14115,8 +14115,8 @@ PROSE_CAP = 2
 
 
 class ReviewFixSonnet(ReviewEnv):
-    """Every fix check runs on Sonnet, whatever the change's Guard or check value (owner, 2026-11-08 15:04 CST, item 444 a). That widens
-    item 351 a (owner, 2026-11-07 14:44 CST), which covered a change with Guard or check yes only. A fix check on another model, such as
+    """Every fix check runs on Sonnet, whatever the change's Guard or check value (owner item 444 a). That widens
+    owner item 351 a, which covered a change with Guard or check yes only. A fix check on another model, such as
     Haiku, reads open on every record, and `--review-record` refuses to write one (exit 2) with a remedy that names sonnet. A Sonnet fix
     check, whatever its letter case, reads as it always has. Records are built with record_text() and read with record_verdict(); the write
     path runs through merge.main, so each case reaches the rule in the real code."""
@@ -14130,7 +14130,7 @@ class ReviewFixSonnet(ReviewEnv):
         return record_verdict(self, record_text(rounds=rounds, guard="yes", net=net, fix=(fix_check_line(model=fix_model),)))
 
     def guard_flags(self, fix_model, guard="yes"):
-        """The review flags for a normal change with `guard`, round 1 FAILed, and a fix check PASS on `fix_model` from the earlier head."""
+        """The review flags for a normal change with `guard`, a failed first review, and a fix check PASS on `fix_model` from the earlier head."""
         return ("--kind", "normal", "--guard", guard, "--round", "1:reviewer:sonnet:FAIL", "--head", self.head(),
                 "--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:{fix_model}:PASS")
 
@@ -14139,8 +14139,8 @@ class ReviewFixSonnet(ReviewEnv):
         return ReviewFixFlag.earlier_host(self)
 
     def test_a_fix_pass_on_another_model_on_a_guard_change_reads_open_not_done(self):
-        # The model refusal is asserted in the why, not only the open state: once owner item 402 a lands, a guard-yes change before round 3
-        # reads open on its own, so the state alone would stay green with the model rule deleted.
+        # The model refusal is asserted in the why, not only the open state: under owner item 402 a, a guard-yes change reads open on its own,
+        # until its third review, so the state alone would stay green with the model rule deleted.
         for model in self.REFUSED_MODELS:
             for rounds in (("Round 1: reviewer, sonnet, FAIL",), ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL")):
                 with self.subTest(model=model, rounds=rounds):
@@ -14149,7 +14149,7 @@ class ReviewFixSonnet(ReviewEnv):
                     self.assertIn(self.MODEL_REFUSAL, why, f"a {model} fix check PASS on a guard or check change is not refused on its model: {why!r}")
 
     def test_a_sonnet_fix_pass_on_a_guard_change_is_not_refused_by_the_model_rule(self):
-        # Pins the model part only. Owner item 402 a (2026-11-08 06:08 CST) owes round 3 on a guard or check change, so the state is not
+        # Pins the model part only. Owner item 402 a owes a third review on a guard or check change, so the state is not
         # asserted here. The haiku verdict is the control: it must carry the model refusal, or the sonnet check proves nothing.
         for rounds in (("Round 1: reviewer, sonnet, FAIL",), ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL")):
             with self.subTest(rounds=rounds):
@@ -14212,7 +14212,7 @@ class ReviewFixSonnet(ReviewEnv):
     MIXED_CASE_MODEL = merge.REVIEW_FIX_GUARD_MODEL.capitalize()
 
     def test_a_mixed_case_sonnet_fix_pass_on_a_guard_change_reads_like_lowercase(self):
-        # Pins letter case only. The state is not asserted: owner item 402 a (2026-11-08 06:08 CST) owes round 3 on a guard or check change.
+        # Pins letter case only. The state is not asserted: owner item 402 a owes a third review on a guard or check change.
         rounds = ("Round 1: reviewer, sonnet, FAIL",)
         lower = self.guard_yes_verdict(rounds, merge.REVIEW_FIX_GUARD_MODEL)  # control: the lowercase model is not refused
         self.assertNotIn(self.MODEL_REFUSAL, lower[1], f"the lowercase control is refused on the model, so the case proves nothing: {lower[1]!r}")
