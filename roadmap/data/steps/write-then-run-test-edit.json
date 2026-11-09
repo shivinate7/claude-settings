@@ -1,0 +1,11 @@
+{
+  "title": "A script file an agent writes with Write after a refused heredoc gets the same interpreter check when Bash runs it",
+  "why": "Lane notes-fix-large-1 (session_013NEJL4DPEKRiC91yHkQV7m), reported 08:14 CST Nov 9. Incident: guard builder-test-edit refused a #2432 Sonnet builder's Bash heredoc that built a probe repo with test-named files; the builder wrote the same probe with the Write tool and ran it with Bash. Its advisor flagged it and the builder deleted the probe. Harm: a refusal the agent can step past by moving the body into a file is no stop. The interpreter check reads heredoc and -c bodies only, so it needs state across two tools: the Write that made the file and the Bash that runs it.",
+  "note": "Split out of step encoded-retry-after-refusal at its lane's word (08:17 CST Nov 9): that guard reads one Bash command's own text, so this gap is out of its scope. Related: steps reviewer-probe-helper (a sanctioned way to run a probe without a script file), builder-edits-mutation-tests, decision builders-cannot-edit-tests.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 912,
+  "updatedAt": "2026-11-09T08:18:00-06:00"
+}
