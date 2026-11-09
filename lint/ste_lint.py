@@ -420,7 +420,7 @@ def load_config(start: str) -> dict:
                 data = json.load(handle)
         else:
             try:
-                import tomllib
+                import tomllib  # novermin  3.11 module; the ImportError branch covers 3.9 (lint/check_python_floor.py)
             except ImportError:  # pragma: no cover - Python 3.10 and older
                 sys.stderr.write(
                     "ste-lint: %s needs Python 3.11 or later. The file is ignored.\n" % found)
