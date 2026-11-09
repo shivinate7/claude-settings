@@ -124,8 +124,8 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   shares the line. "Questions" is 157 px against 166 to 186 px of room at 180 to 200 wide at 200% text. Measured on the built page.
   The 23 harness widths are 180, 190, 200, 210, 220, 240, 260, 280, 300, 320, 360, 390, 430, 480, 520, 540, 560, 600, 640, 700, 820, 1024
   and 1280. Five more were added for the range ends: 225, 230, 250, 270 and 275. "Questions" breaks at 180 to 200 wide at 200% text.
-  At 300% it breaks at 180 to 270. "Designs" breaks at 180 to 230 at 300%. "Status" and every label at 100%, 150% and 390 wide or
-  more never break. A lone letter appears at 190 to 200 wide at 200% ("Question|s") and at 260 to 270 at 300%. For "Designs" it
+  At 300% it breaks at 180 to 278. "Designs" breaks at 180 to 230 at 300%. "Status" and every label at 100%, 150% and 390 wide or
+  more never break. A lone letter appears at 190 to 200 wide at 200% ("Question|s") and at 260 to 278 at 300%. For "Designs" it
   appears at 210 to 230 at 300% ("Design|s"). A named limit; fix: step `page-narrow-breaks-rest`. The page
   before this lane never broke a tab label: its tab ran wider than the strip, and the bar scrolled. When the Designs sheet closes,
   `revealTab()` scrolls the selected tab fully into the bar, as a tab press does.
@@ -186,5 +186,5 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   glyph of the Restored line and of both failure lines is on the first line of a wrapped line, not in the middle of it, at every text size. The
   "Restored." line is smaller than its text at 180 to 205 doubled and 180 to 260 tripled, and spells "Re-stored." with a soft hyphen; at
   the default text and 125% its size and spelling do not change. At 150% the line splits "Re-" and "stored." at 180 to 190 wide. A tab wraps
-  its label inside the strip (a cap at the strip's width), and breaks a word where it is wider than the strip, at the widths in the tab bar paragraph above. The failure lines break
+  its label inside the strip (a cap at the strip's width). It breaks a word when it does not fit its line, because the count chip shares the line, at the widths in the tab bar paragraph above. The failure lines break
   inside "dismissed", "restored" and "(permission" at the widths in the failure-line paragraph above.
