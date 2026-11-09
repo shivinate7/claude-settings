@@ -925,7 +925,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   .askc.dropped .sline > .g { margin-block-start: calc((1.55em - 12px) / 2); }
   .askc.dropped .sline > span { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
   .askc.dropped .sline .btn { grid-column: 2; grid-row: 2; justify-self: start; }
-  /* Dismiss (quiet) lines its label up with the text, Restore (outlined) its edge. The margin offsets one item on purpose. */
+  /* Under the text, these margins set where the Dismiss (quiet) and Restore (outlined) boxes start; each label stays centred in its box. */
   .askc.folded.withd > .btn { justify-self: start; margin: 0 0 8px 28px; }
   .askc.folded.withd > .btn.restore { margin-inline-start: 40px; }
 }
