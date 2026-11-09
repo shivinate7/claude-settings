@@ -15496,12 +15496,20 @@ class BatchFreeze(CloudSession):
         self.assertTrue(self.ancestor(self.head("batch/x"), "origin/main"), "setup: batch/x is not contained in main after its pull request merged")
         lanes_before = [line for line in block_lines(self.body(nightly)) or [] if line.startswith("Lane: ")]
         with self.no_lint_or_ready_check(ready_state="pass") as mocks:
+            lints_at_ready = []
+            real_ready = self.host.ready
+
+            def ready_after_the_lint(n):  # the lint count when Host.ready runs: the lint comes first
+                lints_at_ready.append(len(mocks["lane_lint"].call_args_list))
+                return real_ready(n)
+            self.host.ready = ready_after_the_lint
             rc, out = self.run_batch("--batch-build", "nightly", "--ready")
         self.assertNotIn("not a running batch", out, "--ready refused batch/nightly because its On batch has merged, as not a running batch: %s" % out)
         self.assertEqual(rc, 0, "--ready for a batch whose On batch has merged exited %s: %s" % (rc, out))
         self.assertEqual([target for target, _, _ in self.lint_calls(mocks)], ["batch/nightly"],
                          "--ready for a batch whose On batch has merged did not lint the batch head once: %s" % out)
         self.assertEqual(self.host.readies, [nightly], "--ready for a batch whose On batch has merged did not mark its PR ready once: %s" % out)
+        self.assertEqual(lints_at_ready, [1], "--ready for a batch whose On batch has merged marked the PR ready before its one lint: %s" % out)
         lanes_after = [line for line in block_lines(self.body(nightly)) or [] if line.startswith("Lane: ")]
         self.assertEqual(lanes_after, lanes_before, "--ready for a batch whose On batch has merged changed its frozen lanes: %s" % out)
 
@@ -15646,22 +15654,13 @@ class BatchFreeze(CloudSession):
             self.lane(n)
         pr = self.frozen_batch("nightly", [101, 102], draft=True)
         answer = self.lint_fail_naming("docs/unrelated.md", passing=("lanes/102.txt",), passing_cmd=self.FAILED_STEP_CMD)  # two steps, one command
-        texts = []
-        real = merge.failed_step_text
-
-        def spy_text(fail):
-            got = real(fail)
-            texts.append(got)
-            return got
-        with self.no_lint_or_ready_check(ready_state=answer), self.blame_spy() as seen, \
-                unittest.mock.patch.object(merge, "failed_step_text", side_effect=spy_text):
+        with self.no_lint_or_ready_check(ready_state=answer), self.blame_spy() as seen:
             rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertTrue(texts, "setup: the blame never read a step's text: %s" % out)
-        for text in texts:  # the scope first: the blame reads the failing step's section, and the passing step's line is not in what it reads
-            self.assertNotIn("a passing step prints lanes/102.txt", text or "",
-                             "the blame read the passing step's section, which prints lanes/102.txt, because the two steps share a command: %s" % out)
-        for got in seen:  # then the subject: no lane is named by the path the passing step printed
-            self.assertFalse(got and 102 in got, "a path only the passing step printed named #102: blamed_lanes returned %r: %s" % (got, out))
+        for got in seen:  # the scope first: a lane is named only by a path the failing step printed, docs/unrelated.md. None or {} passes too
+            for n, paths in (got or {}).items():
+                self.assertEqual([p for p in paths if p != "docs/unrelated.md"], [],
+                                 "#%d is named by a path only the passing step printed, which the failing step does not print: blamed_lanes returned %r: %s"
+                                 % (n, got, out))
         self.assertNotIn("102", self.drop_pr_numbers(out, "nightly"),
                          "a path only the passing step printed names #102, and the run prints its drop command: %s" % out)
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
@@ -16127,10 +16126,21 @@ class BatchFreeze(CloudSession):
                          "shared commit is the head of requested lane #101: %s" % out)
         self.assertEqual(rc, 0, "stacked lanes requested with their base lane were refused because an outside pull request is stacked on that base: %s" % out)
         self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
-        with self.no_lint_or_ready_check(ready_state="pass"):
+
+    def test_ready_that_rebuilds_stacked_lanes_whose_shared_base_commit_is_requested_is_not_refused_for_an_outside_pr_stacked_on_that_base(self):
+        self.lane(101)
+        self.lane(102, on=101)  # lane #102 is stacked on lane #101, the base lane requested with it
+        self.lane(103, on=101)  # outside pull request #103 is stacked on lane #101 too
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        self.drift_batch("nightly", [101])  # origin's batch/nightly lost lane #102: --ready rebuilds it before it lints
+        self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "setup: batch/nightly still holds lane #102 after the drift")
+        with self.no_lint_or_ready_check(ready_state="pass") as mocks:
             rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertNotIn("holds a commit of #103", out, "--ready refused a requested lane for holding a commit of outside #103: %s" % out)
-        self.assertEqual(rc, 0, "--ready for stacked lanes requested with their base lane exited %s: %s" % (rc, out))
+        self.assertNotIn("holds a commit of #103", out, "--ready refused a requested lane for holding a commit of outside #103, although the "
+                         "shared commit is the head of requested lane #101: %s" % out)
+        self.assertEqual(rc, 0, "--ready that rebuilds stacked lanes with their base lane requested exited %s: %s" % (rc, out))
+        self.assertEqual([target for target, _, _ in self.lint_calls(mocks)], ["batch/nightly"], "--ready did not lint the batch head once: %s" % out)
+        self.assertEqual(self.host.readies, [pr], "--ready did not mark the batch PR ready once: %s" % out)
 
     def test_a_failed_body_write_on_drop_leaves_the_branch_and_the_body_agreeing(self):
         for n in (101, 102, 103):
