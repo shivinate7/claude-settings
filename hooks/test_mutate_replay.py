@@ -1458,8 +1458,8 @@ CHILD_ROWS = [
         "argv": ["env", "FEED_FREE_FLOOR_GB=0", "{deps}/venv/bin/python", "-m", "unittest", "{suite}"],
         "install": [[sys.executable, "-m", "venv", "{deps}/venv"],
                     ["{deps}/venv/bin/pip", "install", "--quiet", "--disable-pip-version-check", "-r",
-                     "requirements.txt"]],
-        "lockfile": "requirements.txt", "link": None}),
+                     "requirements-all.txt"]],
+        "lockfile": "requirements-all.txt", "link": None}),
 ]
 # Suites left out of ios_adblock: test_chrome_slice.sh is TAP, which the node part covers; test_build_rules.sh and
 # test_export_lists.sh are zsh; test_merge_chunks.sh needs macOS Swift.
