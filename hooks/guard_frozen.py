@@ -454,10 +454,19 @@ def _split_jobs(segments, ends):
     reads as two commands, as `echo x&&sed ...` already does. A part cut at a `&` ends with `&`; the last part
     keeps the end of the segment it came from, unless the segment ends with its `&` (`cd sub &` before a
     newline): that part ends with `&`, so `dir_before_segment` reads the list as a background job. A segment with
-    no lone `&` stays as it is."""
+    no lone `&` stays as it is. The `&` that opens a segment after a `;` is the end of a case arm (`;&`, `;;&`),
+    no job: it stays a segment of its own, for `_fall_through` to read."""
     cut, cut_ends = [], []
     for at, segment in enumerate(segments):
         end = ends[at] if at < len(ends) else ""
+        if cut_ends[-1:] == [";"] and segment.lstrip().startswith("&"):
+            rest = segment.lstrip()[1:]
+            cut.append("&")
+            if not rest.strip():
+                cut_ends.append(end)
+                continue
+            cut_ends.append(";")
+            segment = rest
         pieces = split_background(segment)
         parts = [part for part in pieces if part.strip()]
         if len(pieces) < 2 or not parts:

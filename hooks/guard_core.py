@@ -1098,29 +1098,59 @@ _BLOCK_OPENERS = ("if", "for", "while", "until", "select", "case")
 _BLOCK_CLOSERS = ("fi", "done", "esac")
 
 
+def _after_body_words(tokens):
+    """The words from the first one that is no `then`, `else`, `elif` or `do` (_BODY_WORDS): where a command starts."""
+    tokens = tokens or []   # None: words the reader could not tell
+    at = 0
+    while at < len(tokens) and tokens[at] in _BODY_WORDS:
+        at += 1
+    return tokens[at:]
+
+
 def _block_change(tokens) -> int:
     """+1 for a segment that opens a compound command (`if`, `for`, `while`, `until`, `select`, `case`), -1 for
-    one that closes it (`fi`, `done`, `esac`), else 0. A later line of its body may not run."""
-    word = tokens[0].strip("()") if tokens else ""
+    one that closes it (`fi`, `done`, `esac`), else 0, read past a leading `then`, `else`, `elif` or `do`. A
+    later line of its body may not run."""
+    words = _after_body_words(tokens)
+    word = words[0].strip("()") if words else ""
     return 1 if word in _BLOCK_OPENERS else -1 if word in _BLOCK_CLOSERS else 0
 
 
+def _case_start(tokens):
+    """The index just past `case WORD in` when the segment's command is that head, else None. The head may follow
+    `then`, `else`, `elif` or `do` on its line; a `;`, `&&`, `|` or newline before it has split the segment."""
+    tokens = tokens or []
+    at = len(tokens) - len(_after_body_words(tokens))
+    if len(tokens) >= at + 3 and tokens[at].lstrip("(") == "case" and tokens[at + 2] == "in":
+        return at + 3
+    return None
+
+
 def _case_header(tokens) -> bool:
-    """True when the segment opens with `case WORD in`."""
-    return len(tokens) >= 3 and tokens[0].lstrip("(") == "case" and tokens[2] == "in"
+    """True when the segment's command is `case WORD in`."""
+    return _case_start(tokens) is not None
 
 
-def _case_arm(tokens, in_case: bool = False):
-    """(the words after a case-arm pattern, whether the pattern opens with `(`), else None. A pattern counts
-    only where an arm starts: on a `case WORD in` header line, or at the start of an arm inside an open
-    block (`in_case`; `_case_after` says where one starts). Anywhere else a word that ends in `)` is the
-    close of a subshell (`(cd x; make) > log`). The pattern is the first word of the segment, or the one
-    after the header, and ends with `)` (`x)`, `a|b)` once split at its `|`, `*)`, `(x)`). Nothing after
-    it means it is no arm (`(cd)` is a subshell)."""
-    header = _case_header(tokens) and len(tokens) > 3
-    if not (header or in_case):
+def _fall_through(tokens, before: str):
+    """(the tokens without a leading `&`, whether one was there). `;&` and `;;&` split into `;` and a segment that
+    opens with `&`: it ends an arm as `;;` does. A leading `&` after anything but `;` is no arm end."""
+    if tokens and tokens[0] == "&" and before == ";":
+        return tokens[1:], True
+    return tokens, False
+
+
+def _case_arm_once(tokens, starts_arm: bool):
+    """(the words after one case-arm pattern, whether the pattern opens with `(`), else None. The pattern is
+    the word after a `case WORD in` head, or the first word where an arm starts (`starts_arm`). It ends with
+    `)` (`x)`, `a|b)` once split at its `|`, `*)`, `(x)`), and nothing after it means it is no arm (`(cd)` is a
+    subshell)."""
+    head = _case_start(tokens)
+    if head is not None and len(tokens) > head:
+        start = head
+    elif starts_arm:
+        start = 0
+    else:
         return None
-    start = 3 if header else 0
     if start >= len(tokens):
         return None
     pattern = tokens[start]
@@ -1129,11 +1159,33 @@ def _case_arm(tokens, in_case: bool = False):
     return list(tokens[start + 1:]), pattern.startswith("(")
 
 
-def _case_change(tokens, arm) -> int:
-    """+1 for a segment (or the body of its arm) that opens a `case WORD in` block, -1 for one that closes it
-    with `esac`, else 0."""
+def _case_layers(tokens, starts_arm: bool):
+    """([the segment's words, then the words after each arm pattern in it], [each pattern's `(` flag]). One line can
+    hold several: `case x in a) case y in b) cd d` is two arms, and the last layer is the command."""
+    layers, parens = [tokens], []
+    while True:
+        step = _case_arm_once(layers[-1], starts_arm and not parens)
+        if step is None:
+            return layers, parens
+        layers.append(step[0])
+        parens.append(step[1])
+
+
+def _case_arm(tokens, in_case: bool = False, fresh: bool = False, before: str = ""):
+    """(the words after the last case-arm pattern, each pattern's `(` flag, every layer of the line: see
+    _case_layers), else None. A pattern counts only where an arm starts: on a `case WORD in` head (it may follow
+    `do` or `then`, and sit in another arm), or at the start of an arm inside an open block (`in_case`, and
+    `fresh` or a `;&` end: `_case_after` says where one starts). Anywhere else a word that ends in `)` is the
+    close of a subshell (`(cd x; make) > log`)."""
+    tokens, fell = _fall_through(tokens, before)
+    layers, parens = _case_layers(tokens, in_case and (fresh or fell))
+    return (layers[-1], parens, layers) if parens else None
+
+
+def _case_change(layers) -> int:
+    """+1 for each layer that opens a `case WORD in` block, -1 for each that closes it with `esac`."""
     change = 0
-    for words in (tokens, arm[0] if arm else ()):
+    for words in layers:
         if _case_header(words):
             change += 1
         elif words and words[0].strip("()") == "esac":
@@ -1143,14 +1195,21 @@ def _case_change(tokens, arm) -> int:
 
 def _case_after(depth: int, fresh: bool, tokens, arm, before: str, end: str):
     """(open `case` blocks, whether the next segment starts an arm) once a segment is read. An arm starts after a
-    header line that holds no pattern yet, after `;;` (its second `;` is a segment of its own, empty, after a
-    `;`), and in the middle of an alternation (`a|b)` is split at each `|`). A segment that is none of those
-    starts no arm, so `make)` closing a subshell in an arm's body is no pattern."""
+    `case WORD in` head that holds no pattern yet, after `;;` (its second `;` is a segment of its own, empty,
+    between two `;`), after `;&` and `;;&` (a segment that opens with `&`), and in the middle of an
+    alternation (`a|b)` is split at each `|`, so the head or an earlier pattern ends with `|`). A segment
+    that is none of those starts no arm, so `make)` closing a subshell in an arm's body is no pattern, and
+    the `;` + newline that ends `make;` is no `;;`."""
+    tokens, fell = _fall_through(tokens, before)
     if not tokens:
-        return depth, fresh or before == ";"
-    depth = max(0, depth + _case_change(tokens, arm))
-    opens_bare = any(len(words) == 3 and _case_header(words) for words in (tokens, arm[0] if arm else ()))
-    return depth, opens_bare or (fresh and arm is None and end == "|" and depth > 0)
+        return depth, fresh or fell or (before == ";" and end == ";")
+    layers = arm[2] if arm else [tokens]
+    depth = max(0, depth + _case_change(layers))
+    last = layers[-1]
+    head = _case_start(last)
+    bare = head is not None and head == len(last)
+    partial = head is not None and head + 1 == len(last) and not last[head].endswith(")") and end == "|"
+    return depth, bare or partial or (fresh and arm is None and end == "|" and depth > 0)
 
 
 def case_arm_bodies(segments, ends=()):
@@ -1167,7 +1226,7 @@ def case_arm_bodies(segments, ends=()):
                 bodies.pop(0)
             continue
         before = ends[at - 1] if 0 < at <= len(ends) else ""
-        arm = _case_arm(tokens, depth > 0 and fresh) if tokens else None
+        arm = _case_arm(tokens, depth > 0, fresh, before) if tokens else None
         out.append(arm[0] if arm else tokens)
         depth, fresh = _case_after(depth, fresh, tokens, arm, before, ends[at] if at < len(ends) else "")
         bodies = [delimiter for _, delimiter in heredoc_heads(segment)[0]]
@@ -1293,11 +1352,12 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         end = ends[at] if at < len(ends) else ""
         before = ends[at - 1] if 0 < at <= len(ends) else ""
         arm_tokens = segment_tokens(segment)
-        arm = _case_arm(arm_tokens, case_depth > 0 and arm_fresh) if arm_tokens else None
-        if arm:
-            for mark in ("(", ")") if arm[1] else (")",):
+        arm = _case_arm(arm_tokens, case_depth > 0, arm_fresh, before) if arm_tokens else None
+        for paren in arm[1] if arm else ():
+            for mark in ("(", ")") if paren else (")",):
                 if mark in marks:
                     marks.remove(mark)   # a case-arm pattern's parentheses are no subshell's
+        if arm:
             if before == "|":
                 before = ";"   # `a|b)` was split at its `|`: the arm's cd follows no pipe
         if held and before not in AND_ENDS:
