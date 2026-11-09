@@ -881,6 +881,7 @@ def _ag_hidden_regex_refusal(words, position: int) -> str:
         try:
             regex = _posix_classes_to_python(_shell_value(regex))
             with warnings.catch_warnings():
+                # A bracket set such as `[[a]` warns on stderr (nested set). The verdict stands.
                 warnings.simplefilter("ignore", FutureWarning)
                 compiled = re.compile(regex)
             try:
