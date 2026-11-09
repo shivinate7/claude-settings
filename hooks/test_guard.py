@@ -11528,11 +11528,16 @@ for _label, _command in (
 # THE EDIT ROUTE IN OTHER FORMS. A marked edit is refused whatever form its comment route takes: a full URL, a query string after the
 # comment id, or a command substitution in the id or in the route. The guard judges the route it reads, so a route its pattern does not
 # match is an edit it never judges. Each form takes the edit refusal. An unmarked body on the same route is allowed.
+# The last three forms are unquoted, with a space inside their substitution. The guard splits the command into words first, so the
+# space makes the route several words, and the guard reads no route at all. The quoted forms above keep the route one word.
 EDIT_ROUTE_FORMS = (
     ("a full URL", "\"https://api.github.com/repos/y/x/issues/comments/%d\"" % REVIEW_COMMENT_ID),
     ("a query string after the id", "\"repos/y/x/issues/comments/%d?x=1\"" % REVIEW_COMMENT_ID),
     ("a command substitution in the id", "\"repos/y/x/issues/comments/$(echo %d)\"" % REVIEW_COMMENT_ID),
     ("a command substitution in the route", "\"repos/$(echo y/x)/issues/comments/%d\"" % REVIEW_COMMENT_ID),
+    ("an unquoted command substitution with a space in the id", "repos/y/x/issues/comments/$(cat idfile)"),
+    ("an unquoted gh call in the id", "repos/y/x/issues/comments/$(gh api repos/y/x/issues/%d/comments --jq .[0].id)" % REVIEW_PR),
+    ("an unquoted command substitution with a space in the repo", "repos/$(echo y/x)/issues/comments/%d" % REVIEW_COMMENT_ID),
 )
 for _what, _route in EDIT_ROUTE_FORMS:
     bash_post("review-record: a marked edit is refused, %s, gh api -X PATCH" % _what,
