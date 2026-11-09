@@ -11736,23 +11736,32 @@ for _label, _command in (
 
 # THE EDIT ROUTE IN OTHER FORMS. A marked edit is refused whatever form its comment route takes: a full URL, a query string after the
 # comment id, or a command substitution in the id or in the route. The guard judges the route it reads, so a route its pattern does not
-# match is an edit it never judges. Each form takes the edit refusal. An unmarked body on the same route is allowed.
-# The last three forms are unquoted, with a space inside their substitution. The guard splits the command into words before it reads a
-# route, so the space splits the route into several words. Each form must take the edit refusal, the same as the quoted forms above.
+# match is an edit it never judges. Each form takes the edit refusal.
+# An unmarked edit on a route the guard reads makes its one read of the old body, and is allowed. A command substitution in the id
+# names no comment the guard can read, so the old body cannot be read: an unmarked edit on it is refused as a read that could not run.
+# The unquoted forms have a space inside their substitution. The guard splits the command into words before it reads a route, so the
+# space splits the route into several words. Each form must take the edit refusal, the same as the quoted forms above.
 EDIT_ROUTE_FORMS = (
     ("a full URL", "\"https://api.github.com/repos/y/x/issues/comments/%d\"" % REVIEW_COMMENT_ID),
     ("a query string after the id", "\"repos/y/x/issues/comments/%d?x=1\"" % REVIEW_COMMENT_ID),
-    ("a command substitution in the id", "\"repos/y/x/issues/comments/$(echo %d)\"" % REVIEW_COMMENT_ID),
     ("a command substitution in the route", "\"repos/$(echo y/x)/issues/comments/%d\"" % REVIEW_COMMENT_ID),
-    ("an unquoted command substitution with a space in the id", "repos/y/x/issues/comments/$(cat idfile)"),
-    ("an unquoted gh call in the id", "repos/y/x/issues/comments/$(gh api repos/y/x/issues/%d/comments --jq .[0].id)" % REVIEW_PR),
     ("an unquoted command substitution with a space in the repo", "repos/$(echo y/x)/issues/comments/%d" % REVIEW_COMMENT_ID),
 )
-for _what, _route in EDIT_ROUTE_FORMS:
+UNREADABLE_ID_FORMS = (
+    ("a command substitution in the id", "\"repos/y/x/issues/comments/$(echo %d)\"" % REVIEW_COMMENT_ID),
+    ("an unquoted command substitution with a space in the id", "repos/y/x/issues/comments/$(cat idfile)"),
+    ("an unquoted gh call in the id", "repos/y/x/issues/comments/$(gh api repos/y/x/issues/%d/comments --jq .[0].id)" % REVIEW_PR),
+)
+for _what, _route in EDIT_ROUTE_FORMS + UNREADABLE_ID_FORMS:
     bash_post("review-record: a marked edit is refused, %s, gh api -X PATCH" % _what,
               "gh api -X PATCH %s -f 'body=%s'" % (_route, review_record()), "deny", rule=REVIEW_RULE, carries=(EDIT_REFUSAL,))
+for _what, _route in EDIT_ROUTE_FORMS:
     bash_post("review-record: an edit with no marker is allowed, %s, gh api -X PATCH" % _what,
               "gh api -X PATCH %s -f 'body=%s'" % (_route, UNMARKED_BODY), "allow")
+for _what, _route in UNREADABLE_ID_FORMS:
+    bash_post("review-record: an edit with no marker is refused as a read that could not run, %s, gh api -X PATCH" % _what,
+              "gh api -X PATCH %s -f 'body=%s'" % (_route, UNMARKED_BODY), "deny", rule=REVIEW_RULE,
+              carries=("the read of the comment's current body could not run",))
 
 # `-e` is gh's --editor, not --edit-last. A post with -e is a post: judged on its pull request, with one head read, and allowed.
 REVIEW_LOG_CHECKS.append(("review-record:a fresh post with -e (--editor) is judged as a post, gh pr comment -e --body",
@@ -11765,10 +11774,11 @@ REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused with no gh r
                          review_reads(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT), "deny", 0)))
 REVIEW_LOG_CHECKS.append(("review-record:a marked update with a wrong head tail is refused with no gh read, MCP update_issue_comment",
                          review_reads(MCP_UPDATE, mcp_input(review_record(head=REVIEW_TAIL), comment_id=REVIEW_COMMENT), "deny", 0)))
-REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker makes no gh read, MCP update_issue_comment",
-                         review_reads(MCP_UPDATE, mcp_input("Round 1 ran. No review record yet.", comment_id=REVIEW_COMMENT), "allow", 0)))
-REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line makes no gh read, MCP update_issue_comment",
-                         review_reads(MCP_UPDATE, mcp_input(REVIEW_PROSE, comment_id=REVIEW_COMMENT), "allow", 0)))
+# An edit whose new body holds no marker reads the old body once.
+REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker makes one gh read of the old body, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input("Round 1 ran. No review record yet.", comment_id=REVIEW_COMMENT), "allow", 1)))
+REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line makes one gh read of the old body, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(REVIEW_PROSE, comment_id=REVIEW_COMMENT), "allow", 1)))
 REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused even when its comment cannot be read, MCP update_issue_comment",
                          review_refused_unread(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT),
                                      GHRECORDBROKEN + os.pathsep + PY_PATH)))
@@ -11779,8 +11789,8 @@ REVIEW_LOG_CHECKS.append(("review-record:a marked update with a wrong head tail 
                          review_reads(MCP_UPDATE, mcp_input(review_record(head=REVIEW_TAIL), comment_id=REVIEW_TEXT_ID), "deny", 0)))
 REVIEW_LOG_CHECKS.append(("review-record:a malformed marked update with a string comment id is refused before any gh read, MCP update_issue_comment",
                          review_reads(MCP_UPDATE, mcp_input(REVIEW_NO_STAMP, comment_id=REVIEW_TEXT_ID), "deny", 0)))
-REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker and a string comment id makes no gh read, MCP update_issue_comment",
-                         review_reads(MCP_UPDATE, mcp_input("Round 1 ran. No review record yet.", comment_id=REVIEW_TEXT_ID), "allow", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker and a string comment id makes one gh read of the old body, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input("Round 1 ran. No review record yet.", comment_id=REVIEW_TEXT_ID), "allow", 1)))
 
 
 # =========================================================================== 5g. archive of a lane
