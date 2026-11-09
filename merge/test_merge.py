@@ -23,6 +23,9 @@ import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
+import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
+sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: no hook module shadows one this suite imports
+import guard as hook_guard  # noqa: E402  is_test_rel, the one home of what a test path is (hooks/guard.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
 
 def printed(out, marker):
@@ -142,17 +145,25 @@ class FakeHost:
         self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
         self.pr_calls = []  # each n the run read through pr(): a refusal before any host read leaves it empty
         self.readies, self.ready_refuse = [], None  # readies: each n a draft confirm asked to mark ready; ready_refuse: the reason the host refuses
-        self.prs, self.created, self.batch_pr_calls = {}, [], []  # prs: the pull requests add_pr and create_pr hold, by number; created: each create_pr; batch_pr_calls: each branch batch_pr read
+        self.pulls, self.created, self.batch_pr_calls = {}, [], []  # prs: the pull requests add_pr and create_pr hold, by number; created: each create_pr; batch_pr_calls: each branch batch_pr read
         self.to_drafts, self.to_draft_refuse, self.on_to_draft = [], None, None  # to_drafts: each n a to_draft call named; to_draft_refuse: the reason the host refuses; on_to_draft: a hook a case sets, called on each call before it answers
+        self.changed, self.files_error = [("README.md", "modified", 0)], None  # changed: the (path, status, additions) triples pr_files reports; files_error: raised by pr_files instead
+        self.changed_files = None  # the changed_files count pr reports; None is the length of changed. The count check is the real Host's, so this fake does not check it
+
+    def pr_files(self, n, changed=None):  # the (path, status, additions) triples of the pull request, as Host.pr_files reports them
+        if self.files_error:
+            raise merge.Stop(self.files_error)
+        return list(self.changed)
 
     def pr(self, n):
         self.pr_calls.append(n)
-        if n in self.prs:  # a batch case's pull request, read from its own entry
+        if n in self.pulls:  # a batch case's pull request, read from its own entry
             return self.pr_info(n)
         head = merge.origin_head(self.root, self.branch)
         base = (self.base_seq.pop(0) if len(self.base_seq) > 1 else self.base_seq[0]) if self.base_seq else self.base
         return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
-                "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": self.draft, "body": self.body}
+                "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": self.draft, "body": self.body,
+                "changed_files": len(self.changed) if self.changed_files is None else self.changed_files}
 
     def required_names(self):
         return ["checks"]
@@ -193,26 +204,26 @@ class FakeHost:
         self.readies.append(n)
         if self.ready_refuse:
             return False, self.ready_refuse
-        if n in self.prs:  # the batch cases: the pull request's own draft flag clears too
-            self.prs[n]["draft"] = False
+        if n in self.pulls:  # the batch cases: the pull request's own draft flag clears too
+            self.pulls[n]["draft"] = False
         self.draft = False
         return True, ""
 
     def add_pr(self, n, branch, base="main", state="OPEN", draft=False, body=""):  # a pull request by number, with its head branch on origin
-        self.prs[n] = {"branch": branch, "base": base, "state": state, "draft": draft, "body": body}
+        self.pulls[n] = {"branch": branch, "base": base, "state": state, "draft": draft, "body": body}
 
     def pr_info(self, n):  # the same fields as pr(), read from the entry add_pr or create_pr made
-        p = self.prs[n]
+        p = self.pulls[n]
         return {"head": merge.origin_head(self.root, p["branch"]), "branch": p["branch"], "base": p["base"], "state": p["state"],
                 "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": p["draft"], "body": p["body"]}
 
     def batch_pr(self, branch):  # the open pull request whose head is `branch`, as (n, info), or None
         self.batch_pr_calls.append(branch)
-        hits = [n for n, p in self.prs.items() if p["branch"] == branch and p["state"] == "OPEN"]
+        hits = [n for n, p in self.pulls.items() if p["branch"] == branch and p["state"] == "OPEN"]
         return (hits[0], self.pr_info(hits[0])) if hits else None
 
     def open_prs(self):  # every open pull request as [(n, info)] in number order: a rebuild finds the on-batches among them
-        return [(n, self.pr_info(n)) for n in sorted(self.prs) if self.prs[n]["state"] == "OPEN"]
+        return [(n, self.pr_info(n)) for n in sorted(self.pulls) if self.pulls[n]["state"] == "OPEN"]
 
     def create_pr(self, branch, base, title, body, draft=False):  # the pull request holds the draft flag the caller sends
         n = 900 + len(self.created)
@@ -226,14 +237,14 @@ class FakeHost:
             self.on_to_draft(n)
         if self.to_draft_refuse:
             return False, self.to_draft_refuse
-        if n in self.prs:
-            self.prs[n]["draft"] = True
+        if n in self.pulls:
+            self.pulls[n]["draft"] = True
         else:
             self.draft = True
         return True, ""
 
     def set_body(self, n, body):
-        self.prs[n]["body"] = body
+        self.pulls[n]["body"] = body
 
 def wait_sites(src):
     """-> (count, in_loop) over the `wait_checks` calls in a Python source. A call inside a for or while may run many
@@ -8334,7 +8345,7 @@ class ClockedHost(merge.Host):
     def pr(self, n, *a, **k):
         self.read()
         return {"head": self.head_at(self.clock[0]), "branch": "feat", "base": "main", "state": "OPEN",
-                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": False}
+                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": False, "changed_files": 1}
 
     def batch_running(self, n, base, head=None):  # no gh here, and no other pull request in these cases
         return []
@@ -12020,6 +12031,14 @@ def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:
     """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads and created_at, which the review list reads."""
     return {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": {"ref": "feat%d" % number, "sha": sha}}
 
+def pr_file(name, previous=None, status="modified", additions=0):
+    """One changed file of a pull request, as `pulls/<n>/files` lists it. `previous` is the old name of a rename: GitHub gives it only then.
+    `additions` is the lines the file adds; a file with only removed lines has 0."""
+    d = {"filename": name, "status": status, "additions": additions}
+    if previous is not None:
+        d["previous_filename"] = previous
+    return d
+
 def batch_run(name, status="in_progress", conclusion=None):
     """A check run of a head as `pages("commits/<sha>/check-runs")` lists it. Pending unless its status is completed."""
     return {"name": name, "status": status, "conclusion": conclusion, "details_url": BATCH_LINK, "started_at": None, "completed_at": None}
@@ -12032,13 +12051,17 @@ class PullsHost(merge.Host):
     `gh` also answers `pulls/<n>` from the open list, and the compare read of two heads: `compares` maps (base sha, head sha) to the status
     GitHub would answer. A pair not listed is "diverged", so unrelated heads never contain each other. The base branch's read,
     `compare/<base>...<head>`, is keyed ("main", head sha) in the same map. `compare_error` answers every compare read;
-    `base_compare_error` answers only the base branch's read. `repo` is the OWNER/NAME the host names its repo by (Host.repo): the header
-    of a `--reviewed --root` block reads it."""
+    `base_compare_error` answers only the base branch's read. `files` are the changed files of the pull requests (`pulls/<n>/files`, one page
+    per 100), and `files_error` fails that read. `changed_files` is the count `pulls/<n>` reports (None: the length of `files`). `repo` is the
+    OWNER/NAME the host names its repo by (Host.repo): the header of a `--reviewed --root` block reads it."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
-                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, repo=None):
+                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, files=None, files_error=None, changed_files=None, repo=None):
         super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore, repo=repo)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
+        self.files = list(files) if files is not None else [pr_file("README.md")]  # the changed files of every pull request, as `pulls/<n>/files` lists them
+        self.files_error = files_error  # the (code, output) text of a failed files read
+        self.changed_files = changed_files  # the changed_files count of `pulls/<n>`; None is the length of files
         self.workflow_runs = workflow_runs or {}  # sha -> the workflow runs `gh run list --commit <sha>` answers
         self.compares, self.compare_error, self.base_compare_error = compares or {}, compare_error, base_compare_error  # the (code, output) of a failed read
         self.reads = []
@@ -12054,14 +12077,16 @@ class PullsHost(merge.Host):
         if self.count_gh and args[0] == "api":
             rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
             self.gh_calls.append(rel)
+            if self.files_error and re.fullmatch(r"pulls/\d+/files", rel):
+                return 1, self.files_error
+            m = re.fullmatch(r"pulls/(\d+)", rel)
+            if m:
+                return self.pull_reply(int(m.group(1)))
             return 0, self.answer(rel, args[1:])
         route = args[1] if args[:1] == ["api"] else ""
         m = re.search(r"/pulls/(\d+)$", route)
         if m:
-            found = [d for d in self.pulls if d["number"] == int(m.group(1))]
-            if not found:
-                return 1, "gh: Not Found (HTTP 404)"
-            return 0, json.dumps({**found[0], "state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean", "body": ""})
+            return self.pull_reply(int(m.group(1)))
         m = re.search(r"/compare/([^/]+)\.\.\.([^/]+)$", route)
         if m:
             self.compare_reads.append(m.groups())
@@ -12071,6 +12096,26 @@ class PullsHost(merge.Host):
             return 0, json.dumps({"status": self.compares.get(m.groups(), "diverged")})
         raise AssertionError("unexpected gh call: " + " ".join(args))
 
+    def pull_reply(self, n):
+        """-> (code, output) of `pulls/<n>`: the open pull request n, as the REST read gives it."""
+        found = [d for d in self.pulls if d["number"] == n]
+        if not found:
+            return 1, "gh: Not Found (HTTP 404)"
+        count = len(self.files) if self.changed_files is None else self.changed_files
+        return 0, json.dumps({**found[0], "state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean", "body": "",
+                              "changed_files": count})
+
+    def files_reply(self, rel, params, flags):
+        """`pulls/<n>/files`: the page asked for, 100 to a page (REST.listing). Under -i, a Link header with rel="next" while pages follow, as gh
+        prints it. The header's URL is never followed: a reader asks for each page by number."""
+        text = REST.listing(self.files, None, params, flags, None, 100)
+        size = max(1, min(int(params.get("per_page", 30)), 100))
+        page, last = int(params.get("page", 1)), max(1, -(-len(self.files) // size))
+        if "include" not in flags or "paginate" in flags or page >= last:
+            return text
+        link = '<https://api.github.com/repos/{owner}/{repo}/%s?page=%d>; rel="next"' % (rel, page + 1)
+        return "HTTP/1.1 200 OK\nLink: %s\n\n%s" % (link, text)
+
     def answer(self, rel, argv):
         """The reply of one REST route for the request's own flags, as the fake gh gives it (REST.listing): the page asked for, or with
         --paginate every page in the --slurp shape. The protection answers its --jq value. A list read that asks for a page gets that page."""
@@ -12078,6 +12123,8 @@ class PullsHost(merge.Host):
         m = re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel)
         if rel == "pulls":
             return REST.listing(self.pulls, None, params, flags, None, 100)
+        if re.fullmatch(r"pulls/\d+/files", rel):
+            return self.files_reply(rel, params, flags)
         if rel == "issues/comments":
             return REST.listing(self.comments, None, params, flags, None, 100)
         if rel == f"branches/{self.base}/protection/required_status_checks":
@@ -12106,6 +12153,10 @@ class PullsHost(merge.Host):
             return self.check_rows.get(m.group(1), [])
         if re.fullmatch(r"commits/[^/]+/status", rel):
             return []
+        if re.fullmatch(r"pulls/\d+/files", rel):
+            if self.files_error:
+                raise merge.Stop(self.files_error)
+            return self.files
         raise AssertionError("unexpected read: " + rel)
 
 class BatchRunningReads(unittest.TestCase):
@@ -12973,10 +13024,19 @@ def fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model=
     return f"Fix check: {head}, {role}, {model}, {verdict}"
 
 def review_fn(test, name):
-    """The merge.py function `name`, or a failed case that says it is missing."""
+    """The merge.py name `name` (a function or a constant), or a failed case that says it is missing."""
     fn = getattr(merge, name, None)
     if fn is None:
         test.fail(f"merge.{name} is not defined")
+    return fn
+
+def pr_files_of(test, host):
+    """`host.pr_files(n, changed)`, or a failed case that says merge.Host has none, or that its second parameter is not the count. The fakes
+    have one; the real Host is the one under test."""
+    fn = getattr(host, "pr_files", None)
+    if fn is None:
+        test.fail("merge.Host.pr_files is not defined")
+    test.assertIn("changed", inspect.signature(fn).parameters, "merge.Host.pr_files must take changed, the pull request's changed_files count")
     return fn
 
 def parse_text(test, text):
@@ -13462,9 +13522,10 @@ class ReviewEnv(Env):
         """The review flags, with --head set to the live head of the feature branch, then `extra`."""
         return (*REVIEW_FLAGS, "--head", self.head(), *extra)
 
-    def record_host(self, *comments, head=REVIEW_HEAD):
-        """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first."""
-        return PullsHost([batch_pull(7, head)], {}, comments=comments)
+    def record_host(self, *comments, head=REVIEW_HEAD, files=None):
+        """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first, and the files given
+        (default: one non-guard file)."""
+        return PullsHost([batch_pull(7, head)], {}, comments=comments, files=files)
 
 class ReviewArgs(ReviewEnv):
     """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
@@ -13803,6 +13864,408 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest)])
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+
+# The guard's changed-path check of `--review-record`. One home for its examples: GUARD_EXAMPLES holds one changed path under each folder entry
+# of merge.GUARD_PATHS and under each file entry of merge.GUARD_FILES. The cases read the entries from merge and check them against these keys,
+# so an entry with no example fails.
+GUARD_EXAMPLES = {"hooks/": "hooks/guard.py", "lint/": "lint/check_x.py", "bin/": "bin/merge", "actions/": "actions/stamp/stamp.mjs",
+                  ".github/": ".github/workflows/checks.yml", "merge/": "merge/merge.py", "githooks/": "githooks/pre-commit", "settings.json": "settings.json"}
+
+class ReviewGuardPaths(unittest.TestCase):
+    """merge.GUARD_PATHS: the rule dirs of lint/stale_cites.py, then merge/ and githooks/, folder prefixes only. merge.GUARD_FILES: settings.json,
+    matched exactly. The rule dirs are read from stale_cites, so the guard follows the module and never a copy of its tuple."""
+
+    def test_the_entries_are_the_rule_dirs_then_merge_and_githooks(self):
+        self.assertEqual(review_fn(self, "GUARD_PATHS"), (*stale_cites.RULE_DIRS, "merge/", "githooks/"))
+
+    def test_the_file_entry_is_settings_json(self):
+        self.assertEqual(getattr(merge, "GUARD_FILES", None), ("settings.json",), "merge.GUARD_FILES must be ('settings.json',), matched exactly")
+
+    def test_the_rule_dirs_are_read_from_the_module(self):
+        # A copy of the tuple keeps the default. Here the module's tuple is swapped before merge loads, so only a read of it shows the swap.
+        code = ("import sys\n"
+                f"sys.path[:0] = [{HERE!r}, {os.path.join(os.path.dirname(HERE), 'lint')!r}]\n"
+                "import stale_cites\n"
+                "stale_cites.RULE_DIRS = ('zzz/',)\n"
+                "import merge\n"
+                "print(repr(getattr(merge, 'GUARD_PATHS', None)))\n")
+        r = subprocess.run([sys.executable, "-c", code], cwd=os.path.dirname(HERE), capture_output=True, text=True, timeout=300)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), repr(("zzz/", "merge/", "githooks/")), "merge.GUARD_PATHS does not read stale_cites.RULE_DIRS")
+
+class ReviewGuardHits(unittest.TestCase):
+    """merge.guard_hits(paths): the paths that start with a GUARD_PATHS entry, or equal a GUARD_FILES entry, sorted. A folder entry holds the
+    paths under it; a file entry holds the one path that is its whole name. A path that holds an entry's name below its own folder is no hit."""
+
+    def test_each_entry_has_an_example_and_each_example_is_a_hit(self):
+        guard_hits = review_fn(self, "guard_hits")
+        entries = (*review_fn(self, "GUARD_PATHS"), *getattr(merge, "GUARD_FILES", ()))
+        self.assertEqual(set(GUARD_EXAMPLES), set(entries), "GUARD_EXAMPLES must name every entry of GUARD_PATHS and GUARD_FILES")
+        for entry, path in GUARD_EXAMPLES.items():
+            with self.subTest(entry=entry):
+                self.assertEqual(guard_hits([path]), [path], f"{path} is not a hit under {entry}")
+
+    def test_a_githooks_file_is_a_hit(self):
+        self.assertEqual(review_fn(self, "guard_hits")(["githooks/pre-commit"]), ["githooks/pre-commit"])
+
+    def test_settings_json_at_the_root_is_a_hit(self):
+        self.assertEqual(review_fn(self, "guard_hits")(["settings.json"]), ["settings.json"])
+
+    def test_a_name_that_only_begins_with_settings_json_is_no_hit(self):
+        # GUARD_FILES matches the whole path, so a file that begins with settings.json is no hit
+        guard_hits = review_fn(self, "guard_hits")
+        for path in ("settings.json.bak", "settings.jsonc"):
+            with self.subTest(path=path):
+                self.assertEqual(guard_hits([path]), [], f"{path} is a hit, but GUARD_FILES matches settings.json exactly")
+
+    def test_a_folder_that_begins_with_a_guard_folder_name_is_no_hit(self):
+        # hooksfoo/ begins with hooks, but the folder entry is hooks/, with its slash
+        self.assertEqual(review_fn(self, "guard_hits")(["hooksfoo/x.py"]), [])
+
+    def test_a_markdown_file_under_hooks_is_a_hit(self):
+        self.assertEqual(review_fn(self, "guard_hits")(["hooks/README.md"]), ["hooks/README.md"])
+
+    def test_a_path_under_no_entry_is_no_hit_and_no_paths_is_empty(self):
+        # docs/hooks/ is not hooks/, merges.md is not merge/, lint.md is not lint/. An empty result is a clean diff.
+        guard_hits = review_fn(self, "guard_hits")
+        self.assertEqual(guard_hits(["README.md", "docs/hooks/notes.md", "merges.md", "lint.md"]), [])
+        self.assertEqual(guard_hits([]), [])
+
+    def test_hits_are_sorted_and_only_the_guard_paths_are_kept(self):
+        self.assertEqual(review_fn(self, "guard_hits")(["lint/b.py", "README.md", "hooks/a.py", "docs/x.md", "merge/m.py"]),
+                         ["hooks/a.py", "lint/b.py", "merge/m.py"])
+
+TEST_PATHS = ("hooks/test_guard.py", "merge/test_merge.py", "lint/test_stale_cites.py", "githooks/test_pre_commit.sh")
+
+class ReviewGuardTestPaths(unittest.TestCase):
+    """A test path is no guard change, and a diff of test paths alone holds no hit. hooks/guard.py is_test_rel is the one home of what a test
+    path is, and guard_hits calls it. A check named like a test, such as hooks/mutate_guard.py, is no test path, so it stays a hit."""
+
+    def test_each_test_path_is_no_hit_and_a_diff_of_them_holds_none(self):
+        guard_hits = review_fn(self, "guard_hits")
+        for path in TEST_PATHS:
+            with self.subTest(path=path):
+                self.assertTrue(hook_guard.is_test_rel(path), f"{path} is not a test path under hooks/guard.py is_test_rel")
+                self.assertEqual(guard_hits([path]), [], f"{path} is a guard hit, but a test path is no guard change")
+        self.assertEqual(guard_hits(list(TEST_PATHS)), [], "a diff of test paths alone holds a guard hit")
+
+    def test_a_check_named_like_a_test_is_still_a_hit(self):
+        # hooks/mutate_guard.py is a check, not a test. Beside a test path, it is the one hit left.
+        self.assertFalse(hook_guard.is_test_rel("hooks/mutate_guard.py"), "hooks/mutate_guard.py is a test path under is_test_rel, but a check is no test")
+        self.assertEqual(review_fn(self, "guard_hits")(["hooks/test_guard.py", "hooks/mutate_guard.py"]), ["hooks/mutate_guard.py"],
+                         "guard_hits counts the test path hooks/test_guard.py, or drops the check hooks/mutate_guard.py")
+
+class ReviewGuardKinds(unittest.TestCase):
+    """merge.kind_misfits(kind, files): the sorted paths that break the kind, over the (path, status, additions) triples of the diff. docs-only:
+    each path not ending in .md. delete-only: each path that adds lines (additions above 0), or is new (status added, renamed or copied). normal: none."""
+
+    def test_normal_owes_no_kind_check(self):
+        self.assertEqual(review_fn(self, "kind_misfits")("normal", [("hooks/a.py", "modified", 4), ("x.py", "removed", 0)]), [])
+
+    def test_docs_only_names_each_path_not_ending_in_md_sorted(self):
+        files = [("lint/x.py", "modified", 2), ("docs/a.md", "modified", 1), ("hooks/y.txt", "modified", 0), ("docs/b.md", "removed", 0)]
+        self.assertEqual(review_fn(self, "kind_misfits")("docs-only", files), ["hooks/y.txt", "lint/x.py"])
+
+    def test_delete_only_names_each_path_that_adds_or_is_new_sorted(self):
+        files = [("hooks/a.py", "removed", 0), ("README.md", "modified", 3), ("docs/moved.md", "renamed", 0), ("docs/old.md", "removed", 0),
+                 ("new.py", "added", 0), ("c.py", "copied", 0), ("m.py", "modified", 0)]
+        self.assertEqual(review_fn(self, "kind_misfits")("delete-only", files), ["README.md", "c.py", "docs/moved.md", "new.py"])
+
+    def test_a_modified_path_with_no_additions_is_a_delete_only_change(self):
+        # a file with only removed lines has status modified and adds nothing: a delete, not a misfit
+        self.assertEqual(review_fn(self, "kind_misfits")("delete-only", [("a.py", "modified", 0), ("b.py", "removed", 0)]), [])
+
+    def test_a_clean_diff_and_an_empty_one_name_nothing(self):
+        kind_misfits = review_fn(self, "kind_misfits")
+        self.assertEqual(kind_misfits("docs-only", [("docs/a.md", "modified", 1), ("docs/b.md", "added", 3)]), [])
+        self.assertEqual(kind_misfits("delete-only", [("docs/a.md", "removed", 0), ("docs/b.md", "removed", 0)]), [])
+        self.assertEqual(kind_misfits("docs-only", []), [])
+        self.assertEqual(kind_misfits("delete-only", []), [])
+
+class ReviewGuardEnv(ReviewEnv):
+    """The guard and kind cases' one home: the record's argv at the feature branch's head (the fake host reports it as live), and the refusal's shape."""
+
+    def review_argv(self, kind="normal", guard="no"):
+        rounds = () if kind == "docs-only" else ("--round", "1:reviewer:sonnet:PASS")  # a docs-only change owes no round
+        return ("7", "--review-record", "--head", self.head(), "--kind", kind, "--guard", guard, *rounds)
+
+    def assert_refused(self, rc, out, err, *paths, holds="Guard or check"):
+        """A refusal: rc 1, nothing printed on stdout, and stderr names each path and holds `holds`."""
+        self.assertEqual(rc, 1, f"a changed path was not refused ({holds}):\n" + out + err)
+        self.assertEqual(out, "", "a refused record was printed")
+        for path in paths:
+            self.assertIn(path, err)
+        self.assertIn(holds, err)
+
+class ReviewGuardRefusal(ReviewGuardEnv):
+    """`--review-record --guard no` refuses a pull request with a changed path under merge.GUARD_PATHS, and a kind refuses a diff that breaks it
+    (merge.kind_misfits). A clean diff prints the record as before, and --guard yes prints it with a guard hit. The fake host reports
+    (path, status, additions) triples, with additions 0 unless a case gives more."""
+
+    def test_guard_no_refuses_a_hit_under_each_entry(self):
+        for entry, path in GUARD_EXAMPLES.items():
+            with self.subTest(entry=entry):
+                self.host.changed = [(path, "modified", 0)]
+                self.assert_refused(*self.run_args(*self.review_argv()), path)
+
+    def test_a_hooks_markdown_file_refuses(self):
+        self.host.changed = [("hooks/README.md", "modified", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv()), "hooks/README.md")
+
+    def test_docs_only_on_a_guard_path_refuses(self):
+        # the guard path is markdown, so the docs-only kind holds and only the guard refuses
+        self.host.changed = [("docs/notes.md", "modified", 0), ("hooks/README.md", "modified", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "hooks/README.md")
+
+    def test_delete_only_on_a_guard_path_refuses(self):
+        self.host.changed = [("bin/merge", "removed", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv("delete-only")), "bin/merge")
+
+    def test_every_hit_path_is_named(self):
+        self.host.changed = [("hooks/a.py", "modified", 0), ("README.md", "modified", 0), ("lint/b.py", "modified", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv()), "hooks/a.py", "lint/b.py")
+
+    def test_guard_no_on_a_test_only_diff_under_hooks_prints_the_record(self):
+        self.host.changed = [("hooks/test_guard.py", "modified", 0)]
+        rc, out, err = self.run_args(*self.review_argv())
+        self.assertEqual(rc, 0, "a test-only diff was refused as a guard change:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
+
+    def test_a_mixed_diff_refuses_on_the_check_and_does_not_name_the_test_file(self):
+        self.host.changed = [("hooks/test_guard.py", "modified", 0), ("hooks/guard.py", "modified", 0)]
+        rc, out, err = self.run_args(*self.review_argv())
+        self.assert_refused(rc, out, err, "hooks/guard.py")
+        self.assertNotIn("hooks/test_guard.py", err, "the refusal names the test file hooks/test_guard.py, which is no guard change")
+
+    def test_guard_no_with_no_hit_prints_the_record_as_before(self):
+        rc, out, err = self.run_args(*self.review_argv())
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
+
+    def test_docs_only_with_no_hit_prints_the_record(self):
+        self.host.changed = [("docs/notes.md", "modified", 0)]
+        rc, out, err = self.run_args(*self.review_argv("docs-only"))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only")
+
+    def test_guard_yes_with_a_hit_still_prints_the_record(self):
+        self.host.changed = [("hooks/guard.py", "modified", 0)]
+        rc, out, err = self.run_args(*self.review_argv(guard="yes"))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "yes")
+
+    def test_guard_yes_with_no_hit_is_allowed(self):
+        rc, out, err = self.run_args(*self.review_argv(guard="yes"))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "yes")
+
+    def test_a_failed_files_read_exits_one_and_prints_no_record(self):
+        for guard in ("no", "yes"):
+            with self.subTest(guard=guard):
+                self.host.files_error = "reading pulls/7/files from GitHub failed: HTTP 500"
+                rc, out, err = self.run_args(*self.review_argv(guard=guard))
+                self.assertEqual(rc, 1, "a failed files read did not stop the record:\n" + out + err)
+                self.assertNotIn(REVIEW_MARKER, out)
+                self.assertIn("pulls/7/files", err)
+
+    def test_docs_only_with_a_py_path_refuses_on_kind(self):
+        self.host.changed = [("docs/tool.py", "modified", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "docs/tool.py", holds="Kind")
+
+    def test_docs_only_refusal_names_each_non_md_path(self):
+        self.host.changed = [("docs/a.md", "modified", 0), ("docs/b.py", "modified", 0), ("docs/c.txt", "modified", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "docs/b.py", "docs/c.txt", holds="Kind")
+
+    def test_delete_only_with_a_modified_path_that_adds_refuses_on_kind(self):
+        # the path is modified with 3 added lines: it adds something, so it is no delete-only change
+        self.host.changed = [("README.md", "modified", 3)]
+        self.assert_refused(*self.run_args(*self.review_argv("delete-only")), "README.md", holds="Kind")
+
+    def test_delete_only_with_a_renamed_path_refuses_on_kind(self):
+        # a rename gives its new path as renamed and its old path as removed; only the new path breaks delete-only
+        self.host.changed = [("docs/moved.md", "renamed", 0), ("docs/old.md", "removed", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv("delete-only")), "docs/moved.md", holds="Kind")
+
+    def test_a_kind_misfit_refuses_whatever_the_guard(self):
+        self.host.changed = [("README.md", "modified", 3)]
+        self.assert_refused(*self.run_args(*self.review_argv("delete-only", guard="yes")), "README.md", holds="Kind")
+
+    def test_a_clean_docs_only_diff_prints_the_record(self):
+        self.host.changed = [("docs/a.md", "modified", 1), ("docs/b.md", "added", 4)]
+        rc, out, err = self.run_args(*self.review_argv("docs-only"))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only")
+
+    def test_a_clean_delete_only_diff_prints_the_record(self):
+        self.host.changed = [("docs/a.md", "removed", 0), ("docs/b.md", "removed", 0)]
+        rc, out, err = self.run_args(*self.review_argv("delete-only"))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "delete-only")
+
+class ReviewGuardFiles(ReviewGuardEnv):
+    """The guard and the kind read the files through the real Host.pr_files, so a rename counts by both its names and every page of the list is
+    read. These cases run merge over PullsHost in count mode: its gh answers the REST routes that the real Host reads."""
+
+    def run_record(self, files, kind="normal", guard="no", files_error=None, changed=None):
+        host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, count_gh=True, files=files, files_error=files_error, changed_files=changed)
+        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", kind, "--guard", guard, "--round", "1:reviewer:sonnet:PASS",
+                             host=host)
+
+    def test_a_rename_out_of_hooks_refuses_by_its_old_name(self):
+        self.assert_refused(*self.run_record([pr_file("docs/moved.md", previous="hooks/moved.md", status="renamed")]), "hooks/moved.md")
+
+    def test_a_move_into_hooks_refuses(self):
+        self.assert_refused(*self.run_record([pr_file("hooks/new.py", previous="docs/old.py", status="renamed")]), "hooks/new.py")
+
+    def test_a_rename_inside_docs_passes(self):
+        rc, out, err = self.run_record([pr_file("docs/new.md", previous="docs/old.md", status="renamed")])
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
+
+    def test_a_removed_hook_refuses_as_delete_only(self):
+        self.assert_refused(*self.run_record([pr_file("hooks/old.py", status="removed")], kind="delete-only"), "hooks/old.py")
+
+    def test_a_delete_only_rename_refuses_on_kind_by_its_new_name(self):
+        # a rename with no added lines still moves a path to a new name: the new name breaks delete-only, the old one does not
+        self.assert_refused(*self.run_record([pr_file("docs/moved.md", previous="docs/old.md", status="renamed", additions=0)], kind="delete-only"),
+                            "docs/moved.md", holds="Kind")
+
+    def test_delete_only_with_a_modified_path_and_no_additions_prints_the_record(self):
+        # a file with only removed lines: status modified, 0 additions. It is a delete-only change, so the record prints
+        rc, out, err = self.run_record([pr_file("a.py", status="modified", additions=0)], kind="delete-only")
+        self.assertEqual(rc, 0, "a modified path with no additions was refused on kind delete-only:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "delete-only")
+
+    def test_delete_only_with_a_modified_path_that_adds_refuses_on_kind(self):
+        self.assert_refused(*self.run_record([pr_file("a.py", status="modified", additions=3)], kind="delete-only"), "a.py", holds="Kind")
+
+    def test_delete_only_with_an_added_path_refuses_on_kind(self):
+        self.assert_refused(*self.run_record([pr_file("new.py", status="added", additions=0)], kind="delete-only"), "new.py", holds="Kind")
+
+    def test_a_removed_path_with_no_additions_prints_as_delete_only(self):
+        rc, out, err = self.run_record([pr_file("old.py", status="removed", additions=0)], kind="delete-only")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "delete-only")
+
+    def test_a_docs_only_rename_of_md_files_prints_the_record(self):
+        rc, out, err = self.run_record([pr_file("docs/new.md", previous="docs/old.md", status="renamed")], kind="docs-only")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only")
+
+    def test_a_pr_with_no_files_prints_the_record(self):
+        rc, out, err = self.run_record([])
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
+
+    def test_a_hit_on_the_last_of_three_pages_refuses(self):
+        # 250 files: GitHub pages them 100 to a page, so the hit sits on the third page
+        files = [pr_file(f"docs/page-{i}.md") for i in range(249)] + [pr_file("hooks/last.py")]
+        self.assert_refused(*self.run_record(files), "hooks/last.py")
+
+    def test_a_failed_files_read_exits_one_and_prints_no_record(self):
+        rc, out, err = self.run_record([], files_error="gh: Resource not accessible by integration (HTTP 403)")
+        self.assertEqual(rc, 1, "a failed files read did not stop the record:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out)
+        self.assertIn("pulls/7/files", err)
+
+    def test_a_files_list_shorter_than_the_changed_count_refuses_the_record(self):
+        # the pull request says two files changed and its list holds one: the record would miss the other, so no record is printed
+        rc, out, err = self.run_record([pr_file("README.md")], changed=2)
+        self.assertEqual(rc, 1, "a short files list did not stop the record:\n" + out + err)
+        self.assertEqual(out, "", "a short files list printed a record")
+        self.assertIn("changed files", err)
+
+    def test_a_files_list_with_the_changed_count_prints_the_record(self):
+        rc, out, err = self.run_record([pr_file("README.md"), pr_file("docs/a.md")], changed=2)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
+
+class ReviewGuardHostFiles(unittest.TestCase):
+    """merge.Host.pr_files(n, changed) and Host.pr(n) over the real Host and a scripted gh. pr_files reads pulls/<n>/files page by page, one call per page of 100, as
+    (path, status, additions) triples: each filename with its status and the lines it adds, and for a rename also its previous_filename as
+    removed with 0 additions. The list must hold `changed` file entries, the pull request's changed_files count, or it is a Stop. GitHub caps
+    the list at 3000 entries. A failed read is a Stop."""
+
+    def host(self, files=None, files_error=None, changed_files=None):
+        return PullsHost([batch_pull(7, REVIEW_HEAD)], {}, count_gh=True, files=files, files_error=files_error, changed_files=changed_files)
+
+    def test_lists_each_filename_with_its_status_and_additions(self):
+        fn = pr_files_of(self, self.host([pr_file("hooks/a.py", additions=3), pr_file("README.md", additions=0)]))
+        self.assertEqual(sorted(fn(7, 2)), [("README.md", "modified", 0), ("hooks/a.py", "modified", 3)])
+
+    def test_an_entry_with_no_additions_key_counts_zero(self):
+        # the API entry may leave additions out: the path then counts as adding nothing
+        fn = pr_files_of(self, self.host([{"filename": "a.py", "status": "modified"}]))
+        self.assertEqual(fn(7, 1), [("a.py", "modified", 0)], "a file entry with no additions key must count 0 additions")
+
+    def test_a_rename_lists_its_new_path_and_its_old_path_as_removed(self):
+        # one rename is one changed file: the count is 1, and the two tuples are not two entries. The old path adds nothing.
+        fn = pr_files_of(self, self.host([pr_file("docs/moved.md", previous="hooks/moved.md", status="renamed", additions=2)]))
+        self.assertEqual(sorted(fn(7, 1)), [("docs/moved.md", "renamed", 2), ("hooks/moved.md", "removed", 0)])
+
+    def test_no_files_is_an_empty_list(self):
+        self.assertEqual(pr_files_of(self, self.host([]))(7, 0), [])
+
+    def test_every_page_is_read(self):
+        # 250 files: GitHub pages them 100 to a page, so the list takes three reads, one per page. A file on the middle page adds 5 lines, and
+        # the rename on the last page adds 2, so additions are read from every page. The rename's old path adds nothing.
+        names = [f"docs/p{i}.md" for i in range(249)]
+        added = {"docs/p150.md": 5}
+        host = self.host([pr_file(n, additions=added.get(n, 0)) for n in names]
+                         + [pr_file("docs/moved.md", previous="hooks/moved.md", status="renamed", additions=2)])
+        want = sorted([(n, "modified", added.get(n, 0)) for n in names] + [("docs/moved.md", "renamed", 2), ("hooks/moved.md", "removed", 0)])
+        self.assertEqual(sorted(pr_files_of(self, host)(7, 250)), want, "every filename and every previous_filename, from every page")
+        self.assertEqual(host.gh_calls, ["pulls/7/files"] * 3, "one read per page of 100: 250 files are three pages")
+
+    def test_a_short_list_is_a_stop_that_names_the_changed_files(self):
+        fn = pr_files_of(self, self.host([pr_file("hooks/a.py")]))
+        with self.assertRaises(merge.Stop) as cm:
+            fn(7, 2)
+        self.assertIn("changed files", str(cm.exception))
+
+    def test_a_rename_is_one_entry_so_a_count_of_two_is_short(self):
+        # the rename gives two tuples but one file entry: a count of two names a file the list does not hold, however many tuples it gives
+        fn = pr_files_of(self, self.host([pr_file("docs/moved.md", previous="hooks/moved.md", status="renamed")]))
+        with self.assertRaises(merge.Stop) as cm:
+            fn(7, 2)
+        self.assertIn("changed files", str(cm.exception))
+
+    def test_a_list_capped_at_githubs_3000_entries_is_a_stop_under_a_larger_count(self):
+        # GitHub stops the list at 3000 entries. A pull request that changed 3001 files cannot be read in full, so the record stops
+        fn = pr_files_of(self, self.host([pr_file(f"docs/f{i}.md") for i in range(3000)]))
+        with self.assertRaises(merge.Stop) as cm:
+            fn(7, 3001)
+        self.assertIn("changed files", str(cm.exception))
+
+    def test_a_full_list_of_3000_passes_at_its_count(self):
+        fn = pr_files_of(self, self.host([pr_file(f"docs/f{i}.md") for i in range(3000)]))
+        self.assertEqual(len(fn(7, 3000)), 3000)
+
+    def test_the_pr_read_carries_its_changed_files_count(self):
+        # the count is the read's own field: 5 here, though the list holds 2 entries, so Host.pr does not count the list
+        info = self.host([pr_file("a.md"), pr_file("b.md")], changed_files=5).pr(7)
+        self.assertEqual(info.get("changed_files"), 5, "merge.Host.pr must return changed_files, the count the pull request read gives")
+
+    def test_a_failed_read_is_a_stop(self):
+        fn = pr_files_of(self, self.host(files_error="gh: Resource not accessible by integration (HTTP 403)"))
+        with self.assertRaises(merge.Stop):
+            fn(7, 1)
+
+class ReviewGuardCost(ReviewEnv):
+    """`--review-record` without --fix-check makes exactly two gh reads, the pull request and then its files list. They are counted at the one seam
+    every call goes through (PullsHost in count mode), as ReviewedList counts its reads."""
+
+    def test_the_record_makes_two_gh_reads(self):
+        # a PR of 100 files is one page, so its whole list is still one read: two reads for any PR of up to 100 files
+        hundred = [pr_file(f"docs/f{i}.md") for i in range(100)]
+        for guard, files in (("no", None), ("yes", None), ("no", hundred)):
+            with self.subTest(guard=guard, files=len(files) if files else 1):
+                host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, count_gh=True, files=files)
+                rc, out, err = self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", guard,
+                                             "--round", "1:reviewer:sonnet:PASS", host=host)
+                self.assertEqual(rc, 0, out + err)  # the record printed, so the reads ran to the end
+                self.assertEqual(parse_text(self, posted_body(self, out))["guard"], guard)
+                self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files"], "the record's gh reads, in order")
 
 
 # `merge --reviewed --root DIR [--root DIR ...]`: one call reads every repo the batch runner owns. The seam is `hosts`: main takes a mapping
@@ -15579,7 +16042,7 @@ class BatchFreeze(CloudSession):
         return {line.split()[1] for line in out.splitlines() if len(line.split()) == 2}
 
     def body(self, n):
-        return self.host.prs[n]["body"]
+        return self.host.pulls[n]["body"]
 
     def snapshot(self, n):
         """What a refused run must leave alone: origin's batch/nightly head, and the body of pull request n."""
@@ -15776,12 +16239,12 @@ class BatchFreeze(CloudSession):
         self.record_pushes()
         for draft in (True, False):  # the draft comes first: its red is the one the old build's ready call makes
             with self.subTest(draft=draft):
-                self.host.prs[pr]["draft"], self.host.readies = draft, []
+                self.host.pulls[pr]["draft"], self.host.readies = draft, []
                 with self.no_lint_or_ready_check():
                     rc, out = self.run_batch("--batch-build", "nightly", "102", "101")
                 self.assertEqual(self.host.readies, [], "the same set again called Host.ready on a %s batch PR: a rerun leaves it as it is: %s"
                                  % ("draft" if draft else "ready", out))
-                self.assertEqual(self.host.prs[pr]["draft"], draft, "the same set again changed the draft flag: %s" % out)
+                self.assertEqual(self.host.pulls[pr]["draft"], draft, "the same set again changed the draft flag: %s" % out)
                 self.assertEqual(rc, 0, "the same set again was refused: %s" % out)
                 self.assertEqual(len(self.host.created), 1, "the same set again opened a second pull request: %s" % out)
                 self.assert_untouched(pr, snap, out)
@@ -15795,7 +16258,7 @@ class BatchFreeze(CloudSession):
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
         self.assertEqual(self.host.readies, [], "the build on a draft called Host.ready: only --ready marks a batch ready: %s" % out)
-        self.assertTrue(self.host.prs[pr]["draft"], "the build on a draft marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.pulls[pr]["draft"], "the build on a draft marked the batch PR ready: %s" % out)
         self.assertEqual(len(self.host.created), 1, "the build on a draft opened a second pull request: %s" % out)
         self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
 
@@ -15810,7 +16273,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.readies, [pr], "--ready did not ask the host to mark the batch PR ready once: %s" % out)
         self.assertIn(self.host.ready_refuse, out, "the refused ready's reason is not printed: %s" % out)
         self.assertEqual(rc, 1, "a refused ready did not exit 1: %s" % out)
-        self.assertTrue(self.host.prs[pr]["draft"], "the batch PR went ready though the host refused it")
+        self.assertTrue(self.host.pulls[pr]["draft"], "the batch PR went ready though the host refused it")
 
     # --ready: the one lint of the batch head, then the mark ready. A refused or failed lint never reaches Host.ready.
 
@@ -15824,7 +16287,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.lint_calls(mocks), [("batch/nightly", "main", "")],
                          "--ready did not lint the batch head once, and no other lint: %s" % out)
         self.assertEqual(self.host.readies, [pr], "--ready did not call Host.ready once after a passing lint: %s" % out)
-        self.assertFalse(self.host.prs[pr]["draft"], "the batch PR is still a draft after --ready: %s" % out)
+        self.assertFalse(self.host.pulls[pr]["draft"], "the batch PR is still a draft after --ready: %s" % out)
         self.assertEqual(rc, 0, "--ready exited %s: %s" % (rc, out))
         self.assertEqual(self.pushes(), [], "--ready pushed: it lints and marks ready, and pushes nothing")
         self.assertFalse(self.lock_ref(), "--ready took the merge lock")
@@ -15837,7 +16300,7 @@ class BatchFreeze(CloudSession):
             rc, out = self.run_batch("--batch-build", "nightly", "--ready")
         self.assertEqual(len(self.lint_calls(mocks)), 1, "--ready did not lint the batch head once: %s" % out)
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.prs[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
         self.assertIn("FAILs", out, "the FAIL of the batch head is not printed: %s" % out)
         self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
 
@@ -15849,7 +16312,7 @@ class BatchFreeze(CloudSession):
             rc, out = self.run_batch("--batch-build", "nightly", "--ready")
         self.assertEqual(len(self.lint_calls(mocks)), 1, "--ready did not lint the batch head once: %s" % out)
         self.assertEqual(self.host.readies, [], "an unknown lint of the batch head called Host.ready with no --lint-unknown-ok: %s" % out)
-        self.assertTrue(self.host.prs[pr]["draft"], "an unknown lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.pulls[pr]["draft"], "an unknown lint marked the batch PR ready: %s" % out)
         self.assertIn("is unknown, not a pass", out, "the unknown lint is not refused by name: %s" % out)
         self.assertEqual(rc, 1, "an unknown lint without --lint-unknown-ok exited %s, not 1: %s" % (rc, out))
 
@@ -15863,7 +16326,7 @@ class BatchFreeze(CloudSession):
                          "--ready did not pass --lint-unknown-ok to the one lint of the batch head: %s" % out)
         self.assertIn("tool missing on this box", out, "the reason of --lint-unknown-ok is not logged: %s" % out)
         self.assertEqual(self.host.readies, [pr], "--ready with --lint-unknown-ok did not mark the batch PR ready once: %s" % out)
-        self.assertFalse(self.host.prs[pr]["draft"], "the batch PR is still a draft after --ready: %s" % out)
+        self.assertFalse(self.host.pulls[pr]["draft"], "the batch PR is still a draft after --ready: %s" % out)
         self.assertEqual(rc, 0, "--ready with --lint-unknown-ok exited %s: %s" % (rc, out))
 
     def test_ready_on_a_ready_batch_says_already_ready_and_lints_and_calls_nothing(self):
@@ -15915,7 +16378,7 @@ class BatchFreeze(CloudSession):
         finally:
             self.host.branch = lane_branch
         self.assertEqual(refusal, "", "setup: the merge of batch/x's pull request into main was refused: %s" % refusal)
-        self.host.prs[x]["state"] = "MERGED"
+        self.host.pulls[x]["state"] = "MERGED"
         self.assertTrue(self.ancestor(self.head("batch/x"), "origin/main"), "setup: batch/x is not contained in main after its pull request merged")
         lanes_before = [line for line in block_lines(self.body(nightly)) or [] if line.startswith("Lane: ")]
         with self.no_lint_or_ready_check(ready_state="pass") as mocks:
@@ -15981,7 +16444,7 @@ class BatchFreeze(CloudSession):
         self.assertIn("#102", out, "the lint FAIL names lanes/102.txt but does not name #102, the one frozen lane whose diff touches it: %s" % out)
         self.assertEqual(len(self.lint_calls(mocks)), 1, "--ready did not lint the batch head once: %s" % out)
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.prs[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
         self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
 
     def test_ready_lint_fail_names_both_lanes_that_touch_the_failing_path(self):
@@ -15995,7 +16458,7 @@ class BatchFreeze(CloudSession):
         for n in (101, 102):
             self.assertIn(f"#{n}", out, "the lint FAIL names lanes/shared.txt, which #101 and #102 both touch, but does not name #%d: %s" % (n, out))
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.prs[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
         self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
 
     def test_ready_lint_fail_on_a_path_no_lane_touches_says_the_blame_is_unknown_and_prints_no_drop_command(self):
@@ -16011,7 +16474,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.drop_pr_numbers(out, "nightly"), [],
                          "the lint FAIL names docs/unrelated.md, which no frozen lane touches, yet prints a drop command: a guess: %s" % out)
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.prs[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
         self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
 
     def test_ready_lint_fail_does_not_blame_a_lane_that_only_a_passing_step_prints(self):
@@ -16028,7 +16491,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.drop_pr_numbers(out, "nightly"), [],
                          "a passing step printed lanes/102.txt, which #102 touches, yet the run prints a drop command for #102: a whole-log scan, not the failing step: %s" % out)
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.prs[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
         self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
 
     def test_ready_lint_fail_with_a_log_that_is_not_there_says_the_blame_is_unknown_and_prints_no_drop_command(self):
@@ -16043,7 +16506,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.drop_pr_numbers(out, "nightly"), [],
                          "the lint FAIL's log is not there, yet the run prints a drop command: a guess: %s" % out)
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.prs[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
         self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
 
     def ready_lint_fail_naming_lane_102(self, variant, **fail):
@@ -16060,7 +16523,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.drop_pr_numbers(out, "nightly"), ["102"], "%s: the lint FAIL names lanes/102.txt, which #102 touches, but prints no "
                          "`merge --batch-drop nightly 102`: %s" % (variant, out))
         self.assertEqual(self.host.readies, [], "%s: a FAILing lint of the batch head called Host.ready: %s" % (variant, out))
-        self.assertTrue(self.host.prs[pr]["draft"], "%s: a FAILing lint marked the batch PR ready: %s" % (variant, out))
+        self.assertTrue(self.host.pulls[pr]["draft"], "%s: a FAILing lint marked the batch PR ready: %s" % (variant, out))
         self.assertEqual(rc, 1, "%s: a FAILing lint exited %s, not 1: %s" % (variant, rc, out))
 
     def test_ready_lint_fail_with_a_runner_failure_marker_after_its_rc_still_blames_the_lane_its_step_touches(self):
@@ -16087,7 +16550,7 @@ class BatchFreeze(CloudSession):
         self.assertNotIn("102", self.drop_pr_numbers(out, "nightly"),
                          "a path only the passing step printed names #102, and the run prints its drop command: %s" % out)
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.prs[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
         self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
 
     def test_a_blamed_lane_dropped_leaves_a_draft_that_needs_ready_again_and_the_next_ready_lints_once(self):
@@ -16104,7 +16567,7 @@ class BatchFreeze(CloudSession):
             rc, out = self.run_batch("--batch-drop", "nightly", "102")
         self.assertEqual(rc, 0, "the drop the lint named exited %s: %s" % (rc, out))
         self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the drop did not take lane #102 off batch/nightly: %s" % out)
-        self.assertTrue(self.host.prs[pr]["draft"], "the drop of a draft batch changed its draft flag: %s" % out)
+        self.assertTrue(self.host.pulls[pr]["draft"], "the drop of a draft batch changed its draft flag: %s" % out)
         self.assertEqual(self.host.to_drafts, [], "the drop of a draft batch called to_draft: %s" % out)
         self.assertIn("merge --batch-build nightly --ready", out, "the drop does not say the batch needs --ready again: %s" % out)
         self.assertEqual(self.host.readies, [], "the drop called Host.ready: %s" % out)
@@ -16113,7 +16576,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.lint_calls(mocks), [("batch/nightly", "main", "")],
                          "the --ready after the drop did not lint the batch head once, and no other lint: %s" % out)
         self.assertEqual(self.host.readies, [pr], "the --ready after the drop did not mark the batch PR ready once: %s" % out)
-        self.assertFalse(self.host.prs[pr]["draft"], "the batch PR is still a draft after the --ready that passed: %s" % out)
+        self.assertFalse(self.host.pulls[pr]["draft"], "the batch PR is still a draft after the --ready that passed: %s" % out)
         self.assertEqual(rc, 0, "the --ready after the drop exited %s: %s" % (rc, out))
 
     # Drop: one lane off the branch, the block rewritten, nothing else touched.
@@ -16174,7 +16637,7 @@ class BatchFreeze(CloudSession):
         for n in (101, 102):
             self.lane(n)
         pr = self.frozen_batch("nightly", [101, 102])
-        self.host.prs[pr]["body"] = "Notes kept by hand.\n\n```\n" + self.body(pr) + "```\n"
+        self.host.pulls[pr]["body"] = "Notes kept by hand.\n\n```\n" + self.body(pr) + "```\n"
         snap = self.snapshot(pr)
         self.record_pushes()
         rc, out = self.run_batch("--batch-drop", "nightly", "102")
@@ -16185,7 +16648,7 @@ class BatchFreeze(CloudSession):
         for n in (101, 102, 103):
             self.lane(n)
         pr = self.frozen_batch("nightly", [101, 102, 103])
-        self.host.prs[pr]["body"] = "Notes kept by hand.\n\n" + self.body(pr) + "\nFooter kept.\n"
+        self.host.pulls[pr]["body"] = "Notes kept by hand.\n\n" + self.body(pr) + "\nFooter kept.\n"
         before = self.body(pr)
         rc, out = self.run_batch("--batch-drop", "nightly", "102")
         self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the drop did not take lane #102 off batch/nightly: %s" % out)
@@ -16198,7 +16661,7 @@ class BatchFreeze(CloudSession):
         for n in (101, 102):
             self.lane(n)
         pr = self.frozen_batch("nightly", [101, 102])
-        self.host.prs[pr]["body"] = self.body(pr) + self.body(pr)
+        self.host.pulls[pr]["body"] = self.body(pr) + self.body(pr)
         snap = self.snapshot(pr)
         self.record_pushes()
         for argv in (("--batch-build", "nightly", "101", "102"), ("--batch-drop", "nightly", "102")):
@@ -16221,7 +16684,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.to_drafts, [pr], "a drop of a ready batch did not return it to draft once: %s" % out)
         self.assertEqual(seen, [before], "the return to draft came after batch/nightly was pushed: %s" % out)
         self.assertIn("--batch-build nightly --ready", out, "the drop does not say the batch needs --ready again: %s" % out)
-        self.assertTrue(self.host.prs[pr]["draft"], "the drop did not leave the batch PR a draft: %s" % out)
+        self.assertTrue(self.host.pulls[pr]["draft"], "the drop did not leave the batch PR a draft: %s" % out)
         self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the drop did not take lane #102 off batch/nightly: %s" % out)
         self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
         self.assertEqual(self.host.readies, [], "the drop called Host.ready: %s" % out)
@@ -16241,7 +16704,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(block_lines(self.body(pr)), freeze_inner("nightly", [(101, self.heads[101]), (103, self.heads[103])], dropped=[102]),
                          "the frozen block does not drop #102 after a refused return to draft: %s" % out)
         self.assertEqual(self.host.to_drafts, [pr], "the drop did not try to return the ready batch to draft: %s" % out)
-        self.assertFalse(self.host.prs[pr]["draft"], "a refused return to draft changed the draft flag: %s" % out)
+        self.assertFalse(self.host.pulls[pr]["draft"], "a refused return to draft changed the draft flag: %s" % out)
 
     def test_a_drop_of_a_ready_batch_whose_return_to_draft_is_refused_still_says_it_needs_ready_again(self):
         for n in (101, 102, 103):
@@ -16251,7 +16714,7 @@ class BatchFreeze(CloudSession):
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-drop", "nightly", "102")
         self.assertEqual(self.host.to_drafts, [pr], "setup: the drop did not try to return the ready batch to draft: %s" % out)
-        self.assertFalse(self.host.prs[pr]["draft"], "setup: the refused return to draft changed the draft flag: %s" % out)
+        self.assertFalse(self.host.pulls[pr]["draft"], "setup: the refused return to draft changed the draft flag: %s" % out)
         self.assertIn("merge --batch-build nightly --ready", out,
                       "the drop of a ready batch whose return to draft was refused does not say the batch needs --ready again: %s" % out)
         self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
@@ -16264,7 +16727,7 @@ class BatchFreeze(CloudSession):
             rc, out = self.run_batch("--batch-drop", "nightly", "102")
         self.assertIn("--batch-build nightly --ready", out, "the drop of a draft does not say the batch needs --ready again: %s" % out)
         self.assertEqual(self.host.to_drafts, [], "the drop of a draft batch called to_draft: %s" % out)
-        self.assertTrue(self.host.prs[pr]["draft"], "the drop of a draft batch changed the draft flag: %s" % out)
+        self.assertTrue(self.host.pulls[pr]["draft"], "the drop of a draft batch changed the draft flag: %s" % out)
         self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the drop did not take lane #102 off batch/nightly: %s" % out)
         self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
 
@@ -16277,7 +16740,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(sorted(self.host.to_drafts), sorted([x, nightly]),
                          "the drop of batch/x did not return batch/x and its ready on-batch to draft, once each: %s" % out)
         self.assertIn((nightly, old_nightly), seen, "batch/nightly was rebuilt before it went to draft: %s" % out)
-        self.assertTrue(self.host.prs[x]["draft"] and self.host.prs[nightly]["draft"], "the drop left batch/x or batch/nightly ready: %s" % out)
+        self.assertTrue(self.host.pulls[x]["draft"] and self.host.pulls[nightly]["draft"], "the drop left batch/x or batch/nightly ready: %s" % out)
         self.assertTrue(self.ancestor(self.head("batch/x"), self.head("batch/nightly")),
                         "batch/nightly was not rebuilt on the new head of batch/x: %s" % out)
         self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
@@ -16292,7 +16755,7 @@ class BatchFreeze(CloudSession):
                       "the refused return to draft does not warn: %s" % out)
         self.assertTrue(self.ancestor(self.head("batch/x"), self.head("batch/nightly")),
                         "a refused return to draft blocked the rebuild of batch/nightly: %s" % out)
-        self.assertFalse(self.host.prs[nightly]["draft"], "a refused return to draft changed batch/nightly's draft flag: %s" % out)
+        self.assertFalse(self.host.pulls[nightly]["draft"], "a refused return to draft changed batch/nightly's draft flag: %s" % out)
         self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
 
     def test_a_restack_of_a_ready_on_batch_whose_return_to_draft_is_refused_still_says_it_needs_ready_again(self):
@@ -16301,7 +16764,7 @@ class BatchFreeze(CloudSession):
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-drop", "x", "102")
         self.assertTrue(self.ancestor(self.head("batch/x"), self.head("batch/nightly")), "setup: the drop did not restack batch/nightly on batch/x: %s" % out)
-        self.assertFalse(self.host.prs[nightly]["draft"], "setup: the refused return to draft changed batch/nightly's draft flag: %s" % out)
+        self.assertFalse(self.host.pulls[nightly]["draft"], "setup: the refused return to draft changed batch/nightly's draft flag: %s" % out)
         self.assertIn("merge --batch-build nightly --ready", out,
                       "the restack of a ready batch/nightly whose return to draft was refused does not say it needs --ready again: %s" % out)
         self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
@@ -16396,7 +16859,7 @@ class BatchFreeze(CloudSession):
     def test_a_lane_pr_that_is_not_open_is_refused_before_any_push(self):
         for n in (101, 102):
             self.lane(n)
-        self.host.prs[102]["state"] = "MERGED"
+        self.host.pulls[102]["state"] = "MERGED"
         self.record_pushes()
         rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
         self.assertEqual(rc, 1, "a merged lane PR was not refused with exit 1: %s" % out)
@@ -16520,7 +16983,7 @@ class BatchFreeze(CloudSession):
     def test_a_lane_whose_pr_targets_another_base_is_refused_and_nothing_moves(self):
         for n in (101, 102):
             self.lane(n)
-        self.host.prs[101]["base"] = "release"  # lane #101's pull request targets release, and the batch targets main
+        self.host.pulls[101]["base"] = "release"  # lane #101's pull request targets release, and the batch targets main
         self.record_pushes()
         rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
         self.assertEqual(rc, 1, "a lane whose pull request targets another base was not refused with exit 1: %s" % out)
@@ -16635,8 +17098,8 @@ class BatchFreeze(CloudSession):
             self.lane(n)
         self.frozen_batch("nightly", [101, 102, 103])
         self.lane(990)  # an ordinary lane pull request, not a batch: its body quotes the begin marker on a line of its own
-        self.host.prs[990]["body"] = "A note that quotes the marker:\n" + BATCH_BEGIN + "\nand goes on.\n"
-        self.assertIsNone(block_raw(self.host.prs[990]["body"]), "setup: the quoted marker is read as a whole block")
+        self.host.pulls[990]["body"] = "A note that quotes the marker:\n" + BATCH_BEGIN + "\nand goes on.\n"
+        self.assertIsNone(block_raw(self.host.pulls[990]["body"]), "setup: the quoted marker is read as a whole block")
         rc, out = self.run_batch("--batch-drop", "nightly", "102")
         self.assertEqual(rc, 0, "a good drop exited %s because an unrelated pull request quotes a lone begin marker: %s" % (rc, out))
         self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the drop did not take lane #102 off batch/nightly: %s" % out)
@@ -16646,7 +17109,7 @@ class BatchFreeze(CloudSession):
             self.lane(n)
         self.frozen_batch("nightly", [101, 102])
         late = self.frozen_batch("late", [104], on="batch/nightly")
-        self.host.prs[late]["body"] = "\n".join([BATCH_BEGIN, "Batch: late", "Lane: #104 not-a-sha", BATCH_END]) + "\n"
+        self.host.pulls[late]["body"] = "\n".join([BATCH_BEGIN, "Batch: late", "Lane: #104 not-a-sha", BATCH_END]) + "\n"
         rc, out = self.run_batch("--batch-drop", "nightly", "102")
         self.assertIn(f"#{late}", out, "the drop did not name batch/late, whose frozen block it cannot read: %s" % out)
         self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the drop did not take lane #102 off batch/nightly: %s" % out)
@@ -16816,7 +17279,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.to_drafts, [pr], "the heal of a drifted ready batch did not return it to draft once: %s" % out)
         self.assertEqual(seen, [drifted], "the return to draft did not come before the heal's push to batch/nightly: %s" % out)
         self.assertTrue(self.on_origin(self.heads[102], "batch/nightly"), "the heal did not put lane #102 back on batch/nightly: %s" % out)
-        self.assertTrue(self.host.prs[pr]["draft"], "the heal left the batch PR ready: %s" % out)
+        self.assertTrue(self.host.pulls[pr]["draft"], "the heal left the batch PR ready: %s" % out)
         self.assertIn("merge --batch-build nightly --ready", out, "the heal does not say the batch needs --ready again: %s" % out)
         self.assertEqual(self.host.readies, [], "the heal called Host.ready: %s" % out)
         self.assertEqual(rc, 0, "the heal exited %s: %s" % (rc, out))
@@ -16826,7 +17289,7 @@ class BatchFreeze(CloudSession):
     def test_a_drop_rerun_that_heals_a_ready_batch_returns_it_to_draft_once_before_its_push(self):
         self.host.to_draft_refuse = "no mark-draft route is open to this session"
         pr = self.killed_drop((101, 102, 103), 102)  # the lanes are made here; the return to draft was refused, then the push was killed: still ready
-        self.assertFalse(self.host.prs[pr]["draft"], "setup: the killed drop left the batch a draft, so the rerun would not heal a ready batch")
+        self.assertFalse(self.host.pulls[pr]["draft"], "setup: the killed drop left the batch a draft, so the rerun would not heal a ready batch")
         self.host.to_draft_refuse = None
         drifted = self.head("batch/nightly")
         seen, before = [], len(self.host.to_drafts)
@@ -16836,7 +17299,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.to_drafts[before:], [pr], "the rerun drop that heals a ready batch did not return it to draft once: %s" % out)
         self.assertEqual(seen, [drifted], "the return to draft did not come before the heal's push to batch/nightly: %s" % out)
         self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the rerun drop left dropped lane #102 on batch/nightly: %s" % out)
-        self.assertTrue(self.host.prs[pr]["draft"], "the rerun drop left the batch PR ready: %s" % out)
+        self.assertTrue(self.host.pulls[pr]["draft"], "the rerun drop left the batch PR ready: %s" % out)
         self.assertEqual(rc, 0, "the rerun drop exited %s: %s" % (rc, out))
 
     def test_a_refused_return_to_draft_on_a_heal_warns_and_the_heal_still_pushes(self):
@@ -16850,7 +17313,7 @@ class BatchFreeze(CloudSession):
         self.assertIn("could not return to draft: no mark-draft route is open to this session; the push restarts CI", out,
                       "the refused return to draft on a heal does not warn, with its reason: %s" % out)
         self.assertTrue(self.on_origin(self.heads[102], "batch/nightly"), "a refused return to draft blocked the heal of batch/nightly: %s" % out)
-        self.assertFalse(self.host.prs[pr]["draft"], "a refused return to draft changed the batch PR's draft flag: %s" % out)
+        self.assertFalse(self.host.pulls[pr]["draft"], "a refused return to draft changed the batch PR's draft flag: %s" % out)
         self.assertEqual(rc, 0, "the heal with a refused return to draft exited %s, not 0: %s" % (rc, out))
 
     def test_a_refused_return_to_draft_on_a_heal_of_a_ready_batch_still_says_it_needs_ready_again(self):
@@ -16862,7 +17325,7 @@ class BatchFreeze(CloudSession):
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
         self.assertEqual(self.host.to_drafts, [pr], "setup: the heal did not try to return the ready batch to draft: %s" % out)
-        self.assertFalse(self.host.prs[pr]["draft"], "setup: the refused return to draft changed the batch PR's draft flag: %s" % out)
+        self.assertFalse(self.host.pulls[pr]["draft"], "setup: the refused return to draft changed the batch PR's draft flag: %s" % out)
         self.assertIn("merge --batch-build nightly --ready", out,
                       "the heal of a ready batch whose return to draft was refused does not say the batch needs --ready again: %s" % out)
         self.assertEqual(rc, 0, "the heal exited %s: %s" % (rc, out))
@@ -16876,7 +17339,7 @@ class BatchFreeze(CloudSession):
             rc, out = self.run_batch("--batch-build", "nightly", "102", "101")
         self.assertEqual(self.pushes(), [], "the same-set rerun pushed batch/nightly: %s" % out)
         self.assertEqual(self.host.to_drafts, [], "a rerun that pushes nothing called to_draft: %s" % out)
-        self.assertFalse(self.host.prs[pr]["draft"], "the same-set rerun changed the batch PR's draft flag: %s" % out)
+        self.assertFalse(self.host.pulls[pr]["draft"], "the same-set rerun changed the batch PR's draft flag: %s" % out)
         self.assertEqual(rc, 0, "the same-set rerun exited %s: %s" % (rc, out))
 
     # Green control: the fixtures and the push recorder work on main, where no batch code exists.
@@ -16896,12 +17359,12 @@ class BatchFreeze(CloudSession):
     def test_green_control_the_draft_fixtures_hold_and_to_draft_flips_the_flag(self):
         self.lane(101)
         pr = self.frozen_batch("nightly", [101], draft=True)
-        self.assertTrue(self.host.prs[pr]["draft"], "control: frozen_batch(draft=True) is not a draft")
+        self.assertTrue(self.host.pulls[pr]["draft"], "control: frozen_batch(draft=True) is not a draft")
         self.assertTrue(self.host.created[-1]["draft"], "control: create_pr(draft=True) did not record the draft flag")
         self.assertEqual(self.host.ready(pr), (True, ""), "control: ready() did not succeed")
-        self.assertFalse(self.host.prs[pr]["draft"], "control: ready() did not clear the draft flag")
+        self.assertFalse(self.host.pulls[pr]["draft"], "control: ready() did not clear the draft flag")
         self.assertEqual(self.host.to_draft(pr), (True, ""), "control: to_draft() did not succeed")
-        self.assertTrue(self.host.prs[pr]["draft"], "control: to_draft() did not set the draft flag")
+        self.assertTrue(self.host.pulls[pr]["draft"], "control: to_draft() did not set the draft flag")
         self.assertEqual(self.host.to_drafts, [pr], "control: to_draft() did not record its call")
 
 
