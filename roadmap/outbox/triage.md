@@ -142,3 +142,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - written-times-says-bash (same source and decision): the "Written times" bullet says Bash, but SHELL_TOOLS also judges PowerShell.
 - fix-check-model-wording-stale (#2342 round 3, via the coordinator 19:27 CST Nov 8): agent-model-cap.md:93 and debate-model-tiers.md:26 keep older wording about fix-check models.
 - fix-check-cites-unpinned (same source): no check pins the five doc cites of the literal "Fix check".
+- export-false-collections-doc (#2360 round 1 reviewer, via lane artifact-pages-other-account 19:33 CST Nov 8): layout.py docstring at :264 says `export: false` takes no collections, but :295-301 accepts them.
+- collections-page-accepted (same source): `collections: ["page"]` passes layout.py (:298) and export_page.py would export into the page folder (:507), while `--rebuild --collections` refuses `page` (:584).
