@@ -85,15 +85,17 @@ STREET_WORDS = ("Street", "St", "Avenue", "Ave", "Road", "Rd", "Drive", "Dr", "L
                 "Highway", "Hwy")
 STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND"
                "|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY")
-# The user part of a URL credential holds no quote, bracket or `|`. The password holds any character but `@`, `/`, `?`,
-# `#` and blanks: a real password may hold a lone `)`, `'`, `}` or `||`.
-URL_USER = r"[^/?#\s@:\"'`()\[\]{}|]+"
+# The user part of a URL credential holds no quote, bracket, paren or `|`, so minified code cannot start a match. A whole
+# `{name}` is the one exception: a templated user (`{user}`, `${USER}`) is still a user. The password holds any character
+# but `@`, `/`, `?`, `#` and blanks: a real password may hold a lone `)`, `}`, `+` or `||`.
+URL_USER = r"(?:[^/?#\s@:\"'`()\[\]{}|]|\{\w+\})+"
 URL_PASSWORD = r"[^/?#\s@]+"
-# A password with no code character: a literal. The `@` after it is a credential, whatever follows, a quoted or templated
-# host included (`"postgres://u:pw@" + host`, `u:pw@{db_host}`).
-URL_PLAIN_PASSWORD = r"[^/?#\s@\"'`+()\[\]{}|]+"
-# What may follow the `@` of a password that holds a code character: a bracketed IPv6 host (`[::1]`), or anything but a
-# quote, bracket or `|`, which is code.
+# A password with no quote or backtick is a literal, even with a `+`, `|`, bracket or paren in it. The `@` after it is a
+# credential, whatever follows, a quoted or templated host included (`"postgres://u:pw@" + host`, `u:pw@{db_host}`).
+# Two string literals joined (`"http://h:"+port+"@"`) always leave a quote inside the password.
+URL_PLAIN_PASSWORD = r"[^/?#\s@\"'`]+"
+# What may follow the `@` of a password that holds a quote: a bracketed IPv6 host (`[::1]`), or anything but a quote,
+# bracket or `|`, which is code.
 URL_HOST_START = r"(?:(?=\[[0-9A-Fa-f.]*:)|(?![\"'`()\[\]{}|]))"
 # Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
 # from starting inside a longer word ("risk-" and "btn-sk-" are not "sk-").
@@ -116,8 +118,8 @@ SECRET_SHAPES = (
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
     # `scheme://user:password@host`, on any host: a version pin after the `@` is blanked, so an IP host is caught here.
     # The user part holds no quote, bracket or `|`: minified code runs `"https://a"})];x||y:z@` together. The password
-    # may hold them. A password with a code character (a quote, `+`, a bracket) is code when a quote, bracket or `|`
-    # follows the `@` unless an IPv6 host opens there: `"http://h:"+port+"@"`. A plain literal password always refuses.
+    # may hold them. A password with a quote is code when a quote, bracket or `|` follows the `@`, unless an IPv6 host
+    # opens there: `"http://h:"+port+"@"`. A password with no quote is a literal and always refuses.
     ("url-credentials", re.compile(
         r"://" + URL_USER + r":(?:" + URL_PLAIN_PASSWORD + r"@|" + URL_PASSWORD + r"@" + URL_HOST_START + r")")),
     # The value is captured in a lookahead, so a match ends at the separator and a later password word on the same line
