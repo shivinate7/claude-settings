@@ -15714,6 +15714,111 @@ class BatchFreeze(CloudSession):
                          "the drop rebuilt batch/nightly on main's live tip, not on the base recorded at build: %s" % out)
         self.assertTrue(self.ancestor(recorded, "origin/batch/nightly"), "the drop left batch/nightly off the base recorded at build: %s" % out)
 
+    # A stacked lane whose base lane moved, a kill between a drop's body write and its push, a repair of a stacked batch after its
+    # restack failed, and a fork pull request among the open ones.
+
+    def killed_drop(self, numbers, number):
+        """A frozen batch of `numbers` whose --batch-drop of `number` was killed after its body write: the branch keeps the lane and the body
+        lists it dropped, the state a kill leaves. -> the batch's pull request number. The kill is not a Stop, so no handler in the run catches it."""
+        for n in numbers:
+            self.lane(n)
+        pr = self.frozen_batch("nightly", numbers)
+
+        class Killed(BaseException):
+            pass
+        with unittest.mock.patch.object(merge, "push_branch", side_effect=Killed()), self.assertRaises(Killed):
+            self.run_merge("--batch-drop", "nightly", str(number))
+        held, listed = self.lanes_on_branch_and_listed(pr, numbers)
+        self.assertEqual((held, listed), (set(numbers), set(numbers) - {number}), "setup: the kill did not leave batch/nightly whole with the body shrunk")
+        return pr
+
+    def test_a_stacked_lane_is_refused_when_its_base_lane_gained_a_commit_after_it_was_stacked(self):
+        self.lane(101)
+        self.lane(102, on=101)  # stacked on #101's first commit
+        self.advance(101)  # #101 gets a second commit, which #102 does not hold
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "102")
+        self.assertEqual(rc, 1, "a lane holding an old commit of open lane #101, which the request leaves out, was not refused with exit 1: %s" % out)
+        self.assertIn("#101", out, "the refusal does not name #101, whose commit the lane holds: %s" % out)
+        self.assertEqual(self.host.created, [], "the refused build opened a pull request: %s" % out)
+        self.assertEqual(self.head("batch/nightly"), "", "the refused build pushed batch/nightly: %s" % out)
+        self.assertEqual(self.pushes(), [], "the refused build pushed: %s" % out)
+
+    def test_stacked_lanes_requested_with_their_base_lane_after_it_gained_a_commit_are_allowed(self):
+        self.lane(101)
+        self.lane(102, on=101)
+        self.advance(101)
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 0, "stacked lanes requested with their base lane, which has a second commit, were refused: %s" % out)
+        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
+        self.assertTrue(self.on_origin(self.heads[101], "batch/nightly") and self.on_origin(self.heads[102], "batch/nightly"),
+                        "batch/nightly does not hold both stacked lanes: %s" % out)
+
+    def test_a_rerun_build_of_the_shrunk_set_after_a_kill_rebuilds_the_branch_and_exits_0(self):
+        pr = self.killed_drop((101, 102, 103), 102)
+        with self.no_lint_or_ready_check() as mocks:
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "103")
+        self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the rerun build of the shrunk set left dropped lane #102 on batch/nightly: %s" % out)
+        self.assertEqual(rc, 0, "the rerun build of the shrunk set exited %s: %s" % (rc, out))
+        held, listed = self.lanes_on_branch_and_listed(pr, (101, 102, 103))
+        self.assertEqual(held, listed, "after the rerun build batch/nightly holds lanes %s but its body lists %s: %s" % (sorted(held), sorted(listed), out))
+        for name, mock in mocks.items():
+            self.assertFalse(mock.called, "the rerun build called merge.%s: a batch build runs no lane lint and no ready check" % name)
+
+    def test_a_rerun_drop_of_the_same_lane_after_a_kill_leaves_the_branch_and_the_body_agreeing(self):
+        pr = self.killed_drop((101, 102, 103), 102)
+        rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        held, listed = self.lanes_on_branch_and_listed(pr, (101, 102, 103))
+        self.assertEqual(held, listed, "after a rerun drop of #102 batch/nightly holds lanes %s but its body lists %s (the run exited %s): %s"
+                         % (sorted(held), sorted(listed), rc, out))
+
+    def test_a_repair_of_a_stacked_batch_after_a_failed_restack_does_not_keep_the_dropped_lane(self):
+        for n in (101, 102, 104):
+            self.lane(n)
+        self.lane(103, on=101)  # stacked on #101: batch/by holds #101's commit through #103
+        self.frozen_batch("bx", [101, 102])
+        by_pr = self.frozen_batch("by", [103, 104], on="batch/bx")
+        with unittest.mock.patch.object(merge, "restack", return_value=1):  # the restack of batch/by fails after the drop of #101
+            self.run_batch("--batch-drop", "bx", "101")
+        self.assertFalse(self.on_origin(self.heads[101], "batch/bx"), "setup: the drop of #101 left it on batch/bx")
+        self.assertTrue(self.on_origin(self.heads[101], "batch/by"), "setup: the failed restack left batch/by without #101's commit")
+        by_before = self.head("batch/by")
+        rc, out = self.run_batch("--batch-build", "by", "103", "104", "--on", "batch/bx")
+        if rc == 0:
+            self.assertFalse(self.on_origin(self.heads[101], "batch/by"),
+                             "the repair of batch/by exited 0 and batch/by still holds dropped #101 through stacked lane #103: %s" % out)
+            self.assertNotIn(f"Lane: #103 {self.heads[103]}", block_lines(self.body(by_pr)) or [],
+                             "the repair of batch/by exited 0 and its block still lists dependent #103: %s" % out)
+        else:
+            self.assertTrue("#101" in out or "#103" in out, "the refused repair names neither #101 nor its dependent #103: %s" % out)
+            self.assertEqual(self.head("batch/by"), by_before, "the refused repair moved batch/by: %s" % out)
+
+    def test_a_fork_pr_whose_head_branch_is_not_on_origin_does_not_stop_an_unrelated_build(self):
+        self.lane(101)
+        self.host.add_pr(555, "contrib-branch-not-on-origin")  # a fork's pull request: its branch is not on origin
+        rc, out = self.run_batch("--batch-build", "nightly", "101")
+        self.assertEqual(rc, 0, "a fork pull request whose branch is not on origin stopped the build of #101: %s" % out)
+        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
+        self.assertTrue(self.on_origin(self.heads[101], "batch/nightly"), "batch/nightly does not hold lane #101: %s" % out)
+
+    def test_a_fork_pr_on_its_own_main_does_not_blame_an_unrelated_lane(self):
+        self.lane(101)
+        self.host.add_pr(555, "main")  # a fork's pull request from its own main: the branch is read by name, so it resolves to origin's main
+        rc, out = self.run_batch("--batch-build", "nightly", "101")
+        self.assertNotIn("#101 contains the head of #555", out, "the build blamed #101 for a head of fork pull request #555: %s" % out)
+        self.assertEqual(rc, 0, "a fork pull request on its own main refused the build of #101: %s" % out)
+        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
+
+    def test_a_stacked_refusal_names_its_base_pr_while_a_fork_pr_is_open(self):
+        self.lane(101)
+        self.lane(102, on=101)
+        self.host.add_pr(555, "contrib-branch-not-on-origin")
+        rc, out = self.run_batch("--batch-build", "nightly", "102")
+        self.assertEqual(rc, 1, "a lane stacked on an open lane without it was not refused with exit 1: %s" % out)
+        self.assertIn("#101", out, "the refusal of #102 does not name its base lane #101: %s" % out)
+        self.assertEqual(self.host.created, [], "the refused build opened a pull request: %s" % out)
+        self.assertEqual(self.head("batch/nightly"), "", "the refused build pushed batch/nightly: %s" % out)
+
     # Green control: the fixtures and the push recorder work on main, where no batch code exists.
 
     def test_green_control_fixtures_hold_the_frozen_batch_and_the_recorder_logs_a_push(self):
