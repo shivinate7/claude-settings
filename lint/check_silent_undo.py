@@ -19,7 +19,8 @@ Four reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               whitespace-only change, a reorder or a pure delete) is a finding when the removed line is absent from
               every base and one parent holds it and the other does not. A line the lane touched, or only the lane
               added, is quiet. A pure delete is the lost-line read. A Drops-lines trailer does not excuse a hand
-              edit: restore main's lines in the merge, and change them in a later lane commit. Only a generated
+              edit: restore main's lines verbatim in the merge, or change them in a later lane commit (its trailer lifts the
+              reversal read). A hand finding survives a later UNKNOWN, in .problems. Only a generated
               page (below) does. Cost, per merge commit: that one git call. Only a merge with such a hunk adds a
               rev-list, a merge-base, a diff-tree per base and parent (renames), one `git log` per parent and
               file (branch_only_lines), and one `git cat-file --batch` process (class Blobs), closed at the end.
@@ -52,7 +53,7 @@ are the diff of old name to new name, as they would be in place. A file below th
 
 Blank lines and whitespace never count. The escape is a trailer in a commit message, one per
 path: `Drops-lines: <path> -- <reason>`. The PR body is read too: the same line in it
-excuses its path, except for a hand edit. A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
+excuses its path, except for a hand edit, and only when that commit changes the path (a merge: against any parent). A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
 `Retire-run: <slug> -- <run URL>` line in the PR body's last paragraph that the debt-close check
 (check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. It needs a
 run reader (run_state); with none, or a read that fails, the finding stays. Only a whole delete is excused, not a rename out of
@@ -82,9 +83,8 @@ except ImportError:  # a hook loads this file; a missing helper never stops that
 TRAILER = "Drops-lines"
 ZERO = "0" * 40
 WORD = re.compile(r"[A-Za-z0-9]")
-HAND = "hand-edited"  # the word of the rewrite finding (fmt_hand); fix_note finds it again by this constant
-HAND_FIX = ("A %s finding is not lifted by a %s trailer: restore main's lines in the merge, and change them in a later lane commit."
-            % (HAND, TRAILER))
+HAND = "hand-edited"  # the word of the rewrite finding (fmt_hand); is_hand finds it again by this constant
+HAND_HEAD = re.compile(r": merge [0-9a-f]+ %s \d+ line" % HAND)
 
 
 class Unknown(Exception):
@@ -159,11 +159,23 @@ def last_paragraph(pr_body):
 
 def allowed(cwd, rng, pr_body=""):
     """{path: reason} from `Drops-lines: <path> -- <reason>` trailers on any commit of the range
-    (a rev or a..b), and from such lines in pr_body (its last_paragraph). A line with no reason excuses nothing."""
-    _, out = git(cwd, "log", "--format=%(trailers:key=" + TRAILER + ",valueonly,unfold)", rng)
+    (a rev or a..b), and from such lines in pr_body (its last_paragraph). A line with no reason excuses nothing.
+    A commit's trailer excuses only a path that commit changes (a merge: its diff against any parent), so an empty
+    commit excuses nothing. One `git log -m --name-only` pass reads the trailers and the paths together."""
+    _, out = git(cwd, "log", "-m", "--no-renames", "--name-only", "-z", "--format=%x01%H%x02%(trailers:key=" + TRAILER + ",valueonly,unfold)%x03", rng)
+    res, touched, said = {}, {}, {}
+    for rec in out.split("\x01")[1:]:
+        sha, _, rest = rec.partition("\x02")
+        trailers, _, names = rest.partition("\x03")  # after the format: NUL, a newline, then NUL-ended paths; -m repeats a merge per parent
+        said[sha] = trailers
+        touched.setdefault(sha, set()).update(n.lstrip("\n") for n in names.split("\0") if n.strip("\n"))
+    for sha, trailers in said.items():
+        for line in trailers.splitlines():
+            m = re.match(r"\s*(\S.*?)\s+--\s+(\S.*?)\s*$", line)
+            if m and m.group(1) in touched[sha]:
+                res[m.group(1)] = m.group(2)
     body = re.findall(r"^" + TRAILER + r":(.*)$", last_paragraph(pr_body), re.I | re.M | re.ASCII)
-    res = {}
-    for line in out.splitlines() + body:
+    for line in body:
         m = re.match(r"\s*(\S.*?)\s+--\s+(\S.*?)\s*$", line)
         if m:
             res[m.group(1)] = m.group(2)
@@ -694,9 +706,23 @@ def fmt_hand(m, path, p, lines):
     return "%s: merge %s %s %d line(s) that parent %s added, outside a conflict%s" % (path, m[:9], HAND, len(lines), p[:9], shown)
 
 
-def fix_note(problems):
-    """The sentence a refusal adds when a finding is a hand edit: the trailer that excuses a lost line does not lift it."""
-    return " " + HAND_FIX if any(HAND in p for p in problems) else ""
+def is_hand(problem):
+    """True for a hand-edit finding. Only its first line is read: a lost line's text may hold the word."""
+    return bool(HAND_HEAD.search(problem.split("\n", 1)[0]))
+
+
+def fix_text(problems, cap=False):
+    """The remedy sentence for a refusal. A lost line (or any other finding) keeps the trailer remedy. A hand edit gets the
+    other one: no trailer on the merge lifts it, so main's lines go back verbatim in the merge, and a change on purpose is a
+    later lane commit, whose trailer lifts the reversal read."""
+    parts = []
+    if not all(is_hand(p) for p in problems):
+        parts.append("put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
+    if any(is_hand(p) for p in problems):
+        parts.append("For a %s finding, restore main's lines verbatim in the merge. To change one of main's lines on purpose, "
+                     "make a later lane commit with `%s: <path> -- <reason>`; a trailer on the merge does not lift it." % (HAND, TRAILER))
+    text = " ".join(parts)
+    return text[:1].upper() + text[1:] if cap else text
 
 
 # --------------------------------------------------------------------- revived
@@ -844,41 +870,46 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     refs = [upstream] + [r for r in ((default,) if default else ("origin/HEAD", "origin/main", "main")) if r != upstream and git(
         cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
     items, hand, octopus = [], [], []
-    for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
-        try:
-            items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
-            hand += [(x[0], fmt_hand(m, *x)) for x in hand_edits(cwd, m, refs)]
-        except Octopus as e:  # the other reads still run: their findings must not hide behind this one
-            octopus.append(str(e))
-    items += revived_notes(cwd, upstream, h)
-    rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
-    if rc == 0:
-        old, new = upstream, out.split()[0]
-    else:  # a conflict leaves no result to read: the branch's own diff off the merge base
-        old, new = git(cwd, "merge-base", upstream, h)[1].strip(), h
-    files = raw_files(cwd, old, new)
-    base = git(cwd, "merge-base", upstream, h)[1].strip()
-    own = git(cwd, "rev-list", "--first-parent", "%s..%s" % (upstream, h))[1].split()
-    if own:  # the fork point is where the branch's own first-parent line left main, even after it merged main back in
-        rc, fork = git(cwd, "merge-base", upstream, own[-1] + "^", ok=(0, 1))
-        base = fork.strip() if rc == 0 and fork.strip() else base
-    n = int(git(cwd, "rev-list", "--count", "--first-parent", "%s..%s" % (base, upstream))[1]) + 1  # +1: the fork commit
-    earlier = first_parent(cwd, upstream, n)
-    items += [(x[0], fmt_rev(*x)) for x in reversals(cwd, old, new, files, earlier)]
-    page, same = generated_page(cwd, h, {p for p, _ in items if p not in ok} | {p for p, _ in hand}, upstream, tool)
-    if same:
-        ok = dict(ok, **{page: "the page is the generator's output for the head"})
-    open_paths = {p for p, _ in items if p not in ok}
-    if open_paths:
-        ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
-    bad, notes = judge(items, ok)
-    bad += [t for p, t in hand if not (same and p == page)]  # no Drops-lines trailer excuses a hand edit; only a generated page does
-    notes += misplaced(cwd, "%s..%s" % (upstream, h)) if bad else []
-    if octopus:
-        e = Octopus("; ".join(octopus))
-        e.problems, e.notes = bad, notes
-        raise e
-    return bad, notes
+    try:
+        for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
+            try:
+                items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
+                hand += [(x[0], fmt_hand(m, *x)) for x in hand_edits(cwd, m, refs)]
+            except Octopus as e:  # the other reads still run: their findings must not hide behind this one
+                octopus.append(str(e))
+        items += revived_notes(cwd, upstream, h)
+        rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
+        if rc == 0:
+            old, new = upstream, out.split()[0]
+        else:  # a conflict leaves no result to read: the branch's own diff off the merge base
+            old, new = git(cwd, "merge-base", upstream, h)[1].strip(), h
+        files = raw_files(cwd, old, new)
+        base = git(cwd, "merge-base", upstream, h)[1].strip()
+        own = git(cwd, "rev-list", "--first-parent", "%s..%s" % (upstream, h))[1].split()
+        if own:  # the fork point is where the branch's own first-parent line left main, even after it merged main back in
+            rc, fork = git(cwd, "merge-base", upstream, own[-1] + "^", ok=(0, 1))
+            base = fork.strip() if rc == 0 and fork.strip() else base
+        n = int(git(cwd, "rev-list", "--count", "--first-parent", "%s..%s" % (base, upstream))[1]) + 1  # +1: the fork commit
+        earlier = first_parent(cwd, upstream, n)
+        items += [(x[0], fmt_rev(*x)) for x in reversals(cwd, old, new, files, earlier)]
+        page, same = generated_page(cwd, h, {p for p, _ in items if p not in ok} | {p for p, _ in hand}, upstream, tool)
+        if same:
+            ok = dict(ok, **{page: "the page is the generator's output for the head"})
+        open_paths = {p for p, _ in items if p not in ok}
+        if open_paths:
+            ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
+        bad, notes = judge(items, ok)
+        bad += [t for p, t in hand if not (same and p == page)]  # no Drops-lines trailer excuses a hand edit; only a generated page does
+        notes += misplaced(cwd, "%s..%s" % (upstream, h)) if bad else []
+        if octopus:
+            e = Octopus("; ".join(octopus))
+            e.problems, e.notes = bad, notes
+            raise e
+        return bad, notes
+    except Unknown as e:  # a hand finding already made rides on the exception, as an octopus merge's findings do: a later unreadable read never hides it
+        if not e.problems and hand:
+            e.problems = [t for _, t in hand]
+        raise
 
 
 def history(cwd, rev, window):
@@ -932,7 +963,7 @@ def main(argv):
         for p in e.problems:
             say("silent-undo: FAIL: " + p)
         if e.problems:
-            say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message.%s" % (TRAILER, fix_note(e.problems)))
+            say("silent-undo: " + fix_text(e.problems))
         say("silent-undo: UNKNOWN: %s" % e)
         return 1 if (e.problems or a.strict or os.environ.get("CI")) else 0
     for n in notes:
@@ -940,7 +971,7 @@ def main(argv):
     for p in problems:
         say("silent-undo: FAIL: " + p)
     if problems:
-        say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message.%s" % (TRAILER, fix_note(problems)))
+        say("silent-undo: " + fix_text(problems))
     return 1 if problems else 0
 
 

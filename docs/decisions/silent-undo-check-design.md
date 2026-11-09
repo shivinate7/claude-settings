@@ -10,6 +10,8 @@
   that the change removes, even in a hunk that also edits a neighbour. It catches `git revert` of a merged
   PR, a stale copy, and a rebase that took its own side when the lost work is the rebase-base commit or
   later. The branch check has no time bound and no commit-count floor.
+  A later lane commit that changes one of main's lines on purpose carries `Drops-lines: <path> -- <reason>`; the
+  trailer on that non-merge lane commit lifts this read. The read itself is unchanged.
 - **Lost line.** A merge commit in the branch loses a line one parent added since the merge base. It
   catches a conflict taken "ours" and a hand edit of a merge. A line main only gained is main's. A line a
   commit added on the branch alone is the branch's. A merge of three or more parents is not read, and the
@@ -24,7 +26,12 @@
   commit upstream holds its adder. A line the lane touched, or only the lane added, is quiet. A whitespace-only
   change, a reorder and a pure delete are quiet; a pure delete is the lost-line read. **A `Drops-lines` trailer
   does not lift it**, because the trailer excuses a path by whatever reason it gives, and a reworded line is
-  not a lost one. The way out is to restore main's lines in the merge and change them in a later lane commit.
+  not a lost one. The way out: restore main's lines verbatim in the merge. To change one of main's lines on
+  purpose, make a later lane commit with `Drops-lines: <path> -- <reason>`; that trailer, on a non-merge lane
+  commit, lifts the reversal read and never the hand finding on the merge. A refusal that holds only hand
+  findings names this way out and no trailer remedy; one with a lost line keeps the trailer remedy as well.
+  A hand finding made before a later read raises UNKNOWN rides on the exception, so the merge tool refuses it
+  as dropped and its reason flag cannot lift it, as with an octopus merge's findings.
   Only a generated page (the records page) is excused. Cost: that one git call per merge commit; a merge with
   such a hunk adds a rev-list, a merge-base, renames reads and one `git cat-file --batch` read of its files. No
   process stays running and no file is written. History mode runs it too, with no refs, as the lost-line read does.
@@ -35,7 +42,9 @@
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
-nothing. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
+nothing. A commit's trailer excuses only a path that commit changes (a merge: its diff against any parent), so a
+trailer on an empty commit excuses nothing; a PR-body line has no commit and is read as before. Cost: one
+`git log -m --name-only` pass over the range, with no process kept and no file written. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
 reason. No switch turns the check off.
 
 A deleted debt file has a second escape: a `Retire-run: <slug> -- <run URL>` in the PR body's last paragraph
