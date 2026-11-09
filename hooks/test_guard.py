@@ -11127,6 +11127,13 @@ AGENT_FIXTURES = {
                                      [(AGENT_OWN_ID, role_target_call("t1", STEP_TOPIC_TAGS))]),
     "brief-agent-lanes-both": (role_target_call("t1", STEP_TOPIC_TAGS),
                                [(AGENT_OWN_ID, role_target_call("t1", STEP_COLORS_TAGS))]),
+    # An untagged record in the agent's file, and a set_session_tags call on the target in the main transcript, which holds
+    # no record of it. The tags may have changed since that record, so the brief is refused as stale.
+    "brief-agent-untagged-main-tags": (role_tag_call("t2", session=ROLE_OTHER),
+                                       [(AGENT_OWN_ID, role_target_call("t1", ARCH_UNTAGGED_TAGS))]),
+    # The same order in one file: an untagged read of the target, then a set_session_tags call on it. No agent file.
+    "brief-agent-untagged-then-tags": (role_target_call("t1", ARCH_UNTAGGED_TAGS) + role_tag_call("t2", session=ROLE_OTHER),
+                                       [(AGENT_OWN_ID, AGENT_QUIET)]),
     "trust-agent-untagged": (AGENT_QUIET, [(AGENT_OWN_ID, role_call("g1", ["cs-repo:o/r"]))]),
     "trust-agent-lane": (role_call("g1", ["cs-repo:o/r"]), [(AGENT_OWN_ID, role_call("g1", LANE_TAGS))]),
 }
@@ -11352,6 +11359,15 @@ step_refuse("a brief for topic colors to a lane whose record is only in the agen
 step_refuse("a brief for topic icons, after set_session_tags in the agent's own transcript, is refused as stale",
             role_path("brief-agent-stale"), "Lane brief: icon-b. Topic: icons.", agent_id=AGENT_OWN_ID,
             carries=("set_session_tags call on the target followed",))
+# Refused as stale: the agent's record is untagged, and a set_session_tags call on the target in the main transcript may
+# have tagged it a lane since. The untagged record must not pass on its own tags.
+step_refuse("a brief for topic B, over an untagged agent record and set_session_tags in the main transcript, is refused as stale",
+            role_path("brief-agent-untagged-main-tags"), "Lane brief: x. Topic: B.", agent_id=AGENT_OWN_ID,
+            carries=("set_session_tags call on the target followed",), lacks=("holds no get_session",))
+# The same order in one file: the untagged read, then the set_session_tags call, both in the main transcript.
+step_refuse("a brief for topic B, after an untagged read then set_session_tags in the main transcript, is refused as stale",
+            role_path("brief-agent-untagged-then-tags"), "Lane brief: x. Topic: B.", agent_id=AGENT_OWN_ID,
+            carries=("set_session_tags call on the target followed",), lacks=("holds no get_session",))
 step_refuse("a lane in the agent's own record decides though the main record says triage: a brief for topic colors is refused",
             role_path("brief-agent-lane-over-triage"), "Lane brief: icon-b. Topic: colors.", agent_id=AGENT_OWN_ID,
             carries=("names a topic the lane does not hold",))
