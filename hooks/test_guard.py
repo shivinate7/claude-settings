@@ -12177,8 +12177,12 @@ def graphql_block(text):
     return '"""%s"""' % text
 
 
-def gh_graphql(query, route="graphql"):
-    """The `gh api` call that sends `query` as its -f value to `route` (the GraphQL endpoint by default), quoted for the shell."""
+def gh_graphql(query, route="graphql", double=False):
+    """The `gh api` call that sends `query` as its -f value to `route` (the GraphQL endpoint by default), quoted for the shell: in
+    single quotes, or with `double`, in a double-quoted word that escapes its backslash, quote, dollar sign and backtick."""
+    if double:
+        escaped = query.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+        return 'gh api %s -f query="%s"' % (route, escaped)
     return "gh api %s -f %s" % (route, shlex.quote("query=" + query))
 
 
@@ -12356,6 +12360,21 @@ bash_post("review-record: a marked addComment read into a query by a shell subst
 bash_post("review-record: a marked addComment fed to -F query=@- by a heredoc is refused, gh api graphql -F query=@-",
           "gh api graphql -F query=@- <<'EOF'\n%s\nEOF\n" % graphql_add(graphql_block(review_record())), "deny", rule=REVIEW_RULE,
           carries=("node id",))
+
+# THE DOUBLE-QUOTED QUERY. Decision pr-review-record, the GraphQL text: a query in a double-quoted shell word has its inner quotes escaped
+# with a backslash, and the shell hands gh the plain query. The guard judges the query gh receives, so each form below is judged as its
+# single-quoted twin is. The control names a comment that holds no record, and it is allowed.
+old_bash("review-record: an unmarked updateIssueComment over a stamped record is refused, double-quoted query with escaped quotes",
+         r'gh api graphql -f query="mutation { updateIssueComment(input: {id: \"%s\", body: \"W\"}) { issueComment { id } } }"' % GRAPHQL_NODE,
+         "deny", rule=REVIEW_RULE)
+bash_post("review-record: a marked addComment in a double-quoted query is refused",
+          gh_graphql(graphql_add(graphql_block(review_record())), double=True), "deny", rule=REVIEW_RULE, carries=("node id",))
+old_bash("review-record: an unmarked updateIssueComment whose node id is a field is refused over a stamped record, double-quoted query",
+         r'gh api graphql -f query="mutation(\$id: ID!, \$body: String!) { updateIssueComment(input: {id: \$id, body: \$body}) { issueComment { id } } }" -f id=%s -f body=W'
+         % GRAPHQL_NODE, "deny", rule=REVIEW_RULE)
+old_bash("review-record: an unmarked updateIssueComment over a comment that holds no record is allowed, double-quoted query with escaped quotes",
+         r'gh api graphql -f query="mutation { updateIssueComment(input: {id: \"%s\", body: \"W\"}) { issueComment { id } } }"' % ("IC_kwDO%d" % REVIEW_COMMENT),
+         "allow")
 
 # An update whose node id is the `id` of an input object: `updateIssueComment(input:$input)`, with `-F input[id]=` naming the node. The guard
 # reads the node a field names, as it reads a literal id: one read, and the stamped record that node holds is refused.
