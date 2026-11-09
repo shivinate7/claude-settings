@@ -636,16 +636,17 @@ def _copy_reads(raw, predicate, cwd):
     return set(operands)
 
 
-def _dest_values(word, cwd):
+def _dest_values(word, cwd, unquoted=False):
     """The paths the DEST word of a copy can name, else None when they cannot be told. A word with no `$`,
     backtick, glob or brace names itself. A word with a quote mark and a live glob (`_DEST_NOT_GLOB`) names its
     own text and each match on disk (`_written_sources`), as a loop variable whose item is that glob holds one
-    match per run. A glob that matches more than the caps allow, an unquoted glob, a quoted `*` (text), and
-    any other word with an unsafe character, give None."""
+    match per run. `unquoted` reads a glob with no quote mark the same way (`cp x test_*`): only
+    `_copy_written_hit` asks for it, since the other callers leave such a DEST a root. A glob that matches more
+    than the caps allow, a quoted `*` (text), and any other word with an unsafe character, give None."""
     target = _copy_target(word)
     if not _CP_DEST_UNSAFE.search(target):
         return [target]
-    if _DEST_NOT_GLOB.search(word) or not _has_quote(word) or not _glob_pattern(word)[1]:
+    if _DEST_NOT_GLOB.search(word) or not (unquoted or _has_quote(word)) or not _glob_pattern(word)[1]:
         return None
     found, capped = _written_sources(word, cwd)
     return None if capped else [target, *found]
@@ -817,20 +818,22 @@ def _written_sources(word, cwd):
 def _copy_written_hit(raw, cwd, predicate, fed, filters, made=frozenset()) -> str:
     """The path a `cp` segment writes that `predicate(path, cwd)` accepts, else ''. The sources are the
     words with their braces and globs expanded against `cwd`. DEST is a folder when it ends in a slash,
-    is an existing folder, is a folder `made` holds (absolute folders an earlier `mkdir` of the same command makes), is `-t`'s word, is
-    fed, or there is more than one source: the copy then writes
+    is an existing folder, is a folder `made` holds (absolute folders an earlier `mkdir` of the same command
+    makes), is `-t`'s word, or there is more than one source. It is also a folder when the copy is fed, DEST is
+    no file that exists and a source is no file that exists: a fed source may be a folder that holds many
+    files, or a name that a find lists. The copy then writes
     `DEST/<basename of each source>`, so a test-named source copied into any folder writes a test there.
     With `--parents` DEST is always a folder and the copy writes `DEST/<each source as named>`.
     Otherwise it writes DEST itself. A source folder is walked (`cp -r SRC DEST/` writes
     `DEST/<SRC name>/<path under SRC>` for each file) as far as the caps allow; a fed source that is a folder is a
     find root (`_fed_segments`): it is walked, as `filters` narrows it, and each file under it is judged
-    as `DEST/<its name>`. A DEST that holds a variable or an unquoted glob is not judged (it stays a root, which
-    fails closed). A quoted glob DEST is judged as each path `_dest_values` lists."""
+    as `DEST/<its name>`. A DEST that holds a variable is not judged (it stays a root, which fails closed). A
+    glob DEST, quoted or not, is judged as its own text and each path `_dest_values` lists."""
     parts = _copy_parts(raw, predicate, cwd)
     if parts is None:
         return ""
     operands, at = parts
-    dests = _dest_values(raw[at], cwd)
+    dests = _dest_values(raw[at], cwd, True)
     if not operands or not _copy_target(raw[at]) or dests is None:
         return ""
     sources, capped = [], False
@@ -841,8 +844,10 @@ def _copy_written_hit(raw, cwd, predicate, fed, filters, made=frozenset()) -> st
     flagged = _glued_cp_target(raw[at]) is not None or at > 0 and _CP_TARGET.fullmatch(_unquoted(raw[at - 1]))
     parents = _cp_keeps_parents(raw)
     for dest in dests:
-        into = bool(fed or flagged or parents or dest.endswith(("/", "\\")) or len(sources) > 1
-                    or os.path.normpath(_expanded(dest, cwd)) in made or os.path.isdir(_expanded(dest, cwd)))
+        into = bool(flagged or parents or dest.endswith(("/", "\\")) or len(sources) > 1
+                    or os.path.normpath(_expanded(dest, cwd)) in made or os.path.isdir(_expanded(dest, cwd))
+                    or fed and not os.path.isfile(_expanded(dest, cwd)) and not all(
+                        os.path.isfile(_expanded(path, cwd)) for _word, path in sources))
         if capped and _may_hold_a_test(dest, cwd, predicate):
             return _unquoted(raw[operands[0]]) + _TOO_LARGE_NOTE
         for word, source in sources:
@@ -1251,15 +1256,14 @@ _COUNT_FLAGS = frozenset(("--count", "--ignore-case", "--invert-match", "--word-
                           "--extended-regexp", "--fixed-strings"))
 
 
-def _prints_text(words) -> bool:
-    """True when the segment prints the content of its files or a bare count, so its roots are no paths it
-    prints: `cat`, or a `grep -c` with one file and no flag that adds the file's name or searches a folder."""
+def _prints_a_file_count(words) -> bool:
+    """True when the segment prints a bare count of one file's lines, so its root is no path it prints: a
+    `grep -c` with one file and no flag that adds the file's name or searches a folder. A `cat` is not one: it
+    prints the file's content, whose words may be paths."""
     index = resolve_command(tuple(words))
     if index is None:
         return False
     name, args = _name(words[index]), words[index + 1:]
-    if name == "cat":
-        return True
     flags = [word for word in args if word.startswith("-") and len(word) > 1 and word != "--"]
     return name in ("grep", "egrep", "fgrep") and len(_roots(words)) == 1 and bool(flags) and all(
         word in _COUNT_FLAGS if word.startswith("--") else set(word[1:]) <= _COUNT_FLAG_LETTERS
@@ -1268,8 +1272,9 @@ def _prints_text(words) -> bool:
 
 def _text_roots(text: str) -> list:
     """The roots of every pipeline of a command text, in order, each once. A pipeline that ends in a
-    count (`_prints_a_count`) gives none, nor does a lone `cat` or one-file `grep -c` (`_prints_text`): its
-    output is content or a count, so a path in its words is read, not printed."""
+    count (`_prints_a_count`) gives none, nor does a lone one-file `grep -c` (`_prints_a_file_count`): its
+    output is a count, so a path in its words is read, not printed. A lone `cat` gives its file: the content
+    is unread, and the file's name stands in for the words in it."""
     ends = []
     segments = split_segments(text, ends)
     segments, ends, _changed = _fed_segments(segments, ends)
@@ -1277,8 +1282,8 @@ def _text_roots(text: str) -> list:
     fed_by = [_piped_into(ends, parsed, at) for at in range(len(parsed))]
     roots = []
     for at, words in enumerate(parsed):
-        if not words or at in fed_by or _prints_a_count(words) or (fed_by[at] is None and _prints_text(words)):
-            continue   # empty, not the last of its pipeline, a count, or the content of a file
+        if not words or at in fed_by or _prints_a_count(words) or (fed_by[at] is None and _prints_a_file_count(words)):
+            continue   # empty, not the last of its pipeline, or a count
         chain, stage = [], at
         while stage is not None:
             chain = _roots(parsed[stage], fed_by[stage] is None) + chain
@@ -1287,10 +1292,79 @@ def _text_roots(text: str) -> list:
     return roots
 
 
+_VALUE = "\x03"   # wraps the number of a substitution in the outer text, so a variable that holds one carries it
+_VALUE_AT = re.compile("\x03(\\d+)\x03")
+_SED_VALUE_FLAGS = {"expression": True, "file": False, "line-length": False}   # long flags with a value
+
+
+def _sed_script_words(words) -> set:
+    """The indexes of the words of a `sed` segment that are its script: the value of each `-e` or
+    `--expression`, else the first word that is no flag. A script is text, never a path. A `-f` or `-l`
+    value and the words after the script are not. Empty when the segment is no `sed`."""
+    index = resolve_command(tuple(words))
+    if index is None or _name(words[index]) != "sed":
+        return set()
+    scripts, explicit, at = set(), False, index + 1
+    while at < len(words):
+        word = _unquoted(words[at])
+        if word == "--" or word == "-" or not word.startswith("-"):
+            break
+        step = 1
+        if word.startswith("--"):
+            name, glued, _value = word[2:].partition("=")
+            kind = next((flag for flag in _SED_VALUE_FLAGS if name and flag.startswith(name)), None)
+            if kind:
+                explicit = explicit or _SED_VALUE_FLAGS[kind]
+                if _SED_VALUE_FLAGS[kind]:
+                    scripts.add(at if glued else at + 1)
+                step = 1 if glued else 2
+        else:
+            for place, letter in enumerate(word[1:]):
+                if letter == "i":
+                    break   # the rest of the cluster is the backup suffix
+                if letter in "efl":
+                    glued = place + 2 < len(word)
+                    if letter == "e":
+                        explicit = True
+                        scripts.add(at if glued else at + 1)
+                    step = 1 if glued else 2
+                    break
+        at += step
+    if not explicit and at < len(words):
+        scripts.add(at)
+    return scripts
+
+
+def _value_uses(text) -> list:
+    """For each `_VALUE` mark of `text`, in order: True when it sits in the script of a `sed`, else False.
+    Empty when the marks of the segments do not add up to the marks of the text."""
+    uses = []
+    for segment in split_segments(text, []):
+        words = _quoted_words(segment)
+        scripts = _sed_script_words(words)
+        for at, word in enumerate(words):
+            uses.extend([at in scripts] * len(_VALUE_AT.findall(word)))
+    return uses if len(uses) == len(_VALUE_AT.findall(text)) else []
+
+
+def _put_values(text, children):
+    """`text`, the outer text of a command with a mark for each substitution, with each mark put as the
+    roots of its inner command (`children`). Each mark goes in by number first and the variables are
+    read, so a mark stays where its value is used (`n=$(cat F); sed -i "s/N/$n/" G` has it in the
+    script). The roots go in where the value is a path or a loop word. A mark inside a `sed` script is text
+    and gets `x`, as `_copy_outer` puts it: the script is no path, whatever its value."""
+    numbers = iter(range(len(children)))
+    marked = _resolve_vars(_MARK_AT.sub(lambda _mark: "%s%d%s" % (_VALUE, next(numbers), _VALUE), text))
+    uses = iter(_value_uses(marked))
+    return _VALUE_AT.sub(
+        lambda found: "x" if next(uses, False) else " ".join(children[int(found.group(1))]), marked)
+
+
 def _fed_substitutions(cmd: str) -> str:
     """`cmd` with each `$(...)`, backtick pair and process substitution read as the roots of its inner
     command. `_substitutions` lists the texts children first, siblings left to right, each parent
-    holding one mark per child, so a stack gives each mark its child."""
+    holding one mark per child, so a stack gives each mark its child. The outer text is last: its marks
+    are put by where their value is used (`_put_values`)."""
     texts, too_deep = _substitutions(cmd, mark=_MARK)
     if too_deep or len(texts) < 2:
         return cmd
@@ -1299,11 +1373,12 @@ def _fed_substitutions(cmd: str) -> str:
         marks = len(_MARK_AT.findall(text))
         if marks > len(stack):
             return cmd
-        children = iter(stack[len(stack) - marks:])
+        children = stack[len(stack) - marks:]
         del stack[len(stack) - marks:]
-        text = _MARK_AT.sub(lambda _mark: " ".join(next(children)), text)
         if number == len(texts) - 1:
-            return text
+            return _put_values(text, children)
+        iterator = iter(children)
+        text = _MARK_AT.sub(lambda _mark: " ".join(next(iterator)), text)
         stack.append(_text_roots(text))
     return cmd
 
@@ -1316,14 +1391,43 @@ def _loop_variable(name):
 _UNROLL_LIMIT = 1000   # the most word lists `_fill_loop_variables` makes of one segment
 
 
-def _dest_loop_names(words, loops) -> frozenset:
-    """The names of the open `for` variables, of more than one list word, that the DEST word of a `cp`, `mv`
-    or `install` segment holds. The command runs once per list word, and each run takes that word as its DEST.
-    Put inline, the words would be one copy with the list words side by side, and the last would be its DEST."""
+_REDIRECT_GLUED = re.compile(r"\d*>>?[|&]?")
+
+
+def _run_loop_names(words, loops) -> frozenset:
+    """The names of the open `for` variables that make the command run once per list word: the variable
+    is in the DEST word of a `cp`, `mv` or `install` segment, or in the target of a redirect (`> "$f"`,
+    `>"$f"`), and the list holds more than one word or a glob. Each run takes one list word as its DEST or
+    its target. Put inline, the words would be one run with the list words side by side, and only the last
+    would be the DEST, or only the first the target."""
     parts = _copy_parts(words, lambda *_: False, "", _TARGET_COMMANDS)
-    dest = words[parts[1]] if parts else "'"
+    holders = [words[parts[1]]] if parts else []
+    for at, word in enumerate(words):
+        if at and ">" in words[at - 1] and _is_redirect(words[at - 1]):
+            holders.append(word)
+        elif _REDIRECT_GLUED.match(word) and _REDIRECT_GLUED.match(word).end() < len(word):
+            holders.append(word)
     return frozenset(name for name, items in loops
-                     if name and len(items) > 1 and not dest.startswith("'") and _loop_variable(name).search(dest))
+                     if name and (len(items) > 1 or any(_LIST_MAGIC.search(item) for item in items))
+                     and any(not word.startswith("'") and _loop_variable(name).search(word) for word in holders))
+
+
+def _listed_loops(loops, names, cwd):
+    """`loops` with each glob or brace word of the lists of `names` put as the paths it matches in `cwd` (as
+    `_written_sources` lists them), so each match is one run. A word that matches nothing, or whose matches
+    pass the cap, stays as written. With no `cwd` nothing is expanded."""
+    if not cwd:
+        return loops
+    out = []
+    for name, items in loops:
+        if name in names:
+            listed = []
+            for item in items:
+                found, capped = _written_sources(item, cwd) if _LIST_MAGIC.search(item) else ([item], False)
+                listed.extend([item] if capped else found)
+            items = listed
+        out.append((name, items))
+    return out
 
 
 def _fill_loop_variables(words, loops, unroll=frozenset()):
@@ -1408,12 +1512,14 @@ def _read_loop(words, roots):
     return ("REPLY", roots)
 
 
-def _fed_segments(segments, ends):
+def _fed_segments(segments, ends, cwd=""):
     """(segments, ends, changed): the segments with each `for` variable, xargs and `find -exec` put as
     the plain command the shell runs. An xargs command takes the roots of the segments piped into it,
     in the `-I` string's place, else as last words. A `find -exec` segment becomes its commands, with
-    `{}` put as the find roots. `_walk_wrappers` already reads the xargs flags."""
-    out, out_ends, out_words, loops, changed = [], [], [], [], False
+    `{}` put as the find roots. `_walk_wrappers` already reads the xargs flags. A glob in the list of a loop
+    that runs once per word (`_run_loop_names`) is put as its matches in `cwd` (`_listed_loops`), unless a
+    `cd` came before the loop: the matches would be those of another folder."""
+    out, out_ends, out_words, loops, changed, moved = [], [], [], [], False, False
     for number, segment in enumerate(segments):
         words = original = _quoted_words(segment)
         lead = 0
@@ -1426,8 +1532,10 @@ def _fed_segments(segments, ends):
             loops.append(_read_loop(words[lead:], _piped_roots(out_ends, out_words, len(out))))
         elif head == "done" and loops:
             loops.pop()
+        moved = moved or head in ("cd", "pushd", "popd")
         pieces = []   # per word list the shell runs: (its words, the plain commands it becomes)
-        for words in _fill_loop_variables(original, loops, _dest_loop_names(original, loops)):
+        runs = _run_loop_names(original, loops)
+        for words in _fill_loop_variables(original, _listed_loops(loops, runs, "" if moved else cwd), runs):
             rewritten = [words]
             index, chain = _walk_wrappers(tuple(words))
             xargs = next((flags for word, flags in chain if word == "xargs"), None)
@@ -1465,16 +1573,16 @@ def _fed_segments(segments, ends):
     return out, out_ends, changed
 
 
-def _fed_command(cmd: str):
+def _fed_command(cmd: str, cwd=""):
     """(text, segments, ends) of `cmd` as the shell runs it with the fed roots put in place, else
-    None when it holds no fed form or reads as PowerShell."""
+    None when it holds no fed form or reads as PowerShell. `cwd` is the folder a loop's globs are read in."""
     if is_powershell(cmd):
         return None
     text = _fed_substitutions(cmd)
     plain = _resolve_vars(text)
     ends = []
     segments = split_segments(plain, ends)
-    segments, ends, changed = _fed_segments(segments, ends)
+    segments, ends, changed = _fed_segments(segments, ends, cwd)
     return (plain, segments, ends) if changed or text != cmd else None
 
 
@@ -1488,12 +1596,13 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     `read_fed` reads what main reads, and more: a path that `find`, `xargs`, a `for` list or a
     substitution feeds to a writer. It judges the command as it stands (`_copy_outer` aside), then
     each substitution's inner command as a command of its own, then the command once more as
-    `_fed_command` rewrites it. It only adds refusals, except for a `cp` source that is a whole
-    substitution (`cp $(find tests -name x) /tmp/`): that is a read (`_copy_outer`). The builder test
-    check asks for it, from rule 7c and from `never_lifted` (both call `builder_shell_test_hit`). Every
-    caller shares `_copy_reads`, which reads a `cp` DEST through `_dest_values`: a DEST word with a quote mark
-    and a live glob (`cp x ""/tmp/run*""`) counts as its matches, so the sources of a copy that no match
-    receives stay reads. That is the one place a caller without `read_fed` can see a different verdict."""
+    `_fed_command` rewrites it. It adds refusals to main's reading, except for two reads. A `cp` source that is a
+    whole substitution (`cp $(find tests -name x) /tmp/`) is a read (`_copy_outer`). The sources of a `cp` whose
+    DEST is a word with a quote mark and a live glob (`cp x ""/tmp/run*""`) are reads when no match is a test:
+    `_copy_reads` reads that DEST through `_dest_values` for every caller, so it is the one place a caller without
+    `read_fed` can see a different verdict. A value that `$( )` or a variable holds is a path where it is a
+    writer's word, and text inside a `sed` script (`_put_values`). The builder test
+    check asks for it, from rule 7c and from `never_lifted` (both call `builder_shell_test_hit`)."""
     def scan(text, fed=None, copy_outer=False, filters=None):
         return _shell_write_scan(text, cwd, predicate, holds, follow_cd, command_position,
                                  predicate_command, fed, copy_outer, filters, read_fed)
@@ -1506,7 +1615,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         hit = hit or scan(text)
     if hit:
         return hit
-    fed = _fed_command(cmd)
+    fed = _fed_command(cmd, cwd)
     return scan(fed[0], fed[1:], filters=_walk_filters([text for text, _in_message in texts] or [cmd])) \
         if fed else ""
 
