@@ -15033,9 +15033,11 @@ def fold_unc_prefix_check():
 
 
 def fold_unc_dotdot_check():
-    """A `..` after a UNC share name stops at the share root: `//server/share/../tests` folds to `//server/share/tests`,
-    and `//server/share/a/../../x` to `//server/share/x`. The fold popped the absent share name as a folder, so the server
-    name became the parent and the share was lost. Both rows share that one cause."""
+    """On Windows a `..` after a UNC share name stops at the share root: `//server/share/../tests` folds to
+    `//server/share/tests`, and `//server/share/a/../../x` to `//server/share/x`. Both rows share that one cause. POSIX
+    leaves a UNC `//` to the OS, which resolves a `..` past the share, so these rows are not judged off Windows."""
+    if os.name != "nt":
+        return SKIP, "the UNC share-root stop is a Windows rule: POSIX resolves a UNC '..' past the share"
     frozen = _folded_module()
     if frozen is None:
         return False, "guard.py did not load guard_frozen, so _folded cannot be judged"
@@ -15049,6 +15051,43 @@ def fold_unc_dotdot_check():
     if wrong:
         return False, "; ".join(wrong) + ": a `..` popped the UNC share name, so the fold went past the share root"
     return True, "_folded stops a UNC path's `..` at its share root"
+
+
+def fold_posix_unc_dotdot_check():
+    """On POSIX a `..` after a UNC server and share folds as any other `..`: the absent folder under `//app` is popped and
+    the `//app` root stays, so `//app/<absent>/../tests` folds to `//app/tests`, as `/app/<absent>/../tests` folds to
+    `/app/tests`. The share-root stop, which holds on Windows, kept the absent folder here."""
+    if os.name == "nt":
+        return SKIP, "the POSIX fold of a UNC '..' is judged on POSIX only"
+    frozen = _folded_module()
+    if frozen is None:
+        return False, "guard.py did not load guard_frozen, so _folded cannot be judged"
+    absent = "//app/" + uuid.uuid4().hex
+    if os.path.exists(absent):
+        return False, "%s exists on this machine, so it cannot stand for an absent folder" % absent
+    got = frozen._folded(absent + "/../tests")
+    if got != "//app/tests":
+        return False, ("_folded('%s/../tests') returned %r, want '//app/tests': the share-root stop ran on POSIX and "
+                       "kept the absent folder" % (absent, got))
+    return True, "_folded folds a POSIX UNC path's '..' as any other '..'"
+
+
+def fold_posix_unc_dotdot_two_check():
+    """On POSIX a second `..` after a UNC share pops the folder before it too: `//app/<absent>/a/../../x` folds to
+    `//app/x`. The share-root stop dropped that second `..`, so the absent folder stayed in the path."""
+    if os.name == "nt":
+        return SKIP, "the POSIX fold of a UNC '..' is judged on POSIX only"
+    frozen = _folded_module()
+    if frozen is None:
+        return False, "guard.py did not load guard_frozen, so _folded cannot be judged"
+    absent = "//app/" + uuid.uuid4().hex
+    if os.path.exists(absent):
+        return False, "%s exists on this machine, so it cannot stand for an absent folder" % absent
+    got = frozen._folded(absent + "/a/../../x")
+    if got != "//app/x":
+        return False, ("_folded('%s/a/../../x') returned %r, want '//app/x': the share-root stop ran on POSIX and "
+                       "dropped the second '..'" % (absent, got))
+    return True, "_folded folds a second POSIX UNC '..' past the absent folder"
 
 
 def fold_root_dot_check():
@@ -15118,7 +15157,12 @@ def fold_root_builder_find_check():
 
 
 LOG_CHECKS_EXTRA.append(("fold: _folded keeps the leading // of a UNC path, plain and as a glob", fold_unc_prefix_check))
-LOG_CHECKS_EXTRA.append(("fold: a '..' after a UNC share name stops at the share root, not past it", fold_unc_dotdot_check))
+LOG_CHECKS_EXTRA.append(("fold: on Windows a '..' after a UNC share name stops at the share root, not past it",
+                         fold_unc_dotdot_check))
+LOG_CHECKS_EXTRA.append(("fold: on POSIX a '..' after a UNC server and share folds as any other '..'",
+                         fold_posix_unc_dotdot_check))
+LOG_CHECKS_EXTRA.append(("fold: on POSIX a second '..' after a UNC share pops the folder before it",
+                         fold_posix_unc_dotdot_two_check))
 LOG_CHECKS_EXTRA.append(("fold: a builder's find at cwd / past the walk cap is too large to check, not allowed",
                          fold_root_builder_find_check))
 LOG_CHECKS_EXTRA.append(("fold: _folded('/.') folds to the root '/', not an empty path", fold_root_dot_check))
