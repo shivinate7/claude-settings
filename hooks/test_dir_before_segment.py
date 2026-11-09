@@ -18,6 +18,7 @@ Green controls pass on the current code and must stay green. A red case fails th
 cause: the folder a variable names is not read. A case that waits on another step is kept, not run, and
 printed as SKIP with that step's name.
 """
+import contextlib
 import os
 import shutil
 import sys
@@ -49,6 +50,8 @@ PARENT = folder("real")                 # a folder a variable names, one level u
 CHILD = folder("real", "x")             # PARENT/x: the folder a variable built from PARENT names
 SECOND = folder("second")               # the folder a cd moves to before a `cd -`
 MISSING = os.path.join(ROOT, "missing")  # never made: a cd into it fails
+OTHER = folder("real", "other")         # a second folder a variable names, for a later assignment to name
+SHELL_A = folder("shell", "a")          # SHELL/a: the folder `R=a` names as a relative path, so a wrong read is a real folder
 
 
 def check(label, ok, detail=""):
@@ -58,7 +61,8 @@ def check(label, ok, detail=""):
 
 def expect(label, command, scope, want, cwd=SHELL, failed_cd_stays=False):
     """The folder dir_before_segment gives the segment that holds SCOPE, which must be the one segment
-    that holds it. `want` is None when the walk cannot tell the folder."""
+    that holds it. `want` is None when the walk cannot tell the folder. A tuple is the folders any one
+    of which is right: a case whose truth the walk may answer with None, or with the one folder, names both."""
     ends = []
     segments = guard_core.split_segments(command, ends)
     named = [number for number, segment in enumerate(segments) if scope in segment]
@@ -66,7 +70,8 @@ def expect(label, command, scope, want, cwd=SHELL, failed_cd_stays=False):
     if len(named) != 1:
         return
     got = guard_core.dir_before_segment(segments, named[0], cwd, ends, failed_cd_stays=failed_cd_stays)
-    check(label, got == want, "got %r, want %r" % (got, want))
+    ok = got in want if isinstance(want, tuple) else got == want
+    check(label, ok, "got %r, want %r" % (got, want))
 
 
 SKIPPED = []  # (label, reason): a case that waits on another step. It stays listed and prints its reason.
@@ -132,24 +137,80 @@ case("a variable built from an unknown one is unknown: None",
      'R=$(pwd); A="$R"/x; cd "$A" && git status', "git status", None)
 
 
-def case_home():
-    """`$HOME` reads as `~`, the one mapping _resolve_vars makes, so `cd "$HOME"` is the folder `cd ~` is.
-    HOME and USERPROFILE point at a folder of this run, and both are put back after the case."""
-    home = folder("home")
+# --- A variable is read only from a plain NAME=value that runs in this shell. The cases that expect
+# None are red on 9e6762c56, where the walk takes a value no shell at that position holds. The literal
+# apostrophe form, the comment cases and the controls are green on 9e6762c56 and must stay green. On main,
+# which reads no variable, the None cases are green and the controls are red.
+case("a prefix assignment, D=<dir> true, is not the shell's variable: cd \"$D\" reads None",
+     'D=%s true; cd "$D" && git status' % TARGET, "git status", None)
+case("an apostrophe in double quotes, then a later assignment: cd \"$R\" reads B or None, never A",
+     'R=%s; echo "it\'s"; R=%s; cd "$R" && git status' % (TARGET, OTHER), "git status", (OTHER, None))
+case("two apostrophes in double quotes, a later assignment between them: cd \"$R\" reads B or None, never A",
+     'R=%s; echo "it\'s"; R=%s; echo "it\'s"; cd "$R" && git status' % (TARGET, OTHER), "git status",
+     (OTHER, None))
+case("a cd that failed in an && chain skips the assignment after it: cd \"$R\" reads None",
+     'cd %s && R=%s; cd "$R" && git status' % (MISSING, TARGET), "git status", None, failed_cd_stays=True)
+case("after a plain R=<other>, unset -v R: cd \"$R\" reads None",
+     'R=%s; unset -v R; cd "$R" && git status' % OTHER, "git status", None)
+case("after a plain R=<other>, a for loop sets R: cd \"$R\" in its body reads None",
+     'R=%s; for R in %s; do cd "$R" && git status; done' % (OTHER, TARGET), "git status", None)
+case("after a plain R=<other>, printf -v R sets R: cd \"$R\" reads None",
+     'R=%s; printf -v R %%s %s; cd "$R" && git status' % (OTHER, TARGET), "git status", None)
+case("an assignment in a subshell, (R=<dir>), does not persist: cd \"$R\" reads None",
+     '(R=%s); cd "$R" && git status' % TARGET, "git status", None)
+case("an assignment in a pipe, R=<dir> | cat, does not persist: cd \"$R\" reads None",
+     'R=%s | cat; cd "$R" && git status' % TARGET, "git status", None)
+case("R=<dir> || cd \"$R\": the cd after || is not known to run, so the next segment reads None",
+     'R=%s || cd "$R"; git status' % TARGET, "git status", None)
+case("echo \"R=<dir>\" prints text, not an assignment: cd \"$R\" reads None",
+     'echo "R=%s"; cd "$R" && git status' % TARGET, "git status", None)
+case("R=a, then R+=/x: the += is not read, so cd \"$R\" reads None, not the folder a",
+     'R=a; R+=/x; cd "$R" && git status', "git status", None)
+case("control: R=<dir> && cd \"$R\" reads R as the folder it holds, the and-chain assignment runs first",
+     'R=%s && cd "$R" && git status' % TARGET, "git status", TARGET)
+case("control: R=<A>; R=<B>; cd \"$R\" reads B, the last plain assignment",
+     'R=%s; R=%s; cd "$R" && git status' % (TARGET, OTHER), "git status", OTHER)
+case("control: R=<dir> # c, then a newline, then cd \"$R\" reads R as the folder it holds",
+     'R=%s # c\ncd "$R" && git status' % TARGET, "git status", TARGET)
+case("a comment that holds an assignment, # R=<B>, is text: cd \"$R\" reads A or None, never B",
+     'R=%s # R=%s\ncd "$R" && git status' % (TARGET, OTHER), "git status", (TARGET, None))
+case("a comment opener inside double quotes is text: the assignment after it still counts",
+     'R=%s; echo "# x"; R=%s; cd "$R" && git status' % (TARGET, OTHER), "git status", OTHER)
+
+
+@contextlib.contextmanager
+def pinned_home(home):
+    """HOME and USERPROFILE point at `home` inside the block, and both are put back after it."""
     saved = {name: os.environ.get(name) for name in ("HOME", "USERPROFILE")}
     os.environ["HOME"] = home
     os.environ["USERPROFILE"] = home
     try:
-        expect("cd \"$HOME\" reads the home folder, as cd ~ does", 'cd "$HOME" && git status',
-               "git status", home)
-        expect("cd ~ is the home folder (the literal twin of cd \"$HOME\")", 'cd ~ && git status',
-               "git status", home)
+        yield home
     finally:
         for name, value in saved.items():
             if value is None:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
+
+
+def case_home():
+    """`$HOME` reads as `~`, the one mapping _resolve_vars makes, so `cd "$HOME"` is the folder `cd ~` is.
+    HOME and USERPROFILE point at a folder of this run, and both are put back after the case."""
+    with pinned_home(folder("home")) as home:
+        expect("cd \"$HOME\" reads the home folder, as cd ~ does", 'cd "$HOME" && git status',
+               "git status", home)
+        expect("cd ~ is the home folder (the literal twin of cd \"$HOME\")", 'cd ~ && git status',
+               "git status", home)
+
+
+def case_quoted_tilde():
+    """A quoted `~` is not tilde-expanded by bash, so `cd "$R"` with R="~" is the folder named `~`. The walk
+    expands the value to the home folder, so HOME is pinned to a folder of this run: the wrong read is then a
+    real folder, and the answer None is not."""
+    with pinned_home(folder("home-tilde")):
+        expect("R=\"~\", quoted, is not the home folder: cd \"$R\" reads None", 'R="~"; cd "$R" && git status',
+               "git status", None)
 
 
 def case_inline_script():
@@ -189,6 +250,7 @@ def case_sweep():
 
 
 CASES.append(("$HOME as ~, and its literal twin", case_home))
+CASES.append(("a quoted ~ is not the home folder: None", case_quoted_tilde))
 CASES.append(("an inline python script after a variable cd reads the folder the cd holds", case_inline_script))
 CASES.append(("the run-folder sweep removes an old sibling and keeps a new one", case_sweep))
 
