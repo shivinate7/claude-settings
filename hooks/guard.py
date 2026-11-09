@@ -2062,10 +2062,12 @@ def builder_test_path(path: str, cwd: str) -> bool:
     return is_test_rel(rel)
 
 
-def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
+def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
     """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
     redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
-    python or node script a heredoc body or `-c` / `-e` holds, on the raw command."""
+    python or node script a heredoc body or `-c` / `-e` holds, on the raw command. `tool` is the
+    call's tool: it sets which shell's rules read the text."""
+    POWERSHELL_CALL[0] = tool == "PowerShell"
     return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
             or interpreter_write_hit(raw, cwd, builder_test_path))
 
@@ -4132,7 +4134,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # own writes (a python or node heredoc body, -c, -e) from the raw one. Only an agent with a builder
     # role is judged, the same guard as the Edit tools.
     if role == BUILDER_ROLE:
-        matched = builder_shell_test_hit(raw, stripped, cwd)
+        matched = builder_shell_test_hit(raw, stripped, cwd, tool)
         if matched:
             refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
 
@@ -5215,6 +5217,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     the primary checkout, else ''. Only a call with no `agent_id` and a cwd in the primary's own files
     is judged. A missing, empty or unreadable record is unknown and passes. The clone's `.git`,
     `.claude/worktrees/`, and a target outside the clone pass. Liftable by an owner override."""
+    POWERSHELL_CALL[0] = tool == "PowerShell"
     if not isinstance(payload, dict) or payload.get("agent_id"):
         return ""
     if tool in WRITE_TOOLS:
@@ -5269,6 +5272,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
     worktree-home refusal. refuse() asks this before it spends an override, because a lifted act ends the
     check."""
+    POWERSHELL_CALL[0] = tool == "PowerShell"
     # role_model_check's above-row refusal is liftable (item 127 pick a); only its no-model refusal is never lifted.
     if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input)
             or role_model_check(tool, tool_input)[1].startswith(ROLE_NO_MODEL_MATCH)
@@ -5280,7 +5284,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
         return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
                     or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
                     or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw))
-                    or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd)))
+                    or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd, tool)))
     role = agent_role(payload)
     for target in write_targets(tool_input) if tool in WRITE_TOOLS else ():
         if (is_frozen(target, cwd) or (role and role_write_hit(role, tool_input, target, cwd, session_id_of(payload)))

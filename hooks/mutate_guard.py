@@ -2112,8 +2112,8 @@ MUTATIONS = [
      '        for args, where, overrides in ([] if tool else _push_calls(segment, stripped, cwd)):\n            verdict = push_verdict(',
      "guard", "ask-step-hidden: a force push inside bash -c denies"),
     ("ask-step-hidden: the trailing paren or backtick stays on the path word, so a subshell write hides its path",
-     '                word = word.rstrip(")`") or word\n',
-     '                word = word\n',
+     '                word = _typed(word.rstrip(")`") or word, word)   # keeps the PowerShell type of the word\n',
+     '                word = _typed(word, word)   # keeps the PowerShell type of the word\n',
      "guard", "ask-step-hidden: a cap write in a subshell with a leading space asks"),
     # ---- hand-made-worktree (decision lanes-start-in-tool-worktrees): one mutant per branch.
     ("hand-made-worktree: the judge_shell loop never asks, so no hand-made tree is refused",
