@@ -11376,10 +11376,11 @@ def review_counter_works():
     return True, "the counter logs a direct call"
 
 
-def review_reads(tool, tool_input, want, reads, cwd=NOGIT, path_dirs=(), folder=GHRECORDCOUNT, bodies=None, carries=()):
+def review_reads(tool, tool_input, want, reads, cwd=NOGIT, path_dirs=(), folder=GHRECORDCOUNT, bodies=None, carries=(), remedy=None):
     """A checker for one post: the guard says `want`, and the post makes `reads` gh calls, the one live-head read. `cwd` is the
     folder the post runs in. `path_dirs` are folders the guard's PATH adds after the fake gh's, such as git's for a post with no number.
-    `folder` is the counted fake the post runs against, with the comment `bodies` it names. `carries` are fragments the reason must hold."""
+    `folder` is the counted fake the post runs against, with the comment `bodies` it names. `carries` are fragments the reason must hold.
+    `remedy` is a checker of the refusal's remedy text, run after the read count."""
     def check():
         if reads == 0:
             ok, note = review_counter_works()
@@ -11396,6 +11397,10 @@ def review_reads(tool, tool_input, want, reads, cwd=NOGIT, path_dirs=(), folder=
             return False, "refused, but the reason lacks %s: %s" % (missing, reason[:90])
         if len(calls) != reads:
             return False, "%d gh call(s) wanted for the live head, %d seen: %r" % (reads, len(calls), calls)
+        if remedy is not None:
+            ok, why = remedy(remedy_of(reason))
+            if not ok:
+                return False, why
         return True, "%s, with %d gh call(s)" % (want, reads)
     FIXTURELESS_CHECKS.add(check)
     return check
@@ -11814,6 +11819,55 @@ REVIEW_LOG_CHECKS.append(("review-record:the remedy of an edit whose repo or id 
                          unread_remedy_check()))
 REVIEW_LOG_CHECKS.append(("review-record:a read that fails on a literal route still says to run the edit again, gh api -X PATCH",
                          review_retry_remedy_kept))
+
+
+def no_retry_remedy(remedy):
+    """-> (ok, note). The remedy of a refusal names no retry: the same command would read no better."""
+    if not remedy:
+        return False, "the refusal names no remedy"
+    if re.search(r"\bagain\b", remedy):
+        return False, "the remedy says to run the edit again: %s" % remedy[:110]
+    return True, "the remedy does not say to run the edit again"
+
+
+def literal_repo_remedy_check():
+    """-> (ok, note). An edit whose repo is a shell variable is refused, and its remedy names the `gh pr comment` form to write: a
+    literal `-R owner/repo`, or the literal pull request number. It names no comment id and no `{owner}/{repo}` placeholder."""
+    command = "gh pr comment %d -R $REPO --edit-last --body x" % REVIEW_PR
+    decision, reason = decide(review_case("Bash", {"command": command}, GHRECORD + os.pathsep + PY_PATH))
+    if decision != "deny":
+        return False, "want deny, got %s: %s" % (decision, reason[:90])
+    remedy = remedy_of(reason)
+    if not remedy:
+        return False, "the refusal names no remedy: %s" % reason[:90]
+    if "gh pr comment" not in remedy or not ("-R owner/repo" in remedy or ("gh pr comment %d" % REVIEW_PR) in remedy):
+        return False, "the remedy does not name the gh pr comment form, with -R owner/repo or pull request %d: %s" % (
+            REVIEW_PR, remedy[:110])
+    if re.search(r"\bid\b", remedy):
+        return False, "the remedy names a comment id, which this command does not have: %s" % remedy[:110]
+    if "{owner}/{repo}" in remedy:
+        return False, "the remedy names the {owner}/{repo} placeholder, which this command does not use: %s" % remedy[:110]
+    return True, "the remedy names the gh pr comment form, with a literal repo or pull request number, and no comment id"
+
+
+# A VARIABLE PULL REQUEST SELECTOR IN --edit-last. The guard reads the selector as written, so a variable names no pull request. The
+# refusal makes no read, and its remedy names no retry: the same command reads no better.
+for _what, _command in (
+        ("a variable pull request number", "gh pr comment $PR --edit-last --body x"),
+        ("a variable owner in a pull request URL", "gh pr comment https://github.com/$O/x/pull/%d --edit-last --body x" % REVIEW_PR)):
+    REVIEW_LOG_CHECKS.append(("review-record:an edit with %s is refused with no gh read, and its remedy does not say to run it again, gh pr comment --edit-last" % _what,
+                             review_reads("Bash", {"command": _command}, "deny", 0, remedy=no_retry_remedy)))
+
+# A VARIABLE REPO WITH --edit-last. The remedy names the `gh pr comment` form to write, with a literal repo or the literal pull request
+# number. This command has no comment id and no `{owner}/{repo}` route, so its remedy names neither.
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose repo is a shell variable has a remedy that names the gh pr comment form, not a comment id or {owner}/{repo}, gh pr comment -R $REPO --edit-last",
+                         literal_repo_remedy_check))
+
+# THE PLACEHOLDER THE REMEDY OFFERS IS READ. A route with `{owner}/{repo}` reads the comment an edit replaces, as a literal route does. The
+# stamped old body shows the read: the edit is refused over the record it reads.
+REVIEW_LOG_CHECKS.append(("review-record:a route with the {owner}/{repo} placeholder reads the old body once, and is refused over a stamped record, gh api -X PATCH",
+                         review_reads("Bash", {"command": "gh api -X PATCH repos/{owner}/{repo}/issues/comments/%d -f 'body=%s'" % (REVIEW_COMMENT_ID, UNMARKED_BODY)},
+                                      "deny", 1, folder=GHRECORDOLDCOUNT, bodies=REVIEW_OLD_RECORD, carries=WITHDRAW_REMEDY)))
 
 # `-e` is gh's --editor, not --edit-last. A post with -e is a post: judged on its pull request, with one head read, and allowed.
 REVIEW_LOG_CHECKS.append(("review-record:a fresh post with -e (--editor) is judged as a post, gh pr comment -e --body",
