@@ -70,9 +70,10 @@ def gh_call_of(segment: str):
     """Return the tokens after `gh` when the segment's COMMAND WORD is gh, else None.
 
     A repo flag before the verb (`gh -R o/r pr merge`) is valid gh and hid the verb from every
-    caller, which read the first two words. The flag moves to the end: gh reads `-R` after the
-    verb the same, and the callers that look for the repo (merge_call_of, ci_wake) already read
-    it there.
+    caller, which read the first two words. The same flag right after the group word
+    (`gh pr -R o/r comment`) hid the subcommand the same way. The flag moves to the end: gh
+    reads `-R` after the verb the same, and the callers that look for the repo (merge_call_of,
+    ci_wake) already read it there.
     """
     tokens = segment_tokens(segment)
     if not tokens:
@@ -86,12 +87,16 @@ def gh_call_of(segment: str):
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):
         return None
-    rest, root = tokens[index + 1:], []
-    while rest and _gh_root_repo_flag(rest, 0):
-        taken = _gh_root_repo_flag(rest, 0)
-        root += rest[:taken]
-        rest = rest[taken:]
-    return rest + root
+    rest, root, group = tokens[index + 1:], [], []
+    for _ in (0, 1):   # before the group word, then right after it
+        while rest and _gh_root_repo_flag(rest, 0):
+            taken = _gh_root_repo_flag(rest, 0)
+            root += rest[:taken]
+            rest = rest[taken:]
+        if group or not rest:
+            break
+        group, rest = rest[:1], rest[1:]
+    return group + rest + root
 
 
 # ---- a merge made outside the merge tool
