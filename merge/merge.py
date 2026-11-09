@@ -2652,7 +2652,10 @@ def step_cite_check(root, head, base, body=""):
     as unknown, never a pass. Returns None when every cite resolves."""
     import check_step_cites, layout
     from check_artifact_cites import STEP_FOLDER
-    c, out = git(root, "diff", "--name-only", "--no-renames", "--diff-filter=d", "-z", f"origin/{base}...{head}")
+    diff = ("diff", "--name-only", "--no-renames", "--diff-filter=d", "-z")
+    c, out = git(root, *diff, f"origin/{base}...{head}")
+    if c and "no merge base" in out:  # a shallow clone cut the history that holds the merge base: the tree difference needs none, and over-reads only a record that base changed since
+        c, out = git(root, *diff, f"origin/{base}", head)
     if c:
         raise Stop(f"git diff failed, so the step cite read is unknown, not a pass: {out} {LANE_LINT_CITE}")
     texts = [body] if body else []
