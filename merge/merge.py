@@ -1943,8 +1943,10 @@ def small_base_move(wt, base_ref, sha, before_run=None):
         # --base is the base tip, as a pull request run reads its base: it checks the merge against main as it is now
         c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--base", base_ref], cwd=wt, env={**env, "VERDICT_LOG": log}, timeout=LINT_SECONDS)
         if c:
-            keep = True
             bad = [l.strip() for l in out.splitlines() if l.startswith(("FAIL", "unknown"))]
+            if c == 2 and heavy_busy(bad):  # the lints never ran: no finding, so it proves no staleness
+                return False, UnreadText(f"the lints of the merge did not run: {'; '.join(bad[:3])}")
+            keep = True
             return False, f"the lints of the merge are not all PASS ({'; '.join(bad[:3]) or 'exit ' + str(c)}; full output: {log})"
         try:
             # the records page is left out: it is derived from the records, which are matched, and the generator proves it on the merge
@@ -1988,8 +1990,12 @@ def holds_base(wt, base_ref, sha, before_run=None, raise_unread=False):
             return None, why
         tip = git(wt, "rev-parse", "--short=9", base_ref)[1]
         base = base_ref.split("/", 1)[-1]
-        text = (f"{sha[:9]} does not hold {base_ref} at {tip}, so no run on it tested the current {base}. "
-                f"Merge {base} into the branch, push, and run again. The green run cannot stand: {why}. {BASE_CITE}")
+        if isinstance(why, UnreadText) and heavy_busy([why]):  # the lint never ran, so the head is not proved stale: no merge-the-base remedy
+            text = (f"{sha[:9]} lacks {base_ref} at {tip}, and the proof that its green run still stands could not run: {why}. "
+                    f"{BUSY_RETRY} {BASE_CITE}")
+        else:
+            text = (f"{sha[:9]} does not hold {base_ref} at {tip}, so no run on it tested the current {base}. "
+                    f"Merge {base} into the branch, push, and run again. The green run cannot stand: {why}. {BASE_CITE}")
         if raise_unread and isinstance(why, UnreadText):  # an unread `why` proves no staleness
             raise Unread(text)
         return text, None
