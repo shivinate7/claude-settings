@@ -699,7 +699,8 @@ def _written_sources(word, cwd):
     for each in _brace_words(word):
         pattern, magic = _glob_pattern(each)
         if magic:
-            paths.extend(itertools.islice(glob.iglob(_expanded(pattern, cwd)), _WALK_LIMIT + 1 - len(paths)))
+            matched = list(itertools.islice(glob.iglob(_expanded(pattern, cwd)), _WALK_LIMIT + 1 - len(paths)))
+            paths.extend(matched or [_unquoted(each)])
         else:
             paths.append(_unquoted(each))
         if len(paths) > _WALK_LIMIT:
@@ -707,11 +708,13 @@ def _written_sources(word, cwd):
     return paths, False
 
 
-def _copy_written_hit(raw, cwd, predicate, fed, filters) -> str:
+def _copy_written_hit(raw, cwd, predicate, fed, filters, made=frozenset()) -> str:
     """The path a `cp` segment writes that `predicate(path, cwd)` accepts, else ''. The sources are the
     words with their braces and globs expanded against `cwd`. DEST is a folder when it ends in a slash,
-    is an existing folder, is `-t`'s word, is fed, or there is more than one source: the copy then writes
+    is an existing folder, is a folder `made` holds (an earlier `mkdir` of the same command), is `-t`'s word, is
+    fed, or there is more than one source: the copy then writes
     `DEST/<basename of each source>`, so a test-named source copied into any folder writes a test there.
+    With `--parents` DEST is always a folder and the copy writes `DEST/<each source as named>`.
     Otherwise it writes DEST itself. A source folder is walked (`cp -r SRC DEST/` writes
     `DEST/<SRC name>/<path under SRC>` for each file) as far as the caps allow; a fed source that is a folder is a
     find root (`_fed_segments`): it is walked, as `filters` narrows it, and each file under it is judged
@@ -729,13 +732,14 @@ def _copy_written_hit(raw, cwd, predicate, fed, filters) -> str:
         sources.extend((raw[index], path) for path in found)
         capped = capped or more
     flagged = _glued_cp_target(raw[at]) is not None or at > 0 and _CP_TARGET.fullmatch(_unquoted(raw[at - 1]))
-    into = bool(fed or flagged or dest.endswith(("/", "\\")) or len(sources) > 1
-                or os.path.isdir(_expanded(dest, cwd)))
+    parents = _cp_keeps_parents(raw)
+    into = bool(fed or flagged or parents or dest.endswith(("/", "\\")) or len(sources) > 1
+                or os.path.normpath(dest) in made or os.path.isdir(_expanded(dest, cwd)))
     if capped and _may_hold_a_test(dest, cwd, predicate):
         return _unquoted(raw[operands[0]]) + _TOO_LARGE_NOTE
     for word, source in sources:
         base = re.split(r"[/\\]", source.rstrip("/\\"))[-1]
-        written = os.path.join(dest, base) if into else dest
+        written = os.path.join(dest, source.lstrip("/\\") if parents else base) if into else dest
         if base and predicate(written, cwd):
             return written
         if fed and _may_hold_a_test(dest, cwd, predicate):
@@ -747,6 +751,36 @@ def _copy_written_hit(raw, cwd, predicate, fed, filters) -> str:
         if walked:
             return source + _TOO_LARGE_NOTES[walked] if walked in _TOO_LARGE_NOTES else walked
     return ""
+
+
+def _cp_keeps_parents(raw) -> bool:
+    """True when a `cp` segment has `--parents`, which GNU `cp` also takes cut short to `--pa`."""
+    start = _cp_start(raw, True)
+    for word in ([_unquoted(word) for word in raw[start + 1:]] if start is not None else []):
+        if word == "--":
+            return False
+        if word.startswith("--pa") and "parents".startswith(word[2:]):
+            return True
+    return False
+
+
+def _made_folders(raw) -> set:
+    """The folders a `mkdir` segment makes, each with the folders above it, as `os.path.normpath` text. A flag's
+    value (`-m MODE`) is not one."""
+    start = _cp_start(raw, True, ("mkdir",))
+    made, skip = set(), False
+    for word in ([_unquoted(word) for word in raw[start + 1:]] if start is not None else []):
+        if skip:
+            skip = False
+        elif word in ("-m", "--mode"):
+            skip = True
+        elif not word.startswith("-"):
+            for each in _brace_words(word):
+                folder = os.path.normpath(each)
+                while folder not in made and folder not in ("", ".", "/"):
+                    made.add(folder)
+                    folder = os.path.dirname(folder)
+    return made
 
 
 def _name_matches(names, base: str) -> bool:
@@ -1153,9 +1187,23 @@ def _fill_loop_variables(words, loops):
             if word.startswith("'") or not variable.search(word):
                 filled.append(word)
             else:
-                filled.extend(variable.sub(lambda _m, item=item: item, word) for item in items)
+                filled.extend(_put_loop_item(variable, word, item) for item in items)
         words = filled
     return words
+
+
+_LIST_MAGIC = re.compile(r"[*?\[{]")
+
+
+def _put_loop_item(variable, word, item) -> str:
+    """`word` with each match of `variable` put as `item`. A loop list's glob or brace is expanded when the
+    loop starts, so the variable holds its matches: an `item` that holds one, put inside double quotes
+    (`"$f"`), leaves those quotes, so the glob is still read as a glob."""
+    def put(found):
+        if not _LIST_MAGIC.search(item) or word[:found.start()].count('"') % 2 == 0:
+            return item
+        return '"%s"' % item
+    return variable.sub(put, word)
 
 
 def _put_roots(words, mark, roots):
@@ -1353,6 +1401,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
+    made = set()   # the folders an earlier `mkdir` of this command makes
     for number, raw in enumerate(parsed):
         linked = _cp_link_source(raw, holds, cwd, bool(fed))
         if linked:
@@ -1427,9 +1476,10 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
             if hit and writes_to(word, text, *(_segment_command(script) if command_position else ())):
                 return word + _TOO_LARGE_NOTES.get(walked, "")
         if written and not closed and not predicate_command:
-            wrote = _copy_written_hit(raw, at, predicate, bool(fed), filters)
+            wrote = _copy_written_hit(raw, at, predicate, bool(fed), filters, made)
             if wrote:
                 return wrote
+            made |= _made_folders(raw)
     return ""
 
 
