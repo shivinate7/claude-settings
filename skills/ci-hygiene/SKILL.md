@@ -69,8 +69,16 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
    the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
    each lane PR closes as replaced.
-   When the integration run is red, read the failing job. Find the lane whose files it touches. Drop
-   that lane and any lane that depends on it. Rebuild the branch from main without them. Never
+   When the integration run is red, read the failing job. Find the lane whose files it touches.
+   Search one lane merge commit at a time: for each lane merge commit `M` on the integration branch,
+   run `git diff --name-only M^1 M` or `git log -1 -m -S<text> M` as its own command, and print the
+   lane's name on the line before its hits. Each hit then names exactly one lane. Never run one
+   search over the whole range, such as `git log -p -S<text> main..<integration>`, and never run
+   two searches in one command: their output joins and the hits blame the wrong lane. A hit in two
+   lanes is two names, so read each lane's diff before you drop either. Example: the failing job
+   reads `lint/foo.py`. Lane A's own search lists `lint/foo.py` and lane B's lists nothing. Blame A.
+   (At 17:10 CST on Nov 8 two searches printed together, so the runner blamed lane B for lane A's
+   red.) Drop that lane and any lane that depends on it. Rebuild the branch from main without them. Never
    revert. A lane dropped by a revert re-applies its diff after it merges main, and checks that each
    file is there. A job that ends at its cap with no red CI step is re-capped or split. That is not a
    reason to drop the lane.
