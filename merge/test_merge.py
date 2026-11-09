@@ -13925,7 +13925,7 @@ class ReviewedList(ReviewEnv):
         lines = text.splitlines()
         spaced = "\n".join([lines[0] + "  "] + lines[1:]) + "\n"
         host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=[review_comment(1, 7, spaced, created="2026-10-02T00:00:00Z")])
-        self.assertEqual(host.review_comments("2026-10-01T00:00:00Z"), {7: [("2026-10-02T00:00:00Z", spaced)]},
+        self.assertEqual(host.review_comments("2026-10-01T00:00:00Z"), {7: [(spaced, "2026-10-02T00:00:00Z", False)]},
                          "review_comments dropped a record whose marker line has trailing spaces")
 
     def test_the_newest_record_decides_the_line(self):
