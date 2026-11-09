@@ -6,6 +6,10 @@ merge's `_nowindow`. `FakeFetchClock.patched(merge)` swaps both for the block, s
 sleeping or reading the real clock. A `git fetch` takes `step` seconds of fake time, cut at the timeout its caller
 passed, as a real process is cut. Any other git call runs for real, with no timeout, and takes no fake time.
 
+A gh call takes the fake seconds of the first `read_steps` key that one of its arguments holds, and none when no key
+matches. It is cut at its timeout the same way, then the real stand-in answers it. `patched_process()` swaps the
+process's own clock and child-start seam for the block, for a hook run in a process of its own.
+
     python3 lint/test_fake_fetch.py
 """
 import contextlib
@@ -22,17 +26,22 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 
 
 class FakeFetchClock:
-    def __init__(self, step):
+    def __init__(self, step, read_steps=None):
         self.step = step  # fake seconds that one fetch takes
+        self.read_steps = read_steps  # None, or {text: fake seconds} for gh calls: the first key an argument holds sets the seconds
         self.now = 0.0
         self.fetches = []  # [start, timeout] of each fetch in call order; the timeout is None when the caller gave none
+        self.reads = []  # [start, timeout, argv] of each gh call in call order, when read_steps is given
+        self.real_run = None  # set by patched_process: the child start the fake passes through, saved before its patch
 
     def monotonic(self):
         return self.now
 
     def run(self, args, timeout=None, **kwargs):
+        if self.read_steps is not None and args[0] == "gh":
+            return self.read(args, timeout, **kwargs)
         if "fetch" not in args:
-            return _nowindow.run(args, timeout=None, **kwargs)
+            return self.passthrough(args, **kwargs)
         self.fetches.append([self.now, timeout])
         if timeout is not None and self.step > timeout:
             self.now += timeout
@@ -40,12 +49,35 @@ class FakeFetchClock:
         self.now += self.step
         return subprocess.CompletedProcess(args, 0, "", "")
 
+    def read(self, args, timeout, **kwargs):
+        """A gh call: it takes its fake seconds, cut at its timeout as a real process is. The real stand-in then answers it."""
+        self.reads.append([self.now, timeout, list(args)])
+        step = next((seconds for key, seconds in self.read_steps.items() if any(key in arg for arg in args)), 0)
+        if timeout is not None and step > timeout:
+            self.now += timeout
+            raise subprocess.TimeoutExpired(args, timeout)
+        self.now += step
+        return self.passthrough(args, **kwargs)
+
+    def passthrough(self, args, **kwargs):
+        """The real child start, with no timeout: the one patched_process saved, else the module's own."""
+        run = self.real_run or _nowindow.run
+        return run(args, timeout=None, **kwargs)
+
     @contextlib.contextmanager
     def patched(self, merge):
         """Patch `merge`'s clock and git seam for the block. Only merge's names change, so no other module's clock moves."""
         clock = types.SimpleNamespace(monotonic=self.monotonic, time=time.time, sleep=time.sleep)
         seam = types.SimpleNamespace(run=self.run)
         with unittest.mock.patch.object(merge, "time", clock), unittest.mock.patch.object(merge, "_nowindow", seam):
+            yield self
+
+    @contextlib.contextmanager
+    def patched_process(self):
+        """Patch this process's monotonic clock and child-start seam for the block. Only a hook run in a process of its own
+        calls this, so every module of that process reads the fake clock and no other process does."""
+        self.real_run = _nowindow.run
+        with unittest.mock.patch.object(time, "monotonic", self.monotonic), unittest.mock.patch.object(_nowindow, "run", self.run):
             yield self
 
 
