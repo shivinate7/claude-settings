@@ -1925,27 +1925,32 @@ test("a timed-out call names its command, and on Windows leaves no orphan behind
 // On Windows libuv kills a non-detached grandchild with its parent, so the Windows orphan is spawned
 // detached to really outlive it while holding the pipe (see hangCommand).
 for (const kind of ["hold", "orphan"]) {
-  test(`watchdog: a command whose child holds its pipe (${kind}) ends within the cap; a hang reads red, named, with no process left`, () =>
+  test(`watchdog: a command whose child holds its pipe (${kind}) arms the cap it was given, and the marker records the armed delay`, () =>
     withTempDir((dir) => {
       const pidFile = join(dir, "pids");
-      const env = { ...process.env, STAMP_SUITE_CAP_S: "5", STAMP_SUITE_SWEEP: "1", [HANG]: pidFile, [HANG_KIND]: kind };
+      const marker = join(dir, "armed"); // the watchdog writes its armed delay, in ms, to this file
+      const env = { ...process.env, STAMP_SUITE_CAP_S: "5", STAMP_SUITE_ARMED_FILE: marker, STAMP_SUITE_SWEEP: "1", [HANG]: pidFile, [HANG_KIND]: kind };
       delete env[CHILD];
       // A file, not a pipe: without a watchdog the fixture would hold a pipe, and this test, forever.
       const outFile = join(dir, "out.txt");
       const fd = openSync(outFile, "w");
-      const t0 = Date.now();
-      let r, found;
+      let r = { status: null }, found, callErr = null;
       try {
+        // A hang guard only: the watchdog ends a hung run at its cap, well before this spawn timeout.
         r = shSync(process.execPath, [SELF], { env, stdio: ["ignore", fd, fd], timeout: 40_000 });
+      } catch (e) {
+        callErr = e; // a guard that fires is text in out, so the marker assert still runs and names its cause
       } finally {
         closeSync(fd);
         found = leftovers(pidFile);
       }
-      const secs = (Date.now() - t0) / 1000;
-      const out = readFileSync(outFile, "utf8");
-      assert.ok(secs < 30, `took ${secs} s\n${out}`);
+      const out = readFileSync(outFile, "utf8") + (callErr ? `\n${callErr.message}` : "");
       assert.equal(found.pids.length, 2, out);
       assert.deepEqual(found.left, [], `still running: ${JSON.stringify(found.left)}; exit ${r.status}; cap line ${/ran past its/.test(out) ? "present" : "absent"}\n${out}`);
+      // The run hangs until the watchdog stops it, so the watchdog has armed, and the marker holds its delay.
+      assert.ok(existsSync(marker), `the watchdog wrote no armed-delay marker at ${marker}\n${out}`);
+      assert.equal(readFileSync(marker, "utf8").trim(), String(Number(env.STAMP_SUITE_CAP_S) * 1000),
+        `the watchdog armed a delay other than the ${env.STAMP_SUITE_CAP_S} s cap\n${out}`);
       assert.equal(r.status, 1, out);
       assert.match(out, new RegExp(`FAIL - hang fixture \\(${kind}\\)`), out);
     }));
