@@ -125,7 +125,10 @@ def run_step(what, cmd):
 
 
 def move_aside(path):
-    """Delete `path` by renaming it into a fresh sibling folder first, so a parallel run never reads half of it."""
+    """Delete the folder `path` by renaming it into a fresh sibling folder first, so a parallel run never reads half
+    of it. Acts only on a real folder: a file or a symlink is left alone."""
+    if os.path.islink(path) or not os.path.isdir(path):
+        return
     aside = tempfile.mkdtemp(prefix=os.path.basename(path) + ".old-", dir=os.path.dirname(path))
     try:
         os.rename(path, os.path.join(aside, "old"))
@@ -135,11 +138,17 @@ def move_aside(path):
 
 
 def refuse_foreign_folder(cache):
-    """Raises Unreadable for a folder that holds files and is neither a finished cache nor an old venv."""
+    """Raises Unreadable, naming `cache`, unless it is missing, an empty folder, a finished cache or an old venv.
+    Decided by file type first: a symlink (even to a folder) or a file is never ours to rename or delete."""
+    if os.path.islink(cache) or (os.path.lexists(cache) and not os.path.isdir(cache)):
+        raise Unreadable("cannot install vermin==%s: the cache path %s is a file or a symlink, not a folder; name "
+                         "another path in FLOOR_VENV_DIR" % (VERMIN_PIN, cache))
+    if not os.path.lexists(cache):
+        return
     try:
         names = os.listdir(cache)
-    except OSError:
-        return  # missing, or not a folder the rename will report
+    except OSError as err:
+        raise Unreadable("cannot install vermin==%s: cannot read the cache folder %s: %s" % (VERMIN_PIN, cache, err))
     if names and OK_MARKER not in names and "pyvenv.cfg" not in names:
         raise Unreadable("cannot install vermin==%s: the cache folder %s holds other files and is neither a vermin "
                          "cache nor a venv; name another folder in FLOOR_VENV_DIR or empty it" % (VERMIN_PIN, cache))
@@ -205,10 +214,10 @@ def vermin_command():
         else:
             cache = cache_dir()
             marker = os.path.join(cache, OK_MARKER)
+            refuse_foreign_folder(cache)
             if os.path.isfile(marker) and not imports_vermin(cache):
                 move_aside(cache)  # a marker over a venv that cannot import vermin: rebuild
             if not os.path.isfile(marker):
-                refuse_foreign_folder(cache)
                 build_cache(cache)
             _COMMAND.append([venv_python(cache), "-c", VERMIN_CODE])
     return list(_COMMAND[0])
