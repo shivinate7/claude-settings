@@ -105,7 +105,8 @@ SECRET_SHAPES = (
     ("session-cookie", re.compile(r"(?<![A-Za-z0-9_.])connect\.sid=\S+")),
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
     # `scheme://user:password@host`, on any host: a version pin after the `@` is blanked, so an IP host is caught here.
-    ("url-credentials", re.compile(r"://[^/?#\s@:]+:[^/?#\s@]+@")),
+    # Quotes, brackets and `|` end the user and password parts: minified code runs `"https://a"})];x||y:z@` together.
+    ("url-credentials", re.compile(r"://[^/?#\s@:\"'`()\[\]{}|]+:[^/?#\s@\"'`()\[\]{}|]+@")),
     ("password", re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(\S+)", re.I)),
     ("email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
     # Bare "Bearer <token>" or "Basic <credential>" with no header name: 20 or more token characters, so prose such as
@@ -121,7 +122,7 @@ SECRET_SHAPES = (
     # passes too.
     ("credential-name", re.compile(
         r"[A-Za-z0-9_-]*(?:secret|token|key|cookie)[A-Za-z0-9_-]*[\"']?[ \t]*(?P<sep>[=:])[ \t]*[\"']?(?:"
-        r"(?=[A-Za-z0-9+/_.~%=-]*[A-Za-z])(?=[A-Za-z0-9+/_.~%=-]*\d)[A-Za-z0-9+/_.~%=-]{8,}"
+        r"(?=[A-Za-z0-9+/_.~%=-]*[A-Za-z])(?=[A-Za-z0-9+/_.~%=-]*\d)(?P<mixed>[A-Za-z0-9+/_.~%=-]{8,})"
         r"|(?!(?-i:[A-Za-z_-]*[a-z]{3}[A-Z]))(?P<letters>[A-Za-z_-]{12,})(?=[\"']?[ \t]*(?:[,;}\r\n]|\Z)))", re.I)),
     # A well-known cookie name set with "=" to a value of 8 or more characters with a digit in it.
     ("cookie-value", re.compile(
@@ -143,6 +144,7 @@ SECRET_SHAPES = (
 # must be the whole rest of its line, after one pair of wrapping quotes or brackets and trailing `.,;` are taken off:
 # a word after it on the same line may be the secret (`none hunter2`). Anything else is refused.
 PLAIN_VALUES = frozenset(("optional", "required", "none", "null", "empty", "unset", "hidden", "redacted", "omitted"))
+JS_BOOLEANS = frozenset(("!0", "!1"))  # minified `true` and `false`
 MASK_VALUE = re.compile(r"[*•#]{3,}|[xX]{3,}")
 # `<placeholder words>` has no digits. A variable reference has an ALL_CAPS name, so `$Tr0ub4dor` and `${hunter2}` refuse.
 PLACEHOLDER_VALUE = re.compile(
@@ -204,7 +206,7 @@ def password_is_no_secret(found):
     value = bare_value(found.group(2))
     if found.group(1) == SHELL_PWD and SHELL_PATH.fullmatch(value):
         return True
-    return (value.lower() in PLAIN_VALUES or bool(MASK_VALUE.fullmatch(value))
+    return (value.lower() in PLAIN_VALUES or value in JS_BOOLEANS or bool(MASK_VALUE.fullmatch(value))
             or bool(PLACEHOLDER_VALUE.fullmatch(value)))
 
 
@@ -247,10 +249,21 @@ def letters_are_words(value):
             and not CONSONANT_RUN.search(letters))
 
 
+# A name made of lower-case words joined by hyphens, each word with at most 2 trailing digits (`automations-v3-review`).
+HYPHEN_WORDS = re.compile(r"[a-z]+\d{0,2}(?:-[a-z]+\d{0,2})+")
+VALUE_END = frozenset("\"'`,;)}] \t\r\n")
+
+
 def credential_is_no_secret(found):
-    """True when a `:` set a letters-only value that reads as words. An `=` assigns, so it never passes."""
+    """True when a `:` set a letters-only value that reads as words (an `=` assigns, so it never passes there), or
+    any separator set a whole value of lower-case words joined by hyphens, as a localStorage key name is."""
     value = found.group("letters")
-    return found.group("sep") == ":" and bool(value) and letters_are_words(value)
+    if value:
+        return found.group("sep") == ":" and letters_are_words(value)
+    value = found.group("mixed")
+    return (bool(value) and HYPHEN_WORDS.fullmatch(value) is not None
+            and found.string[found.end():found.end() + 1] in VALUE_END | {""}
+            and letters_are_words(re.sub(r"\d", "", value)))
 
 
 # A match of these shapes can still name no secret and no person. Every other shape refuses on any match.
