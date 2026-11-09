@@ -26,6 +26,14 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
 - One "Relayed Grant:" entry quotes page_grant.py's COMMAND and COUNTED_LINE, read from the
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
   relayed-grant-read-from-page).
+- One "Own Branch Lease Push:" entry quotes the lease push with a named sha and the guard remedy's
+  command form, read from PUSH_REASON. Its Covers text names the 9 lease-push refusals, requires
+  the branch was pushed earlier in this session, and binds the sha to the tip this session last
+  pushed. Its Never covers names each act in LEASE_REFUSED (decision auto-mode-owner-acts).
+- One "Own Branch Lease Push, refspec form:" entry quotes both lease forms typed with a source ref,
+  `origin <src>:<branch>`, and names <src> as a local branch, `HEAD` or a commit sha. Its Covers text
+  requires the same earlier push and binds the sha as the lease entry does. Its Never covers names each
+  act in REFSPEC_REFUSED (decision auto-mode-owner-acts).
 - One "Relayed Merge Yes:" entry quotes the merge command derived from merge/cloud_allow.json's
   one `--confirm` merge rule with the head flag read from merge/merge.py's argparse.
   Its Covers text names the coordinator that relays (cs-build:coordinator),
@@ -53,6 +61,7 @@ MERGE_PY = os.path.join(REPO_ROOT, "merge", "merge.py")
 sys.path.insert(0, HOOKS)
 
 import guard_branch_worktree  # noqa: E402
+import guard_push_delete  # noqa: E402
 
 sys.path.insert(0, os.path.join(REPO_ROOT, "skills", "waiting-page"))
 import page_grant  # noqa: E402
@@ -128,6 +137,35 @@ MESSAGE_RELAY = (("relays a grant", "relays a grant"), ("hands off an act", "han
 MESSAGE_NEXT_MERGE = (("next: merge", "next: merge"),)
 MESSAGE_ONLY = (("only informs and asks for no act", "only informs and asks for no act"),)
 MESSAGE_OUTSIDE = (("never a session outside the owner's account", "never a session outside the owner's account"),)
+LEASE = "Own Branch Lease Push:"
+LEASE_SHA_FORM = "`git push --force-with-lease=<branch>:<sha> origin <branch>`"
+LEASE_INCIDENT = "9 lease-push refusals"
+# (name, case-insensitive pattern) for each condition the lease Covers text must state.
+LEASE_SCOPE = (("earlier in this session", "earlier in this session"),
+               ("pushed that same branch", "pushed that same branch"), ("same remote", "same remote"))
+# (name, case-insensitive pattern) for the sha the lease Covers text binds to the last tip pushed.
+LEASE_BINDING = (("sha is the tip this session last pushed",
+                  r"<sha> is the tip this session last pushed"),)
+# (name, case-insensitive pattern) for each act the lease "Never covers" must name. Backticks anchor
+# the flags, because --force-if-includes contains --force and -f.
+LEASE_REFUSED = (("--force", r"`--force`"), ("-f", r"`-f`"), ("+refspec", r"`\+refspec`"),
+                 ("a lease with neither --force-if-includes nor a named sha",
+                  r"lease with neither `--force-if-includes` nor a named sha"),
+                 ("the default branch", "default branch"), ("archive/", r"`archive/`"),
+                 ("roadmap", r"`roadmap`"), ("merge-lock", r"`merge-lock`"),
+                 ("a branch this session did not push earlier", "did not push earlier"),
+                 ("--mirror", r"`--mirror`"), ("--all", r"`--all`"), ("delete", r"\bdelete\b"))
+REFSPEC = "Own Branch Lease Push, refspec form:"
+REFSPEC_IF_INCLUDES_FORM = "`git push --force-with-lease --force-if-includes origin <src>:<branch>`"
+REFSPEC_SHA_FORM = "`git push --force-with-lease=<branch>:<sha> origin <src>:<branch>`"
+# (name, case-insensitive pattern) for the source ref the refspec Covers text names.
+REFSPEC_SRC = (("src is a local branch, HEAD or a commit sha",
+                r"<src> is a local branch, `HEAD` or a commit sha"),)
+# The refspec Never covers names the lease entry's acts, with the `+` read before either ref and the
+# delete named with its empty <src>. The shared items keep their one home in LEASE_REFUSED.
+REFSPEC_REFUSED = tuple(item for item in LEASE_REFUSED if item[0] not in ("+refspec", "delete")) + (
+    ("a + before either ref", r"`\+` before either ref"),
+    ("delete (an empty <src>)", r"a delete \(an empty <src>\)"))
 
 
 def auto_mode():
@@ -200,6 +238,20 @@ def bounds_text(entry):
 def unnamed_terms(clause, terms):
     """The names in terms whose pattern the clause does not match, ignoring case."""
     return [name for name, pattern in terms if not re.search(pattern, clause, re.I)]
+
+
+def entry_part(test, prefix, never=False):
+    """The Never covers sentence (never=True), else the Covers text, of the one entry starting with prefix."""
+    entry = allow_entry(prefix)
+    test.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % prefix)
+    test.assertIsNotNone(never_covers(entry), "need a 'Never covers' sentence in the '%s' entry" % prefix)
+    return never_covers(entry) if never else bounds_text(entry)
+
+
+def remedy_form():
+    """The retry command the guard's remedy names, built from PUSH_REASON, or None when it names none."""
+    found = re.search(r"Remedy: retry with (.+?)\.\s*$", guard_push_delete.PUSH_REASON)
+    return "`git push %s origin <branch>`" % found.group(1) if found else None
 
 
 class AutoModeKeepsTheBuiltInRules(unittest.TestCase):
@@ -470,10 +522,7 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
 
     def owner_message_part(self, never=False):
         """The owner message's Never covers sentence (never=True), else its Covers text."""
-        entry = allow_entry(OWNER_MESSAGE)
-        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWNER_MESSAGE)
-        self.assertIsNotNone(never_covers(entry), "need a 'Never covers' sentence to bound Covers")
-        return never_covers(entry) if never else bounds_text(entry)
+        return entry_part(self, OWNER_MESSAGE, never)
 
     def test_covers_names_the_session_that_started_this_one(self):
         missing = unnamed_terms(self.owner_message_part(), MESSAGE_TARGET)
@@ -515,6 +564,72 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
         self.assertFalse(missing,
                          "Never covers does not name a session outside the owner's account: %r"
                          % missing)
+
+
+class OwnBranchLeasePushIsAllowed(unittest.TestCase):
+    def test_one_entry_names_the_lease_push(self):
+        hits = [e for e in auto_mode().get("allow", []) if e.startswith(LEASE)]
+        self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
+                         % (LEASE, len(hits)))
+
+    def test_covers_quotes_the_sha_push_form(self):
+        self.assertIn(LEASE_SHA_FORM, entry_part(self, LEASE),
+                      "Covers text does not quote the lease push with a named sha")
+
+    def test_entry_quotes_the_guard_remedy_form(self):
+        form = remedy_form()
+        self.assertIsNotNone(form, "PUSH_REASON names no retry command to quote")
+        self.assertIn(form, entry_part(self, LEASE), "entry does not quote the guard remedy's command form")
+
+    def test_covers_names_the_incident(self):
+        self.assertIn(LEASE_INCIDENT, entry_part(self, LEASE),
+                      "Covers text does not name the incident '%s'" % LEASE_INCIDENT)
+
+    def test_covers_requires_a_push_earlier_in_this_session(self):
+        missing = unnamed_terms(entry_part(self, LEASE), LEASE_SCOPE)
+        self.assertFalse(missing, "Covers text does not require an earlier push this session: %r" % missing)
+
+    def test_covers_binds_the_sha_to_the_tip_last_pushed(self):
+        missing = unnamed_terms(entry_part(self, LEASE), LEASE_BINDING)
+        self.assertFalse(missing, "Covers text does not bind the lease sha to the tip this session last pushed: %r"
+                         % missing)
+
+    def test_never_covers_names_each_refused_act(self):
+        missing = unnamed_terms(entry_part(self, LEASE, never=True), LEASE_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+
+class OwnBranchLeaseRefspecPushIsAllowed(unittest.TestCase):
+    def test_one_entry_names_the_refspec_form(self):
+        hits = [e for e in auto_mode().get("allow", []) if e.startswith(REFSPEC)]
+        self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
+                         % (REFSPEC, len(hits)))
+
+    def test_covers_quotes_the_if_includes_form(self):
+        self.assertIn(REFSPEC_IF_INCLUDES_FORM, entry_part(self, REFSPEC),
+                      "Covers text does not quote the --force-if-includes form with a source ref")
+
+    def test_covers_quotes_the_sha_form(self):
+        self.assertIn(REFSPEC_SHA_FORM, entry_part(self, REFSPEC),
+                      "Covers text does not quote the lease push with a named sha and a source ref")
+
+    def test_covers_requires_a_push_earlier_in_this_session(self):
+        missing = unnamed_terms(entry_part(self, REFSPEC), LEASE_SCOPE)
+        self.assertFalse(missing, "Covers text does not require an earlier push this session: %r" % missing)
+
+    def test_covers_binds_the_sha_to_the_tip_last_pushed(self):
+        missing = unnamed_terms(entry_part(self, REFSPEC), LEASE_BINDING)
+        self.assertFalse(missing, "Covers text does not bind the lease sha to the tip this session last pushed: %r"
+                         % missing)
+
+    def test_covers_names_the_source_ref(self):
+        missing = unnamed_terms(entry_part(self, REFSPEC), REFSPEC_SRC)
+        self.assertFalse(missing, "Covers text does not name <src> as a local branch, HEAD or a commit sha: %r"
+                         % missing)
+
+    def test_never_covers_names_each_refused_act(self):
+        missing = unnamed_terms(entry_part(self, REFSPEC, never=True), REFSPEC_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
 
 
 class NeverCoversSentence(unittest.TestCase):
