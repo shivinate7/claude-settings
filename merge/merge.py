@@ -42,14 +42,21 @@
                           `__main__.Class.name`, which names no file): a line that starts, after any timestamp, with FAIL, FAILED or ERROR;
                           the case text is what follows the `]` of a hooks/test_guard.py line, without its trailing `  (note)`. Paths are compared
                           normalised (`./a` is `a`). No match prints `no open pull request touches them.` only when every read succeeded and
-                          every changed file had a patch. Unknown (exit 1, `merge: unknown ...` on stderr, the matches still on stdout): a --run
-                          whose failing lines give no case and no file, with or without --case or --file; a --run with a red job that timed
-                          out or was cancelled. An open PR with a changed file that has no patch, while a case is queried and the PR has no
-                          match, prints `#N ...: unknown: file PATH has no patch to read` and exits 1. A failed read, or a program that cannot
-                          start, prints only `unknown` (exit 1). An empty --run, --case or --file is a usage error (exit 2). Stands alone;
-                          takes no lock, merges and posts nothing; any session may run it.
-                          Cost per call: API reads only: the open pull list pages, one pulls/N/files read (its pages) per open PR, and for --run
-                          one jobs read and one log read per failed job. No file, process or timer.
+                          nothing is unknown. Unknown (exit 1, `merge: unknown ...` on stderr, the matches still on stdout), with or without
+                          --case or --file: a --run whose failing lines give no case and no file at all; a --run with a failed job (but the
+                          all-jobs-passed rollup) whose own log gives no case and no file, an empty log included; a --run with a job whose
+                          conclusion is not success, skipped, neutral or failure (timed out, cancelled, startup failure, action required,
+                          still running). A changed file with no patch makes a PR unknown only while a case is queried and that PR has no
+                          match: it prints `#N ...: unknown: file PATH has no patch to read` and exits 1; --file alone is fine beside it.
+                          A failed read, or a program that cannot start, prints only `unknown` (exit 1). An empty --run, --case or --file is
+                          a usage error (exit 2). Limits: a case matches only when its text sits whole in one `+` line, so a name built from
+                          pieces or with escapes never matches, and a fix in guard code that leaves the case line alone never matches. --file
+                          is an exact path after normpath: no rename's previous name, no directory, no backslash path. A failing line whose
+                          reason spans lines may keep a partial `  (note` in the case. Stands alone; takes no lock, merges and posts nothing;
+                          any session may run it.
+                          Cost per call: API reads only: the open pull list pages (one call per 100 PRs), one pulls/N/files read (its pages)
+                          per open PR, and for --run the jobs read pages (one call per 100 jobs) and one log read per failed job but the
+                          rollup. No file, process or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
@@ -101,10 +108,12 @@ class Stop(Exception):
 class Liftable(Stop):
     """A refusal that a reason flag lifts. Its message names the flag, so main() does not add the no-override line."""
 
-UNREAD_CONCLUSIONS = ("timed_out", "cancelled")  # a red job whose log holds no failing lines to read (merge --touches)
+FINE_CONCLUSIONS = ("success", "skipped", "neutral")  # a job conclusion merge --touches needs no log for; failure is read, any other is unread
+ROLLUP_JOB = REQUIRED_CHECK  # the all-jobs-passed rollup job (actions/all-jobs-passed): it fails in every red run and logs only its own verdict
 
 class UnreadJobs(Stop):
-    """A run has a red job that timed out or was cancelled. Its message is the unknown line; `lines` are the failing lines of the run's other failed jobs."""
+    """A run has a job that merge --touches could not account for: a failed job whose log gave no case and no file, or a job whose conclusion is
+    neither fine nor failure (Host.failed_lines). Its message is the unknown line; `lines` are the failing lines of the run's other failed jobs."""
     def __init__(self, message, lines):
         super().__init__(message)
         self.lines = lines
@@ -881,21 +890,30 @@ class Host:
         return self.pages(f"pulls/{n}/files")
 
     def failed_lines(self, run_id):
-        """-> the failing lines (see failing_line) of the log of each failed job of run RUN_ID: one jobs read, then one log read per failed job.
-        A failed read is a Stop. A red job that timed out or was cancelled has no log worth reading: the lines of the other failed jobs are read, then
-        UnreadJobs is raised, carrying them, so the caller can still use what was read and say the rest is unknown."""
+        """-> the failing lines (see failing_line) of the log of each failed job of run RUN_ID: the jobs read (its pages), then one log read per
+        failed job. Each job is accounted for on its own. The rollup job (ROLLUP_JOB) is skipped, with no log read. A job with a fine conclusion
+        (FINE_CONCLUSIONS) needs no log. A failed job must give at least one case or file from its own log lines; an empty log gives none. Any other
+        conclusion, a job still running included, is unread. A failed read is a Stop. A job not accounted for raises UnreadJobs once every job is
+        read, carrying the lines read, so the caller can still use them and say the rest is unknown."""
         lines, unread = [], []
         for job in self.pages(f"actions/runs/{run_id}/jobs", "jobs"):
-            if job.get("conclusion") in UNREAD_CONCLUSIONS:
-                unread.append(f"{job.get('name') or job.get('id')} {job['conclusion']}")
-            if job.get("conclusion") != "failure":
+            name, conclusion = job.get("name") or job.get("id"), job.get("conclusion")
+            if job.get("name") == ROLLUP_JOB or conclusion in FINE_CONCLUSIONS:
+                continue
+            if conclusion != "failure":
+                unread.append(f"{name} {conclusion or 'still running'}")
                 continue
             c, out = self.api(f"actions/jobs/{job['id']}/logs")
             if c:
                 raise Stop(f"reading the log of job {job['id']} of run {run_id} failed: {out} " + UNKNOWN_CITE)
-            lines += [t for t in out.splitlines() if failing_line(t) is not None]
+            found = [(t, failing_line(t)) for t in out.splitlines()]
+            found = [(t, p) for t, p in found if p is not None]
+            if not any(file or case for _t, (file, case) in found):
+                unread.append(f"{name} failure, its log gave no case or file")
+            lines += [t for t, _p in found]
         if unread:
-            raise UnreadJobs(f"unknown: run {run_id} has a red job with no failing lines to read ({'; '.join(unread)}) " + UNKNOWN_CITE, lines)
+            raise UnreadJobs(f"unknown: run {run_id} has a job whose log was not read or gave no case or file ({'; '.join(unread)}) "
+                             + UNKNOWN_CITE, lines)
         return lines
 
     # The old GraphQL values the rest of the tool reads, from the REST fields.
@@ -3517,10 +3535,11 @@ def touches_lines(h, run, cases, files):
     """-> (lines, unknown): the lines of `merge --touches` and why it is unknown, or None. A line per open pull request that touches a named file or
     holds a named case in a `+` line of its patch, ascending by number; the one no-match line when there is none and nothing is unknown. Paths are
     posixpath.normpath'd on both sides. The failing lines of the run (Host.failed_lines) add their cases and files to the named ones. Unknown, with
-    the matches still listed: a run that gave no case and no file from any of its failing lines (a summary line such as `FAILED (failures=2)` parses
-    to none), even beside --case or --file; a run with a red job that timed out or was cancelled; and, for a pull request that has no match while a
-    case is queried, a changed file with no patch (a binary or large file), on that pull request's own line. Reads: one Host.failed_lines for a run,
-    the open pull list pages, one Host.pull_files per open pull request. A Stop in a read raises before any line is made."""
+    the matches still listed: a run with a job that Host.failed_lines cannot account for (UnreadJobs); a run that gave no case and no file at all,
+    even beside --case or --file (on a real host, a run with no failed job but the rollup; a summary line such as `FAILED (failures=2)` parses to
+    none); and, for a pull request that has no match while a case is queried, a changed file with no patch (a binary or large file), on that pull
+    request's own line. Reads: one Host.failed_lines for a run, the open pull list pages, one Host.pull_files per open pull request. A Stop in a
+    read raises before any line is made."""
     cases, files = list(cases), [posixpath.normpath(f) for f in files]
     asked = bool(cases or files)
     unknown = None
@@ -3529,7 +3548,7 @@ def touches_lines(h, run, cases, files):
             lines = h.failed_lines(run)
         except UnreadJobs as e:
             lines, unknown = e.lines, str(e)
-        parsed = False
+        parsed = False  # the run as a whole gave a case or a file; each failed job's own share is held in Host.failed_lines
         for line in lines:
             file, case = failing_line(line) or (None, None)
             parsed = parsed or bool(file or case)
