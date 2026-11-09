@@ -417,7 +417,7 @@ is never changed.
 7. Put the mockups in, on main's code ("Keep the page on main's code"). Run its read, `stale_pages.py --write` and copy
    steps on the live page. The page that `--write` writes is main's `page.html` with the live roadmap block carried
    over. In that page, replace the text inside the `designData` script element with `<out folder>/designData.json`,
-   as is. The file already writes each `<` as `<`, so no string can close the script. Publish that page once to
+   as is. The file already writes each `<` as `\u003c`, so no string can close the script. Publish that page once to
    the live URL, as that section's republish step says.
 8. Rewrite each `page item <n>` cite of the copy's account in the roadmap, with `<out folder>/renumbered.json`: the
    key is the old `n`, and the value is the new one. Commit it on the record branch.
