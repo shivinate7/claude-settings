@@ -1949,22 +1949,29 @@ ENV_WALK_REASON_EXEC = ("this command would search a name that find hands to its
                         "an environment file")
 
 
-def _find_names_no_env(expression) -> bool:
+def _find_names_no_env(expression, runners: bool = False) -> bool:
     """True when each name a find expression prints matches a `-name` or `-iname` glob that no env file name
     fits. The words are dequoted. Without a paren, find's `-a` binds tighter than `-o`, so each part between
     two top-level `-o` is one alternative. Each alternative needs a `-name` or `-iname` test that no `!` or
     `-not` turns round. Any other test in it, negated or not, only narrows the names. When an explicit
     `-print` or `-print0` sits in the expression, only an alternative that holds one prints (a `-prune`
     branch with none prints nothing), and only its tests before the first print narrow what it prints. A
-    paren, or an action that prints other text than the name, is not read, and the answer is False."""
+    paren, or an action that prints other text than the name, is not read, and the answer is False. With
+    `runners` set, the names are the ones find hands to its `-exec` programs (`{}`), not the ones it prints: a
+    runner and its program words, up to the `;` or `+` that ends them, then count as a `-print` in its
+    alternative, so only the tests before it narrow the names it gets."""
     alternatives, current, at = [], [], 0
     printing = []
     printed = False
     while at < len(expression):
         word = expression[at]
-        if word in ("(", ")") or word in ENV_FIND_OTHER_OUTPUT:
+        if runners and word in ENV_FIND_RUNNERS:
+            printed = True
+            while at < len(expression) and expression[at] not in ENV_FIND_RUNNER_ENDS:
+                at += 1
+        elif word in ("(", ")") or word in ENV_FIND_OTHER_OUTPUT:
             return False
-        if word in ("-o", "-or"):
+        elif word in ("-o", "-or"):
             alternatives.append(current)
             printing.append(printed)
             current, printed = [], False
@@ -2023,8 +2030,11 @@ def _find_pruned(expression):
     alternatives.append(current)
     prunes = []
     for words in alternatives:
+        # find reaches an alternative only when each one before it is false for the entry, so a `-prune` after an
+        # alternative with no `-prune` of its own (`-print -o -path ./big -prune`) is not reached for what that one
+        # holds for, and find enters the folder. Only the prunes in front of the first such alternative are read.
         if "-prune" not in words:
-            continue
+            break
         tests, at, readable = [], 0, True
         while at < words.index("-prune"):
             word = words[at]
@@ -2180,7 +2190,7 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders
 
 
 def _feed_source(command: str, rest, here: str, reads_folders: bool = True,
-                 narrowing=((), (), False, False), runs_empty: bool = False):
+                 narrowing=((), (), False, False), runs_empty: bool = False, exec_feed: bool = False):
     """What the lister `command` (its argument words are `rest`) hands to a search as names, from xargs or as
     the `{}` of its own `-exec`: (the env file it names, whether the search may walk `here`, the folders it
     names). The env file is '' for none, a path, or ENV_TOO_LARGE. With `runs_empty` the search runs once on
@@ -2237,7 +2247,7 @@ def _feed_source(command: str, rest, here: str, reads_folders: bool = True,
             at += 1
         if any(bare[i + 1:i + 2] == ["d"] for i, w in enumerate(bare) if w == "-type"):
             return unknown
-        names_no_env = _find_names_no_env(bare[at:])
+        names_no_env = _find_names_no_env(bare[at:], exec_feed)
         prints_folder, globs = _find_folder_names(bare[at:])
         # A search that reads no folder it is given reads only the files find prints.
         prints_folder = prints_folder and reads_folders
@@ -2457,7 +2467,8 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
                         sources = {here: _xargs_source(pieces, ends, number, part, here, reads_folders, narrowing,
                                                        empty) for here in heres}
                     elif feed is not None:
-                        sources = {here: _feed_source("find", feed, here, reads_folders, narrowing) for here in heres}
+                        sources = {here: _feed_source("find", feed, here, reads_folders, narrowing, exec_feed=True)
+                                   for here in heres}
                     else:
                         sources = {}
                     lister = "xargs is fed" if via_xargs else "find -exec is fed"
