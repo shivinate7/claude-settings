@@ -1978,6 +1978,46 @@ class RestoredLine(MainLineDrop, unittest.TestCase):
         self.assertIn("still missing beta", text, "the line the head still lacks was not named")
         self.assertNotIn("restored alpha", text, "a line a later commit put back in the same file was still named")
 
+    def test_two_merges_that_each_drop_one_copy_of_a_line_are_not_both_cleared_by_one_restored_copy(self):
+        r = self.r
+        fork = r.sh("rev-parse", "HEAD")  # the feat commit: a second lane starts here, on the same base
+        self.main_adds("added by main")
+        self.merge_dropping_main_lines()
+        merge_a = r.sh("rev-parse", "HEAD")
+        r.sh("checkout", "-q", "-b", "feat2", fork)
+        # its own message: the same parents, tree and date would make this the first merge's commit
+        self.merge_main_dropping("Merge main into the second lane, drop its line", self.T2)
+        merge_c = r.sh("rev-parse", "HEAD")
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-edit", "feat2", date=self.T2)
+        r.commit("put the line back", date=self.T2, app_txt=BODY + "added by main\n")
+        self.assertNotEqual(merge_a, merge_c, "premise: the two merges are two commits")
+        self.assertNotIn("added by main", self.at(merge_a, "app.txt"), "premise: the first merge dropped the line")
+        self.assertNotIn("added by main", self.at(merge_c, "app.txt"), "premise: the second merge dropped the line")
+        self.assertEqual(self.at("HEAD", "app.txt").count("added by main"), 1, "premise: the head holds one copy")
+        got = self.r.verdict()
+        self.assertEqual(len(got), 1, "two merges each dropped one copy, the head holds one: want 1 finding, got %r" % got)
+        self.assertIn("added by main", got[0], "the finding does not name the dropped line: %r" % got)
+
+    def test_a_loss_at_a_renamed_file_is_not_cleared_by_a_later_file_recreated_at_the_old_name(self):
+        r = self.r
+        self.main_adds("added by main")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.sh("mv", "app.txt", "app2.txt")
+        r.put("app2.txt", BODY)  # the merge renames app.txt to app2.txt and drops the line main added to it
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main, rename app.txt, drop its line", date=self.T2)
+        merge = r.sh("rev-parse", "HEAD")
+        r.commit("recreate the old name with the line", date=self.T2, app_txt=BODY + "added by main\n")
+        names = r.sh("ls-tree", "--name-only", merge).split()
+        self.assertIn("app2.txt", names, "premise: the merge renamed app.txt to app2.txt")
+        self.assertNotIn("app.txt", names, "premise: the merge left no app.txt")
+        self.assertNotIn("added by main", self.at("HEAD", "app2.txt"), "premise: the head lacks the line at the new name")
+        self.assertIn("added by main", self.at("HEAD", "app.txt"), "premise: the head holds the line at the old name")
+        got = self.r.verdict()
+        self.assertTrue(got, "a line dropped at the new name was cleared by a file recreated at the old name")
+        self.assertTrue(any("added by main" in g for g in got), "no finding names the dropped line: %r" % got)
+
 
 class DropsLinesHint(unittest.TestCase):
     """A `Drops-lines:` line that git does not parse as a trailer (it is not in the last paragraph) excuses nothing.
