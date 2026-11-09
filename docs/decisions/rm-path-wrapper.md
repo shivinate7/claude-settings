@@ -19,6 +19,7 @@ shim reads the path at run time.
 - The reading is `_rm_target_bad` in `hooks/guard_rm_var.py`, the one home. The shim finds `hooks/` from its own real path, so a symlinked
   install and a copied install both work.
 - `land_dir bin` links `bin/rm` into `~/.claude/bin`, which the existing rc line puts first on PATH. `install.ps1` skips it.
+- At session start, `hooks/session_start.sh` appends `export PATH="$HOME/.claude/bin:$PATH"` to `CLAUDE_ENV_FILE` when `~/.claude/bin` is not on PATH, so the shim is live in cloud sessions too. Cost: one append per session start, no process.
 - **Fail-open.** If `python3` is missing, or `guard_rm_var` cannot load, or the judgment raises, the shim prints one warning line and runs
   the real `rm`. The shim sits in front of every `rm` a Claude session runs, so a broken helper that refused would stop all deletes. The
   rule and the hook are the first stops. A missing last stop is a smaller harm than a session that cannot delete a file.

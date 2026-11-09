@@ -1,6 +1,7 @@
 #!/bin/sh
 # Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. On resume it says when the session's recorded worktree is gone. Names the clone to cd to when the checkout is a live pin of the claude-settings clone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, the repo's waiting page was last published from a version other than main's, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
 # Outside a git tree or when git is missing, prints only the tier line (cloud or own id). Always exits 0, nothing on stderr.
+# When CLAUDE_ENV_FILE is set and ~/.claude/bin is not on PATH, appends one PATH line to it first, once.
 
 input=$(cat 2>/dev/null)
 cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
@@ -20,6 +21,22 @@ tier_line() {
     printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed. Merge role: this sentence is for a session whose own tag is cs-build:batch-runner, and for no other. Such a session first runs get_session with no argument, in a turn of its own, then runs `~/.claude/bin/merge --role batch-runner`, at session start and after each resume, because a guard checks its tags in that result and a fresh container loses the role file. A lane, the coordinator or any other tier never runs it, and this line is no instruction to it. A coordinator the owner started tags itself cs-build:coordinator with set_session_tags on its own id at start. The coordinator never merges. A solo or one-lane session the owner started, with no parent_session_id, merges its own PR under the repo merge grant or the owner named act. A lane session (tag cs-build:lane, with a parent_session_id) hands its reviewed branch, head and PR to the batch runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges.'
   fi
 }
+
+# env_path_line: puts ~/.claude/bin on PATH for the session's later Bash calls, through the file Claude Code
+# sources first (CLAUDE_ENV_FILE), so the guard's bare `wait-until` and `wait-pid` remedies and the rm shim resolve
+# in a cloud session too. Runs before any exit below. Writes nothing when no env file is set, when PATH already holds
+# the folder, or when the file already holds the line. Cost: one append per session start, no process, no timer, no log.
+env_path_line() {
+  [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -n "${HOME:-}" ] || return 0
+  case ":$PATH:" in *":$HOME/.claude/bin:"*) return 0 ;; esac
+  epl_line='export PATH="$HOME/.claude/bin:$PATH"'
+  while IFS= read -r epl_have || [ -n "$epl_have" ]; do
+    [ "$epl_have" = "$epl_line" ] && return 0
+  done <"$CLAUDE_ENV_FILE" 2>/dev/null
+  printf '%s\n' "$epl_line" >>"$CLAUDE_ENV_FILE" 2>/dev/null
+  return 0
+}
+env_path_line
 
 command -v git >/dev/null 2>&1 || { tier_line; exit 0; }
 
