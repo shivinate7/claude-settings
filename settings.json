@@ -13,6 +13,7 @@
       "mcp__claude-artifacts__db_get",
       "mcp__claude-artifacts__db_list",
       "mcp__claude-artifacts__db_query",
+      "mcp__claude-artifacts__db_str_replace",
       "mcp__claude-artifacts__db_write",
       "mcp__claude-artifacts__watch",
       "mcp__claude-code-remote__add_repo",
