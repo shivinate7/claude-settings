@@ -111,7 +111,8 @@ def pointer_checkout() -> str:
 POINTER_EDIT_REASON = (
     "Rule (pointer-edit): this checkout is the one the owner's global rules point at. Every session "
     "on this machine runs its hooks, its lint and its agents out of it, so a file edited here is live "
-    "for all of them at once, before any review. "
+    "for all of them at once, before any review "
+    "(decision pointer-edit, the guard refuses Edit and Write in the pointer checkout). "
     "Remedy: call the EnterWorktree tool to make a worktree of your own on a new branch, with a `name` "
     "and no `path`. Then make the edit inside that worktree."
 )
