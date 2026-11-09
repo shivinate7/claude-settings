@@ -22,11 +22,15 @@ repo's GitHub name, rolled out or not, and that repo's extras file may repeat it
 Cause: each repo moves its own files in its own roll-out (owner, Oct 17). The last roll-out deletes
 "legacy", "legacy-repos", `legacy()`, `legacy_repos()`, `unmoved()`, `candidates()` and the branches in `path()`.
 
-Standard library only, and safe to import: it reads files only when a function is called.
+Safe to import: it reads files only when a function is called. It needs the standard library and
+hooks/git_reads.py, which `repo_name` imports on first use.
 """
 import json
+import ntpath
 import os
+import posixpath
 import re
+import sys
 
 LAYOUT_FILE = "lint/layout.json"  # relative to the claude-settings root; hooks/guard.py holds the same literal
 LAYOUT_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), os.path.basename(LAYOUT_FILE))
@@ -100,8 +104,20 @@ def legacy(name):
     return layout().get("legacy", {}).get(found, found)
 
 
-# github.com in https, ssh and scp form, and the /git/<owner>/<name> path of a cloud session's git proxy.
-GITHUB = re.compile(r"(?:^|[/@])github\.com[:/]+([^/\s]+/[^/\s]+?)(?:\.git)?/*$|/git/([^/\s]+/[^/\s]+?)(?:\.git)?/*$")
+# An origin repo_name may read: github.com in https, ssh and scp form, a port after the host allowed, or the
+# /git/<owner>/<name> path of a cloud session's git proxy. The path is exactly owner/name, `.git` and trailing
+# slashes optional; git_reads.origin_slug reads the owner/name.
+GITHUB = re.compile(
+    r"(?:^|[/@])github\.com(?::\d+)?[:/]+[^/\s]+/[^/\s]+?(?:\.git)?/*$|/git/[^/\s]+/[^/\s]+?(?:\.git)?/*$")
+
+
+def _origin_slug(url):
+    """git_reads.origin_slug, the one origin parser; imported on first use so this module stays safe to import."""
+    hooks = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks")
+    if hooks not in sys.path:
+        sys.path.append(hooks)
+    from git_reads import origin_slug
+    return origin_slug(url)
 
 
 def _common_dir(root):
@@ -138,8 +154,9 @@ def repo_name(root):
         if line.startswith("["):
             section = line
         elif section == '[remote "origin"]' and re.match(r"url\s*=", line):
-            hit = GITHUB.search(line.split("=", 1)[1].strip())
-            return (hit.group(1) or hit.group(2)).lower() if hit else None
+            url = line.split("=", 1)[1].strip()
+            slug = _origin_slug(url) if GITHUB.search(url) else None
+            return slug.lower() if slug else None
     return None
 
 
@@ -506,6 +523,92 @@ def shared_resources(root):
         if repo_name(root) == item["owner"].lower() and not os.path.isfile(os.path.join(root, *item["preflight"].split("/"))):
             raise LayoutError("%s: %s preflight %s is missing in the owner repo" % (where, label, item["preflight"]))
     return found
+
+
+# ---------------------------------------------------------------------------- mockup homes
+#
+# Decision mockup-home. A mockup that a waiting item or a roadmap step names is a repo path under the design folder,
+# and version control holds it. This is the one home of the path (rule building-allow-list-is-the-constant): the guard
+# (hooks/question_form.py) and the roadmap build (skills/roadmap/build.py) import it and keep no copy. That origin holds
+# the file is the build's check (build.py mockup_on_origin); the guard judges shape only.
+URL_FORM = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+WIN_DRIVE = re.compile(r"^[A-Za-z]:")
+
+
+def _owner_home(home):
+    """`home` as text, else this machine's home read now (HOME), else None when it cannot be told."""
+    found = str(home) if home is not None else os.path.expanduser("~")
+    return None if found in ("", "~") else found
+
+
+def mockup_homes(root):
+    """The folders a mockup may sit in, as a tuple of paths: the repo's design folder inside the checkout. Reads no
+    file and starts no process."""
+    return (os.path.join(root, *path(root, "design").split("/")),)
+
+
+def mockup_home_words(root):
+    """The mockup home as a sentence shows it, with no absolute path."""
+    return "%s/<file>, committed to git" % path(root, "design")
+
+
+def _flavour(*texts):
+    """ntpath when any text is a Windows form (a drive letter or a backslash), else posixpath."""
+    return ntpath if any(t and (WIN_DRIVE.match(t) or "\\" in t) for t in texts) else posixpath
+
+
+def _parts(mod, text):
+    """The parts of `text` with `.` and `..` folded out, in `mod`'s form. A `..` that escapes the start stays."""
+    return tuple(part for part in re.split(r"[\\/]+", mod.normpath(text)) if part and part != ".")
+
+
+def _is_absolute(mod, text):
+    return bool(WIN_DRIVE.match(text)) or text.startswith(("/", "\\")) or mod.isabs(text)
+
+
+def _below(parts, home, fold):
+    """The parts of `parts` below `home` (both tuples of parts), or None when `parts` is not strictly below it."""
+    head = parts[:len(home)]
+    same = [p.casefold() for p in head] == [p.casefold() for p in home] if fold else head == home
+    return parts[len(home):] if same and len(parts) > len(home) else None
+
+
+def mockup_file(root, file, home=None):
+    """(path, why) for a mockup `file`. path is the file as this machine reads it (`~` expanded, a relative file
+    joined to `root`, `.` and `..` folded) when it sits under the design folder. Else path is None and why is
+    "empty" (no file), "url", "folder" (the text ends in a slash) or "outside". A Windows form reads in any case, with
+    either slash. Starts no process."""
+    if not isinstance(file, str) or not file.strip():
+        return None, "empty"
+    file = file.strip()
+    if URL_FORM.match(file):
+        return None, "url"
+    if file.endswith(("/", "\\")):
+        return None, "folder"
+    design = mockup_homes(root)[0]
+    owner = _owner_home(home)
+    mod = _flavour(file, owner)
+    if file == "~" or file.startswith(("~/", "~\\")):
+        if owner is None:
+            return None, "outside"
+        file = mod.join(owner, file[2:])
+    elif not _is_absolute(mod, file):
+        file = mod.join(root, file)
+    if _below(_parts(mod, file), _parts(mod, design), mod is ntpath) is not None:
+        return mod.normpath(file), None
+    return None, "outside"
+
+
+def mockup_home_problem(root, file, home=None):
+    """None when `file` sits in the design folder of the repo at `root`, else one sentence that says why not and
+    names the folder. The guard prints it, so it holds no absolute path."""
+    found, why = mockup_file(root, file, home)
+    if found:
+        return None
+    cause = {"empty": "has no file", "url": "is a link, and a link does not stay with the repo",
+             "folder": "is a folder, and a folder holds no mockup"}.get(
+        why, "is outside the design folder")
+    return "the design's `file` %s. Keep the mockup in %s, and put its path in `file`." % (cause, mockup_home_words(root))
 
 
 def folders(root, flag):

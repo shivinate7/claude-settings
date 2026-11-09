@@ -3,10 +3,12 @@
 Read this file before you write UI in a repo with screens. Each rule states only what Vercel
 web-interface-guidelines, impeccable and frontend-design do not state. Ruling: record
 ux-house-rules (house UX rules). A repo's own design records can add to a rule, never cancel it. Before you lay out a screen,
-also read [`layout.md`](layout.md).
+also read [`layout.md`](layout.md). An entry marked Guidance is not a house rule.
 
 ## ux-press-moves-nothing
 
+Not adopted, not a house rule: a miss is no finding (record ux-house-rules; owner, 2026-11-06
+13:11 CST, item 183 option b).
 A press, a load or a change of state moves no other content.
 Check: press each control and load each state. Pass when no other element moves or resizes. A
 loading area keeps its loaded size, and a control keeps the box of its widest label or icon.
@@ -16,20 +18,37 @@ it); ios-adblock `ios/App/AdBlockApp.swift` (the state icon has a fixed frame).
 
 ## ux-order-holds-still
 
-A list keeps a plain, predictable order, and an act on a row does not re-rank the list.
-Check: act on a row. Pass when the other rows keep their order until the person sorts again.
+Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
+A list keeps a plain, predictable order, so the person reaches the next open row without a hunt
+and no other row changes its order. An act may move the row it acted on out of an open list,
+such as a sent card that sinks to Answered. Then the next open row, if any, takes its slot. No
+other row leaves the list, and the other rows keep their order until the person sorts again.
+Check: act on a row. Pass when no other row leaves the open list and the other rows keep their
+order among themselves. If the acted-on row left, pass only when the next open row, if any, took
+its slot. Fail when the acted-on row moved to another place in the same open list. The rows that
+close its gap and the rows that make room where it lands may shift with it, in their order (owner,
+2026-11-06 16:47 CST, item 313 a). A count badge or section header that the sink shifts may shift
+too (owner, 2026-11-06 17:19 CST, item 318 a).
 Source: banchi D181 (order is taken once, a sale keeps it) and D263 (a sort press re-sorts,
-nothing else jumps).
+nothing else jumps); owner, 2026-11-06 16:47 CST, item 313 a (a sent card may sink).
 
 ## ux-unknown-is-not-empty
 
-A screen shows loading, failed, unknown and loaded as different states.
+A screen shows loading, failed, unknown, empty and loaded as different states. An empty state is
+one sentence that says what fills it, and one control that fills it. A list that has no data yet
+hides its filters. A list that a filter emptied keeps its filters, and its one control clears the
+filter.
 Check: force a failed read and an unknown state. Pass when neither shows as empty, zero or done.
+Then empty each list. Pass when it shows one sentence and one control. With no data, the filters
+are hidden. When a filter emptied it, the filters show and the control clears the filter.
 Source: q_max D-255 (never assert an unreached state) and D-233 (a failed history read says so);
-ios-adblock `ios/App/AdBlockApp.swift` (`BlockerRow` has its own error and unknown states).
+ios-adblock `ios/App/AdBlockApp.swift` (`BlockerRow` has its own error and unknown states);
+banchi `CLAUDE.md` "Register" and `docs/DESIGN.md` `EmptyState`; q_max `specs/ux-plan-b.md` B2
+(owner confirmed, 2026-09-29).
 
 ## ux-statements-are-true
 
+Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
 Screen copy claims only what the product does and what the owner confirmed.
 Check: pass when each promise (a search scope, a feature, a figure, a trust line) is true now.
 Source: joyous `docs/design-brief.md` move 6 (no unsourced claim); sillage
@@ -38,6 +57,7 @@ Source: joyous `docs/design-brief.md` move 6 (no unsourced claim); sillage
 
 ## ux-machine-text-hidden
 
+Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
 A code, a path, a record id or raw server text shows only in a closed disclosure.
 Check: pass when each visible string is in the person's words, and machine text is behind a
 "What the server said" disclosure under a plain sentence.
@@ -46,6 +66,7 @@ disclosure); q_max D-640 (an error never shows the server's raw reason).
 
 ## ux-no-dead-end
 
+Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
 Each refusal, error and end page has a control on that screen that leads on: a fix, or another
 way such as a phone number.
 Check: pass when each one has that control. Prose that names a place is not a control.
@@ -53,28 +74,9 @@ Source: q_max D-261 (a refusal names a reachable fix) and D-226 (offer the desti
 prose); joyous `docs/design-brief.md` move 4 (no dead end, offer a call) and record
 custom-tour-booking (an unknown link shows Book a tour and the phone).
 
-## ux-empty-one-action
-
-An empty state is one sentence that says what fills it, and one control that fills it.
-A list that has no data yet hides its filters. A list that a filter emptied keeps its filters,
-and its one control clears the filter.
-Check: pass when an empty list shows one sentence and one control. With no data, the filters
-are hidden. When a filter emptied it, the filters show and the control clears the filter.
-Source: banchi `CLAUDE.md` "Register" and `docs/DESIGN.md` `EmptyState`; q_max
-`specs/ux-plan-b.md` B2 (owner confirmed, 2026-09-29).
-
-## ux-ask-or-undo
-
-A destructive press asks first when it cannot be undone, and acts and offers Undo when it can.
-Check: pass when no destructive press does both or neither, and each ask names the act and the
-count, with first focus on Cancel.
-Source: banchi `docs/DESIGN.md` ConfirmSheet row (first focus on Cancel) and UX-099 (ask first,
-or undo after; the ask names the count); banchi D57 (mark sold is one press, undoable); q_max
-D-497 (un-retire is an undo) and D-653 (a restore keeps the retirement in the log).
-
 ## ux-keep-what-was-made
 
-Never discard input that a person made and that no server can return.
+Input that a person made and that no server can return survives leaving and coming back.
 Check: type, then close, go back, change tabs and leave the app. Pass when the input is still
 there on return.
 Source: q_max D-399 (a screen with unrecoverable input stays mounted); sillage
@@ -110,6 +112,7 @@ times or more: too much verbiage).
 
 ## ux-a11y-floor
 
+Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
 Each screen meets the accessibility floor in `a11y.md`.
 Check: run the CI check in `a11y.md` on the changed screens, at each size and theme they ship in.
 Pass when it is green and the hand checks there pass.
@@ -236,7 +239,8 @@ Check: record a lab trace of the changed route on a mobile profile. Pass when LC
 Blocking Time in the lab) and CLS meet web.dev's "good" lines. Where field data at the 75th percentile
 exists, it must also pass. Field data is in CrUX through PageSpeed Insights, or the repo's own field log.
 Source: [web.dev, Web Vitals](https://web.dev/articles/vitals) (the "good" lines, and the 75th
-percentile for field data); impeccable `optimize` gives the lines as advice with no check.
+percentile for field data) and [web.dev, Total Blocking Time](https://web.dev/articles/tbt) (the lab
+TBT line); impeccable `optimize` gives the lines as advice with no check.
 
 ## ux-feature-baseline-or-fallback
 
@@ -249,3 +253,13 @@ test, and the fallback was seen working. To see the fallback, invert the `@suppo
 feature test false, then use the page. A browser-name check fails.
 Source: [web.dev, Baseline](https://web.dev/baseline); impeccable `overdrive` asks for a working
 fallback, with no check.
+
+## ux-text-zooms
+
+Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
+Web text zooms to 200% and loses no content, and it grows with the browser's default font size. So a font
+size is never in px without a repo record.
+Check: zoom each changed route to 200% at its smallest width, and raise the browser's default font size.
+Pass when no content is clipped or lost, and the text grows.
+Source: [MDN, font-size](https://developer.mozilla.org/en-US/docs/Web/CSS/font-size) (a `px` size ignores
+the browser's default font size); WCAG 1.4.4 (resize text).

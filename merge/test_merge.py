@@ -9,12 +9,14 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, atexit, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import ast, atexit, base64, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
 import ctypes  # the Windows-branch test patches os.name; ctypes' own import would then take the Windows path on Linux, so it loads here first
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import merge  # noqa: E402
+from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.py); merge.py puts hooks on sys.path
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
@@ -271,14 +273,16 @@ class Env(unittest.TestCase):
         self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
         self.addCleanup(lambda: os.environ.pop("MERGE_TEST_HOOK", None))
 
-    def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None):
-        """-> (rc, stdout + stderr). Pass a StringIO as stderr to read the error stream on its own afterwards."""
+    def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None, hosts=None):
+        """-> (rc, stdout + stderr). Pass a StringIO as stderr to read the error stream on its own afterwards. `hosts` is the --root seam, one
+        Host per --root string. It is passed only when merge.main takes it: on a main without it, argparse refuses --root first."""
         out, err = stdout or io.StringIO(), stderr or io.StringIO()
         cwd = os.getcwd()
         os.chdir(self.co)
+        seam = {"hosts": hosts} if hosts is not None and "hosts" in inspect.signature(merge.main).parameters else {}
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                rc = merge.main(list(args), host=host or self.host, lock=lock or self.lock)
+                rc = merge.main(list(args), host=host or self.host, lock=lock or self.lock, **seam)
         finally:
             os.chdir(cwd)
         return rc, out.getvalue() + err.getvalue()
@@ -314,6 +318,13 @@ class Env(unittest.TestCase):
         put(os.path.join(o, "rival.txt"), "someone else pushed\n")
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "rival"); sh(o, "git", "push", "-q", "origin", "feat")
         return sh(o, "git", "rev-parse", "HEAD")
+
+    def main_moves(self):
+        """A person pushes a commit to main that touches no path a batch touches, from the second clone."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, "elsewhere.txt"), "main moved\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
 
     def hook(self, fn_script):
         p = os.path.join(self.t, "hook.sh")
@@ -424,10 +435,10 @@ class Flow(Env):
 
     @windows_slice
     def test_afterMerge_runs_in_git_bash_not_the_wsl_stub(self):
-        """after_merge() (merge/merge.py:470) hands subprocess.run a bare "bash". On Windows,
-        CreateProcess searches C:\\Windows\\System32 before PATH, and that folder holds the WSL
-        launcher stub, not Git Bash (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub;
-        the fix, _find_git_bash(), lives only in hooks/test_config_watch.py). A command that
+        """after_merge() runs its commands in resolve_program("bash"). On Windows, CreateProcess
+        searches C:\\Windows\\System32 before PATH, and that folder holds the WSL launcher stub,
+        not Git Bash (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub; the lookup's one
+        home is hooks/git_bash.py). A command that
         prints $OSTYPE tells the two apart: Git Bash (MSYS/MINGW) says "msys" or "msys-...", the
         WSL stub says "linux-gnu". The redirect target is a bare relative name so this case does
         not also depend on the separate native-path-quoting defect above."""
@@ -817,6 +828,37 @@ class Race(Env):
         with self.assertRaises(merge.Held):
             lock2.acquire("main", 600)
 
+    def test_a_failed_reread_after_a_refused_lock_push_keeps_the_push_output(self):
+        # The first read sees no lock, the push is refused, and the re-read after the refused push fails.
+        self.refuse_pushes()
+        real_read, reads = self.lock.read, []
+        def read_then_fail(b, ref=None):  # the second read of the main ref is the re-read, and it fails
+            if ref is None:
+                reads.append(ref)
+                if len(reads) > 1:
+                    raise merge.Stop("cannot read the merge lock: the re-read failed")
+            return real_read(b, ref)
+        self.lock.read = read_then_fail
+        with self.assertRaises(merge.Stop) as got:
+            self.lock.acquire("main", 600)
+        self.assertIn(self.PUSH_REFUSAL, str(got.exception))
+
+    def test_a_netstop_from_the_reread_after_a_refused_lock_push_keeps_its_class_and_the_push_output(self):
+        # The first read sees no lock, the push is refused, and the re-read after the refused push hits a network error.
+        self.refuse_pushes()
+        real_read, reads = self.lock.read, []
+        def read_then_net_fail(b, ref=None):  # the second read of the main ref is the re-read, and it is a network NetStop
+            if ref is None:
+                reads.append(ref)
+                if len(reads) > 1:
+                    raise merge.NetStop("cannot read the merge lock: the network failed on the re-read")
+            return real_read(b, ref)
+        self.lock.read = read_then_net_fail
+        with self.assertRaises(merge.NetStop) as got:
+            self.lock.acquire("main", 600)
+        self.assertIs(type(got.exception), merge.NetStop, "the re-read's NetStop was re-raised as another class")
+        self.assertIn(self.PUSH_REFUSAL, str(got.exception), "the re-read's error replaced the push output")
+
     def test_a_held_lock_stops_a_full_run_and_touches_nothing(self):
         merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
         before = self.refs()
@@ -936,6 +978,42 @@ class LockRetake(Env):
         self.assertIn(self.PUSH_REFUSAL, str(cm.exception), "the Stop drops the push output")
         self.assertIn(merge.LOCK_CITE, str(cm.exception), "the Stop drops the lock cite")
 
+    NET_DROP = "fatal: unable to access 'https://example.invalid/origin.git/': Failed to connect to example.invalid port 443 after 21 ms"
+
+    def drop_lock_pushes(self):
+        """Every push of the lock ref fails as a dropped network call: the origin never sees it, so the ref stays as it was.
+        Other git calls run for real. -> (the patch, the list that receives each faked push)."""
+        self.assertTrue(merge.is_net(128, self.NET_DROP), "scope: the faked push output is no network error line")
+        real, pushes = merge.git, []
+        def git(cwd, *args, input=None):
+            if args[:1] == ("push",):
+                pushes.append(args)
+                return 128, self.NET_DROP
+            return real(cwd, *args, input=input)
+        return unittest.mock.patch.object(merge, "git", side_effect=git), pushes
+
+    def assert_dropped_push_is_net_stop(self, pushes):
+        """acquire on a push the network drops: a NetStop, which says the network failed, never that the remote refused."""
+        with self.assertRaises(merge.Stop) as cm:
+            self.lock.acquire("main", 600)
+        self.assertTrue(pushes, "the lock push never ran, so the case proves nothing")
+        self.assertIsInstance(cm.exception, merge.NetStop, "a dropped lock push reads as a refusal, not as a network stop")
+        self.assertNotIn("the remote refused", str(cm.exception), "a dropped lock push says the remote refused")
+
+    def test_a_lock_push_the_network_drops_is_a_net_stop_when_no_lock_exists(self):
+        self.assertFalse(self.lock_ref())  # scope: no lock ref on origin before the take
+        patch, pushes = self.drop_lock_pushes()
+        with patch:
+            self.assert_dropped_push_is_net_stop(pushes)
+        self.assertFalse(self.lock_ref(), "the dropped push created a lock ref")
+
+    def test_a_lock_push_the_network_drops_is_a_net_stop_over_a_released_lock(self):
+        released = self.released_lock()  # scope: the released lock is on origin before the take
+        patch, pushes = self.drop_lock_pushes()
+        with patch:
+            self.assert_dropped_push_is_net_stop(pushes)
+        self.assertEqual(self.head("merge-lock/main"), released, "the dropped push moved the released lock")
+
     def test_a_released_lock_the_remote_refuses_stops_and_names_the_push(self):
         released = self.released_lock()
         self.refuse_pushes()
@@ -1054,12 +1132,6 @@ class Guards(Env):
         self.assertEqual(rc, 1)
         self.assertIn("cannot fetch origin main", out)
         self.assertFalse(self.host.merged)
-
-    def main_moves(self):
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
-        put(os.path.join(o, "elsewhere.txt"), "main moved\n")
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
 
     def test_a_head_without_the_base_tip_is_refused_before_any_claim(self):  # merge-needs-current-base
         self.main_moves()
@@ -1205,6 +1277,22 @@ class SmallBaseMove(Env):
         refusal, _ = merge.holds_base(repo, "main", n_head)
         self.assertIsNotNone(refusal)
         self.assertIn("does not hold main", refusal)
+
+    def test_a_batch_rename_of_a_path_main_changed_is_a_shared_path(self):
+        # --no-renames in small_base_move: the batch's rename names its old path too, so main's change to base.txt is shared.
+        # With rename detection the batch names moved.txt only, the shared check passes, and the green run stands.
+        repo, _ = self.batch_repo()
+        sh(repo, "git", "mv", "base.txt", "moved.txt"); sh(repo, "git", "commit", "-qm", "N renames base")
+        n_head = sh(repo, "git", "rev-parse", "HEAD")
+        base = sh(repo, "git", "merge-base", "main", n_head)
+        sh(repo, "git", "checkout", "-q", "main"); put(os.path.join(repo, "base.txt"), "main changed\n")
+        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "main changes base")
+        scope = sh(repo, "git", "diff", "--name-status", "-M", base, n_head)
+        self.assertIn("R100\tbase.txt\tmoved.txt", scope, "the batch is not an exact rename, so the case proves nothing:\n" + scope)
+        with tempfiles_in_run_folder():
+            ok, why = merge.small_base_move(repo, "main", n_head)
+        self.assertFalse(ok, "the batch's rename hid main's change to base.txt, so the green run stands: " + why)
+        self.assertIn("main and the batch both change base.txt", why, "the batch's rename hid main's change to base.txt from the shared-path check")
 
     def scoped(self, workflow=CHECKS_YML, scope=True):
         """Main and feat both gain the CI files; feat then holds main's tip."""
@@ -1422,6 +1510,142 @@ class SmallBaseMove(Env):
         self.scoped(workflow=CHECKS_YML + "      - name: Unread\n        if: ${{ github.actor == 'x' }}\n        run: python3 lint/check_slugs.py\n")
         self.on("main", {"docs/guide.md": "# Guide\n"})
         self.refused()
+
+    def move_main_after_the_claim(self, claimed, move=None):
+        """Main moves during the wait, after the claim push, so the green run needs the small-move proof. move: the push (default a docs-only commit)."""
+        def on_wait():
+            claimed.append(self.head())
+            (move or (lambda: self.on("main", {"docs/guide.md": "# Guide\n"})))()
+        self.host.on_wait = on_wait
+
+    def base_read_fails_after_the_claim(self, matches, cause, move=None):
+        """A git read in the small-move proof fails after the claim push: `matches(args)` picks it. The stop is unknown, keeps the claim and names `cause`."""
+        claimed = []
+        self.move_main_after_the_claim(claimed, move)
+        real = merge.git
+        def git(cwd, *a, **k):
+            if claimed and matches(a):
+                return 128, "fatal: unreadable"
+            return real(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", git), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn(cause, out, "the stop does not name the read that could not run")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_merge_of_the_base_that_fails_without_a_conflict_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.scoped()
+        claimed = []
+        self.move_main_after_the_claim(claimed)
+        real = merge.git
+        def merge_fails(cwd, *a, **k):
+            if claimed and "Merge origin/main to read the lints" in a:  # the merge the lints run on: it fails, and no file conflicts
+                return 128, "fatal: unable to write new index file"
+            return real(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", merge_fails), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("does not merge cleanly", out, "the stop does not name the merge that failed")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_lint_step_listing_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.scoped()
+        claimed = []
+        self.move_main_after_the_claim(claimed)
+        real = merge.sh
+        def plan_fails(args, *a, **k):
+            if claimed and "--plan" in args:  # lint_steps: ci-job cannot list the lint steps
+                return 1, "ci-job: cannot list the steps"
+            return real(args, *a, **k)
+        with unittest.mock.patch.object(merge, "sh", plan_fails), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("the lint steps cannot be listed", out, "the stop does not name the lint listing")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_checks_workflow_that_cannot_be_read_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.scoped()
+        claimed = []
+        self.move_main_after_the_claim(claimed)
+        workflow = os.path.join(".github", "workflows", "checks.yml")
+        real_open = open
+        def unreadable(path, *a, **k):
+            if claimed and str(path).endswith(workflow):  # hit_suites reads the workflow of the merge
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_open(path, *a, **k)
+        with unittest.mock.patch.object(merge, "open", unreadable, create=True), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("the workflow cannot be read", out, "the stop does not name the workflow read")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_checks_suite_that_cannot_be_read_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.scoped()
+        claimed = []
+        self.move_main_after_the_claim(claimed)
+        suite = os.path.join("hooks", "test_reads_guide.py")
+        real_open = open
+        def unreadable(path, *a, **k):
+            if claimed and str(path).endswith(suite):  # hit_suites reads each suite line's file
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_open(path, *a, **k)
+        with unittest.mock.patch.object(merge, "open", unreadable, create=True), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("cannot be read", out, "the stop does not name the suite read")
+        self.assertIn("test_reads_guide.py", out, "the stop does not name the suite")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_the_merge_base_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.base_read_fails_after_the_claim(lambda a: a[:1] == ("merge-base",), "the merge base cannot be read")
+
+    def test_the_changed_paths_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.base_read_fails_after_the_claim(lambda a: a[:1] == ("diff",) and "-z" in a, "the paths of main or of the batch cannot be read")
+
+    def test_the_commit_count_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.base_read_fails_after_the_claim(lambda a: a[:2] == ("rev-list", "--count"), "the paths of main or of the batch cannot be read")
+
+    def test_the_worktree_head_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.base_read_fails_after_the_claim(lambda a: a == ("rev-parse", "HEAD"), "the worktree's HEAD cannot be read")
+
+    def test_the_trees_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        def empty_main_commit():  # main moves by a commit that changes no path, so the proof reads the trees of its commits
+            o = self.other
+            sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+            sh(o, "git", "commit", "-q", "--allow-empty", "-m", "main: an empty commit"); sh(o, "git", "push", "-q", "origin", "main")
+        self.scoped()
+        self.base_read_fails_after_the_claim(lambda a: a[:2] == ("log", "--format=%T"), "the trees of main's commits since the merge base cannot be read",
+                                             move=empty_main_commit)
+
+    def test_the_proof_that_cannot_start_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.scoped()
+        claimed = []
+        self.move_main_after_the_claim(claimed)
+        real = merge.sh
+        def scope_cannot_start(args, *a, **k):
+            if claimed and merge.CI_SCOPE in args:  # the scope script the proof runs cannot start
+                raise OSError(2, "No such file or directory", merge.CI_SCOPE)
+            return real(args, *a, **k)
+        with unittest.mock.patch.object(merge, "sh", scope_cannot_start), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("the proof could not run", out, "the stop does not name the proof")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_real_conflict_with_the_base_is_still_a_refusal(self):
+        """Main and the batch both change the records page, which the shared-path check leaves out, so git conflicts. A refusal that names the merge, never unknown."""
+        repo, _ = self.batch_repo()
+        page = os.path.join(*merge.RECORDS_PAGE.split("/"))
+        sh(repo, "git", "checkout", "-q", "main"); put(os.path.join(repo, page), "main\n")
+        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "main page")
+        sh(repo, "git", "checkout", "-q", "n"); put(os.path.join(repo, page), "batch\n")
+        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "batch page")
+        n_head = sh(repo, "git", "rev-parse", "HEAD")
+        with tempfiles_in_run_folder():
+            ok, why = merge.small_base_move(repo, "main", n_head)
+        self.assertFalse(ok, why)
+        self.assertNotIsInstance(why, merge.UnreadText, why)
+        self.assertIn("does not merge cleanly", why)
 
 class CutBranch(Env):
     def local_branch(self, extra):
@@ -2616,12 +2840,14 @@ class AfterPush(Env):
         self.assertTrue(lines[0].startswith("merge: "), lines[0])
 
     def test_the_tree_config_or_kinds_gone_at_the_base_check_stops_clean(self):
-        """The tree, the config or the kinds gone at the base check: one outcome, a stop with no claim left
-        behind. Each row is a fresh fixture, so subTest runs its own setUp."""
+        """The config or the kinds gone at the base check stop clean, with no claim left behind. The tree gone is a read that
+        could not run: unknown, and the claim stays (standing-merge-grant). Each row is a fresh fixture, so subTest runs its own setUp."""
+        claimed = []
         def tree_gone():
+            claimed.append(self.head())  # the claim is on origin when the base check runs
             shutil.rmtree(os.path.dirname(self.merge_tree()))
         cases = (
-            ("tree", tree_gone, self.assert_clean_stop),
+            ("tree", tree_gone, lambda rc, out: assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[-1] if claimed else None)),
             ("config", lambda: self.base_loses(None), self.assert_base_lost),
             ("kinds", lambda: self.base_loses(json.dumps({k: v for k, v in CONFIG.items() if k != "kinds"})), self.assert_base_lost),
         )
@@ -2631,11 +2857,16 @@ class AfterPush(Env):
                 self.host.on_wait = hook
                 check(*self.run_merge("7", "--confirm"))
 
-    def test_any_error_after_the_push_reverts_the_claim(self):
+    def test_any_error_after_the_push_keeps_the_claim_and_says_unknown(self):
+        claimed = []
         def boom():
+            claimed.append(self.head())  # the claim is on origin when the wait starts
             raise RuntimeError("boom")
         self.host.on_wait = boom
-        self.assert_clean_stop(*self.run_merge("7", "--confirm"))
+        rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.worktrees(), 1)
 
     def test_an_error_in_the_merge_call_reverts_the_claim(self):
         def boom(*a):
@@ -2650,6 +2881,245 @@ class AfterPush(Env):
         self.assertEqual(rc, 0, out)
         self.assertIn("locked", seen[0])
         self.assertEqual(self.worktrees(), 1)
+
+def route_of(args):
+    """The REST route of a `gh api` call's args, or "" for any other call."""
+    return args[2] if len(args) > 2 and args[1] == "api" else ""
+
+def assert_unknown_stop_keeps_the_claim(test, rc, out, claim):
+    """A read that could not run after the claim push: the claim stays, nothing is pushed after it, and the one stop says the result is unknown and to rerun.
+    Only a proven refusal reverts a claim (decision standing-merge-grant)."""
+    test.assertIsNotNone(claim, "the claim was never pushed, so this case proves nothing about it:\n" + out)
+    test.assertNotIn("reverted on", out, "a claim was reverted for a read that could not run")
+    test.assertNotIn("id: pending", test.show("feat", "docs/decisions/second.md"), "the claim's record is pending on feat: the claim was reverted")
+    test.assertEqual(test.head(), claim, "feat moved after the claim push: something pushed or reverted")
+    test.assertEqual(rc, 1, out)
+    test.assertRegex(out.lower(), r"unknown", "the stop does not say the result is unknown")
+    test.assertRegex(out.lower(), r"re-?run|run again", "the stop does not say to rerun merge")
+    test.assertFalse(test.lock_ref(), "the merge lock was left on origin")
+
+def tempfiles_in_run_folder():
+    """Patch tempfile.mkstemp to make its files in this run's folder, so a helper that writes one never uses the system temp dir."""
+    real_mkstemp = tempfile.mkstemp
+    def mkstemp_in_run_folder(**k):
+        k.setdefault("dir", run_folder())
+        return real_mkstemp(**k)
+    return unittest.mock.patch.object(tempfile, "mkstemp", mkstemp_in_run_folder)
+
+class ClaimSurvivesUnknown(Env):
+    """A read that could not run after the claim push keeps the claim, on the fake host. Only a proven refusal reverts it (standing-merge-grant)."""
+
+    def unknown_at_the_claim_wait(self, error):
+        """The claim's wait raises `error`: the claim is pushed, then the read after it is unknown. -> (rc, out, the claim's sha)."""
+        claimed = []
+        def unknown():
+            claimed.append(self.head())
+            raise error
+        self.host.on_wait = unknown
+        rc, out = self.run_merge("7", "--confirm")
+        self.host.on_wait = None  # the rerun waits on its own terms, not on this read
+        return rc, out, (claimed[0] if claimed else None)
+
+    def merge_main_onto_feat(self):
+        """main moves and the branch merges it, as a healed records page leaves the branch: the head is a merge commit on top of the claim. -> the head."""
+        self.main_moves()
+        o = self.other
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
+        return self.head()
+
+    def test_an_unknown_base_check_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        real = merge.node_stamp
+        def check_unknown(wt, cfgrel, mode, base):
+            if claimed and mode == "check":  # the base check prove() makes after the claim push
+                return 0, "UNKNOWN: the stamp could not read origin/main"
+            return real(wt, cfgrel, mode, base)
+        with unittest.mock.patch.object(merge, "node_stamp", check_unknown), tempfiles_in_run_folder():  # stamp_stop writes its log to this run's folder
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_failed_pulls_read_before_the_put_stops_unknown_and_keeps_the_claim(self):
+        claimed = []
+        def read_fails_after_the_claim():
+            claimed.append(self.head())
+            self.host.batch_error = merge.Stop("reading pulls from GitHub failed: boom")  # the pre-PUT batch read, after the claim push
+        self.host.on_wait = read_fails_after_the_claim
+        rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_debt_check_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        import check_debt_retire  # the lint the merge tool's debt check runs; its read fails below, only after the claim push
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        real_check = check_debt_retire.check
+        def check_unknown(*a, **k):
+            if claimed:  # prove() runs the debt check after the claim push
+                raise check_debt_retire.Unknown("the debt history could not be read")
+            return real_check(*a, **k)
+        with unittest.mock.patch.object(check_debt_retire, "check", check_unknown):
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("could not read the history", out, "the stop does not name the failed history read")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_holds_base_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        real_ancestor = merge.ancestor
+        def ancestor_unknown(cwd, tip, base):
+            if claimed and base == claimed[0]:  # holds_base asks whether the claim holds the base tip: git cannot tell
+                return None
+            return real_ancestor(cwd, tip, base)
+        with unittest.mock.patch.object(merge, "ancestor", ancestor_unknown):
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("cannot read whether", out, "the stop does not name the unreadable base read")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_rerun_over_its_own_claim_resumes_and_claims_and_pushes_nothing(self):
+        rc, out, claim = self.unknown_at_the_claim_wait(merge.NetStop("the read after the claim push failed"))
+        self.assertEqual(rc, 1, out)  # precondition: the first run stopped and left its claim on feat
+        self.assertIn("id: D-002", self.show("feat", "docs/decisions/second.md"), "the first run did not leave its claim on feat")
+        before = len(self.host.waits)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("resumed", out)
+        self.assertEqual([sha for sha, _ in self.host.waits[before:]], [claim], "the rerun waited on a head other than its claim: it pushed")
+        self.assertEqual(self.claims("main"), 1, "the rerun claimed again")
+
+    def test_a_rerun_over_a_merge_commit_on_its_claim_claims_nothing_and_pushes_nothing(self):
+        rc, out, claim = self.unknown_at_the_claim_wait(merge.NetStop("the read after the claim push failed"))
+        self.assertEqual(rc, 1, out)  # precondition: the first run stopped and left its claim on feat
+        merged = self.merge_main_onto_feat()
+        self.assertNotEqual(merged, claim, "the merge commit did not land on top of the claim")
+        before = len(self.host.waits)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("nothing to claim", out, "the rerun did not say it claims nothing")
+        self.assertEqual([sha for sha, _ in self.host.waits[before:]], [merged], "the rerun waited on a head other than its merge commit: it pushed")
+        self.assertEqual(self.claims("main"), 1, "the rerun claimed again")
+
+    def test_an_unknown_read_in_the_wait_of_a_rerun_over_a_merge_commit_stops_unknown_and_pushes_nothing(self):
+        rc, out, claim = self.unknown_at_the_claim_wait(merge.NetStop("the read after the claim push failed"))
+        self.assertEqual(rc, 1, out)  # precondition: the first run stopped and left its claim on feat
+        merged = self.merge_main_onto_feat()
+        def read_fails(n, sha, deadline, prior=None):
+            raise merge.Stop("reading the checks of #7 failed: boom")
+        self.host.wait_checks = read_fails
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertRegex(out.lower(), r"unknown", "the stop does not say the result is unknown")
+        self.assertRegex(out.lower(), r"re-?run|run again", "the stop does not say to rerun merge")
+        self.assertEqual(self.head(), merged, "feat moved: the rerun pushed or reverted")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+        self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
+
+    def test_a_red_check_on_a_rerun_over_a_merge_commit_names_the_claim_as_staying_under_it(self):
+        rc, out, claim = self.unknown_at_the_claim_wait(merge.NetStop("the read after the claim push failed"))
+        self.assertEqual(rc, 1, out)  # precondition: the first run stopped and left its claim on feat
+        merged = self.merge_main_onto_feat()
+        self.host.checks = (False, "a check is red: checks: fail")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("checks: fail", out, "the stop does not print the red check")
+        self.assertIn("stays on feat", out, "the stop does not say the claim stays on feat")
+        self.assertIn(claim[:9], out, "the stop does not name the claim")
+        self.assertIn(merged[:9], out, "the stop does not name the merge commit the claim stays under")
+        self.assertNotIn("reverted", out, "a revert of the head was made: the head is a merge commit, not the claim")
+        self.assertEqual(self.head(), merged, "feat moved: the red rerun pushed or reverted")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_base_proof_read_that_cannot_run_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        # main moved in the wait, so the green run needs the small-move proof, and that proof's first read (rev-parse of origin/main) cannot run.
+        claimed = []
+        def main_moves_during_the_wait():
+            claimed.append(self.head())
+            self.main_moves()
+        self.host.on_wait = main_moves_during_the_wait
+        real_git = merge.git
+        def base_unreadable(cwd, *a, input=None):
+            if claimed and a == ("rev-parse", "origin/main"):
+                return 128, "fatal: ambiguous argument 'origin/main': unknown revision"
+            return real_git(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "git", base_unreadable), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_base_config_listing_that_cannot_run_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        real_git = merge.git
+        def listing_unreadable(cwd, *a, input=None):
+            if claimed and a[:3] == ("ls-tree", "--name-only", "origin/main"):
+                return 128, "fatal: not a tree object"
+            return real_git(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "git", listing_unreadable):
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_base_config_read_that_cannot_run_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        real_git = merge.git
+        def config_unreadable(cwd, *a, input=None):
+            if claimed and a == ("show", "origin/main:.github/stamp.json"):
+                return 128, "fatal: path '.github/stamp.json' does not exist"
+            return real_git(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "git", config_unreadable):
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_records_merge_that_fails_without_a_conflict_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        real_git = merge.git
+        def merge_fails_without_a_conflict(cwd, *a, input=None):
+            if claimed and "--no-commit" in a:  # the records proof's merge: it fails, and leaves no unmerged file
+                return 1, "fatal: unable to write new index file"
+            return real_git(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "git", merge_fails_without_a_conflict):
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_worktree_gone_at_the_base_proof_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        claimed = []
+        def tree_swept():
+            claimed.append(self.head())
+            for line in sh(self.co, "git", "worktree", "list", "--porcelain").splitlines():
+                path = line[len("worktree "):] if line.startswith("worktree ") else ""
+                if path and os.path.realpath(path) != os.path.realpath(self.co):
+                    shutil.rmtree(path)  # swept or cleaned: the merge tool's tree is gone before the base proof
+        self.host.on_wait = tree_swept
+        rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_an_os_error_from_the_merge_call_after_the_claim_push_stops_unknown_and_says_it_may_have_landed(self):
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        def merge_fails(*a):
+            raise OSError(5, "Input/output error")
+        self.host.merge = merge_fails
+        rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("may have landed", out, "the stop does not say the merge may have landed")
+
+    def test_a_timeout_from_the_merge_call_after_the_claim_push_stops_unknown_and_says_it_may_have_landed(self):
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        def merge_times_out(*a):
+            raise subprocess.TimeoutExpired(["gh", "api"], 30)
+        self.host.merge = merge_times_out
+        rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("may have landed", out, "the stop does not say the merge may have landed")
 
 class RerunAfterRevert(Env):
     def test_second_run_claims_the_same_number_again_and_merges(self):
@@ -2717,9 +3187,9 @@ class BaseAware(Env):
             if "fetch" in a:
                 self.fetches.append((len(self.host.waits), a))
             return real_git(cwd, *a, **k)
-        def undo(wt, base_ref, unknown_ok="", pr_body=""):
+        def undo(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
             self.undo_bases.append(base_ref)
-            return real_undo(wt, base_ref, unknown_ok, pr_body)
+            return real_undo(wt, base_ref, unknown_ok, pr_body, run_state, retire_head)
         for name, fn in (("node_stamp", stamp), ("git", git), ("undo_check", undo)):
             p = unittest.mock.patch.object(merge, name, fn); p.start(); self.addCleanup(p.stop)
 
@@ -3000,11 +3470,18 @@ class GhLockTest(unittest.TestCase):
 #   - an argument holding a newline (`\n` or `\r`), a `-f` value included, is refused for the same reason: cmd.exe cuts the command at it. Send a multi-line value as JSON with `--input <file>`.
 #   - `--input <file>` reads a JSON object and merges its keys into the fields (gh's own body-from-file rule, so a PUT or POST sends it). `--input -` (stdin) is refused.
 #   - GraphQL (`gh pr ...`, `gh repo view`, `gh api graphql`, any other gh command) answers the HTTP 403 a Claude Code cloud session gives.
+#   - the cloud agent proxy refuses a numeric-ID path: when a case sets `proxy_refuses_paged`, a `--paginate` read of more than one page
+#     answers HTTP 403 on `repositories/<id>/...`, the path gh follows from the Link header. Off unless a case sets it.
+#   - `issues/comments` answers a case's `issue_comments` (oldest first) once the case sets them; with none set it stays a 404.
+#   - a case's `fail_page` ({"page", "text"}) answers every read of that page with the error text (rest_err), so a later page of a list read fails.
+#   - a list read under `-i` prints the header block gh prints, with a `Link` header (rel="next" and rel="last", on the numeric route) while pages
+#     follow, and none on the last page. A `--paginate` read prints no Link header: gh follows it itself.
 GH_REST_LIB = r'''
 import json, re
 
 GRAPHQL_403 = "HTTP 403: GitHub GraphQL is not available from Claude Code sessions; use the REST API (https://api.github.com/graphql)"
 TEST_MERGE_SHA = "e" * 40  # REST sets merge_commit_sha on an OPEN pull request too: the sha of GitHub's test merge
+REPO_NUMERIC_ID = 424242424  # the repo's id on GitHub: the numeric path a Link header names, which the cloud agent proxy refuses
 
 class Refused(Exception):
     """An answer the fake gives as a failure: .text is what gh prints, .code its exit status."""
@@ -3080,12 +3557,15 @@ def jq_lines(expr, value):
         vals = [v.get(name) if isinstance(v, dict) else None for v in vals] if name else [x for v in vals for x in (v if isinstance(v, list) else [])]
     return [v if isinstance(v, str) else json.dumps(v, separators=(",", ":")) for v in vals]
 
-def listing(items, key, params, flags, jq, cap, top=None):
+def listing(items, key, params, flags, jq, cap, top=None, refuse=None):
     """The text gh prints for a list read. `items` is the whole list; `key` is None for a JSON array reply, else the object field that
-    holds the page (check_runs, statuses), with `top` the object's other fields. Without --paginate only the page asked for comes back."""
+    holds the page (check_runs, statuses), with `top` the object's other fields. Without --paginate only the page asked for comes back.
+    `refuse` names the second page's path when the proxy refuses it: a --paginate read of more than one page then answers HTTP 403."""
     size = max(1, min(int(params.get("per_page", 30)), cap))
     pages = [items[i:i + size] for i in range(0, len(items), size)] or [[]]
     if "paginate" in flags:
+        if refuse and len(pages) > 1:
+            raise Refused(api_error(403, "Resource not accessible by integration: " + refuse))
         chosen = pages
     else:
         n = int(params.get("page", 1))
@@ -3180,10 +3660,10 @@ def hold(kind):  # the first such call starts a helper that keeps this process's
         open(os.path.join(d, "held"), "w").close()
         import subprocess
         subprocess.Popen([sys.executable, "-c", "import time; time.sleep(%d)" % h["seconds"]])
-def finish(text, code, include=False):
+def finish(text, code, include=False, link=None):
     if include and not (code and not re.search(r"\(HTTP \d{3}\)\s*$", text)):  # a transport error has no HTTP reply, so no header block
         got = int(re.search(r"\(HTTP (\d{3})\)\s*$", text).group(1)) if code else 200
-        sys.stdout.buffer.write(("HTTP/2.0 %d %s\r\nContent-Type: application/json\r\nX-Ratelimit-Remaining: 4999\r\n\r\n" % (got, "Error" if code else "OK")).encode())
+        sys.stdout.buffer.write(("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nX-Ratelimit-Remaining: 4999\r\n%s\r\n" % (got, "Error" if code else "OK", "Link: %s\r\n" % link if link else "")).encode())
     print(text)
     sys.exit(code)
 def graphql():
@@ -3220,6 +3700,25 @@ try:
         raise Refused(api_error(404, "Not Found"))
     repo, rel = m.group(1), m.group(2) or ""
     cap = S.get("page_cap", 100)
+    refuse = "repositories/%d/%s?page=2" % (REPO_NUMERIC_ID, rel) if S.get("proxy_refuses_paged") else None  # the second page's numeric path, when the proxy refuses it
+    fp = S.get("fail_page")  # {"page", "text"}: every read of that page answers the error text, so a later page of a list read fails (the listing is cut there)
+    if fp and str(params.get("page", 1)) == str(fp["page"]) and method == "GET":
+        raise Refused(fp["text"])
+    def answer_list(items, key, top=None):
+        """The answer of a list read as gh api -i prints it: the page asked for, and the Link header while pages follow. The header names the numeric
+        route, which the cloud agent proxy refuses; a reader follows rel="next" on the repo route, one call per page. --paginate prints no Link header."""
+        size = max(1, min(int(params.get("per_page", 30)), cap))
+        last, n = max(1, -(-len(items) // size)), int(params.get("page", 1))
+        if fp and "paginate" in flags and last >= int(fp["page"]):  # gh --paginate fails the whole read when one of its pages fails
+            raise Refused(fp["text"])
+        text = listing(items, key, params, flags, jq, cap, top, refuse=refuse)
+        link = None
+        if include and "paginate" not in flags and n < last:
+            def url(page):
+                parts = ["%s=%s" % kv for kv in params.items() if kv[0] != "page"] + ["page=%d" % page]
+                return "<https://api.github.com/repositories/%d/%s?%s>" % (REPO_NUMERIC_ID, rel, "&".join(parts))
+            link = '%s; rel="next", %s; rel="last"' % (url(n + 1), url(last))
+        finish(text, 0, include, link)
     num = S.get("pr_number", 7)
     rows = S.get("open_prs", [])
     numbered = {(r[3] if len(r) > 3 else 101 + i): r for i, r in enumerate(rows)}
@@ -3248,7 +3747,7 @@ try:
         if params.get("state", "open") != "open" or set(params) - {"state", "per_page", "page"}:
             raise Refused(api_error(422, "fake gh: the open pull requests are read with state=open and per_page only, then matched on head.ref"))
         items = [list_item(n, r[1], r[0], r[2]) for n, r in numbered.items()]
-        finish(listing(items, None, params, flags, jq, cap), 0, include)
+        answer_list(items, None)
 
     elif method == "GET" and m_pr:
         n = int(m_pr.group(1))
@@ -3321,8 +3820,8 @@ try:
             other = S.get("other_rows", {}).get(sha, [("checks", "pass", "")])
             if m_run:
                 crs = [check_run(r, k) for k, r in enumerate(other)]
-                finish(listing(crs, "check_runs", params, flags, jq, cap, {"total_count": len(crs)}), 0, include)
-            finish(listing([], "statuses", params, flags, jq, cap, {"state": "pending", "sha": sha, "total_count": 0}), 0, include)
+                answer_list(crs, "check_runs", {"total_count": len(crs)})
+            answer_list([], "statuses", {"state": "pending", "sha": sha, "total_count": 0})
         if sha not in set(S.get("shown", [])) | {feat_head()}:
             raise Refused(api_error(422, "No commit found for SHA: " + sha))
         cf = S.get("checks_fail")  # {"n", "msg"}: the next n reads fail with msg, then it answers
@@ -3334,7 +3833,7 @@ try:
         # broken_from counts rounds per route (a round is one check-run read and one status read, in either order), so the second route of a round is not cut off early
         if S.get("checks_broken") and i >= S.get("broken_from", 0):
             S[key] = i; save()
-            raise Refused(api_error(404, "Not Found"))  # a 4xx is a refusal, not a network error: the wait's read reverts (a 5xx is a network stop, see GhHalf)
+            raise Refused(api_error(404, "Not Found"))  # only a 401 or 403 is a proven refusal (standing-merge-grant): this 404 is an unknown read, and a 5xx is a network stop (see GhHalf)
         if m_run:
             S["checks_calls"] = S.get("checks_calls", 0) + 1
         save()
@@ -3346,8 +3845,11 @@ try:
             cur = {"check_runs": [check_run(r, k) for k, r in enumerate(rows_now) if len(r) < 4 or r[3] != "status"],
                    "statuses": [status_entry(r, k) for k, r in enumerate(rows_now) if len(r) >= 4 and r[3] == "status"]}
         if m_run:
-            finish(listing(cur["check_runs"], "check_runs", params, flags, jq, cap, {"total_count": len(cur["check_runs"])}), 0, include)
-        finish(listing(cur["statuses"], "statuses", params, flags, jq, cap, {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])}), 0, include)
+            answer_list(cur["check_runs"], "check_runs", {"total_count": len(cur["check_runs"])})
+        answer_list(cur["statuses"], "statuses", {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])})
+
+    elif method == "GET" and rel == "issues/comments" and "issue_comments" in S:  # the repo's issue comments, seeded by a case (the review record reads them)
+        answer_list(S["issue_comments"], None)
 
     elif method == "GET" and rel.startswith("compare/"):  # the batch brake's containment read: diverged, so no other ready pull request holds this head
         finish(one({"status": "diverged"}, jq), 0, include)
@@ -3365,7 +3867,7 @@ try:
 
     elif method == "GET" and m_jobs:
         jobs = (S.get("base_jobs") or {}).get(m_jobs.group(1), [])
-        finish(listing(jobs, "jobs", params, flags, jq, cap, {"total_count": len(jobs)}), 0, include)
+        answer_list(jobs, "jobs", {"total_count": len(jobs)})
 
     elif method == "GET" and m_req:
         af = S.get("api_fail")  # {"msg", "after_checks"}: once the checks have been read that many times, each read fails with msg
@@ -3632,7 +4134,7 @@ class GhHalf(Env):
         got = self.gh_host().open_heads()
         self.assertEqual(got, {"lane2": ("a" * 40, "main"), "agent/lane1": ("b" * 40, "release/1.0")})
         calls = self.calls()
-        for part in (LIST_CALL, "state=open", "per_page=100", "--paginate"):  # one page holds 100 at most, and --paginate takes the rest
+        for part in (LIST_CALL, "state=open", "per_page=100"):  # one page holds 100 at most, so the read asks for each page by number
             self.assertIn(part, calls)
 
     def test_a_failed_open_pr_read_is_never_an_empty_set(self):
@@ -4045,6 +4547,82 @@ class GhHalf(Env):
 
     def test_a_git_fetch_http2_stream_error_after_the_claim_push_stops_without_a_revert(self):
         self.fetch_fails_after_the_claim_push("fatal: unable to access 'https://github.com/shivinate7/claude-settings/': HTTP/2 stream 1 was not closed cleanly: INTERNAL_ERROR (err 2)")
+
+    # ---- a read that could not run after the claim push keeps the claim (standing-merge-grant: only a proven refusal reverts it)
+
+    def after_the_claim(self, gh=None, git_call=None, **gh_kw):
+        """Run the merge with the seams wrapped, so each answer applies only once the claim is pushed: `gh(args)` answers a `gh` call,
+        `git_call(args)` answers a git call made by the git helper (args after the repo path). None from an answer lets the real call run.
+        -> (rc, out, the claim's sha on origin)."""
+        real_sh, real_git, real_push = merge.sh, merge.git, merge.push_branch
+        claimed = []
+        def push(wt, branch):
+            r = real_push(wt, branch)
+            claimed.append(self.head(branch))
+            return r
+        def sh_answer(args, *a, **k):
+            reply = gh(args) if gh and claimed and args[0] == "gh" else None
+            return reply if reply is not None else real_sh(args, *a, **k)
+        def git_answer(cwd, *a, input=None):
+            reply = git_call(a) if git_call and claimed else None
+            return reply if reply is not None else real_git(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "push_branch", push), unittest.mock.patch.object(merge, "sh", sh_answer), \
+                unittest.mock.patch.object(merge, "git", git_answer):
+            rc, out = self.go(**gh_kw)
+        return rc, out, (claimed[0] if claimed else None)
+
+    def test_a_gh_timeout_during_the_checks_wait_stops_unknown_and_keeps_the_claim(self):
+        def timed_out(args):
+            raise subprocess.TimeoutExpired(args, 30)
+        rc, out, claim = self.after_the_claim(gh=timed_out)
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_pr_read_with_a_non_network_error_in_the_wait_stops_unknown_and_keeps_the_claim(self):
+        def cut_short(args):
+            return (1, "gh: could not read the pull request: the reply was cut short") if route_of(args).endswith("/pulls/7") else None
+        rc, out, claim = self.after_the_claim(gh=cut_short)
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_pr_read_with_a_json_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        def unparsable(args):
+            return (0, "{") if route_of(args).endswith("/pulls/7") else None  # gh exits 0 and prints a reply that is not JSON
+        rc, out, claim = self.after_the_claim(gh=unparsable)
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_an_os_error_on_a_gh_read_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        def no_gh(args):
+            raise OSError(5, "Input/output error")
+        rc, out, claim = self.after_the_claim(gh=no_gh)
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_base_fetch_with_a_non_network_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        def fetch_of_main(a):
+            if a[:2] == ("fetch", "-q") and a[-1] == "+refs/heads/main:refs/remotes/origin/main":
+                return 1, "fatal: couldn't find remote ref refs/heads/main"
+            return None
+        rc, out, claim = self.after_the_claim(git_call=fetch_of_main)
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_checks_wait_past_its_deadline_with_a_required_check_pending_stops_unknown_and_keeps_the_claim(self):
+        # A busy Mac: each poll of the wait is ten minutes of the fake clock, past the five-minute deadline. The head's wait is green; the claim's wait is pending.
+        self.set(checks_seq=[[("checks", "pass", "")], [("checks", "pass", "")], [("checks", "pending", "")]])
+        rc, out, claim = self.after_the_claim(minute=600)
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertIn("Still pending: checks", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_wait_deadline_while_github_still_shows_the_prior_head_stops_unknown_and_keeps_the_claim(self):
+        # GitHub still shows the head from before the push. Each poll is ten minutes of the fake clock, so the second read is past the deadline.
+        self.set(lag={"n": 1000, "prior": self.head()})
+        rc, out, claim = self.after_the_claim(minute=600)
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertIn("still shows the head before the push", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_merge_that_may_have_landed_with_an_unreadable_state_says_to_finish_by_hand(self):
         self.set(merge_replies=[[NET_TLS, True], [NET_TLS, False]],  # the merge lands, its reply and the retries are lost
@@ -4476,13 +5054,16 @@ class GhHalf(Env):
             self.assertEqual(rc, 0, out)
             self.assertIn(want, out)
 
-    def test_banchi_604_a_pending_check_that_is_not_required_goes_red_after_the_required_are_green(self):
-        # The head reads green on `checks`, `design` still pending, then red. The wait must not end on the green required check.
+    def test_banchi_604_a_pending_check_that_is_not_required_is_not_waited_on_and_its_red_still_refuses(self):
+        """A pending check that is not required does not hold the wait, and its red still refuses. Ruling: step merge-waits-required-only, wait only on the required check."""
+        # The head reads green on `checks`, `design` still pending, then red. A pending check that is not required does not hold a minute;
+        # the red it turns into is seen on the settle re-read and refuses.
         before = self.head()
         self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")], [("checks", "pass", ""), ("design", "fail", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("a check is red: design: fail", out)
+        self.assertNotIn(60, self.paused)  # no minute-long wait for `design`
         self.assertEqual(self.head(), before)  # stopped at the head wait: nothing claimed
         self.assertNotIn(MERGE_CALL, self.calls())
 
@@ -4495,11 +5076,13 @@ class GhHalf(Env):
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertTrue(self.reverted())
 
-    def test_a_pending_check_that_is_not_required_is_waited_on_then_merges_on_green(self):
-        self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")], [("checks", "pass", ""), ("design", "pass", "")]])
+    def test_a_pending_check_that_is_not_required_is_not_waited_on_and_merges_on_green(self):
+        """A pending check that is not required is not waited on, and one line names it. Ruling: step merge-waits-required-only, wait only on the required check."""
+        self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertGreaterEqual(self.paused.count(60), 1)
+        self.assertNotIn(60, self.paused)  # no minute-long wait for a check that is not required
+        self.assertTrue(any("design" in l for l in out.splitlines() if l.startswith("merge:")), out)  # the one line names what was not waited on
         self.assertIn(MERGE_CALL, self.calls())
 
     def test_skipped_and_neutral_count_as_passed(self):
@@ -4557,6 +5140,18 @@ class GhHalf(Env):
         self.assertIn("gh pr ready", text)
         self.assertIn("push", text)
         self.assertNotIn("gh workflow run", text)
+        # gh pr ready is GraphQL, refused in cloud: the remedy also names the cloud route and its table.
+        self.assertIn("update_pull_request", text)
+        self.assertIn("route pr-ready-mcp-cloud", text)
+
+    def test_the_stale_page_remedy_names_both_draft_routes_and_their_table(self):
+        # A cloud session returns a PR to draft by MCP update_pull_request (route pr-draft-mcp-cloud), so the remedy never hands it to the owner's computer.
+        for claim in ("", "c1"):
+            text = merge.stale_page_remedy(7, claim)
+            self.assertIn("update_pull_request", text)
+            self.assertIn("gh pr ready 7 --undo", text)
+            self.assertIn("route pr-draft-mcp-cloud", text)
+            self.assertNotIn("owner's computer", text)
 
     def test_a_draft_head_with_all_jobs_passed_required_stops_at_once_with_the_remedy(self):
         # The wait path. Every check and run skipped: red stops the wait on the first read, not at the 45 minute deadline.
@@ -4749,11 +5344,21 @@ class GhHalf(Env):
         self.assertIn(f"b: {t}", red)
         self.assertFalse([e for e in red if "cancel" in e], red)
 
-    def test_a_workflow_run_in_progress_holds_the_wait_though_no_job_is_listed(self):
+    def test_a_pending_run_of_a_workflow_without_the_required_job_does_not_hold_the_wait(self):
+        """A pending run of a workflow that does not define a required job does not hold the wait. Ruling: step merge-waits-required-only, wait only on the required check."""
+        push_base(self, {".github/workflows/ci.yml": workflow_text("ci", "ci")})  # a readable folder whose one workflow has no required job
         self.set(runs_seq=[[("ci", "in_progress", "")], [("ci", "completed", "success")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertGreaterEqual(self.paused.count(60), 1)
+        self.assertNotIn(60, self.paused)  # the run did not hold a minute
+
+    def test_a_pending_run_of_the_workflow_that_defines_the_required_job_holds_the_wait(self):
+        # The folder defines the required job `checks`, so its pending run holds the wait until the next read sees it complete.
+        push_base(self, {".github/workflows/checks.yml": workflow_text("checks", "checks")})
+        self.set(runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "success")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("merge: waiting on workflow checks", out, "the pending run of the workflow that defines the required job did not hold the wait")
 
     def test_a_failed_workflow_run_stops_the_run_and_an_ignored_one_does_not(self):
         before = self.head()
@@ -4774,16 +5379,12 @@ class GhHalf(Env):
         self.assertIn(merge.SETTLE_SECONDS, self.paused)
         self.assertEqual(self.head(), before)  # stopped at the head wait: nothing claimed
 
-    def test_a_failed_read_in_the_wait_reverts_the_claim(self):
-        before = self.head()
-        self.set(checks_broken=True, broken_from=2)  # the head and its settle read fine, the wait after the claim push does not
+    def test_a_failed_read_in_the_wait_keeps_the_claim_and_says_unknown(self):
+        self.set(checks_broken=True, broken_from=2)  # the head and its settle read fine, the wait after the claim push does not: a 404, not a proven refusal
         self.set(checks_seq=[[("checks", "pass", "")]])
-        rc, out = self.go()
-        self.assertEqual(rc, 1)
-        self.assertRegex(out, r"checks?\b[^\n]*\bfailed")
-        self.assertNotEqual(self.head(), before)  # the claim was pushed, then reverted
-        self.assertTrue(self.reverted())
-        self.assertFalse(self.lock_ref())
+        rc, out, claim = self.after_the_claim()
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertRegex(out, r"checks?\b[^\n]*\bfailed")  # the stop names the read that failed
 
     # ---- no .github/stamp.json: the defaults
 
@@ -4883,9 +5484,9 @@ class GhHalf(Env):
         self.set(draft=True)
         before = self.refs()
         real, seen = merge.undo_check, []
-        def spy(wt, base_ref, unknown_ok="", pr_body=""):
+        def spy(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
             seen.append((base_ref, sh(wt, "git", "rev-parse", "HEAD")))  # the check runs on the PR head's worktree
-            return real(wt, base_ref, unknown_ok, pr_body)
+            return real(wt, base_ref, unknown_ok, pr_body, run_state, retire_head)
         with unittest.mock.patch.object(merge, "undo_check", spy):
             rc, out = self.run_merge("7", host=self.gh_host())
         self.assertEqual(rc, 0, out)
@@ -5149,16 +5750,17 @@ class RestRoutes(Env):
 
     # ---- the checks of a head are the check runs AND the commit statuses
 
-    def test_one_green_check_run_and_one_pending_status_is_not_green(self):
+    def test_one_green_check_run_and_one_pending_status_is_pending_in_the_preview_and_not_waited_on(self):
+        """The preview shows a pending status that is not required; the wait does not hold on it. Ruling: step merge-waits-required-only, wait only on the required check."""
         self.set(checks_seq=[[("checks", "pass", ""), ("deploy", "pending", "https://x/s", "status")]], runs_seq=[[("checks", "completed", "success")]])
-        verdict, detail = self.gh_host().head_read(7)
+        verdict, detail = self.gh_host().head_read(7)  # the preview reads every check: the pending status shows
         self.assertEqual(verdict, "pending", detail)
         self.assertIn("deploy", detail)
-        rc, out = self.go()
-        self.assertEqual(rc, 1, out)
-        self.assertIn("Still pending: deploy", out)
-        self.assertNotIn(MERGE_CALL, self.calls())
-        self.assertFalse(self.lock_ref())
+        rc, out = self.go()  # the wait holds on the required checks only
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Still pending", out)
+        self.assertNotIn(60, self.paused)
+        self.assertIn(MERGE_CALL, self.calls())
 
     def test_a_failed_or_errored_status_is_red(self):
         for bucket in ("fail", "error"):  # the status states failure and error
@@ -5228,6 +5830,100 @@ class RestRoutes(Env):
     def test_open_heads_reads_every_page_of_more_than_a_hundred_open_pull_requests(self):
         self.set(open_prs=[[f"b{i}", f"{i:040x}", "main"] for i in range(250)])
         self.assertEqual(len(self.gh_host().open_heads()), 250)
+
+    # ---- the proxy refuses the numeric page gh follows from a Link header, so a list read asks for each page by number
+
+    @staticmethod
+    def open_pr_rows(n):
+        return [[f"b{i}", f"{i:040x}", "main"] for i in range(n)]
+
+    def list_reads(self):
+        return len([c for c in self.calls().splitlines() if c.startswith(LIST_CALL)])
+
+    def test_open_pull_requests_past_one_hundred_all_come_back_when_the_proxy_refuses_a_paginated_read(self):
+        # Scope first: the paginated read of two pages is the one the proxy refuses, so the pass below is the reader's own paging.
+        for n in (101, 194):
+            with self.subTest(open_prs=n):
+                self.set(proxy_refuses_paged=True, open_prs=self.open_pr_rows(n))
+                host = self.gh_host()
+                code, out = host.api("pulls", "--paginate", "--slurp", fields={"state": "open", "per_page": 100})
+                self.assertNotEqual(code, 0, "the proxy must refuse the paginated read of two pages: " + out)
+                self.assertIn("repositories/", out)
+                try:
+                    got = host.pages("pulls", fields={"state": "open"})
+                except merge.Stop as e:
+                    self.fail(f"paged read of {n} open pull requests stopped: {e}")
+                self.assertEqual(len(got), n, "a paged read of open pull requests dropped items")
+                self.assertEqual(sorted(d["number"] for d in got), list(range(101, 101 + n)))
+
+    def test_open_pull_requests_of_zero_and_one_hundred_come_back_whole_and_the_read_stops(self):
+        # The control: one page is one read, and a list of exactly 100 has no next link, so it ends there.
+        for n in (0, 100):
+            with self.subTest(open_prs=n):
+                self.set(proxy_refuses_paged=True, open_prs=self.open_pr_rows(n))
+                host = self.gh_host()
+                before = self.list_reads()
+                try:
+                    got = host.pages("pulls", fields={"state": "open"})
+                except merge.Stop as e:
+                    self.fail(f"paged read of {n} open pull requests stopped: {e}")
+                self.assertEqual(sorted(d["number"] for d in got), list(range(101, 101 + n)))
+                self.assertEqual(self.list_reads() - before, 1, "one page of 100 has no next link: one call")
+
+    def test_check_runs_past_one_hundred_all_come_back_when_the_proxy_refuses_a_paginated_read(self):
+        names = [f"run{i:03d}" for i in range(194)]
+        self.set(proxy_refuses_paged=True, checks_seq=[[(name, "pass", "") for name in names]])
+        host = self.gh_host()
+        code, out = host.api(f"commits/{self.head()}/check-runs", "--paginate", "--slurp", fields={"per_page": 100})
+        self.assertNotEqual(code, 0, "the proxy must refuse the paginated read of two pages: " + out)
+        self.assertIn("repositories/", out)
+        try:
+            got = host.checks(7, warn=False)
+        except merge.Stop as e:
+            self.fail(f"paged read of 194 check runs stopped: {e}")
+        self.assertEqual(sorted(got), sorted(names))
+
+    def test_review_comments_past_one_hundred_are_all_read_when_the_proxy_refuses_a_paginated_read(self):
+        since = "2000-01-01T00:00:00Z"
+        comments = [{"id": i, "body": REVIEW_MARKER + "\n", "issue_url": f"https://api.github.com/repos/o/r/issues/{i}", "created_at": "2026-01-01T00:00:00Z"}
+                    for i in range(1, 151)]
+        self.set(proxy_refuses_paged=True, issue_comments=comments)
+        host = self.gh_host()
+        code, out = host.api("issues/comments", "--paginate", "--slurp", fields={"per_page": 100, "sort": "created", "direction": "asc", "since": since})
+        self.assertNotEqual(code, 0, "the proxy must refuse the paginated read of two pages: " + out)
+        self.assertIn("repositories/", out)
+        try:
+            found = host.review_comments(since)
+        except merge.Stop as e:
+            self.fail(f"review record read of 150 issue comments stopped: {e}")
+        self.assertEqual(sorted(found), list(range(1, 151)), "a review record on some pull request was not read")
+
+    # A later page that fails (a 403 the proxy gives, or a 502 gh retries) must stop the read. A reader that keeps the items of the pages before it
+    # would return a short list, which reads as fewer open pull requests or check runs than there are.
+    LATER_PAGE_FAILURES = ((403, "Resource not accessible by integration"), (502, "Bad Gateway"))
+
+    def test_a_later_page_that_fails_stops_the_open_pr_read_and_returns_nothing(self):
+        for code, text in self.LATER_PAGE_FAILURES:
+            with self.subTest(code=code):
+                self.set(open_prs=self.open_pr_rows(194), fail_page={"page": 2, "text": rest_err(code, text)})
+                got, stopped = None, False
+                try:
+                    got = self.gh_host().pages("pulls", fields={"state": "open"})
+                except merge.Stop:
+                    stopped = True
+                self.assertTrue(stopped, f"page 2 answered {code}, and the read returned {len(got or [])} open pull requests instead of stopping")
+
+    def test_a_later_page_that_fails_stops_the_check_run_read_and_returns_nothing(self):
+        names = [f"run{i:03d}" for i in range(194)]
+        for code, text in self.LATER_PAGE_FAILURES:
+            with self.subTest(code=code):
+                self.set(checks_seq=[[(name, "pass", "") for name in names]], fail_page={"page": 2, "text": rest_err(code, text)})
+                got, stopped = None, False
+                try:
+                    got = self.gh_host().checks(7, warn=False)
+                except merge.Stop:
+                    stopped = True
+                self.assertTrue(stopped, f"page 2 answered {code}, and the read returned {len(got or {})} check runs instead of stopping")
 
     # ---- every conclusion and state lands in one bucket
 
@@ -5338,6 +6034,41 @@ class RestRoutes(Env):
                 self.assertIn("GET pulls/7", self.calls())  # it was read, not assumed
                 self.assertNotIn(MERGE_CALL, self.calls())
         self.assertIsNone(self.gh_state("oid"))
+
+    def test_a_base_that_moves_after_the_take_sends_no_put_and_is_a_refusal(self):
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
+        head = self.head()
+        host = self.gh_host()
+        host.pr(7)  # the take reads the base: main
+        self.set(base="integ")  # the pull request is retargeted after the take, before the merge call
+        commit, msg = host.merge(7, "merge", head)
+        self.assertIsNone(commit, msg)  # a proven refusal: confirm reverts the claim on it, and no merge lands on the new base
+        self.assertRegex(msg, "(?i)base changed")
+        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertIsNone(self.gh_state("oid"))
+
+    def test_a_base_that_holds_from_the_take_to_the_merge_call_is_merged(self):
+        head = self.head()
+        host = self.gh_host()
+        host.pr(7)  # the take reads the base: main, and nothing moves it
+        commit, msg = host.merge(7, "merge", head)
+        self.assertIsNotNone(commit, msg)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_a_base_the_take_read_refuses_a_later_read_of_another_base(self):
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
+        head = self.head()
+        host = self.gh_host()
+        host.take_base = "main"  # confirm sets this to the base it read under the lock: main
+        self.set(base="integ")  # the pull request is retargeted, and a later pr() read takes the new base
+        host.pr(7)
+        self.assertEqual(host.base, "integ", "the later pr() read did not move self.base, so the case proves nothing")
+        commit, msg = host.merge(7, "merge", head)
+        self.assertNotIn(MERGE_CALL, self.calls(), "a merge call went to integ, though the take read main")
+        self.assertIsNone(commit, msg)  # a proven refusal: confirm reverts the claim on it
+        self.assertRegex(msg, "(?i)base changed")
 
     def merged_in_state(self, state):
         head = self.head()
@@ -5660,6 +6391,28 @@ class ConfigFile(Env):
                 rc, out = self.run_merge("7")
                 self.assertEqual(rc, 0, out)
 
+    def test_ready_checks_is_a_merge_field(self):  # decision: merge.readyChecks names the ready checks of the draft step
+        self.assertIn("readyChecks", merge.MERGE_FIELDS)
+
+    def test_ready_checks_has_no_default(self):  # the control: a repo that declares nothing keeps today's merge block
+        self.assertNotIn("readyChecks", merge.MERGE_DEFAULTS)
+
+    def test_a_bad_readyChecks_is_refused_at_preview_as_not_valid(self):
+        """A non-empty list of non-blank step names. Each bad value stops at preview with one line saying the key is not
+        valid. Until the key joins MERGE_FIELDS, main refuses it as an unknown field, which this case does not accept."""
+        for value in ("checks", True, [], [""], ["  "], ["ok", " "], [7]):
+            with self.subTest(value=value):
+                self.setUp()
+                self.refused_at_preview(self.config_text({"readyChecks": value}), "merge.readyChecks is not valid")
+
+    def test_a_valid_ready_checks_list_is_accepted_at_preview(self):
+        for names in (["check invariants"], ["check invariants", "records page"]):  # one name, then two
+            with self.subTest(names=names):
+                self.setUp()
+                put_base_config(self, self.config_text({"readyChecks": names}))
+                rc, out = self.run_merge("7")
+                self.assertEqual(rc, 0, out)
+
     def test_an_unknown_merge_field_stops_with_one_line_naming_it(self):
         put_base_config(self, json.dumps({"merge": {"methd": "squash"}}))
         rc, out = self.run_merge("7")
@@ -5784,11 +6537,11 @@ class SilentUndo(Env):
     def test_the_check_runs_again_after_the_wait_and_a_red_reverts_the_claim(self):
         calls = []
         real = merge.undo_check
-        def second_is_red(wt, base, unknown_ok="", pr_body=""):
+        def second_is_red(wt, base, unknown_ok="", pr_body="", run_state=None, retire_head=None):
             calls.append(base)
             if len(calls) == 2:
                 raise merge.Stop("the branch silently undoes earlier work: main moved during the wait")
-            return real(wt, base, unknown_ok, pr_body)
+            return real(wt, base, unknown_ok, pr_body, run_state, retire_head)
         with unittest.mock.patch.object(merge, "undo_check", second_is_red):
             rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(len(calls), 2)
@@ -5796,6 +6549,165 @@ class SilentUndo(Env):
         self.assertEqual(self.claims(), 0)
         self.assertFalse(getattr(self.host, "merged", False))
 
+    def test_the_silent_undo_check_gets_the_cite_reader_and_the_pr_head_at_each_read(self):
+        """undo.check is handed run_state (a reader of a cited run, through the host) and retire_head (the PR head, as read at
+        the start). The claim at confirm moves the branch, so a read after it has a worktree HEAD that is not the PR head."""
+        DebtRetire.pr_on_debt(self, 0)
+        pr_head = self.head()
+        reads = []
+        self.host.cited_run = lambda url: (reads.append(url), ("success", pr_head))[1]
+        sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+        import check_silent_undo as undo
+        seen = []
+
+        def spy(*a, **k):
+            seen.append(k)
+            return [], []
+        with unittest.mock.patch.object(undo, "check", spy):
+            rc_preview, out_preview = self.run_merge("7")
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertGreaterEqual(len(seen), 2, out_preview + out)
+        for k in seen:
+            self.assertIn("run_state", k, "undo.check got no run_state: a Retire-run cite cannot reach the silent-undo check")
+            self.assertEqual(k.get("retire_head"), pr_head, "undo.check got a retire_head that is not the PR head")
+            k["run_state"]("https://github.com/fixture/repo/actions/runs/42")
+        self.assertTrue(reads, "the run reader undo.check got does not reach the host's cited_run")
+        self.assertEqual((rc_preview, rc), (0, 0), out_preview + out)
+
+
+DEBT_FIXTURE = "# Retire target\n\n- **What.** A fixture debt for the merge tests.\n- **Where.** None.\n- **Decision.** none\n- **Retire.** %s\n"
+RETIRE_TEST = "Delete the fixture. Check: `tests/test_retire_target.py`."
+PROSE_RETIRE = "Confirm it on a phone."  # names no runnable check: the close needs a cited run
+
+
+def names_kind(test, out, slug, kind):
+    """The printed line that names debt `slug` must also name its kind."""
+    line = printed(out, slug)
+    test.assertTrue(line, "no printed line names debt %s: %s" % (slug, out))
+    test.assertIn(kind, line, "the line for debt %s does not name its kind %s: %s" % (slug, kind, line))
+
+
+class DebtRetire(Env):
+    """A PR that closes a debt (deletes the debt file) runs that debt's Retire check on the PR head before preview or confirm
+    lets it through. The fixture debt names tests/test_retire_target.py, which exits with the code each case gives it."""
+
+    def pr_on_debt(self, test_exit, closes=True, retire=RETIRE_TEST, test_text=None):
+        """main gains a debt file. feat is cut from that main, adds the pending record and the test, and then either deletes
+        the debt (closes) or edits it in place. feat is cut from main after the debt lands, so no main commit is a reversal of it."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, ".claude/layout-extras.json"), json.dumps({"kinds": {}, "rolled-out": True}))
+        put(os.path.join(o, "docs/debts/retire-target.md"), DEBT_FIXTURE % retire)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: a debt"); sh(o, "git", "push", "-q", "origin", "main")
+        put(os.path.join(o, "main-moves.txt"), "main moves on\n")  # feat is cut from a later main, so the debt commit is not one it left
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: moves on"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
+        put(os.path.join(o, "docs/decisions/second.md"), record("pending", "second"))
+        put(os.path.join(o, "tests/test_retire_target.py"), test_text or "import sys\nsys.exit(%d)\n" % test_exit)
+        if closes:
+            sh(o, "git", "rm", "-q", "docs/debts/retire-target.md")
+        else:
+            put(os.path.join(o, "docs/debts/retire-target.md"), DEBT_FIXTURE % RETIRE_TEST + "\nEdited in this PR.\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: the pending record and the debt")
+        sh(o, "git", "push", "-q", "-f", "origin", "feat")
+        sh(self.co, "git", "fetch", "-q", "origin")
+
+    def test_preview_refuses_a_closed_debt_whose_retire_check_is_red(self):
+        self.pr_on_debt(1)
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        names_kind(self, out, "retire-target", "red")
+
+    def test_confirm_refuses_a_closed_debt_whose_retire_check_is_red_before_any_claim_or_push(self):
+        self.pr_on_debt(1)
+        before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        names_kind(self, out, "retire-target", "red")
+        self.assertEqual(self.refs(), before, "a refused confirm pushed")
+        self.assertEqual(self.claims(), 0, "a refused confirm claimed a record number")
+        self.assertFalse(getattr(self.host, "merged", False), "a refused confirm merged")
+        self.assertFalse(self.lock_ref(), "a refused confirm kept the merge lock")
+
+    def test_preview_passes_a_closed_debt_whose_retire_check_is_green(self):
+        self.pr_on_debt(0)
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PREVIEW", out)
+        self.assertNotIn("BLOCKED", out)
+
+    def test_a_pr_that_closes_no_debt_previews_as_before(self):
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PREVIEW", out)
+        self.assertNotIn("retire", out.lower())
+
+    def test_an_edited_debt_is_not_a_close(self):
+        self.pr_on_debt(1, closes=False)
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PREVIEW", out)
+        self.assertNotIn("BLOCKED", out)
+
+    def test_confirm_with_a_claim_keeps_a_cited_run_on_the_pr_head(self):
+        """The claim commit goes on top of the PR head. The cited run is on that head, so the re-check after the claim must accept it."""
+        self.pr_on_debt(0, retire=PROSE_RETIRE)
+        run_head = self.head()  # the run was on this head; the claim pushes the branch past it
+        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
+        self.host.cited_run = lambda url: ("success", run_head)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.claims(), 1, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
+    def test_confirm_claim_does_not_carry_a_file_the_retire_test_wrote(self):
+        """The Retire test runs in the merge worktree, before the claim's `git add -A`. A file the test leaves there is no part of the claim."""
+        self.pr_on_debt(0, test_text="import sys\nopen('junk-from-test.txt', 'w').write('x')\nsys.exit(0)\n")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.claims(), 1, out)
+        names = sh(self.co, "git", "log", "origin/main", "--format=", "--name-only")  # the claim is a parent of the merge: its files are in the log
+        self.assertNotIn("junk-from-test.txt", names, "the claim commit holds a file the Retire test wrote into the merge folder")
+
+
+    def cited_run_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self, error):
+        """The PR closes a debt by a prose check and cites a run on its head. The run reads green before the claim push; after it, the read raises."""
+        self.pr_on_debt(0, retire=PROSE_RETIRE)
+        run_head = self.head()
+        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
+        claimed = []
+        def read(url):
+            if claimed:
+                raise error
+            return "success", run_head
+        self.host.cited_run = read
+        self.host.on_wait = lambda: claimed.append(self.head())
+        rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("could not be read", out, "the stop does not name the cited run that could not be read")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_cited_run_read_that_fails_with_a_network_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.cited_run_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(merge.NetStop("the run's reply was cut short"))
+
+    def test_a_cited_run_read_that_fails_with_an_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.cited_run_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(RuntimeError("boom"))
+
+    def test_a_cited_run_that_is_red_after_the_claim_push_still_reverts(self):
+        """A real finding: the cited run reads green before the claim push and red after it. A red finding refuses, so the claim reverts."""
+        self.pr_on_debt(0, retire=PROSE_RETIRE)
+        run_head = self.head()
+        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.cited_run = lambda url: ("failure", run_head) if claimed else ("success", run_head)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("reverted on feat", out)
+        self.assertIn("closes a debt without proof", out)
+        self.assertEqual(self.show("feat", "docs/decisions/second.md"), record("pending", "second").strip())
+        self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
 
 class DraftPreview(Env):
     """`merge <pr>` with no --confirm: a draft is previewed, not refused. The silent-undo check runs on the head
@@ -5861,9 +6773,9 @@ class DraftPreview(Env):
 
     def test_a_closed_or_merged_pr_is_refused_at_preview_and_the_check_never_runs(self):  # control
         real, calls = merge.undo_check, []
-        def spy(wt, base_ref, unknown_ok="", pr_body=""):
+        def spy(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
             calls.append(base_ref)
-            return real(wt, base_ref, unknown_ok, pr_body)
+            return real(wt, base_ref, unknown_ok, pr_body, run_state, retire_head)
         before = self.refs()
         with unittest.mock.patch.object(merge, "undo_check", spy):
             for state in ("CLOSED", "MERGED"):
@@ -5997,9 +6909,9 @@ class UndoMemo(Env):
             scans.append(a[1])
             return real_check(*a, **k)
 
-        def spy_undo(wt, base_ref, unknown_ok="", pr_body=""):
+        def spy_undo(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
             undos.append(base_ref)
-            return real_undo(wt, base_ref, unknown_ok, pr_body)
+            return real_undo(wt, base_ref, unknown_ok, pr_body, run_state, retire_head)
         with unittest.mock.patch.object(undo, "check", spy_check), unittest.mock.patch.object(merge, "undo_check", spy_undo):
             res = fn()
         return res, len(scans), len(undos)
@@ -7121,19 +8033,17 @@ class WaitProgress(unittest.TestCase):
         self.assertTrue(ok, why)
         self.assert_gaps_within(lines, 0.0, end)
 
-    def test_a_change_in_the_pending_set_prints_at_once(self):
+    def test_a_pending_check_that_is_not_required_is_never_printed_as_waited_on(self):
+        """A pending check that is not required is never named as waited on. Ruling: step merge-waits-required-only, wait only on the required check."""
         def checks_at(t):
-            if t < 60:
-                return {"checks": [("pending", "")]}
             if t < 300:
                 return {"checks": [("pending", "")], "design": [("pending", "")]}
             return {"checks": [("pass", "")], "design": [("pass", "")]}
         host = ClockedHost(checks_at)
         ok, why, _, waits, _ = self.wait(host, 15)
         self.assertTrue(ok, why)
-        design = [t for t, l in waits if "design" in l]
-        # The change is first read at about 64 s (a read costs 2 s, the loop pauses 60 s). It must print before the next 60 s pass.
-        self.assertTrue(design and design[0] < 120, f"a new pending check named at {design[:1]}; lines at {[round(t) for t, _ in waits]}")
+        self.assertTrue(waits, "no `merge: waiting on` line while the required check was pending")
+        self.assertEqual([l for _, l in waits if "design" in l], [], f"the wait named a check that is not required: {waits}")
 
     def test_a_wait_that_is_green_on_the_first_read_prints_no_waiting_line(self):
         host = ClockedHost(lambda t: {"checks": [("pass", "")]})
@@ -7148,6 +8058,33 @@ class WaitProgress(unittest.TestCase):
         self.assertTrue(ok, why)
         self.assertTrue(lines and lines[0][0] < READ_SECONDS, f"no line before the first read; lines {lines}")
         self.assertIn("checks", lines[0][1])
+
+def workflow_text(name, *jobs):
+    """A workflow file whose top-level name is `name`, with one job per id in `jobs`, one step each."""
+    lines = [f"name: {name}", "on: push", "jobs:"]
+    for job in jobs:
+        lines += [f"  {job}:", "    runs-on: ubuntu-latest", "    steps:", "      - run: echo ok"]
+    return "\n".join(lines) + "\n"
+
+
+def pending_run(name, run_id=101):
+    """A workflow run still in progress, with the fields `gh run list --json` gives it that the wait reads."""
+    return {"databaseId": run_id, "name": name, "workflowName": name, "workflowDatabaseId": run_id, "status": "in_progress", "conclusion": ""}
+
+
+def workflow_folder(test, files=None, git=False):
+    """A checkout root under this run's folder, removed at cleanup. Its .github/workflows holds `files` (name -> text); with `files` None there is
+    no such folder, and `files` {} is an empty .github/workflows. `git` makes the root a checkout, so the walk up for a workflow folder stops there."""
+    root = os.path.realpath(tempfile.mkdtemp(prefix="required-only-", dir=run_folder()))
+    test.addCleanup(shutil.rmtree, root, True)
+    if git:
+        os.mkdir(os.path.join(root, ".git"))
+    if files is not None:
+        os.makedirs(os.path.join(root, ".github", "workflows"))
+    for name, text in (files or {}).items():
+        put(os.path.join(root, ".github", "workflows", name), text)
+    return root
+
 
 class AbsentRequiredCheck(unittest.TestCase):
     """c189 part 2: a required check no run reports ends the wait at once, once every reported check has ended (#746: the pinned checks* names)."""
@@ -7175,11 +8112,14 @@ class AbsentRequiredCheck(unittest.TestCase):
         ok, why, *_ = self.wait(host, 55)
         self.assertTrue(ok, why)
 
-    def test_a_pending_workflow_run_keeps_the_wait_going(self):
-        host = self.host(lambda t: {"checks": [("pass", "")], **({"needed": [("pass", "")]} if t >= 400 else {})})
-        host.runs = lambda sha: [{"name": "ci", "status": "in_progress" if host.clock[0] < 400 else "completed", "conclusion": None if host.clock[0] < 400 else "success"}]
-        ok, why, *_ = self.wait(host, 55)
+    def test_a_pending_run_of_another_workflow_does_not_keep_the_wait_going(self):
+        """A pending run of a workflow that does not define a required job does not keep the wait going. Ruling: step merge-waits-required-only, wait only on the required check."""
+        host = ClockedHost(lambda t: {"checks": [("pass", "")], "needed": [("pass", "")]})
+        host.required, host.cwd = ["checks", "needed"], workflow_folder(self, {"ci.yml": workflow_text("ci", "ci")})
+        host.runs = lambda sha: [pending_run("ci")]  # a run of a workflow that does not define the required job: it is not waited on
+        ok, why, _, _, end = self.wait(host, 55)
         self.assertTrue(ok, why)
+        self.assertLess(end, 55 * 60, f"the wait ran to {end:.0f} s for a run that is not required")
 
     def test_a_required_check_created_late_inside_the_settle_pause_is_waited_for(self):
         host = self.host(lambda t: {"checks": [("pass", "")], **({"needed": [("pass", "")]} if t >= 20 else {})})
@@ -7191,6 +8131,123 @@ class AbsentRequiredCheck(unittest.TestCase):
         ok, why, _, _, end = self.wait(host, 5)
         self.assertFalse(ok)
         self.assertIn("deadline of 5 minutes", why)
+
+class RequiredOnlyWait(unittest.TestCase):
+    """merge-waits-required-only: the wait holds on the required check names. A pending run holds only when its workflow file defines a
+    required job, or when no workflow folder can be read. A pending check or run that is not required never holds the wait, and one line on
+    success names what was not waited for. A red check, required or not, still refuses.
+    Ruling: step merge-waits-required-only, wait only on the required check."""
+    wait = WaitProgress.wait
+
+    def host(self, checks_at, runs=lambda sha: [], folder=None, required=(REQUIRED_CHECK,)):
+        host = ClockedHost(checks_at)
+        host.required, host.cwd, host.runs = list(required), folder, runs
+        return host
+
+    def test_a_pending_check_that_is_not_required_does_not_hold_a_green_required_check(self):
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")], "design": [("pending", "")]})
+        ok, why, _, _, end = self.wait(host, 15)
+        self.assertTrue(ok, why)
+        self.assertLess(end, 15 * 60, f"waited {end:.0f} s for a check that is not required")
+
+    def test_a_pending_required_check_still_holds_to_the_deadline(self):
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pending", "")]})
+        ok, why, _, _, end = self.wait(host, 5)
+        self.assertFalse(ok)
+        self.assertIn("deadline of 5 minutes", why)
+        self.assertGreaterEqual(end, 5 * 60)
+
+    def test_a_red_required_check_refuses_at_once(self):
+        host = self.host(lambda t: {REQUIRED_CHECK: [("fail", "")]})
+        ok, why, _, _, end = self.wait(host, 15)
+        self.assertFalse(ok)
+        self.assertIn(f"{REQUIRED_CHECK}: fail", why)
+        self.assertLess(end, 60, f"a red required check waited {end:.0f} s")
+
+    def test_on_success_one_line_names_the_pending_check_and_run_it_did_not_wait_for(self):
+        folder = workflow_folder(self, {"docs.yml": workflow_text("docs", "docs")})
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")], "design": [("pending", "")]},
+                         runs=lambda sha: [pending_run("docs")], folder=folder)
+        ok, why, lines, _, _ = self.wait(host, 15)
+        self.assertTrue(ok, why)
+        named = [l for _, l in lines if "design" in l or "docs" in l]
+        self.assertEqual(len(named), 1, f"want one line naming what was not waited for: {lines}")
+        self.assertIn("design", named[0])
+        self.assertIn("docs", named[0])
+
+    def test_a_pending_run_of_the_workflow_that_defines_the_required_job_holds_past_an_old_pass(self):
+        folder = workflow_folder(self, {"checks.yml": workflow_text("checks", "checks", REQUIRED_CHECK)})
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("checks")], folder=folder)
+        ok, why, *_ = self.wait(host, 5)  # the pass row is the old run's: the re-run of the workflow is pending on this head
+        self.assertFalse(ok, why)
+        self.assertIn("deadline of 5 minutes", why)
+
+    def test_a_red_check_that_is_not_required_still_refuses(self):
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")], "design": [("fail", "")]})
+        ok, why, _, _, end = self.wait(host, 15)
+        self.assertFalse(ok, why)
+        self.assertIn("design: fail", why)
+        self.assertLess(end, 60, f"a red check that is not required waited {end:.0f} s")
+
+    def test_a_pending_run_of_a_workflow_without_the_required_job_does_not_hold_a_green_required_check(self):
+        folder = workflow_folder(self, {"docs.yml": workflow_text("docs", "docs")})
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("docs")], folder=folder)
+        ok, why, _, _, end = self.wait(host, 15)
+        self.assertTrue(ok, why)
+        self.assertLess(end, 15 * 60, f"waited {end:.0f} s for a run whose workflow does not define the required job")
+
+    def test_a_pending_run_holds_when_no_workflow_folder_can_be_read(self):  # the fallback: unknown holds, so a folder that is not read never lets a run through
+        folder = workflow_folder(self, None, git=True)
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("docs")], folder=folder)
+        ok, why, *_ = self.wait(host, 5)
+        self.assertFalse(ok, why)
+        self.assertIn("deadline of 5 minutes", why)
+
+    def test_a_pending_run_whose_name_matches_no_local_workflow_holds_over_a_stale_pass(self):
+        # The head renamed the workflow's `name:`, so the run's name maps to no local file. A name no file maps to is unknown, and it holds.
+        folder = workflow_folder(self, {"checks.yml": workflow_text("checks-renamed", REQUIRED_CHECK)})
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("checks")], folder=folder)
+        ok, why, *_ = self.wait(host, 5)
+        self.assertFalse(ok, "a pending run that maps to no local workflow file was dropped, and the stale pass let the wait pass")
+        self.assertIn("deadline of 5 minutes", why)
+
+    def test_a_pending_run_of_the_file_that_defines_a_pinned_required_job_holds_over_a_stale_pass(self):
+        # The wait holds on every required name. A pinned `lint` is required, and its file defines the job `lint`.
+        folder = workflow_folder(self, {"lint.yml": workflow_text("lint", "lint")})
+        host = self.host(lambda t: {"lint": [("pass", "")]}, runs=lambda sha: [pending_run("lint")], folder=folder, required=("lint",))
+        ok, why, *_ = self.wait(host, 5)
+        self.assertFalse(ok, "a pending run of the file that defines the pinned required job `lint` was dropped, and the stale pass let the wait pass")
+        self.assertIn("deadline of 5 minutes", why)
+
+    def test_an_empty_workflow_folder_holds_a_pending_run(self):
+        # No file is shown to define the run's job, so the run is unknown and it holds.
+        folder = workflow_folder(self, {})
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("docs")], folder=folder)
+        ok, why, *_ = self.wait(host, 5)
+        self.assertFalse(ok, "a pending run in an empty workflow folder was dropped, and the wait passed")
+        self.assertIn("deadline of 5 minutes", why)
+
+    def test_a_workflow_file_whose_line_scan_finds_no_job_holds_its_pending_run(self):
+        # A 4-space indent or a flow-style `jobs:` gives the line scan no job. A file with no job found is unknown, so its run holds.
+        texts = {"indent.yml": "name: docs\non: push\njobs:\n    docs:\n        runs-on: ubuntu-latest\n",
+                 "flow.yml": "name: docs\non: push\njobs: {docs: {runs-on: ubuntu-latest}}\n"}
+        for name, text in texts.items():
+            with self.subTest(file=name):
+                folder = workflow_folder(self, {name: text})
+                host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("docs")], folder=folder)
+                ok, why, *_ = self.wait(host, 5)
+                self.assertFalse(ok, "a workflow file whose line scan finds no job dropped its pending run, and the wait passed")
+                self.assertIn("deadline of 5 minutes", why)
+
+    def test_a_pending_check_that_is_not_required_does_not_clear_a_no_job_ran_red(self):
+        # A pending check that is not required is not waited on, so it cannot hold back the red that no job ran. That red still refuses.
+        skipped = {"databaseId": 102, "name": "lint", "workflowName": "lint", "workflowDatabaseId": 102, "status": "completed", "conclusion": "skipped"}
+        host = self.host(lambda t: {"lint": [("skipping", "")], "design": [("pending", "")]}, runs=lambda sha: [skipped], required=("lint",))
+        ok, why, _, _, end = self.wait(host, 15)
+        self.assertFalse(ok, "a pending check that is not required cleared the no-job-ran red, and the wait passed")
+        self.assertTrue(any(s in why for s in ("no job ran", "no check ran")), why)
+        self.assertLess(end, 60, f"the skipped required job waited {end:.0f} s before it was refused")
+
 
 class SilentWait(Env):
     """Silence: merge printed only the launch line for minutes. A long step printed
@@ -7318,7 +8375,7 @@ class ScanProgress(Env):
         out, seen = io.StringIO(), []
         stub = unittest.mock.MagicMock()
 
-        def scan(cwd, upstream, head, default=None, tool=None, pr_body=""):
+        def scan(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=None, retire_head=None):
             seen.append(out.getvalue())
             return [], []
 
@@ -7477,6 +8534,14 @@ def put_lf(path, text):
 
 class RecordsEnv(Env):
     """Helpers for the records-page cases. Holds no test."""
+    def use_fake_records(self):
+        """Patch merge.RECORDS to the fake generator (FAKE_RECORDS) for this case. Sets self.calls (its log) and self.prog."""
+        self.calls, self.prog = os.path.join(self.t, "records-calls.log"), os.path.join(self.t, "records.py")
+        put(self.prog, FAKE_RECORDS)
+        for p in (unittest.mock.patch.object(merge, "RECORDS", self.prog, create=True),  # create: a missing name is a failure, not an error
+                  unittest.mock.patch.dict(os.environ, {"RECORDS_CALLS": self.calls})):
+            p.start(); self.addCleanup(p.stop)
+
     def kinds_off(self):
         """The base holds claude-settings' own config: no stamp kinds, so no claim."""
         self.on("main", {".github/stamp.json": json.dumps(dict(CONFIG, kinds=[]))}, "no stamp kinds")
@@ -7638,11 +8703,7 @@ class RecordsRebuild(RecordsEnv):
     """
     def setUp(self):
         super().setUp()
-        self.calls, self.prog = os.path.join(self.t, "records-calls.log"), os.path.join(self.t, "records.py")
-        put(self.prog, FAKE_RECORDS)
-        for p in (unittest.mock.patch.object(merge, "RECORDS", self.prog, create=True),  # create: a missing name is a failure, not an error
-                  unittest.mock.patch.dict(os.environ, {"RECORDS_CALLS": self.calls})):
-            p.start(); self.addCleanup(p.stop)
+        self.use_fake_records()
 
     def test_a_pr_that_adds_a_debt_gets_the_page_in_the_claim_commit(self):
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
@@ -8132,11 +9193,20 @@ class RecordsRebuild(RecordsEnv):
         self.assertNotEqual(rc, 0, out)
         self.assertEqual(self.head(), before, "pushed on a refusal")
 
+    def test_the_draft_preview_of_a_claim_head_with_ready_checks_says_run_the_draft_first(self):
+        block = dict(CONFIG["merge"], readyChecks=["check invariants"])
+        put_base_config(self, json.dumps(dict(CONFIG, merge=block)))  # the config first: a merge after the claim would hide its trailer
+        self.claim_head()
+        out = self.draft_preview()
+        claim = self.preview_line(out, "claim")
+        self.assertIn("already claimed (D-002)", claim, out)  # precondition: the head holds the claim
+        self.assertIn("--confirm` on the draft first", claim, out)
+
     def test_prepare_a_pushed_page_with_a_refused_ready_does_not_read_as_a_failure(self):
         # The real host's ready() always returns (False, why), so every draft step ends here. The push worked, so no line says "could not".
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        self.host.ready_refuse = "GitHub marks a draft ready only through GraphQL, and this tool sends no GraphQL"
+        self.host.ready_refuse = merge.Host.ready(None, 1)[1]
         before = self.head()
         rc, out = self.draft_confirm()
         self.assertEqual(rc, 0, out)
@@ -8373,6 +9443,19 @@ class RecordsHeal(RecordsEnv):
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
 
+    def assert_unknown_kept(self, rc, out):
+        """The heal wait could not get an answer: the stop says the result is unknown and to rerun, the merge commit stays on feat, nothing is merged."""
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(len(self.host.waits), 3, self.host.waits)
+        self.assertRegex(out.lower(), r"unknown", "the stop does not say the result is unknown")
+        self.assertRegex(out.lower(), r"re-?run|run again", "the stop does not say to rerun merge")
+        self.assertNotIn("are not green", out, "the heal wait read an unanswered wait as a red check")
+        self.assertNotIn("reverted", out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.rev("origin/feat"), self.host.waits[-1][0], "feat moved off the merge commit the heal pushed")
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
     def test_red_checks_on_the_heal_commit_keep_it_and_merge_nothing(self):
         self.heal_setup()
         self.host.seq = [(True, ""), (True, ""), (False, "a check is red: checks: fail")]
@@ -8380,6 +9463,28 @@ class RecordsHeal(RecordsEnv):
         self.assert_kept(rc, out)
         self.assertIn("are not green", out)
         self.assertIn("checks: fail", out)
+
+    def test_a_deadline_with_a_required_check_pending_on_the_heal_commit_stops_unknown_and_keeps_it(self):
+        self.heal_setup()
+        self.host.seq = [(True, ""), (True, ""), (None, "the checks wait ended at its deadline with a required check pending")]
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_unknown_kept(rc, out)
+
+    def test_a_failed_read_in_the_heal_wait_stops_unknown_and_keeps_the_merge_commit(self):
+        self.heal_setup()
+        def read_fails():
+            raise merge.Stop("reading the checks of #7 failed: boom")
+        self.on_heal_wait(read_fails)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_unknown_kept(rc, out)
+
+    def test_an_error_in_the_heal_wait_stops_unknown_and_keeps_the_merge_commit(self):
+        self.heal_setup()
+        def boom():
+            raise RuntimeError("boom")
+        self.on_heal_wait(boom)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_unknown_kept(rc, out)
 
     def test_a_debt_landing_on_main_during_the_heal_wait_makes_the_page_stale(self):
         self.heal_setup()
@@ -9852,19 +10957,57 @@ def main_job(name, conclusion, minutes=1):
             "html_url": f"https://github.com/o/r/actions/runs/1/job/{len(name)}"}
 
 
+# The workflow file a head serves when a case gives none: one job with no if:, so every job name reads as one that may run.
+NO_IF_WORKFLOW = "\n".join(["name: checks", "on: push", "jobs:", "  checks:", "    runs-on: ubuntu-latest", "    steps:", "      - run: echo ok"]) + "\n"
+CHECKS_PATH = ".github/workflows/checks.yml"
+REAL_CHECKS = os.path.join(os.path.dirname(HERE), ".github", "workflows", "checks.yml")  # the file as it is on disk, never a stub
+# The live nightly case: schedule run LIVE_R failed on checks-windows-merge-3, all-jobs-passed and ci-done skipped; the newer push run LIVE_N
+# passed merge-3 and skipped the same two. Their jobs and conclusions are the ones test_action.sh's live case gives too.
+LIVE_R, LIVE_N = 41817705653, 41905916525
+LIVE_N_SHA = f"{LIVE_N:040x}"
+
+
+def real_checks():
+    with open(REAL_CHECKS, encoding="utf-8") as f:
+        return f.read()
+
+
+def live_nightly():
+    """-> (main_runs, jobs) of the live nightly case, newest run first, as GET actions/runs and the jobs read give them."""
+    runs = [main_run(LIVE_N, "success", sha=LIVE_N_SHA, path=CHECKS_PATH), main_run(LIVE_R, "failure", event="schedule", path=CHECKS_PATH)]
+    jobs = {LIVE_R: [main_job("checks-windows-merge-3", "failure", 19), main_job("all-jobs-passed", "skipped"), main_job("ci-done", "skipped")],
+            LIVE_N: [main_job("checks-windows-merge-3", "success", 19), main_job("all-jobs-passed", "skipped"), main_job("ci-done", "skipped")]}
+    return runs, jobs
+
+
 class MainRunsHost(FakeHost, merge.Host):
     """FakeHost for the flow; the real Host.base_state over scripted REST. `main_runs`: main's push runs, newest first. `jobs`: run id -> jobs.
-    `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with."""
+    `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with.
+    `texts`: head sha -> the workflow file's text on that head (a head not in it reads as NO_IF_WORKFLOW). `text_fail`: every file read fails with this text."""
     base_state = getattr(merge.Host, "base_state", None)
 
-    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None):
+    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, texts=None, text_fail=None):
         FakeHost.__init__(self, root, other)
         self.ignore, self.cwd, self.warned = {}, root, set()
         self.main_runs, self.jobs, self.runs_fail, self.jobs_fail, self.reads = main_runs, jobs, runs_fail, jobs_fail, []
         self.jobs_fail_of = jobs_fail_of or {}
+        self.texts, self.text_fail = texts or {}, text_fail
+
+    def file_at_head(self, rel, extra, fields):
+        """`contents/<path>` read at a head: the ref is a field or a query. Raw when the Accept header asks for raw, else the JSON reply with base64 content."""
+        query = re.search(r"[?&]ref=([0-9a-f]+)", rel)
+        ref = fields.get("ref") or (query and query.group(1))
+        if self.text_fail:
+            return 1, self.text_fail
+        text = self.texts.get(ref, NO_IF_WORKFLOW)
+        if any("vnd.github.raw" in a for a in extra):
+            return 0, text
+        return 0, json.dumps({"encoding": "base64", "content": base64.b64encode(text.encode("utf-8")).decode("ascii")})
 
     def api(self, rel, *extra, method="GET", fields=None):
         self.reads.append(rel)
+        if rel.startswith("contents/"):
+            return self.file_at_head(rel, extra, fields or {})
         assert (rel, method, fields.get("branch")) == ("actions/runs", "GET", "main"), (rel, fields)
         if self.runs_fail:
             return 1, self.runs_fail
@@ -10068,6 +11211,84 @@ class RedMainBrake(Env):
                               main_run(930, "failure", name="links", event="schedule", path=LINKS_PATH)],
                              {930: [main_job("readme-links", "failure", 20)], 931: [main_job("readme-links", "success", 20)]})
         self.merged(rc, out)
+
+    # The failed-run clear, job by job: a job the red run did not fail, whose job-level if: names another event, is not needed by a green run of
+    # that event. A red job always is. The workflow file is read at the green run's head (GET contents, ref = its head sha).
+    def test_a_newer_push_run_clears_a_red_nightly_whose_pull_request_jobs_it_skipped(self):
+        runs, jobs = live_nightly()
+        rc, out, _ = self.go(runs, jobs, texts={LIVE_N_SHA: real_checks()})
+        self.merged(rc, out)
+
+    def test_the_live_nightly_is_green_on_the_red_main_read(self):
+        # the same live case as test_action.sh's live case: base_verdict, the red-main check's read, judges it green, with no merge
+        runs, jobs = live_nightly()
+        self.host = MainRunsHost(self.co, self.other, runs, jobs, texts={LIVE_N_SHA: real_checks()})
+        verdict, detail = merge.base_verdict(self.co, self.host, "main")
+        self.assertEqual(verdict, "green", detail)
+
+    def test_a_red_job_skipped_in_the_push_run_still_blocks_the_clear_when_its_if_names_no_event(self):
+        # lint failed in the nightly and was skipped in the push run. It has no if:, so it may run and stays needed.
+        sha = "c" * 40
+        lint = "\n".join(["name: checks", "on: [push, schedule]", "jobs:",
+                          "  checks-windows-merge-3:", "    runs-on: windows-latest", "    steps:", "      - run: echo ok",
+                          "  lint:", "    runs-on: ubuntu-latest", "    needs: checks-windows-merge-3", "    steps:", "      - run: echo ok",
+                          "  all-jobs-passed:", "    runs-on: ubuntu-latest", "    needs: [lint, checks-windows-merge-3]",
+                          "    if: ${{ always() && github.event_name == 'pull_request' }}", "    steps:", "      - run: echo ok"]) + "\n"
+        runs = [main_run(1211, "success", sha=sha), main_run(1210, "failure", event="schedule")]
+        jobs = {1210: [main_job("checks-windows-merge-3", "success", 19), main_job("lint", "failure", 3), main_job("all-jobs-passed", "skipped")],
+                1211: [main_job("checks-windows-merge-3", "success", 19), main_job("lint", "skipped"), main_job("all-jobs-passed", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={sha: lint})
+        self.refused(rc, out, before)
+        self.assertIn("run 1210", out)
+        self.assertIn("lint: fail", out)
+
+    def test_a_red_job_whose_if_excludes_the_push_event_is_never_dropped(self):
+        # all-jobs-passed is pull_request-only, so the push run skips it. It failed in the nightly: it stays needed, and the clear is refused.
+        sha = "d" * 40
+        runs = [main_run(1221, "success", sha=sha), main_run(1220, "failure", event="schedule")]
+        jobs = {1220: [main_job("checks-windows-merge-3", "success", 19), main_job("all-jobs-passed", "failure", 2)],
+                1221: [main_job("checks-windows-merge-3", "success", 19), main_job("all-jobs-passed", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={sha: real_checks()})
+        self.refused(rc, out, before)
+        self.assertIn("run 1220", out)
+        self.assertIn("all-jobs-passed: fail", out)
+
+    def test_a_job_whose_if_names_the_push_event_inside_an_or_still_blocks_the_clear(self):
+        # checks-extra's if: is an ||, so it may run. It is skipped in the push run, so it stays needed and the clear is refused.
+        sha = "e" * 40
+        checks_extra = "\n".join(["name: checks", "on: [push, schedule]", "jobs:",
+                          "  checks-windows-merge-3:", "    runs-on: windows-latest", "    steps:", "      - run: echo ok",
+                          "  checks-extra:", "    runs-on: ubuntu-latest", "    if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}",
+                          "    steps:", "      - run: echo ok"]) + "\n"
+        runs = [main_run(1231, "success", sha=sha), main_run(1230, "failure", event="schedule")]
+        jobs = {1230: [main_job("checks-windows-merge-3", "failure", 19), main_job("checks-extra", "skipped")],
+                1231: [main_job("checks-windows-merge-3", "success", 19), main_job("checks-extra", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={sha: checks_extra})
+        self.refused(rc, out, before)
+        self.assertIn("run 1230", out)
+        self.assertIn("checks-windows-merge-3: fail", out)
+
+    def test_a_failed_read_of_the_workflow_file_is_unknown_and_refuses_the_clear(self):
+        runs, jobs = live_nightly()
+        rc, out, before = self.go(runs, jobs, text_fail="HTTP 500: Internal Server Error (fake contents read)")
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out, "a failed read of the workflow file is unknown: never red, and never a clear")
+        self.assertIn("the read failed", out)
+
+    def test_a_red_job_the_green_run_lacks_or_did_not_pass_is_red_not_unknown_when_the_workflow_read_fails(self):
+        # A certain red needs no workflow file: a green run that lacks a red job, or did not pass it, clears nothing whatever the if:.
+        # The read fails here and must not turn the red into unknown. The control is the test above: a green run that passed the red job needs the file.
+        red_run = main_run(1310, "failure", event="schedule")
+        red_jobs = [main_job("checks-windows-merge-3", "failure", 19), main_job("all-jobs-passed", "skipped")]
+        for variant, green_jobs in (("the red job is missing", [main_job("all-jobs-passed", "skipped")]),
+                                    ("the red job is skipped", [main_job("checks-windows-merge-3", "skipped"), main_job("all-jobs-passed", "skipped")])):
+            with self.subTest(variant=variant):
+                rc, out, before = self.go([main_run(1311, "success"), red_run], {1310: red_jobs, 1311: green_jobs},
+                                          text_fail="HTTP 500: Internal Server Error (fake contents read)")
+                self.refused(rc, out, before)
+                self.assertNotIn("UNKNOWN", out, "a certain red reads as unknown: the workflow read ran first, and its failure came before the red check")
+                self.assertIn("latest completed run is red", out)
+                self.assertIn("checks-windows-merge-3: fail", out)
 
     def test_a_green_schedule_run_with_every_job_of_a_red_push_run_clears_it(self):
         rc, out, _ = self.go([main_run(941, "success", event="schedule"), main_run(940, "failure")],
@@ -10466,10 +11687,11 @@ class PullsHost(merge.Host):
     `gh` also answers `pulls/<n>` from the open list, and the compare read of two heads: `compares` maps (base sha, head sha) to the status
     GitHub would answer. A pair not listed is "diverged", so unrelated heads never contain each other. The base branch's read,
     `compare/<base>...<head>`, is keyed ("main", head sha) in the same map. `compare_error` answers every compare read;
-    `base_compare_error` answers only the base branch's read."""
+    `base_compare_error` answers only the base branch's read. `repo` is the OWNER/NAME the host names its repo by (Host.repo): the header
+    of a `--reviewed --root` block reads it."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
-                 base_compare_error=None, comments=(), comments_error=None, count_gh=False):
-        super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore)
+                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, repo=None):
+        super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore, repo=repo)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
         self.workflow_runs = workflow_runs or {}  # sha -> the workflow runs `gh run list --commit <sha>` answers
@@ -10487,7 +11709,7 @@ class PullsHost(merge.Host):
         if self.count_gh and args[0] == "api":
             rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
             self.gh_calls.append(rel)
-            return 0, self.answer(rel)
+            return 0, self.answer(rel, args[1:])
         route = args[1] if args[:1] == ["api"] else ""
         m = re.search(r"/pulls/(\d+)$", route)
         if m:
@@ -10504,19 +11726,21 @@ class PullsHost(merge.Host):
             return 0, json.dumps({"status": self.compares.get(m.groups(), "diverged")})
         raise AssertionError("unexpected gh call: " + " ".join(args))
 
-    def answer(self, rel):
-        """The reply of one REST route, in the shape `gh api --paginate --slurp` gives it (one page), or the --jq value of the protection."""
+    def answer(self, rel, argv):
+        """The reply of one REST route for the request's own flags, as the fake gh gives it (REST.listing): the page asked for, or with
+        --paginate every page in the --slurp shape. The protection answers its --jq value. A list read that asks for a page gets that page."""
+        _method, _path, params, flags, _jq = REST.parse(argv)
         m = re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel)
         if rel == "pulls":
-            return json.dumps([self.pulls])
+            return REST.listing(self.pulls, None, params, flags, None, 100)
         if rel == "issues/comments":
-            return json.dumps([self.comments])
+            return REST.listing(self.comments, None, params, flags, None, 100)
         if rel == f"branches/{self.base}/protection/required_status_checks":
             return json.dumps(self.protection)
         if m and m.group(2) == "check-runs":
-            return json.dumps([{"check_runs": self.check_rows.get(m.group(1), [])}])
+            return REST.listing(self.check_rows.get(m.group(1), []), "check_runs", params, flags, None, 100)
         if m:
-            return json.dumps([{"statuses": []}])
+            return REST.listing([], "statuses", params, flags, None, 100)
         raise AssertionError("unexpected route: " + rel)
 
     def pages(self, rel, key=None, fields=None):
@@ -11393,10 +12617,15 @@ REVIEW_FAILED_THREE = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, so
 REVIEW_FLAGS = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:PASS")
 REVIEW_FOOTER = "\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"  # the footer a GitHub post carries, a lane's or the server's
 
-def record_text(rounds=REVIEW_PASS, head=REVIEW_HEAD, kind="normal", guard="no", net="not owed", n=7, marker=REVIEW_MARKER):
-    """The record line by line, in the order the form gives. A keyword replaces one field, so a case changes only what it tests."""
+def record_text(rounds=REVIEW_PASS, head=REVIEW_HEAD, kind="normal", guard="no", net="not owed", n=7, marker=REVIEW_MARKER, fix=()):
+    """The record line by line, in the order the form gives. A keyword replaces one field, so a case changes only what it tests. `fix` holds the
+    fix check lines, which follow the rounds and come before Net value."""
     return "\n".join([marker, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
-                      *rounds, f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
+                      *rounds, *fix, f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
+
+def fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model="haiku"):
+    """The one literal of the fix check line: the reviewed head the fix diff starts from, the role, the model and the verdict."""
+    return f"Fix check: {head}, {role}, {model}, {verdict}"
 
 def review_fn(test, name):
     """The merge.py function `name`, or a failed case that says it is missing."""
@@ -11410,9 +12639,12 @@ def parse_text(test, text):
     test.assertIsNotNone(rec, "parse_review refused a well-formed record:\n" + text)
     return rec
 
+def record_verdict(test, text, head=REVIEW_HEAD):
+    """-> (state, why) of the record, as review_state gives them."""
+    return review_fn(test, "review_state")(parse_text(test, text), head)
+
 def record_state(test, text, head=REVIEW_HEAD):
-    state, _why = review_fn(test, "review_state")(parse_text(test, text), head)
-    return state
+    return record_verdict(test, text, head)[0]
 
 def posted_body(test, out):
     """The record printed in `out`, from its marker line through its CI line: the text a lane posts."""
@@ -11436,6 +12668,84 @@ def list_line(test, out, n):
 def no_record_numbers(out):
     """The pull request numbers named on the `no record:` line."""
     return {int(m) for l in out.splitlines() if l.startswith("no record:") for m in re.findall(r"#(\d+)", l)}
+
+REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", "haiku", "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict
+REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", "haiku", "FAIL")
+
+def fix_state(test, fix, **kw):
+    """-> (state, why) of a record built without a fix line, with `fix` set on its parsed dict. review_state runs without the parser, so a
+    case tests the fix rule alone."""
+    rec = parse_text(test, record_text(**kw))
+    rec["fix"] = fix
+    return review_fn(test, "review_state")(rec, REVIEW_HEAD)
+
+def body_with_fix(test, rounds, net, fix):
+    """review_body for pull request 7 at REVIEW_HEAD, a normal change with guard no, with `fix`. A merge.py that takes no fix argument fails here by name."""
+    fn = review_fn(test, "review_body")
+    if "fix" not in inspect.signature(fn).parameters:
+        test.fail("merge.review_body takes no fix argument")
+    return fn(7, REVIEW_HEAD, "normal", "no", rounds, net, fix=fix)
+
+class ReviewFixForm(unittest.TestCase):
+    """The fix check line (decision hold-unsafe-after-round-3): one optional line after the Round lines and before Net value. parse_review
+    returns it as rec["fix"], and refuses a malformed line, a second line, a line before a round, and a reviewed head equal to the record's Head.
+    Each refusal sits beside a well-formed sibling that must parse, so the case is red until the parser knows the line."""
+
+    def test_the_fix_line_parses_to_its_four_fields(self):
+        rec = parse_text(self, record_text(rounds=REVIEW_PASS, fix=(fix_check_line(),)))
+        self.assertEqual(rec.get("fix"), REVIEW_FIX_PASS, f"the fix line did not parse to its four fields: {rec.get('fix')!r}")
+
+    def test_a_record_with_no_fix_line_has_no_fix(self):
+        # control: a record without the line parses as before, and its fix is None
+        rec = parse_text(self, record_text(rounds=REVIEW_PASS))
+        self.assertIsNone(rec.get("fix"), f"a record with no fix line has fix {rec.get('fix')!r}")
+
+    def test_review_body_without_a_fix_prints_no_fix_line(self):
+        # control: the existing call, with no fix, prints no fix line
+        body = review_fn(self, "review_body")(7, REVIEW_HEAD, "normal", "no", [(1, "reviewer", "sonnet", "PASS")], "not owed")
+        self.assertFalse([l for l in body.splitlines() if l.startswith("Fix check")], f"a body with no fix printed a fix line:\n{body}")
+
+    def test_review_body_prints_the_fix_line_after_the_rounds_and_before_net_value(self):
+        body = body_with_fix(self, [(1, "reviewer", "sonnet", "PASS")], "not owed", REVIEW_FIX_PASS)
+        self.assertEqual(body.splitlines(), [REVIEW_MARKER, "PR: #7", f"Head: {REVIEW_HEAD}", "Kind: normal", "Guard or check: no",
+                                             "Round 1: reviewer, sonnet, PASS", fix_check_line(), "Net value: not owed", REVIEW_CI_LINE])
+
+    def test_the_full_form_with_a_fix_line_round_trips(self):
+        # full size: three rounds with design-reviewer lines, then the fix line, a guard change with a positive net value
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, FAIL",
+                  "Round 2: design-reviewer, opus, PASS", "Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, PASS")
+        text = record_text(rounds=rounds, guard="yes", net="positive", fix=(fix_check_line(),))
+        rec = parse_text(self, text)
+        self.assertEqual(rec.get("fix"), REVIEW_FIX_PASS, f"the fix line did not parse to its four fields: {rec.get('fix')!r}")
+        self.assertEqual(review_fn(self, "review_body")(**rec).splitlines(), text.splitlines())
+
+    def test_a_malformed_fix_line_is_not_a_record(self):
+        good = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(),))
+        self.assertEqual(parse_text(self, good).get("fix"), REVIEW_FIX_PASS, "the well-formed fix line did not parse")
+        bad_lines = {"verdict PARTIAL": fix_check_line(verdict="PARTIAL"), "verdict MAYBE": fix_check_line(verdict="MAYBE"),
+                     "role design-reviewer": fix_check_line(role="design-reviewer"), "a 39-character head": fix_check_line(head=REVIEW_OLD_HEAD[:39]),
+                     "an upper-case head": fix_check_line(head=REVIEW_OLD_HEAD.upper()), "no model": f"Fix check: {REVIEW_OLD_HEAD}, reviewer, PASS"}
+        for cause, line in bad_lines.items():
+            with self.subTest(cause=cause):
+                self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(line,))), f"parse_review accepted a fix line with {cause}")
+
+    def test_two_fix_lines_are_not_a_record(self):
+        good = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(),))
+        self.assertEqual(parse_text(self, good).get("fix"), REVIEW_FIX_PASS, "the well-formed fix line did not parse")
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(fix_check_line(), fix_check_line(verdict="FAIL")))),
+                          "parse_review accepted two fix lines")
+
+    def test_a_fix_line_before_a_round_line_is_not_a_record(self):
+        good = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(),))
+        self.assertEqual(parse_text(self, good).get("fix"), REVIEW_FIX_PASS, "the well-formed fix line did not parse")
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=(fix_check_line(), "Round 1: reviewer, sonnet, PASS"))),
+                          "parse_review accepted a fix line before a round line")
+
+    def test_a_fix_line_whose_reviewed_head_is_the_record_head_is_not_a_record(self):
+        good = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(),))
+        self.assertEqual(parse_text(self, good).get("fix"), REVIEW_FIX_PASS, "the well-formed fix line did not parse")
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(fix_check_line(head=REVIEW_HEAD),))),
+                          "parse_review accepted a fix line whose reviewed head is the record's Head")
 
 class ReviewRecordForm(unittest.TestCase):
     """The form: review_body prints a record and parse_review reads it back. The parser accepts the form and refuses what it does not allow."""
@@ -11519,10 +12829,10 @@ class ReviewRecordForm(unittest.TestCase):
             self.assertIsNone(review_fn(self, "parse_review")(record_text(kind="bogus").rstrip("\n") + REVIEW_FOOTER))
 
 class ReviewRecordRules(unittest.TestCase):
-    """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS,
-    or the third round is done and Guard or check is no, or the third round is done with Guard or check yes and a Net value of zero or
-    positive. Net value negative is held. The third round with Guard or check yes and no Net value is open. A first-round FAIL is open.
-    The verdicts are PASS, FAIL and PARTIAL."""
+    """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS
+    and the last design-reviewer line is PASS or absent, or the third round is done and Guard or check is no, or the third round is done
+    with Guard or check yes and a Net value of zero or positive. Net value negative is held. The third round with Guard or check yes and no
+    Net value is open. A first-round FAIL is open. The verdicts are PASS, FAIL and PARTIAL."""
 
     def test_a_pass_in_the_last_round_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS)), "done")
@@ -11555,7 +12865,48 @@ class ReviewRecordRules(unittest.TestCase):
     def test_a_design_reviewer_fail_in_round_three_with_guard_no_is_done(self):
         # The review cap rule (roles-review-cap-three) ends the review after the third round when Guard or check is no, even when that round fails.
         rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, FAIL")
-        self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no")), "done")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="no"))
+        self.assertEqual(state, "done", "round 3 is done whatever its verdict, so the state must stay done")
+        self.assertIn("in round 3 is FAIL", why, f"why does not name the design reviewer's round 3 FAIL: {why!r}")
+
+    def test_a_reviewer_pass_in_the_last_round_does_not_clear_a_design_fail_in_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds))
+        self.assertEqual(state, "open", "the last design-reviewer line is FAIL, but the record reads done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_design_fail_in_round_one_is_not_cleared_by_a_later_reviewer_pass(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds))
+        self.assertEqual(state, "open", "the last design-reviewer line is FAIL, but the record reads done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_design_partial_in_round_one_is_not_cleared_by_a_later_reviewer_pass(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PARTIAL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds))
+        self.assertEqual(state, "open", "the last design-reviewer line is PARTIAL, so the record must not read done")
+        self.assertIn("in round 1 is PARTIAL", why, f"why does not name the design reviewer's round 1 PARTIAL: {why!r}")
+
+    def test_a_design_pass_in_a_later_round_after_a_design_fail_is_done(self):
+        # Pinning: the last design-reviewer line is PASS, so the design rule holds and the record reads done.
+        rounds = ("Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS", "Round 2: design-reviewer, opus, PASS")
+        self.assertEqual(record_state(self, record_text(rounds=rounds)), "done")
+
+    def test_a_reviewer_fail_then_a_reviewer_pass_with_no_design_line_is_done(self):
+        # Pinning: no design-reviewer line at all, so the design rule does not apply to the record.
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="no"))
+        self.assertEqual(state, "done", "a record with no design line must read done")
+        self.assertEqual(why, "round 2 passed", f"the no-design record must say exactly 'round 2 passed': {why!r}")
+
+    def test_a_design_reviewer_role_with_a_space_or_capitals_does_not_parse(self):
+        # Pinning: the role is exactly "design-reviewer". A misspelled role makes the record bad, so it can never read as done.
+        for role in ("design reviewer", "Design-Reviewer"):
+            with self.subTest(role=role):
+                text = record_text(rounds=("Round 1: reviewer, sonnet, PASS", f"Round 1: {role}, opus, FAIL"))
+                rec = review_fn(self, "parse_review")(text)
+                self.assertIsNone(rec, f"parse_review accepted the role {role!r}")
+                self.assertEqual(review_fn(self, "review_state")(rec, REVIEW_HEAD)[0], "bad", f"a record with the role {role!r} did not read bad")
 
     def test_a_delete_only_change_passed_in_round_one_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, kind="delete-only")), "done")
@@ -11565,6 +12916,36 @@ class ReviewRecordRules(unittest.TestCase):
             with self.subTest(verdict=verdict):
                 rec = record_text(rounds=(f"Round 1: reviewer, sonnet, {verdict}",), kind="delete-only", guard="no")
                 self.assertEqual(record_state(self, rec), "done")
+
+    def test_a_delete_only_guard_no_change_with_a_design_fail_in_round_one_is_done_and_names_design(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL")
+        state, why = record_verdict(self, record_text(rounds=rounds, kind="delete-only", guard="no"))
+        self.assertEqual(state, "done", "a delete-only change with guard no is done after round 1, so the state must stay done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_round_three_guard_no_with_a_design_fail_in_round_one_is_done_and_names_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="no"))
+        self.assertEqual(state, "done", "round 3 is done whatever its verdict, so the state must stay done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_delete_only_guard_no_with_a_design_fail_in_round_one_and_a_round_two_fail_is_done_and_names_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, FAIL")
+        state, why = record_verdict(self, record_text(rounds=rounds, kind="delete-only", guard="no"))
+        self.assertEqual(state, "done", "a delete-only change with guard no is done after round 1, so the state must stay done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_round_three_guard_yes_net_positive_with_a_design_partial_in_round_one_is_done_and_names_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PARTIAL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, FAIL")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="yes", net="positive"))
+        self.assertEqual(state, "done", "round 3 with a net value of positive is done, so the state must stay done")
+        self.assertIn("in round 1 is PARTIAL", why, f"why does not name the design reviewer's round 1 PARTIAL: {why!r}")
+
+    def test_a_delete_only_guard_no_with_a_design_fail_in_round_one_is_done_whatever_round_two_is(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds, kind="delete-only", guard="no"))
+        self.assertEqual(state, "done", "a delete-only change with guard no stays done after round 1, whatever round 2 is")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
 
     def test_a_delete_only_change_with_guard_yes_and_a_round_one_fail_is_open(self):
         # A guard or check change owes the second and third rounds when the first round fails, even if it only deletes.
@@ -11592,6 +12973,129 @@ class ReviewRecordRules(unittest.TestCase):
     def test_a_record_for_an_older_head_is_stale(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD), head=REVIEW_HEAD), "stale")
 
+class ReviewFixRules(unittest.TestCase):
+    """review_state with a fix check (decision hold-unsafe-after-round-3). A fix check is not a review of its own. A FAIL is open, whatever
+    the rounds say. A PASS counts as the round it follows passing. When that round is the first or the second allowed one, the record is done
+    whatever that round's verdict, and owes no net value yet. A last design-reviewer line of FAIL or PARTIAL keeps the record open, and the
+    why names the design reviewer. On the last allowed round the fix check keeps the net value that round gave, and does not settle a net
+    value that is still owed. With no round recorded the record is open. The rule cases build their record with fix_state(); the last case
+    reads the fix line from the text."""
+
+    def test_a_fix_fail_after_round_three_is_open_and_says_new_lane(self):
+        state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=REVIEW_FAILED_THREE, guard="no")
+        self.assertEqual(state, "open", "a failed fix check must not read done")
+        self.assertIn("fix check failed", why)
+        self.assertIn("new lane", why)
+
+    def test_a_fix_fail_after_round_three_with_a_positive_net_value_is_open(self):
+        state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=REVIEW_FAILED_THREE, guard="yes", net="positive")
+        self.assertEqual(state, "open", "a failed fix check must not read done, even when round 3's net value is positive")
+        self.assertIn("fix check failed", why)
+
+    def test_a_fix_fail_after_a_delete_only_round_one_is_open(self):
+        state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=REVIEW_PASS, kind="delete-only", guard="no")
+        self.assertEqual(state, "open", "a failed fix check must not read done, even after a delete-only round 1")
+        self.assertIn("fix check failed", why)
+
+    def test_a_fix_pass_after_round_one_is_done_whatever_round_one_said(self):
+        # A fix PASS after the first round counts as that round passing, for a normal change with guard no or yes
+        for verdict in ("PASS", "FAIL"):
+            for guard in ("no", "yes"):
+                with self.subTest(verdict=verdict, guard=guard):
+                    rounds = (f"Round 1: reviewer, sonnet, {verdict}",)
+                    state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard=guard, net="not owed")
+                    self.assertEqual(state, "done", f"a fix check PASS after round 1 {verdict}, guard {guard}, must read done: {why!r}")
+
+    def test_a_fix_pass_after_round_two_is_done_whatever_round_two_said(self):
+        # A fix PASS after the second round counts as that round passing, and owes no net value before the last allowed round
+        for verdict in ("PASS", "FAIL"):
+            for guard in ("no", "yes"):
+                with self.subTest(verdict=verdict, guard=guard):
+                    rounds = ("Round 1: reviewer, sonnet, FAIL", f"Round 2: reviewer, sonnet, {verdict}")
+                    state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard=guard, net="not owed")
+                    self.assertEqual(state, "done", f"a fix check PASS after round 2 {verdict}, guard {guard}, must read done: {why!r}")
+
+    def test_a_fix_pass_after_a_delete_only_round_one_with_guard_yes_is_done(self):
+        # A delete-only change with guard yes owes the later rounds after a failed first round. A fix PASS counts as that first round passing, so they are not owed
+        for verdict in ("FAIL", "PASS"):
+            with self.subTest(verdict=verdict):
+                rounds = (f"Round 1: reviewer, sonnet, {verdict}",)
+                state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, kind="delete-only", guard="yes")
+                self.assertEqual(state, "done", f"a fix check PASS after a delete-only round 1 {verdict} with guard yes must read done: {why!r}")
+
+    def test_a_fix_pass_before_round_three_with_a_design_hold_is_open_and_names_the_design_reviewer(self):
+        # owner item 271 b: the design-reviewer hold stays. The last design-reviewer line is FAIL or PARTIAL, so the fix PASS leaves the state open
+        cases = (
+            (("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL"), "in round 1 is FAIL"),
+            (("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PARTIAL",
+              "Round 2: reviewer, sonnet, PASS"), "in round 1 is PARTIAL"),
+        )
+        for rounds, note in cases:
+            with self.subTest(rounds=rounds):
+                state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds)
+                self.assertEqual(state, "open", f"a fix check PASS must not clear the design reviewer's hold: {why!r}")
+                self.assertIn("design reviewer", why, f"why does not name the design reviewer: {why!r}")
+                self.assertIn(note, why, f"why does not name the design reviewer's round line: {why!r}")
+
+    def test_a_fix_pass_with_no_round_recorded_is_open_and_says_no_round(self):
+        # the empty state: no round is recorded, so the fix check has no round to count as passing
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=(), kind="docs-only")
+        self.assertEqual(state, "open", "a fix check PASS with no round recorded must not read done")
+        self.assertIn("no round", why, f"why does not say no round is recorded: {why!r}")
+
+    def test_a_fix_pass_after_round_three_with_guard_no_is_done(self):
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="no")
+        self.assertEqual(state, "done", f"a fix check PASS after round 3 of a change with no guard must read done: {why!r}")
+
+    def test_a_fix_pass_after_round_three_with_guard_yes_is_done_for_a_zero_or_positive_net_value(self):
+        for net in ("zero", "positive"):
+            with self.subTest(net=net):
+                state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="yes", net=net)
+                self.assertEqual(state, "done", f"round 3's net value {net} must carry through the fix check: {why!r}")
+
+    def test_a_fix_pass_after_round_three_with_guard_yes_keeps_the_net_value_owed(self):
+        # the fix check does not settle a net value that the third round left owed
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="yes", net="not owed")
+        self.assertEqual(state, "open", f"a fix check settled a net value round 3 left owed: {why!r}")
+
+    def test_a_fix_pass_after_round_three_with_guard_yes_is_held_for_a_negative_net_value(self):
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="yes", net="negative")
+        self.assertEqual(state, "held", f"a negative net value must hold through the fix check: {why!r}")
+
+    def test_a_fix_pass_after_a_delete_only_round_one_with_guard_no_is_done(self):
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_PASS, kind="delete-only", guard="no")
+        self.assertEqual(state, "done", f"a fix check PASS after a delete-only round 1 must read done: {why!r}")
+
+    def test_the_fix_line_in_the_text_reaches_the_state_rules(self):
+        # end to end: the line is read from the record text, then the same rules apply
+        cases = ((REVIEW_FAILED_THREE, "no", "not owed", "FAIL", "open"),
+                 (REVIEW_FAILED_THREE, "no", "not owed", "PASS", "done"),
+                 (REVIEW_FAILED_THREE, "yes", "zero", "PASS", "done"),
+                 (REVIEW_FAILED_THREE, "yes", "negative", "PASS", "held"),
+                 (REVIEW_PASS, "no", "not owed", "PASS", "done"),  # a fix PASS after a passing first round is done
+                 (("Round 1: reviewer, sonnet, FAIL",), "no", "not owed", "PASS", "done"))
+        for rounds, guard, net, verdict, want in cases:
+            with self.subTest(rounds=rounds, guard=guard, net=net, verdict=verdict):
+                text = record_text(rounds=rounds, guard=guard, net=net, fix=(fix_check_line(verdict=verdict),))
+                self.assertEqual(record_state(self, text), want)
+
+    def test_a_fix_pass_after_a_failed_first_round_names_the_fail_and_the_fix_check(self):
+        # the why keeps the failed round in view and names the fix check, so it does not read as a passed round
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        self.assertEqual(state, "done", f"a fix check PASS after a failed first round must read done: {why!r}")
+        self.assertIn("FAIL", why, f"the why does not name the failed round: {why!r}")
+        self.assertIn("fix check", why, f"the why does not name the fix check: {why!r}")
+        self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
+
+    def test_a_fix_pass_after_a_failed_first_round_with_a_design_fail_names_both_and_stays_open(self):
+        # the design reviewer also failed the first round, so the fix check does not clear it, and the why keeps that FAIL in view and names the fix check
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL")
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds)
+        self.assertEqual(state, "open", f"a design reviewer FAIL must hold the fix check PASS open: {why!r}")
+        self.assertIn("FAIL", why, f"the why does not name the failed reviewer: {why!r}")
+        self.assertIn("fix check", why, f"the why does not name the fix check: {why!r}")
+        self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
+
 class ReviewEnv(Env):
     """The review-record cases' one home for running merge: a run that returns (rc, stdout, stderr) and reads a usage error's SystemExit as
     its code, and the check that a usage error came from a parser that knows the flag. No test lives here."""
@@ -11600,13 +13104,17 @@ class ReviewEnv(Env):
         """The review flags, with --head set to the live head of the feature branch, then `extra`."""
         return (*REVIEW_FLAGS, "--head", self.head(), *extra)
 
-    def run_args(self, *argv, host=None):
+    def run_args(self, *argv, host=None, hosts=None):
         out, err = io.StringIO(), io.StringIO()
         try:
-            rc = self.run_merge(*argv, host=host, stdout=out, stderr=err)[0]
+            rc = self.run_merge(*argv, host=host, hosts=hosts, stdout=out, stderr=err)[0]
         except SystemExit as e:
             rc = e.code
         return rc, out.getvalue(), err.getvalue()
+
+    def record_host(self, *comments, head=REVIEW_HEAD):
+        """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first."""
+        return PullsHost([batch_pull(7, head)], {}, comments=comments)
 
     def assert_usage_error(self, *argv):
         """A usage error: rc 2, from a parser that knows every flag in argv. stderr holds no OLD_PARSER_ERRORS text and no traceback."""
@@ -11716,6 +13224,122 @@ class ReviewRecordWrite(ReviewEnv):
             with self.subTest(round=rnd):
                 out, _err = self.assert_usage_error("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head(), "--round", rnd)
                 self.assertNotIn(REVIEW_MARKER, out)
+
+class ReviewFixFlag(ReviewEnv):
+    """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
+    error prints no record. Each refusal sits beside the good value, which must exit 0, so a parser that never learned the flag fails here too."""
+
+    def fix_value(self, head=REVIEW_OLD_HEAD, role="reviewer", model="haiku", verdict="PASS"):
+        return f"{head}:{role}:{model}:{verdict}"
+
+    def earlier_host(self):
+        """The pull request at the live head, with one earlier record that reviewed the fix base and has no fix line: the base the good values name."""
+        return self.record_host(review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)), head=self.head())
+
+    def test_the_printed_record_carries_the_fix_line_after_the_rounds(self):
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=self.earlier_host())
+        self.assertEqual(rc, 0, "merge refused --fix-check:\n" + out + err)
+        self.assertEqual(posted_body(self, out).splitlines()[5:], ["Round 1: reviewer, sonnet, PASS", fix_check_line(), "Net value: not owed", REVIEW_CI_LINE])
+
+    def test_the_printed_fix_line_parses_back_to_the_flag_value(self):
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=self.earlier_host())
+        self.assertEqual(rc, 0, "merge refused --fix-check:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
+    def test_without_the_flag_the_record_prints_no_fix_line(self):
+        # control: the same record without --fix-check prints no fix line
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+        self.assertFalse([l for l in posted_body(self, out).splitlines() if l.startswith("Fix check")])
+
+    def test_a_malformed_fix_value_exits_two_and_prints_no_record(self):
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=self.earlier_host())
+        self.assertEqual(rc, 0, "the well-formed --fix-check is refused:\n" + out + err)
+        for bad in (self.fix_value(role="design-reviewer"), self.fix_value(verdict="PARTIAL"), self.fix_value(verdict="MAYBE"),
+                    self.fix_value(head=REVIEW_OLD_HEAD[:39]), f"{REVIEW_OLD_HEAD}:reviewer:PASS"):
+            with self.subTest(bad=bad):
+                out, _err = self.assert_usage_error("7", "--review-record", *self.flags(), "--fix-check", bad)
+                self.assertNotIn(REVIEW_MARKER, out)
+
+    def test_a_fix_whose_reviewed_head_is_the_live_head_exits_two(self):
+        # the fix diff would be empty, so parse_review refuses the record, and the flag refuses it the same way the rounds do
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=self.earlier_host())
+        self.assertEqual(rc, 0, "the well-formed --fix-check is refused:\n" + out + err)
+        out, _err = self.assert_usage_error("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(head=self.head()))
+        self.assertNotIn(REVIEW_MARKER, out)
+
+    def test_fix_check_needs_review_record(self):
+        self.assert_usage_error("7", "--fix-check", self.fix_value())
+        rc, out, err = self.run_args("7")
+        self.assertEqual(rc, 0, out + err)
+
+class ReviewFixBase(ReviewEnv):
+    """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of the newest review record already on the pull request, and
+    that record has no fix check line. The fix diff then starts from the head the last record reviewed, and a fix never follows a fix. The
+    earlier records come from review_comments, which PullsHost serves from its comment list, oldest first. A refusal exits 2 and prints no record."""
+
+    EARLIER_HEAD = "1e" * 20  # a head that an earlier record reviewed, and that is not the newest record's
+    OTHER_HEAD = "2e" * 20  # a head that no record reviewed
+
+    def review_with_base(self, base, host):
+        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:haiku:PASS", host=host)
+
+    def assert_refused(self, rc, out, err):
+        self.assertEqual(rc, 2, "the fix check was not refused:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_a_base_equal_to_the_newest_earlier_record_head_prints_the_record(self):
+        # control: the fix diff starts from the head the newest earlier record reviewed, and that record has no fix line
+        host = self.record_host(review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
+        self.assertEqual(rc, 0, "a base that is the newest record's head was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
+    def test_a_base_that_is_not_the_head_of_the_newest_earlier_record_is_refused(self):
+        # only the newest record's head counts, so a head that just an older record reviewed is refused as well as a head no record reviewed
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        for base in (self.OTHER_HEAD, self.EARLIER_HEAD):
+            with self.subTest(base=base):
+                rc, out, err = self.review_with_base(base, self.record_host(older, newest))
+                self.assert_refused(rc, out, err)
+
+    def test_a_newest_earlier_record_with_a_fix_line_refuses_its_head_as_the_base(self):
+        # the head already has its fix check, so a second fix check from it would be a fix after a fix
+        fixed = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.EARLIER_HEAD),))
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(review_comment(1, 7, fixed)))
+        self.assert_refused(rc, out, err)
+
+    def test_no_earlier_record_on_the_pull_request_refuses_the_fix_check(self):
+        # with no record on this pull request there is no reviewed head to start the fix diff from
+        other_pr = review_comment(1, 8, record_text(n=8, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        for label, comments in (("no record at all", []), ("a record on another pull request", [other_pr])):
+            with self.subTest(label=label):
+                rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(*comments))
+                self.assert_refused(rc, out, err)
+
+    def test_an_older_fix_line_does_not_block_a_base_on_a_newer_record_without_one(self):
+        # only the newest earlier record decides, so a fix line on an older record does not refuse a base the newest record names
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.OTHER_HEAD),)))
+        newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, newest))
+        self.assertEqual(rc, 0, "a base on the newest record, which has no fix line, was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
+    def test_a_failed_comments_read_refuses_the_fix_check_with_no_record(self):
+        # without the earlier records there is no base to check the fix check against, so the read failure stops the run before any record prints
+        host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments_error="reading issue comments from GitHub failed")
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
+        self.assertEqual(rc, 1, "a failed comments read did not stop the run:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a failed comments read still printed a record")
+
+    def test_a_malformed_newest_earlier_record_refuses_the_base(self):
+        # the newest record does not parse, so it cannot name a head, and the base is refused even when an older record has that head
+        older = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        malformed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus"))
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
+        self.assert_refused(rc, out, err)
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
@@ -11839,6 +13463,1524 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
 
+
+# `merge --reviewed --root DIR [--root DIR ...]`: one call reads every repo the batch runner owns. The seam is `hosts`: main takes a mapping
+# from each --root string, exactly as given, to that root's Host. A root's header is the `repo` of its host, and its config is read by
+# load_config on that root. A test host keeps its own checks, as `host` does.
+OPEN_ROUNDS = ("Round 1: reviewer, sonnet, FAIL",)  # a failed round: the pull request is open
+REVIEWED_LINE_STARTS = ("#", "no record:", "no open pull requests.", "open batch now: ", "build next batch on the running head: ")  # what --reviewed prints per repo
+BATCH_LINE_STARTS = ("open batch now: ", "build next batch on the running head: ")
+
+def hex_head(c):
+    """A full 40-hex head: one hex digit repeated, so each pull request of a case has its own."""
+    return c * 40
+
+def green():
+    return [batch_run("checks", "completed", "success")]
+
+def running():
+    return [batch_run("checks", "in_progress")]
+
+def record_of(n, head, rounds=REVIEW_PASS, net="not owed"):
+    """The review record comment of pull request n at `head`, as the repo's comment list gives it."""
+    return review_comment(n, n, record_text(n=n, head=head, rounds=rounds, net=net))
+
+def root_host(repo, pulls=(), comments=(), check_rows=None, **reads):
+    """The fake host of one --root repo: its open pulls, their records and their check runs."""
+    return PullsHost(list(pulls), check_rows or {}, comments=list(comments), repo=repo, **reads)
+
+def root_blocks(out):
+    """-> [(owner/name, its lines)] in the order the `repo <owner/name>:` headers print. A line belongs to the last header above it. Only the
+    lines --reviewed prints are kept, so a notice from load_config is not one of them."""
+    found = []
+    for line in out.splitlines():
+        m = re.fullmatch(r"repo (\S+):", line)
+        if m:
+            found.append((m.group(1), []))
+        elif found and line.startswith(REVIEWED_LINE_STARTS):
+            found[-1][1].append(line)
+    return found
+
+def by_repo(test, out, *names):
+    """-> {owner/name: its lines}, after asserting that each name has one block."""
+    found = dict(root_blocks(out))
+    for name in names:
+        test.assertIn(name, found, "no block for " + name + ":\n" + out)
+    return found
+
+def batch_lines_of(lines):
+    return [l for l in lines if l.startswith(BATCH_LINE_STARTS)]
+
+def pr_lines(lines, n):
+    return [l for l in lines if l.startswith(f"#{n} ")]
+
+def printed_review_lines(out):
+    """Every line --reviewed prints: the headers and the per-repo lines. A failed read prints none of them."""
+    return [l for l in out.splitlines() if l.startswith(("repo ",) + REVIEWED_LINE_STARTS)]
+
+class ReviewedRoots(ReviewEnv):
+    """`merge --reviewed --root DIR [--root DIR ...]`. Output: one block per root, in the order given. A block is the header `repo <owner/name>:`,
+    then that repo's reviewed lines, then at most one batch line after them. A root whose read or config fails prints one line in its place,
+    `repo DIR: unknown (reason)`; every other root prints in full; exit 1.
+    The two roots are real checkouts (copy_repos), so load_config reads their base. The cwd, self.co, is no root."""
+
+    def setUp(self):
+        super().setUp()
+        self.alpha, self.bravo = self.checkout("alpha"), self.checkout("bravo")
+
+    def checkout(self, name):
+        """A root: a checkout with its own origin and base config, in a folder of its own. -> its path."""
+        t = os.path.realpath(tempfile.mkdtemp(prefix=f"test-merge-{name}-", dir=run_folder()))
+        self.addCleanup(shutil.rmtree, t, True)
+        if not copy_repos(t):
+            build_repos(t)
+        return os.path.join(t, "co")
+
+    def run_roots(self, *argv, hosts):
+        """-> (rc, out, err) of `merge` with `argv` and `hosts`. The parser must know --root, so a refusal of it fails here, named first."""
+        rc, out, err = self.run_args(*argv, hosts=hosts)
+        self.assertNotIn("unrecognized arguments", err, "the parser refuses --root under --reviewed")
+        return rc, out, err
+
+    def roots_with_done(self, alpha_read=None, bravo_read=None):
+        """Both roots, each with one done pull request, number 5. A read keyword (`pulls_error` or `comments_error`) fails that root's read."""
+        def repo(name, read):
+            return root_host(name, pulls=[batch_pull(5, hex_head("5"))], comments=[record_of(5, hex_head("5"))],
+                             check_rows={hex_head("5"): green()}, **(read or {}))
+        return {self.alpha: repo("o/alpha", alpha_read), self.bravo: repo("o/bravo", bravo_read)}
+
+    def gh_shim_for(self, root, default_branch="main"):
+        """The fake gh on PATH, for a real Host of `root`: the repo's default branch is `default_branch`, and its origin and clone are the root's."""
+        folder = os.path.dirname(root)
+        install_gh_shim(self)
+        GhHalf.set(self, other=os.path.join(folder, "other"), bare=os.path.join(folder, "origin.git"), default_branch=default_branch)
+
+    # The fake gh of the per-root cases. It answers for the repo of the folder each call runs in (the cwd of a real Host(cwd=root)), from the
+    # state of that folder in roots.json. The routes are GH_REST_LIB's, the one home of the REST shapes; a route no case answers is refused and logged.
+    PER_ROOT_GH = "#!/usr/bin/env python3\nimport json, os, re, sys\n" + GH_REST_LIB + r'''
+d = os.environ["FAKE_GH_DIR"]; a = sys.argv[1:]
+
+def answer(text, code=0):
+    print(text); sys.exit(code)
+
+def unexpected(what):
+    open(os.path.join(d, "unexpected.log"), "a").write(what + "\n")
+    answer(api_error(404, "fake gh: no answer for " + what), 1)
+
+me = os.path.realpath(os.getcwd())
+roots = json.load(open(os.path.join(d, "roots.json")))
+if me not in roots:
+    unexpected("a call from " + me)
+r = roots[me]
+if a[:2] == ["run", "list"]:
+    answer("[]")
+if a[:1] != ["api"]:
+    unexpected(" ".join(a))
+try:
+    method, path, params, flags, jq = parse(a[1:])
+except Refused as e:
+    answer(e.text, e.code)
+m = re.match(r"^repos/(\{owner\}/\{repo\}|[^/{}]+/[^/{}]+)(?:/(.*))?$", path)
+rel = (m.group(2) or "") if m else None
+if rel is None:
+    unexpected(path)
+if method == "GET" and not rel:
+    answer(one({"default_branch": "main", "full_name": r["full_name"]}, jq))
+if method == "GET" and rel == "pulls":
+    answer(listing(r["pulls"], None, params, flags, jq, 100))
+if method == "GET" and rel == "issues/comments":
+    answer(listing(r["comments"], None, params, flags, jq, 100))
+c = re.fullmatch(r"commits/([0-9a-f]+)/(check-runs|status)", rel)
+if method == "GET" and c and c.group(2) == "check-runs":
+    rows = r["check_runs"].get(c.group(1), [])
+    answer(listing(rows, "check_runs", params, flags, jq, 100, {"total_count": len(rows)}))
+if method == "GET" and c:
+    answer(listing([], "statuses", params, flags, jq, 100, {"state": "pending", "sha": c.group(1), "total_count": 0}))
+if method == "GET" and re.fullmatch(r"branches/[^/]+/protection/required_status_checks", rel):
+    if r["contexts"] is None:
+        answer(api_error(404, "Branch not protected"), 1)
+    answer(one({"contexts": r["contexts"]}, jq))
+cmp = re.fullmatch(r"compare/([^/]+)\.\.\.([^/]+)", rel)
+if method == "GET" and cmp:
+    answer(one({"status": r["compares"].get(cmp.group(1) + "..." + cmp.group(2), "diverged")}, jq))
+unexpected(method + " " + rel)
+'''
+
+    def per_root_gh(self, roots):
+        """The fake gh on PATH, answering each call for the folder it runs in (PER_ROOT_GH). `roots` maps a checkout to root_state(...). The
+        test's own folder, self.co, which run_merge enters, is always one of them: o/self, with pull request 7."""
+        install_gh_shim(self)  # PATH, FAKE_GH_DIR and the GraphQL check; the shim it puts in bin is replaced here
+        put_shim(os.path.join(self.t, "bin", "gh"), self.PER_ROOT_GH)
+        roots = {self.co: self.root_state("o/self", pulls=[batch_pull(7, hex_head("7"))]), **roots}
+        with open(os.path.join(self.state, "roots.json"), "w") as f:
+            json.dump({os.path.realpath(k): v for k, v in roots.items()}, f)
+        self.addCleanup(self.assert_no_unexpected_route)
+
+    def assert_no_unexpected_route(self):
+        log = pathlib.Path(self.state, "unexpected.log")
+        if log.exists():
+            self.fail("the merge tool asked gh for a route no case answers: " + log.read_text())
+
+    def root_state(self, full_name, pulls=(), comments=(), check_rows=None, contexts=("checks",), compares=None):
+        """What gh answers for one repo's folder: its name, its open pulls, the repo's comments, the check runs by head, the required checks
+        of its base (None: no branch protection) and the compares, by "first...second"."""
+        return {"full_name": full_name, "pulls": list(pulls), "comments": list(comments), "check_runs": check_rows or {},
+                "contexts": None if contexts is None else list(contexts), "compares": compares or {}}
+
+    def base_hosts(self, status, busy=False):
+        """alpha: a done ready #5 at head 5, a done draft #6 at head 6, and with `busy`, a ready #8 with its CI running and no record. `status`
+        is the compare of head 5 with main, as holds_head reads it (head...main); its mirror, main...head 5, is the same fact. None: no compare."""
+        head5, head6, head8 = hex_head("5"), hex_head("6"), hex_head("8")
+        compares = {} if status is None else {(head5, "main"): status, ("main", head5): {"ahead": "behind", "behind": "ahead", "identical": "identical"}[status]}
+        pulls = [batch_pull(5, head5), batch_pull(6, head6, draft=True)]
+        rows = {head5: green(), head6: green()}
+        if busy:
+            pulls.append(batch_pull(8, head8))
+            rows[head8] = running()
+        comments = [record_of(5, head5), record_of(6, head6)]
+        return {self.alpha: root_host("o/alpha", pulls=pulls, comments=comments, check_rows=rows, compares=compares)}
+
+    def make_trunk_default(self, root, config=None):
+        """Make `trunk` the default branch of `root`: a trunk branch on its origin, with `config` as its stamp.json (CONFIG with defaultBranch
+        trunk when None), and the root's origin/HEAD on it. A test host still names main as its base, as every test host does."""
+        other = os.path.join(os.path.dirname(root), "other")
+        sh(other, "git", "fetch", "-q", "origin")
+        sh(other, "git", "checkout", "-q", "-B", "trunk", "origin/main")
+        put(os.path.join(other, ".github/stamp.json"), config if config is not None else json.dumps({**CONFIG, "defaultBranch": "trunk"}))
+        sh(other, "git", "commit", "-qam", "trunk config")
+        sh(other, "git", "push", "-q", "origin", "trunk")
+        sh(root, "git", "fetch", "-q", "origin")
+        sh(root, "git", "remote", "set-head", "origin", "trunk")
+
+    def held_hosts(self, compares, draft9):
+        """alpha: done lanes #5 and #6, both drafts with CI green, and integration #9 (a draft or ready, with no record) at head 9. `compares` is
+        the compare table: {(head 5, head 9): "ahead"} says #9 holds #5, as GitHub's compare of head 5 with head 9 reads."""
+        heads = {n: hex_head(str(n)) for n in (5, 6, 9)}
+        pulls = [batch_pull(5, heads[5], draft=True), batch_pull(6, heads[6], draft=True), batch_pull(9, heads[9], draft=draft9)]
+        comments = [record_of(5, heads[5]), record_of(6, heads[6])]
+        return {self.alpha: root_host("o/alpha", pulls=pulls, comments=comments, check_rows={h: green() for h in heads.values()}, compares=compares)}
+
+    def batch_numbers(self, lines):
+        """-> the pull request numbers named on the batch lines of `lines`, in the order printed."""
+        return [int(n) for line in batch_lines_of(lines) for n in re.findall(r"#(\d+)", line)]
+
+    def assert_done(self, block, *numbers):
+        """Each of `numbers` has one line in `block`, and it reads done. A red on a batch line then cannot come from a PR the record left not done."""
+        for n in numbers:
+            lines = pr_lines(block, n)
+            self.assertEqual(len(lines), 1, f"want one line for #{n}:\n" + "\n".join(block))
+            self.assertIn(" done: ", lines[0])
+
+    def assert_one_unknown_beside_a_full_block(self, out, failing, reason, other, failing_first):
+        """The printed lines are four. `failing`'s block is one line, `repo <failing as given>: unknown (...)`, at its place in the order given,
+        and `other`'s block is whole: its header, its one #5 line and its batch line. Nothing else prints. `reason` is a text the reason must
+        hold, or None for any reason that is not empty."""
+        lines = printed_review_lines(out)
+        self.assertEqual(len(lines), 4, "want one unknown line and one whole block, and nothing else:\n" + out)
+        unknown, block = (lines[0], lines[1:]) if failing_first else (lines[3], lines[:3])
+        m = re.fullmatch(rf"repo {re.escape(failing)}: unknown \((.+)\)", unknown)
+        self.assertTrue(m, f"the failing root's block is not `repo {failing}: unknown (...)`:\n" + out)
+        self.assertTrue(m.group(1).strip(), "the unknown line gives no reason:\n" + out)
+        if reason is not None:
+            self.assertIn(reason, m.group(1), "the unknown line does not give the reason:\n" + out)
+        self.assertEqual(block[0], f"repo {other}:", out)
+        self.assert_done(block, 5)
+        self.assertEqual(self.batch_numbers(block), [5], f"{other} lost its batch line:\n" + out)
+
+    def test_root_needs_reviewed(self):
+        # --root goes only with --reviewed: the parser refuses it anywhere else, and the usage error names the flag's refusal.
+        for argv in (("--root", self.alpha), ("7", "--root", self.alpha), ("--reviewed", "--root", self.alpha, "--confirm"),
+                     ("--reviewed", "--root", self.alpha, "7")):
+            with self.subTest(argv=argv):
+                self.assert_usage_error(*argv)
+
+    def test_root_repeats_under_reviewed(self):
+        hosts = {self.alpha: root_host("o/alpha"), self.bravo: root_host("o/bravo")}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
+        self.assertEqual(rc, 0, "two --root values under --reviewed:\n" + out + err)
+        self.assertEqual([name for name, _ in root_blocks(out)], ["o/alpha", "o/bravo"], out)
+
+    def test_each_root_is_a_block_headed_by_its_repo_in_the_order_given(self):
+        head5, head7 = hex_head("5"), hex_head("7")
+        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(7, head7)], comments=[record_of(7, head7, rounds=OPEN_ROUNDS)],
+                                       check_rows={head7: green()}),
+                 self.bravo: root_host("o/bravo", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.bravo, "--root", self.alpha, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual([name for name, _ in root_blocks(out)], ["o/bravo", "o/alpha"], "the headers are not in the order given:\n" + out)
+        blocks = by_repo(self, out, "o/alpha", "o/bravo")
+        self.assertTrue(pr_lines(blocks["o/bravo"], 5), out)
+        self.assertFalse(pr_lines(blocks["o/bravo"], 7), out)
+        self.assertTrue(pr_lines(blocks["o/alpha"], 7), out)
+        self.assertFalse(pr_lines(blocks["o/alpha"], 5), out)
+
+    def test_a_done_pr_opens_its_batch_while_another_repo_has_one_running(self):
+        # alpha has a ready integration pull request with its CI pending and no done pull request. bravo has one done pull request and nothing
+        # running. bravo's batch opens: the running CI in alpha does not hold it.
+        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(3, hex_head("3"))], check_rows={hex_head("3"): running()}),
+                 self.bravo: root_host("o/bravo", pulls=[batch_pull(5, hex_head("5"))], comments=[record_of(5, hex_head("5"))],
+                                       check_rows={hex_head("5"): green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        blocks = by_repo(self, out, "o/alpha", "o/bravo")
+        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #5"], out)
+        self.assertEqual(blocks["o/bravo"][-1], "open batch now: o/bravo #5", "the batch line comes after the repo's own lines:\n" + out)
+        self.assertEqual(batch_lines_of(blocks["o/alpha"]), [], "alpha has no done pull request, so it gets no batch line:\n" + out)
+
+    def test_a_repo_with_no_done_pr_prints_no_batch_line(self):
+        # the number 5 is done in alpha and open in bravo: each block names only its own done pull requests
+        head5, head8 = hex_head("5"), hex_head("8")
+        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()}),
+                 self.bravo: root_host("o/bravo", pulls=[batch_pull(5, head5), batch_pull(8, head8)],
+                                       comments=[record_of(5, head5, rounds=OPEN_ROUNDS), record_of(8, head8, rounds=OPEN_ROUNDS)],
+                                       check_rows={head8: green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        blocks = by_repo(self, out, "o/alpha", "o/bravo")
+        self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["open batch now: o/alpha #5"], out)
+        self.assertEqual(batch_lines_of(blocks["o/bravo"]), [], "bravo has no done pull request:\n" + out)
+
+    def test_a_busy_repo_builds_the_next_batch_and_an_idle_one_opens_its_own(self):
+        head5, head6, head9 = hex_head("5"), hex_head("6"), hex_head("9")
+        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6)], comments=[record_of(5, head5)],
+                                       check_rows={head5: green(), head6: running()}),
+                 self.bravo: root_host("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9)], check_rows={head9: green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        blocks = by_repo(self, out, "o/alpha", "o/bravo")
+        self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["build next batch on the running head: o/alpha #5"], out)
+        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #9"], out)
+
+    def test_done_prs_are_listed_in_ascending_order_and_held_or_open_ones_are_left_out(self):
+        pulls = [batch_pull(n, hex_head(c)) for n, c in ((9, "9"), (6, "6"), (5, "5"), (4, "4"))]  # out of order on purpose
+        comments = [record_of(9, hex_head("9")), record_of(6, hex_head("6"), rounds=OPEN_ROUNDS), record_of(5, hex_head("5")),
+                    record_of(4, hex_head("4"), net="negative")]
+        check_rows = {hex_head("9"): green(), hex_head("5"): green()}
+        hosts = {self.bravo: root_host("o/bravo", pulls=pulls, comments=comments, check_rows=check_rows)}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.bravo, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        blocks = by_repo(self, out, "o/bravo")
+        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #5 #9"], out)
+
+    def test_every_done_pr_of_a_full_repo_is_listed(self):
+        heads = {n: format(n, "x") * 40 for n in range(1, 13)}
+        pulls = [batch_pull(n, heads[n]) for n in reversed(range(1, 13))]
+        comments = [record_of(n, heads[n]) for n in range(1, 13)]
+        hosts = {self.bravo: root_host("o/bravo", pulls=pulls, comments=comments, check_rows={heads[n]: green() for n in range(1, 13)})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.bravo, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        blocks = by_repo(self, out, "o/bravo")
+        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo " + " ".join(f"#{n}" for n in range(1, 13))], out)
+
+    def test_a_repo_with_no_open_pull_requests_prints_its_empty_line_and_the_others_batch(self):
+        hosts = {self.alpha: root_host("o/alpha"), self.bravo: self.roots_with_done()[self.bravo]}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        blocks = by_repo(self, out, "o/alpha", "o/bravo")
+        self.assertEqual(blocks["o/alpha"], ["no open pull requests."], out)
+        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #5"], out)
+
+    def test_a_draft_with_running_ci_does_not_block_the_batch(self):
+        # a draft never counts as a running batch: only a ready pull request with CI pending holds the next one
+        head5, head6 = hex_head("5"), hex_head("6")
+        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6, draft=True)],
+                                       comments=[record_of(5, head5)], check_rows={head5: green(), head6: running()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        blocks = by_repo(self, out, "o/alpha")
+        self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["open batch now: o/alpha #5"], out)
+
+    def test_a_failed_read_in_one_root_prints_that_root_unknown_and_the_others_in_full(self):
+        argv = ("--reviewed", "--root", self.alpha, "--root", self.bravo)
+        rc, out, err = self.run_roots(*argv, hosts=self.roots_with_done())
+        self.assertEqual(rc, 0, "control, no read fails, so both blocks print:\n" + out + err)
+        self.assertEqual(sorted(name for name, _ in root_blocks(out)), ["o/alpha", "o/bravo"], out)
+        for side in ("alpha", "bravo"):
+            for read in ({"pulls_error": "reading pulls from GitHub failed"}, {"comments_error": "reading issue comments from GitHub failed"}):
+                with self.subTest(failing=side, read=read):
+                    other = "o/bravo" if side == "alpha" else "o/alpha"
+                    rc, out, err = self.run_roots(*argv, hosts=self.roots_with_done(**{side + "_read": read}))
+                    self.assertEqual(rc, 1, "a failed read exits 1:\n" + out + err)
+                    self.assert_one_unknown_beside_a_full_block(out, getattr(self, side), next(iter(read.values())), other, failing_first=side == "alpha")
+
+    def test_a_broken_config_in_one_root_is_unknown_and_the_others_print_in_full(self):
+        # load_config reads each root's own base. A broken config on bravo's base makes bravo one unknown line that names the config; alpha prints in full.
+        argv = ("--reviewed", "--root", self.alpha, "--root", self.bravo)
+        rc, out, err = self.run_roots(*argv, hosts=self.roots_with_done())
+        self.assertEqual(rc, 0, "control, before the break:\n" + out + err)
+        by_repo(self, out, "o/alpha", "o/bravo")
+        bravo_clones = os.path.dirname(self.bravo)  # the root's own folder holds its origin and its other clone
+        put_base_config(types.SimpleNamespace(co=self.bravo, other=os.path.join(bravo_clones, "other"), host=types.SimpleNamespace(branch="feat")),
+                        "{not json\n")
+        rc, out, err = self.run_roots(*argv, hosts=self.roots_with_done())
+        self.assertEqual(rc, 1, out + err)
+        self.assert_one_unknown_beside_a_full_block(out, self.bravo, ".github/stamp.json", "o/alpha", failing_first=False)
+
+    def test_no_root_never_prints_a_batch_line(self):
+        # the control: without --root the output keeps its lines, so a done pull request gets no batch line, with a batch running or not
+        for running_batch in (True, False):
+            with self.subTest(running=running_batch):
+                pulls, rows = [batch_pull(5, hex_head("5"))], {hex_head("5"): green()}
+                if running_batch:
+                    pulls.append(batch_pull(6, hex_head("6")))
+                    rows[hex_head("6")] = running()
+                host = root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5"))], check_rows=rows)
+                rc, out, err = self.run_args("--reviewed", host=host)
+                self.assertEqual(rc, 0, out + err)
+                self.assertRegex(list_line(self, out, 5), r" done: ")  # the done line is printed before the batch lines are judged
+                self.assertEqual(batch_lines_of(out.splitlines()), [], out)
+
+
+    def test_a_done_pr_held_by_an_open_pr_head_is_not_named(self):
+        # #9's head holds #5's head: the compare of head 5 with head 9 reads ahead or identical, as holds_head reads it. #5 is not named.
+        # #6 is held by nothing, so it is named.
+        for status in ("ahead", "identical"):
+            for draft9 in (True, False):
+                with self.subTest(status=status, draft=draft9):
+                    hosts = self.held_hosts({(hex_head("5"), hex_head("9")): status}, draft9)
+                    rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+                    self.assertEqual(rc, 0, out + err)
+                    block = by_repo(self, out, "o/alpha")["o/alpha"]
+                    self.assert_done(block, 5, 6)
+                    self.assertEqual(self.batch_numbers(block), [6], "a done pull request whose head an open pull request holds is named:\n" + out)
+
+    def test_a_done_draft_lane_no_open_pr_holds_is_named(self):
+        # The control for the held case: the same pull requests, with no compare that holds #5. Both done lanes are named.
+        for draft9 in (True, False):
+            with self.subTest(draft=draft9):
+                rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.held_hosts({}, draft9))
+                self.assertEqual(rc, 0, out + err)
+                block = by_repo(self, out, "o/alpha")["o/alpha"]
+                self.assert_done(block, 5, 6)
+                self.assertEqual(self.batch_numbers(block), [5, 6], out)
+
+    def test_a_done_pr_that_is_ready_with_ci_running_is_not_named(self):
+        # #5 is done and ready, with its CI running: it is not named. #6, a done draft with nothing running, is named.
+        pulls = [batch_pull(5, hex_head("5")), batch_pull(6, hex_head("6"), draft=True)]
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6"))],
+                                       check_rows={hex_head("5"): running(), hex_head("6"): green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        self.assert_done(block, 5, 6)
+        self.assertEqual(self.batch_numbers(block), [6], "a done pull request that is ready with CI running is named in the batch line:\n" + out)
+
+    def test_a_done_ready_pr_with_green_ci_is_named(self):
+        # The control for the running case: #5 ready with CI green is named, with #6.
+        pulls = [batch_pull(5, hex_head("5")), batch_pull(6, hex_head("6"), draft=True)]
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6"))],
+                                       check_rows={hex_head("5"): green(), hex_head("6"): green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        self.assert_done(block, 5, 6)
+        self.assertEqual(self.batch_numbers(block), [5, 6], out)
+
+    def test_a_done_pr_on_another_base_is_not_named(self):
+        # #5 is done on release, not the repo's default main: no batch line names it. #6, done on main, is named.
+        pulls = [batch_pull(5, hex_head("5"), base="release"), batch_pull(6, hex_head("6"), draft=True)]
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6"))],
+                                       check_rows={hex_head("5"): green(), hex_head("6"): green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        self.assert_done(block, 5, 6)
+        self.assertEqual(self.batch_numbers(block), [6], out)
+
+    def test_a_root_names_the_batch_of_its_own_default_branch(self):
+        # The root's default branch is trunk, and its one done pull request is on trunk. Its test host names main as its base, as every test
+        # host does. The batch line still names the PR, because the root's base is its own default branch.
+        self.make_trunk_default(self.alpha)
+        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, hex_head("5"), base="trunk")],
+                                       comments=[record_of(5, hex_head("5"))], check_rows={hex_head("5"): green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        self.assert_done(block, 5)
+        self.assertEqual(self.batch_numbers(block), [5], "the batch line does not name the PR on the root's default branch trunk:\n" + out)
+
+    def test_the_real_host_reads_the_config_of_its_default_branch(self):
+        # No host is given, so each root gets a real Host(cwd=root), and gh names trunk as the repo's default branch. The root's config must be
+        # read from origin/trunk: its notice names that branch.
+        self.gh_shim_for(self.alpha, default_branch="trunk")
+        self.make_trunk_default(self.alpha, config=json.dumps({"defaultBranch": "trunk", "merge": {"method": "merge"}}))
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=None)
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("repo o/r:", out.splitlines(), out)
+        self.assertIn("on origin/trunk", out, "the config was read from main, not from the root's default branch trunk:\n" + out + err)
+
+    def test_the_real_host_header_is_the_repo_full_name_gh_returns(self):
+        # The one real-host case with no default-branch change: no host is given, and the header is the full_name the gh shim answers (o/r),
+        # not the root's folder.
+        self.gh_shim_for(self.alpha)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=None)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(printed_review_lines(out), ["repo o/r:", "no open pull requests."], out)
+
+    def test_a_root_notice_never_prints_before_the_blocks(self):
+        # Each root's config read prints a notice (CONFIG leaves requiredChecks out). No notice may print before root 2's blocks are known: the
+        # probe reads stdout at root 2's first pulls read, when nothing may have printed yet.
+        argv = ("--reviewed", "--root", self.alpha, "--root", self.bravo)
+        hosts = self.roots_with_done()
+        seen, read = [], hosts[self.bravo].pages
+
+        def probe(rel, key=None, fields=None):
+            if rel == "pulls" and not seen:
+                seen.append(sys.stdout.getvalue())
+            return read(rel, key, fields)
+        hosts[self.bravo].pages = probe
+        rc, out, err = self.run_roots(*argv, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("leaves out", out, "the control: no notice printed, so the probe proves nothing:\n" + out)
+        self.assertEqual(seen, [""], "a notice printed before root 2's blocks were known:\n" + out)
+        notices = sorted(l for l in out.splitlines() if "leaves out" in l)
+        # root 2's read fails: the first line is still root 1's header, and no notice is dropped
+        rc, out, err = self.run_roots(*argv, hosts=self.roots_with_done(bravo_read={"pulls_error": "reading pulls from GitHub failed"}))
+        self.assertEqual(rc, 1, out + err)
+        first = out.splitlines()[:1]
+        self.assertTrue(first and first[0].startswith("repo "), "a stray line precedes the blocks:\n" + out + err)
+        self.assertEqual(sorted(l for l in (out + err).splitlines() if "leaves out" in l), notices, "a notice was dropped:\n" + out + err)
+
+    def test_a_missing_root_prints_unknown_beside_the_good_root_in_full(self):
+        # The folder is never created. Today the read of its default branch raises OSError out of merge, so no line prints. The case fails on that
+        # escape, named. In both orders the missing root is one `repo DIR: unknown (...)` line at its place, and the good root's block is whole.
+        missing = os.path.join(os.path.dirname(self.alpha), "missing")
+        self.per_root_gh({self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, hex_head("5"))],
+                                                      comments=[record_of(5, hex_head("5"))], check_rows={hex_head("5"): green()})})
+        for failing_first in (True, False):
+            order = (missing, self.alpha) if failing_first else (self.alpha, missing)
+            with self.subTest(failing_first=failing_first):
+                try:
+                    rc, out, err = self.run_roots("--reviewed", "--root", order[0], "--root", order[1], hosts=None)
+                except OSError as e:
+                    self.fail(f"a --root folder that does not exist escapes merge as {type(e).__name__} ({e}), not as `repo {missing}: unknown (...)`")
+                self.assertEqual(rc, 1, out + err)
+                self.assertNotIn("Traceback", err)
+                self.assert_one_unknown_beside_a_full_block(out, missing, None, "o/alpha", failing_first=failing_first)
+        self.assertFalse(os.path.exists(missing), "the case must not create the folder it names")
+
+    def test_each_real_host_block_holds_its_own_roots_repo_and_pulls(self):
+        # No host is given, so each root gets a real Host(cwd=root), and gh answers for the folder each call runs in. alpha and bravo each name their
+        # own repo and hold their own pull request. The folder the test runs in (o/self, #7) reaches neither block: a Host built from the process
+        # cwd would read it.
+        head5, head9 = hex_head("5"), hex_head("9")
+        self.per_root_gh({
+            self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()}),
+            self.bravo: self.root_state("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9)], check_rows={head9: green()}),
+        })
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=None)
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("o/self", out, "a root's Host read the folder the test runs in, not its own root:\n" + out)
+        self.assertEqual([name for name, _ in root_blocks(out)], ["o/alpha", "o/bravo"], out)
+        blocks = by_repo(self, out, "o/alpha", "o/bravo")
+        self.assert_done(blocks["o/alpha"], 5)
+        self.assertEqual(pr_lines(blocks["o/alpha"], 9), [], "alpha's block holds bravo's pull request:\n" + out)
+        self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["open batch now: o/alpha #5"], out)
+        self.assert_done(blocks["o/bravo"], 9)
+        self.assertEqual(pr_lines(blocks["o/bravo"], 5), [], "bravo's block holds alpha's pull request:\n" + out)
+        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #9"], out)
+
+    def test_a_done_pr_whose_head_the_base_holds_is_named_in_neither_batch_line(self):
+        # holds_head reads head...main: ahead or identical says main holds head 5, so #5 is already in the base, and no batch line names it. #6, a
+        # done draft that no compare holds, is still named. Both batch lines are covered: the open one, and the one built on a running head.
+        for status in ("ahead", "identical"):
+            for busy in (False, True):
+                with self.subTest(status=status, busy=busy):
+                    rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.base_hosts(status, busy))
+                    self.assertEqual(rc, 0, out + err)
+                    block = by_repo(self, out, "o/alpha")["o/alpha"]
+                    self.assert_done(block, 5, 6)
+                    want = "build next batch on the running head: o/alpha #6" if busy else "open batch now: o/alpha #6"
+                    self.assertEqual(batch_lines_of(block), [want], "a done pull request whose head the base holds is named in a batch line:\n" + out)
+
+    def test_a_done_pr_whose_head_the_base_does_not_hold_is_named(self):
+        # The control. No compare says main holds head 5, or the compare reads "behind" on head...main, which says head 5 is ahead of main: neither
+        # holds head 5, so #5 and #6 are both named, in either batch line.
+        for status in (None, "behind"):
+            for busy in (False, True):
+                with self.subTest(status=status, busy=busy):
+                    rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.base_hosts(status, busy))
+                    self.assertEqual(rc, 0, out + err)
+                    block = by_repo(self, out, "o/alpha")["o/alpha"]
+                    self.assert_done(block, 5, 6)
+                    want = "build next batch on the running head: o/alpha #5 #6" if busy else "open batch now: o/alpha #5 #6"
+                    self.assertEqual(batch_lines_of(block), [want], out)
+
+    def test_a_stop_reading_ci_for_the_batch_line_keeps_the_roots_built_lines(self):
+        # alpha's base has no branch protection, so its required checks cannot be named. The stop comes from the batch line's CI read (ready_busy):
+        # alpha keeps its lines, and its batch line says why in place of the batch line. The root is not unknown as a whole, and bravo prints in full.
+        head5, head9 = hex_head("5"), hex_head("9")
+        self.per_root_gh({
+            self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()},
+                                        contexts=None),
+            self.bravo: self.root_state("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9)], check_rows={head9: green()}),
+        })
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=None)
+        self.assertEqual(rc, 1, out + err)
+        self.assertNotIn(f"repo {self.alpha}: unknown", out, "the root went unknown as a whole, so its built lines are lost:\n" + out)
+        lines = out.splitlines()
+        self.assertIn("repo o/alpha:", lines, out)
+        self.assertIn("repo o/bravo:", lines, out)
+        i, j = lines.index("repo o/alpha:"), lines.index("repo o/bravo:")
+        unknown = [k for k, line in enumerate(lines) if line.startswith("batch line unknown (")]
+        self.assertEqual(len(unknown), 1, "want one batch line unknown, in alpha's block:\n" + out)
+        self.assertTrue(i < unknown[0] < j, "the batch line unknown is not in alpha's block:\n" + out)
+        m = re.fullmatch(r"batch line unknown \((.+)\)", lines[unknown[0]])
+        self.assertTrue(m, "the batch line unknown is not `batch line unknown (...)`:\n" + out)
+        self.assertIn("no branch protection", m.group(1), "the batch line unknown does not give the stop's reason:\n" + out)
+        alpha = lines[i:j]
+        self.assert_done(alpha, 5)
+        self.assertEqual(batch_lines_of(alpha), [], "alpha names a batch line as well as unknown:\n" + out)
+        self.assertEqual(batch_lines_of(lines[j:]), ["open batch now: o/bravo #9"], out)
+
+
+# The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
+# cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
+# report names each line the model judges stale or unbacked. A model error or timeout reads UNKNOWN. Nothing it says
+# refuses a merge. The named cap constant is merge.PROSE_JUDGE_MAX_CALLS; a case patches it to PROSE_CAP.
+PROSE = "docs/notes/cloud.md"  # governed prose outside the decision folder, so only a read of every file at head finds it
+CITE_DOC = "# Cloud notes\n\nCloud sessions cannot push to main (read src/widget.py:4).\n"  # the cite is on line 3
+PLAIN_DOC = "# Plain notes\n\nA note with no cite.\n"
+BACKING = "src/widget.py"
+BACKING_TEXT = "a = 1\nb = 2\nc = 3\nd = 4\n"
+CAP_NAME = "PROSE_JUDGE_MAX_CALLS"
+PROSE_CAP = 2
+
+
+class JudgeStub:
+    """Stands in for decision_watch.invoke_model. `answer(prompt)` gives (verdict, error), or raises. Each call's prompt is
+    kept, so a case reads what the judge sent as well as what it got back."""
+    def __init__(self, answer):
+        self.answer, self.prompts = answer, []
+
+    def __call__(self, prompt, *args, **kwargs):
+        self.prompts.append(prompt)
+        return self.answer(prompt)
+
+
+def verdict_for(line, verdict, why="the cited file says otherwise"):
+    """An answer that judges one line of the prose file, in the JSON shape the judge asks for."""
+    return lambda prompt: ({"verdicts": [{"line": line, "verdict": verdict, "why": why}]}, None)
+
+
+def raises(exc):
+    def answer(prompt):
+        raise exc
+    return answer
+
+
+def replies_with(stdout, returncode=0, stderr=""):
+    """A `claude` start that exits with `returncode` and the given output, as the subprocess result invoke_model reads."""
+    def answer(args):
+        return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+    return answer
+
+
+def judge_lines(out, path, word):
+    """The output lines that name `path` and carry `word`. A case pins a verdict on the line that names the file."""
+    return [line for line in out.splitlines() if path in line and word in line]
+
+
+UNKNOWN_CAUSES = ("timed out", "model error", "no readable verdict", "past the call cap", "skipped by the reply")  # the fixed buckets, in the order a count line lists them
+
+
+def prose_unknown_lines(out):
+    """The merge's prose-judge UNKNOWN lines. Other steps of a merge print UNKNOWN too, so a case reads only these."""
+    return [line for line in out.splitlines() if "prose judge" in line and "UNKNOWN" in line]
+
+
+def per_file(answers):
+    """An answer routed by the file the prompt judges: `answers` maps a path to a function of the prompt. A prompt for a path that is not
+    in `answers` reads as a model error."""
+    def answer(prompt):
+        for path, reply in answers.items():
+            if "File: %s\n" % path in prompt:
+                return reply(prompt)
+        return None, "the test has no answer for this file"
+    return answer
+
+
+def stale_every_line(prompt):
+    """An answer that calls every line the prompt numbers `stale`, read from its `Line N:` rows."""
+    numbers = [int(n) for n in re.findall(r"^Line (\d+): ", prompt, re.M)]
+    return {"verdicts": [{"line": n, "verdict": "stale", "why": "the cited file says otherwise"} for n in numbers]}, None
+
+
+def timed_out(prompt):
+    return None, "model subprocess timed out"
+
+
+def cited_lines(n):
+    """A Markdown file of a heading and `n` lines that each cite src/widget.py:4, so every line is selected and judged."""
+    return "# Cloud notes\n\n" + "Cloud sessions cannot push to main (read src/widget.py:4).\n" * n
+
+
+REAL_INVOKE_MODEL = decision_watch.invoke_model  # captured at import, before the test base swaps in its stub
+REAL_RUN = decision_watch._nowindow.run  # captured at import, before the test base wraps it
+
+
+def base_model_stub(prompt, *args, **kwargs):
+    """decision_watch.invoke_model for every test, unless the test opts back in to REAL_INVOKE_MODEL: no subprocess, and the merge
+    reads the call as UNKNOWN."""
+    return None, "stubbed by the test base"
+
+
+class ModelStarted(BaseException):
+    """Raised when a test would start `claude -p`. A BaseException, so the judge's `except Exception` cannot turn it into UNKNOWN."""
+
+
+def guarded_run(args, **kwargs):
+    """decision_watch._nowindow.run with `claude` refused: a test that tries it fails with ModelStarted."""
+    if args and os.path.splitext(os.path.basename(str(args[0])))[0] == "claude":
+        raise ModelStarted("a test started `claude -p`: patch decision_watch.invoke_model, or opt in to REAL_INVOKE_MODEL")
+    return REAL_RUN(args, **kwargs)
+
+
+def install_model_guard():
+    """The test base: every test in this file gets base_model_stub and guarded_run, whatever its base class. setUpModule calls it, and so
+    do the two child-process branches under __main__, which run merge.main with no unittest run."""
+    unittest.mock.patch.object(decision_watch, "invoke_model", base_model_stub).start()
+    unittest.mock.patch.object(decision_watch._nowindow, "run", guarded_run).start()
+    unittest.addModuleCleanup(unittest.mock.patch.stopall)
+
+
+def setUpModule():
+    install_model_guard()
+
+
+class ProseJudge(Env):
+    def setup_range(self, main_files, feat_files, links=None, later=None, renames=None):
+        """main gains `main_files` ({path: text}), so their lines are in no added line. Then feat removes the pending record
+        (second.md, governed prose with no cite) and changes `feat_files`, and makes each `links` ({path: target}) a symlink to
+        target. Feat then takes main's base, and `later` ({path: text}) is one more feat commit after that: the lines it adds to
+        a prose file are selected through the diff base, and a cited line through the backing file it cites. `renames` ({old: new})
+        is one more feat commit after the base too: a git mv of each old path to its new one."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        for path, text in main_files.items():
+            put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "prose on main"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "rm", "-q", "docs/decisions/second.md")
+        for path, text in feat_files.items():
+            put(os.path.join(o, path), text)
+        for path, target in (links or {}).items():
+            os.makedirs(os.path.dirname(os.path.join(o, path)), exist_ok=True)
+            os.symlink(target, os.path.join(o, path))
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: drop the pending record, change the backing")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        head_takes_base(self)
+        if later or renames:  # after the base is taken: a prose file that main and feat both add would conflict in head_takes_base's merge
+            sh(o, "git", "fetch", "-q", "origin")
+            sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+            for old, new in (renames or {}).items():
+                sh(o, "git", "mv", old, new)  # the new path keeps the old text, so git reads a pure rename
+            for path, text in (later or {}).items():
+                put(os.path.join(o, path), text)
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: move the prose file" if renames and not later else "feat: add lines to the prose")
+            sh(o, "git", "push", "-q", "origin", "feat")
+
+    def run_capped(self, cap=PROSE_CAP):
+        """The merge with the cap at `cap`, or at the default PROSE_JUDGE_MAX_CALLS when `cap` is None. -> (rc, out)."""
+        if cap is None:
+            return self.run_merge("7", "--confirm")
+        with unittest.mock.patch.object(merge, CAP_NAME, cap):  # no create=True: a renamed constant fails here, not passes
+            return self.run_merge("7", "--confirm")
+
+    def judge(self, answer, cap=PROSE_CAP):
+        """The merge with `answer` in place of invoke_model, at `cap` model calls (None: the default). -> (stub, rc, out)."""
+        stub = JudgeStub(answer)
+        with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            rc, out = self.run_capped(cap)
+        return stub, rc, out
+
+    def assert_unknown_count(self, out, k, causes):
+        """The merge's one prose-judge UNKNOWN line. It opens `merge: #7 prose judge UNKNOWN:`, reads K lines not judged, and lists
+        (count, cause) pairs in the fixed bucket order, with a zero bucket left out. The wording between those parts is not pinned."""
+        lines = prose_unknown_lines(out)
+        self.assertEqual(len(lines), 1, "prose-judge UNKNOWN lines: %d, want 1: one count line per merge\n%s" % (len(lines), out))
+        line = lines[0]
+        self.assertTrue(line.startswith("merge: #7 prose judge UNKNOWN:"), "the UNKNOWN line does not open the count line: %r" % line)
+        found_k = re.search(r"(\d+) lines not judged", line)
+        self.assertIsNotNone(found_k, "the UNKNOWN line has no `<K> lines not judged`: %r" % line)
+        self.assertEqual(int(found_k.group(1)), k, "lines not judged: %s, want %d: %r" % (found_k.group(1), k, line))
+        found = [(int(n), cause) for n, cause in re.findall(r"(\d+) (%s)\b" % "|".join(UNKNOWN_CAUSES), line)]
+        self.assertEqual(found, causes, "causes in the UNKNOWN line: %r, want %r: %r" % (found, causes, line))
+
+    def real_judge(self, reply=None, claude=None, isolation=None):
+        """The merge through the real invoke_model and its parse. Each `claude` start is answered in this process: by `claude(args)` when
+        given, a function that returns a result or raises, else by an envelope whose result text is `reply`. `isolation`, when given,
+        stands in for _judge_isolation: a function of no arguments that returns (cwd, env) or raises. Every other program goes to the
+        real runner, so git still runs. Call after setup_range. -> (claude starts, rc, out)."""
+        answer = claude or replies_with(json.dumps({"result": reply}))
+        real_run, claude_calls = decision_watch._nowindow.run, []
+
+        def run(args, **kwargs):
+            if args and args[0] == "claude":
+                claude_calls.append(args)
+                return answer(args)
+            return real_run(args, **kwargs)
+
+        scratch = tempfile.mkdtemp(dir=self.t)  # the real invoke_model removes its own scratch folder; this one is inside the case's folder
+        with unittest.mock.patch.object(decision_watch, "invoke_model", REAL_INVOKE_MODEL), \
+                unittest.mock.patch.object(decision_watch, "_judge_isolation", isolation or (lambda: (scratch, {}))), \
+                unittest.mock.patch.object(decision_watch._nowindow, "run", run):
+            rc, out = self.run_capped()
+        return claude_calls, rc, out
+
+    def merge_interrupted(self, where, exc):
+        """The merge with afterMerge set, and `exc` raised where `where` names: "model" is the model call, "plan" is the judge's plan
+        read under the merge lock. -> (times the raise was reached, origin main before the merge, output)."""
+        cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=["echo ran > after.txt"]))
+        put_base_config(self, json.dumps(cfg))
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        reached = []
+
+        def interrupt(*args, **kwargs):
+            reached.append(args)
+            raise exc
+        owner, name = (decision_watch, "invoke_model") if where == "model" else (merge, "prose_judge_lines")
+        before, out, err = self.head("main"), io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(owner, name, interrupt):
+            try:
+                self.run_merge("7", "--confirm", stdout=out, stderr=err)
+            except (SystemExit, KeyboardInterrupt):  # the interrupt left merge.main: the case reads the state it left behind
+                pass
+        return len(reached), before, out.getvalue() + err.getvalue()
+
+    def assert_interrupt_leaves_merge_whole(self, where, exc):
+        reached, before, out = self.merge_interrupted(where, exc)
+        self.assertEqual(reached, 1, "the %s interrupt was reached %d times, want 1: the case did not hit its seam\n%s" % (where, reached, out))
+        self.assertNotEqual(self.head("main"), before, "origin main did not move: the merge did not land before the interrupt\n" + out)
+        self.assertEqual(sh(self.co, "git", "rev-parse", "main"), self.head("main"),
+                         "local main did not move to the merge commit: the interrupt came before ff_main\n" + out)
+        self.assertTrue(os.path.exists(os.path.join(self.co, "after.txt")), "afterMerge did not run: the interrupt came before it\n" + out)
+        self.assertNotIn("refs/heads/feat", self.refs(), "origin feat is still there: the interrupt came before cut_branch\n" + out)
+        self.assertFalse(self.lock_ref(), "the merge lock is still held after the interrupt\n" + out)
+
+    def test_a_changed_backing_file_selects_the_line_that_cites_it(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: one prose file cites the changed %s" % (len(stub.prompts), BACKING))
+        self.assertIn(PROSE, stub.prompts[0], "the call does not name %s" % PROSE)
+        self.assertIn("cannot push to main", stub.prompts[0], "the call does not carry the cited line")
+        self.assertIn("read %s:4" % BACKING, stub.prompts[0], "the call does not carry what the line cites")
+
+    def test_one_model_call_per_selected_file(self):
+        names = ("docs/notes/a.md", "docs/notes/b.md")
+        plain = "docs/notes/plain.md"  # no cite: never selected
+        self.setup_range({names[0]: CITE_DOC, names[1]: CITE_DOC, plain: PLAIN_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two prose files are selected" % len(stub.prompts))
+        sent = {p for p in names + (plain,) if any(p in prompt for prompt in stub.prompts)}
+        self.assertEqual(sent, set(names), "the calls name %s, want the two selected files only" % sorted(sent))
+
+    def test_past_the_cap_the_rest_read_unknown(self):
+        names = ("docs/notes/a.md", "docs/notes/b.md", "docs/notes/c.md")
+        self.setup_range({p: CITE_DOC for p in names}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), PROSE_CAP, "model calls: %d for 3 selected files, want the cap %d" % (len(stub.prompts), PROSE_CAP))
+        sent = {p for p in names if any(p in prompt for prompt in stub.prompts)}
+        unjudged = set(names) - sent
+        self.assertEqual(len(unjudged), 1, "files not sent: %s, want one past the cap" % sorted(unjudged))
+        self.assert_unknown_count(out, 1, [(1, "past the call cap")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_stale_verdict_names_the_file_and_line(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "stale"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertTrue(judge_lines(out, "%s:3" % PROSE, "stale"), "the report names no stale line at %s:3" % PROSE)
+
+    def test_an_unbacked_verdict_names_the_file_and_line(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "unbacked"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertTrue(judge_lines(out, "%s:3" % PROSE, "unbacked"), "the report names no unbacked line at %s:3" % PROSE)
+
+    def test_a_holds_verdict_is_not_named(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertFalse([line for line in out.splitlines() if "%s:3" % PROSE in line], "the report names %s:3, which the model held" % PROSE)
+        self.assertEqual(prose_unknown_lines(out), [], "a held line added an UNKNOWN line: the merge has no unjudged line")
+
+    def test_a_stale_verdict_never_refuses_the_merge(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "stale"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the merge did not land after a stale verdict")
+
+    def test_a_raised_error_reads_unknown(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(raises(RuntimeError("model host unreachable")))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertNotIn("model host unreachable", out, "the report prints the raised error's text, not a cause\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+
+    def test_a_raised_error_never_refuses_the_merge(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(raises(RuntimeError("model host unreachable")))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the merge did not land after the call raised")
+
+    def test_a_timeout_reads_unknown_and_never_refuses(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(timed_out)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_unknown_count(out, 1, [(1, "timed out")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_stale_verdict_travels_through_the_real_invoke_model(self):
+        # The stub above stops at invoke_model. This case runs the real invoke_model and its parse: `claude` is answered in
+        # this process, and every other program goes to the real runner, so git still runs. The child-process seams in
+        # hooks/test_reply_judge.py and hooks/test_call_judge.py cannot reach the merge's own process.
+        reply = json.dumps({"verdicts": [{"line": 3, "verdict": "stale", "why": "the cited file says otherwise"}]})
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(reply)
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assertTrue(judge_lines(out, "%s:3" % PROSE, "stale"), "the report names no stale line at %s:3 through the real parse" % PROSE)
+
+    def test_a_reply_in_the_wrong_shape_reads_every_selected_line_unknown(self):
+        # The reply carries `findings` and `ok`, not `verdicts`. The real parse must refuse it, or its stale line reads through.
+        reply = json.dumps({"ok": True, "findings": [{"line": 3, "verdict": "stale", "why": "x"}]})
+        self.setup_range({PROSE: TWO_CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(reply)
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        # The real parse refuses this shape and returns a "model result" error, which reads as no readable verdict.
+        self.assertNotIn("was not a list", out, "the report prints the parse's error text, not a cause\n" + out)
+        self.assert_unknown_count(out, 2, [(2, "no readable verdict")])
+        self.assertFalse([line for line in out.splitlines() if "prose judge" in line and PROSE in line and "UNKNOWN" not in line],
+                         "a non-UNKNOWN prose judge line names %s, so the wrong-shape reply was read as a verdict\n%s" % (PROSE, out))
+        self.assertEqual(rc, 0, out)
+
+    # Each case below is one error that decision_watch.invoke_model returns or raises, read through its real parse and the merge's bucket.
+    def test_a_non_json_reply_from_claude_reads_no_readable_verdict(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(claude=replies_with("not json at all"))
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assert_unknown_count(out, 1, [(1, "no readable verdict")])
+        self.assertEqual(rc, 0, out)
+
+    def test_an_envelope_with_no_result_text_reads_no_readable_verdict(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(claude=replies_with(json.dumps({"type": "result", "subtype": "success"})))
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assert_unknown_count(out, 1, [(1, "no readable verdict")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_result_text_with_no_json_reads_no_readable_verdict(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge("I cannot give a verdict on this line.")
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assert_unknown_count(out, 1, [(1, "no readable verdict")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_non_zero_claude_exit_reads_model_error(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(claude=replies_with("", returncode=1, stderr="claude: upstream exploded"))
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assertNotIn("upstream exploded", out, "the report prints claude's stderr, not a cause\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_claude_start_that_raises_reads_model_error(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(claude=raises(OSError("no such file: claude")))
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assertNotIn("no such file", out, "the report prints the start error's text, not a cause\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_an_unreadable_token_file_reads_model_error(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        isolated = []
+
+        def unreadable():
+            isolated.append(1)
+            raise decision_watch.TokenUnreadable()
+        claude_calls, rc, out = self.real_judge(isolation=unreadable)
+        self.assertEqual(len(isolated), 1, "isolation reads: %d, want 1: the real invoke_model did not reach the token read" % len(isolated))
+        self.assertEqual(claude_calls, [], "claude starts: %d, want 0: no model runs when the token cannot be read" % len(claude_calls))
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_claude_timeout_reads_timed_out(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(claude=raises(subprocess.TimeoutExpired(["claude"], 1)))
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assert_unknown_count(out, 1, [(1, "timed out")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_system_exit_from_the_model_leaves_the_merge_whole(self):
+        self.assert_interrupt_leaves_merge_whole("model", SystemExit(3))
+
+    def test_a_keyboard_interrupt_from_the_model_leaves_the_merge_whole(self):
+        self.assert_interrupt_leaves_merge_whole("model", KeyboardInterrupt())
+
+    def test_a_system_exit_in_the_plan_leaves_the_merge_whole(self):
+        self.assert_interrupt_leaves_merge_whole("plan", SystemExit(3))
+
+    def test_a_keyboard_interrupt_in_the_plan_leaves_the_merge_whole(self):
+        self.assert_interrupt_leaves_merge_whole("plan", KeyboardInterrupt())
+
+    def test_the_default_model_stub_is_in_place_in_every_test(self):
+        # Without the test base, decision_watch.invoke_model is the real function, and a merge reaching it would start `claude -p`.
+        # The first two asserts read identity only, so a red run starts no program.
+        self.assertIs(decision_watch.invoke_model, base_model_stub,
+                      "decision_watch.invoke_model is not the test base's stub, so a merge could start claude -p")
+        self.assertIs(decision_watch._nowindow.run, guarded_run, "decision_watch._nowindow.run is not the claude guard")
+        self.assertEqual(decision_watch.invoke_model("probe"), (None, "stubbed by the test base"), "the test base's stub does not read UNKNOWN")
+
+    def test_the_guard_refuses_a_claude_start_and_runs_other_programs(self):
+        # Scope first: a program that is not claude runs through the guard. Then the refusal: a claude start never reaches
+        # the runner. REAL_RUN is a recorder for that half, so a red run (refusal removed) starts no program.
+        ran = decision_watch._nowindow.run([sys.executable, "-c", "print('ran')"], capture_output=True, text=True)
+        self.assertEqual((ran.returncode, ran.stdout.strip()), (0, "ran"), "a program that is not claude did not run through the guard")
+        started = []
+
+        def recorder(args, **kwargs):
+            started.append(list(args))
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        with unittest.mock.patch.object(sys.modules[__name__], "REAL_RUN", recorder):
+            with self.assertRaises(ModelStarted):
+                decision_watch._nowindow.run(["claude", "-p"])
+        self.assertEqual(started, [], "the refused claude start still reached the runner")
+
+    def test_a_renamed_prose_file_has_its_lines_judged_as_added(self):
+        # --no-renames in prose_judge_lines: the moved file's lines read as added, so each is judged. Under rename detection a pure
+        # rename adds no line, and its lines go unjudged. Scope first: the range is one pure rename of the prose file.
+        moved = "docs/notes/moved.md"
+        self.setup_range({PROSE: "# Cloud notes\n\nThe cloud runner is idle on weekends.\n"}, {}, renames={PROSE: moved})
+        base = sh(self.other, "git", "merge-base", "origin/main", "origin/feat")
+        scope = sh(self.other, "git", "diff", "--name-status", "-M", base, "origin/feat")
+        self.assertIn("R100\t%s\t%s" % (PROSE, moved), scope, "the range is not a pure rename of %s, so the case proves nothing:\n%s" % (PROSE, scope))
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the moved %s adds its line, so the line is judged\n%s" % (len(stub.prompts), moved, out))
+        self.assertIn("idle on weekends", stub.prompts[0], "the call does not carry the moved file's line")
+
+    def test_no_backed_line_and_no_added_prose_makes_no_model_call(self):
+        # The range changes code only, and the prose on main cites a file the range does not change.
+        self.setup_range({PROSE: "# Cloud notes\n\nCloud sessions cannot push to main (read src/other.py:4).\n"}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "stale"))
+        self.assertEqual(stub.prompts, [], "model calls: %d, want 0: no line cites a changed file" % len(stub.prompts))
+        self.assertEqual(rc, 0, out)
+        self.assertFalse(judge_lines(out, PROSE, "stale"), "the report names %s with no call made" % PROSE)
+        self.assertEqual(prose_unknown_lines(out), [], "the merge made no call, yet printed an UNKNOWN line")
+
+    def test_a_line_the_range_adds_to_governed_prose_is_judged_with_no_backing_change(self):
+        # No backing file changes and the line has no cite, so only the diff base can select it: main holds the old line,
+        # and feat adds line 5. The old line on main is in no added line, so the call must not carry it.
+        old = "# Cloud notes\n\nAn old line on main.\n"
+        self.setup_range({PROSE: old}, {}, later={PROSE: old + "\nCloud sessions run in a container.\n"})
+        stub, rc, out = self.judge(verdict_for(5, "unbacked", "no cited file backs the line"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the range adds one prose line with no cite" % len(stub.prompts))
+        self.assertIn("File: %s" % PROSE, stub.prompts[0], "the call does not name %s" % PROSE)
+        self.assertIn("Line 5: Cloud sessions run in a container.", stub.prompts[0], "the call does not carry the line the range adds, at line 5")
+        self.assertNotIn("An old line on main", stub.prompts[0], "the call carries a line that main holds, not one the range adds")
+        self.assertTrue(judge_lines(out, "%s:5" % PROSE, "unbacked"), "the report names no unbacked line at %s:5" % PROSE)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_unreadable_base_reads_unknown_and_never_holds_the_merge(self):
+        # The base's rev-parse fails in confirm, and only that call fails: the merge's other git reads run. The report names the
+        # unreadable base, and the merge still lands with rc 0.
+        old = "# Cloud notes\n\nAn old line on main.\n"
+        self.setup_range({PROSE: old}, {}, later={PROSE: old + "\nCloud sessions run in a container.\n"})
+        real_git, reached = merge.git, []
+
+        def base_unreadable(cwd, *a, **kw):
+            if sys._getframe(1).f_code.co_name == "confirm" and a == ("rev-parse", "--verify", "-q", "origin/main^{commit}"):
+                reached.append(a)
+                return 1, ""
+            return real_git(cwd, *a, **kw)
+        with unittest.mock.patch.object(merge, "git", base_unreadable):
+            rc, out = self.run_capped()
+        self.assertEqual(len(reached), 1, "the base's rev-parse was reached %d times, want 1: the case did not hit its seam" % len(reached))
+        self.assertIn("prose judge UNKNOWN: the base could not be read", out, "the report names no unreadable base\n" + out)
+        self.assertEqual(prose_unknown_lines(out), ["merge: #7 prose judge UNKNOWN: the base could not be read, so no line was judged."],
+                         "a plan-level failure is the only UNKNOWN line, so no other UNKNOWN line may print beside it\n" + out)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the merge did not land after the base could not be read")
+
+    def test_a_base_read_that_times_out_still_lands_the_merge(self):
+        # The base read in confirm raises TimeoutExpired, and only that read: the merge's other steps run. The try around the read
+        # holds the merge: ff_main, afterMerge and the branch cut all run, the report names the unreadable base, and rc is 0.
+        cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=["echo ran > after.txt"]))
+        put_base_config(self, json.dumps(cfg))
+        old = "# Cloud notes\n\nAn old line on main.\n"
+        self.setup_range({PROSE: old}, {}, later={PROSE: old + "\nCloud sessions run in a container.\n"})
+        before = self.head("main")
+        real_git, reached = merge.git, []
+
+        def base_times_out(cwd, *a, **kw):
+            if sys._getframe(1).f_code.co_name == "confirm" and a == ("rev-parse", "--verify", "-q", "origin/main^{commit}"):
+                reached.append(a)
+                raise subprocess.TimeoutExpired(cmd=list(a), timeout=1)
+            return real_git(cwd, *a, **kw)
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(merge, "git", base_times_out), unittest.mock.patch.object(merge, CAP_NAME, PROSE_CAP):
+            try:
+                rc, _ = self.run_merge("7", "--confirm", stdout=out, stderr=err)
+            except subprocess.TimeoutExpired:  # a read that escapes confirm: the asserts below read the state it left
+                rc = None
+        text = out.getvalue() + err.getvalue()
+        self.assertEqual(len(reached), 1, "the base read was reached %d times, want 1: the case did not hit its seam\n%s" % (len(reached), text))
+        self.assertNotEqual(self.head("main"), before, "origin main did not move: the merge did not land after the base read timed out\n" + text)
+        self.assertEqual(sh(self.co, "git", "rev-parse", "main"), self.head("main"), "local main did not move to the merge commit: ff_main did not run\n" + text)
+        self.assertTrue(os.path.exists(os.path.join(self.co, "after.txt")), "afterMerge did not run after the base read timed out\n" + text)
+        self.assertNotIn("refs/heads/feat", self.refs(), "origin feat is still there: the branch was not cut after the base read timed out\n" + text)
+        self.assertIn("prose judge UNKNOWN: the base could not be read", text, "the report names no unreadable base\n" + text)
+        self.assertEqual(rc, 0, text)
+
+    def test_the_model_call_runs_after_the_merge_lock_is_released(self):
+        # confirm holds the lock from acquire until the release in its finally. A model call waits up to MODEL_TIMEOUT, so it
+        # must come after that release. Building the prompt under the lock is allowed.
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        events = []
+        lock = OrderLock(self.co, now=lambda: self.now, pause=lambda s: None)
+        lock.events = events
+        answer = verdict_for(3, "holds")
+
+        def timed(prompt):
+            events.append("invoke")
+            return answer(prompt)
+        with unittest.mock.patch.object(decision_watch, "invoke_model", JudgeStub(timed)):
+            rc, out = self.run_merge("7", "--confirm", lock=lock)
+        self.assertIn("invoke", events, "the model was never called, so the order is unknown: events %s" % events)
+        self.assertIn("release", events[:events.index("invoke")], "the model call ran with the merge lock held: events %s" % events)
+
+    def test_a_timeout_on_a_long_doc_collapses_to_one_count_line(self):
+        # 400 timed-out lines are one UNKNOWN count line. UNKNOWNs take no finding slot, so no count of lines past a cap prints.
+        self.setup_range({PROSE: cited_lines(400)}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(timed_out)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_unknown_count(out, 400, [(400, "timed out")])
+        self.assertNotIn("more lines not shown", out, "a count of lines past a cap, but UNKNOWNs never take the finding cap\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_the_line_cap_is_the_named_constant_twenty(self):
+        self.assertEqual(getattr(merge, "PROSE_JUDGE_MAX_LINES", None), 20, "merge.PROSE_JUDGE_MAX_LINES is not the named cap of 20 judge lines")
+
+    def test_a_21_line_timeout_collapses_to_one_count_line_of_21(self):
+        # 21 timed-out lines pass the finding cap of 20 and are still one UNKNOWN line: UNKNOWNs never take the cap.
+        self.setup_range({PROSE: cited_lines(21)}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(timed_out)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_unknown_count(out, 21, [(21, "timed out")])
+        self.assertNotIn("more lines not shown", out, "a count of 1 line past the cap of 20: the UNKNOWN lines took the cap\n" + out)
+
+    def malformed_reply(self, bad):
+        """The merge with PROSE's reply replaced by `bad`, and OTHER_PROSE answered stale at line 3. -> (rc, out)."""
+        self.setup_range({PROSE: TWO_CITE_DOC, OTHER_PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stale = {"verdicts": [{"line": 3, "verdict": "stale", "why": "the cited file says otherwise"}]}
+        stub = JudgeStub(lambda prompt: (bad, None) if ("File: %s" % PROSE) in prompt else (stale, None))
+        with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            rc, out = self.run_capped()
+        return rc, out
+
+    def assert_malformed_reads_unknown(self, bad):
+        # The merge reads what invoke_model hands it. A reply it cannot read is UNKNOWN for its file, every selected line, and
+        # no verdict prints for that file. The other file's verdict still prints.
+        rc, out = self.malformed_reply(bad)
+        self.assert_unknown_count(out, 2, [(2, "no readable verdict")])
+        self.assertFalse([line for line in out.splitlines() if "prose judge" in line and PROSE in line and "UNKNOWN" not in line],
+                         "a verdict printed for %s from a malformed reply" % PROSE)
+        self.assertTrue(judge_lines(out, "%s:3" % OTHER_PROSE, "stale"), "the other file's stale line did not print after the malformed reply")
+        self.assertEqual(rc, 0, out)
+
+    def test_a_reply_whose_verdicts_are_not_a_list_reads_unknown(self):
+        self.assert_malformed_reads_unknown({"verdicts": "stale"})
+
+    def test_a_reply_with_a_string_line_reads_unknown(self):
+        self.assert_malformed_reads_unknown({"verdicts": [{"line": "3", "verdict": "stale", "why": "w"}, {"line": 5, "verdict": "stale", "why": "w"}]})
+
+    def test_a_reply_with_a_float_line_reads_unknown(self):
+        self.assert_malformed_reads_unknown({"verdicts": [{"line": 3.0, "verdict": "stale", "why": "w"}, {"line": 5, "verdict": "stale", "why": "w"}]})
+
+    def test_a_reply_with_a_verdict_outside_the_three_reads_unknown(self):
+        self.assert_malformed_reads_unknown({"verdicts": [{"line": 3, "verdict": "maybe", "why": "w"}, {"line": 5, "verdict": "stale", "why": "w"}]})
+
+    def test_a_symlinked_backing_file_is_not_read_into_the_prompt(self):
+        # A backing path that is a symlink names a file outside the repo, so its text never goes into the prompt.
+        marker = "OUTSIDE-MARKER-4c1e"
+        outside = os.path.join(self.t, "outside.txt")
+        put(outside, "".join("%s line %d\n" % (marker, n) for n in range(1, 8)))  # long enough that the cited line 4 exists
+        try:
+            os.symlink(outside, os.path.join(self.t, "probe-link"))
+        except (OSError, NotImplementedError) as e:
+            self.skipTest("this host cannot make a symlink: %s" % e)
+        self.setup_range({PROSE: CITE_DOC}, {}, links={BACKING: outside})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the line cites the changed %s" % (len(stub.prompts), BACKING))
+        self.assertIn("cited text of %s" % BACKING, stub.prompts[0], "scope: the prompt has no cited-text section for %s" % BACKING)
+        self.assertNotIn(marker, stub.prompts[0], "the prompt carries text read through the symlink %s to a file outside the repo" % BACKING)
+
+    def test_a_control_character_in_the_prose_line_is_not_sent(self):
+        prose = "# Cloud notes\n\nCloud sessions\x1b[31m cannot push to main (read src/widget.py:4).\n"
+        self.setup_range({PROSE: prose}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertIn("cannot push to main", stub.prompts[0], "scope: the prompt does not carry the prose line")
+        self.assertEqual(controls(stub.prompts[0]), [], "the prompt carries control characters from the prose line: %r" % controls(stub.prompts[0]))
+
+    def test_a_control_character_in_the_cited_text_is_not_sent(self):
+        cited = "a = 1\nb = 2\nc = 3\nd\t=\t4\x07\n"  # the tabs are the control: they survive, and only the bell goes
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: cited})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertIn("d\t=\t4", stub.prompts[0], "scope: the prompt does not carry the cited line")
+        self.assertEqual(controls(stub.prompts[0]), [], "the prompt carries control characters from the cited text: %r" % controls(stub.prompts[0]))
+
+    def test_a_control_character_in_why_is_not_reported(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "stale", "the cited file says \x1b[31motherwise\x07"))
+        lines = judge_lines(out, "%s:3" % PROSE, "stale")
+        self.assertTrue(lines, "scope: no stale line at %s:3" % PROSE)
+        self.assertEqual(controls("\n".join(lines)), [], "the report carries control characters from why: %r" % controls("\n".join(lines)))
+
+    def test_the_default_cap_is_three_model_calls(self):
+        # Pins the default cap on judge model calls per merge, so a change to the default fails here. The test reads the real default, not a patched one.
+        self.assertEqual(merge.PROSE_JUDGE_MAX_CALLS, 3, "the default cap on model calls per merge is not 3")
+
+    def test_the_default_cap_sends_three_files_and_reads_the_fourth_unknown(self):
+        # Four selected files under the default cap make three calls. The fourth file must read UNKNOWN, not pass silently. The test reads the real default, not a patched one.
+        names = ("docs/notes/a.md", "docs/notes/b.md", "docs/notes/c.md", "docs/notes/d.md")
+        self.setup_range({p: CITE_DOC for p in names}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"), cap=None)
+        self.assertEqual(len(stub.prompts), 3, "model calls: %d for 4 selected files, want the default cap of 3" % len(stub.prompts))
+        sent = {p for p in names if any(p in prompt for prompt in stub.prompts)}
+        self.assertEqual(len(sent), 3, "files sent: %d, want 3 under the default cap" % len(sent))
+        self.assert_unknown_count(out, 1, [(1, "past the call cap")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_selected_line_the_model_skips_reads_unknown(self):
+        # Confirm reads a selected line that gets no verdict as UNKNOWN, so no skipped line passes silently. The held line still prints nothing.
+        self.setup_range({PROSE: TWO_CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_unknown_count(out, 1, [(1, "skipped by the reply")])
+        self.assertFalse([line for line in out.splitlines() if "%s:3" % PROSE in line], "the report names %s:3, which the reply held" % PROSE)
+        self.assertEqual(rc, 0, out)
+
+    def test_five_prose_files_collapse_their_unknowns_into_one_count_line(self):
+        # UNKNOWNs collapse to one count line with their causes, and findings print in full.
+        # Five governed files come in the range. The default cap of 3 sends a, b and c, so d and e are past it.
+        files = {LANE_A: THREE_CITE_DOC, LANE_B: THREE_CITE_DOC, LANE_C: TWO_CITE_DOC, LANE_D: TWO_CITE_DOC, LANE_E: TWO_CITE_DOC}
+        self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {**files, BACKING: BACKING_TEXT})
+        answer = per_file({
+            # Line 7 is missing from the reply, so it is skipped.
+            LANE_A: lambda prompt: ({"verdicts": [{"line": 3, "verdict": "unbacked", "why": "no cited file backs it"},
+                                                   {"line": 5, "verdict": "stale", "why": "the cited file says otherwise"}]}, None),
+            LANE_B: timed_out,
+            LANE_C: lambda prompt: ({"ok": True, "findings": [{"line": 3, "verdict": "stale", "why": "x"}]}, None),  # a wrong shape
+        })
+        stub, rc, out = self.judge(answer, cap=None)
+        sent = {p for p in files if any("File: %s\n" % p in prompt for prompt in stub.prompts)}
+        self.assertEqual(sent, {LANE_A, LANE_B, LANE_C}, "the calls name %s, want a, b and c: the default cap sends three files" % sorted(sent))
+        self.assertEqual(len(stub.prompts), 3, "model calls: %d, want 3" % len(stub.prompts))
+        lines = out.splitlines()
+        findings = ["merge: #7 prose judge, %s:3 unbacked: no cited file backs it" % LANE_A,
+                    "merge: #7 prose judge, %s:5 stale: the cited file says otherwise" % LANE_A]
+        for finding in findings:
+            self.assertIn(finding, lines, "the finding is not printed in full: %r\n%s" % (finding, out))
+        self.assert_unknown_count(out, 10, [(3, "timed out"), (2, "no readable verdict"), (4, "past the call cap"), (1, "skipped by the reply")])
+        self.assertLess(max(lines.index(f) for f in findings), lines.index(prose_unknown_lines(out)[0]), "a finding prints after the UNKNOWN line\n" + out)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the merge did not land")
+
+    def test_21_findings_print_20_and_a_count_of_one_then_the_unknown_line(self):
+        # UNKNOWNs do not take the finding cap: 21 findings print 20 and one count line, and the timed-out file adds one UNKNOWN line.
+        self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: cited_lines(21), LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(per_file({LANE_A: stale_every_line, LANE_B: timed_out}), cap=None)
+        self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two files are selected" % len(stub.prompts))
+        lines = out.splitlines()
+        findings = [line for line in lines if line.startswith("merge: #7 prose judge, %s:" % LANE_A)]
+        self.assertEqual(len(findings), 20, "finding lines: %d, want 20: the finding cap\n%s" % (len(findings), out))
+        counts = [line for line in lines if re.match(r"^merge: #7 prose judge: \d+ more lines not shown$", line)]
+        self.assertEqual(counts, ["merge: #7 prose judge: 1 more lines not shown"], "the count line for the findings past the cap is not 1\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "timed out")])
+        unknown = prose_unknown_lines(out)[0]
+        self.assertLess(lines.index(findings[-1]), lines.index(counts[0]), "the count line does not follow the last finding\n" + out)
+        self.assertLess(lines.index(counts[0]), lines.index(unknown), "the count line does not come before the UNKNOWN line\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_unknown_lines_never_take_a_finding_slot(self):
+        # 20 findings and one timed-out file: all 20 findings print, no count line for findings appears, and the UNKNOWN line prints.
+        self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: cited_lines(20), LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(per_file({LANE_A: stale_every_line, LANE_B: timed_out}), cap=None)
+        self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two files are selected" % len(stub.prompts))
+        findings = [line for line in out.splitlines() if line.startswith("merge: #7 prose judge, %s:" % LANE_A)]
+        self.assertEqual(len(findings), 20, "finding lines: %d, want all 20: the UNKNOWN line took a finding slot\n%s" % (len(findings), out))
+        self.assertNotIn("more lines not shown", out, "a count line for findings that all fit: the UNKNOWN line took a slot\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "timed out")])
+        self.assertEqual(rc, 0, out)
+
+    def test_the_unknown_line_names_a_cause_never_the_raw_error_text(self):
+        # invoke_model's error text is never printed: the line names the bucket, model error, and the text stays out.
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(lambda prompt: (None, "RAW-ERROR-7f3a: /home/user/secret/stderr"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertNotIn("RAW-ERROR-7f3a", out, "the report prints the raw error text, not a cause\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_call_with_no_verdict_and_no_error_reads_no_readable_verdict(self):
+        # The ruling of 03:20 CST: a None verdict with no error has no readable verdict, so it is not a model error.
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(lambda prompt: (None, None))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_unknown_count(out, 1, [(1, "no readable verdict")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_merge_with_every_line_judged_prints_no_unknown_line(self):
+        # The empty state: each selected line gets a verdict, so no UNKNOWN line prints and the stale finding prints in full.
+        self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: CITE_DOC, LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(per_file({LANE_A: verdict_for(3, "stale"), LANE_B: verdict_for(3, "holds")}), cap=None)
+        self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two files are selected" % len(stub.prompts))
+        self.assertIn("merge: #7 prose judge, %s:3 stale: the cited file says otherwise" % LANE_A, out.splitlines(),
+                      "the stale finding is not printed in full\n" + out)
+        self.assertEqual(prose_unknown_lines(out), [], "every line was judged, yet an UNKNOWN line printed\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_selection_that_raises_is_the_only_unknown_line(self):
+        # A plan-level failure: the selection raises before any call, so one UNKNOWN line stands for the merge and no count line follows.
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub = JudgeStub(verdict_for(3, "holds"))
+        with unittest.mock.patch.object(merge, "prose_judge_lines", side_effect=RuntimeError("selection broke")), \
+                unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(stub.prompts, [], "model calls: %d, want 0: the selection failed before any call" % len(stub.prompts))
+        unknown = prose_unknown_lines(out)
+        self.assertEqual(len(unknown), 1, "UNKNOWN lines: %d, want 1: the selection failure is the only one\n%s" % (len(unknown), out))
+        self.assertIn("could not run", unknown[0], "the UNKNOWN line does not name a run that could not run: %r" % unknown[0])
+        self.assertNotIn("lines not judged", out, "a count line printed beside a plan-level failure\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_named_path_line_with_no_cite_sends_its_excerpt_in_one_call(self):
+        # The line is added by the range and cites nothing. It names hooks/x.py and run_all in backticks, so the one call carries
+        # the lines of hooks/x.py around run_all, read at head.
+        self.setup_range({SIDE_PROSE: PLAIN_DOC}, {PROSE: NAMED_DOC, NAMED: numbered_source("xs", 30, named={12})})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertIn("Line 3: The runner is `%s` `run_all`" % NAMED, stub.prompts[0], "scope: the call does not carry the named line")
+        got = tokens(stub.prompts[0], "xs")
+        self.assertEqual(got, ["xs%03d" % n for n in range(9, 16)],
+                         "the call carries the lines %s of %s, want lines 9 to 15 around run_all" % (got, NAMED))
+
+    def test_three_named_paths_make_one_call_under_twelve_kilobytes(self):
+        # The cost pin: one prose file is one model call, and three named paths keep its prompt under 12 KB. Each file has 2000-character
+        # rows and names run_all on one line, so the excerpt is one 7-row window per path. Each file is 200 KB, under the 256 KB size skip.
+        # Full-length rows make the bound depend on the per-row cut: uncut, the three windows alone are about 42 KB.
+        files = {"hooks/a.py": "pa", "hooks/b.py": "pb", "hooks/c.py": "pc"}
+        feat = {PROSE: THREE_NAMED_DOC}
+        for path, tag in files.items():
+            feat[path] = numbered_source(tag, 100, named={50}, width=2000)
+        self.setup_range({SIDE_PROSE: PLAIN_DOC}, feat)
+        holds = lambda prompt: ({"verdicts": [{"line": n, "verdict": "holds", "why": "w"} for n in (3, 5, 7)]}, None)
+        stub, rc, out = self.judge(holds)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: one prose file is one call" % len(stub.prompts))
+        prompt = stub.prompts[0]
+        for path, tag in files.items():
+            got = tokens(prompt, tag)
+            self.assertGreater(len(got), 0, "the call carries no lines of %s" % path)
+            self.assertLessEqual(len(got), 40, "the call carries %d lines of %s, want at most 40" % (len(got), path))
+        size = len(prompt.encode("utf-8"))
+        self.assertLess(size, 12 * 1024, "the prompt is %d bytes for three named paths, want under 12 KB" % size)
+
+
+NAMED = "hooks/x.py"  # a tracked code path that a prose line names in backticks
+NAMED_DOC = "# Named notes\n\nThe runner is `hooks/x.py` `run_all` and returns 3.\n"  # the named line is line 3
+THREE_NAMED_DOC = ("# Named notes\n\nThe runner is `hooks/a.py` `run_all` and returns 3.\n\n"
+                   "The runner is `hooks/b.py` `run_all` and returns 3.\n\nThe runner is `hooks/c.py` `run_all` and returns 3.\n")  # lines 3, 5, 7
+SIDE_PROSE = "docs/notes/side.md"  # governed prose on main, so the range has a base to diff against
+
+
+def numbered_source(tag, count, named=(), width=0):
+    """A source file of `count` lines, each `<tag><NNN> = <n>`, padded with `z` to `width` characters when it is shorter. A line in
+    `named` calls run_all as well. Each token such as `xs012` is unique in the file, so a case finds a line by its token, never by
+    its place in the prompt."""
+    rows = (f"{tag}{n:03d} = run_all({n})" if n in named else f"{tag}{n:03d} = {n}" for n in range(1, count + 1))
+    return "\n".join(row.ljust(width, "z") for row in rows) + "\n"
+
+
+def tokens(text, tag):
+    """The distinct `<tag><NNN>` tokens in `text`, in the order they first appear."""
+    return list(dict.fromkeys(re.findall(r"\b%s\d{3}\b" % tag, text)))
+
+
+def excerpt_rows(text, path):
+    """The rows under the excerpt header that names `path`, in order, each without its indent. An excerpt ends at the first
+    line with no indent. [] when the prompt has no such header."""
+    lines = text.split("\n")
+    start = next((i for i, line in enumerate(lines) if line.startswith("  lines of %s " % path)), None)
+    if start is None:
+        return []
+    rows = []
+    for line in lines[start + 1:]:
+        if not line.startswith("    "):
+            break
+        rows.append(line[4:])
+    return rows
+
+
+class ProseJudgePrompt(unittest.TestCase):
+    """merge.prose_judge_prompt for a line that cites nothing and names a path and a name in backticks. No git and no model:
+    the `read` hook serves the text of each path it knows, and every other path reads as missing. The tree is not on disk, so
+    the excerpt can only come through the hook."""
+    WT = os.path.join(os.sep, "no-such-tree-for-prose-judge")
+
+    def prompt(self, by_line, served):
+        reads = []
+
+        def read(wt, backing):
+            reads.append((wt, backing))
+            return served.get(backing)
+        text = merge.prose_judge_prompt(self.WT, "docs/notes/named.md", by_line, read=read)
+        return text, reads
+
+    def test_a_named_path_with_no_cite_gets_the_lines_around_the_name(self):
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: numbered_source("xs", 30, named={12})})
+        self.assertIn("Line 5: " + line, text, "scope: the prompt does not carry the named line")
+        got = tokens(text, "xs")
+        self.assertEqual(got, ["xs%03d" % n for n in range(9, 16)],
+                         "the excerpt of %s is %s, want lines 9 to 15 around the line that holds run_all" % (NAMED, got))
+
+    def test_the_excerpt_is_read_through_the_read_hook_for_the_named_path(self):
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: numbered_source("xs", 30, named={12})})
+        self.assertIn((self.WT, NAMED), reads, "the read hook was never asked for %s at the judged tree: asked for %s" % (NAMED, reads))
+        self.assertTrue(tokens(text, "xs"), "no excerpt of %s came through the read hook" % NAMED)
+
+    def test_an_excerpt_is_at_most_forty_lines_per_path(self):
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: numbered_source("xs", 200, named=range(1, 201))})
+        got = tokens(text, "xs")
+        self.assertGreater(len(got), 0, "no excerpt of %s, so the cap is not seen" % NAMED)
+        self.assertLessEqual(len(got), 40, "the excerpt of %s has %d lines, want at most 40" % (NAMED, len(got)))
+
+    def test_a_named_path_that_is_missing_or_empty_adds_no_excerpt_and_no_error(self):
+        line = "`hooks/missing.py` `hooks/empty.py` `hooks/x.py` `run_all` returns 3"
+        served = {"hooks/empty.py": "", NAMED: numbered_source("xs", 30, named={12})}  # hooks/missing.py is not served at all
+        text, reads = self.prompt({5: (line, [])}, served)
+        self.assertIn("Line 5: " + line, text, "scope: the prompt does not carry the named line")
+        got = tokens(text, "xs")
+        self.assertEqual(got, ["xs%03d" % n for n in range(9, 16)],
+                         "the excerpt of %s is %s, want lines 9 to 15 next to the missing and empty paths" % (NAMED, got))
+
+    def test_a_path_the_line_cites_gets_no_second_excerpt(self):
+        line = "`src/widget.py` `hooks/x.py` `run_all` returns 3 (read src/widget.py:4)"
+        served = {"src/widget.py": numbered_source("ws", 30, named={12}), NAMED: numbered_source("xs", 30, named={12})}
+        text, reads = self.prompt({5: (line, ["read src/widget.py:4"])}, served)
+        self.assertIn("Line 5: " + line, text, "scope: the prompt does not carry the named line")
+        self.assertEqual(tokens(text, "xs"), ["xs%03d" % n for n in range(9, 16)],
+                         "scope: the named excerpt of %s is missing, so the cited path cannot be compared" % NAMED)
+        self.assertIn("ws004 = 4", text, "the cited line ws004 of src/widget.py:4 is missing")
+        self.assertEqual(tokens(text, "ws"), ["ws004"],
+                         "src/widget.py has %s in the prompt, want only its cited line ws004" % tokens(text, "ws"))
+
+    def test_the_stale_verdict_counts_the_code_or_text_shown_below(self):
+        text, reads = self.prompt({3: ("A note with no cite.", [])}, {})
+        self.assertIn("the code or text shown below says otherwise (stale)", text,
+                      "the verdict wording does not count a shown excerpt as text the line can be stale against")
+        self.assertNotIn("the cited text now says otherwise", text, "the verdict wording still names only the cited text")
+
+    def test_an_excerpt_row_longer_than_200_characters_is_cut_to_200_with_a_marker(self):
+        # A one-line file of 250 KB, under the size skip, names run_all on its only line. The row keeps its first 200 characters,
+        # then a marker, and the prompt stays under 12 KB. assertTrue, not assertIn, so a failure does not print the whole prompt.
+        source = "run_all " + "y" * (250 * 1024)
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: source})
+        self.assertTrue(("    1: " + source[:200]) in text, "the excerpt row of %s does not start with the first 200 characters of its line" % NAMED)
+        self.assertFalse(("y" * 201) in text, "the excerpt of %s carries more than 200 characters of its one line" % NAMED)
+        rows = [r for r in excerpt_rows(text, NAMED) if r.startswith("1: ")]
+        self.assertEqual(len(rows), 1, "the excerpt of %s has %d rows for line 1, want one" % (NAMED, len(rows)))
+        self.assertGreater(len(rows[0]), len("1: ") + 200, "the cut row of %s has no marker after its 200 characters" % NAMED)
+        self.assertLess(len(rows[0]), len("1: ") + 200 + 80, "the cut row of %s carries more than a 200-character cut and a marker" % NAMED)
+        size = len(text.encode("utf-8"))
+        self.assertLess(size, 12 * 1024, "the prompt is %d bytes for one 250 KB line, want under 12 KB" % size)
+
+    def test_a_named_file_over_256_kilobytes_gets_no_excerpt_and_a_one_line_note(self):
+        # A one-line file of 2 MB names run_all. Its excerpt is skipped for size, one line of the prompt says so, and the prompt stays under 12 KB.
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: "run_all " + "y" * (2 * 1024 * 1024)})
+        self.assertIn("Line 5: " + line, text, "scope: the prompt does not carry the named line")
+        self.assertFalse(("lines of %s " % NAMED) in text, "the prompt carries an excerpt of %s, a file over 256 KB" % NAMED)
+        notes = [n for n in text.split("\n") if "skipped" in n and "size" in n and NAMED in n]
+        self.assertEqual(len(notes), 1, "the prompt has %d lines that say %s was skipped for size, want one" % (len(notes), NAMED))
+        size = len(text.encode("utf-8"))
+        self.assertLess(size, 12 * 1024, "the prompt is %d bytes for a 2 MB file, want under 12 KB" % size)
+
+    def test_a_named_file_at_256_kilobytes_is_still_excerpted(self):
+        # The size skip starts above 256 KB, so a file of exactly 256 KB keeps its excerpt.
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: "run_all " + "y" * (256 * 1024 - len("run_all "))})
+        self.assertTrue(("lines of %s " % NAMED) in text, "no excerpt of %s, though the file is exactly 256 KB" % NAMED)
+
+    def test_a_path_named_by_many_lines_is_read_once(self):
+        # Three lines name hooks/x.py and two name a path that is not served. Each path is read once in the one prompt build,
+        # and the excerpt of hooks/x.py still reaches the prompt.
+        line = "`hooks/x.py` `run_all` returns 3"
+        missing = "`hooks/missing.py` `run_all` returns 3"
+        by_line = {5: (line, []), 7: (line, []), 9: (line, []), 11: (missing, []), 13: (missing, [])}
+        text, reads = self.prompt(by_line, {NAMED: numbered_source("xs", 30, named={12})})
+        self.assertEqual(reads.count((self.WT, NAMED)), 1,
+                         "the read hook was asked for %s %d times for three lines that name it, want once" % (NAMED, reads.count((self.WT, NAMED))))
+        self.assertEqual(reads.count((self.WT, "hooks/missing.py")), 1,
+                         "the read hook was asked for hooks/missing.py %d times for two lines that name it, want once"
+                         % reads.count((self.WT, "hooks/missing.py")))
+        self.assertEqual(tokens(text, "xs"), ["xs%03d" % n for n in range(9, 16)],
+                         "the excerpt of %s is %s, want lines 9 to 15" % (NAMED, tokens(text, "xs")))
+
+    def test_an_excerpt_cut_by_the_row_cap_ends_with_a_marker_line(self):
+        # Every tenth line of a 200-line file names run_all. The windows do not touch, so the 40-row cap drops the later ones,
+        # and the excerpt ends with a line that says more matches were left out.
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: numbered_source("xs", 200, named=range(10, 201, 10))})
+        rows = excerpt_rows(text, NAMED)
+        numbered = [r for r in rows if re.match(r"\d+: ", r)]
+        self.assertGreater(len(numbered), 0, "no excerpt rows of %s" % NAMED)
+        self.assertLessEqual(len(numbered), 40, "the excerpt of %s has %d numbered rows, want at most 40" % (NAMED, len(numbered)))
+        last = rows[-1] if rows else None
+        self.assertTrue(last is not None and not re.match(r"\d+: ", last) and last != "...",
+                        "the excerpt of %s ends with %r, want a marker line after its last row" % (NAMED, last))
+        self.assertIn("left out", last or "", "the marker line %r does not say more matches were left out" % last)
+
+    def test_an_excerpt_that_fits_the_cap_has_no_marker_line(self):
+        # Ten rows fit under the cap, so the excerpt ends at its last numbered row and no marker follows.
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: numbered_source("xs", 30, named={12})})
+        self.assertEqual(excerpt_rows(text, NAMED)[-1:], ["15: xs015 = 15"], "the excerpt of %s does not end at its last numbered row" % NAMED)
+        self.assertFalse("left out" in text, "the prompt has a marker line though no row of %s was left out" % NAMED)
+
+
+class OrderLock(merge.GitLock):
+    """A GitLock that appends "release" to `events` on each release, so a case can order a model call against it."""
+    events = None
+
+    def release(self, b, token):
+        self.events.append("release")
+        return super().release(b, token)
+
+
+TWO_CITE_DOC = ("# Cloud notes\n\nCloud sessions cannot push to main (read src/widget.py:4).\n\n"
+                "Cloud sessions cannot push to main (read src/widget.py:2).\n")  # the cites are on lines 3 and 5
+OTHER_PROSE = "docs/notes/other.md"  # a second governed file, judged in the same merge
+LANE_A, LANE_B, LANE_C, LANE_D, LANE_E = ["docs/notes/%s.md" % c for c in "abcde"]  # five governed files one range adds, sorted a to e
+THREE_CITE_DOC = ("# Cloud notes\n\nCloud sessions cannot push to main (read src/widget.py:4).\n\n"
+                  "Cloud sessions cannot push to main (read src/widget.py:2).\n\n"
+                  "Cloud sessions cannot push to main (read src/widget.py:3).\n")  # the cites are on lines 3, 5 and 7
+C0_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f]")  # C0 control characters, but not tab (\x09) or newline (\x0a)
+
+
+def controls(text):
+    """The C0 control characters in `text`, in order."""
+    return C0_CONTROL.findall(text)
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
         # A run waiting on its checks for a minute, for a signal to reach. It prints READY once it holds the lock.
@@ -11847,6 +14989,7 @@ if __name__ == "__main__":
                 print("READY", flush=True)
                 time.sleep(60)
                 return True, ""
+        install_model_guard()
         os.chdir(sys.argv[2])
         sys.exit(merge.main(["7", "--confirm"], host=Sleep(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
@@ -11856,6 +14999,7 @@ if __name__ == "__main__":
                 if prior is not None:  # the wait after the claim push; the head's own wait comes first
                     os._exit(9)
                 return True, ""
+        install_model_guard()
         os.chdir(sys.argv[2])
         sys.exit(merge.main(["7", "--confirm"], host=Die(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
     class Slicer(unittest.TestLoader):

@@ -15,6 +15,7 @@ Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap` before th
 ## Sources
 
 <The files, records and rulings to read. Point at them. Never paste them in.>
+For a test or merge change, name claude-settings decisions `test-practices` and `merge-practices`.
 
 ## Fences
 

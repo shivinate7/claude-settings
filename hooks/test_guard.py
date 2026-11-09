@@ -12,6 +12,10 @@ GUARD_FAMILY=<name> runs only one family of cases (FAMILIES, at the top of this 
 name, or a filter that matches no case, fails the run. GUARD_TIMING=1 prints what each fixture
 block cost.
 
+GUARD_HEARTBEAT=<seconds> sets the quiet time after which the run prints a progress line to stderr,
+and appends it to STALL_WATCH_BEAT when that is set (default 60; a number above 0). A run that prints
+nothing for minutes is cut by the stall watch. A malformed value stops the run before a case runs.
+
 GUARD_SHARD=<i>/<n> runs every n-th selected case, starting at the i-th (1-based), after the other
 filters. The n shards of one selection are disjoint and together hold every case, so CI can split
 the suite across jobs and drop none. A malformed value stops the run before a case runs.
@@ -37,6 +41,7 @@ import contextlib
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -89,7 +94,7 @@ FAMILIES = {
     "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
     "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
     "pointer": "the pointer HEAD checkout",
-    "hand-made-worktree": "a lane worktree made by hand outside the agent home folder",
+    "hand-made-worktree": "a worktree made by hand outside the agent home folder",
     "kill": "machine-wide kills and detached launches",
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
@@ -101,6 +106,7 @@ FAMILIES = {
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
+    "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
     "frozen": "frozen paths",
     "model-cap": "the agent model cap",
@@ -133,13 +139,60 @@ FAMILIES = {
     "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
     "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
-    "load-brake": "the machine-load brake: busy and full on lane-start calls, full on an agent's shell or file write, the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
+    "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
 if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
     sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"
              % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
+
+
+# The progress beat (decision stall-watch: a quiet tool owes a line at least every 120 s). The quiet clock
+# restarts at each line that `say` prints and at each beat. `beat` costs one clock read when the output is
+# not quiet, and needs no thread or timer.
+def parse_heartbeat(value):
+    if not value:
+        return 60.0
+    try:
+        secs = float(value)
+    except ValueError:
+        secs = math.nan
+    if not (math.isfinite(secs) and secs > 0):
+        sys.exit("GUARD_HEARTBEAT=%r is not a number of seconds above 0. Want a float, or unset for 60."
+                 % value)
+    return secs
+
+
+GUARD_HEARTBEAT = parse_heartbeat(os.environ.get("GUARD_HEARTBEAT", ""))
+BEAT_FILE = os.environ.get("STALL_WATCH_BEAT", "")  # the stall watch reads this file (hooks/stall_watch.py)
+QUIET_SINCE = [time.monotonic()]  # the import counts as quiet time, so a slow import is a stretch too
+
+
+def say(line):
+    """Print one line, flushed, and restart the quiet clock. Piped output is block-buffered: without the
+    flush a case line reaches a `| tail` or a file only at exit."""
+    print(line, flush=True)
+    QUIET_SINCE[0] = time.monotonic()
+
+
+def beat(where):
+    """Print a progress line to stderr, and append it to STALL_WATCH_BEAT, when the output has been quiet
+    for GUARD_HEARTBEAT seconds. A caller marks a point where the run may spend that long. The line never
+    starts with PASS, FAIL or ok: mutate_guard.py and test_wrappers.py read those as case lines."""
+    now = time.monotonic()
+    quiet = now - QUIET_SINCE[0]
+    if quiet < GUARD_HEARTBEAT:
+        return
+    QUIET_SINCE[0] = now
+    line = "test_guard: still running, %.0fs quiet, %s" % (quiet, where)
+    print(line, file=sys.stderr, flush=True)
+    if BEAT_FILE:
+        try:
+            with open(BEAT_FILE, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
 
 
 def parse_shard(value):
@@ -420,6 +473,7 @@ SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktr
 SUBJDIRTY = os.path.join(ROOT, "subjdirty")  # a real checkout with real uncommitted work
 SUBJSTASH = os.path.join(ROOT, "subjstash")  # a clean tree carrying one real stash entry
 SUBJSTASHWT = os.path.join(ROOT, "subjstashlane")  # a linked worktree of it: same stack
+SUBJSTAGED = os.path.join(ROOT, "subjstaged")  # a real checkout: a staged edit, a staged new file
 GITBLIND = os.path.join(ROOT, "gitblind")  # a git that answers the repo test and no status read
 # A repository under a scratchpad named after one session. ROOT already sits under the system
 # temporary directory, which is the other half of the path test.
@@ -497,6 +551,7 @@ ARCHPAGE = os.path.join(ROOT, "archpage")      # the slug's pull request is on p
 ARCHNEAR_C10 = os.path.join(ROOT, "archnear-c10")      # an open head `c10`: contains the lane id `c1`, is not it
 ARCHNEAR_C10X = os.path.join(ROOT, "archnear-c10x")    # an open head `claude/c10-x1`: contains `c1`, is not it
 ARCHNEAR_CI = os.path.join(ROOT, "archnear-ci")        # an open head `claude/fix-ci-retry-x1`: contains `ci`, is not it
+ARCHOPEN_LANE = os.path.join(ROOT, "archopen-lane")    # the slug's pull request is open on the `lane/<slug>` head form
 # The containment read of an open lane pull request's head against main, by its status. Each fake holds one open
 # pull request on the slug, its head the slug's head sha; the read's answer is what the name says.
 ARCHDRAFT_BEHIND = os.path.join(ROOT, "archdraft-behind")      # an open draft, head behind main: its commits landed
@@ -506,6 +561,7 @@ ARCHDRAFT_DIVERGED = os.path.join(ROOT, "archdraft-diverged")  # an open draft, 
 ARCHREADY_BEHIND = os.path.join(ROOT, "archready-behind")      # an open ready (not draft) pull request, head behind main
 ARCHDRAFT_READFAIL = os.path.join(ROOT, "archdraft-readfail")  # an open draft whose containment read fails
 ARCHDRAFT_INTEG = os.path.join(ROOT, "archdraft-integ")        # an open draft based on integration/b1, not the default branch
+ARCHDRAFT_LANE_BEHIND = os.path.join(ROOT, "archdraft-lane-behind")  # an open draft on the lane/<slug> head, head behind main
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
 # `PTRMAIN`, which stands in for the machine's primary checkout: the one every session runs its
 # hooks and its lint from. `PTRWT` is a real linked worktree of it, which must stay allowed.
@@ -862,6 +918,27 @@ def _real_process_start_ms(pid):
     return int(now_ms - elapsed * 1000)
 
 
+def _require_staged(where, tracked, untracked):
+    """Stop the suite unless `where` holds a STAGED edit to `tracked` (index column M, worktree
+    column clean) and a STAGED new file `untracked` (index column A).
+
+    The `--merge` cases that use SUBJSTAGED depend on exactly this state: git reverts the staged
+    edit and deletes the staged new file. Unstaged work would pass them for the wrong reason, so
+    both are read back with git itself.
+    """
+    lines = _porcelain(where)
+    if not any(line[:2] == "M " and line[3:].strip() == tracked for line in lines):
+        sys.exit(
+            "fixture setup failed in _build_subject: %r is not staged as modified in %r. git "
+            "status --porcelain shows: %r" % (tracked, where, lines)
+        )
+    if not any(line[:2] == "A " and line[3:].strip() == untracked for line in lines):
+        sys.exit(
+            "fixture setup failed in _build_subject: %r is not staged as new in %r. git status "
+            "--porcelain shows: %r" % (untracked, where, lines)
+        )
+
+
 def make_repo(where, files):
     """Build a real checkout holding `files`, committed, with an explicit identity."""
     os.makedirs(where, exist_ok=True)
@@ -900,7 +977,8 @@ def make_blind_git(folder):
     os.chmod(script, 0o755)
 
 
-FAKE_GH_PY = r'''import json, os, re, sys, time
+FAKE_GH_PY = r'''import io, json, os, re, sys, time
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", newline="")  # the bytes go out as written: a text-mode stdout on Windows turns each \n into \r\n, which real gh never does
 state = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")))
 if state.get("count_file"):  # a test that counts the calls names the file: one line per call, its argv
     with open(state["count_file"], "a", encoding="utf-8") as handle:
@@ -908,6 +986,7 @@ if state.get("count_file"):  # a test that counts the calls names the file: one 
 if state.get("delay_s"):
     time.sleep(state["delay_s"])
 args = sys.argv[1:]
+REPO_ID = 424242424  # the numeric id GitHub names in a Link header; the cloud agent proxy refuses paths that carry it
 GRAPHQL = "HTTP 403: GitHub GraphQL is not available from Claude Code sessions; use the REST API (https://api.github.com/graphql)"
 if state["cwd_name"] and os.path.basename(os.getcwd()) != state["cwd_name"]:
     state["broken"] = True
@@ -934,19 +1013,33 @@ def parse(argv):
 
 
 def api_error(code, message):
+    if "-i" in flags:  # gh api -i prints the reply's status line and headers before the body: the status line ends \n, the headers and the blank line \r\n
+        sys.stdout.write("HTTP/1.1 %d %s\nContent-Type: application/json\r\n\r\n" % (code, "Not Found" if code == 404 else "Internal Server Error"))
     print(json.dumps({"message": message, "status": str(code)}, separators=(",", ":")) + "gh: %s (HTTP %d)" % (message, code))
     sys.exit(1)
 
 
-def listing(items, key, fields, flags, top=None):
-    """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages."""
+def listing(items, key, fields, flags, top=None, rel=""):
+    """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages.
+    With -i the status line and headers come first, and a page that more pages follow carries the Link header GitHub sends, on the numeric route."""
     size = max(1, min(int(fields.get("per_page", 30)), state["page_cap"]))
     pages = [items[i:i + size] for i in range(0, len(items), size)] or [[]]
-    chosen = pages if "--paginate" in flags else [pages[max(1, int(fields.get("page", 1))) - 1] if int(fields.get("page", 1)) <= len(pages) else []]
+    asked = max(1, int(fields.get("page", 1)))
+    chosen = pages if "--paginate" in flags else [pages[asked - 1] if asked <= len(pages) else []]
     bodies = [c if key is None else dict(top or {}, **{key: c}) for c in chosen]
     if "--slurp" in flags:
-        return json.dumps(bodies)
-    return json.dumps([x for c in chosen for x in c]) if key is None else "".join(json.dumps(b) for b in bodies)
+        body = json.dumps(bodies)
+    else:
+        body = json.dumps([x for c in chosen for x in c]) if key is None else "".join(json.dumps(b) for b in bodies)
+    if "-i" not in flags:
+        return body
+    link = None
+    if "--paginate" not in flags and asked < len(pages):
+        def url(page):
+            parts = ["%s=%s" % kv for kv in fields.items() if kv[0] != "page"] + ["page=%d" % page]
+            return "<https://api.github.com/repositories/%d/%s?%s>" % (REPO_ID, rel, "&".join(parts))
+        link = '%s; rel="next", %s; rel="last"' % (url(asked + 1), url(len(pages)))
+    return "HTTP/1.1 200 OK\nContent-Type: application/json\r\n%s\r\n%s" % ("Link: %s\r\n" % link if link else "", body)
 
 
 RUN_OF = {"pass": ("completed", "success"), "fail": ("completed", "failure"), "pending": ("in_progress", None),
@@ -991,20 +1084,20 @@ else:
         rows = [dict(state["pr"], number=state["number"])] + others
         if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
             rows = [row for row in rows if row["state"] == "open"]
-        print(listing(rows, None, fields, flags))
+        print(listing(rows, None, fields, flags, rel=rel))
     elif re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel) and rel.split("/")[1] in rows_of:
         checks, statuses = rows_of[rel.split("/")[1]]
         if rel.endswith("check-runs"):
             runs = [{"id": i, "name": c["name"], "status": RUN_OF.get(c["bucket"], ("completed", c["bucket"]))[0],
                      "conclusion": RUN_OF.get(c["bucket"], ("completed", c["bucket"]))[1], "details_url": c["link"] or None,
                      "started_at": None, "completed_at": None} for i, c in enumerate(checks)]
-            print(listing(runs, "check_runs", fields, flags, {"total_count": len(runs)}))
+            print(listing(runs, "check_runs", fields, flags, {"total_count": len(runs)}, rel=rel))
         else:
             sts = [{"id": 50 + i, "context": c["name"], "state": STATUS_OF.get(c["bucket"], c["bucket"]), "target_url": c["link"] or None}
                    for i, c in enumerate(statuses)]
             states = {s["state"] for s in sts}
             combined = "failure" if states & {"failure", "error"} else "pending" if (not states or "pending" in states) else "success"
-            print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}))
+            print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}, rel=rel))
     elif re.fullmatch(r"branches/[^/]+/protection/required_status_checks", rel):
         if state["protection"] == "absent":
             api_error(404, "Branch not protected")
@@ -1179,7 +1272,9 @@ def lazy_fixture(paths, build):
     def once():
         if not done:
             done.append(1)
+            beat("fixture %s, before it builds" % build.__name__)
             _timed(build.__name__, build)
+            beat("fixture %s, after it built" % build.__name__)
     for path in paths:
         LAZY[slash(path)] = once
 
@@ -1201,10 +1296,11 @@ def materialize_for(case):
 
 
 def materialize_all():
-    """Build every lazy fixture except the diff repos. A log check builds its own diff repos (see
-    diff_repo), so the run loop need not build all ~170 of them for any log check."""
+    """Build every lazy fixture except the diff repos and the conflict-markers repos. A log check builds
+    its own diff repos (see diff_repo), so the run loop need not build all ~170 of them for any log check.
+    No log check reads a conflict-markers repo: a case builds one through materialize_for, when it names it."""
     for key, once in list(LAZY.items()):
-        if slash(DIFFROOT) not in key:
+        if slash(DIFFROOT) not in key and not key.startswith(slash(CMKROOT) + "/"):
             once()
 
 
@@ -1301,6 +1397,8 @@ def build_fixtures():
     make_fake_gh(ARCHOPEN, "main", need=["o/r"], others=[slug_head])
     make_fake_gh(ARCHCLOSED, "main", need=["o/r"], others=[dict(slug_head, state="closed")])
     make_fake_gh(ARCHMERGED, "main", need=["o/r"], others=[dict(slug_head, state="closed", merged=True)])
+    # The same lane's pull request on the `lane/<slug>` head form (decision session-tiers names both forms).
+    make_fake_gh(ARCHOPEN_LANE, "main", need=["o/r"], others=[dict(slug_head, ref="lane/" + ARCHIVE_SLUG)])
     # Page two of the open list (two rows a page): the slug's pull request is the third row, so only a read of
     # every page sees it. The two rows before it name other lanes.
     make_fake_gh(ARCHPAGE, "main", need=["o/r"], page_cap=2, others=[
@@ -1326,6 +1424,9 @@ def build_fixtures():
     # its base is not the repo's default branch. A guard that compares against the base's name would release it here.
     make_fake_gh(ARCHDRAFT_INTEG, "main", need=["o/r"], others=[dict(slug_head, draft=True, base="integration/b1")],
                  compares={draft_pair: "behind", "integration/b1..." + slug_head["head"]: "behind"})
+    # An open draft on the `lane/<slug>` head form, its head behind main: released as the bare-slug draft is.
+    make_fake_gh(ARCHDRAFT_LANE_BEHIND, "main", need=["o/r"],
+                 others=[dict(slug_head, draft=True, ref="lane/" + ARCHIVE_SLUG)], compares={draft_pair: "behind"})
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
@@ -1355,11 +1456,32 @@ def _build_ctxrepo():
     run_vcs(CTXREPO, "branch", "done")
 
 
+GHDEV_CHECK = {}  # the delay check's thread, and the error it raised, if it raised one
+
+
+def _run_ghdev_check():
+    try:
+        _verify_fake_gh_delay(GHDEV, delay=1)
+    except BaseException as exc:  # _build_ghdev raises it, on the thread that needs the answer
+        GHDEV_CHECK["error"] = exc
+
+
+def _start_ghdev_check():
+    """Run the delay check on a daemon thread. Called once, after build_fixtures has written GHDEV's fake."""
+    thread = threading.Thread(target=_run_ghdev_check, name="ghdev-delay-check", daemon=True)
+    GHDEV_CHECK["thread"] = thread
+    thread.start()
+
+
 def _build_ghdev():
-    # Trust this delay only once it is proven, not assumed: run it now, under the guard's own
-    # narrow PATH, and fail fixture setup outright if it does not really delay. See
-    # _verify_fake_gh_delay's docstring for the defect this catches.
-    _verify_fake_gh_delay(GHDEV, delay=1)
+    # Trust this delay only once it is proven, not assumed: the check runs under the guard's own
+    # narrow PATH and fails fixture setup outright if it does not really delay. See
+    # _verify_fake_gh_delay's docstring for the defect this catches. It takes about a second and starts
+    # with the fixtures, so this waits only for what is left of it, and a run that never names
+    # GHDEV never waits.
+    GHDEV_CHECK["thread"].join()
+    if "error" in GHDEV_CHECK:
+        raise GHDEV_CHECK["error"]
 
 
 def _build_gitmain():
@@ -1435,7 +1557,8 @@ def _build_gitmain():
 
 
 def _build_subject():
-    """SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH and SUBJSTASHWT: the subject-read repos."""
+    """The subject-read repos: SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT and
+    SUBJSTAGED."""
     # THE SUBJECT READ. Each arm gets both sides, built with real state: a real clean tree, a
     # real uncommitted edit, a real untracked file, a real one-entry stash stack.
     make_repo(SUBJCLEAN, {"f.txt": "base\n", "keep.txt": "base\n"})
@@ -1464,6 +1587,14 @@ def _build_subject():
     # worktree sees the same one-entry stack, and a drop there destroys the primary's entry.
     run_vcs(SUBJSTASH, "worktree", "add", "-q", SUBJSTASHWT, "-b", "stashlane")
     _require_stash(SUBJSTASHWT, 1)
+
+    # A STAGED edit to a tracked file and a STAGED new file: the state `reset --merge HEAD` reverts
+    # and deletes. The tree is dirty, and its work is all in the index.
+    make_repo(SUBJSTAGED, {"f.txt": "base\n", "keep.txt": "base\n"})
+    write(os.path.join(SUBJSTAGED, "f.txt"), "staged\n")
+    write(os.path.join(SUBJSTAGED, "new.txt"), "staged new\n")
+    run_vcs(SUBJSTAGED, "add", "f.txt", "new.txt")
+    _require_staged(SUBJSTAGED, "f.txt", "new.txt")
 
 def _build_privrepo():
     """PRIVREPO: a dirty repository under a scratchpad named after one session."""
@@ -1710,6 +1841,13 @@ def _build_push():
             run_vcs(where, "checkout", "-q", "--detach")
         if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
             sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    # The feat destination holds the remote-tracking refs that the push cost case's forms read: feat for
+    # a HEAD or bare push, lane/foo for a refspec push or HEAD:lane/foo. A local lane/foo is the source.
+    for args in (("update-ref", "refs/remotes/origin/feat", "HEAD"),
+                 ("update-ref", "refs/remotes/origin/lane/foo", "HEAD"), ("branch", "lane/foo")):
+        if run_vcs(PUSHFEAT, *args).returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: PUSHFEAT needs git %s" % " ".join(args))
 
     # The fork names its record branch in the extras file, as lint/layout.py reads it (key record-branch).
     write(os.path.join(RECFORK, ".claude", "layout-extras.json"),
@@ -2118,7 +2256,9 @@ def _build_links():
 
 
 build_fixtures()
+_start_ghdev_check()
 _mark("build_fixtures: eager config, fake gh writes, GHNONE and the link probe")
+beat("eager fixtures at import")
 
 # Each builder runs the first time a case names one of its paths (see lazy_fixture). A builder's
 # list is every path it creates, and the config folders that point into a repo are listed with it,
@@ -2127,7 +2267,8 @@ lazy_fixture([CTXREPO], _build_ctxrepo)
 lazy_fixture([CURREPO], _build_currepo)
 lazy_fixture([GHDEV], _build_ghdev)
 lazy_fixture([GITMAIN, GITWT, AGENTWT, FARWT, SYMWT, DECOYMAIN], _build_gitmain)
-lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT], _build_subject)
+lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT, SUBJSTAGED],
+             _build_subject)
 lazy_fixture([PRIVREPO], _build_privrepo)
 lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, PTRNOORIGIN,
               PTRNOORIGINCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
@@ -2165,6 +2306,7 @@ def build_trap_fixtures():
 
 build_trap_fixtures()
 _mark("build_trap_fixtures, DOTDOTWT and SYMWT")
+beat("trap fixtures at import")
 
 CFG_SETTINGS = slash(os.path.join(CFG, "settings.json"))
 CFG_CLAUDEMD = slash(os.path.join(CFG, "CLAUDE.md"))
@@ -2234,20 +2376,19 @@ sh("stash: branch consumes the entry it builds from", VCS + " stash branch lane"
 sh("reset: throws the tree away", VCS + " reset --hard origin/main", "deny", "shared-tree",
    cwd=NOGIT)
 sh("reset: --hard with no argument", VCS + " reset --hard", "deny", "shared-tree", cwd=NOGIT)
-# A bare reset, and every flag except `--hard`, leaves the working tree alone, or aborts rather
-# than overwrite a local change (MEASURED against a real uncommitted change, 2026-09-17: `--keep`
-# and `--merge` both stopped with "Entry not up to date. Cannot merge." and the change survived).
-# Only `--hard` rewrites the tree unconditionally, so it alone stays denied.
+# A bare reset, `--soft` and `--mixed` leave the working tree alone, and `--hard` rewrites it.
+# `--merge` rewrites it too: it reverts a staged edit and deletes a staged new file. `--keep` and
+# `--merge` both move the branch at another commit, so they take `--hard`'s verdict.
 sh("reset: a plain reset only unstages, the working tree is untouched", VCS + " reset HEAD~1",
    "allow", cwd=NOGIT)
 sh("reset: a bare reset with no argument", VCS + " reset", "allow", cwd=NOGIT)
 sh("reset: an explicit mixed reset", VCS + " reset --mixed HEAD~1", "allow", cwd=NOGIT)
 sh("reset: a soft reset moves the branch and touches nothing else", VCS + " reset --soft HEAD~1",
    "allow", cwd=NOGIT)
-sh("reset: --keep aborts rather than overwrite a local change", VCS + " reset --keep HEAD~1",
-   "allow", cwd=NOGIT)
-sh("reset: --merge aborts rather than overwrite a local change", VCS + " reset --merge HEAD~1",
-   "allow", cwd=NOGIT)
+sh("reset: --keep at another commit refuses where there is no git tree",
+   VCS + " reset --keep HEAD~1", "deny", "shared-tree", cwd=NOGIT)
+sh("reset: --merge at another commit refuses where there is no git tree",
+   VCS + " reset --merge HEAD~1", "deny", "shared-tree", cwd=NOGIT)
 sh("reset: a reset naming a path only touches the index",
    VCS + " reset -- app/src/50_engine.js", "allow", cwd=NOGIT)
 sh("reset: a reset at a commit naming a path only touches the index",
@@ -2329,6 +2470,31 @@ sh("subject: a hard reset at a raw sha in a clean worktree asks",
    cwd=SUBJCLEANWT)
 sh("subject: a quiet hard reset at HEAD is still a pass in a clean tree",
    VCS + " reset -q --hard HEAD", "allow", cwd=SUBJCLEAN)
+# THE `--merge` AND `--keep` FORMS TAKE `--hard`'s VERDICT. Each form has its own deny or ask line,
+# so dropping either flag alone turns a line red. SUBJSTAGED holds a staged edit and a staged new
+# file, so any change denies.
+sh("reset: --merge at HEAD over a staged edit and a staged new file refuses",
+   VCS + " reset --merge HEAD", "deny", "shared-tree", cwd=SUBJSTAGED)
+sh("reset: a bare --merge over a staged edit refuses", VCS + " reset --merge", "deny",
+   "shared-tree", cwd=SUBJSTAGED)
+sh("reset: --merge at HEAD in a clean tree takes nothing", VCS + " reset --merge HEAD", "allow",
+   cwd=SUBJCLEAN)
+sh("reset: --keep at HEAD in a clean tree takes nothing", VCS + " reset --keep HEAD", "allow",
+   cwd=SUBJCLEAN)
+sh("reset: --keep at another commit moves the branch, so a shared checkout refuses",
+   VCS + " reset --keep HEAD~1", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("reset: --keep at another commit asks in a clean worktree", VCS + " reset --keep HEAD~1",
+   "ask", "shared-tree", cwd=SUBJCLEANWT)
+sh("reset: --merge at another commit asks in a clean worktree", VCS + " reset --merge HEAD~1",
+   "ask", "shared-tree", cwd=SUBJCLEANWT)
+sh("reset: a flag after the commit still counts, --merge refuses", VCS + " reset HEAD~1 --merge",
+   "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("reset: --merge aimed at a dirty checkout with -C refuses",
+   VCS + " -C " + slash(SUBJSTAGED) + " reset --merge", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("reset: an echo that quotes a merge reset is not a call", 'echo "git reset --merge"', "allow",
+   cwd=SUBJSTAGED)
+sh("reset: a soft reset over a staged edit stays allowed", VCS + " reset --soft HEAD~1", "allow",
+   cwd=SUBJSTAGED)
 sh("subject: setting aside a clean tree takes nothing", VCS + " stash push -u -m lane", "allow",
    cwd=SUBJCLEAN)
 sh("subject: setting aside real uncommitted work still denies", VCS + " stash push -u -m lane",
@@ -2986,8 +3152,9 @@ sh("worktree: a stash push in a dirty worktree denies, the stack is clone-wide",
 sh("worktree: stash save in a dirty worktree denies, the stack is clone-wide",
    VCS + " stash save lane", "deny", "shared-tree", cwd=GITWT)
 
-# THE TABLE'S ALLOW ROWS, checked in a linked worktree. A read, a reset that keeps the tree, or a
-# restore of one staged file is allowed whichever tree the call runs in.
+# THE TABLE'S ROWS, checked in a linked worktree. A read, a reset that keeps the tree, or a
+# restore of one staged file is allowed whichever tree the call runs in. A reset that moves the
+# branch to another commit asks here, as `--hard` does.
 sh("stash: list allows in the worktree", VCS + " stash list", "allow", cwd=GITWT)
 sh("stash: show allows in the worktree", VCS + " stash show", "allow", cwd=GITWT)
 sh("stash: apply over an empty stack allows in the worktree", VCS + " stash apply", "allow",
@@ -2996,8 +3163,10 @@ sh("stash: pop over an empty stack allows in the worktree", VCS + " stash pop", 
    cwd=GITWT)
 sh("reset: a plain reset allows in the worktree", VCS + " reset HEAD~1", "allow", cwd=GITWT)
 sh("reset: --soft allows in the worktree", VCS + " reset --soft HEAD~1", "allow", cwd=GITWT)
-sh("reset: --keep allows in the worktree", VCS + " reset --keep HEAD~1", "allow", cwd=GITWT)
-sh("reset: --merge allows in the worktree", VCS + " reset --merge HEAD~1", "allow", cwd=GITWT)
+sh("reset: --keep at another commit asks in a dirty linked worktree",
+   VCS + " reset --keep HEAD~1", "ask", "shared-tree", cwd=GITWT)
+sh("reset: --merge at another commit asks in a dirty linked worktree",
+   VCS + " reset --merge HEAD~1", "ask", "shared-tree", cwd=GITWT)
 sh("reset: naming a path allows in the worktree", VCS + " reset -- f.txt", "allow", cwd=GITWT)
 sh("restore: --staged alone allows in the worktree", VCS + " restore --staged f.txt", "allow",
    cwd=GITWT)
@@ -3118,6 +3287,48 @@ for _name, _command in (
     ("a lone apostrophe on the line before status", "echo don't\n" + VCS + " status"),
 ):
     sh("guard-command-position: pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT)
+
+# SUBSTITUTION. The shell runs a command inside `$( )` or backticks, in any word, assignment, double-quoted
+# text, commit message or unquoted heredoc body, so each form denies the reset as the plain reset does.
+for _name, _command in (
+    ("an assignment from a dollar paren", "x=$(" + VCS + " reset --hard)"),
+    ("a dollar paren in an echo", "echo $(" + VCS + " reset --hard)"),
+    ("backticks in an echo", "echo `" + VCS + " reset --hard`"),
+    ("backticks in an assignment", "x=`" + VCS + " reset --hard`"),
+    ("a dollar paren in double quotes", 'echo "$(' + VCS + ' reset --hard)"'),
+    ("a dollar paren in a commit message", VCS + ' commit -m "note: $(' + VCS + ' reset --hard)"'),
+    ("a dollar paren after a hash in double quotes", 'echo "# $(' + VCS + ' reset --hard)"'),
+    ("a dollar paren on line 2 of a multi-line double-quoted text",
+     'echo "first line\n$(' + VCS + ' reset --hard)\nlast line"'),
+    ("a dollar paren in an unquoted heredoc body", "cat <<EOF\n$(" + VCS + " reset --hard)\nEOF"),
+):
+    sh("substitution: shared tree, %s denies" % _name, _command, "deny", "shared-tree", cwd=NOGIT)
+# ALLOW controls: a quoted or escaped `$(` is text, a quoted heredoc body is text, and a commit message
+# that names a reset is text. A reader that judges inner text naively would deny each of these.
+for _name, _command in (
+    ("single quotes hold a dollar paren", "echo '$(" + VCS + " reset --hard)'"),
+    ("an escaped dollar sign", "echo \\$(" + VCS + " reset --hard)"),
+    ("single quotes hold a hash and a dollar paren", "echo '# $(" + VCS + " reset --hard)'"),
+    ("a quoted heredoc body holds a dollar paren", "cat <<'EOF'\n$(" + VCS + " reset --hard)\nEOF"),
+    ("a commit message from a quoted heredoc names a reset",
+     VCS + ' commit -m "$(cat <<\'EOF\'\nfix: never run ' + VCS + ' reset --hard here\nEOF\n)"'),
+    ("a commit message in double quotes names a reset", VCS + ' commit -m "never run ' + VCS + ' reset --hard"'),
+):
+    sh("substitution: shared tree, %s allowed" % _name, _command, "allow", cwd=NOGIT)
+# HASH. An unquoted `#` opens a comment only at a word start. After a letter, a slash, a brace, a dollar
+# sign or an escaped space it is text, so the `$( )` that follows still runs. A reader that takes every
+# `#` as a comment lets each of these through.
+for _name, _command in (
+    ("a hash in a dollar brace array length", "echo ${#arr[@]} $(" + VCS + " reset --hard)"),
+    ("a hash after a letter", "echo a#$(" + VCS + " reset --hard)"),
+    ("a dollar hash", "echo $# $(" + VCS + " reset --hard)"),
+    ("a hash in a URL fragment", "curl https://x/#$(" + VCS + " reset --hard)"),
+    ("an escaped space before a hash", "echo a\\ #$(" + VCS + " reset --hard)"),
+):
+    sh("substitution: shared tree, %s denies" % _name, _command, "deny", "shared-tree", cwd=NOGIT)
+# ALLOW control: a hash at a word start is a real comment, so the `$( )` after it is text.
+sh("substitution: shared tree, a hash at a word start allowed", "echo hi #$(" + VCS + " reset --hard)",
+   "allow", cwd=NOGIT)
 
 
 # ============================================================ 1. branch delete / worktree remove/prune
@@ -3632,7 +3843,7 @@ sh("pointer: no global rules file at all fires nothing",
 # =========================================================================== 1c. hand-made worktree
 FAMILY = "hand-made-worktree"
 #
-# A lane tree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool
+# A worktree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool
 # (debt agents-write-main-clone; decision predicate-is-the-act). The act refused is a real
 # `git worktree add` whose NEW TREE path resolves outside `<primary>/.claude/worktrees/`. The
 # primary is the one of the repo the call acts on. A repo that sits under the guard's temp folder is
@@ -3765,6 +3976,9 @@ def hand_made_refusal_text_case():
     return True, "holds 'Rule (hand-made worktree)', names isolation, EnterWorktree, its shape and the layer"
 
 
+POINTER_OWN_WORKTREE_HINT = "If you already have a worktree, run `git -C <that worktree> ...`"
+
+
 def pointer_remedy_names_enter_worktree_case():
     """The pointer refusal sends Claude to EnterWorktree, so it never contradicts the rule above."""
     got, reason = decide({
@@ -3778,7 +3992,11 @@ def pointer_remedy_names_enter_worktree_case():
         return False, "the pointer remedy does not name EnterWorktree: %s" % reason[:90]
     if ENTER_WORKTREE_SHAPE not in reason:
         return False, "the pointer remedy does not say %s: %s" % (ENTER_WORKTREE_SHAPE, reason[:90])
-    return True, "the pointer remedy names EnterWorktree, its call shape, and no 'worktree add'"
+    # An agent with no readable home record, whose shell directory reset out of its worktree, hits
+    # this rule rather than rule 0, so the remedy also aims git at the worktree it already has.
+    if POINTER_OWN_WORKTREE_HINT not in reason:
+        return False, "the pointer remedy does not say %r: %s" % (POINTER_OWN_WORKTREE_HINT, reason[-120:])
+    return True, "the pointer remedy names EnterWorktree, its call shape, the git -C hint, and no 'worktree add'"
 
 
 # =========================================================================== 2. machine-wide kills
@@ -3852,6 +4070,21 @@ else:
     skip_case("kill: pkill -P of a parent this session started passes", NO_PS)
     skip_case("kill: pkill -P of a parent this session did not start is refused", NO_PS)
     skip_case("kill: pkill -P of init is refused", NO_PS)
+# SUBSTITUTION, kill. A pkill inside `$( )` or backticks runs, so each form denies as the plain pkill does.
+for _name, _command in (
+    ("a dollar paren in double quotes", 'echo "$(pkill -f foo)"'),
+    ("a dollar paren in an echo", "echo $(pkill -f foo)"),
+    ("a dollar paren with spaces inside", "echo $( pkill -f foo )"),
+    ("an assignment from a dollar paren", "x=$(pkill -f foo)"),
+    ("backticks in an echo", "echo `pkill -f foo`"),
+):
+    sh("substitution: kill, %s denies" % _name, _command, "deny", "machine-wide-kill", cwd=NOGIT)
+# ALLOW controls: a hash opens a comment, so the text after it runs nothing, and an unclosed single
+# quote makes bash refuse to parse the line, so it runs nothing.
+sh("substitution: kill, a dollar paren after a hash comment allowed", "echo hi # $(pkill -f foo)",
+   "allow", cwd=NOGIT)
+sh("substitution: kill, a dollar paren after an unclosed quote allowed", "echo Don't $(pkill -f foo)",
+   "allow", cwd=NOGIT)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: a pid this session did not start", "kill %d" % FOREIGN, "deny", "machine-wide-kill",
        cwd=NOGIT, carries="did not start")
@@ -5329,6 +5562,60 @@ sh("narrate: tail of a file, no pipe", "tail -n 5 notes.txt", "allow", cwd=NOGIT
 sh("narrate: merge --confirm named in a quoted argument runs nothing",
    "echo 'merge 12 --confirm' | tail -1", "allow", cwd=NOGIT)
 
+# --- a pipe out of a verdict stage (extends the live-stream rule)
+#
+# verdict prints its FAIL line first, and a pipe cuts it off. A pipeline's exit is its last stage's,
+# so `verdict CMD | tail` reads tail's exit and a red run reads 0. Any pipe out of verdict is refused,
+# whatever the filter. A verdict that is the last stage has no pipe out of it, so it is allowed.
+VERDICT_PIPE = "verdict-pipe"
+
+
+def verdict_pipe(name, command, expected):
+    """One case of the verdict-pipe rule. A deny names the rule; an allow has no reason to name it."""
+    sh("verdict-pipe: " + name, command, expected, VERDICT_PIPE if expected == "deny" else None,
+       cwd=NOGIT)
+
+
+for _name, _command in (
+    ("a bare verdict piped to tail", "verdict false | tail"),
+    ("stderr piped to grep", "verdict false 2>&1 | grep x"),
+    ("a pipe into tee", "verdict false | tee out"),
+    ("the script run by path, piped to tail", "~/.claude/bin/verdict pytest | tail -5"),
+    ("a variable ahead of verdict, piped to head", "VERDICT_LOG=/tmp/x verdict false | head"),
+    ("a cd ahead of verdict, piped to tail", "cd x && verdict false | tail"),
+    ("a pipe that takes stderr too, |&", "verdict false |& tail"),
+    ("the repo's runner form, piped to tail", "python bin/verdict pytest | tail -5"),
+    ("a timeout ahead of verdict, piped to tail", "timeout 600 verdict pytest | tail -5"),
+    ("a lone apostrophe ahead of it", "echo don't; verdict false | tail"),
+    ("a # inside quotes ahead of it", 'echo "a # b"; verdict false | tail'),
+    ("a multi-line quote ahead of it", 'echo "first line\nsecond line"\nverdict false | tail'),
+    ("a pipe at a line end, then tail", "verdict x |\ntail -5"),
+    ("a pipe in a command substitution, to tail", "x=$(verdict pytest | tail -5)"),
+    ("a pipe in a double-quoted substitution, to tail", 'echo "$(verdict x | tail)"'),
+    ("a pipe in bash -c, to tail", "bash -c 'verdict x | tail'"),
+    ("a pipe in sh -c, to head", 'sh -c "verdict x | head"'),
+    ("the .cmd runner, piped to tail", "verdict.cmd pytest | tail -5"),
+):
+    verdict_pipe(_name, _command, "deny")
+for _name, _command in (
+    ("a bare verdict", "verdict false"),
+    ("verdict then a second command, &&", "verdict x && y"),
+    ("verdict then echo, ||", "verdict x || echo red"),
+    ("output redirected to a file", "verdict x > out"),
+    ("a quoted pipe in verdict's own argument", "verdict grep 'a|b' f"),
+    ("a quoted script in verdict's own argument", "verdict bash -c 'a | b'"),
+    ("grep names verdict, pipe out of grep", "grep verdict f | tail"),
+    ("echo names verdict, pipe out of echo", "echo verdict | cat"),
+    ("verdict last in a pipeline", "cat f | verdict pytest"),
+    ("the whole pipe quoted as text", 'echo "verdict false | tail"'),
+    ("a pipe inside a comment", "verdict false # don't | tail"),
+    ("command -v names verdict, piped to head", "command -v verdict | head -1"),
+    ("type names verdict, piped to head", "type verdict | head -1"),
+    ("a substitution that runs verdict, no pipe", "x=$(verdict pytest)"),
+    ("bash -c runs verdict, no pipe", "bash -c 'verdict x'"),
+):
+    verdict_pipe(_name, _command, "allow")
+
 # --- ln -s onto a directory that is already there
 sh("ln: -s over a real directory nests the link inside it",
    "ln -s /opt/tool/realdir realdir", "deny", "ln-over-directory", cwd=TRAPLN)
@@ -5602,6 +5889,227 @@ for _label, _command in (
         add("ci-wait: gh run watch named in %s is data, allowed%s"
             % (_label, " under run_in_background" if _bg else ""), "allow", cwd=NOGIT,
             command=_command, **({"run_in_background": True} if _bg else {}))
+
+
+# ------------------------------------------------------------------ wait-until: a wait for a clock time
+#
+# A session waits until a clock time, then runs one command. Under run_in_background a loop may wait on the
+# clock only when its one test orders `date` output against a literal time, in the direction that turns
+# false at that time: `until` with `>`, `-ge` or `-gt`, or `while` with `<`, `-lt` or `-le`. Such a loop
+# ends at that time, so it is a deadline and not a wait with no end. Equality, a second test, a second
+# loop, a poll of a file and the other direction never reach the time, so each stays refused. A pause of
+# 25 s or more is allowed under run_in_background only when a command follows it. The one helper for a
+# wait on a time is `bin/wait-until TIME [--timeout SECS]` (its own cases: lint/test_wait_until.py).
+WAIT_UNTIL_TIME = "2026-11-06T22:48:00Z"
+WAIT_UNTIL_CLOCK_LOOP = (r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ]; '
+                         r'do sleep 15; done; node tool.mjs')
+
+# Allowed under run_in_background: a pause of 25 s or more when a command follows it, and a loop whose test
+# orders the clock against a literal in the direction that ends it. A quote, a `#` or a line break ahead of a
+# loop is text, so the scan still finds the loop.
+add("wait-until: a pause of 600 s, then one command, is allowed under run_in_background", "allow",
+    cwd=NOGIT, command="sleep 600; node tool.mjs", run_in_background=True)
+add("wait-until: a clock loop, then one command, is allowed under run_in_background", "allow",
+    cwd=NOGIT, command=WAIT_UNTIL_CLOCK_LOOP, run_in_background=True)
+add("wait-until: the same clock loop split over lines is allowed under run_in_background", "allow",
+    cwd=NOGIT, run_in_background=True,
+    command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \\> "2026-11-06T22:48:00" ]\ndo sleep 15; done\nnode tool.mjs')
+add("wait-until: a quote and a # ahead of the clock loop are text, and the loop is allowed under run_in_background",
+    "allow", cwd=NOGIT, command='echo "it\'s # fine"; ' + WAIT_UNTIL_CLOCK_LOOP, run_in_background=True)
+
+# Refused in these shapes, so a change to the clock rule cannot widen them: the clock loop in the foreground,
+# a pause in the foreground, two pauses, a loop with no clock bound, a loop that names the date only inside a
+# string, and gh run watch.
+sh("wait-until: the clock loop in the foreground stays refused", WAIT_UNTIL_CLOCK_LOOP, "deny", "waiter",
+   cwd=NOGIT)
+sh("wait-until: a 30 s pause in the foreground stays refused", "sleep 30", "deny", "waiter", cwd=NOGIT)
+add("wait-until: two pauses under run_in_background stay refused", "deny", "waiter", cwd=NOGIT,
+    command="sleep 5; sleep 5; node tool.mjs", run_in_background=True)
+add("wait-until: a loop with no clock bound stays refused under run_in_background", "deny", "waiter",
+    cwd=NOGIT, command="until grep -q x f; do sleep 15; done", run_in_background=True)
+add("wait-until: a loop that names the date only inside a string stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT, command='until grep -q "date" f; do sleep 15; done; node tool.mjs',
+    run_in_background=True)
+for _bg in (False, True):
+    add("wait-until: gh run watch 7 stays refused%s" % (" under run_in_background" if _bg else ""),
+        "deny", "waiter", cwd=NOGIT, command="gh run watch 7", **({"run_in_background": True} if _bg else {}))
+
+# Refused under run_in_background. Each shape looks like a clock wait and is not one. Its test does not end the
+# loop at the named time: the other direction ends it at once, equality rarely holds, a poll of a file names no
+# time, and an extra test adds a condition. Or a second loop follows, or a long pause has no command after it.
+# Each case covers one check in clock_loop or waiter_verdict.
+add("wait-until: a loop on a literal time with no date stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command="until [ -s 2026-11-06T22:48:00 ]; do sleep 15; done; cmd", run_in_background=True)
+add("wait-until: a loop on date with no literal time stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until [ "$(date +%s)" -gt "$X" ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop whose test has a && clause after it stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command=r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ] && true; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: two clock loops in one command stay refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command=(r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; '
+             r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-07T00:00:00" ]; do sleep 15; done; cmd'),
+    run_in_background=True)
+add("wait-until: a bare sleep of 600 s with nothing after it stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command="sleep 600", run_in_background=True)
+add("wait-until: a while loop that waits while the clock is later than a literal stays refused under "
+    "run_in_background", "deny", "waiter", cwd=NOGIT,
+    command='while [ "$(date +%s)" -gt 1700000000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop that tests the date for equality stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until [ "$(date +%F)" = "2026-11-06" ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a loop that polls a file for a dated name stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until grep -q "$(date +%F)" 2026-11-07.log; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a clock loop with an extra file test stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until [ "$(date +%s)" -gt 1700000000 -a -f done.flag ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a clock loop then a second loop with no pause stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command=r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; '
+            r'until [ -f x ]; do :; done; cmd',
+    run_in_background=True)
+# A read of another command is no clock read, even with a +%s format, so its order against an epoch never
+# reaches a clock time.
+add("wait-until: a loop on a read of another command with a +%s format stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT, command='until [ "$(clock +%s)" -gt 1762470000 ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a loop that tests the clock for equality with a full ISO time stays refused under "
+    "run_in_background", "deny", "waiter", cwd=NOGIT,
+    command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" = "2026-11-06T22:48:00" ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a loop written as an arithmetic test stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until (( $(date +%s) -gt 1762470000 )); do sleep 15; done; cmd',
+    run_in_background=True)
+# Each read and literal disagree in kind, so the test never turns and the loop never ends: `-gt` and `-ge` on a
+# text read are an error, not an order; a text order of epoch digits against an ISO time puts the digits first,
+# so `\>` never holds and `\<` always does.
+add("wait-until: a numeric order on an ISO date-time read stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" -gt "2026-11-06T22:48:00" ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a numeric order with -ge on an ISO date-time read stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" -ge "2026-11-06T22:48:00" ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: an ISO date-time read ordered numerically against an epoch stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" -ge 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a text order of an epoch read against an ISO time stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command=r'until [ "$(date +%s)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a [[ ]] text order of an epoch read against an ISO time stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command='until [[ "$(date +%s)" > "2026-11-06T22:48:00" ]]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a while text order of an epoch read below an ISO time stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command=r'while [ "$(date +%s)" \< "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
+# A `for` loop is a loop of its own, so the command has two loops and the clock loop is not its one loop.
+add("wait-until: a clock loop with a command body, then a for loop with pauses, stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command='until [ "$(date +%s)" -gt 1762470000 ]; do cmd; done; for i in 1 2; do sleep 15; done',
+    run_in_background=True)
+# A numeric order needs an epoch read and an epoch literal; a text order needs an ISO read and an ISO literal.
+# Each pairing here crosses the two, so the test never turns and the loop never ends.
+add("wait-until: a numeric order on a +%s read against an ISO date-time stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command='until [ "$(date +%s)" -gt "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a text order on an ISO read against an epoch stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command=r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+# A read whose time is not the clock reaches no clock time, whatever its format: a fixed date, a file's time, or a
+# text format that is not an ISO date-time.
+add("wait-until: a loop on a fixed date read with -d stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command='until [ "$(date -d 2026-01-01 +%s)" -gt 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop on a fixed date read with --date stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command='until [ "$(date --date=2026-01-01 +%s)" -gt 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop on a file's time read with -r stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command='until [ "$(date -r stamp.txt +%s)" -gt 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop on a text format that is not an ISO date-time stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command=r'until [ "$(date +%m-%d)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
+# Allowed under run_in_background: a numeric order of an epoch read, and a while loop that waits while the clock is
+# earlier than a literal. The order and the read agree in kind, so the test turns at the time it names.
+add("wait-until: a clock loop on an epoch that is reached is allowed under run_in_background", "allow",
+    cwd=NOGIT, command='until [ "$(date +%s)" -ge 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a while loop that waits while the clock is earlier than a literal is allowed under "
+    "run_in_background", "allow", cwd=NOGIT,
+    command=r'while [ "$(date -u +%FT%T)" \< "2026-11-06T22:48:00" ]; do sleep 15; done; cmd',
+    run_in_background=True)
+# The ISO formats a session writes for a text order, with and without the zone suffix and the -u flag.
+add("wait-until: a clock loop on a read with +%FT%TZ is allowed under run_in_background", "allow", cwd=NOGIT,
+    command=r'until [ "$(date -u +%FT%TZ)" \> "2026-11-06T22:48:00Z" ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a clock loop on a read with +%FT%T and no -u is allowed under run_in_background", "allow", cwd=NOGIT,
+    command=r'until [ "$(date +%FT%T)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
+
+# The remedy of a pause names the time form in backticks; the remedy check below reads those forms.
+sh("wait-until: the remedy of a pause names the time form", "sleep 30", "deny", "waiter", cwd=NOGIT,
+   carries=("`wait-until",))
+
+# The helper is never refused, in the foreground or under run_in_background. Nothing judges it yet, so these
+# pin that a waiter rule never refuses the one allowed form. A command after the helper is allowed too.
+for _command in ("wait-until %s" % WAIT_UNTIL_TIME, "wait-until %s --timeout 500" % WAIT_UNTIL_TIME):
+    sh("wait-until: %s is allowed in the foreground" % _command, _command, "allow", cwd=NOGIT)
+    add("wait-until: %s is allowed under run_in_background" % _command, "allow", cwd=NOGIT,
+        command=_command, run_in_background=True)
+add("wait-until: the helper, then one command, is allowed under run_in_background", "allow", cwd=NOGIT,
+    command="wait-until %s; node tool.mjs" % WAIT_UNTIL_TIME, run_in_background=True)
+
+# THE REMEDY CHECK. Every command form that a waiter-family remedy names in backticks is allowed, in the
+# foreground and under run_in_background: the guard must not refuse the advice it gives. The remedies are read
+# from guard_stream, the one home of them. A form is tried with its optional `[...]` part and without it.
+WAIT_SAMPLES = {"PID": "12345", "SECS": "500", "TIME": WAIT_UNTIL_TIME, "T": WAIT_UNTIL_TIME}
+REMEDY_CONSTANTS = ("WAITER_REASON", "LIVE_STREAM_REASON", "PATTERN_POLLER_REASON")
+
+
+def remedy_forms(reason):
+    """The command forms a remedy names in backticks, each placeholder filled from WAIT_SAMPLES. A placeholder
+    with no sample is kept as `<NAME>`, so the check names it."""
+    forms = []
+    for span in re.findall(r"`([^`]+)`", reason):
+        for form in (re.sub(r"[\[\]]", "", span), re.sub(r"\s*\[[^\]]*\]", "", span)):
+            words = [WAIT_SAMPLES.get(w, "<%s>" % w) if re.fullmatch(r"[A-Z][A-Z_]*", w) else w
+                     for w in form.split()]
+            forms.append(" ".join(words))
+    return list(dict.fromkeys(forms))
+
+
+def remedy_refusal(form):
+    """'' when the guard allows `form` in the foreground and under run_in_background, else what it refused."""
+    for background in (False, True):
+        tool_input = {"command": form}
+        if background:
+            tool_input["run_in_background"] = True
+        got, reason = decide({"raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
+                              "env_path": None, "tool_input": tool_input})
+        if got != "allow":
+            return "%s%s is %s (%s)" % (form, " under run_in_background" if background else "", got, reason[:70])
+    return ""
+
+
+def remedy_check(constant):
+    """A log check: the remedy named by `constant` names at least one command form, every form is a placeholder
+    the check can fill, and the guard allows every form."""
+    def check():
+        import guard_stream  # the one home of the waiter-family remedies (hooks/guard_stream.py)
+        reason = getattr(guard_stream, constant, None)
+        if not isinstance(reason, str):
+            return False, "guard_stream has no %s to read the remedy from" % constant
+        forms = remedy_forms(reason)
+        if not forms:
+            return False, "%s names no command form in backticks, so the check reads nothing" % constant
+        unfilled = [f for f in forms if "<" in f]
+        if unfilled:
+            return False, "%s names a placeholder the check cannot fill: %s" % (constant, unfilled[0])
+        refused = [m for m in (remedy_refusal(f) for f in forms) if m]
+        if refused:
+            return False, "%s names a form the guard refuses: %s" % (constant, refused[0])
+        return True, "%s names %d command forms, and the guard allows each" % (constant, len(forms))
+    return check
 
 
 # =========================================================================== background end condition
@@ -6940,6 +7448,61 @@ sh("false alarm: a lease to main-fix", VCS + " push --force-with-lease --force-i
 sh("push: a force push inside a loop's do-block still counts",
    "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY)
+# SUBSTITUTION, push. A forced push inside `$( )` or double quotes runs, so it takes the verdict and the
+# rule of the plain forced push to the same destination from the same checkout (PUSH_SUBST_PLAIN below).
+PUSH_SUBST_FORCE = VCS + " push --force origin main"
+PUSH_SUBST_VERDICT = "ask"   # the plain forced push's verdict, pinned by the control case below
+sh("substitution: push, the plain forced push to main from a feature branch", PUSH_SUBST_FORCE,
+   PUSH_SUBST_VERDICT, "force-push", cwd=PUSHFEAT)
+sh("substitution: push, an assignment from a dollar paren with a forced push",
+   "x=$(" + PUSH_SUBST_FORCE + ")", PUSH_SUBST_VERDICT, "force-push", cwd=PUSHFEAT)
+sh("substitution: push, a dollar paren in double quotes with a forced push",
+   'echo "$(' + PUSH_SUBST_FORCE + ')"', PUSH_SUBST_VERDICT, "force-push", cwd=PUSHFEAT)
+
+# ASK-STEP-HIDDEN (debt ask-step-hidden-in-script). A force push one shell step down, in a substitution,
+# a quoted script or a commit message's substitution, still runs. Each form denies as the plain form does.
+# The controls allow a push that is only quoted, commented or written into a heredoc body: none of them runs.
+FORCE = VCS + " push --force"
+HIDDEN_PUSH = FORCE + " origin feat"
+sh("ask-step-hidden: control, a plain force push denies",
+   HIDDEN_PUSH, "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push inside bash -c denies",
+   "bash -c '" + HIDDEN_PUSH + "'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push inside sh -c denies",
+   "sh -c '" + HIDDEN_PUSH + "'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push inside a quoted eval denies",
+   "eval '" + HIDDEN_PUSH + "'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push in a glued command substitution denies",
+   "x=$(" + HIDDEN_PUSH + ")", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push in glued backticks denies",
+   "x=`" + HIDDEN_PUSH + "`", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push in a commit message's substitution denies",
+   VCS + ' commit -m "n $(' + HIDDEN_PUSH + ')"', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push on the second line of a multi-line bash -c denies",
+   "bash -c 'echo ready\n" + HIDDEN_PUSH + "'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a comment opener and a /* in quotes do not hide a bash -c force push, denies",
+   "echo 'a // b /* c # d'; bash -c '" + HIDDEN_PUSH + "'", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY)
+sh("ask-step-hidden: a lone apostrophe in double quotes does not hide a bash -c force push, denies",
+   "echo \"it's\"; bash -c '" + HIDDEN_PUSH + "'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: control, a commit message single-quoting a substitution that names a force push allows",
+   VCS + " commit -m 'n $(" + FORCE + ")'", "allow", cwd=PUSHFEAT)
+sh("ask-step-hidden: control, a comment naming a bash -c force push allows",
+   "# bash -c '" + FORCE + "'", "allow", cwd=PUSHFEAT)
+sh("ask-step-hidden: control, a commit whose heredoc body names a bash -c force push allows",
+   VCS + " commit -F - <<'EOF'\nbash -c '" + FORCE + "'\nEOF", "allow", cwd=PUSHFEAT)
+sh("ask-step-hidden: control, an echo that quotes a bash -c force push allows",
+   'echo "use bash -c \'' + FORCE + '\' never"', "allow", cwd=PUSHFEAT)
+# ASK-STEP-HIDDEN, inside a wrapper (debt ask-step-hidden-in-script). A `bash -c` or `sh -c` script runs its
+# own `$( )` and backticks, so a force push there still runs and denies. A heredoc body in a wrapper is data.
+sh("ask-step-hidden: a force push in a bash -c substitution denies",
+   "bash -c 'x=$(" + HIDDEN_PUSH + ")'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push in bash -c glued backticks denies",
+   "bash -c 'x=`" + HIDDEN_PUSH + "`'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push in a sh -c double-quoted substitution denies",
+   "sh -c 'echo \"$(" + HIDDEN_PUSH + ")\"'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: control, a heredoc body naming a force push inside bash -c allows",
+   "bash -c 'cat <<EOF\n" + HIDDEN_PUSH + "\nEOF'", "allow", cwd=PUSHFEAT)
 
 # ASK, owner rulings 206 a. An implied destination (a bare push, HEAD, @, or a
 # colon-less refspec naming the current branch) that lands off the branch's upstream asks, unless the push
@@ -7225,6 +7788,62 @@ for _name, _command in (
     ("a folder, long flags", "rm --recursive --force build/"),
 ):
     sh("delete: " + _name + " is allowed", _command, "allow", cwd=NOGIT)
+# THE SPLIT FLAGS IN QUOTED TEXT. `rm -r -f .` and `del -Recurse -Force C:/` in an echo are text, as
+# `rm -rf .` already is. A shell that runs the same text still refuses it.
+sh("delete: an echo of rm with split flags at the working folder calls nothing",
+   'echo "rm -r -f ."', "allow", cwd=NOGIT)
+sh("delete: an echo of the PowerShell delete at a drive root calls nothing",
+   'echo "del -Recurse -Force C:/"', "allow", cwd=NOGIT)
+sh("delete: sh -c of rm with split flags at the working folder still denies",
+   'sh -c "rm -rf ."', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: bash -c of rm with split flags at the working folder still denies",
+   'bash -c "rm -r -f ."', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: eval of rm at the working folder still denies",
+   'eval "rm -rf ."', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: pwsh -Command of a PowerShell delete at a drive root still denies",
+   'pwsh -Command "Remove-Item -Recurse -Force C:/"', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: pwsh -Command of a PowerShell delete at a drive root with no -Force denies",
+   'pwsh -Command "Remove-Item -Recurse C:/"', "deny", "destructive-delete", cwd=NOGIT)
+# THE SPLIT-FLAG DELETE IN A WRAPPER'S STRING. parallel, script -qc, watch and runuser each run their quoted
+# text as a shell command, so `rm -r -f .` inside the quotes deletes the working folder, as bash -c's does.
+for _name, _command in (
+    ("parallel", 'parallel "rm -r -f ." ::: a'),
+    ("script -qc", 'script -qc "rm -r -f ." /dev/null'),
+    ("watch", 'watch "rm -r -f ."'),
+    ("runuser -c", 'runuser -c "rm -r -f ." u'),
+):
+    sh("delete: the split-flag rm at the working folder behind " + _name + " denies", _command, "deny",
+       "destructive-delete", cwd=NOGIT)
+# A single-quoted substitution is text, as the echo of the split-flag rm above is. It runs nothing.
+sh("delete: an echo of a single-quoted $(rm -r -f .) calls nothing",
+   "echo '$(rm -r -f .)'", "allow", cwd=NOGIT)
+# A LIVE SUBSTITUTION INSIDE DOUBLE QUOTES. `"$( )"` runs the command inside it, so a delete there is a
+# command, not text. The echo cases above stay allowed, since their delete is not inside `$( )`. A `#`, a
+# line break or a lone apostrophe around the substitution does not hide it.
+sh("delete: a live $(rm -r -f .) inside double quotes denies",
+   '''echo "$(rm -r -f .)"''', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a live $(Remove-Item -Recurse -Force C:/) inside double quotes denies",
+   '''echo "$(Remove-Item -Recurse -Force C:/)"''', "deny", "destructive-delete", tool="PowerShell",
+   cwd=NOGIT)
+sh("delete: a live $(rm -r -f .) after a # inside double quotes denies",
+   '''echo "# $(rm -r -f .)"''', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a live $(rm -r -f .) on a second line of a double quote denies",
+   'echo "first line\n$(rm -r -f .)\nlast line"', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a live $(rm -r -f .) after a lone apostrophe denies",
+   '''echo don't && echo "$(rm -r -f .)"''', "deny", "destructive-delete", cwd=NOGIT)
+# THE INDEX-ONLY FORM. `git rm --cached` removes a path from the index and leaves the working folder
+# alone, so `git rm -rf --cached .` deletes nothing on disk. The same words without `--cached` delete
+# every file under the working folder, and a chained delete still denies.
+sh("delete: git rm -rf --cached . touches the index only, and is allowed",
+   VCS + " rm -rf --cached .", "allow", cwd=NOGIT)
+sh("delete: git rm -r -f --cached . touches the index only, and is allowed",
+   VCS + " rm -r -f --cached .", "allow", cwd=NOGIT)
+sh("delete: git rm -rf . with no --cached still denies", VCS + " rm -rf .", "deny",
+   "destructive-delete", cwd=NOGIT)
+sh("delete: git rm -r -f . with no --cached still denies", VCS + " rm -r -f .", "deny",
+   "destructive-delete", cwd=NOGIT)
+sh("delete: git rm -rf --cached . chained with rm -rf . still denies",
+   VCS + " rm -rf --cached . && rm -rf .", "deny", "destructive-delete", cwd=NOGIT)
 
 # Each is a program that runs the real command: find -exec, su -c, a container exec, and flock.
 for _name, _command in (
@@ -7606,7 +8225,8 @@ def nm_case(name, command, expected, cwd, tool="Bash"):
         add(name, expected, tool=tool, cwd=cwd, windows=True, command=command)
 
 
-# THE INSTALLS. Each is refused in a linked folder, and each is allowed in a real folder and an absent one.
+# THE INSTALLS, and the commands that rewrite node_modules too: prune, dedupe, rebuild, link and audit fix.
+# Each is refused in a linked folder, and each is allowed in a real folder and an absent one.
 NM_INSTALLS = (
     ("npm ci", "Bash"), ("npm ci", "PowerShell"),
     ("npm install", "Bash"), ("npm install left-pad", "Bash"),
@@ -7614,6 +8234,8 @@ NM_INSTALLS = (
     ("npm add", "Bash"), ("npm add left-pad", "Bash"),
     ("npm uninstall", "Bash"), ("npm uninstall left-pad", "Bash"),
     ("npm update", "Bash"), ("npm update left-pad", "Bash"),
+    ("npm prune", "Bash"), ("npm dedupe", "Bash"), ("npm rebuild", "Bash"), ("npm link", "Bash"),
+    ("npm audit fix", "Bash"), ("npm audit --json fix", "Bash"),
 )
 # THE RECURSIVE DELETES inside node_modules. A bare `rm -rf node_modules` names the link itself, not a
 # file inside it, so it is not pinned here.
@@ -7638,8 +8260,36 @@ nm_case("linked-nm: cd into a real folder, then npm ci, is allowed, though the p
 nm_case("linked-nm: cd into a folder with no node_modules, then npm ci, is allowed",
         "cd " + slash(NMABSENT) + " && npm ci", "allow", NMLINKED)
 
+# THE PREFIX FLAG. `npm ci --prefix <dir>` installs into <dir>, so the folder the flag names is the one judged,
+# not the working folder. Each case is the other folder's answer: a real prefix from a linked folder is allowed,
+# and a linked prefix from a real folder is refused.
+nm_case("linked-nm: npm ci --prefix a real folder, run from a linked folder, is allowed",
+        "npm ci --prefix " + slash(NMREAL), "allow", NMLINKED)
+nm_case("linked-nm: npm ci --prefix a linked folder, run from a real folder, is refused",
+        "npm ci --prefix " + slash(NMLINKED), "deny", NMREAL)
+
+# THE PREFIX FLAG, UNRESOLVED AND REPEATED. A prefix the guard cannot name (a shell variable, a command substitution,
+# a home path) must not hide the working folder: the walk from it still decides, so a linked folder stays refused.
+# The other forms of the flag (`--prefix=dir`, a relative dir, a repeated flag) name the folder npm installs into.
+nm_case('linked-nm: npm ci --prefix "$PWD" from a linked folder is refused',
+        'npm ci --prefix "$PWD"', "deny", NMLINKED)
+nm_case('linked-nm: npm ci --prefix "$(git rev-parse --show-toplevel)" from a linked folder is refused',
+        'npm ci --prefix "$(git rev-parse --show-toplevel)"', "deny", NMLINKED)
+nm_case("linked-nm: npm ci --prefix ~/linked from a linked folder is refused",
+        "npm ci --prefix ~/linked", "deny", NMLINKED)
+nm_case("linked-nm: npm ci --prefix=<linked folder>, run from a real folder, is refused",
+        "npm ci --prefix=" + slash(NMLINKED), "deny", NMREAL)
+nm_case("linked-nm: npm ci --prefix=<real folder>, run from a linked folder, is allowed",
+        "npm ci --prefix=" + slash(NMREAL), "allow", NMLINKED)
+nm_case("linked-nm: npm ci --prefix ../nmlinked, relative, run from a real folder, is refused",
+        "npm ci --prefix ../nmlinked", "deny", NMREAL)
+nm_case("linked-nm: npm ci with a repeated --prefix whose last value is linked, from a real folder, is refused",
+        "npm ci --prefix " + slash(NMREAL) + " --prefix " + slash(NMLINKED), "deny", NMREAL)
+nm_case("linked-nm: npm ci with a repeated --prefix whose last value is real, from a linked folder, is allowed",
+        "npm ci --prefix " + slash(NMLINKED) + " --prefix " + slash(NMREAL), "allow", NMLINKED)
+
 # THE CONTROLS IN A LINKED FOLDER. Each is the job of a linked folder, and none is refused.
-for _command, _tool in (("npm run setup", "Bash"), ("npm run build", "Bash"), ("npm test", "Bash"),
+for _command, _tool in (("npm run setup", "Bash"),
                         ("rm node_modules", "Bash"), ("Remove-Item node_modules", "PowerShell")):
     nm_case("linked-nm: " + _command + " (" + _tool + ") in a linked folder is allowed",
             _command, "allow", NMLINKED, _tool)
@@ -7694,6 +8344,38 @@ nm_case("linked-nm: refuse npm --loglevel error ci (Bash) in a linked folder",
 nm_case("linked-nm: refuse npm --prefix . ci (Bash) in a linked folder",
         "npm --prefix . ci", "deny", NMLINKED)
 
+# THE OFF-LIST COMMANDS. The guard allows only the read-only commands it lists. Each of these is refused in a
+# linked folder: some rewrite node_modules, and the rest are not on the list. A real folder and a folder with
+# no node_modules allow each, since neither is a link.
+NM_OFF_LIST = (
+    "npm unlink x", "npm ddp", "npm rb", "npm ln x", "npm pru", "npm it", "npm install-test",
+    "npm install-ci-test", "npm sit", "npm edit x", "npm explore x", "npm init", "npm shrinkwrap",
+    "npm instal x", "npm -C . ci",
+)
+for _command in NM_OFF_LIST:
+    nm_case("linked-nm: refuse " + _command + " (Bash) in a linked folder", _command, "deny", NMLINKED)
+    nm_case("linked-nm: " + _command + " (Bash) in a real folder is allowed", _command, "allow", NMREAL)
+    nm_case("linked-nm: " + _command + " (Bash) in a folder with no node_modules is allowed",
+            _command, "allow", NMABSENT)
+
+# THE WORKSPACE FLAGS ON `npm version`. With a workspace flag, npm reifies the linked root, so the command
+# changes the install through the link. Without one it only rewrites package.json (a control below).
+NM_WORKSPACE_VERSION = (
+    "npm version patch -w a", "npm version patch --workspaces", "npm version patch -ws",
+    "npm version patch --workspace=a", "npm -w a version patch",
+)
+# THE DRY RUNS THAT STILL RUN INSTALL SCRIPTS. npm rebuild, rb and edit run install scripts even with
+# --dry-run, so a dry run is no no-change for them. `npm prune --dry-run` and `npm audit fix --dry-run`
+# stay allowed (a control below).
+NM_DRY_RUN_WRITERS = (
+    "npm rebuild --dry-run", "npm rb x --dry-run", "npm edit x --dry-run", "npm --dry-run rebuild",
+)
+for _command in NM_WORKSPACE_VERSION + NM_DRY_RUN_WRITERS:
+    nm_case("linked-nm: refuse " + _command + " (Bash) in a linked folder", _command, "deny", NMLINKED)
+    nm_case("linked-nm: " + _command + " (Bash) in a real folder is allowed", _command, "allow", NMREAL)
+    nm_case("linked-nm: " + _command + " (Bash) in a folder with no node_modules is allowed",
+            _command, "allow", NMABSENT)
+
 # THE FALSE-ALARM CONTROLS in a linked folder. None of these changes the linked install, so none is refused.
 nm_case("linked-nm: npm i -g x (Bash) in a linked folder is allowed, a global install",
         "npm i -g x", "allow", NMLINKED)
@@ -7703,6 +8385,17 @@ nm_case("linked-nm: npm ci --dry-run (Bash) in a linked folder is allowed",
         "npm ci --dry-run", "allow", NMLINKED)
 nm_case("linked-nm: npm ci in a quoted echo, in a linked folder, is allowed",
         'echo "npm ci"', "allow", NMLINKED)
+
+# THE READ-ONLY CONTROLS in a linked folder. Each runs a command on the read-only list or a dry run, or
+# names no command (bare `npm`, `npm -v`), so none is refused.
+NM_READ_ONLY = (
+    "npm", "npm -v", "npm ls", "npm list", "npm -C . ls", "npm view x", "npm outdated", "npm audit",
+    "npm audit signatures", "npm explain x", "npm fund", "npm exec -- tsc", "npm config get registry",
+    "npm help install", "npm prune --dry-run", "npm audit fix --dry-run", "npm version patch",
+    "npm rebuild --help", "npm run build", "npm test",
+)
+for _command in NM_READ_ONLY:
+    nm_case("linked-nm: " + _command + " (Bash) in a linked folder is allowed", _command, "allow", NMLINKED)
 
 # THE JUNCTION WITHOUT os.path.isjunction. Python 3.11, the CI interpreter, has no os.path.isjunction, so
 # the link test must read the junction itself. This case runs the guard with that function removed.
@@ -7909,6 +8602,386 @@ for runner in (
 
 sh("env: the loader flag is not a way to print the file", "cat --env-file=" + ENV, "deny",
    "env-file", cwd=NOGIT)
+
+# A runner handed the file may run a script file. Inline code (-e, --eval, -p, --print, a stdin
+# script) runs with the file's variables in scope and can print them, so each form denies. Only the
+# inline-code reason carries this fragment. The allow controls after the groups hold the script
+# arguments, the container's -e, and a stdin script with no inline code.
+INLINE_FRAGMENT = "not inline code"
+for _inline in (
+    "node --env-file=" + ENV + " -e \"console.log(process.env)\"",
+    "node --env-file=" + ENV + " --eval=\"console.log(process.env)\"",
+    "node --env-file=" + ENV + " -p process.env",
+    "node --env-file=" + ENV + " --print x",
+    "node --env-file=" + ENV + " -pe x",
+    "node -e x --env-file=" + ENV,
+    "node --env-file " + ENV + " --import tsx -e x",
+    "node --env-file=" + ENV + " -",
+    "cat s.js | node --env-file=" + ENV,
+    "bun --env-file=" + ENV + " -e x",
+    "bun --env-file=" + ENV + " --eval=x",
+    "bun --env-file=" + ENV + " -p process.env",
+    "bun --env-file=" + ENV + " --print=x",
+    "deno eval --env-file=" + ENV + " \"console.log(Deno.env.toObject())\"",
+):
+    sh("env: inline code under a runner given the file denies, " + _inline[:60], _inline,
+       "deny", "env-file", cwd=NOGIT, carries=INLINE_FRAGMENT)
+for _opener in ("<<'EOF'", "<<EOF"):
+    sh("env: a heredoc body run by a runner given the file denies, " + _opener,
+       "node --env-file=" + ENV + " " + _opener + "\nconsole.log(process.env)\nEOF", "deny",
+       "env-file", cwd=NOGIT, carries=INLINE_FRAGMENT)
+
+# A here-string, a heredoc whose delimiter has a space before it or a `<<-`, and a `<` redirect each
+# feed a runner its script on stdin. An option whose value is a word (--input-type, --experimental-
+# loader, bun's --preload) must not take that value for the script, or the `-e` after it runs.
+sh("env: a here-string feeds a runner its script, node --env-file=.env <<<",
+   "node --env-file=" + ENV + " <<< \"console.log(process.env)\"", "deny", "env-file",
+   cwd=NOGIT, carries=INLINE_FRAGMENT)
+sh("env: a heredoc with a space before its quoted delimiter, node --env-file=.env << 'EOF'",
+   "node --env-file=" + ENV + " << 'EOF'\nconsole.log(process.env)\nEOF", "deny", "env-file",
+   cwd=NOGIT, carries=INLINE_FRAGMENT)
+sh("env: a <<- heredoc with a space before its delimiter, node --env-file=.env <<- EOF",
+   "node --env-file=" + ENV + " <<- EOF\nconsole.log(process.env)\nEOF", "deny", "env-file",
+   cwd=NOGIT, carries=INLINE_FRAGMENT)
+sh("env: a < redirect feeds a runner its script, node --env-file=.env < s.js",
+   "node --env-file=" + ENV + " < s.js", "deny", "env-file", cwd=NOGIT, carries=INLINE_FRAGMENT)
+sh("env: --input-type takes a value, so the -e after it is inline code",
+   "node --env-file=" + ENV + " --input-type module -e \"x\"", "deny", "env-file", cwd=NOGIT,
+   carries=INLINE_FRAGMENT)
+sh("env: --experimental-loader takes a value, so the -e after it is inline code",
+   "node --env-file=" + ENV + " --experimental-loader x -e \"x\"", "deny", "env-file", cwd=NOGIT,
+   carries=INLINE_FRAGMENT)
+sh("env: bun --preload takes a value, so the -e after it is inline code",
+   "bun --env-file=" + ENV + " --preload x -e \"x\"", "deny", "env-file", cwd=NOGIT,
+   carries=INLINE_FRAGMENT)
+
+sh("env: a script's own -e argument is not inline code, node app.js -e x",
+   "node --env-file=" + ENV + " app.js -e x", "allow", cwd=NOGIT)
+sh("env: a script's own -p argument is not inline code, node app.js -p x",
+   "node --env-file=" + ENV + " app.js -p x", "allow", cwd=NOGIT)
+sh("env: a script's own --eval argument is not inline code, node app.js --eval=x",
+   "node --env-file=" + ENV + " app.js --eval=x", "allow", cwd=NOGIT)
+sh("env: a container's -e sets a variable, not inline code, docker run -e FOO=1",
+   "docker run --env-file=" + ENV + " -e FOO=1 image", "allow", cwd=NOGIT)
+sh("env: a file piped into a script, not a runner's stdin, cat data.txt | node app.js",
+   "cat data.txt | node --env-file=" + ENV + " app.js", "allow", cwd=NOGIT)
+sh("env: a heredoc fed to a script is text, node app.js <<'EOF'",
+   "node --env-file=" + ENV + " app.js <<'EOF'\nhello\nEOF", "allow", cwd=NOGIT)
+sh("env: a < redirect with a script word is input to the script, node app.js < input.txt",
+   "node --env-file=" + ENV + " app.js < input.txt", "allow", cwd=NOGIT)
+sh("env: --input-type takes a value and app.mjs is the script, not inline code",
+   "node --env-file=" + ENV + " --input-type module app.mjs", "allow", cwd=NOGIT)
+
+# A runner handed the file may run a child command that prints the variables: a program that prints
+# its environment (env, printenv), a child named through a quoted word or an --entrypoint, or a
+# script fed on stdin to python or a shell. A shell string (sh, bash or zsh -c, and npm, npx or pnpm
+# -c) is judged segment by segment with the same env reader as the parent shell form, and a $
+# expansion in it is denied too. A value flag of a runner or container (--pull, --extra) takes the
+# word after it, and an empty --entrypoint is no program, so the child is the words after the image.
+# Each deny form is refused with env-file. The reason is not pinned here, so the builder chooses it.
+# The allow controls are the ordinary uses of the same runners.
+for _child in (
+    "uv run --env-file " + ENV + " env",
+    "uv run --env-file=" + ENV + " printenv",
+    "uv run --env-file " + ENV + " env | grep FOO",
+    "uv run --env-file " + ENV + " printenv FOO",
+    "uv run --env-file " + ENV + " python -c \"import os; print(os.environ)\"",
+    "uv run --env-file " + ENV + " sh -c 'echo $FOO'",
+    "docker run --env-file " + ENV + " alpine env",
+    "docker run --rm --env-file " + ENV + " alpine printenv",
+    "docker run --env-file " + ENV + " -e X=1 --name t alpine env",
+    "docker compose --env-file " + ENV + " run web env",
+    "podman run --env-file " + ENV + " alpine env",
+    "npm --env-file=" + ENV + " exec -c env",
+    "npx --env-file=" + ENV + " -c printenv",
+    "node --env-file=" + ENV + " /c/Users/x/node_modules/npm/bin/npm-cli.js exec -c env",
+    "npm --env-file=" + ENV + " exec -c \"env\"",
+    "npx --env-file=" + ENV + " -c \"printenv\"",
+    "docker run --env-file " + ENV + " alpine \"env\"",
+    "docker run --env-file " + ENV + " --entrypoint printenv alpine DB_URL",
+    "docker run --env-file " + ENV + " --entrypoint=env alpine",
+    "npm --env-file=" + ENV + " exec -c 'echo $DB_URL'",
+    "docker run -i --env-file " + ENV + " alpine sh < s.sh",
+    "docker run --platform linux/amd64 --env-file " + ENV + " alpine env",
+    "docker run -m 512m --env-file " + ENV + " alpine env",
+    "uv run --env-file " + ENV + " -v env",
+    "echo \"import os\" | uv run --env-file " + ENV + " python",
+):
+    sh("env-child: deny, a runner given the file must not print it through a child, " + _child[:60],
+       _child, "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, node runs npm-cli.js exec -c with a shell string that expands a variable",
+   "node --env-file=" + ENV + " /c/Users/x/node_modules/npm/bin/npm-cli.js exec -c 'echo $DB_URL'",
+   "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv runs a python script fed by a heredoc that prints os.environ",
+   "uv run --env-file " + ENV + " python <<'EOF'\nimport os; print(os.environ)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+for _child_ok in (
+    "uv run --env-file " + ENV + " python app.py",
+    "uv run --env-file " + ENV + " pytest",
+    "docker run --env-file " + ENV + " myimage",
+    "docker run --env-file " + ENV + " myimage npm start",
+    "docker run --env-file " + ENV + " -e MODE=env myimage",
+    "npm --env-file=" + ENV + " run build",
+    "npm --env-file=" + ENV + " exec -c \"node app.js\"",
+    "docker run --env-file " + ENV + " alpine sh -c \"npm start\"",
+    "uv run --env-file " + ENV + " python app.py < input.txt",
+    "docker run --env-file " + ENV + " --entrypoint node myimage app.js",
+):
+    sh("env-child: allow, a runner given the file may run its own app, " + _child_ok[:60],
+       _child_ok, "allow", cwd=NOGIT)
+
+# Each deny names one cause: a later segment of a shell string that prints or reads the file, a value
+# flag the list does not hold, or an empty --entrypoint. Each allow is the same runner running an app.
+sh("env-child: deny, uv runs sh -c whose later segment cats the env file, npm start && cat " + ENV,
+   "uv run --env-file " + ENV + " sh -c \"npm start && cat " + ENV + "\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker runs sh -c whose later segment is env after cd, cd /app && env",
+   "docker run --env-file " + ENV + " alpine sh -c \"cd /app && env\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker runs sh -c whose later segment is printenv after a semicolon",
+   "docker run --env-file " + ENV + " alpine sh -c \"echo x; printenv\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, npm exec -c whose later segment is env after &&, npm test && env",
+   "npm --env-file=" + ENV + " exec -c \"npm test && env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv runs bash -c whose later segment is printenv after set -x",
+   "uv run --env-file " + ENV + " bash -c \"set -x; printenv FOO\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker runs sh -c whose first word is exec before env",
+   "docker run --env-file " + ENV + " alpine sh -c \"exec env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker --pull takes a value, so the child after the image is env",
+   "docker run --pull always --env-file " + ENV + " alpine env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv --extra takes a value, so the child is python printing os.environ",
+   "uv run --env-file " + ENV + " --extra dev python -c \"import os; print(os.environ)\"",
+   "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker --entrypoint with an empty value, so the child is env",
+   "docker run --env-file " + ENV + " --entrypoint \"\" alpine env", "deny", "env-file", cwd=NOGIT)
+# A `#` inside quotes is text, and a line break in a shell string starts a new segment. Both are
+# pinned here, so the segment scan must read the quote marks and the line breaks.
+sh("env-child: deny, a comment opener inside a quoted word does not hide a later env segment",
+   "uv run --env-file " + ENV + " sh -c \"echo '#'; env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a line break inside a shell string starts a segment that is env",
+   "uv run --env-file " + ENV + " sh -c \"npm start\nenv\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, a separator inside single quotes is text, echo 'a && env'",
+   "uv run --env-file " + ENV + " sh -c \"echo 'a && env'\"", "allow", cwd=NOGIT)
+sh("env-child: allow, a lone quote in a shell string is text, echo don't",
+   "uv run --env-file " + ENV + " sh -c \"echo don't\"", "allow", cwd=NOGIT)
+sh("env-child: allow, a line break between npm ci and npm test is two app commands",
+   "uv run --env-file " + ENV + " sh -c \"npm ci\nnpm test\"", "allow", cwd=NOGIT)
+sh("env-child: allow, docker runs sh -c whose segments are cd and npm start",
+   "docker run --env-file " + ENV + " alpine sh -c \"cd /app && npm start\"", "allow", cwd=NOGIT)
+sh("env-child: allow, uv runs sh -c whose segments are npm ci and npm test",
+   "uv run --env-file " + ENV + " sh -c \"npm ci; npm test\"", "allow", cwd=NOGIT)
+sh("env-child: allow, docker --pull takes a value, so the child is myimage",
+   "docker run --pull always --env-file " + ENV + " myimage", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --extra takes a value, so the child is pytest",
+   "uv run --env-file " + ENV + " --extra dev pytest", "allow", cwd=NOGIT)
+# A flag that takes no value (-q, --reinstall, --verbose, --rm) is skipped alone, so the word after it is
+# the child. The words after the child are its own arguments: -k env and -m env are pytest's, and serve
+# env is the image's.
+sh("env-child: allow, uv -q takes no value, so the child is pytest with -k env",
+   "uv run --env-file " + ENV + " -q pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --reinstall takes no value, so the child is pytest with -k env",
+   "uv run --env-file " + ENV + " --reinstall pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --verbose takes no value, so the child is pytest with -m env",
+   "uv run --env-file " + ENV + " --verbose pytest -m env", "allow", cwd=NOGIT)
+sh("env-child: allow, docker --rm takes no value, so the child is myimage with serve env",
+   "docker run --env-file " + ENV + " --rm myimage serve env", "allow", cwd=NOGIT)
+# A value flag that the list does not hold takes the word after it, so the child after exec is env.
+sh("env-child: deny, npm --registry takes a value, so exec -c runs env as the child",
+   "npm --env-file=" + ENV + " --registry x exec -c env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm --reporter takes a value, so exec runs env as the child",
+   "pnpm --env-file=" + ENV + " --reporter silent exec env", "deny", "env-file", cwd=NOGIT)
+# `--` ends the runner's options, so the word after it is the child. The two allows are a test
+# filter (vitest env) and jest's own option (jest -c env), and the guard must not read them as env.
+sh("env-child: deny, pnpm exec -- runs env, since -- ends the runner's options",
+   "pnpm --env-file=" + ENV + " exec -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec -- runs printenv, since -- ends the runner's options",
+   "pnpm --env-file=" + ENV + " exec -- printenv", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm exec -- runs vitest, so env is vitest's test filter",
+   "pnpm --env-file=" + ENV + " exec -- vitest env", "allow", cwd=NOGIT)
+sh("env-child: allow, npm exec -- runs jest, so -c env is jest's option, not npm's shell string",
+   "npm --env-file=" + ENV + " exec -- jest -c env", "allow", cwd=NOGIT)
+# A flag that takes no value (--recursive, --parallel, --silent) is skipped alone, so the word after
+# it is the child: env here.
+sh("env-child: deny, pnpm exec --recursive takes no value, so the child is env",
+   "pnpm --env-file=" + ENV + " exec --recursive env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --parallel takes no value, so the child is env",
+   "pnpm --env-file=" + ENV + " exec --parallel env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --silent takes no value, so the child is env",
+   "pnpm --env-file=" + ENV + " exec --silent env", "deny", "env-file", cwd=NOGIT)
+# Controls, green on this head: with no flag before the child, pnpm exec denies env and allows vitest.
+sh("env-child: deny, pnpm exec with no flag runs env, the control for the cases above",
+   "pnpm --env-file=" + ENV + " exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm exec with no flag runs vitest, the control for the cases above",
+   "pnpm --env-file=" + ENV + " exec vitest", "allow", cwd=NOGIT)
+# A glued v in a short-flag cluster takes the next word as its volume, so /a:/b is not the child.
+sh("env-child: deny, docker -itv takes /a:/b as the volume, so env runs in img",
+   "docker run -itv /a:/b --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker -dv takes /a:/b as the volume, so env runs in img",
+   "docker run -dv /a:/b --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+# A flag that takes no value (--stream) is skipped alone, so python is the child and its -c prints os.environ.
+sh("env-child: deny, pnpm exec --stream takes no value, so python -c prints os.environ",
+   "pnpm --env-file=" + ENV + " exec --stream python -c \"import os; print(os.environ)\"",
+   "deny", "env-file", cwd=NOGIT)
+# An unlisted option ahead of -c must not hide env from the shell string.
+sh("env-child: deny, npm exec with an unlisted --foo before -c still runs env",
+   "npm --env-file=" + ENV + " exec --foo x -c \"env\"", "deny", "env-file", cwd=NOGIT)
+# uv -q and --verbose take no value, so vitest is the child and env is its test filter.
+sh("env-child: allow, uv -q takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " -q vitest env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --verbose takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --verbose vitest env", "allow", cwd=NOGIT)
+# npm exec --yes takes no value, so jest -c env is jest's own option, not npm's shell string.
+sh("env-child: allow, npm exec --yes takes no value, so jest -c env is jest's option",
+   "npm --env-file=" + ENV + " exec --yes jest -c env", "allow", cwd=NOGIT)
+
+# Two unlisted value flags in a row. The scan takes each unlisted flag's next word as a possible
+# value, and runs past every unlisted option, so it reaches the image and its child (env). The
+# --label deny is no such shape: --label is a listed flag, so the scan reads it, and that case
+# pins the listed flag green.
+# Each allow is the same runner with a child that prints nothing, so the flags alone are not denied.
+sh("env-child: deny, docker --cap-add X --cap-add Y, two unlisted value flags, so env runs in img",
+   "docker run --env-file " + ENV + " --cap-add X --cap-add Y img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker --pull always --label a=b after the file, so env runs in img",
+   "docker run --env-file " + ENV + " --pull always --label a=b img env", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker --pull always --rm before the file, so env runs in img",
+   "docker run --pull always --rm --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, docker with two unlisted value flags and no child, so img runs its own command",
+   "docker run --env-file " + ENV + " --cap-add X --cap-add Y img", "allow", cwd=NOGIT)
+sh("env-child: allow, docker with one unlisted value flag, so serve env is the image's own arguments",
+   "docker run --env-file " + ENV + " --cap-add X img serve env", "allow", cwd=NOGIT)
+
+# npm, npx and pnpm given the file, with a printing child and no -c. npm's `--` and its `x` alias
+# end the options, so the word after them is the child. npx reads its first word as the child.
+# pnpm's -r and -w take no value, so exec is the command word. The allows run an app's own command.
+sh("env-child: deny, npm exec -- ends npm's options, so env is the child",
+   "npm --env-file=" + ENV + " exec -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npm x -- ends npm's options, so env is the child of the exec alias x",
+   "npm --env-file=" + ENV + " x -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx with no -c runs env as its first word",
+   "npx --env-file=" + ENV + " env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx with no -c runs printenv FOO as its first word",
+   "npx --env-file=" + ENV + " printenv FOO", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm -r takes no value, so exec runs env as the child",
+   "pnpm --env-file=" + ENV + " -r exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm -w takes no value, so exec runs env as the child",
+   "pnpm --env-file=" + ENV + " -w exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npx with no -c runs vitest, an app's own test command",
+   "npx --env-file=" + ENV + " vitest", "allow", cwd=NOGIT)
+sh("env-child: allow, npx with no -c runs tsx app.ts, an app's own script",
+   "npx --env-file=" + ENV + " tsx app.ts", "allow", cwd=NOGIT)
+sh("env-child: allow, npm exec -- runs jest, an app's own test command",
+   "npm --env-file=" + ENV + " exec -- jest", "allow", cwd=NOGIT)
+sh("env-child: allow, pnpm -r takes no value, so exec runs vitest, the control for -r",
+   "pnpm --env-file=" + ENV + " -r exec vitest", "allow", cwd=NOGIT)
+sh("env-child: allow, pnpm -w takes no value, so exec runs vitest, the control for -w",
+   "pnpm --env-file=" + ENV + " -w exec vitest", "allow", cwd=NOGIT)
+sh("env-child: deny, pnpm dlx runs env as its first word, as npx does with no -c",
+   "pnpm --env-file=" + ENV + " dlx env", "deny", "env-file", cwd=NOGIT)
+# uv -v and -vv are boolean flags, so vitest is the child and env is its own test filter.
+sh("env-child: allow, uv -vv takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " -vv vitest env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv -v takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " -v vitest env", "allow", cwd=NOGIT)
+
+# Flags the list does not name that take no value, given the file. uv's --exact and --all-groups and
+# npx's --silent are bools, so the word after each is the program, and env after it is the program's
+# argument. A bun ./x is a script path, not bun's x alias, so env is its argument.
+sh("env-child: allow, uv --exact takes no value, so pytest runs with the filter env",
+   "uv run --env-file " + ENV + " --exact pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --all-groups takes no value, so pytest runs with the filter env",
+   "uv run --env-file " + ENV + " --all-groups pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, npx --silent takes no value, so jest runs with the filter env",
+   "npx --env-file=" + ENV + " --silent jest -t env", "allow", cwd=NOGIT)
+sh("env-child: allow, bun ./x runs the script ./x, not bun's x alias, so env is its argument",
+   "bun --env-file=" + ENV + " ./x env", "allow", cwd=NOGIT)
+
+# Bool flags that take no value, given the file. `--sig-proxy` is docker's bool, so img is the image
+# and env after it is the child. `--active` is uv's bool, so env is the child of the uv run. `bun x`
+# is the exec alias of bunx, so its first word is the child. Each allow runs the program's own
+# command, with env only as an argument. `bunx` is no loader command, so no bunx case is pinned here.
+sh("env-child: deny, docker --sig-proxy takes no value, so env after img is the child",
+   "docker run --env-file " + ENV + " --pull always --sig-proxy img env", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker --rm takes no value after --pull always, so env after img is the child",
+   "docker run --env-file " + ENV + " --pull always --rm img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv --active takes no value, so env is the child of the uv run",
+   "uv run --env-file " + ENV + " --extra dev --active env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, bun x is the exec alias, so env is the child",
+   "bun --env-file=" + ENV + " x env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, docker --sig-proxy takes no value, so serve env is the image's own command",
+   "docker run --env-file " + ENV + " --pull always --sig-proxy img serve env", "allow", cwd=NOGIT)
+sh("env-child: allow, docker with no child after the image, so serve is the image's own command",
+   "docker run --env-file " + ENV + " --pull always img serve", "allow", cwd=NOGIT)
+sh("env-child: allow, bun x runs vitest, an app's own test command",
+   "bun --env-file=" + ENV + " x vitest", "allow", cwd=NOGIT)
+# Each bool flag takes no value, so the word after it is the child. The allow puts vitest after the
+# flag, with env as its filter. The deny puts env after the flag, and env is the child. A bool that
+# ENV_CHILD_BOOL_FLAG drops reads the next word as the flag's value, so the allow turns to a deny.
+sh("env-child: deny, uv --dev takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --dev env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --dev takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --dev vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --all-packages takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --all-packages env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --all-packages takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --all-packages vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --upgrade takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --upgrade env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --upgrade takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --upgrade vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --refresh takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --refresh env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --refresh takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --refresh vitest env", "allow", cwd=NOGIT)
+# uv's --upgrade-package and --refresh-package take a value, so X is not a flag. The allow is the
+# control: pytest is the child. The deny puts env after X, and env is the child.
+sh("env-child: allow, uv --upgrade-package takes X, so pytest is the child, a control",
+   "uv run --env-file " + ENV + " --upgrade-package X pytest", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --upgrade-package takes X, so env after it is the child",
+   "uv run --env-file " + ENV + " --upgrade-package X env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --refresh-package takes X, so pytest is the child, a control",
+   "uv run --env-file " + ENV + " --refresh-package X pytest", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --refresh-package takes X, so env after it is the child",
+   "uv run --env-file " + ENV + " --refresh-package X env", "deny", "env-file", cwd=NOGIT)
+
+# A `$` in a shell string refuses only in a segment whose command prints (echo, printf, env, printenv).
+# A `$` in any other segment is an ordinary argument, so an app's own command may use it. The three
+# deny forms below each print a variable through echo or printf, so they stay denied.
+sh("env-child: allow, a $ in a cd segment is an argument, docker runs sh -c cd $APP_DIR && npm start",
+   "docker run --env-file " + ENV + " img sh -c \"cd $APP_DIR && npm start\"", "allow", cwd=NOGIT)
+sh("env-child: allow, a $ in a pytest argument is an argument, uv runs sh -c pytest --basetemp=$TMPDIR",
+   "uv run --env-file " + ENV + " sh -c 'pytest --basetemp=$TMPDIR'", "allow", cwd=NOGIT)
+sh("env-child: allow, a $ in a node script argument is an argument, npm exec -c node $SCRIPT",
+   "npm --env-file=" + ENV + " exec -c 'node $SCRIPT'", "allow", cwd=NOGIT)
+sh("env-child: deny, echo prints a $ variable in a shell string, uv runs sh -c echo $DB_URL",
+   "uv run --env-file " + ENV + " sh -c 'echo $DB_URL'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, printf prints a $ variable in a shell string, docker runs sh -c printf",
+   "docker run --env-file " + ENV + " img sh -c 'printf \"%s\" \"$KEY\"'", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, npm exec -c echo prints a $ variable, npm exec -c echo $X",
+   "npm --env-file=" + ENV + " exec -c 'echo $X'", "deny", "env-file", cwd=NOGIT)
+
+# A wrapper word before the printing program (timeout, nice, sudo), or a node inline program under npx,
+# is a child the scan must read. Each deny is one such child that prints the environment.
+sh("env-child: deny, timeout 5 wraps env, uv run --env-file runs timeout 5 env",
+   "uv run --env-file " + ENV + " timeout 5 env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, timeout 5 wraps printenv in an image, docker run runs timeout 5 printenv",
+   "docker run --env-file " + ENV + " img timeout 5 printenv", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, nice wraps env in a shell string, uv run sh -c nice env",
+   "uv run --env-file " + ENV + " sh -c \"nice env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sudo wraps env in a shell string, uv run sh -c sudo env",
+   "uv run --env-file " + ENV + " sh -c \"sudo env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx runs node -e that prints process.env",
+   "npx --env-file=" + ENV + " node -e \"console.log(process.env)\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx runs node -p that prints process.env",
+   "npx --env-file=" + ENV + " node -p process.env", "deny", "env-file", cwd=NOGIT)
+
+# Controls for the wrapper and npx cases above: the same runners with an app as the child stay allowed.
+sh("env-child: allow, uv run --env-file runs timeout 5 pytest, the control for timeout 5 env",
+   "uv run --env-file " + ENV + " timeout 5 pytest", "allow", cwd=NOGIT)
+sh("env-child: allow, npx runs node app.js, the control for npx node -e and node -p",
+   "npx --env-file=" + ENV + " node app.js", "allow", cwd=NOGIT)
 
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
@@ -9039,7 +10112,7 @@ add("merge-batch: the merge tool of the host is allowed past an ignored running 
     tool="mcp__github__merge_pull_request", cwd=STAMPIGNORE, pullNumber=1, repo="x", owner="y",
     env_path=GHRUNIGNORED + os.pathsep + PY_PATH)
 # A pinned merge.requiredChecks list is the required list: STAMPREPO pins `checks`, the protection says `gate`, so only the pin counts.
-add("merge-batch: a pinned merge.requiredChecks list is the required list, so a pending gate on pr 2 does not block", "allow",
+add("merge-batch: a pinned merge.requiredChecks list is the required list, so a pending `gate` check on pr 2 does not block", "allow",
     tool="mcp__github__merge_pull_request", cwd=STAMPREPO, pullNumber=1, repo="x", owner="y", env_path=GHPINNED + os.pathsep + PY_PATH)
 
 _BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
@@ -9606,7 +10679,13 @@ def record_push_cost_case():
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal destination
-    (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The layout and extras files
+    (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The conflict-markers push check
+    (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
+    order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
+    finds the merge base itself). A push with a tracking ref reads one base. A push with no tracking ref
+    and no upstream reads three, and the third, the default base, costs one `git symbolic-ref` for
+    origin/HEAD and one `git rev-parse --verify` per candidate branch tried, until one exists. A `git show`
+    runs only when a marker finding needs its line read. The layout and extras files
     are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
     transcript is read only when the push reaches the record branch: a push to another branch passes
     with an unreadable transcript, and a push to the record branch with one is refused. A stand-in git
@@ -9638,12 +10717,14 @@ def record_push_cost_case():
         return kinds, lines
 
     for label, tail, want in (
-        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1}),
-        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1}),
-        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2}),
-        ("a literal destination, origin main", "push origin main", {"rev-parse": 1}),
-        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1}),
-        ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1}),
+        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1, "diff": 1}),
+        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1}),
+        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1}),
+        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "diff": 1}),
+        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "diff": 1}),
+        ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1, "diff": 1}),
+        ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
+         {"rev-parse": 2, "symbolic-ref": 1, "diff": 3}),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, PUSHFEAT)
         if kinds != want:
@@ -9829,6 +10910,9 @@ archive_allow("an open draft lane pull request whose head is behind main is allo
               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_BEHIND))
 archive_allow("an open draft lane pull request whose head is identical to main is allowed: its commits have landed",
               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_IDENT))
+# The same release on the lane/<slug> head form: the draft's head is behind main, so the lane's commits have landed.
+archive_allow("an open draft on head lane/<slug> whose head is behind main is allowed: the lane/ head form releases too",
+              role_path("archive-lane"), fake_gh_path(ARCHDRAFT_LANE_BEHIND))
 archive_refuse("an open draft lane pull request whose head is ahead of main is refused: its commits have not landed",
                role_path("archive-lane"), fake_gh_path(ARCHDRAFT_AHEAD), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
 archive_refuse("an open draft lane pull request whose head diverged from main is refused",
@@ -9842,6 +10926,9 @@ archive_refuse("an open draft lane pull request whose containment read fails is 
 # This refusal also holds on main, which refuses every open lane pull request. It pins the base check for the release.
 archive_refuse("an open draft lane pull request based on integration/b1, not the default branch, is refused though its head is behind main",
                role_path("archive-lane"), fake_gh_path(ARCHDRAFT_INTEG), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
+# A lane's open pull request on the `lane/<slug>` head form is its own records pull request: refused, as the bare slug is.
+archive_refuse("a lane whose open pull request has head lane/<slug> is refused: the lane/ head form counts",
+               role_path("archive-lane"), fake_gh_path(ARCHOPEN_LANE), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
 # The wrapped record in the real shape: the closing tag carries the opening tag's nonce, so the lane's record is read
 # inside its wrapper and its open pull request refuses the archive.
 archive_refuse("a lane's record in the real wrapper, the nonce on both tags, is read: its open pull request refuses",
@@ -10792,6 +11879,478 @@ records_allow("a commit of a staged page edit where the base page is hand-writte
 records_allow("a chain that runs the generator, then add -A and commit, where the base page is hand-written",
               GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_PLAIN_LANES["product"])
 
+# =========================================================================== 5d. conflict markers
+#
+# `conflict-markers`. A Bash `git commit` is refused when the commit would hold a git conflict marker:
+# one file's added lines hold all three of a `<<<<<<< ` line, a line of exactly `=======`, and a
+# `>>>>>>> ` line. Only the leftover-marker findings of `git diff --check` count, never its whitespace
+# findings. Incident: a conflict-fix script failed, and the next command in its chain
+# (`fix && git add -A && git commit`) committed the markers.
+#
+# THE SEAM. The hook runs BEFORE the shell chain, so it cannot see what an earlier step does to the tree.
+# A commit, or a `--continue`, is judged on the index, plus the working-tree files its adds, `commit -a`
+# or `commit <path>` cover. A blind step (one that can change the tree) before a commit gives no hit,
+# unless a push follows the commit in the call and the commit covers a triplet already in the tree. A git
+# step in the chain that makes a conflict is refused. A `git push` is judged on the net change it sends: upstream..HEAD, or the
+# refspec, or HEAD's range when the refspec does not resolve. A fence does not exempt a full triplet. A
+# read that fails (no HEAD yet) is no hit.
+#
+# NO CONTEXT SKIPS A MARKER. Git writes a marker inside a string, a comment or a template literal too, so
+# a lone apostrophe, a multi-line template literal and a comment opener inside a string do not hide one
+# (building-scanner-respects-strings).
+FAMILY = "conflict-markers"
+# Marker lines are assembled, so this file never holds one at the start of a line.
+CM_START = "<" * 7 + " HEAD\n"
+CM_MID = "=" * 7 + "\n"
+CM_END = ">" * 7 + " topic\n"
+CM_TRIPLET = CM_START + "ours line\n" + CM_MID + "theirs line\n" + CM_END
+MD_FENCE = "`" * 3
+CMK_RULE = "conflict-markers"
+CMKROOT = os.path.join(ROOT, "cmk")
+CMK_MERGE = os.path.join(CMKROOT, "merge")      # a real conflicting merge, left unresolved
+CMK_STAGED = os.path.join(CMKROOT, "staged")    # the triplet staged in a source file
+CMK_AM = os.path.join(CMKROOT, "am")            # the triplet in a tracked file, unstaged; a clean change staged
+CMK_CLEAN = os.path.join(CMKROOT, "clean")      # a clean change staged
+CMK_WS = os.path.join(CMKROOT, "ws")            # a staged change that adds trailing whitespace only
+CMK_MDOK = os.path.join(CMKROOT, "mdok")        # one marker line in a fence, and a setext underline
+CMK_MDFENCE = os.path.join(CMKROOT, "mdfence")  # a full triplet inside a fence
+CMK_NOHEAD = os.path.join(CMKROOT, "nohead")    # no commit yet, the triplet staged
+CMK_LONE = os.path.join(CMKROOT, "lone")        # a lone apostrophe in text, then a staged triplet
+CMK_TPL = os.path.join(CMKROOT, "tpl")          # a staged triplet inside a multi-line template literal
+CMK_OPEN = os.path.join(CMKROOT, "open")        # a string holding comment openers, then a staged triplet
+
+
+def _cmk_run(where, *args):
+    done = run_vcs(where, *IDENT, *args)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed in the conflict-markers fixtures: %s %s in %r: %s"
+                 % (VCS, " ".join(args), where, done.stderr.strip()))
+    return done.stdout.strip()
+
+
+def _cmk_topic(where, files):
+    """A checkout whose base commit holds `files`, moved onto branch `topic`, so the commit under test is
+    no commit on main."""
+    make_repo(where, files)
+    _cmk_run(where, "checkout", "-q", "-b", "topic")
+
+
+def _cmk_stage(where, rel, text):
+    write(os.path.join(where, rel), text)
+    _cmk_run(where, "add", rel)
+
+
+def _build_conflict_markers():
+    run, stage = _cmk_run, _cmk_stage
+    # `theirs` and `topic` both change src/app.py, so merging `theirs` into `topic` leaves a real conflict.
+    _cmk_topic(CMK_MERGE, {"src/app.py": "x = 1\n"})
+    run(CMK_MERGE, "checkout", "-q", "-b", "theirs", "main")
+    write(os.path.join(CMK_MERGE, "src", "app.py"), "x = 2\n")
+    run(CMK_MERGE, "commit", "-q", "-am", "theirs change")
+    run(CMK_MERGE, "checkout", "-q", "topic")
+    write(os.path.join(CMK_MERGE, "src", "app.py"), "x = 3\n")
+    run(CMK_MERGE, "commit", "-q", "-am", "topic change")
+    run_vcs(CMK_MERGE, *IDENT, "merge", "-q", "--no-edit", "theirs")   # conflicts: MERGE_HEAD set, file unmerged
+    _require_conflict(CMK_MERGE, "src/app.py")
+
+    _cmk_topic(CMK_STAGED, {"src/app.py": "x = 1\n"})
+    stage(CMK_STAGED, "src/app.py", "x = 1\n" + CM_TRIPLET)
+
+    _cmk_topic(CMK_AM, {"src/app.py": "x = 1\n", "src/other.py": "y = 1\n"})
+    write(os.path.join(CMK_AM, "src", "app.py"), "x = 1\n" + CM_TRIPLET)   # tracked, modified, unstaged
+    stage(CMK_AM, "src/other.py", "y = 2\n")                                # a clean change, staged
+
+    _cmk_topic(CMK_CLEAN, {"src/app.py": "x = 1\n"})
+    stage(CMK_CLEAN, "src/app.py", "x = 2\n")
+
+    _cmk_topic(CMK_WS, {"src/app.py": "x = 1\n"})
+    stage(CMK_WS, "src/app.py", "x = 2   \n")                               # trailing whitespace only
+
+    _cmk_topic(CMK_MDOK, {"docs/notes.md": "# Notes\n"})
+    stage(CMK_MDOK, "docs/notes.md", "# Notes\n\nSetext heading\n" + CM_MID + "\n" + MD_FENCE + "text\n"
+          + CM_START + MD_FENCE + "\n")
+
+    _cmk_topic(CMK_MDFENCE, {"docs/notes.md": "# Notes\n"})
+    stage(CMK_MDFENCE, "docs/notes.md", "# Notes\n\n" + MD_FENCE + "text\n" + CM_TRIPLET + MD_FENCE + "\n")
+
+    os.makedirs(CMK_NOHEAD, exist_ok=True)
+    run(CMK_NOHEAD, "init", "-q", "-b", "topic", ".")
+    stage(CMK_NOHEAD, "src/app.py", "x = 1\n" + CM_TRIPLET)
+
+    _cmk_topic(CMK_LONE, {"src/view.jsx": "export const a = 1;\n"})
+    stage(CMK_LONE, "src/view.jsx", "export const a = 1;\n<p>Don't</p>\n" + CM_TRIPLET)
+    _cmk_topic(CMK_TPL, {"src/tpl.js": "const a = 1;\n"})
+    stage(CMK_TPL, "src/tpl.js", "const a = 1;\nconst doc = `\n" + CM_TRIPLET + "`;\n")
+    _cmk_topic(CMK_OPEN, {"src/opener.py": "x = 1\n"})
+    stage(CMK_OPEN, "src/opener.py", 'x = 1\nNOTE = "/* // #"\n' + CM_TRIPLET)
+
+
+lazy_fixture([CMK_MERGE, CMK_STAGED, CMK_AM, CMK_CLEAN, CMK_WS, CMK_MDOK, CMK_MDFENCE, CMK_NOHEAD,
+              CMK_LONE, CMK_TPL, CMK_OPEN], _build_conflict_markers)
+
+
+def cmk_refuse(name, command, cwd):
+    sh("conflict-markers: %s is refused" % name, command, "deny", CMK_RULE, cwd=cwd)
+
+
+def cmk_allow(name, command, cwd):
+    sh("conflict-markers: %s is allowed" % name, command, "allow", cwd=cwd)
+
+
+# 1. The index: a real conflict left in the index, or markers staged. A plain commit holds the index.
+cmk_refuse("a real merge conflict left in a file, then add -A and commit",
+         VCS + " add -A && " + VCS + " commit -m x", CMK_MERGE)
+cmk_refuse("a triplet staged in a source file, then commit", VCS + " commit -m x", CMK_STAGED)
+cmk_refuse("a triplet staged, behind a false command in the chain", "false && " + VCS + " commit -m x", CMK_STAGED)
+
+# 2. The working tree: an add in the chain, or a commit that names its file, holds that file's content.
+cmk_refuse("commit -am with the triplet in a tracked, modified file", VCS + " commit -am x", CMK_AM)
+cmk_refuse("add . and commit with the triplet in a tracked, modified file",
+         VCS + " add . && " + VCS + " commit -m x", CMK_AM)
+cmk_refuse("add of the file and commit, the triplet in that file",
+         VCS + " add src/app.py && " + VCS + " commit -m x", CMK_AM)
+cmk_refuse("a commit by path that names the file with the triplet", VCS + " commit -m x src/app.py", CMK_AM)
+
+# 3. Scope: the commit holds what it names, and the markers in an unstaged file it does not name are no hit.
+cmk_allow("a commit with the triplet unstaged in another file, and a clean change staged",
+          VCS + " commit -m x", CMK_AM)
+cmk_allow("a commit by path that names only the clean file, the triplet unstaged in another",
+          VCS + " commit -m x src/other.py", CMK_AM)
+cmk_allow("an add of the clean file and commit, the triplet unstaged in another",
+          VCS + " add src/other.py && " + VCS + " commit -m x", CMK_AM)
+
+# 4. Content that is no conflict marker, and a commit with no HEAD to read.
+cmk_allow("a clean staged change", VCS + " commit -m x", CMK_CLEAN)
+cmk_allow("a staged change that adds trailing whitespace only", VCS + " commit -m x", CMK_WS)
+cmk_allow("a markdown file with one marker line in a fence, and a setext underline of =======",
+          VCS + " commit -m x", CMK_MDOK)
+cmk_allow("a staged triplet in a repository with no commits yet", VCS + " commit -m x", CMK_NOHEAD)
+
+# 5. A fence, a string, a comment or a template literal does not hide a full triplet.
+cmk_refuse("a markdown file with a full triplet inside a fence", VCS + " commit -m x", CMK_MDFENCE)
+cmk_refuse("a staged triplet after a lone apostrophe in text", VCS + " commit -m x", CMK_LONE)
+cmk_refuse("a staged triplet inside a multi-line template literal", VCS + " commit -m x", CMK_TPL)
+cmk_refuse("a staged triplet after a string holding comment openers", VCS + " commit -m x", CMK_OPEN)
+
+
+# The commit check reads the tree only when no earlier segment can change it. The push check judges the
+# commits a push would send, so each push case runs in a checkout whose remote is a bare repository
+# beside it: nothing leaves the machine.
+CMKPUSH = os.path.join(CMKROOT, "push")        # one checkout per push case, on branch `topic`
+CMKREMOTE = os.path.join(CMKROOT, "remote")    # the bare remote of each of those checkouts
+CMK_PU = os.path.join(CMKPUSH, "unpushed")     # an unpushed commit holding a full triplet
+CMK_RB = os.path.join(CMKPUSH, "rebased")      # a commit made by `git rebase --continue`, holding a triplet
+CMK_MP = os.path.join(CMKPUSH, "mergepush")    # a commit made by `git merge --continue`, holding a triplet
+CMK_NF = os.path.join(CMKPUSH, "newfile")      # an unpushed commit that adds a new file holding a triplet
+CMK_CL = os.path.join(CMKPUSH, "clean")        # an unpushed clean commit, and a.txt edited, not staged
+CMK_RT = os.path.join(CMKPUSH, "remotetrip")   # a triplet already on the remote branch, then a clean commit
+CMK_CLT = os.path.join(CMKPUSH, "cltriplet")   # a.txt holding a triplet, tracked and not staged
+CMK_SEQ = os.path.join(CMKPUSH, "seqclean")    # a.txt and b.txt edited, not staged, both clean
+CMK_SEQB = os.path.join(CMKPUSH, "seqtriplet")  # as seqclean, with b.txt holding a triplet
+CMK_REL = os.path.join(CMKPUSH, "relative")    # diff.relative set; a triplet unpushed in sub/f.txt
+CMK_PAREN = os.path.join(CMKPUSH, "fixparen")  # an unpushed triplet on branch fix(x); HEAD on clean topic
+CMK_GONE = os.path.join(CMKROOT, "gone")       # a folder no fixture makes: the cd target of the missing-folder cases
+
+
+def _cmk_commit(where, rel, text, msg):
+    _cmk_stage(where, rel, text)
+    _cmk_run(where, "commit", "-q", "-m", msg)
+
+
+def _cmk_unmerged(where, rel):
+    """Stop the suite unless `rel` is left unmerged in `where`, as a rebase or merge stop leaves it."""
+    lines = [line for line in run_vcs(where, "status", "--porcelain").stdout.splitlines() if rel in line]
+    if not any(line[:2] in ("UU", "AA") for line in lines):
+        sys.exit("fixture setup failed in the conflict-markers fixtures: %r is not unmerged in %r: %r"
+                 % (rel, where, lines))
+
+
+def _cmk_pushed(where, files):
+    """A checkout of `files` on main, pushed to a bare remote beside it, then on branch `topic`, pushed
+    too. What is committed on `topic` after this is unpushed."""
+    remote = os.path.join(CMKREMOTE, os.path.basename(where) + ".git")
+    make_repo(where, files)
+    os.makedirs(remote, exist_ok=True)
+    _cmk_run(remote, "init", "-q", "--bare")
+    _cmk_run(where, "remote", "add", "origin", remote)
+    _cmk_run(where, "push", "-q", "-u", "origin", "main")
+    _cmk_run(where, "checkout", "-q", "-b", "topic")
+    _cmk_run(where, "push", "-q", "-u", "origin", "topic")
+
+
+def _cmk_must_hold(where, rel, marker, what):
+    if marker.strip() not in _cmk_run(where, "show", "HEAD:" + rel):
+        sys.exit("fixture setup failed in the conflict-markers fixtures: %s holds no marker" % what)
+
+
+def _build_conflict_markers_push():
+    run, commit = _cmk_run, _cmk_commit
+
+    _cmk_pushed(CMK_PU, {"src/app.py": "x = 1\n"})
+    commit(CMK_PU, "src/app.py", "x = 1\n" + CM_TRIPLET, "triplet, unpushed")
+
+    _cmk_pushed(CMK_RB, {"a.txt": "base\n"})
+    commit(CMK_RB, "a.txt", "topic\n", "topic change")
+    run(CMK_RB, "push", "-q", "origin", "topic")           # the old topic commit is on the remote
+    run(CMK_RB, "checkout", "-q", "main")
+    commit(CMK_RB, "a.txt", "main\n", "main change")
+    run(CMK_RB, "checkout", "-q", "topic")
+    run_vcs(CMK_RB, *IDENT, "rebase", "main")              # conflicts on a.txt, and the rebase stops
+    _cmk_unmerged(CMK_RB, "a.txt")
+    _cmk_stage(CMK_RB, "a.txt", CM_TRIPLET)                # resolved by keeping the markers
+    run(CMK_RB, "-c", "core.editor=true", "rebase", "--continue")
+    _cmk_must_hold(CMK_RB, "a.txt", CM_START, "the rebased commit")
+
+    _cmk_pushed(CMK_MP, {"a.txt": "base\n"})
+    commit(CMK_MP, "a.txt", "topic\n", "topic change")
+    run(CMK_MP, "push", "-q", "origin", "topic")
+    run(CMK_MP, "checkout", "-q", "main")
+    commit(CMK_MP, "a.txt", "main\n", "main change")
+    run(CMK_MP, "checkout", "-q", "topic")
+    run_vcs(CMK_MP, *IDENT, "merge", "--no-edit", "main")  # conflicts on a.txt
+    _require_conflict(CMK_MP, "a.txt")
+    _cmk_stage(CMK_MP, "a.txt", CM_TRIPLET)
+    run(CMK_MP, "-c", "core.editor=true", "merge", "--continue")
+    _cmk_must_hold(CMK_MP, "a.txt", CM_START, "the merge commit")
+
+    _cmk_pushed(CMK_NF, {"a.txt": "base\n"})
+    write(os.path.join(CMK_NF, "src", "new.txt"), CM_TRIPLET)
+    run(CMK_NF, "add", "-A")
+    run(CMK_NF, "commit", "-q", "-m", "new file holding a triplet")
+
+    _cmk_pushed(CMK_CL, {"a.txt": "base\n"})
+    commit(CMK_CL, "b.txt", "clean\n", "clean change, unpushed")
+    write(os.path.join(CMK_CL, "a.txt"), "edited\n")       # modified, not staged, clean
+
+    _cmk_pushed(CMK_RT, {"a.txt": "base\n"})
+    commit(CMK_RT, "a.txt", CM_TRIPLET, "triplet, already sent")
+    run(CMK_RT, "push", "-q", "origin", "topic")
+    commit(CMK_RT, "b.txt", "clean\n", "clean change, unpushed")
+
+    _cmk_pushed(CMK_CLT, {"a.txt": "base\n"})
+    write(os.path.join(CMK_CLT, "a.txt"), CM_TRIPLET)      # tracked, modified, not staged
+    commit(CMK_CLT, "b.txt", "clean\n", "clean change, unpushed")
+
+    for path, b_text in ((CMK_SEQ, "b2\n"), (CMK_SEQB, CM_TRIPLET)):
+        _cmk_pushed(path, {"a.txt": "base\n", "b.txt": "base\n"})
+        write(os.path.join(path, "a.txt"), "a2\n")         # modified, not staged
+        write(os.path.join(path, "b.txt"), b_text)
+
+    _cmk_pushed(CMK_REL, {"f.txt": "base\n", "sub/f.txt": "base\n"})
+    run(CMK_REL, "config", "diff.relative", "true")
+    commit(CMK_REL, "sub/f.txt", CM_TRIPLET, "triplet in sub, unpushed")
+
+    _cmk_pushed(CMK_PAREN, {"a.txt": "base\n"})
+    run(CMK_PAREN, "checkout", "-q", "-b", "fix(x)")
+    commit(CMK_PAREN, "a.txt", CM_TRIPLET, "triplet on fix(x), unpushed")
+    run(CMK_PAREN, "checkout", "-q", "topic")
+    run(CMK_PAREN, "branch", "fixy", "fix(x)")             # the same commit, under a plain name
+    for gone in (CMK_GONE, os.path.join(CMK_CLT, "nope")):
+        if os.path.exists(gone):
+            sys.exit("fixture setup failed in the conflict-markers fixtures: %r exists, so a cd to it does not fail"
+                     % gone)
+
+
+lazy_fixture([CMK_PU, CMK_RB, CMK_MP, CMK_NF, CMK_CL, CMK_RT, CMK_CLT, CMK_SEQ, CMK_SEQB, CMK_REL, CMK_PAREN],
+             _build_conflict_markers_push)
+
+# A commit that cannot be judged, with no push after it in the call, is no hit. The sed and the fix script
+# below cover a file that holds the triplet before the call, so each one with a push after it is refused.
+CMK_SED_COMMIT = ("sed -i '/^" + "<" * 7 + " /d;/^" + "=" * 7 + "$/d;/^" + ">" * 7 + " /d' src/app.py && "
+                  + VCS + " add src/app.py && " + VCS + " commit -m x")
+CMK_FIX_COMMIT = "./fix.sh; " + VCS + " add -A && " + VCS + " commit -m x"
+cmk_allow("a sed that deletes the marker lines, then add and commit, no push", CMK_SED_COMMIT, CMK_MERGE)
+cmk_allow("a fix script, then add -A and commit, no push", CMK_FIX_COMMIT, CMK_AM)
+cmk_refuse("a sed that deletes the marker lines, then add, commit and push", CMK_SED_COMMIT + " && "
+           + VCS + " push", CMK_MERGE)
+cmk_refuse("a fix script, then add -A, commit and push", CMK_FIX_COMMIT + " && " + VCS + " push", CMK_AM)
+
+# The push check: a push is refused when a commit it would send adds a full triplet, whichever step made it.
+cmk_refuse("a push of an unpushed commit that holds a triplet", VCS + " push", CMK_PU)
+cmk_refuse("a push of a commit made by rebase --continue that holds a triplet", VCS + " push", CMK_RB)
+cmk_refuse("a push of a commit made by merge --continue that holds a triplet", VCS + " push", CMK_MP)
+cmk_refuse("a push of a new file that holds a triplet", VCS + " push", CMK_NF)
+
+# A push sends only what is unpushed: clean commits pass, and so does a triplet already on the remote.
+cmk_allow("a push of unpushed commits that are clean", VCS + " push", CMK_CL)
+cmk_allow("a push of a clean commit, with a triplet already on the remote branch", VCS + " push", CMK_RT)
+
+# A commit then a push in one call: a judged clean commit lets the push through; one that cannot be judged
+# is refused.
+cmk_allow("add a.txt, commit and push, with a clean a.txt",
+          VCS + " add a.txt && " + VCS + " commit -m x && " + VCS + " push", CMK_CL)
+# CMK_CL holds no triplet before the call, so the blind chain is allowed.
+cmk_allow("a fix script, add -A, commit and push, with no triplet in the tree before the call",
+          "./fix.sh && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", CMK_CL)
+
+# A cd is a safe earlier segment: the commit is judged in the repository it names. These run from a
+# directory that is no repository, so only the cd leads to the repository.
+cmk_allow("a cd into a repo with a clean change, then add -A, commit and push",
+          "cd " + slash(CMK_CL) + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+cmk_refuse("a cd into a repo with a triplet in a tracked file, then add -A, commit and push",
+           "cd " + slash(CMK_CLT) + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+
+# A failed cd leaves the shell in its cwd. After `;` the commit runs there, so a missing folder does not stop a
+# commit of the triplet in the cwd repository. After `&&` the failed cd ends the chain, so nothing runs.
+cmk_refuse("a cd into a missing folder, then ; add -A and commit, with a triplet tracked in the cwd repo",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing relative folder, then ; add -A and commit, with a triplet tracked in the cwd repo",
+           "cd nope ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_allow("a cd into a missing folder, then && add -A and commit, with a triplet tracked in the cwd repo",
+          "cd " + slash(CMK_GONE) + " && " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_allow("a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CL)
+
+# A failed cd leaves the shell where it was, so the next command after `;`, a newline or `||` runs there. After
+# `&&` the chain stops. `--work-tree` names the folder an add reads: a missing one fails the add (exit 128), so
+# the `&&` stops the commit, and the same call with a real work tree holding the triplet is refused.
+cmk_allow("a missing --work-tree, then && commit, with a triplet tracked in the cwd repo",
+          VCS + " --work-tree=" + slash(CMK_GONE) + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("an existing --work-tree holding the triplet, then add -A and commit",
+           VCS + " --work-tree=" + slash(CMK_CLT) + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then && git status, then ; add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + " && " + VCS + " status ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then && true, then ; add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + " && true ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then ; add -A and commit, then a cd to a clean repo after the commit",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x ; cd " + slash(CMK_CL), CMK_CLT)
+cmk_refuse("a cd into a missing folder, then || true, then ; add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + " || true ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then a newline, then add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + "\n" + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+
+# `cd -` goes back to the folder before the last cd that worked. A failed cd leaves that folder alone, so the
+# commit lands in the triplet repo. The NOGIT form has no triplet to refuse, so this case starts in CMK_CLT.
+cmk_refuse("a cd into a clean repo, then a cd into a missing folder, then cd -, then add -A and commit",
+           "cd " + slash(CMK_CL) + " ; cd " + slash(CMK_GONE) + " ; cd - ; "
+           + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a clean repo, then cd -, then add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_CL) + " ; cd - ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+
+# An earlier commit is a safe segment too, so each commit is judged and the push sees both.
+cmk_allow("two clean commits, each after an add, then a push",
+          VCS + " add a.txt && " + VCS + " commit -m a && " + VCS + " add b.txt && " + VCS + " commit -m b && "
+          + VCS + " push", CMK_SEQ)
+cmk_refuse("two commits, each after an add, the second holding a triplet, then a push",
+           VCS + " add a.txt && " + VCS + " commit -m a && " + VCS + " add b.txt && " + VCS + " commit -m b && "
+           + VCS + " push", CMK_SEQB)
+
+# A push from a subdirectory with `diff.relative` set: `git diff --check` prints each path relative to that
+# directory, so the file it names is read at the top of the tree, under the wrong path. The root push is a
+# green control: the same triplet, pushed from the root, is refused today and stays refused.
+cmk_refuse("a push from sub/ of a triplet in sub/f.txt, with diff.relative set and a clean f.txt at the top",
+           VCS + " push origin topic", os.path.join(CMK_REL, "sub"))
+cmk_refuse("a push from the root of the same repo, the triplet in sub/f.txt, with diff.relative set",
+           VCS + " push origin topic", CMK_REL)
+
+# A refspec that is no plain name, `fix(x)`, is read as HEAD, so the commit it names is never judged. The
+# same commit under the plain name fixy is the green control: it has no tracking ref, so it is judged
+# against the default base, and that base holds the triplet.
+cmk_refuse("a push of a branch named fix(x) holding a triplet, with HEAD on a clean branch",
+           VCS + ' push origin "fix(x)"', CMK_PAREN)
+cmk_refuse("a push of the same commit under the plain name fixy, with HEAD on a clean branch",
+           VCS + " push origin fixy", CMK_PAREN)
+
+
+# A commit or a --continue is judged on what it covers. A blind step before a commit (one that can
+# change the tree) is refused only when a push follows the commit in the call and the commit covers a
+# triplet already in the tree before the call, or when the chain runs a git step that makes a conflict. A
+# push judges the net change it sends.
+R2_DIR = os.path.join(CMKROOT, "r2")
+R2_NEW = os.path.join(R2_DIR, "new")      # new.txt untracked, holding a triplet
+R2_RB = os.path.join(R2_DIR, "rebase")    # a rebase stopped on a.txt, the triplet staged after the stop
+R2_MC = os.path.join(R2_DIR, "merge")     # a merge stopped on a.txt, the triplet staged after the stop
+R2_CP = os.path.join(R2_DIR, "pick")      # a cherry-pick stopped on a.txt, the triplet staged after the stop
+R2_MG = os.path.join(R2_DIR, "mg")        # a clean tree, and a merge of feat that conflicts with it
+R2_NET = os.path.join(R2_DIR, "net")      # a commit adds a triplet, the next removes it, neither pushed
+
+
+def _build_conflict_markers_r2():
+    run, commit = _cmk_run, _cmk_commit
+
+    _cmk_pushed(R2_NEW, {"a.txt": "base\n"})
+    write(os.path.join(R2_NEW, "new.txt"), CM_TRIPLET)      # untracked, not added
+
+    _cmk_pushed(R2_RB, {"a.txt": "base\n"})
+    commit(R2_RB, "a.txt", "topic\n", "topic change")
+    run(R2_RB, "checkout", "main")
+    commit(R2_RB, "a.txt", "main\n", "main change")
+    run(R2_RB, "checkout", "topic")
+    run_vcs(R2_RB, *IDENT, "rebase", "main")                # conflicts on a.txt, and the rebase stops
+    _cmk_unmerged(R2_RB, "a.txt")
+    _cmk_stage(R2_RB, "a.txt", CM_TRIPLET)
+
+    _cmk_pushed(R2_MC, {"a.txt": "base\n"})
+    commit(R2_MC, "a.txt", "topic\n", "topic change")
+    run(R2_MC, "checkout", "main")
+    commit(R2_MC, "a.txt", "main\n", "main change")
+    run(R2_MC, "checkout", "topic")
+    run_vcs(R2_MC, *IDENT, "merge", "--no-edit", "main")    # conflicts on a.txt
+    _require_conflict(R2_MC, "a.txt")
+    _cmk_stage(R2_MC, "a.txt", CM_TRIPLET)
+
+    _cmk_pushed(R2_CP, {"a.txt": "base\n"})
+    run(R2_CP, "checkout", "-b", "pickme")
+    commit(R2_CP, "a.txt", "pick\n", "pick change")
+    run(R2_CP, "checkout", "topic")
+    commit(R2_CP, "a.txt", "topic\n", "topic change")
+    run_vcs(R2_CP, *IDENT, "cherry-pick", "pickme")        # conflicts on a.txt
+    _cmk_unmerged(R2_CP, "a.txt")
+    _cmk_stage(R2_CP, "a.txt", CM_TRIPLET)
+
+    _cmk_pushed(R2_MG, {"a.txt": "base\n"})
+    run(R2_MG, "checkout", "-b", "feat")
+    commit(R2_MG, "a.txt", "feat\n", "feat change")
+    run(R2_MG, "checkout", "topic")
+    commit(R2_MG, "a.txt", "topic\n", "topic change")
+
+    _cmk_pushed(R2_NET, {"a.txt": "base\n"})
+    commit(R2_NET, "a.txt", CM_TRIPLET, "add a triplet")
+    commit(R2_NET, "a.txt", "clean\n", "remove the triplet")
+
+
+lazy_fixture([R2_NEW, R2_RB, R2_MC, R2_CP, R2_MG, R2_NET], _build_conflict_markers_r2)
+
+# 1. An untracked file holding a triplet is in the commit once it is added, by -A or by name.
+cmk_refuse("an untracked new.txt holding a triplet, then add -A, commit and push",
+           VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", R2_NEW)
+cmk_refuse("an untracked new.txt holding a triplet, then add it by name and commit",
+           VCS + " add new.txt && " + VCS + " commit -m x", R2_NEW)
+
+# 2. A --continue is judged like a commit: the index it would commit holds the triplet.
+cmk_refuse("a triplet staged in a.txt in a rebase conflict, then add, rebase --continue and push",
+           VCS + " add a.txt && " + VCS + " rebase --continue && " + VCS + " push", R2_RB)
+cmk_refuse("a triplet staged in a.txt in a merge conflict, then add, merge --continue and push",
+           VCS + " add a.txt && " + VCS + " merge --continue && " + VCS + " push", R2_MC)
+cmk_refuse("a triplet staged in a.txt in a cherry-pick conflict, then add, cherry-pick --continue and push",
+           VCS + " add a.txt && " + VCS + " cherry-pick --continue && " + VCS + " push", R2_CP)
+
+# 3. A push refspec that does not resolve falls back to HEAD's range, which holds the unpushed triplet.
+cmk_refuse("a push of the current branch by a command substitution, with an unpushed triplet commit",
+           VCS + ' push -u origin "$(' + VCS + ' branch --show-current)"', CMK_PU)
+
+# 4. An add pathspec that does not resolve is a whole-tree add, which covers the tracked triplet.
+cmk_refuse("a tracked triplet, then add of a substituted path list, commit and push",
+           VCS + " add $(" + VCS + " diff --name-only) && " + VCS + " commit -m x && "
+           + VCS + " push -u origin HEAD", CMK_CLT)
+
+# 5. A blind step before a commit is allowed when no triplet sits in the tree.
+cmk_allow("a blind step, then commit -am and push, with no triplet in the tree",
+          "./check.sh && " + VCS + " commit -am x && " + VCS + " push", CMK_CL)
+
+# 6. A blind chain with a triplet already in the tree stays refused.
+cmk_refuse("a fix script, add -A, commit and push, with a triplet in the tree before the call",
+           "./fix.sh && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", CMK_CLT)
+
+# 7. A chain that runs a git step making a conflict is refused, though the tree starts clean.
+cmk_refuse("a merge that conflicts on a clean tree, then add -A, commit and push",
+           VCS + " merge feat && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", R2_MG)
+
+# 8. A push judges the net change it sends: a triplet added and removed again is no hit.
+cmk_allow("two commits, the first adding a triplet and the second removing it, then a push",
+          VCS + " push", R2_NET)
+
+
 # =========================================================================== 6. frozen paths
 FAMILY = "frozen"
 #
@@ -10841,6 +12400,10 @@ sh("frozen: cp onto the config-watch baseline store", "cp /tmp/x.json " + CFG_ST
    "frozen-path", cwd=NOGIT)
 sh("frozen: sed -i on the config-watch baseline store", "sed -i '' s/a/b/ " + CFG_STATE, "deny",
    "frozen-path", cwd=NOGIT)
+# A real newline inside a quoted argument does not split the command: the sed -i and the frozen path it names
+# stay one write.
+sh("frozen: sed -i with a newline in its quoted script, onto the frozen settings",
+   "sed -i '1i\\\ntext' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
 # OWNER RULING 2026-10-17 11:40 CDT: `cp` FROM a frozen path to a path outside the frozen set only
@@ -10881,6 +12444,14 @@ sh("frozen: cp FROM a frozen hook with stderr sent to /dev/null is a read",
    "cp " + CFG_HOOK + " /tmp/g 2>/dev/null", "allow", cwd=NOGIT)
 sh("frozen: cp FROM a frozen hook, with a redirect onto a frozen hook, still denies",
    "cp " + CFG_HOOK + " /tmp/g > " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# A line break inside a quoted operand is part of one word, so the frozen file after it is still the
+# target of the write, whichever command carries the quoted text.
+sh("frozen: sed -i whose quoted a-text script holds a line break still denies a frozen hook",
+   "sed -i '/^x/a\\\nnew line' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i -e whose quoted i-text script holds a line break still denies a frozen hook",
+   "sed -i -e '1i\\\nimport os' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp whose quoted source spans two lines still denies onto a frozen hook",
+   "cp '/tmp/a\nb.py' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
@@ -11059,6 +12630,45 @@ sh("frozen dup: cp from a dup before a frozen settings file stays frozen",
    "cp /tmp/x 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen dup: tee after a dup onto a frozen settings file stays frozen",
    "echo x | tee 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# THE AMPERSAND REDIRECT. `&>` and `&>>` send both streams to a file, so a copy into a frozen path with
+# one of them writes the frozen file. The `&` is a redirect, never a copy source. The forms that already
+# refuse stay refused, and a copy FROM a frozen file with `&>` is still a read.
+sh("frozen amp: cp onto a frozen hook with &> /dev/null stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &> /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with &>/dev/null, no space, stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &>/dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen settings file with &>> /dev/null stays denied",
+   "cp /tmp/x.json " + CFG_SETTINGS + " &>> /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with &> /dev/null, then a chained echo, stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &> /dev/null && echo done", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with > /dev/null stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " > /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with >& /dev/null stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " >& /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with 2>&1 stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " 2>&1", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp FROM a frozen hook to scratch with &> /dev/null is still a read",
+   "cp " + CFG_HOOK + " /tmp/guard.bak &> /dev/null", "allow", cwd=NOGIT)
+# THE DESTINATION AFTER A NULL REDIRECT. `cp SRC &> /dev/null DEST` writes DEST whatever the redirect says, so
+# a frozen DEST named after the null redirect is judged, as one named before it is.
+sh("frozen amp: cp /tmp/x.py &> /dev/null onto a frozen hook named last stays denied",
+   "cp /tmp/x.py &> /dev/null " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp /tmp/x.json &> /dev/null onto a frozen settings file named last stays denied",
+   "cp /tmp/x.json &> /dev/null " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# THE FROZEN SOURCE WITH A FILE REDIRECT. `cp FROZEN /tmp/x &> /tmp/build.log` reads the frozen file and writes
+# scratch, so it is allowed: the `&` of `&>` is no copy source. A frozen destination with the same redirect
+# still denies.
+sh("frozen amp: cp FROM a frozen hook to scratch with &> to a build log is still a read",
+   "cp " + CFG_HOOK + " /tmp/x &> /tmp/build.log", "allow", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with &> to a build log stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &> /tmp/build.log", "deny", "frozen-path", cwd=NOGIT)
+# THE LONE >& REDIRECT. `>&` sends both streams to a file, as `&>` does. A copy FROM a frozen hook with `>&` to a
+# build log reads the frozen file and writes scratch, so it is allowed. A copy onto a frozen hook with the same
+# redirect still denies.
+sh("frozen amp: cp FROM a frozen hook to scratch with >& to a build log is still a read",
+   "cp " + CFG_HOOK + " /tmp/x >& /tmp/l", "allow", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with >& to a build log stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " >& /tmp/l", "deny", "frozen-path", cwd=NOGIT)
 
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
@@ -11219,6 +12829,22 @@ sh("frozen data: a quoted cat-write onto the config settings, piped to python, d
    "echo \"cat > " + CFG_SETTINGS + "\" | python hooks/guard.py", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: a real cat-write onto the config settings stays denied",
    "cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# The PowerShell reading of a `\"` stays fail-closed: the quote may open a string, so the write is
+# still judged and denied. The bash reading of the same text is a plain echo and is allowed.
+sh("frozen: a PowerShell call with a backslash-quote before a config write stays denied",
+   'echo "C:\\" ; Set-Content ' + CFG_SETTINGS + ' x ; echo \\"D"', "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+
+# ASK-STEP-HIDDEN (debt ask-step-hidden-in-script). A redirect glued to a `(` or a `$(` hides its path word
+# from the frozen check, so each form denies as the plain redirect does.
+sh("ask-step-hidden: control, a plain redirect onto the config settings denies",
+   "echo x > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("ask-step-hidden: a redirect in a subshell onto the config settings denies",
+   "(echo x > " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("ask-step-hidden: a redirect in a glued command substitution onto the config settings denies",
+   "x=$(echo x > " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("ask-step-hidden: a redirect in glued backticks inside bash -c onto the config settings denies",
+   "bash -c 'x=`echo x > " + CFG_SETTINGS + "`'", "deny", "frozen-path", cwd=NOGIT)
 
 # VARIABLE INDIRECTION (incident 2026-10-07): the static parse saw only "$D", never the frozen
 # target. A simple VAR=value assignment earlier in the same command must resolve. An unresolved
@@ -11742,6 +13368,20 @@ sh("cap: a redirect onto a project settings file asks",
 sh("cap: an append onto a project settings file asks",
    "echo '\"" + CAP_FORCE + "\": \"0\"' >> " + PROJ_SETTINGS,
    "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_FORCE + " = 0",))
+
+# ASK-STEP-HIDDEN (debt ask-step-hidden-in-script). A cap write glued to a `$(`, a backtick or a `(` hides
+# its path word from the cap check, so each form asks as the plain redirect does.
+HIDDEN_CAP_WRITE = "printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL
+sh("ask-step-hidden: control, the plain cap redirect asks",
+   HIDDEN_CAP_WRITE, "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("ask-step-hidden: a cap write in a glued command substitution asks",
+   "x=$(" + HIDDEN_CAP_WRITE + ")", "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("ask-step-hidden: a cap write in glued backticks asks",
+   "x=`" + HIDDEN_CAP_WRITE + "`", "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("ask-step-hidden: a cap write in a bare subshell asks",
+   "(" + HIDDEN_CAP_WRITE + ")", "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("ask-step-hidden: a cap write in a subshell with a leading space asks",
+   "( " + HIDDEN_CAP_WRITE + ")", "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
 
 # A WRITE PIPED INTO A SHELL IS A WRITE. The cap text sits in double quotes and the sed runs under `sh`,
 # so it is code. The pipe chains it with the echo, so it denies (ask-alone).
@@ -12416,7 +14056,7 @@ for _tool, _field in (("Edit", "file_path"), ("Write", "file_path"), ("MultiEdit
     add("builder-test: %s of a test file is refused" % _tool, "deny", rule=BT, tool=_tool,
         carries=("test-author", "Report"), **{_field: "src/test_app.py"}, **B)
 add("builder-test: the refusal routes a test-file merge conflict", "deny", rule=BT, tool="Edit",
-    file_path="src/test_app.py", carries=("merge conflict",), **B)
+    file_path="src/test_app.py", carries=("merge conflict", "test-author"), **B)
 for _path in ("src/app_test.py", "pkg/app_test.go", "web/a.test.ts", "web/a.test.jsx",
               "web/a.spec.js", "tests/helper.py", "pkg/__tests__/x.js", "spec/models/user.rb",
               "src/tests/data/fixture.json", "test/x.txt", "src/conftest.py"):
@@ -12464,6 +14104,78 @@ add("builder-test: a session run with --agent builder (no agent_id) is not judge
 add("builder-test: a builder Write of a test file from no repository is refused by shape", "deny",
     rule=BT, tool="Write", file_path="src/test_app.py", carries=("test-author", "Report"),
     agent_id="bld1", agent_type="builder", cwd=NOGIT)
+# THE JOIN WITH AN UNKNOWN HEAD. A builder's script joins a folder it cannot read (a temp folder from
+# tempfile.mkdtemp(), which is in no repository) to test-looking pieces. The unknown head drops out of the
+# join, so the pieces read as a repo test path: a false alarm. A join that resolves to the working folder
+# or to a relative folder is a repo test path, and still refuses.
+sh("builder join: a temp folder from mkdtemp joined to tests is allowed",
+   "python3 - <<'EOF'\nimport os, tempfile\ntmpdir = tempfile.mkdtemp()\n"
+   "open(os.path.join(tmpdir, 'tests', 'test_x.py'), 'w').write('x')\nEOF", "allow", **B)
+sh("builder join: a temp folder from mkdtemp in python -c joined to tests is allowed",
+   "python3 -c \"import os, tempfile; t = tempfile.mkdtemp(); "
+   "open(os.path.join(t, 'tests', 'test_x.py'), 'w').write('x')\"", "allow", **B)
+sh("builder join: a literal folder outside the repository joined to tests is allowed",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join('/tmp/elsewhere', 'tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "allow", **B)
+sh("builder join: a relative folder joined to tests still refuses",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join('tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, **B)
+sh("builder join: a relative folder held in a variable and joined to tests still refuses",
+   "python3 - <<'EOF'\nimport os\nrepo = '.'\nopen(os.path.join(repo, 'tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, **B)
+sh("builder join: the working folder from Path.cwd() joined to tests still refuses",
+   "python3 - <<'EOF'\nfrom pathlib import Path\n(Path.cwd() / 'tests' / 'test_x.py').write_text('x')\nEOF",
+   "deny", rule=BT, **B)
+sh("builder join: the working folder from os.getcwd() joined to tests still refuses",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, **B)
+# THE HEAD OF A JOIN IN python -c. An unknown head drops out of the join, so only a head from a temp source
+# (tempfile.mkdtemp, mkstemp, gettempdir, TemporaryDirectory) is safe. A head the script takes from
+# sys.argv, from subprocess output, from Path(__file__) or from os.path.dirname() names a folder in the repo,
+# so the join to hooks/test_x.py still refuses.
+sh("builder join: a repo head from sys.argv[1] joined to hooks in python -c still refuses",
+   '''python3 -c "import os, sys; repo = sys.argv[1]; open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')" .''',
+   "deny", rule=BT, **B)
+sh("builder join: a repo head from subprocess output joined to hooks in python -c still refuses",
+   '''python3 -c "import os, subprocess; repo = subprocess.check_output(['git', 'rev-parse', '--show-toplevel']).decode().strip(); open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a repo head from Path(__file__).resolve().parents joined to hooks in python -c still refuses",
+   '''python3 -c "import os; from pathlib import Path; repo = Path(__file__).resolve().parents[1]; open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a repo head from os.path.dirname joined to hooks in python -c still refuses",
+   '''python3 -c "import os; repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; tmp = tempfile.mkdtemp(); open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+sh("builder join: a temp folder from gettempdir joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; tmp = tempfile.gettempdir(); open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+sh("builder join: a temp folder from mkstemp joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; fd, tmp = tempfile.mkstemp(); os.close(fd); open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+sh("builder join: a temp folder from TemporaryDirectory joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; with tempfile.TemporaryDirectory() as tmp: open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+# THE dir= ARGUMENT OF mkdtemp. `dir='.'` and `dir=os.getcwd()` put the temp folder in the working folder, so a
+# join to tests from it is a repo test path and refuses. Only the system temp folder is no repo folder. The inline
+# join from the same call refuses too. A bare mkdtemp() inline stays allowed, as its held form does.
+sh("builder join: a temp folder from mkdtemp(dir='.') held in a variable, joined to tests still refuses",
+   '''python3 -c "import os, tempfile; d = tempfile.mkdtemp(dir='.'); open(os.path.join(d, 'tests', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp(dir=os.getcwd()) held in a variable, joined to tests still refuses",
+   '''python3 -c "import os, tempfile; d = tempfile.mkdtemp(dir=os.getcwd()); open(os.path.join(d, 'tests', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp(dir='.') joined inline to tests still refuses",
+   '''python3 -c "import os, tempfile; open(os.path.join(tempfile.mkdtemp(dir='.'), 'tests', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp() joined inline to tests is allowed",
+   '''python3 -c "import os, tempfile; open(os.path.join(tempfile.mkdtemp(), 'tests', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+# A TemporaryDirectory held in a variable and joined through its .name is still a system temp folder: allowed.
+sh("builder join: a TemporaryDirectory held in a variable, joined through .name to tests is allowed",
+   '''python3 -c "import os, tempfile; td = tempfile.TemporaryDirectory(); open(os.path.join(td.name, 'tests', 'test_x.py'), 'w')"''',
+   "allow", **B)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
@@ -12497,6 +14209,312 @@ add("test-author: Edit of janitor/mutate_sweep.py is allowed", "allow", tool="Ed
     file_path="janitor/mutate_sweep.py", **A)
 add("test-author: Edit of HOOKS/mutate_guard.py is allowed (case folds)", "allow", tool="Edit",
     file_path="HOOKS/mutate_guard.py", **A)
+
+# ---- workflow test-run steps. A test-author may add or remove a whole test-run step in a workflow; nothing else there.
+# A builder may change any workflow line, except one that disables tests in a test-runner line. Each author row and
+# its builder row share one old and one new text, so the two roles judge the same edit. An Edit is judged by
+# old_string against new_string, never by new_string alone.
+WF = ".github/workflows/checks.yml"
+WF_YAML = ".github/workflows/checks.yaml"
+LINT = "      - name: Lint\n        run: python3 lint/ste_lint.py\n"
+LINT_RUN_CHANGED = LINT.replace("lint/ste_lint.py", "lint/other_lint.py")
+TEST_LINUX = "      - name: Guard tests\n        run: python3 hooks/test_guard.py\n"
+TEST_WINDOWS = "      - name: Guard tests (Windows)\n        run: python hooks/test_guard.py\n"
+TEST_IF = "      - name: Guard tests\n        if: runner.os == 'Linux'\n        run: python3 hooks/test_guard.py\n"
+TEST_APOSTROPHE = "      - name: Don't skip guard tests\n        run: python3 hooks/test_guard.py\n"
+CLEAN = "      - name: Clean\n        run: rm -rf build\n"
+DESELECT = "      - name: Unit\n        run: python3 -m pytest --deselect a::b\n"
+NEW_WORKFLOW = ("on: push\njobs:\n  test:\n    steps:\n      - name: Guard tests\n"
+                "        run: python3 hooks/test_guard.py\n")
+
+# Red on main: main refuses every workflow edit by path, so each allow below fails for that one cause.
+for _name, _path, _old, _new in (
+    ("a Linux test step inserted after a lint step", WF, LINT, LINT + TEST_LINUX),
+    ("a Windows python test step inserted after a lint step", WF, LINT, LINT + TEST_WINDOWS),
+    ("a test step with an if line inserted after a lint step", WF, LINT, LINT + TEST_IF),
+    ("a test step whose name holds an apostrophe inserted", WF, LINT, LINT + TEST_APOSTROPHE),
+    ("a test step deleted", WF, LINT + TEST_LINUX, LINT),
+    ("a test step inserted into checks.yaml", WF_YAML, LINT, LINT + TEST_LINUX),
+):
+    add("test-author: %s is allowed" % _name, "allow", tool="Edit", file_path=_path,
+        old_string=_old, new_string=_new, **A)
+add("test-author: a test step inserted with MultiEdit is allowed", "allow", tool="MultiEdit",
+    file_path=WF, edits=[{"old_string": LINT, "new_string": LINT + TEST_LINUX}], **A)
+
+# Pins: main already refuses each of these, and each must stay refused once the classifier lands.
+for _name, _old, _new in (
+    ("a lint step's run is changed", LINT, LINT_RUN_CHANGED),
+    ("a test step added beside a run: rm -rf build step", LINT, LINT + TEST_LINUX + CLEAN),
+    ("continue-on-error added to a test step", LINT,
+     LINT + "      - name: Guard tests\n        continue-on-error: true\n        run: python3 hooks/test_guard.py\n"),
+    ("a test path followed by && curl x", LINT,
+     LINT + "      - name: Guard tests\n        run: python3 hooks/test_guard.py && curl x\n"),
+    ("a comment opener inside quotes before && curl x", LINT,
+     LINT + '      - name: Guard tests\n        run: python3 hooks/test_guard.py "a # b" && curl x\n'),
+    ("a multi-line run block with rm -rf build", LINT,
+     LINT + "      - name: Guard tests\n        run: |\n          python3 hooks/test_guard.py\n          rm -rf build\n"),
+):
+    add("test-author: %s in checks.yml is refused" % _name, "deny", rule=TA, tool="Edit",
+        file_path=WF, old_string=_old, new_string=_new, carries=("builder", "Report"), **A)
+add("test-author: Edit of .github/dependabot.yml is refused", "deny", rule=TA, tool="Edit",
+    file_path=".github/dependabot.yml", old_string="version: 2\n", new_string="version: 2\nupdates: []\n",
+    carries=("builder", "Report"), **A)
+add("test-author: Write of a new workflow with on and jobs lines is refused", "deny", rule=TA,
+    tool="Write", file_path=".github/workflows/nightly.yml", content=NEW_WORKFLOW,
+    carries=("builder", "Report"), **A)
+
+# Builder: an edit to a workflow stays allowed unless its added lines disable tests in a test-runner line.
+for _name, _old, _new in (
+    ("a lint step's run is changed", LINT, LINT_RUN_CHANGED),
+    ("a test step is added", LINT, LINT + TEST_LINUX),
+):
+    add("builder-test: %s in checks.yml is allowed" % _name, "allow", tool="Edit", file_path=WF,
+        old_string=_old, new_string=_new, **B)
+add("builder-test: a pytest --deselect step added to checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT, new_string=LINT + DESELECT, carries=("test-author", "Report"), **B)
+
+# A `$(` in a test-run step runs a command, quoted or not, so no test run holds it. A ruff line on tests/ is a lint
+# step. A continue-on-error, an `if: false` or a deleted test step takes a test out of CI.
+QUOTED_SUBST = '      - name: Guard tests\n        run: python3 hooks/test_guard.py "$(curl -s x | sh)"\n'
+TAG_SUBST = '      - name: Guard tests\n        run: python3 hooks/test_guard.py --tag "$(git rev-parse HEAD)"\n'
+UNQUOTED_SUBST = '      - name: Guard tests\n        run: python3 hooks/test_guard.py --tag $(git rev-parse HEAD)\n'
+RUFF_TESTS = "      - name: Ruff\n        run: ruff check tests/ --ignore E501\n"
+CONTINUE_ON_ERROR = "      - name: Guard tests\n        continue-on-error: true\n        run: python3 hooks/test_guard.py\n"
+IF_FALSE = "      - name: Guard tests\n        if: false\n        run: python3 hooks/test_guard.py\n"
+for _name, _new in (
+    ("a quoted $( substitution in a test run", LINT + QUOTED_SUBST),
+    ("a quoted $( with git rev-parse in a test run", LINT + TAG_SUBST),
+    ("an unquoted $( with git rev-parse in a test run", LINT + UNQUOTED_SUBST),
+):
+    add("test-author: %s in checks.yml is refused" % _name, "deny", rule=TA, tool="Edit",
+        file_path=WF, old_string=LINT, new_string=_new, carries=("builder", "Report"), **A)
+add("builder-test: a ruff --ignore line on tests/ added to checks.yml is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT, new_string=LINT + RUFF_TESTS, **B)
+add("builder-test: continue-on-error added under a test step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + CONTINUE_ON_ERROR,
+    carries=("test-author", "Report"), **B)
+add("builder-test: if: false added under a test step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + IF_FALSE,
+    carries=("test-author", "Report"), **B)
+# A mutation test is a test run too: a disabled mutate step reads green while its mutants go unrun. Its file is
+# named in AUTHOR_MUTATION_TESTS, not a test_ name, so the step check must count that list. The controls keep a
+# non-test script, a near-miss hooks/mutate_x.py and a timeout change on the mutate step allowed.
+MUTATE_GUARD = ("      - name: Guard mutation test\n        run: python3 hooks/mutate_guard.py\n"
+                "        timeout-minutes: 25\n")
+MUTATE_GUARD_CONTINUE = ("      - name: Guard mutation test\n        continue-on-error: true\n"
+                         "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_IF_FALSE = ("      - name: Guard mutation test\n        if: false\n"
+                         "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_TIMEOUT = MUTATE_GUARD.replace("minutes: 25", "minutes: 30")
+MUTATE_SWEEP = "      - name: Mutate sweep\n        run: python3 janitor/mutate_sweep.py\n"
+MUTATE_SWEEP_CONTINUE = ("      - name: Mutate sweep\n        continue-on-error: true\n"
+                         "        run: python3 janitor/mutate_sweep.py\n")
+SOME_TOOL = "      - name: Some tool\n        run: python3 hooks/some_tool.py\n"
+SOME_TOOL_CONTINUE = ("      - name: Some tool\n        continue-on-error: true\n"
+                      "        run: python3 hooks/some_tool.py\n")
+MUTATE_X = "      - name: Mutate tool\n        run: python3 hooks/mutate_x.py\n"
+MUTATE_X_CONTINUE = ("      - name: Mutate tool\n        continue-on-error: true\n"
+                     "        run: python3 hooks/mutate_x.py\n")
+add("builder-test: continue-on-error added under the mutate_guard step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added under the mutate_sweep step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_SWEEP, new_string=LINT + MUTATE_SWEEP_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: if: false added under the mutate_guard step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_IF_FALSE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added to a step running hooks/some_tool.py is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + SOME_TOOL, new_string=LINT + SOME_TOOL_CONTINUE, **B)
+add("builder-test: continue-on-error added to a step running hooks/mutate_x.py is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_X, new_string=LINT + MUTATE_X_CONTINUE, **B)
+add("builder-test: a timeout change on the mutate_guard step is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_TIMEOUT, **B)
+# A YAML comment after a disable value still disables the step, so the disable line must be read without its comment.
+# A lone apostrophe in that comment must not stop the reader from finding the `#`: a quote-aware reader that throws on
+# it would fall open. The controls keep a comment after a false value, and a quoted `#` on a run line, allowed.
+MUTATE_GUARD_CONTINUE_FLAKY = ("      - name: Guard mutation test\n        continue-on-error: true  # flaky\n"
+                               "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_IF_FALSE_FLAKY = ("      - name: Guard mutation test\n        if: false  # flaky\n"
+                               "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_CONTINUE_APOSTROPHE = ("      - name: Guard mutation test\n        continue-on-error: true  # don't\n"
+                                    "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+TEST_GUARD_CONTINUE_FLAKY = ("      - name: Guard tests\n        continue-on-error: true  # flaky\n"
+                             "        run: python3 hooks/test_guard.py\n")
+MUTATE_GUARD_CONTINUE_FALSE = ("      - name: Guard mutation test\n        continue-on-error: false  # never\n"
+                               "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_QUOTED_HASH = ("      - name: Guard mutation test\n"
+                            "        run: echo \"a # b\" && python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+add("builder-test: continue-on-error: true with a trailing # flaky comment under the mutate_guard step is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD,
+    new_string=LINT + MUTATE_GUARD_CONTINUE_FLAKY, carries=("test-author", "Report"), **B)
+add("builder-test: if: false with a trailing # flaky comment under the mutate_guard step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_IF_FALSE_FLAKY,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error: true with a trailing # flaky comment under a test step is refused", "deny",
+    rule=BT, tool="Edit", file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + TEST_GUARD_CONTINUE_FLAKY,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error: true with a lone apostrophe in its # comment under the mutate_guard step "
+    "is refused", "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD,
+    new_string=LINT + MUTATE_GUARD_CONTINUE_APOSTROPHE, carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error: false with a trailing # comment under the mutate_guard step is allowed", "allow",
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_CONTINUE_FALSE, **B)
+add("builder-test: a quoted # on the mutate_guard run line ahead of the script is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_QUOTED_HASH, **B)
+# A mutation test run through `cd hooks &&` or a `working-directory:` line names its script by the bare file name.
+# The step check counts that run by the name (the basename against MUTATION_TEST_NAMES) and resolves no folder, so
+# a disabled step in either form would read green without that count.
+# The pins hold what a test file already keeps: the same forms on a test file are refused, by basename.
+TEST_GUARD_CD = "      - name: Guard tests\n        run: cd hooks && python3 test_guard.py\n"
+TEST_GUARD_CD_CONTINUE = ("      - name: Guard tests\n        continue-on-error: true\n"
+                          "        run: cd hooks && python3 test_guard.py\n")
+TEST_GUARD_WD = "      - name: Guard tests\n        working-directory: hooks\n        run: python3 test_guard.py\n"
+TEST_GUARD_WD_IF_FALSE = ("      - name: Guard tests\n        if: false\n        working-directory: hooks\n"
+                          "        run: python3 test_guard.py\n")
+MUTATE_GUARD_CD = "      - name: Guard mutation test\n        run: cd hooks && python3 mutate_guard.py\n"
+MUTATE_GUARD_CD_CONTINUE = ("      - name: Guard mutation test\n        continue-on-error: true\n"
+                            "        run: cd hooks && python3 mutate_guard.py\n")
+MUTATE_GUARD_WD = ("      - name: Guard mutation test\n        working-directory: hooks\n"
+                   "        run: python3 mutate_guard.py\n")
+MUTATE_GUARD_WD_IF_FALSE = ("      - name: Guard mutation test\n        if: false\n        working-directory: hooks\n"
+                            "        run: python3 mutate_guard.py\n")
+MUTATE_SWEEP_WD = "      - name: Mutate sweep\n        working-directory: janitor\n        run: python3 mutate_sweep.py\n"
+MUTATE_SWEEP_WD_CONTINUE = ("      - name: Mutate sweep\n        continue-on-error: true\n"
+                            "        working-directory: janitor\n        run: python3 mutate_sweep.py\n")
+MUTATE_X_CD = "      - name: Mutate tool\n        run: cd hooks && python3 mutate_x.py\n"
+MUTATE_X_CD_CONTINUE = ("      - name: Mutate tool\n        continue-on-error: true\n"
+                        "        run: cd hooks && python3 mutate_x.py\n")
+add("builder-test: continue-on-error added under the cd hooks mutate_guard step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD_CD, new_string=LINT + MUTATE_GUARD_CD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: if: false added under the working-directory mutate_guard step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD_WD, new_string=LINT + MUTATE_GUARD_WD_IF_FALSE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added under the working-directory mutate_sweep step is refused", "deny",
+    rule=BT, tool="Edit", file_path=WF, old_string=LINT + MUTATE_SWEEP_WD, new_string=LINT + MUTATE_SWEEP_WD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added to a cd hooks mutate_x.py step is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_X_CD, new_string=LINT + MUTATE_X_CD_CONTINUE, **B)
+add("builder-test: continue-on-error added under the cd hooks test step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + TEST_GUARD_CD, new_string=LINT + TEST_GUARD_CD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: if: false added under the working-directory test step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + TEST_GUARD_WD, new_string=LINT + TEST_GUARD_WD_IF_FALSE,
+    carries=("test-author", "Report"), **B)
+# A mutation test's whole step is a test run too: deleting it leaves its mutants unrun, so the deletion is refused by
+# the file name the step runs. The control deletes an upload step beside the kept mutate step, in the same job.
+UPLOAD_REPORT = ("      - name: Upload report\n        uses: actions/upload-artifact@v4\n"
+                 "        with:\n          name: report\n          path: out/report.json\n")
+add("builder-test: a whole mutate_guard step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: a whole mutate_sweep step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_SWEEP, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: an upload step deleted beside the mutate_guard step is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD + UPLOAD_REPORT, new_string=LINT + MUTATE_GUARD, **B)
+add("builder-test: a whole test step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: a test step moved within checks.yml is allowed", "allow", tool="Edit", file_path=WF,
+    old_string=LINT + TEST_LINUX + CLEAN, new_string=LINT + CLEAN + TEST_LINUX, **B)
+add("builder-test: a test step's if: changed to another condition is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=TEST_IF,
+    new_string=TEST_IF.replace("runner.os == 'Linux'", "github.event_name == 'push'"), **B)
+
+# A test run keeps its test when its interpreter flag (-u, -X utf8), its ./ path or its shell flag (bash -x)
+# changes, and when its step moves to another job. Removing a test run drops its test, and a flag that
+# hides the test path from the run does not change that.
+R3_UNIT = "      - name: Unit\n        run: python3 tests/test_a.py\n"
+R3_UNIT_U = "      - name: Unit\n        run: python3 -u tests/test_a.py\n"
+R3_JOBS_BEFORE = (
+    "jobs:\n  lint:\n    steps:\n      - name: Lint\n        run: python3 lint/ste_lint.py\n"
+    "  unit:\n    steps:\n      - name: Install\n        run: pip install -r requirements.txt\n"
+    "      - name: Guard tests\n        run: python3 hooks/test_guard.py\n")
+R3_JOBS_AFTER = (
+    "jobs:\n  lint:\n    steps:\n      - name: Lint\n        run: python3 lint/ste_lint.py\n"
+    "      - name: Guard tests\n        run: python3 hooks/test_guard.py\n"
+    "  unit:\n    steps:\n      - name: Install\n        run: pip install -r requirements.txt\n")
+add("builder-test: python3 -u in place of python3 on a test run is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=R3_UNIT, new_string=R3_UNIT_U, **B)
+add("builder-test: python -X utf8 in place of python3 on a test run is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=R3_UNIT,
+    new_string="      - name: Unit\n        run: python -X utf8 tests/test_a.py\n", **B)
+add("builder-test: a ./ path in place of a test path on a test run is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=R3_UNIT,
+    new_string="      - name: Unit\n        run: python3 ./tests/test_a.py\n", **B)
+add("builder-test: bash -x in place of bash on a test run is allowed", "allow", tool="Edit",
+    file_path=WF, old_string="      - name: Unit\n        run: bash tests/run.sh\n",
+    new_string="      - name: Unit\n        run: bash -x tests/run.sh\n", **B)
+add("builder-test: a test step moved to another job is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=R3_JOBS_BEFORE, new_string=R3_JOBS_AFTER, **B)
+add("builder-test: a -u test run deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + R3_UNIT_U, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: an added run of a test path with --deselect is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT,
+    new_string=LINT + "      - name: X\n        run: python3 hooks/x_test.py --deselect a\n",
+    carries=("test-author", "Report"), **B)
+# A wrapper runs the test it wraps, so a wrapped run is judged as the bare run it wraps. A builder's wrap of a bare
+# run keeps its test, a test-author's wrapped single-line run is a test step, and deleting a wrapped run drops its test.
+WRAPPED_RUNS = (
+    "timeout 600 python3 tests/test_a.py",
+    "xvfb-run -a python3 tests/test_a.py",
+    "coverage run tests/test_a.py",
+    "uv run tests/test_a.py",
+    "env FOO=1 python3 tests/test_a.py",
+    "nice python3 tests/test_a.py",
+    "python3 -m coverage run tests/test_a.py",
+)
+for _form in WRAPPED_RUNS:
+    add("builder-test: %s in place of a bare test run is allowed" % _form, "allow", tool="Edit", file_path=WF,
+        old_string=R3_UNIT, new_string="      - name: Unit\n        run: %s\n" % _form, **B)
+for _form in WRAPPED_RUNS:
+    add("test-author: a whole new test step, %s, is allowed" % _form, "allow", tool="Edit", file_path=WF,
+        old_string=LINT, new_string=LINT + "      - name: Unit\n        run: %s\n" % _form, **A)
+for _form in WRAPPED_RUNS:
+    add("builder-test: a wrapped test run, %s, deleted from checks.yml is refused" % _form, "deny", rule=BT,
+        tool="Edit", file_path=WF, old_string=LINT + "      - name: Unit\n        run: %s\n" % _form, new_string=LINT,
+        carries=("test-author", "Report"), **B)
+add("builder-test: a wrapped test run unwrapped to its bare path is allowed", "allow", tool="Edit", file_path=WF,
+    old_string="      - name: Unit\n        run: timeout 600 python3 tests/test_a.py\n", new_string=R3_UNIT, **B)
+# Not a test run: a wrapper around one does not make it a test, so each of these still drops the test it replaces.
+add("builder-test: a bare test run replaced by an echo of its path is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=R3_UNIT, new_string="      - name: Unit\n        run: echo python3 tests/test_a.py\n",
+    carries=("test-author", "Report"), **B)
+add("builder-test: a bare test run replaced by a timeout around a lint run is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=R3_UNIT, new_string="      - name: Unit\n        run: timeout 600 python3 lint/ste_lint.py\n",
+    carries=("test-author", "Report"), **B)
+add("test-author: a whole new test step, timeout around curl, is refused", "deny", rule=TA, tool="Edit",
+    file_path=WF, old_string=LINT, new_string=LINT + "      - name: Unit\n        run: timeout 600 curl -s x\n",
+    carries=("builder", "Report"), **A)
+add("test-author: a whole new test step with if: false is refused", "deny", rule=TA, tool="Edit",
+    file_path=WF, old_string=LINT,
+    new_string=LINT + "      - name: Guard tests\n        if: false\n        run: python3 hooks/test_guard.py\n",
+    carries=("builder", "Report"), **A)
+# A multi-line run: block whose wrapper takes a quoted value with a space. The shell reads the quoted value as one
+# word, so the run is a test. A whitespace split reads `-screen` and `0` as the command and finds no test path, so
+# the deletion would pass. The bare block beside it is the control: the same block shape, no wrapper, is refused.
+XVFB_QUOTED_BLOCK = ("      - name: Xvfb unit\n        run: |\n"
+                     "          xvfb-run -s \"-screen 0 1024x768x24\" python3 tests/test_a.py\n")
+BARE_BLOCK = "      - name: Bare unit\n        run: |\n          python3 tests/test_a.py\n"
+add("builder-test: a multi-line run under xvfb-run with a quoted -s value, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + XVFB_QUOTED_BLOCK, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a multi-line bare test run, no wrapper, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BARE_BLOCK, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+# A backslash in a test path is a separator on Windows, and is_test_rel reads it as `/`. The run line must keep it:
+# shlex in POSIX mode reads an unquoted backslash as an escape, so `tests\test_a.py` loses its separator and reads as
+# no test. Each deletion below is refused on main, so a parse that drops the backslash is a regression.
+BACKSLASH_INLINE = "      - name: Win unit\n        run: python tests\\test_a.py\n"
+BACKSLASH_BLOCK = "      - name: Win unit\n        run: |\n          python tests\\test_a.py\n"
+BACKSLASH_NODE = "      - name: Win node\n        run: node tests\\run.js\n"
+add("builder-test: a bare python run with a backslash test path, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_INLINE, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a multi-line python run with a backslash test path, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_BLOCK, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a node run with a backslash test path, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_NODE, new_string=LINT,
+    carries=("test-author", "Report"), **B)
 
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
@@ -12669,6 +14687,47 @@ sh("builder-test: shell grep of tests/test_guard.py for a mutating word is allow
    "grep -n install tests/test_guard.py", "allow", **BR)
 sh("builder-test: shell pytest -k with a mutating word is allowed",
    "python3 -m pytest -k copy tests/test_guard.py", "allow", **BR)
+# A `bash -c` script is read at its command position, as the shell reads it: a mutating word that is only an
+# argument of a test run inside it reads as a read. A write to a test inside the script stays refused, whether
+# the write is the script's first command or a later one after `;`.
+sh("builder-test: bash -c pytest -k with a mutating word on a test is allowed",
+   'bash -c "pytest -k install tests/test_x.py"', "allow", **BR)
+sh("builder-test: timeout around bash -c pytest -k with a mutating word on a test is allowed",
+   'timeout 300 bash -c "pytest -k move tests/x.py"', "allow", **BR)
+sh("builder-test: bash -c echo redirect onto a test is refused",
+   'bash -c "echo x > tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c cp onto a test is refused",
+   'bash -c "cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c install onto a test is refused",
+   'bash -c "install -m 644 /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c pytest read, then a cp onto a test after the semicolon, is refused",
+   'bash -c "pytest -k install tests/test_x.py; cp /tmp/a tests/test_x.py"', "deny", rule=BT,
+   carries=("test-author",), **BR)
+# A real newline inside the bash -c string starts a new command, so a write after it is judged the same way.
+sh("builder-test: bash -c with a newline before a cp onto a test is refused",
+   'bash -c "set -e\ncp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with a newline before a sed -i on a test is refused",
+   'bash -c "echo hi\nsed -i s/a/b/ tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+# A quoted argument with a real newline in it, and an escaped quote in a bash -c string, do not hide the write
+# that follows: each is read at its command position, as the shell reads it.
+sh("builder-test: sed -i with a newline in its quoted script, onto a test, is refused",
+   "sed -i '1i\\\ntext' tests/test_x.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: cp of a quoted argument with a newline onto a test is refused",
+   'cp "a\nb" tests/x.py', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with an escaped quote, then ; and a cp onto a test, is refused",
+   r'bash -c "echo \"x\"; cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with an escaped quote, then a pipe into a cp onto a test, is refused",
+   r'bash -c "echo \"x\"|cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with an escaped quote, then a newline and a cp onto a test, is refused",
+   'bash -c "echo \\"x\\"\ncp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+# The message after -m keeps its place in the words a git commit is read by, so a pathspec after it is read at its
+# own place: a path named rm or mv is no git rm or git mv. A real git rm after the commit is still refused.
+sh("builder-test: git commit with a message, then a pathspec named rm before a test, is allowed",
+   'git commit -m "docs" rm tests/test_x.py', "allow", **BR)
+sh("builder-test: git commit with a message, then a pathspec named mv before a test, is allowed",
+   'git commit -m "docs" mv tests/test_x.py', "allow", **BR)
+sh("builder-test: git commit with a message, then && and a git rm of a test, is refused",
+   'git commit -m "docs" && git rm tests/test_x.py', "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: python heredoc that reads tests/x.py, rebinds the name, then writes src/app.py is allowed",
    "python3 - <<'EOF'\np='tests/x.py'\nprint(open(p).read())\np='src/app.py'\nopen(p,'w').write('x')\nEOF",
    "allow", **BR)
@@ -13048,6 +15107,12 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The wait-until remedy checks are defined beside the wait-until cases. They are log checks, so they are
+# registered here, where LOG_CHECKS_EXTRA is defined, and their family is set by hand.
+for _constant in REMEDY_CONSTANTS:
+    _remedy_label = "wait-until remedy: every command form the %s names is allowed" % _constant
+    LOG_CHECKS_EXTRA.append((_remedy_label, remedy_check(_constant)))
+    LOG_FAMILY[_remedy_label] = "stream"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -13068,6 +15133,61 @@ sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COM
    cwd=NOGIT, agent_id="bld1", agent_type="builder")
 sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
    "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
+
+# ---- frozen: the main mirror and the live pin name are copied into guard_frozen.py from install.sh and
+# merge/install_from_main.sh. Each shell name is a literal in its script, and the guard keeps its own copy
+# (MAIN_MIRROR_NAME, LIVE_PIN_SUFFIX). Each copy is read as text, never imported, so the check loads no guard.
+# A change to one side alone would leave the frozen check guarding a folder that no install builds.
+FAMILY = "frozen"
+_MIRROR_SHELL = re.compile(r'^MAIN_MIRROR="\$HOME/([^"/$]+)"[ \t\r]*$', re.M)
+_PIN_SHELL = re.compile(r'^pin="\$clone([^"/$]*)"[ \t\r]*$', re.M)
+
+
+def _module_literal(text, name):
+    """The value of the top-level assignment `name = <literal>` in a Python module's text, or None."""
+    for node in ast.parse(text).body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            try:
+                return ast.literal_eval(node.value)
+            except ValueError:
+                return None
+    return None
+
+
+def mirror_name_problems(install_sh, install_from_main, guard_frozen):
+    """One line per copy that differs from its shell literal, or [] when every copy agrees. Each argument is
+    the text of one file."""
+    problems = []
+    mirror = _MIRROR_SHELL.findall(install_sh)
+    pin = _PIN_SHELL.findall(install_from_main)
+    name = _module_literal(guard_frozen, "MAIN_MIRROR_NAME")
+    suffix = _module_literal(guard_frozen, "LIVE_PIN_SUFFIX")
+    if len(mirror) != 1:
+        problems.append("install.sh does not set MAIN_MIRROR to $HOME/<name> exactly once")
+    elif name != mirror[0]:
+        problems.append("MAIN_MIRROR_NAME is %r but install.sh MAIN_MIRROR is $HOME/%s" % (name, mirror[0]))
+    if len(pin) != 1:
+        problems.append('install_from_main.sh does not set pin="$clone<suffix>" exactly once')
+    elif suffix != pin[0]:
+        problems.append("LIVE_PIN_SUFFIX is %r but install_from_main.sh pin suffix is %r" % (suffix, pin[0]))
+    return problems
+
+
+def _mirror_names_tie():
+    """MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX in guard_frozen.py equal the shell names they copy."""
+    def read(*parts):
+        with open(os.path.join(REPO, *parts), encoding="utf-8") as handle:
+            return handle.read()
+
+    problems = mirror_name_problems(read("install.sh"), read("merge", "install_from_main.sh"),
+                                    read("hooks", "guard_frozen.py"))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal install.sh MAIN_MIRROR and the install_from_main.sh pin"
+
+
+LOG_CHECKS_EXTRA.append(("frozen: MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal the shell names they copy",
+                         _mirror_names_tie))
 
 # ---- merge: gh_call_of reads the pr verb past a root flag. Its callers (merge_call_of, the draft-PR read,
 # ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front hides the
@@ -13365,6 +15485,28 @@ for _name, _change in AUTHOR_GREEN:
        agent_id="auth1", agent_type="test-author")
     add("author-diff: stop with %s is allowed" % _name, "allow", event="SubagentStop",
         cwd=_repo, agent_id="auth1", agent_type="test-author")
+
+
+# ---- workflow files at commit time: the diff a test-author or a builder would commit (role_offences). A
+# test-author's lint change is logged and allowed. A builder's test change is refused at commit.
+WF_BASE = LINT + TEST_LINUX
+WF_FILES = {**BASE_FILES, WF: WF_BASE}
+_repo = diff_repo("wfa-lint-run", _put(WF, LINT_RUN_CHANGED + TEST_LINUX), files=WF_FILES)
+sh("author-diff: commit with a workflow lint change is allowed and logged", COMMIT, "allow", cwd=_repo,
+   agent_id="auth1", agent_type="test-author")
+for _slug, _label, _text, _expect in (
+    ("wfb-deselect", "a --deselect pytest line", LINT + DESELECT, "deny"),
+    ("wfb-continue-on-error", "a continue-on-error test step", LINT + CONTINUE_ON_ERROR, "deny"),
+    ("wfb-delete-test-step", "a deleted test step", LINT, "deny"),
+    ("wfb-ruff-tests", "a ruff --ignore line on tests/", LINT + TEST_LINUX + RUFF_TESTS, "allow"),
+):
+    _repo = diff_repo(_slug, _put(WF, _text), files=WF_FILES)
+    if _expect == "deny":
+        sh("builder-diff: commit with %s in checks.yml is denied" % _label, COMMIT, "deny", rule=BDIFF,
+           cwd=_repo, agent_id="bld1", agent_type="builder")
+    else:
+        sh("builder-diff: commit with %s in checks.yml is allowed" % _label, COMMIT, "allow", cwd=_repo,
+           agent_id="bld1", agent_type="builder")
 
 
 # ---- record-writer: Markdown only (owner ruling 2026-10-10). Writing prose and records is not
@@ -14447,7 +16589,7 @@ add("impeccable: bare name with polish is denied", "deny", "impeccable-review-on
 # refusal-vs-rule (impeccable-review-only, design-skills): the skill reads the FIRST word as its command
 # and the rest as target text. A `;` inside that target starts no second command, so a review with a
 # focus after the `;` loads. A non-review first word stays refused. A non-review verb after the `;` also
-# stays refused: the skill asks once when two commands fit, and the gate cannot tell that ask from a run.
+# stays refused: the skill asks once when two commands fit, and the guard cannot tell that ask from a run.
 add("impeccable: audit with a focus after a semicolon is allowed", "allow", tool="Skill", skill=IMP,
     args="audit the page; focus on a11y")
 add("impeccable: critique with a focus after a semicolon is allowed", "allow", tool="Skill", skill=IMP,
@@ -15217,18 +17359,24 @@ elif not PD_NODE:
           file=sys.stderr)
 
 
-def pd_repo(name, stamp):
+def pd_repo(name, stamp, origin=None):
     """A real checkout for one case: the waiting page's layout extras and one commit. `stamp` is the path the
-    stamp file holds, or None for no stamp. The stamp resolves as the stamp does: <git common dir>/PD_STAMP."""
+    stamp file holds, or None for no stamp. The stamp resolves as the stamp does: <git common dir>/PD_STAMP.
+    `origin` is a remote URL to add, for a case whose machine home is named by the repo's origin."""
     where = os.path.join(ROOT, "pd", name)
     wp_put(os.path.join(where, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "waiting-page": PQ_URL}))
     wp_put(os.path.join(where, "README.md"), "a checkout of the waiting-page fixture\n")
     wp_git(where, "init", "-q")
+    if origin:
+        wp_git(where, "remote", "add", "origin", origin)
     wp_git(where, "add", "-A")
     wp_git(where, *IDENT, "commit", "-q", "-m", "fixture: waiting page")
     if stamp is not None:
         wp_put(os.path.join(where, ".git", PD_STAMP), stamp + "\n")
     return where
+
+
+PD_FILE = "docs/design/item48/a.html"  # a design's file: inside the checkout's design folder (rule mockup-home)
 
 
 def pd_item(designs=None, **over):
@@ -15238,7 +17386,7 @@ def pd_item(designs=None, **over):
             "options": [{"key": "a", "label": "Full card", "how": "The card shows the full stock.", "design": "m1"},
                         {"key": "b", "label": "Empty card", "how": "The card shows no stock."}],
             "designs": designs if designs is not None else
-            [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]}
+            [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full", "file": PD_FILE}]}
     item.update(over)
     return with_stake(item, departs=True)
 
@@ -15300,22 +17448,26 @@ def pd_case(label, name, stamp, data, want, fragment="", action="set", note=Fals
 # The deny cases read the checker's answer, so they run only where the checker can render.
 if PD_NEEDS_NODE:
     pd_case("a focus the mockup does not draw is denied, with the page's sentence", "focus", PD_PAGE,
-            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full"}]),
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full",
+                              "file": PD_FILE}]),
             "deny", fragment="shows nothing the focus names")
     pd_case("a state the mockup does not draw is denied, with the page's sentence", "state", PD_PAGE,
-            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "empty"}]),
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "empty",
+                              "file": PD_FILE}]),
             "deny", fragment="a state its mockup does not draw")
     pd_case("a strip mockup below the picture floor is denied, naming option A", "strip", PD_PAGE,
             pd_item(designs=[{"slug": "m2", "label": "Full card", "option": "a", "focus": "#vol", "state": "full",
-                              "drawn": 2400}]),
+                              "drawn": 2400, "file": PD_FILE}]),
             "deny", fragment="option A")
     pd_case("an update that carries a missed picture is denied, with the page's sentence", "update", PD_PAGE,
-            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full"}]),
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full",
+                              "file": PD_FILE}]),
             "deny", fragment="shows nothing the focus names", action="update")
 
 pd_case("a good picture, focus #vol and state full, is allowed", "good", PD_PAGE, pd_item(), "allow")
 pd_case("a picture whose mockup slug is missing is allowed: the page warns in the frame", "missing", PD_PAGE,
-        pd_item(designs=[{"slug": "m9", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]),
+        pd_item(designs=[{"slug": "m9", "label": "Full card", "option": "a", "focus": "#vol", "state": "full",
+                          "file": PD_FILE}]),
         "allow")
 pd_case("no stamp is allowed, with one noted line", "nostamp", None, pd_item(), "allow", note=True)
 pd_case("a stamp of a file that is gone is allowed, with one noted line", "gone", os.path.join(ROOT, "pd", "gone.html"),
@@ -15435,7 +17587,7 @@ def pd_partial_options():
                                    {"key": "b", "label": "Empty card", "how": "The card shows no stock."}]})["options"]
 
 
-PD_FULL_DESIGN = [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]
+PD_FULL_DESIGN = [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full", "file": PD_FILE}]
 
 
 def pd_partial(label, name, data, judged):
@@ -15500,6 +17652,111 @@ def pd_budget_case():
 
 
 LOG_CHECKS_EXTRA.append(("page-item-design: pictured items in one batch share one deadline", pd_budget_case))
+
+
+# --------------------------------------------------------------------------- a design names its file, in a mockup home
+
+# Rule mockup-home (the file of a waiting item's design, judged at write). The one mockup home is the repo's design
+# folder (docs/design/). A designs entry with no file, or a file the judge refuses (lint/layout.py mockup_home_problem),
+# is denied before the picture check starts node. The machine-home form ~/Developer/<repo name>-imports is refused too.
+# The checker here is a stub that passes, so a call of it is counted and nothing renders. The judge reads no file.
+MH_RULE = "mockup-home"
+MH_ORIGIN = "git@github.com:owner/fixture.git"
+MH_MACHINE = "~/Developer/fixture-imports/item48/a.html"
+MH_APP_SUPPORT = "~/Library/Application Support/Claude-Work/side-session-notes/abc123/a.html"
+MH_SHOT = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asset/shot.png"
+MH_WIN_OWNER = "C:/Users/x"  # a Windows owner's home, as Path.home returns it
+MH_WIN_HOME = "C:\\Users\\x"  # the same home, as the HOME variable holds it
+
+
+def mh_design(**over):
+    """One design entry with a picture and a file in the design folder. `over` sets a key; None removes it."""
+    entry = {"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full", "file": PD_FILE}
+    entry.update(over)
+    return {key: value for key, value in entry.items() if value is not None}
+
+
+def mh_judged(name, data, action="set", windows=False):
+    """(decision, reason, checker calls, guard.log rows) for one ArtifactData write of the fixture's waiting page,
+    judged in this process. `windows` makes Path.home a Windows owner's home, the way a Windows computer reads it."""
+    import pathlib
+    from unittest import mock
+    repo = pd_repo(name, PD_PAGE, origin=MH_ORIGIN)
+    home = os.path.join(ROOT, "pd", "mh-home-" + name)
+    os.makedirs(home, exist_ok=True)
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch.dict(os.environ, {"HOME": MH_WIN_HOME if windows else home}))
+        if windows:  # Path.home and HOME both name the owner's home, so a judge that reads either one sees it
+            stack.enter_context(mock.patch.object(pathlib.Path, "home", return_value=pathlib.PureWindowsPath(MH_WIN_OWNER)))
+        calls, out, rows = pd_judged(pd_body(repo, data, action), name, seam=lambda page_file, item: (0, ""))
+    decision, reason = read_decision(out)
+    return decision, reason, calls, rows
+
+
+def mh_case(label, name, data, want, checker, action="set", windows=False, says=(), not_says=()):
+    """One check of rule mockup-home. A deny names the rule and the file field, starts no checker, and logs a deny row
+    for the rule. An allow prints nothing and starts `checker` checker calls. A deny's reason holds each `says` text
+    and no `not_says` text."""
+    def check():
+        decision, reason, calls, rows = mh_judged(name, data, action, windows)
+        if decision != want:  # one cause per failure: a wrong decision is the cause, the rest follow from it
+            return False, "want %s, got %s: %s" % (want, decision, reason[:160])
+        if want == "deny":
+            if not reason.startswith(MH_RULE + ":"):
+                return False, "the reason does not open with rule %s: %s" % (MH_RULE, reason[:160])
+            if "file" not in reason.lower():
+                return False, "the reason does not name the file field: %s" % reason[:160]
+            leak = names_the_target(reason, MH_RULE)
+            if leak:
+                return False, "the reason names the forbidden target %r" % leak
+            for text in says:
+                if text not in reason:
+                    return False, "the reason does not name %r: %s" % (text, reason[:160])
+            for text in not_says:
+                if text in reason:
+                    return False, "the reason names %r, a home that holds no mockup now: %s" % (text, reason[:160])
+            if not any(len(r) == 6 and r[2] == "deny" and r[3] == MH_RULE for r in rows):
+                return False, "guard.log holds no deny row for %s" % MH_RULE
+        if calls != checker:
+            return False, "the checker was called %d time(s), want %d" % (calls, checker)
+        return True, "%s, as wanted" % want
+    LOG_CHECKS_EXTRA.append(("mockup-home: " + label, check))
+
+
+mh_case("a design with a file under the machine home is denied, on a machine with no Developer folder",
+        "mh-machine", pd_item(designs=[mh_design(file=MH_MACHINE)]), "deny", checker=0)
+mh_case("a design with a file in the design folder is allowed",
+        "mh-design", pd_item(designs=[mh_design(file=PD_FILE)]), "allow", checker=1)
+mh_case("a design with no file is denied, naming the file field",
+        "mh-nofile", pd_item(designs=[mh_design(file=None)]), "deny", checker=0)
+mh_case("a design with an empty file is denied",
+        "mh-empty", pd_item(designs=[mh_design(file="")]), "deny", checker=0)
+mh_case("a mockup under Application Support is denied, its path holds spaces",
+        "mh-appsupport", pd_item(designs=[mh_design(file=MH_APP_SUPPORT)]), "deny", checker=0)
+mh_case("a denied mockup's reason names the design folder, and not the machine home",
+        "mh-words", pd_item(designs=[mh_design(file=MH_APP_SUPPORT)]), "deny", checker=0,
+        says=("docs/design",), not_says=("-imports", "Developer"))
+mh_case("an image hosted as an artifact asset is denied",
+        "mh-asset", pd_item(designs=[mh_design(file=MH_SHOT)]), "deny", checker=0)
+mh_case("a file that escapes the design folder with .. is denied",
+        "mh-dotdot", pd_item(designs=[mh_design(file="docs/design/../../escape/a.html")]), "deny", checker=0)
+mh_case("a Windows owner's machine-home file is denied",
+        "mh-win-machine", pd_item(designs=[mh_design(file="C:\\Users\\x\\Developer\\fixture-imports\\item48\\a.html")]),
+        "deny", checker=0, windows=True)
+mh_case("a Windows owner's AppData mockup is denied",
+        "mh-win-appdata",
+        pd_item(designs=[mh_design(file="C:\\Users\\x\\AppData\\Roaming\\Claude-Work\\side-session-notes\\abc123\\a.html")]),
+        "deny", checker=0, windows=True)
+mh_case("an update that carries designs with no file is denied",
+        "mh-update", {"designs": [mh_design(file=None)]}, "deny", checker=0, action="update")
+mh_case("a closed item with a design that has no file is untouched",
+        "mh-closed", pd_item(status="closed", designs=[mh_design(file=None)]), "allow", checker=0)
+mh_case("a write with no designs is untouched by the file rule",
+        "mh-plain", pd_plain(), "allow", checker=0)
+mh_case("a design whose file is a folder is denied, since a folder holds no mockup",
+        "mh-folder", pd_item(designs=[mh_design(file="docs/design/item48/")]), "deny", checker=0)
+mh_case("a Windows-form design path inside the design folder is allowed, as it is today",
+        "mh-win-design", pd_item(designs=[mh_design(file="docs\\design\\a.html")]), "allow", checker=1)
 
 
 # --------------------------------------------------------------------------- a pick never widens a shared tool
@@ -16208,6 +18465,12 @@ tn_replace("a str_replace on the title is allowed", "allow", "title",
            "Delete the stale branches", "Delete the old branches")
 tn_replace("a str_replace whose old_str holds no Why yours line is allowed", "allow", "context",
            TN_CTX, "The cloud proxy refused the branch deletes (403), twice.")
+# Rule task-why-cited (decision claims-carry-backing, part (v)). hooks/test_question_form.py judges the rule in-process;
+# this case runs the real guard, so a rule the guard does not dispatch would show here as an allow.
+add("task why cited: a Why yours line with a capability reason and no cite is denied by the guard", "deny",
+    "task-why-cited", tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set", collection="items",
+    doc_id="stale-branch-deletes",
+    data=tn_task(context=TN_CTX + "\nWhy yours: the cloud proxy refused the branch deletes (403)."))
 
 
 # --------------------------------------------------------------------------- a decision states the question form
@@ -16913,7 +19176,7 @@ def decide(case):
     guard_file = case.get("guard") or GUARD
     command = [sys.executable, guard_file]
     if case.get("tool") in dict(LB_TOOLS).values():
-        # A lane-start call makes the guard read the machine's load. A case about another rule must
+        # A start call makes the guard read the machine's load. A case about another rule must
         # not meet this host's load, or a busy host turns it red (the load brake refuses a
         # background lane). The lane call runs in the load-brake probe with a neutral reading, unless
         # the case names one (`load`). Only the load-brake family sets a busy or full reading.
@@ -18034,6 +20297,315 @@ add("ceiling: Task on sonnet is allowed", "allow", tool="Task", prompt="x", mode
     subagent_type="general-purpose")
 sh("ceiling: a shell command that only names a spawn on opus is not a spawn",
    "echo spawn the agent with model opus", "allow", cwd=NOGIT)
+
+# ---- Brief claims need a probe (rule brief-claim-has-probe). A brief to a builder or a test-author that claims what
+# main, origin/main or "today" passes, allows, accepts or refuses for an input is refused, unless the brief carries
+# the probe that showed it: a command line and its result line. A claim written from memory of main is the mistake
+# this stops. Selector: MUTATE_ONLY=brief-claim: runs these cases alone. Each deny is red on a guard that lets the
+# claim through. Each allow is a control the rule must leave alone.
+BRIEF_PROBE = "brief-claim-has-probe"
+REPRO_TEST_AUTHOR = ("Round 1 passed but found that the fix adds false alarms that main does not have.\n"
+                     "Move `adHocKey: ...` and `globalHotkey: Ctrl+Alt+2` to the passing list: main passes both.\n"
+                     "Also main passes `password: none for guests and visitors`.")
+add("brief-claim: test-author brief that says main passes two inputs, with no probe, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt=REPRO_TEST_AUTHOR, subagent_type="test-author")
+add("brief-claim: builder brief that says main passes a password input, with no probe, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Make these green; main passes `password: none for the guest`.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief that says origin/main accepts an input, with no command, is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Make the failing case green. origin/main accepts `user: root` as a valid name.",
+    subagent_type="builder", model="sonnet", carries=(("probe", "command"),))
+add("brief-claim: test-author brief that says today main refuses an input, with no command, is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Write the case. Today main refuses `port: 0`, so the new case expects a refusal.",
+    subagent_type="test-author")
+add("brief-claim: test-author brief that says today the guard refuses an input, with no main named, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Write the case. Today it refuses `password: none for the guest`.",
+    subagent_type="test-author")
+add("brief-claim: builder brief that says main allows an input, with no probe, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep the scan as it is. main allows `port: 0`.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief with a main claim and a result line but no command is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep the scan as it is.\nmain allows `port: 0`.\nPASS",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief with a main claim and a command but no result line is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Keep the scan as it is.\nmain allows `port: 0`.\n`python3 hooks/probe_main.py 'port: 0'`",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: test-author brief whose probe is for another input does not show the claim, and is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="main refuses `password: none for the guest`.\n```\n$ python3 hooks/probe_main.py 'port: 0'\nrefused\n```",
+    subagent_type="test-author")
+LONG_BRIEF = "\n".join("Keep the export scan narrow. Line %d of the brief." % n for n in range(1, 30))
+add("brief-claim: builder brief with the claim on line 30 of a long brief, with no probe, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt=LONG_BRIEF + "\nNote: main refuses `password: none for the guest`.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief with a lone quote and an unmatched backtick around a main claim is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Don't skip the scan. Main refuses `password: none for the guest, and the guest passes.\nMake these green.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief with a main refusal and a fenced git show probe with its result is allowed",
+    "allow", tool="Agent",
+    prompt="Make these green. Main refuses `password: none for the guest`.\n```\n"
+           "$ git show origin/main:hooks/guard.py | python3 -I - 'password: none for the guest'\n"
+           "origin_main RRRR\n```",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: test-author brief with a main refusal and an inline python3 probe with its refused line is allowed",
+    "allow", tool="Agent",
+    prompt="Main refuses `globalHotkey: Ctrl+Alt+2`.\n"
+           "`python3 hooks/probe_main.py 'globalHotkey: Ctrl+Alt+2'`\nrefused",
+    subagent_type="test-author")
+add("brief-claim: builder brief with origin/main passes an input and a PASS result line is allowed",
+    "allow", tool="Agent",
+    prompt="origin/main passes `user: root`.\n$ python3 hooks/probe_main.py 'user: root'\nPASS",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief with no claim about main is allowed",
+    "allow", tool="Agent",
+    prompt="Make these green. The guard must refuse `password: none for the guest` for every role.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: reviewer brief with the main claim is allowed (out of scope)",
+    "allow", tool="Agent", prompt="Check the diff. Main passes `password: none for the guest`, so the fix is wrong.",
+    subagent_type="reviewer")
+add("brief-claim: Explore brief with the main claim is allowed (out of scope)",
+    "allow", tool="Agent",
+    prompt="Find where the guest password rule lives. Main passes `password: none for the guest`.",
+    subagent_type="Explore")
+add("brief-claim: designer brief with the main claim is allowed (out of scope)",
+    "allow", tool="Agent", prompt="Draw the mockup. Main passes `password: none for the guest`.",
+    subagent_type="designer")
+add("brief-claim: main and today as plain words are allowed",
+    "allow", tool="Agent",
+    prompt="The main point of this lane is the probe rule. The main branch is the base. Today the lane starts on it.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: an empty brief is allowed", "allow", tool="Agent", prompt="", subagent_type="builder",
+    model="sonnet")
+
+
+# ---- Brief-claim edges (rule brief-claim-has-probe). A claim can hide behind a backticked subject, a fence, a passive
+# form, another verb, a probe for a longer input, a plain-quoted input, a path locator, or a quoted red-case text. It
+# can also sit apart from its inputs (both, them, or a list above it), be negated, use "lets ... through", or sit
+# unquoted in a Must deny: line. Each deny is red on a guard that lets the claim through. Each allow is a false alarm
+# the rule must not raise: a double-quoted claim with backticks, a claim whose clause ends at "so", or a real probe
+# shape (a cd, a pipe, an env prefix or time before python3). Each text is data: the prompt a brief carries, verbatim.
+# Selector: MUTATE_ONLY=brief-claim: runs these with the cases above.
+BRIEF_CLAIM_EDGES = (
+    ("brief-claim: test-author brief with a backticked main subject and a refusal is denied",
+     "deny", "test-author", "`main` refuses `git push --force`, so keep that."),
+    ("brief-claim: builder brief with a backticked origin/main subject and a pass is denied",
+     "deny", "builder", "`origin/main` passes `user: root`."),
+    ("brief-claim: test-author brief with a claim inside a fence after Cases: is denied",
+     "deny", "test-author", "Cases:\n```\nmain refuses `git push --force`\n```"),
+    ("brief-claim: builder brief whose claim line is its own probe is denied",
+     "deny", "builder", "`git push --force` refused on main"),
+    ("brief-claim: test-author brief whose probe is for a longer input than the claim is denied",
+     "deny", "test-author",
+     "main refuses `git push`.\n$ python3 hooks/probe_main.py 'git push --force'\nrefused"),
+    ("brief-claim: builder brief with main rejects an input is denied",
+     "deny", "builder", "main rejects `git push --force`."),
+    ("brief-claim: test-author brief with main blocks an input is denied",
+     "deny", "test-author", "main blocks `git push --force`."),
+    ("brief-claim: builder brief with an input refused on main in passive form is denied",
+     "deny", "builder", "- `git push --force` is refused on main"),
+    ("brief-claim: test-author brief where main passes a plain-quoted input is denied",
+     "deny", "test-author", 'main passes "password: none for guests and visitors"'),
+    ("brief-claim: builder brief with main as an adjective before a refusal is allowed",
+     "allow", "builder", "The main session refuses `git push --force` on this checkout."),
+    ("brief-claim: builder brief with main as an adjective before a pass is allowed",
+     "allow", "builder", "The main checkout passes `verdict` for every lane."),
+    ("brief-claim: builder brief with today as a time word and the builder as subject is allowed",
+     "allow", "builder", "Today the builder passes `verdict` results to the lane."),
+    ("brief-claim: test-author brief with a path locator after a probed refusal is allowed",
+     "allow", "test-author",
+     "main refuses `git push --force` in `hooks/guard.py`.\n$ python3 hooks/probe_main.py 'git push --force'\nrefused"),
+    ("brief-claim: test-author brief quoting a claim after Add a case: is allowed",
+     "allow", "test-author", 'Add a case: "main refuses `git push --force`, so keep that."'),
+    ("brief-claim: test-author brief quoting a claim after Must deny: is allowed",
+     "allow", "test-author", 'Must deny: "main passes `user: root`."'),
+    ("brief-claim: test-author brief where main passes both, with its inputs in the sentence before, is denied",
+     "deny", "test-author", "Move `user: root` and `port: 0` to the passing list. Main passes both."),
+    ("brief-claim: builder brief where as main refuses it, with its inputs in a list below, is denied",
+     "deny", "builder", "Each must be refused, as main refuses it:\n- `git push --force`\n- `port: 0`"),
+    ("brief-claim: test-author brief where main passes all of them, after a list of inputs, is denied",
+     "deny", "test-author", "- `user: root`\n- `port: 0`\nmain passes all of them."),
+    ("brief-claim: builder brief where main doesn't refuse an input is denied",
+     "deny", "builder", "main doesn't refuse `git push --force`."),
+    ("brief-claim: test-author brief where main never refuses an input is denied",
+     "deny", "test-author", "main never refuses `git push --force`."),
+    ("brief-claim: builder brief where main lets an input through is denied",
+     "deny", "builder", "main lets `port: 0` through."),
+    ("brief-claim: test-author brief with an unquoted claim inside a Must deny: line is denied",
+     "deny", "test-author", "Must deny: `x: y` (main allows `x: y` today)."),
+    ("brief-claim: test-author brief with a backticked main claim in double quotes, no prefix, is allowed",
+     "allow", "test-author", '- "`main` refuses `git push --force`"'),
+    ("brief-claim: builder brief whose main claim is followed by so and a backticked command is allowed",
+     "allow", "builder", "origin/main passes CI, so run `verdict pytest` first."),
+    ("brief-claim: test-author brief whose main claim is followed by so and a backticked edit is allowed",
+     "allow", "test-author", "main passes CI, so only edit `hooks/guard.py`."),
+    ("brief-claim: builder brief with a cd-and-python3 probe and its result line is allowed",
+     "allow", "builder", "Main refuses `x: y`.\n$ cd /w && python3 probe.py 'x: y'\nrefused"),
+    ("brief-claim: test-author brief with a piped echo probe and its result line is allowed",
+     "allow", "test-author", "Main refuses `x: y`.\n$ echo 'x: y' | python3 probe.py\nrefused"),
+    ("brief-claim: builder brief with an env-prefixed python3 probe and its result line is allowed",
+     "allow", "builder", "Main refuses `x: y`.\n$ PYTHONPATH=. python3 probe.py 'x: y'\nrefused"),
+    ("brief-claim: test-author brief with a time-prefixed python3 probe and its result line is allowed",
+     "allow", "test-author", "Main refuses `x: y`.\n$ time python3 probe.py 'x: y'\nrefused"),
+    # Each deny here is a claim the rule must catch, and each allow a claim it must leave alone. The NUL case is a
+    # deny, not an allow: a guard that crashes fails open, so an allow would pass on the crash.
+    ("brief-claim: test-author brief where origin/main passes all tests, after a backticked path, is allowed",
+     "allow", "test-author", "Edit `hooks/guard.py`. origin/main passes all tests."),
+    ("brief-claim: builder brief where origin/main refuses each push, after a backticked path, is allowed",
+     "allow", "builder", "Fix `x.py`. origin/main refuses each push."),
+    ("brief-claim: test-author brief where origin/main passes CI after because, with an input before it, is allowed",
+     "allow", "test-author", "Edit `hooks/guard.py`, because origin/main passes CI."),
+    ("brief-claim: builder brief where main blocks raw pytest after because, with an input before it, is allowed",
+     "allow", "builder", "Use `verdict` because main blocks raw pytest."),
+    ("brief-claim: builder brief with a bulleted Controls heading after a probed refusal list is allowed",
+     "allow", "builder",
+     "$ python3 hooks/probe_main.py 'git push --force'\nrefused\n\nEach must be refused, as main refuses it:\n"
+     "- `git push --force`\n\n- Controls that must still pass:\n  - `user: root`"),
+    ("brief-claim: test-author brief with a numbered Controls heading after a probed refusal list is allowed",
+     "allow", "test-author",
+     "$ python3 hooks/probe_main.py 'git push --force'\nrefused\n\nEach must be refused, as main refuses it:\n"
+     "- `git push --force`\n\n1. Controls that must still pass:\n   - `user: root`"),
+    ("brief-claim: builder brief with a plain Controls heading after a probed refusal list is allowed",
+     "allow", "builder",
+     "$ python3 hooks/probe_main.py 'git push --force'\nrefused\n\nEach must be refused, as main refuses it:\n"
+     "- `git push --force`\n\nControls that must still pass:\n- `user: root`"),
+    ("brief-claim: test-author brief where main refuses each, after a list of inputs, is denied",
+     "deny", "test-author", "- `user: root`\n- `port: 0`\nmain refuses each."),
+    ("brief-claim: builder brief where main refuses an input named before the verb, with no probe, is denied",
+     "deny", "builder", "For `user: root` main refuses."),
+    ("brief-claim: test-author brief where two inputs pass on main, joined by and, is denied",
+     "deny", "test-author", "`user: root` and `port: 0` pass on main."),
+    ("brief-claim: builder brief where an input is listed as passing on main is denied",
+     "deny", "builder", "The lane listed `git push --force` as passing on main."),
+    ("brief-claim: test-author brief where On main, an input passes is denied",
+     "deny", "test-author", "On main, `port: 0` passes."),
+    ("brief-claim: builder brief where Today an input passes is denied",
+     "deny", "builder", "Today `port: 0` passes."),
+    ("brief-claim: test-author brief where the guard refuses an input today is denied",
+     "deny", "test-author", "The guard refuses `port: 0` today."),
+    ("brief-claim: builder brief with a NUL marker on a line with no quoted input, then a claim, is denied without a crash",
+     "deny", "builder", "Keep the scan. \x000\x00 is a marker.\nMain refuses `port: 0`."),
+    ("brief-claim: test-author brief with a comment opener inside a backticked input is denied",
+     "deny", "test-author", "main refuses `/* x */` today."),
+    ("brief-claim: builder brief with a hash opener inside a double-quoted input is denied",
+     "deny", "builder", 'main refuses "# not a comment" today.'),
+    ("brief-claim: test-author brief with a backtick span cut by a line break reads to the line's end, and is denied",
+     "deny", "test-author", "main refuses `git push\n--force`."),
+)
+for _name, _expected, _role, _prompt in BRIEF_CLAIM_EDGES:
+    add(_name, _expected, BRIEF_PROBE if _expected == "deny" else None, tool="Agent", prompt=_prompt,
+        subagent_type=_role, **({"model": "sonnet"} if _role == "builder" else {}))
+# A brief with two unprobed claims names every input in its refusal, not only the first.
+add("brief-claim: builder brief with two unprobed claims names both inputs in its refusal, and is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Make these green.\nMain refuses `git push --force`.\nMain allows `port: 0`.",
+    subagent_type="builder", model="sonnet", carries=("git push --force", "port: 0"))
+# A referent that is a pronoun, or a count word such as all three or both today, takes the inputs of its own sentence,
+# or of the sentence before it, and the refusal names them. Each deny here is a miss: the referent sat in the same
+# sentence as its inputs, or the count word named no referent at all.
+add("brief-claim: test-author brief where main refuses it, after an input in the same sentence, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Edit `x`, because main refuses it.",
+    subagent_type="test-author", carries=("`x`",))
+add("brief-claim: builder brief where main refuses them, after two inputs in the same sentence, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Edit `x` and `y`, because main refuses them.",
+    subagent_type="builder", model="sonnet", carries=("`x`", "`y`"))
+add("brief-claim: builder brief where main passes it, after an input in the same sentence, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Edit `x`, because main passes it.",
+    subagent_type="builder", model="sonnet", carries=("`x`",))
+add("brief-claim: test-author brief where main passes them, after two inputs in the same sentence, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Edit `x` and `y`, because main passes them.",
+    subagent_type="test-author", carries=("`x`", "`y`"))
+add("brief-claim: test-author brief where main refuses all three, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses all three.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: builder brief where main refuses both cases, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses both cases.",
+    subagent_type="builder", model="sonnet", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses these two, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses these two.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: builder brief where main refuses each one, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses each one.",
+    subagent_type="builder", model="sonnet", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses both today, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses both today.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: builder brief where main passes all three, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main passes all three.",
+    subagent_type="builder", model="sonnet", carries=("`a`", "`b`"))
+add("brief-claim: builder brief where both cases must still pass, after two inputs, is allowed",
+    "allow", tool="Agent", prompt="Keep `a` and `b`. Both cases must still pass.",
+    subagent_type="builder", model="sonnet")
+# Each case below kills one mutant of the claim scan that no case read before: the base verb block after not, the -ing
+# verb refusing, the subjects check and rule before today, and now as the last word after a verb. Each is green on the
+# guard as it stands and red on the mutant.
+add("brief-claim: builder brief where main does not block an input is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep the scan as it is. Main does not block `git push --force`.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief where an input is refusing on main is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep the scan as it is. `port: 0` is refusing on main.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: test-author brief where the check refuses an input today is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Write the case. The check refuses `port: 0` today.",
+    subagent_type="test-author")
+add("brief-claim: test-author brief where the rule refuses an input today is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Write the case. The rule refuses `port: 0` today.",
+    subagent_type="test-author")
+add("brief-claim: test-author brief where an input before main refuses now is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Write the case. For `port: 0` main refuses now.",
+    subagent_type="test-author")
+
+
+# Pins for the count word, the pronoun tail and today (rule brief-claim-has-probe). A count word (all three, both now,
+# all 3, these ones) after a claim refers to the inputs before it, as a pronoun does. The allows are claims the scan
+# reads with no input of their own.
+add("brief-claim: test-author brief where main refuses all three today, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses all three today.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses all three now, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses all three now.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses both now, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses both now.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses all 3, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses all 3.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses both inputs, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses both inputs.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses these ones, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses these ones.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses all five, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses all five.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main passes all three tests is allowed",
+    "allow", tool="Agent", prompt="Main passes all three tests.", subagent_type="test-author")
+add("brief-claim: test-author brief where main refuses it after a fixed input is allowed",
+    "allow", tool="Agent", prompt="Fix `X`, and main refuses it.", subagent_type="test-author")
+add("brief-claim: test-author brief where main refuses it, then a verdict command, is allowed",
+    "allow", tool="Agent", prompt="Main refuses it, so run `verdict pytest`.", subagent_type="test-author")
+add("brief-claim: test-author brief where main passes CI for a kept input is allowed",
+    "allow", tool="Agent", prompt="Keep it in `x` because main passes CI.", subagent_type="test-author")
+add("brief-claim: test-author brief where main passes CI, and an edit keeps it green, is allowed",
+    "allow", tool="Agent", prompt="Edit `x` because main passes CI, and keep it green.", subagent_type="test-author")
+# A count word that is not the clause's end is no referent: "all three tests" names no inputs, so the two before it are not claimed.
+add("brief-claim: test-author brief where main passes all three tests, after two inputs, is allowed",
+    "allow", tool="Agent", prompt="Keep `a` and `b`. Main passes all three tests.", subagent_type="test-author")
+add("brief-claim: test-author brief where today we know the guard refuses an input today is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Today we know the guard refuses `x` today.",
+    subagent_type="test-author", carries=("`x`",))
+add("brief-claim: test-author brief where the guard refuses an input in capitals TODAY is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="The guard refuses `x` TODAY.",
+    subagent_type="test-author", carries=("`x`",))
+# Names only the first input: the scan reads one claim per sentence. The verdict is pinned.
+add("brief-claim: test-author brief where the guard refuses an input today, and main refuses a second, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="The guard refuses `a` today, and main refuses `b`.",
+    subagent_type="test-author", carries=("`a`",))
 
 
 def _flow(model, role=None):
@@ -19797,6 +22369,162 @@ def worktree_home_cd_exempt_case():
     return True, "the recorded home, the own red-run folder and the session's recorded home pass"
 
 
+def worktree_home_red_write_case():
+    """Rule 0, other-checkout, the write act's exemption for the caller's own red-run folder: an
+    agent's writes into `agent-<its id>-red` pass from its home, as a `cd` chained to a write, a `cp`,
+    a Write and an Edit. The same four writes into a sibling agent's red-run folder, into a folder
+    whose name only starts with the agent's id, into the primary, or from a call with no agent_id are
+    refused. A test-author writes its tests in its red-run folder, so the write act must match the
+    cd act that worktree_home_cd_exempt_case already allows."""
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcored", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    red = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")[0]
+    sibling_red = sh_add_lane(primary, "agent-" + CD_AGENT_SIBLING + "-red")[0]
+    prefix_trap = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "b-red")[0]
+    write(os.path.join(home, "t.py"), "print(1)\n")
+    problems = []
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow":
+        problems.append("the agent's recording call: want allow, got %s (%s)" % (got, reason[:120]))
+    if not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        problems.append("the agent's recording call wrote no home record")
+
+    def writes_into(folder):
+        """(tool, tool input) for the four writes into FOLDER: a chained cd, a cp, a Write and an Edit."""
+        return (
+            ("Bash", {"command": "cd %s && echo x > f" % slash(folder)}),
+            ("Bash", {"command": "cp t.py %s/" % slash(folder)}),
+            ("Write", {"file_path": os.path.join(folder, "f"), "content": "x"}),
+            ("Edit", {"file_path": os.path.join(folder, "f"), "old_string": "1", "new_string": "2"}),
+        )
+
+    def label(tool, tool_input):
+        return "%s %r" % (tool, tool_input.get("command") or tool_input["file_path"])
+
+    for tool, tool_input in writes_into(red):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if got != "allow":
+            problems.append("%s into the agent's own red-run folder: want allow, got %s (%s)"
+                            % (label(tool, tool_input), got, reason[:120]))
+    for target in (sibling_red, prefix_trap, primary):
+        for tool, tool_input in writes_into(target):
+            got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+            if got != "deny" or any(text in reason for text in (ROOT, slash(ROOT), target, slash(target))):
+                problems.append("%s: want deny naming no path, got %s (%s)"
+                                % (label(tool, tool_input), got, reason[:120]))
+    for tool, tool_input in writes_into(red):
+        got, reason = _decide_full(tool, home, **tool_input)
+        problems += _other_checkout_problems("no agent_id: " + label(tool, tool_input), got, reason,
+                                             (ROOT, slash(ROOT), red, slash(red)))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an agent's writes into its own red-run folder pass; the same writes elsewhere are refused"
+
+
+def worktree_home_red_root_case():
+    """Rule 0, other-checkout, the folder root of the caller's own red-run folder: a write may land
+    inside it, never remove or move it. `rm -rf` of the folder, with or without a trailing slash, a
+    `cd` into it chained to `rm -rf .`, `mv` of it and a Write on its path are refused. A `cp` into
+    it, a `cd` into it chained to a `cp`, and a Write inside it pass. Decision:
+    an-agent-outside-its-home-tree-must-stop."""
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcoredroot", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    red = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")[0]
+    write(os.path.join(home, "t.py"), "print(1)\n")
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow" or not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        return False, ("the agent's recording call: want allow and a home record, got %s (%s)"
+                       % (got, reason[:120]))
+    paths = (ROOT, slash(ROOT), red, slash(red))
+    problems = []
+    for label, tool, tool_input in (
+        ("rm -rf <red>", "Bash", {"command": "rm -rf %s" % slash(red)}),
+        ("rm -rf <red>/", "Bash", {"command": "rm -rf %s/" % slash(red)}),
+        ("cd <red> && rm -rf .", "Bash", {"command": "cd %s && rm -rf ." % slash(red)}),
+        ("mv <red> x", "Bash", {"command": "mv %s x" % slash(red)}),
+        ("Write on <red>", "Write", {"file_path": red, "content": "x"}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if tool == "Bash":
+            problems += _other_checkout_problems(label, got, reason, paths)
+        elif got != "deny" or any(text in reason for text in paths):
+            problems.append("%s: want deny naming no path, got %s (%s)" % (label, got, reason[:120]))
+    for label, tool, tool_input in (
+        ("cp t.py <red>/", "Bash", {"command": "cp t.py %s/" % slash(red)}),
+        ("cd <red> && cp x .", "Bash", {"command": "cd %s && cp x ." % slash(red)}),
+        ("Write inside <red>", "Write", {"file_path": os.path.join(red, "f"), "content": "x"}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (label, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the red-run folder's root is refused to rm, mv and a Write; a cp into it and a write inside it pass"
+
+
+def worktree_home_red_nested_case():
+    """Rule 0, other-checkout, the red-run folder is the primary's alone: a folder named
+    `agent-<its id>-red` under another linked worktree's `.claude/worktrees/` belongs to that
+    worktree, so a `cd` into it, a shell write into it and a Write into it are refused. Decision:
+    an-agent-outside-its-home-tree-must-stop."""
+    primary, home, lane_b, _ = _cross_checkout_fixture(
+        "xcorednest", lanes=("agent-" + CD_AGENT_HOME, "lane-b"))
+    nested = os.path.join(lane_b, ".claude", "worktrees", "agent-" + CD_AGENT_HOME + "-red")
+    os.makedirs(nested, exist_ok=True)
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow" or not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        return False, ("the agent's recording call: want allow and a home record, got %s (%s)"
+                       % (got, reason[:120]))
+    paths = (ROOT, slash(ROOT), nested, slash(nested), lane_b, slash(lane_b))
+    problems = []
+    for label, tool, tool_input in (
+        ("cd <nested>", "Bash", {"command": "cd %s" % slash(nested)}),
+        ("echo x > <nested>/f", "Bash", {"command": "echo x > %s/f" % slash(nested)}),
+        ("Write <nested>/f", "Write", {"file_path": os.path.join(nested, "f"), "content": "x"}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if tool == "Bash":
+            problems += _other_checkout_problems(label, got, reason, paths)
+        elif got != "deny" or any(text in reason for text in paths):
+            problems.append("%s: want deny naming no path, got %s (%s)" % (label, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a red-run folder nested under another linked worktree is refused to a cd, a shell write and a Write"
+
+
+RED_CASE_OFF_WINDOWS = ("Windows folds path case, so another spelling of the red-run folder is that "
+                        "folder only there; on POSIX it is another folder, so this case does not run")
+
+
+def worktree_home_red_case_fold_case():
+    """Rule 0, other-checkout, the write act's exemption on Windows: the caller's own red-run folder
+    spelled in other letters of case is the same folder, so a Write into it and a `cd` into it
+    chained to a write pass. Decision: an-agent-outside-its-home-tree-must-stop."""
+    if os.name != "nt":
+        return SKIP, RED_CASE_OFF_WINDOWS
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcorecase", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")
+    upper = os.path.join(primary, ".claude", "worktrees", "AGENT-" + CD_AGENT_HOME.upper() + "-RED")
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow" or not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        return False, ("the agent's recording call: want allow and a home record, got %s (%s)"
+                       % (got, reason[:120]))
+    problems = []
+    for label, tool, tool_input in (
+        ("Write into the upper-case red-run folder", "Write",
+         {"file_path": os.path.join(upper, "f"), "content": "x"}),
+        ("cd into the upper-case red-run folder chained to a write", "Bash",
+         {"command": "cd %s && echo x > f" % slash(upper)}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (label, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a write into the red-run folder spelled in other letters of case passes"
+
+
 # Text is not a move: a `cd` in a comment, in quotes or in a heredoc body is never run. A real `cd`
 # after one of those still is, and a comment opener or a lone quote inside a string must not hide it.
 CD_TEXT_ALLOW = (
@@ -20553,6 +23281,43 @@ sh("other-checkout: a git -C commit into a clone of a different repo is allowed"
 sh("other-checkout: a stranded cwd with CLAUDE_PROJECT_DIR unset takes a git commit",
    VCS + " commit -m x", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": None})
 
+# A commit message is text. From a lane's own worktree, `../docs` resolves into the primary's
+# `.claude/worktrees` folder, a folder that holds no `docs` checkout. The write scan reads the message's
+# words as paths only when the scan fails closed on the text (an escaped quote, a curly quote, a line break
+# or a hash inside the quotes) and the text also holds a `->` or a move-type word. The rows below are red
+# on a guard that refuses that text as another checkout. A plain message and a quoted heredoc body pass
+# already, so they are green controls for the same path.
+UP_SEP = slash(os.path.relpath(XCL_SEP, XCL_LANE))   # the separate clone, as a path from the lane
+BACKTICK = chr(96)
+sh("other-checkout: a commit message naming ../docs, with an escaped quote and a move word, is allowed",
+   VCS + ' commit -m "move \\"pins\\" to ../docs"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with an escaped quote and an arrow, is allowed",
+   VCS + ' commit -m "re-point \\"pins\\" -> ../docs"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with a curly apostrophe and an arrow, is allowed",
+   VCS + ' commit -m "re-point pins -> ../docs don’t"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a multi-line commit message naming ../docs, with an escaped quote and an arrow, is allowed",
+   VCS + ' commit -m "re-point \\"pins\\" -> ../docs\n\nsee \\"walk\\""', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with an escaped quote, an arrow and a hash, is allowed",
+   VCS + ' commit -m "re-point \\"pins\\" -> ../docs # not a comment"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with no write word, is allowed",
+   VCS + ' commit -m "re-point pins to ../docs"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a quoted heredoc commit body naming ../docs is allowed",
+   VCS + " commit -F - <<'EOF'\nre-point \"pins\" -> ../docs\nEOF", "allow", cwd=XCL_LANE)
+sh("other-checkout: a quoted heredoc in a substitution, naming ../docs in a commit message, is allowed",
+   VCS + " commit -m \"$(cat <<'EOF'\nfix: walk ../docs\nEOF\n)\"", "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message with a lone apostrophe, naming ../docs, is allowed",
+   VCS + ' commit -m "re-point pins -> ../docs, don\'t"', "allow", cwd=XCL_LANE)
+
+# Still refused: a real move into a separate clone, from the lane. A relative path to a clone is judged too,
+# and so is a backtick in a message, which the shell runs as a command.
+sh("other-checkout: a cd into a separate clone by a relative path, chained to a commit, is refused",
+   "cd " + UP_SEP + " && " + VCS + ' commit -m "msg"', "deny", "other-checkout", cwd=XCL_LANE)
+sh("other-checkout: a git -C commit into a separate clone by a relative path is refused",
+   VCS + " -C " + UP_SEP + ' commit -m "msg"', "deny", "other-checkout", cwd=XCL_LANE)
+sh("other-checkout: a backtick copy into a separate clone, inside a commit message, is refused",
+   VCS + ' commit -m "' + BACKTICK + "cp note.txt " + UP_SEP + "/note.txt" + BACKTICK + '"',
+   "deny", "other-checkout", cwd=XCL_LANE)
+
 # Two clones whose origin is one local bare repository. A local-path origin names no owner and repo, so the
 # same-repo test must read the two clones as one repo by the bare path they share.
 XCL_REMOTE = os.path.join(ROOT, "xcl_remote.git")  # the bare repository both clones name as origin
@@ -20723,6 +23488,15 @@ LOG_CHECKS = (
      "clone's .git passes", worktree_home_cd_allowed_case),
     ("worktree-home: the cd exemptions pass: an agent's recorded home from outside it, its own red-run "
      "folder, a session's recorded home", worktree_home_cd_exempt_case),
+    ("worktree-home: an agent's write into its own red-run folder, by a cd chained to it, a cp, a Write "
+     "or an Edit, is allowed; the same writes into a sibling's red-run folder, a prefix-named folder, "
+     "the primary, or with no agent_id are refused", worktree_home_red_write_case),
+    ("worktree-home: the own red-run folder's root is refused to rm, mv and a Write, and a cp into it "
+     "or a write inside it passes", worktree_home_red_root_case),
+    ("worktree-home: a red-run folder nested under another linked worktree, not the primary's, is "
+     "refused to a cd, a shell write and a Write", worktree_home_red_nested_case),
+    ("worktree-home: a write into the own red-run folder spelled in other letters of case passes on "
+     "Windows, and is a skip elsewhere", worktree_home_red_case_fold_case),
     ("worktree-home: a cd in a comment, in quotes or in a heredoc body is text, and a real cd after one "
      "is refused", worktree_home_cd_text_case),
     ("worktree-home: an owner override lifts a bare cd into another checkout",
@@ -22752,7 +25526,7 @@ def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agen
             temp=None, env=None, load=None, env_path=None):
     """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
     reads as the system temp: a git write under it is a throwaway, and silent-write skips it. `env`
-    adds variables to this one guard run. `load` is the machine reading a lane-start call meets
+    adds variables to this one guard run. `load` is the machine reading a start call meets
     (LB_NORMAL when None). `env_path` is the PATH of this one guard run (None keeps the runner's)."""
     fixed = {"LOCAL_TIME_NOW": ov_clock(seconds)}
     fixed.update(env or {})
@@ -22818,6 +25592,9 @@ OV_ACTS = (
      VCS + " push origin HEAD", PUSHSTRAY, "ask", PUSH_STRAY_RULE, None),
     ("push-main", "a non-forced push of main",
      VCS + " push origin main", PUSHMAIN, "ask", PUSH_MAIN_RULE, None),
+    # The owner's refused wait for a clock time, from the main session (no agent id, so a once override reaches it).
+    ("wait-until-clock-loop", "a foreground loop that waits for a clock time",
+     WAIT_UNTIL_CLOCK_LOOP, NOGIT, "deny", "waiter", None),
 )
 
 
@@ -23495,7 +26272,7 @@ for _label, _check in GS_CHECKS:
 # The brake applies to every lane start, lifted or not. LB_ALL_HIGH is a full machine: memory and disk both
 # over the full line, and the case's `load` key is that reading.
 def gl_check(name, tool_input, config_name, session_name, typed=None, grant=None, load=None, want="deny"):
-    """One lane-start call on a machine with the given reading. `grant` is the step's grant list, when the
+    """One start call on a machine with the given reading. `grant` is the step's grant list, when the
     lane is bound to a step; `typed` is an owner prompt typed before the call. Returns the verdict wanted."""
     config, session = ov_config(config_name), session_name
     if grant is not None:
@@ -24514,7 +27291,7 @@ for _label, _check in (
 # suite drops it here, and a cloud case passes its own value to lb_decision_check (`remote`). No other case reads it.
 os.environ.pop("CLAUDE_CODE_REMOTE", None)
 FAMILY = "load-brake"
-# The machine-load brake. On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
+# The machine-load brake. On a start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
 # the guard reads the machine's load once: memory in use as a share of this machine's memory, and disk free on
 # the home drive in GB against the drive's size. CPU is not read (decision machine-load-brake): a 200 ms CPU
 # sample is noise, and memory and disk are what stall a machine. It counts no claude process and no running
@@ -24522,7 +27299,7 @@ FAMILY = "load-brake"
 #   busy  memory over 85%, or disk free under the smaller of 10% of the disk and 15 GB. An Agent or Task call
 #         passes busy only when run_in_background is absent or exactly false. Any other value (true, a string,
 #         null, a number) is refused. Any Workflow is refused. The refusal says to wait for the load to drop, or
-#         to start the lane as an Agent call that leaves run_in_background out or sets it false. A disk reading
+#         to make this an Agent call that leaves run_in_background out or sets it false. A disk reading
 #         names free disk space instead.
 #   full  memory over 95%, or disk free under the smaller of 5% of the disk and 5 GB. Every lane call is refused,
 #         an Agent or Task call too.
@@ -24548,7 +27325,7 @@ FAMILY = "load-brake"
 #                  folder. Neither reads the CPU ticks, the load average, or waits.
 # The judge must call it by its bare name, so the probe's patch (set on every guard module that
 # holds the name) is the function that runs. A function the probe cannot replace fails every case.
-# The reading of a call is one read_load() per lane-start call, and none on any other call.
+# The reading of a call is one read_load() per start call, and none on any other call.
 # THE FAKE HOST. A case with a `fake` spec runs the real read_load under fakes, in the probe, and judges the
 # call on what it read. The fake sets sys.platform, ctypes.CDLL and ctypes.cdll, os.getloadavg (the load
 # average, which no reading uses), shutil.disk_usage, and the /proc/stat file (builtins.open and io.open).
@@ -24561,7 +27338,7 @@ FAMILY = "load-brake"
 # The probe also counts the child processes a run starts (subprocess.Popen, os.system, os.spawn*,
 # os.posix_spawn*, os.startfile), which is the harness's process seam for the "zero children" cases.
 LB_PROBE = r"""
-import importlib.machinery, importlib.util, io, json, os, subprocess, sys, time, types
+import builtins, importlib.machinery, importlib.util, io, json, os, subprocess, sys, time, types
 from unittest import mock
 guard_path, side, spec = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
 children = []
@@ -24687,8 +27464,21 @@ try:
                 setattr(m, name, fn)
 
     before = listing()
+    if spec.get("spy"):
+        # The spy counts each open of the transcript path, through builtins.open and io.open, the two names a guard
+        # reads a file by. The path is compared by its real path, so a link to the same file counts too.
+        real_open, target = open, os.path.realpath(spec["spy"])
+
+        def spy_open(file, *args, **kwargs):
+            if isinstance(file, (str, bytes, os.PathLike)) and os.path.realpath(os.fsdecode(file)) == target:
+                out["opened"] = out.get("opened", 0) + 1
+            return real_open(file, *args, **kwargs)
+        builtins.open = spy_open
+        io.open = spy_open
     if spec["mode"] == "selfcheck_child":
         subprocess.run([sys.executable, "-c", "pass"])
+    elif spec["mode"] == "selfcheck_open":
+        open(spec["spy"], encoding="utf-8").close()
     elif spec["mode"] == "reader":
         if not holders:
             out["missing"] = True
@@ -24720,7 +27510,14 @@ try:
                 # case reads each pair they return, not only the decision.
                 body = json.loads(sys.stdin.read())
                 out["hit"] = list(g.load_hit(body.get("tool_name"), body.get("tool_input")))
-                out["running"] = list(g.running_lane_hit(body, body.get("tool_name")))
+                # A guard with no running_agent_hit records None, which the check reports as a missing name.
+                running_hit = getattr(g, "running_agent_hit", None)
+                out["running"] = list(running_hit(body, body.get("tool_name"))) if running_hit else None
+            elif spec["mode"] == "lane":
+                # lane_session_hit, called direct on the call's payload. A guard with no such name leaves the pair None.
+                body = json.loads(sys.stdin.read())
+                direct = getattr(g, "lane_session_hit", None)
+                out["lane"] = None if direct is None else list(direct(body, body.get("tool_name")))
             else:
                 g.main()
         except SystemExit:
@@ -24751,10 +27548,13 @@ LB_ALL_HIGH = {"memory_pct": 99.0, "disk_free_gb": 1.0, "disk_total_gb": 926.0}
 LB_SPAWNS = (("Agent", "Agent"), ("Task", "Task"))
 LB_BG = ((True, "run_in_background true"), (None, "run_in_background left out"),
          (False, "run_in_background false"))
-LB_REMEDY = re.compile(re.escape("Wait until the load drops, or start this lane as an Agent call that leaves "
+LB_REMEDY = re.compile(re.escape("Wait until the load drops, or make this an Agent call that leaves "
                                  "run_in_background out or sets it false."), re.I)
 LB_FREE_DISK = re.compile(r"free disk space", re.I)   # the disk reading's remedy
 LB_FOREGROUND = re.compile(r"foreground", re.I)   # a busy refusal of an Agent or Task call never says this
+LB_BUSY_CITE = re.compile(r"starts no new lane or agent")   # the decision cite of a busy or full refusal
+LB_NO_NEW = re.compile(r"No new lane or agent starts")   # the first sentence of a full refusal
+LB_RUN_CITE = re.compile(r"stops a running agent")   # the decision cite of a running agent's full refusal
 
 
 def lb_gb(free, total):
@@ -24776,7 +27576,7 @@ def lb_reading(**changes):
 
 
 def lb_lane_input(tool, background=None):
-    """The input of a lane-start call. `background` is run_in_background: True, False, or None to
+    """The input of a start call. `background` is run_in_background: True, False, or None to
     leave it out. Only Agent and Task take it."""
     given = dict(LB_LANE_INPUT[tool])
     if background is not None and tool in dict(LB_SPAWNS).values():
@@ -24789,12 +27589,20 @@ def lb_spawn_input(tool, value):
     return dict(LB_LANE_INPUT[tool], run_in_background=value)
 
 
-def lb_run(tool, spec, tool_input=None, event=None, agent=None, remote=None):
+LB_MISSING = "missing"   # a transcript sentinel: the payload names a path that is not there
+LB_FOLDER = "folder"     # a transcript sentinel: the payload names a folder, so the guard's open() fails
+
+
+def lb_run(tool, spec, tool_input=None, event=None, agent=None, remote=None, own_env=None, transcript=None,
+           spy=False):
     """One guard run in the probe. Returns (decision, reason, side): the decision the run printed,
-    and what the probe saw (reads, children, files, had_reader, reading...). `agent` is the payload's
+    and what the probe saw (reads, children, files, had_reader, reading, opened, lane...). `agent` is the payload's
     agent_id, so the call is an agent's own; None leaves it out (the orchestrator's call). `remote` is the
     value of CLAUDE_CODE_REMOTE; None leaves it unset. The runner's own value never reaches a case, so
-    every case judges a local machine unless it names `remote`."""
+    every case judges a local machine unless it names `remote`. `own_env` is a dict of env values that name the
+    session's own id (CLAUDE_CODE_REMOTE_SESSION_ID); None leaves it unset, as the runner's value is never kept.
+    `transcript` is the payload's transcript_path: a list of JSONL lines written to the run folder, or LB_MISSING or
+    LB_FOLDER. `spy` counts the opens of that transcript path, into side["opened"]."""
     os.makedirs(LB_DIR, exist_ok=True)
     run = tempfile.mkdtemp(dir=LB_DIR)
     try:
@@ -24814,12 +27622,29 @@ def lb_run(tool, spec, tool_input=None, event=None, agent=None, remote=None):
         body["session_id"] = "lb-" + os.path.basename(run)
         if agent is not None:
             body["agent_id"], body["agent_type"] = agent, "general-purpose"
+        if transcript is not None:
+            # The transcript sits in the run folder, outside cfg and tmp, so the file listing never counts it.
+            if transcript == LB_FOLDER:
+                path = os.path.join(run, "folder.jsonl")
+                os.makedirs(path)
+            elif transcript == LB_MISSING:
+                path = os.path.join(run, "missing.jsonl")
+            else:
+                path = os.path.join(run, "transcript.jsonl")
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write("".join(line + "\n" for line in transcript))
+            body["transcript_path"] = path
+            if spy:
+                spec = dict(spec, spy=path)
         env = dict(os.environ)
         for name in ("TMPDIR", "TEMP", "TMP"):
             env[name] = dirs["tmp"]
         env["CLAUDE_CONFIG_DIR"] = dirs["cfg"]
         env.pop("CLAUDE_CODE_SESSION_ID", None)
         env.pop("CLAUDE_CODE_REMOTE", None)
+        env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)   # this container sets one: only a case that names it has one
+        if own_env:
+            env.update(own_env)
         if remote is not None:
             env["CLAUDE_CODE_REMOTE"] = remote
         env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
@@ -24848,14 +27673,16 @@ def lb_names(word, *numbers, percent=True):
 
 
 def lb_decision_check(tool, reading, want, names=(), background=None, tool_input=None, reads=1, lacks=(),
-                      fake=None, agent=None, remote=None):
-    """A lane-start call under a forced reading, or under THE FAKE HOST when `fake` is given (then `reading`
+                      fake=None, agent=None, remote=None, own_env=None, transcript=None, spy=False):
+    """A start call under a forced reading, or under THE FAKE HOST when `fake` is given (then `reading`
     is unused and the real read_load runs). `background` is the call's run_in_background: True, False, or
-    None to leave it out. `tool_input` replaces the whole input. `remote` is CLAUDE_CODE_REMOTE (see lb_run)."""
+    None to leave it out. `tool_input` replaces the whole input. `remote` is CLAUDE_CODE_REMOTE (see lb_run),
+    and `own_env`, `transcript` and `spy` are lb_run's."""
     def check():
         given = lb_lane_input(tool, background) if tool_input is None else tool_input
         spec = {"mode": "judge", "fake": fake} if fake else {"mode": "judge", "reading": reading}
-        got, reason, side = lb_run(tool, spec, given, agent=agent, remote=remote)
+        got, reason, side = lb_run(tool, spec, given, agent=agent, remote=remote, own_env=own_env,
+                                   transcript=transcript, spy=spy)
         if got == "error":
             return False, reason
         called = side.get("reads")
@@ -24896,7 +27723,7 @@ def lb_no_read_check(tool, tool_input=None, event=None, agent=None, remote=None)
 
 
 def lb_real_children_check(tool, background=None):
-    """A lane-start call with the real reader starts no child process, whatever the machine reads
+    """A start call with the real reader starts no child process, whatever the machine reads
     and whatever the call is then judged."""
     def check():
         got, reason, side = lb_run(tool, {"mode": "judge"}, lb_lane_input(tool, background))
@@ -25051,7 +27878,7 @@ if __name__ == "__main__":
 
 
 def lb_neutral_default_check():
-    """decide() gives a lane-start call a neutral load unless the case names one (`load`), so a case about
+    """decide() gives a start call a neutral load unless the case names one (`load`), so a case about
     another rule never meets the host's load. A call that starts no lane runs the guard file itself."""
     global GUARD
     folder = os.path.join(ROOT, "neutral-load")
@@ -25104,13 +27931,16 @@ for _short, _tool in LB_SPAWNS:
         if _bg is True:
             lb_add("%s, memory 91.7%%, %s: busy, refused, names the reading, gives the wait or Agent-call remedy"
                    % (_short, _say),
-                   lb_decision_check(_tool, lb_reading(memory_pct=91.7), "deny", LB_MEM_BUSY + (LB_REMEDY,),
-                                     background=_bg, lacks=(LB_FOREGROUND,)))
+                   lb_decision_check(_tool, lb_reading(memory_pct=91.7), "deny",
+                                     LB_MEM_BUSY + (LB_REMEDY, LB_BUSY_CITE), background=_bg,
+                                     lacks=(LB_FOREGROUND,)))
         else:
             lb_add("%s, memory 91.7%%, %s: busy, allowed" % (_short, _say),
                    lb_decision_check(_tool, lb_reading(memory_pct=91.7), "allow", background=_bg))
-        lb_add("%s, memory 97.2%%, %s: full, refused, names the reading" % (_short, _say),
-               lb_decision_check(_tool, lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, background=_bg))
+        lb_add("%s, memory 97.2%%, %s: full, refused, names the reading, says no new lane or agent starts"
+               % (_short, _say),
+               lb_decision_check(_tool, lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL + (LB_NO_NEW,),
+                                 background=_bg))
         lb_add("%s, a read that raises, %s: allowed" % (_short, _say),
                lb_decision_check(_tool, "raise", "allow", background=_bg))
 
@@ -25272,18 +28102,18 @@ lb_add("a SubagentStop reads no load under the worst reading",
 # A RUNNING LANE. An agent's own shell or file write reads the load once, so a lane stops at full even while
 # its orchestrator waits on the owner. Busy lets it run. The orchestrator's own calls above read nothing.
 LB_AGENT = "a64a7f84210a8721d"
-LB_STOP_LANE = re.compile(r"Stop this lane now")
+LB_STOP_AGENT = re.compile(r"Stop this agent now")
 LB_WRITES = (("Bash", {"command": "echo hi"}), ("PowerShell", {"command": "Write-Output hi"}),
              ("Edit", {"file_path": "{cwd}/notes.txt", "old_string": "a", "new_string": "b"}),
              ("Write", {"file_path": "{cwd}/notes.txt", "content": "a"}),
              ("MultiEdit", {"file_path": "{cwd}/notes.txt", "edits": [{"old_string": "a", "new_string": "b"}]}),
              ("NotebookEdit", {"notebook_path": "{cwd}/n.ipynb", "new_source": "a"}))
 for _tool, _given in LB_WRITES:
-    lb_add("an agent's %s, 3.1 GB free of 926 GB: full, refused, names the reading, tells the lane to stop" % _tool,
+    lb_add("an agent's %s, 3.1 GB free of 926 GB: full, refused, names the reading, tells the agent to stop" % _tool,
            lb_decision_check(_tool, lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), "deny",
-                             (lb_gb(3.1, 926), LB_STOP_LANE), tool_input=_given, agent=LB_AGENT))
+                             (lb_gb(3.1, 926), LB_STOP_AGENT, LB_RUN_CITE), tool_input=_given, agent=LB_AGENT))
 lb_add("an agent's Bash, memory 97.2%: full, refused, names the reading",
-       lb_decision_check("Bash", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL + (LB_STOP_LANE,),
+       lb_decision_check("Bash", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL + (LB_STOP_AGENT,),
                          tool_input={"command": "echo hi"}, agent=LB_AGENT))
 lb_add("an agent's Bash, memory 91.7% and 9.4 GB free of 926 GB: busy, allowed, one read",
        lb_decision_check("Bash", lb_reading(memory_pct=91.7, disk_free_gb=9.4, disk_total_gb=926.0), "allow",
@@ -25307,7 +28137,7 @@ lb_add("an agent's session tool that writes nothing reads no load under the wors
 lb_add("a Bash call whose agent_id is malformed reads no load under the worst reading",
        lb_no_read_check("Bash", {"command": "echo hi"}, agent="not an id!"))
 
-# CLOUD. decision session-tiers: the load brake is local-only. With CLAUDE_CODE_REMOTE=true a lane-start call is
+# CLOUD. decision session-tiers: the load brake is local-only. With CLAUDE_CODE_REMOTE=true a start call is
 # allowed at busy and full. These run end to end, so an allowed call's file writes are checked too (nothing reaches
 # guard.log). The section below already holds an Agent with run_in_background true, a Workflow and the writes at full,
 # so those are not repeated here.
@@ -25368,7 +28198,7 @@ def cloud_name_check():
 
 
 def cloud_one_home_check():
-    """guard.py's brake gate holds guard_core's is_cloud: the cloud check has one home."""
+    """guard.py's brake guard holds guard_core's is_cloud: the cloud check has one home."""
     import importlib
     guard = _load_guard_module()
     core = importlib.import_module("guard_core")
@@ -25377,12 +28207,12 @@ def cloud_one_home_check():
         return False, "guard_core has no is_cloud: the cloud check has no one home yet"
     got = getattr(guard, "is_cloud", None)
     if got is not helper:
-        return False, "guard.py's brake gate does not hold guard_core.is_cloud (it holds %r)" % (got,)
+        return False, "guard.py's brake guard does not hold guard_core.is_cloud (it holds %r)" % (got,)
     return True, "guard.py holds guard_core.is_cloud"
 
 
 lb_add('cloud check: guard_core.is_cloud exists and is True only for exactly "true"', cloud_name_check)
-lb_add("cloud check: guard.py's brake gate holds guard_core.is_cloud, one home", cloud_one_home_check)
+lb_add("cloud check: guard.py's brake guard holds guard_core.is_cloud, one home", cloud_one_home_check)
 
 
 # A CLOUD SESSION. The brake is specific to local sessions: with CLAUDE_CODE_REMOTE "true" it skips every lane
@@ -25393,7 +28223,7 @@ LB_FULL_READING = lb_reading(memory_pct=97.2)   # a full machine: memory over 95
 
 
 def lb_hit_check(which, tool, reading, tool_input, remote=None, deny=None, reads=1, agent=None):
-    """A direct call of load_hit (which "load_hit") or running_lane_hit (which "running_lane_hit") on the call's
+    """A direct call of load_hit (which "load_hit") or running_agent_hit (which "running_agent_hit") on the call's
     own payload, under a forced reading and `remote`. `deny` is None for the empty pair ("", ""), or the patterns
     the refusal's reason must name. `reads` is how many times the reader ran across the probe's two calls."""
     key = "hit" if which == "load_hit" else "running"
@@ -25404,6 +28234,8 @@ def lb_hit_check(which, tool, reading, tool_input, remote=None, deny=None, reads
         if got == "error":
             return False, reason
         called, pair = side.get("reads"), side.get(key)
+        if pair is None:
+            return False, "guard.py defines no %s" % which
         if not isinstance(pair, list) or len(pair) != 2:
             return False, "%s returned %r, want a pair" % (which, pair)
         if deny is None:
@@ -25428,9 +28260,9 @@ lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, memory 97.2%: loa
        lb_hit_check("load_hit", "Agent", LB_FULL_READING, lb_lane_input("Agent", True), remote="true", reads=0))
 lb_add("CLAUDE_CODE_REMOTE=true, Workflow, memory 97.2%: load_hit returns the empty pair, the reader never runs",
        lb_hit_check("load_hit", "Workflow", LB_FULL_READING, lb_lane_input("Workflow"), remote="true", reads=0))
-lb_add("CLAUDE_CODE_REMOTE=true, an agent's Bash, memory 97.2%: running_lane_hit returns the empty pair, "
+lb_add("CLAUDE_CODE_REMOTE=true, an agent's Bash, memory 97.2%: running_agent_hit returns the empty pair, "
        "the reader never runs",
-       lb_hit_check("running_lane_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote="true", reads=0,
+       lb_hit_check("running_agent_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote="true", reads=0,
                     agent=LB_AGENT))
 lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, full reading: allowed, the reader never runs",
        lb_no_read_check("Agent", lb_lane_input("Agent", True), remote="true"))
@@ -25449,18 +28281,18 @@ for _remote, _say in ((None, "unset"), ("false", "false")):
     lb_add("CLAUDE_CODE_REMOTE %s, Workflow, memory 97.2%%: load_hit refuses, names the memory" % _say,
            lb_hit_check("load_hit", "Workflow", LB_FULL_READING, lb_lane_input("Workflow"), remote=_remote,
                         deny=LB_MEM_FULL))
-    lb_add("CLAUDE_CODE_REMOTE %s, an agent's Bash, memory 97.2%%: running_lane_hit refuses, names the memory, "
-           "tells the lane to stop" % _say,
-           lb_hit_check("running_lane_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote=_remote,
-                        deny=LB_MEM_FULL + (LB_STOP_LANE,), agent=LB_AGENT))
+    lb_add("CLAUDE_CODE_REMOTE %s, an agent's Bash, memory 97.2%%: running_agent_hit refuses, names the memory, "
+           "tells the agent to stop" % _say,
+           lb_hit_check("running_agent_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote=_remote,
+                        deny=LB_MEM_FULL + (LB_STOP_AGENT,), agent=LB_AGENT))
     lb_add("CLAUDE_CODE_REMOTE %s, Agent run_in_background true, memory 97.2%%: refused, names the memory, "
            "one read" % _say,
            lb_decision_check("Agent", LB_FULL_READING, "deny", LB_MEM_FULL, background=True, remote=_remote))
     lb_add("CLAUDE_CODE_REMOTE %s, Workflow, memory 97.2%%: refused, names the memory" % _say,
            lb_decision_check("Workflow", LB_FULL_READING, "deny", LB_MEM_FULL, remote=_remote))
-    lb_add("CLAUDE_CODE_REMOTE %s, an agent's Bash, memory 97.2%%: refused, names the memory, tells the lane to stop"
+    lb_add("CLAUDE_CODE_REMOTE %s, an agent's Bash, memory 97.2%%: refused, names the memory, tells the agent to stop"
            % _say,
-           lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + (LB_STOP_LANE,),
+           lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + (LB_STOP_AGENT,),
                              tool_input={"command": "echo hi"}, agent=LB_AGENT, remote=_remote))
 
 for _short, _tool in LB_TOOLS:
@@ -25475,7 +28307,7 @@ lb_add("the real reader returns readings in range, and on Windows and Mac reads 
 
 
 def lb_live_waits_check(tool):
-    """A lane-start call on the live judge, with no stub reading, makes no sleep: the CPU read's 200 ms wait."""
+    """A start call on the live judge, with no stub reading, makes no sleep: the CPU read's 200 ms wait."""
     def check():
         got, reason, side = lb_run(tool, {"mode": "judge"}, lb_lane_input(tool))
         if got == "error":
@@ -25489,7 +28321,7 @@ def lb_live_waits_check(tool):
 
 
 def lb_live_times_check():
-    """On Windows, no lane-start call on the live judge makes a GetSystemTimes call, the CPU tick read."""
+    """On Windows, no start call on the live judge makes a GetSystemTimes call, the CPU tick read."""
     if sys.platform != "win32":
         return SKIP, "GetSystemTimes is the Windows CPU tick read, so this runs on Windows only"
     for _short, tool in LB_TOOLS:
@@ -25500,13 +28332,225 @@ def lb_live_times_check():
             return False, "the guard has no read_load, so no real reading was taken"
         if side.get("GetSystemTimes"):
             return False, "%s made %d GetSystemTimes call(s), want none" % (_short, side["GetSystemTimes"])
-    return True, "no GetSystemTimes call on any lane-start call"
+    return True, "no GetSystemTimes call on any start call"
 
 
 for _short, _tool in LB_TOOLS:
     lb_add("%s on the live judge makes no sleep, so no 200 ms CPU wait" % _short,
            lb_live_waits_check(_tool), real=True)
-lb_add("Windows: no lane-start call on the live judge makes a GetSystemTimes call", lb_live_times_check, real=True)
+lb_add("Windows: no start call on the live judge makes a GetSystemTimes call", lb_live_times_check, real=True)
+
+
+# A LANE SESSION (decision machine-load-brake). A lane session's own shell or file write is refused at a full machine,
+# as an agent's is, so a lane its orchestrator leaves waiting stops writing. The session's own id is
+# CLAUDE_CODE_REMOTE_SESSION_ID (cse_<x>, read as session_<x>). Its own get_session record in the transcript must tag
+# cs-build:lane, with no other cs-build: tier tag, and no set_session_tags naming it may follow that record. Any other
+# session, a cloud session, a session with no own id, and any read error passes. A session with an own id reads the
+# load once, and opens its transcript only when the reading is full.
+LB_LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
+LB_LANE = role_call("g1", LB_LANE_TAGS)   # the lane's own record, as its transcript holds it
+LB_OWN = ROLE_ENV                          # the env that names it: CLAUDE_CODE_REMOTE_SESSION_ID=cse_ROLEOWN01
+# The refusal tells the lane to end its turn and send the reading to its parent.
+LB_LANE_REMEDY = (re.compile(r"end your turn", re.I), re.compile(r"send_message", re.I),
+                  re.compile(re.escape("@parent")))
+LB_LANE_BASH = {"command": "echo hi"}
+LB_LANE_EDIT = {"file_path": "{cwd}/notes.txt", "old_string": "a", "new_string": "b"}
+LB_BUSY = lb_reading(memory_pct=91.7)                             # busy on memory: over 85%, not over 95%
+LB_BUSY_EDIT = lb_reading(disk_free_gb=9.4, disk_total_gb=926.0)  # busy on disk: under 15 GB of 926
+LB_LONG = [line for n in range(200)                               # a 400-line transcript of other calls
+           for line in (role_use("f%d" % n, "Bash", {"command": "ls"}), role_result("f%d" % n, "a.txt"))]
+
+
+def lb_lane_direct_check(tool, tool_input, reading, names):
+    """lane_session_hit, called direct on the lane's own call under `reading`: its pair is a refusal that names each
+    of `names`, and the reader ran once."""
+    def check():
+        got, reason, side = lb_run(tool, {"mode": "lane", "reading": reading}, tool_input, own_env=LB_OWN,
+                                   transcript=LB_LANE)
+        if got == "error":
+            return False, reason
+        pair = side.get("lane")
+        if pair is None:
+            return False, "the guard has no lane_session_hit"
+        if not isinstance(pair, list) or len(pair) != 2 or not pair[0]:
+            return False, "lane_session_hit returned %r, want a refusal" % (pair,)
+        for pattern in names:
+            if not pattern.search(pair[0]):
+                return False, "lane_session_hit's refusal does not name %r: %s" % (pattern.pattern[:30], pair[0][:100])
+        if side.get("reads") != 1:
+            return False, "lane_session_hit ran the reader %s time(s), want 1" % side.get("reads")
+        return True, "lane_session_hit refuses, names the reading and the remedy, and the reader ran once"
+    return check
+
+
+def lb_lane_refusal_check(tool, tool_input, reading, names):
+    """A lane session's call under `reading` is refused, names each of `names`, and tells the lane to end its turn and
+    report to @parent. The reader runs once. The full run is checked first, so the direct call is judged only once the
+    run refuses. The direct call must refuse the same way."""
+    full = tuple(names) + LB_LANE_REMEDY
+    judge = lb_decision_check(tool, reading, "deny", full, tool_input=tool_input, own_env=LB_OWN, transcript=LB_LANE)
+    direct = lb_lane_direct_check(tool, tool_input, reading, full)
+
+    def check():
+        ok, note = judge()
+        return direct() if ok else (ok, note)
+    return check
+
+
+def lb_lane_refusal_quiet_check():
+    """A lane session's shell on a full machine starts no child process, and writes no file but the refusal's guard.log
+    line."""
+    def check():
+        got, reason, side = lb_run("Bash", {"mode": "judge", "reading": LB_FULL_READING}, LB_LANE_BASH,
+                                   own_env=LB_OWN, transcript=LB_LANE)
+        if got == "error":
+            return False, reason
+        if got != "deny":
+            return False, "%s, want deny: %s" % (got, reason[:90])
+        if side["children"]:
+            return False, "%d child process(es) started: %s" % (len(side["children"]), side["children"][:3])
+        written = sorted(os.path.basename(path) for path in side["files"])
+        if written != ["guard.log"]:
+            return False, "the refusal wrote %s, want only guard.log" % (written,)
+        return True, "deny, no child process, and guard.log is the only file written"
+    return check
+
+
+def lb_lane_quiet_check(own_env=None, remote=None):
+    """A call that no lane check reaches, at a full reading: it is allowed, the reader runs no time, the transcript is
+    not opened, and no file is written."""
+    def check():
+        got, reason, side = lb_run("Bash", {"mode": "judge", "reading": LB_ALL_HIGH}, LB_LANE_BASH, own_env=own_env,
+                                   transcript=LB_LANE, spy=True, remote=remote)
+        if got == "error":
+            return False, reason
+        if got != "allow":
+            return False, "%s, want allow: %s" % (got, reason[:90])
+        if side.get("reads"):
+            return False, "the reader ran %s time(s), want none" % side["reads"]
+        if side.get("opened"):
+            return False, "the transcript was opened %d time(s), want none" % side["opened"]
+        if side["files"]:
+            return False, "an allowed call wrote %d file(s)" % len(side["files"])
+        return True, "allow, no read, the transcript is not opened"
+    return check
+
+
+def lb_transcript_read_check(reading, opened_wanted):
+    """A lane session's own call: at a full reading its transcript is opened, since the lane check reads it; at a normal
+    reading it is not. The reader runs once either way."""
+    def check():
+        got, reason, side = lb_run("Bash", {"mode": "judge", "reading": reading}, LB_LANE_BASH, own_env=LB_OWN,
+                                   transcript=LB_LANE, spy=True)
+        if got == "error":
+            return False, reason
+        opened = side.get("opened", 0)
+        if opened_wanted and not opened:
+            return False, "the transcript was not opened at a full reading, so no lane check reads it"
+        if not opened_wanted and opened:
+            return False, "the transcript was opened %d time(s) at a normal reading, want none" % opened
+        if side.get("reads") != 1:
+            return False, "the reader ran %s time(s), want 1" % side.get("reads")
+        return True, "the transcript opened %d time(s), and the reader ran once" % opened
+    return check
+
+
+def lb_spy_control_check():
+    """The spy counts one open of the transcript path, so the transcript checks above see a read when one happens."""
+    def check():
+        got, reason, side = lb_run(None, {"mode": "selfcheck_open"}, tool_input={}, transcript=LB_LANE, spy=True)
+        if got == "error":
+            return False, reason
+        if side.get("opened") != 1:
+            return False, "the spy counted %s open(s) of the transcript, want 1" % side.get("opened")
+        return True, "the spy counts one open"
+    return check
+
+
+# The refusal at a full machine: each write tool, a disk reading, and the shell's quiet refusal.
+for _tool, _given in LB_WRITES:
+    lb_add("a lane session's %s, memory 97.2%%: full, refused, names the memory, tells the lane to end its turn "
+           "and report to @parent" % _tool,
+           lb_lane_refusal_check(_tool, _given, LB_FULL_READING, LB_MEM_FULL))
+lb_add("a lane session's Bash, 3.1 GB free of 926 GB: full, refused, names the disk, tells the lane to end its turn",
+       lb_lane_refusal_check("Bash", LB_LANE_BASH, lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), (lb_gb(3.1, 926),)))
+lb_add("a lane session's Bash, memory 97.2%: full, starts no child process and writes only the guard.log line",
+       lb_lane_refusal_quiet_check())
+
+# The busy reading lets a lane run, and the lane's one read is the reader's.
+lb_add("a lane session's Bash, memory 91.7%: busy, allowed, the reader runs once",
+       lb_decision_check("Bash", LB_BUSY, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN, transcript=LB_LANE))
+lb_add("a lane session's Edit, 9.4 GB free of 926 GB: busy, allowed, the reader runs once",
+       lb_decision_check("Edit", LB_BUSY_EDIT, "allow", tool_input=LB_LANE_EDIT, own_env=LB_OWN, transcript=LB_LANE))
+# An agent of a lane makes an agent's call, so it reads the load once, as an agent's write does, and the lane check never
+# reads it again. Both are green on main: they pin the cost of the new check on an agent's call.
+lb_add("a lane session's agent Bash (agent_id set), memory 91.7%: busy, allowed, the reader runs once",
+       lb_decision_check("Bash", LB_BUSY, "allow", tool_input=LB_LANE_BASH, agent=LB_AGENT, own_env=LB_OWN,
+                         transcript=LB_LANE))
+lb_add("a lane session's agent Bash (agent_id set), memory 97.2%: full, refused by the agent's stop, "
+       "the reader runs once",
+       lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + (LB_STOP_AGENT,), tool_input=LB_LANE_BASH,
+                         agent=LB_AGENT, own_env=LB_OWN, transcript=LB_LANE))
+
+# A record that is no lane's: another tier tag, or a parent with no tier tag. At a full machine it is allowed.
+for _say, _lines in (
+        ("a coordinator record", role_call("g1", ["cs-build:coordinator", "cs-repo:o/r"])),
+        ("a triage record, with its parent", role_call("g1", ["cs-build:triage", "cs-repo:o/r"])),
+        ("a batch-runner record, with its parent", role_call("g1", ["cs-build:batch-runner", "cs-repo:o/r"])),
+        ("a record with cs-build:lane and cs-build:coordinator", role_call(
+            "g1", ["cs-build:lane", "cs-build:coordinator", "cs-repo:o/r"])),
+        ("a record with a parent and no cs-build tag", role_call("g1", ["cs-repo:o/r"]))):
+    lb_add("own record is %s, memory 97.2%%: full, allowed, the reader runs once" % _say,
+           lb_decision_check("Bash", LB_FULL_READING, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN,
+                             transcript=_lines))
+
+# set_session_tags: a lane that tags its own record after it is no longer a lane. Tagging another session leaves it one.
+lb_add("a lane session that tags its own record after it, memory 97.2%: full, allowed, the reader runs once",
+       lb_decision_check("Bash", LB_FULL_READING, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN,
+                         transcript=LB_LANE + role_tag_call("t1")))
+lb_add("a lane session whose record is tagged on another session after it, memory 97.2%: full, refused",
+       lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + LB_LANE_REMEDY, tool_input=LB_LANE_BASH,
+                         own_env=LB_OWN, transcript=LB_LANE + role_tag_call("t1", session=ROLE_OTHER)))
+
+# No own record, or a transcript that cannot be read, is no lane: allowed at full, and the reader still runs once.
+lb_add("a lane record for another session only, memory 97.2%: full, allowed, the reader runs once",
+       lb_decision_check("Bash", LB_FULL_READING, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN,
+                         transcript=role_call("g1", LB_LANE_TAGS, session=ROLE_OTHER)))
+lb_add("the transcript file is missing, memory 97.2%: full, allowed, the reader runs once",
+       lb_decision_check("Bash", LB_FULL_READING, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN,
+                         transcript=LB_MISSING))
+lb_add("the transcript is a folder, memory 97.2%: full, allowed, the reader runs once",
+       lb_decision_check("Bash", LB_FULL_READING, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN,
+                         transcript=LB_FOLDER))
+lb_add("an empty transcript, memory 97.2%: full, allowed, the reader runs once",
+       lb_decision_check("Bash", LB_FULL_READING, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN, transcript=[]))
+
+# The newest own record decides: a lane that later becomes a coordinator is allowed, and the reverse is refused.
+lb_add("a lane record, then a coordinator record, memory 97.2%: full, allowed, the newest record decides",
+       lb_decision_check("Bash", LB_FULL_READING, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN,
+                         transcript=LB_LANE + role_call("g2", ["cs-build:coordinator", "cs-repo:o/r"])))
+lb_add("a coordinator record, then a lane record, memory 97.2%: full, refused, the newest record decides",
+       lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + LB_LANE_REMEDY, tool_input=LB_LANE_BASH,
+                         own_env=LB_OWN, transcript=role_call("g1", ["cs-build:coordinator", "cs-repo:o/r"])
+                         + role_call("g2", LB_LANE_TAGS)))
+lb_add("a lane record at the end of a 400-line transcript, memory 97.2%: full, refused, names the memory",
+       lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + LB_LANE_REMEDY, tool_input=LB_LANE_BASH,
+                         own_env=LB_OWN, transcript=LB_LONG + LB_LANE))
+
+# No lane check reaches these calls: a cloud session, a session with no own id, and an own id in another shape.
+lb_add("CLAUDE_CODE_REMOTE=true with a lane record, memory 99%: allowed, the reader runs 0 times, transcript not opened",
+       lb_lane_quiet_check(own_env=LB_OWN, remote="true"))
+lb_add("a lane record and no own id, memory 99%: allowed, the reader runs 0 times, transcript not opened",
+       lb_lane_quiet_check(own_env=None))
+lb_add("a lane record and an own id in another shape (xyz), memory 99%: allowed, the reader runs 0 times, "
+       "transcript not opened", lb_lane_quiet_check(own_env={"CLAUDE_CODE_REMOTE_SESSION_ID": "xyz"}))
+
+# The transcript is opened only at a full reading. The spy control shows that one open is counted.
+lb_add("probe control: the transcript spy counts one open of the transcript", lb_spy_control_check())
+lb_add("a lane session's transcript is opened at a full reading, so the lane check reads it",
+       lb_transcript_read_check(LB_FULL_READING, True))
+lb_add("a lane session's transcript is not opened at a normal reading, and the reader runs once",
+       lb_transcript_read_check(LB_NORMAL, False))
 
 
 def shard_split_check():
@@ -26458,8 +29502,10 @@ FAMILY = "simulator"
 #   The cap counts EVERY booted device, owner-booted and unrecorded included.
 #   simulator-boot-route   refuses an xcodebuild -destination that names a shut-down device, judged after
 #                          cap and twin. The remedy is sim-test for `test`, else the generic destination.
-#   simulator-boot-locked  refuses an MCP launch of a shut-down device while the sim-test lock is held by
-#                          a live pid, or by a pid-less folder under 60 s old. A booted device is never refused.
+#   simulator-boot-lease   refuses an MCP launch of a shut-down device, held lock or not: a launch needs a lease,
+#                          and the Mac shares one simulator across repos (decision sim-test-is-the-one-boot-path,
+#                          ruling 5). Judged after cap and twin. The reason names sim-test and the lease. A booted
+#                          device is never refused.
 # A fake `xcrun` and `ps` on PATH answer `simctl list devices` and the process table. A reason names
 # UDIDs and device names only, never the config folder or the record file.
 
@@ -26498,8 +29544,8 @@ def sim_boot_by_destination(udid):
     return "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + udid + "'"
 
 
-def make_fake_xcrun(folder, rows):
-    """A stand-in `xcrun` that answers every call with the device list in ROWS.
+def make_fake_xcrun(folder, rows, pid_starts=None, ps_log=None):
+    """A stand-in `xcrun` that answers every call with the device list in ROWS. PID_STARTS and PS_LOG are make_fake_ps's.
 
     ROWS are (udid, name, state, deviceTypeIdentifier, runtime). The fake prints with the shell's
     printf builtin, so it needs no other program on the PATH. Windows has no xcrun, so no case
@@ -26518,7 +29564,7 @@ def make_fake_xcrun(folder, rows):
     # A quiet process table beside it: readable, with each booted device's launchd_sim and no holder.
     make_fake_ps(folder, [("1", "0", "0", "/sbin/launchd")] + [
         (str(LAUNCHD_PID[udid]), "1", "0", LAUNCHD_CMD + " " + udid)
-        for udid, _, state, _, _ in rows if state == "Booted"])
+        for udid, _, state, _, _ in rows if state == "Booted"], pid_starts=pid_starts, ps_log=ps_log)
     return folder
 
 
@@ -26552,12 +29598,12 @@ def register_simulator_boot_cases():
                  [twin_idle_rec]),
         "twin_recent": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_recent"), twin_rows()),
                         [dict(twin_idle_rec, at=sim_iso(10 * 60))]),
-        "twin_unrecorded": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_unrec"), twin_rows()),
+        "twin_unrecorded": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_unrecorded"), twin_rows()),
                             []),
-        "twin_other_runtime": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_rt"),
+        "twin_other_runtime": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_other_runtime"),
                                                twin_rows(state_of_ut0_runtime=SIM_RT_OLD)),
                                [dict(twin_idle_rec, runtime=SIM_RT_OLD)]),
-        "twin_other_type": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_type"),
+        "twin_other_type": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_other_type"),
                                             twin_rows(type_of_ut0=SIM_TYPE_AIR)),
                             [dict(twin_idle_rec, deviceTypeIdentifier=SIM_TYPE_AIR)]),
         # The twin was booted 2 hours ago and shut down, then booted by hand: the live launchd_sim
@@ -26696,11 +29742,39 @@ def register_simulator_boot_cases():
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC
        + ",OS=26.0'", "deny", rule="simulator-boot-cap", env_path=os_split_path,
        config=os_split_cfg, carries=(SIM_UA, SIM_UE))
-    # The controls from here to the twin section boot through the simulator MCP launch, with no lock held.
-    # simulator-boot-route judges only xcodebuild destinations, so an xcodebuild boot of a shut-down device
-    # would be refused by it before the cap or twin rule is read. The MCP launch runs the same cap and twin code.
-    add("control: one booted, a second boot by MCP launch is allowed",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UC, env_path=one_path, config=one_cfg)
+    # The MCP launch cases from here to the twin section boot through the simulator MCP tool, with no lock
+    # held. simulator-boot-route judges only xcodebuild destinations, so an xcodebuild boot of a shut-down
+    # device would be refused by it before the cap or twin rule is read. Every MCP launch of a shut-down device
+    # is refused by simulator-boot-lease once cap and twin pass, so the refusal here is the lease: it shows
+    # that cap and twin did not fire.
+    add("lease: one booted, an MCP launch of a shut-down device with no lock is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("lease: one booted, an MCP launch that names the shut-down device by udid is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", udid=SIM_UC,
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("lease: an MCP launch of a booted device with no lock is allowed",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UA, env_path=one_path, config=one_cfg)
+    # A name that differs from the device's name only in case or in outer spaces still names that device.
+    add("lease: an MCP launch naming the shut-down device in lowercase is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device="gamma mini",
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("lease: an MCP launch naming the shut-down device with a leading space is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=" Gamma Mini",
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("lease: an MCP launch naming the shut-down device with a trailing space is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device="Gamma Mini ",
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("control: an MCP launch of a name no device holds is allowed, the name matches nothing",
+        "allow", tool=SIM_MCP, action="launch", device="Zeta Mini", env_path=one_path, config=one_cfg)
+    # Devices unreadable: a failing `simctl list` leaves no device list, so the boot rules fail open, the lease too.
+    unreadable = os.path.join(ROOT, "sim_unreadable")
+    os.makedirs(unreadable, exist_ok=True)
+    write(os.path.join(unreadable, "xcrun"), "#!/bin/sh\nexit 1\n")
+    os.chmod(os.path.join(unreadable, "xcrun"), 0o755)
+    add("control: an MCP launch of a shut-down device with an unreadable device list is allowed (fail open)",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=unreadable + os.pathsep + PY_PATH, config=one_cfg)
     sh("boot a second simulator with one booted: bash simctl boot, bypass first",
        "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-bypass",
        env_path=one_path, config=one_cfg, carries="sim-test")
@@ -26726,21 +29800,23 @@ def register_simulator_boot_cases():
     add("boot a device with an idle booted twin: simulator MCP launch names it by udid",
         "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", udid=SIM_UT1,
         env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
-    add("control: the twin booted 10 minutes ago is not idle",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_recent"),
-        config=cfgs["twin_recent"][1])
-    add("control: an unrecorded booted twin is not idle",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_unrecorded"),
-        config=cfgs["twin_unrecorded"][1])
-    add("control: an idle twin on another runtime does not match",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_other_runtime"),
-        config=cfgs["twin_other_runtime"][1])
-    add("control: an idle twin of another device type does not match",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_other_type"),
-        config=cfgs["twin_other_type"][1])
-    add("boot a device with a twin booted by hand after its recorded boot: the record is older",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_rebooted"),
-        config=cfgs["twin_rebooted"][1])
+    # Each launch below is refused by the lease, so the twin rule did not fire: the lease is the rule named.
+    add("twin not idle: a twin booted 10 minutes ago does not fire the twin rule; the lease refuses the launch",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_recent"), config=cfgs["twin_recent"][1], carries=("sim-test", "lease"))
+    add("twin not idle: an unrecorded booted twin does not fire the twin rule; the lease refuses the launch",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_unrecorded"), config=cfgs["twin_unrecorded"][1], carries=("sim-test", "lease"))
+    add("twin not matched: an idle twin on another runtime does not fire the twin rule; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_other_runtime"), config=cfgs["twin_other_runtime"][1],
+        carries=("sim-test", "lease"))
+    add("twin not matched: an idle twin of another device type does not fire the twin rule; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_other_type"), config=cfgs["twin_other_type"][1], carries=("sim-test", "lease"))
+    add("twin not idle: a twin booted by hand after its recorded boot does not fire the twin rule; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_rebooted"), config=cfgs["twin_rebooted"][1], carries=("sim-test", "lease"))
 
     # Rule simulator-boot-route (decision sim-test-is-the-one-boot-path, ruling 5). An xcodebuild whose
     # -destination names a shut-down simulator is refused after the cap and twin rules. The remedy depends
@@ -26837,68 +29913,43 @@ def register_simulator_boot_cases():
        "xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=17.0'",
        "allow", env_path=os_two_path, config=os_two_cfg)
 
-    # Rule simulator-boot-locked (decision sim-test-is-the-one-boot-path, rulings 2 and 5). A simulator MCP
-    # launch that names a shut-down device is refused while <config>/state/sim-test.lock is held by a live
-    # pid. Held: a pid file naming a live pid, or, with no pid file, a lock folder under 60 s old. A dead
-    # pid is not held. A launch of a booted device is never refused by the lock.
-    def lock_config(name, pid_text=None, age=None):
+    # The sim-test lock does not decide an MCP launch: a shut-down device is refused by the lease whether the
+    # lock is held or free. So the held case names the lease, and no case reads the lock's age or its holder's
+    # liveness. The lock is one fixture, built just before its case.
+    def lock_config(name, pid_text):
         cfg = os.path.join(ROOT, "simcfg_lock_" + name)
         lock = os.path.join(cfg, "state", "sim-test.lock")
 
         def build():
-            # Built just before the case that names cfg runs (lazy_fixture), so `age` is the age at that run.
             os.makedirs(lock, exist_ok=True)
-            if pid_text is not None:
-                write(os.path.join(lock, "pid"), pid_text + "\n")
-            if age is not None:
-                stamp = time.time() - age
-                os.utime(lock, (stamp, stamp))
+            write(os.path.join(lock, "pid"), pid_text + "\n")
         lazy_fixture([cfg], build)
         return cfg
 
-    # The test runner's own pid is alive for as long as the cases run.
+    # The test runner's own pid is alive for as long as the cases run, so the lock is held.
     live_cfg = lock_config("live", str(os.getpid()))
-    add("lock: a live holder refuses an MCP launch of a shut-down device, naming its pid and sim-test",
-        "deny", rule="simulator-boot-locked", tool=SIM_MCP, action="launch", device=SIM_UC,
-        env_path=one_path, config=live_cfg, carries=(str(os.getpid()), "sim-test"))
-    add("lock: a live holder refuses an MCP launch that names the shut-down device by udid",
-        "deny", rule="simulator-boot-locked", tool=SIM_MCP, action="launch", udid=SIM_UC,
-        env_path=one_path, config=live_cfg, carries=(str(os.getpid()), "sim-test"))
-    add("lock: a live holder does not refuse an MCP launch of a booted device",
+    add("lease: a live lock holder does not lift the lease: an MCP launch of a shut-down device is refused",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=one_path, config=live_cfg, carries=("sim-test", "lease"))
+    add("lease: a live lock holder does not lift the lease: an MCP launch by udid is refused",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", udid=SIM_UC,
+        env_path=one_path, config=live_cfg, carries=("sim-test", "lease"))
+    add("lease: a live lock holder does not refuse an MCP launch of a booted device",
         "allow", tool=SIM_MCP, action="launch", device=SIM_UA, env_path=one_path, config=live_cfg)
-
-    # A holder that has exited and been reaped is not held: the cap and twin rules judge the launch alone.
-    gone = subprocess.Popen([sys.executable, "-c", "pass"])
-    gone.wait(timeout=10)
-    dead_cfg = lock_config("dead", str(gone.pid))
-    add("lock: a dead holder is not held, so an MCP launch with two booted goes to the cap",
-        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
-        env_path=cap_path, config=dead_cfg, carries=(SIM_UA, SIM_UB))
-    add("lock: a dead holder is not held, so an MCP launch with room goes through",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UC, env_path=one_path, config=dead_cfg)
-
-    # A lock folder with no pid file is held for 60 s by its mtime, then it is not held.
-    fresh_cfg = lock_config("nopid_fresh", None, age=10)
-    add("lock: a folder with no pid file, 10 s old, is held: an MCP launch of a shut-down device is refused",
-        "deny", rule="simulator-boot-locked", tool=SIM_MCP, action="launch", device=SIM_UC,
-        env_path=one_path, config=fresh_cfg, carries="sim-test")
-    stale_cfg = lock_config("nopid_stale", None, age=600)
-    add("lock: a folder with no pid file, 10 minutes old, is not held: the launch goes through",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UC, env_path=one_path, config=stale_cfg)
-    # The partner of the allow above: the same stale folder, with two booted, so the cap refuses. An
-    # allow that a guard reaches by failing open would not show the cap, so this case shows the cap ran.
-    add("lock: a folder with no pid file, 10 minutes old, is not held: the cap still judges the launch",
-        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
-        env_path=cap_path, config=stale_cfg, carries=(SIM_UA, SIM_UB))
 
 
 def folder_path(name):
     return os.path.join(ROOT, "sim_" + name) + os.pathsep + PY_PATH
 
 
-def make_fake_ps(folder, rows, rc=0):
+def make_fake_ps(folder, rows, rc=0, pid_starts=None, ps_log=None):
     """Replace the quiet `ps` in FOLDER with one that answers the process table ROWS, (pid, ppid,
-    uid, command), or fails with RC. A row carries no single quote."""
+    uid, command), or fails with RC. A row carries no single quote.
+
+    PID_STARTS, when given, maps a pid to the start text its `-o lstart=` read answers, or to None for a
+    dead pid. A pid that is not a key is dead too, so a fixture's shape never decides a liveness case. A
+    read that names `pid=` gets "PID START", as the launchd reads do. Without it, the launchd answers stand.
+    PS_LOG, when given, is a file that each call appends its argv to, one line per call."""
     if rc:
         body = "exit %d\n" % rc
     else:
@@ -26915,6 +29966,23 @@ def make_fake_ps(folder, rows, rc=0):
                 " *) printf '%s' '" + start_lines + "' ;; esac ;;\n"
                 "  *) printf '%s' '" + table + "' ;;\n"
                 "esac\n")
+        if pid_starts is not None:
+            # A `-o` word of the read names its pid: that pid answers its own start, and any other pid, or a
+            # mapped None, answers nothing and fails, as `ps` does for a dead pid.
+            arms = ""
+            for pid, text in pid_starts.items():
+                if text:
+                    assert "'" not in text, "the printf body is single-quoted"
+                    arms += ("%d) case \"$*\" in *pid=*) printf '%%s %%s\\n' '%d' '%s' ;;"
+                             " *) printf '%%s\\n' '%s' ;; esac; exit 0 ;;\n" % (pid, pid, text, text))
+            body = ("case \"$*\" in\n"
+                    "  *lstart*) for a in \"$@\"; do case \"$a\" in\n" + arms +
+                    "  esac; done; exit 1 ;;\n"
+                    "  *) printf '%s' '" + table + "' ;;\n"
+                    "esac\n")
+    if ps_log:
+        assert "'" not in ps_log, "the log path is single-quoted"
+        body = "printf '%%s\\n' \"$*\" >> '%s'\n" % ps_log + body
     ps = os.path.join(folder, "ps")
     write(ps, "#!/bin/sh\n" + body)
     os.chmod(ps, 0o755)
@@ -26961,12 +30029,14 @@ def register_simulator_hold_cases():
         ("a twin is not idle while Xcode.app runs", quiet + [
             ("600", "1", "0", "/Applications/Xcode.app/Contents/MacOS/Xcode")]),
     ]
+    # Each launch is refused by the lease, so the twin rule did not fire on the held or unreadable twin.
     for index, (label, rows) in enumerate(holds):
-        add("control: " + label, "allow", tool=SIM_MCP, action="launch", device=SIM_UT1,
-            env_path=env_for("hold_%d" % index, rows), config=cfg)
-    add("control: a twin is not idle when the process table cannot be read",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1,
-        env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg)
+        add(label + ": the twin rule does not fire; the lease refuses the launch",
+            "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+            env_path=env_for("hold_%d" % index, rows), config=cfg, carries=("sim-test", "lease"))
+    add("a twin is not idle when the process table cannot be read: the twin rule does not fire; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg, carries=("sim-test", "lease"))
 
 
 def register_simulator_bypass_cases():
@@ -27047,19 +30117,14 @@ def sim_bypass_override_check(timed):
     return check
 
 
-def sim_route_override_check():
-    """The owner override lifts simulator-boot-route. With no override a test of a shut-down device is
-    refused. After `override` the same call is allowed once, and the second call is refused again. The
-    call runs on the "one" fixture PATH (one booted, one shut down), so the route rule is what refuses it."""
+def sim_override_check(name, rule, tool, tool_input, path):
+    """The owner override lifts RULE. With no override the call is refused. After `override` the same call
+    is allowed once, and the second call is refused again. The call runs on PATH, so RULE is what refuses it."""
     def check():
-        config, session = ov_config("sim-route-override"), "ov-sim-route-override"
-        rule = "simulator-boot-route"
-        path = folder_path("one")
-        command = "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'"
+        config, session = ov_config(name), "ov-" + name
 
         def call(seconds):
-            return lambda: ov_call("Bash", {"command": command}, NOGIT, config, session, seconds,
-                                   env_path=path)
+            return lambda: ov_call(tool, tool_input, NOGIT, config, session, seconds, env_path=path)
 
         ok, why = ov_story([("with no override", call(0), "deny", rule)])
         if not ok:
@@ -27073,27 +30138,291 @@ def sim_route_override_check():
     return check
 
 
-def sim_lock_eperm_check():
-    """A lock whose pid the guard cannot signal is not held. bin/sim-test reads a failed `kill -0`, EPERM
-    included, as the holder being gone, and takes the lock over, so the guard must read the same. Root can
-    signal any pid, so no real pid gives EPERM in this sandbox: os.kill is patched to raise PermissionError,
-    in process, and the lock's pid is this process's own pid."""
-    guard = _load_guard_module()
-    cfg = os.path.join(ROOT, "simcfg_lock_eperm")
-    lock = os.path.join(cfg, "state", "sim-test.lock")
-    os.makedirs(lock, exist_ok=True)
-    write(os.path.join(lock, "pid"), str(os.getpid()) + "\n")
-    with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
-        # Scope first: with the real os.kill, the lock is read and this process is its live holder. Without
-        # this, a "" below could mean the lock was never read rather than that EPERM reads as free.
-        read = guard.sim_lock_holder()
-        if read != str(os.getpid()):
-            return False, "fixture not read: sim_lock_holder() returned %r before the patch, want this pid" % read
-        with mock.patch("os.kill", side_effect=PermissionError(1, "Operation not permitted")):
-            got = guard.sim_lock_holder()
-    if got != "":
-        return False, "sim_lock_holder() returned %r, want \"\": a pid the guard cannot signal reads as free" % got
-    return True, "a lock whose pid cannot be signalled reads as free"
+def sim_route_override_check():
+    """The owner override lifts simulator-boot-route. A test of a shut-down device is refused with no override.
+    The call runs on the "one" fixture (one booted, one shut down), so the route rule is what refuses it."""
+    command = "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'"
+    return sim_override_check("sim-route-override", "simulator-boot-route", "Bash",
+                              {"command": command}, folder_path("one"))
+
+
+def sim_lease_override_check():
+    """The owner override lifts simulator-boot-lease. An MCP launch of a shut-down device, with no lock held, is
+    refused with no override. The "one" fixture has one booted device, so the cap does not fire."""
+    return sim_override_check("sim-lease-override", "simulator-boot-lease", SIM_MCP,
+                              {"action": "launch", "device": SIM_UC}, folder_path("one"))
+
+
+# --------------------------------------------------------------------------- the lease allow
+# Decision sim-test-is-the-one-boot-path, ruling 5, and decision sim-lease-tool. An MCP launch of a shut-down
+# phone simulator is allowed when THIS session holds a LIVE lease whose slot maps to the launched device's UDID.
+# The cap and twin rules still refuse first, and a lease that cannot be read keeps the refusal. Liveness is
+# sim-lease's reap: the pid is alive and `ps -o lstart=` gives the recorded start. The slot map is the one in
+# skills/ios-apps/SKILL.md, Phone simulators (lines 67-69), typed here as data. The test does not import it from
+# bin/sim-lease, so a missing constant there fails an assert and not an import. Each case differs from the allow
+# case in one input.
+LEASE_RULE = "simulator-boot-lease"
+LEASE_CARRIES = ("sim-test", "lease")
+LEASE_SLOT_UDID = {"1": "3553660D-315C-4B9C-8614-039D7A5B637E",     # Duo 1
+                   "2": "801F55F4-F666-4C6D-AB04-7DF77C953974",     # Duo 2
+                   "pro": "86F9268A-A905-4B82-9BC0-D7EBB682D341"}   # iPhone 18 Pro
+LEASE_DUO1, LEASE_DUO2, LEASE_PRO = LEASE_SLOT_UDID["1"], LEASE_SLOT_UDID["2"], LEASE_SLOT_UDID["pro"]
+LEASE_DECOY = "1A2B3C4D-0000-4000-8000-0000000000D6"  # named "Duo 1", but not Duo 1's UDID: a name match would allow it
+LEASE_PID = os.getpid()    # a live holder for the whole run
+LEASE_OTHER_PID = 4243     # another session's holder, live in the fake ps
+LEASE_WAIT_PID = 4244      # a waiter, live in the fake ps
+LEASE_DEAD_PID = 4194311   # above any pid_max, so no process holds it
+LEASE_START = "Wed Nov  4 03:00:00 2026"
+LEASE_REUSED_START = "Mon Nov  2 09:00:00 2026"   # the start of another process that reuses LEASE_PID
+LEASE_OWN, LEASE_OTHER = "sess-own-0001", "sess-other-0002"
+LEASE_ENV = {"CI": None, "GITHUB_ACTIONS": None}  # sim-lease's no-op reads CI; the guard's lease read must not
+
+
+def lease_entry(slot, pid=LEASE_PID, start=LEASE_START, session=LEASE_OWN):
+    """One lease record as sim-lease's take writes it: the slot is a string, the device is `pro` or `duo`."""
+    return {"pid": pid, "start": start, "device": "pro" if slot == "pro" else "duo",
+            "session": session, "slot": slot}
+
+
+def lease_fixture(name, rows, pid_starts, leases=None, queue=(), raw=None, as_dir=False, records=None, ps_log=False):
+    """A case folder of its own: a fake xcrun that lists ROWS and a fake ps that answers PID_STARTS (a booted
+    device's launchd_sim is always alive, as on the Mac). The config dir holds leases.json as LEASES with QUEUE,
+    as RAW text, as a directory (AS_DIR), or as no file at all. PS_LOG logs each fake ps call to ps.log in the
+    config dir. Returns (PATH, config dir)."""
+    folder = os.path.join(ROOT, "simlease_" + name)
+    starts = {LAUNCHD_PID[udid]: LSTART for udid, _, state, _, _ in rows if state == "Booted" and udid in LAUNCHD_PID}
+    starts.update(pid_starts)
+    cfg = os.path.join(ROOT, "simlease_cfg_" + name)
+    make_fake_xcrun(folder, rows, pid_starts=starts, ps_log=os.path.join(cfg, "ps.log") if ps_log else None)
+    lease_file = os.path.join(cfg, "state", "sim-lease", "leases.json")
+    os.makedirs(cfg, exist_ok=True)
+    if as_dir:
+        os.makedirs(lease_file, exist_ok=True)
+    elif raw is not None:
+        write(lease_file, raw)
+    elif leases is not None:
+        write(lease_file, json.dumps({"leases": leases, "queue": list(queue)}))
+    if records is not None:
+        write_sim_records(cfg, records)
+    return folder + os.pathsep + PY_PATH, cfg
+
+
+def lease_launch(name, expected, fixture, device=None, udid=None, session=LEASE_OWN, rule=None, carries=None, raw=None):
+    """One MCP launch case against FIXTURE, naming the device by DEVICE or by UDID. SESSION rides on the payload,
+    and None sends no session key. A deny carries LEASE_CARRIES unless CARRIES says otherwise. Returns the case."""
+    env_path, config = fixture
+    tool_input = {"action": "launch"}
+    if device is not None:
+        tool_input["device"] = device
+    if udid is not None:
+        tool_input["udid"] = udid
+    if carries is None:
+        carries = LEASE_CARRIES if expected == "deny" else ()
+    add(name, expected, rule=rule, tool=SIM_MCP, env_path=env_path, config=config, session=session,
+        carries=carries, env=LEASE_ENV, raw=raw, **tool_input)
+    return CASES[-1]
+
+
+# The one liveness read of a lease: bin/sim-lease's start_time runs `ps -o lstart= -p PID`. The table read and
+# the launchd read carry other argv, so this form counts only the lease reads.
+LEASE_PS_READ = re.compile(r"-o lstart= -p \d+")
+
+
+def lease_ps_count_check(case, want):
+    """The held-lease read costs one `ps` per lease (decision sim-test-is-the-one-boot-path, ruling 7). CASE runs
+    under a fake ps that logs each call, and the check counts the lease reads among them. It does not judge the
+    decision, which the case asserts itself. Returns the check."""
+    log = os.path.join(case["config"], "ps.log")
+
+    def check():
+        if os.path.exists(log):
+            os.remove(log)
+        decide(case)
+        calls = []
+        if os.path.exists(log):
+            with open(log) as handle:
+                calls = handle.read().splitlines()
+        reads = [c for c in calls if LEASE_PS_READ.fullmatch(c)]
+        if len(reads) != want:
+            return False, "the launch made %d lease reads (ps -o lstart= -p PID), want %d" % (len(reads), want)
+        return True, "the launch made %d lease reads, one per lease" % len(reads)
+    return check
+
+
+def lease_no_write_check(case):
+    """The lease read writes nothing (decision sim-lease-tool: the guard reads leases.json and never takes its
+    lock). CASE is a refusal over a dead lease, the one read that a reaping reader would rewrite: it is refused,
+    and leases.json and the lock keep the same bytes. A reader that reaps through sim-lease's State rewrites the
+    file and creates the lock."""
+    state = os.path.join(case["config"], "state", "sim-lease")
+
+    def snapshot():
+        return {n: (open(os.path.join(state, n), "rb").read() if os.path.exists(os.path.join(state, n)) else None)
+                for n in ("leases.json", "lock")}
+
+    def check():
+        before = snapshot()
+        decision, _ = decide(case)
+        after = snapshot()
+        if decision != "deny":
+            return False, "the dead lease was %s, not refused" % decision
+        changed = [n for n in before if before[n] != after[n]]
+        if changed:
+            return False, "the lease read changed sim-lease's %s" % " and ".join(changed)
+        return True, "the dead lease is refused and sim-lease's files keep their bytes"
+    return check
+
+
+def lease_fake_ps_check():
+    """The lease fixtures' fake ps answers each pid it names with that pid's start, and no other pid. The liveness
+    cases decide on that answer, so a fixture that answered the wrong pid would decide them (scope before subject)."""
+    own_ps = os.path.join(ROOT, "simlease_own_slot1", "ps")
+    reused_ps = os.path.join(ROOT, "simlease_reused", "ps")
+
+    def read(ps, *args):
+        r = subprocess.run([ps, "-o", *args], capture_output=True, text=True)
+        return r.returncode, r.stdout.strip()
+
+    def check():
+        got = read(own_ps, "lstart=", "-p", str(LEASE_PID))
+        if got != (0, LEASE_START):
+            return False, "the live pid's start read %r, not the recorded start" % (got,)
+        rc, text = read(own_ps, "lstart=", "-p", str(LEASE_DEAD_PID))
+        if rc == 0 and text:
+            return False, "the dead pid answered a start"
+        got = read(reused_ps, "lstart=", "-p", str(LEASE_PID))
+        if got != (0, LEASE_REUSED_START):
+            return False, "the reused pid's start read %r, not its own start" % (got,)
+        launchd = LAUNCHD_PID[SIM_UB]
+        got = read(own_ps, "pid=,lstart=", "-p", str(launchd))
+        if got != (0, "%d %s" % (launchd, LSTART)):
+            return False, "a booted device's launchd_sim read %r" % (got,)
+        return True, "the fake ps answers each named pid and no other"
+    return check
+
+
+def register_simulator_lease_cases():
+    """The lease allow and its controls. Returns the dead-lease case, which lease_no_write_check runs, and the
+    lease read counts as (label, check) pairs for LOG_CHECKS."""
+    rows = [(LEASE_DUO1, "iPhone Duo A", "Shutdown", SIM_TYPE_MINI, SIM_RT),
+            (LEASE_DUO2, "iPhone Duo B", "Shutdown", SIM_TYPE_MINI, SIM_RT),
+            (LEASE_PRO, "iPhone 18 Pro", "Shutdown", SIM_TYPE_PRO, SIM_RT),
+            (LEASE_DECOY, "Duo 1", "Shutdown", SIM_TYPE_MINI, SIM_RT),
+            (SIM_UB, "Beta Air", "Booted", SIM_TYPE_AIR, SIM_RT)]
+    cap_rows = rows + [(SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT)]
+    twin_rows = [(LEASE_DUO1, "iPhone Duo A", "Shutdown", SIM_TYPE_PRO, SIM_RT),
+                 (SIM_UT0, "Idle Pro", "Booted", SIM_TYPE_PRO, SIM_RT)]
+    live = {LEASE_PID: LEASE_START}
+    slot1 = [lease_entry("1")]
+    duo1, duo2 = "iPhone Duo A", "iPhone Duo B"
+
+    # The allow: this session's live lease, and its slot maps to the launched device.
+    own1 = lease_fixture("own_slot1", rows, live, slot1)
+    lease_launch("lease allow: this session's live slot 1 lease, a launch of Duo 1 by name is allowed",
+                 "allow", own1, device=duo1)
+    lease_launch("lease allow: this session's live slot 1 lease, a launch of Duo 1 by udid is allowed",
+                 "allow", own1, udid=LEASE_DUO1)
+    lease_launch("lease allow: this session's live slot 1 lease, a launch of Duo 1 by lowercase udid is allowed",
+                 "allow", own1, udid=LEASE_DUO1.lower())
+    lease_launch("control: this session's live slot 1 lease, a launch of a booted device is allowed (no boot)",
+                 "allow", own1, device="Beta Air")
+    own2 = lease_fixture("own_slot2", rows, live, [lease_entry("2")])
+    lease_launch("lease allow: this session's live slot 2 lease, a launch of Duo 2 by name is allowed",
+                 "allow", own2, device=duo2)
+    own_pro = lease_fixture("own_pro", rows, live, [lease_entry("pro")])
+    lease_launch("lease allow: this session's live pro lease, a launch of the 18 Pro by name is allowed",
+                 "allow", own_pro, device="iPhone 18 Pro")
+    # Full: another session holds slot 2 and a third waits. This session's slot 1 allows Duo 1 and no other.
+    full = lease_fixture("full", rows, {LEASE_PID: LEASE_START, LEASE_OTHER_PID: LEASE_START,
+                                        LEASE_WAIT_PID: LEASE_START},
+                         [lease_entry("1"), lease_entry("2", pid=LEASE_OTHER_PID, session=LEASE_OTHER)],
+                         queue=[{"pid": LEASE_WAIT_PID, "start": LEASE_START, "device": "duo",
+                                 "session": LEASE_OTHER}])
+    lease_launch("lease allow: a full state, this session's slot 1 lease allows a launch of Duo 1",
+                 "allow", full, device=duo1)
+    lease_launch("lease: a full state, this session's slot 1 lease does not allow a launch of Duo 2",
+                 "deny", full, device=duo2, rule=LEASE_RULE)
+
+    # Refused: no lease, a dead or reused holder, a queue place, another session, a lease for another device.
+    lease_launch("lease: no lease file, a launch of Duo 1 is refused", "deny",
+                 lease_fixture("no_file", rows, live), device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: an empty lease list, a launch of Duo 1 is refused", "deny",
+                 lease_fixture("empty_list", rows, live, []), device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: an empty object, a launch of Duo 1 is refused", "deny",
+                 lease_fixture("empty_object", rows, live, raw="{}"), device=duo1, rule=LEASE_RULE)
+    dead_case = lease_launch("lease: a dead lease (its pid is not alive) is refused", "deny",
+                             lease_fixture("dead", rows, live, [lease_entry("1", pid=LEASE_DEAD_PID)]),
+                             device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: a reused pid (its start differs from the lease's) is refused", "deny",
+                 lease_fixture("reused", rows, {LEASE_PID: LEASE_REUSED_START}, slot1),
+                 device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: this session only queued, not granted, is refused", "deny",
+                 lease_fixture("queued", rows, live, [], queue=slot1), device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: another session's live slot 1 lease on Duo 1 does not allow this session", "deny",
+                 lease_fixture("other_session", rows, live, [lease_entry("1", session=LEASE_OTHER)]),
+                 device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: this session's slot 1 lease does not allow a launch of Duo 2", "deny",
+                 own1, device=duo2, rule=LEASE_RULE)
+    lease_launch("lease: this session's pro lease does not allow a launch of Duo 1", "deny",
+                 own_pro, device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: a name no lease maps is refused: the decoy named Duo 1 is not Duo 1's udid", "deny",
+                 own1, device="Duo 1", rule=LEASE_RULE)
+    lease_launch("lease: the decoy's udid is refused by this session's slot 1 lease", "deny",
+                 own1, udid=LEASE_DECOY, rule=LEASE_RULE)
+
+    # A name that two shut-down devices share resolves to both UDIDs. The launch is allowed only when this
+    # session's live leases hold every one of them (sim_lease_holds is all, not any). Duo 2 is on the older runtime.
+    shared = [(LEASE_DUO1, "iPhone Duo", "Shutdown", SIM_TYPE_MINI, SIM_RT),
+              (LEASE_DUO2, "iPhone Duo", "Shutdown", SIM_TYPE_MINI, SIM_RT_OLD)] + rows[2:]
+    lease_launch("lease: a shared name, this session's slot 1 lease alone is refused: Duo 2 is not held",
+                 "deny", lease_fixture("shared_slot1", shared, live, slot1), device="iPhone Duo", rule=LEASE_RULE)
+    lease_launch("lease: a shared name, this session's slot 2 lease alone is refused: Duo 1 is not held",
+                 "deny", lease_fixture("shared_slot2", shared, live, [lease_entry("2")]),
+                 device="iPhone Duo", rule=LEASE_RULE)
+    both = lease_fixture("shared_slot12", shared, live, [lease_entry("1"), lease_entry("2")], ps_log=True)
+    shared_case = lease_launch("control: a shared name, this session's slot 1 and slot 2 leases together are allowed",
+                               "allow", both, device="iPhone Duo")
+    booted_case = lease_launch("control: a booted device under this session's slot 1 and slot 2 leases is allowed",
+                               "allow", both, device="Beta Air")
+
+    # An empty session never matches: on the lease side, on the payload side, or on both.
+    blank = lease_fixture("blank_session", rows, live, [lease_entry("1", session="")])
+    lease_launch("lease: a lease with an empty session does not match a payload that names a session", "deny",
+                 blank, device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: a lease with an empty session does not match a payload with no session", "deny",
+                 blank, device=duo1, session=None, rule=LEASE_RULE)
+    lease_launch("lease: this session's lease does not match a payload whose session is empty", "deny",
+                 own1, device=duo1, session=None, rule=LEASE_RULE,
+                 raw=json.dumps({"tool_name": SIM_MCP, "tool_input": {"action": "launch", "device": duo1},
+                                 "session_id": ""}))
+
+    # A lease file that cannot be read keeps the refusal.
+    lease_launch("lease: a lease file that is not JSON keeps the refusal", "deny",
+                 lease_fixture("garbage", rows, live, raw="not json {"), device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: a lease file that is a directory keeps the refusal", "deny",
+                 lease_fixture("as_dir", rows, live, as_dir=True), device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: a lease file of the wrong shape keeps the refusal", "deny",
+                 lease_fixture("wrong_shape", rows, live, raw='{"leases": "x", "queue": []}'),
+                 device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: a lease record with no pid keeps the refusal", "deny",
+                 lease_fixture("no_pid", rows, live,
+                               [{"start": LEASE_START, "device": "duo", "session": LEASE_OWN, "slot": "1"}]),
+                 device=duo1, rule=LEASE_RULE)
+
+    # The cap and the twin still refuse first, with this session's live lease in place.
+    lease_launch("lease: this session's live slot 1 lease, cap full: simulator-boot-cap still refuses first",
+                 "deny", lease_fixture("cap_full", cap_rows, live, slot1), device=duo1,
+                 rule="simulator-boot-cap", carries=(SIM_UA, SIM_UB))
+    lease_launch("lease: this session's live slot 1 lease, an idle twin: simulator-boot-twin still refuses first",
+                 "deny", lease_fixture("twin", twin_rows, live, slot1,
+                                       records=[sim_boot_record(SIM_UT0, "Idle Pro", SIM_TYPE_PRO, SIM_RT,
+                                                                2 * 3600)]),
+                 device=duo1, rule="simulator-boot-twin", carries=(SIM_UT0,))
+    ps_counts = [("simulator: a held-lease allow of two leases makes two lease reads, one ps per lease (ruling 7)",
+                  lease_ps_count_check(shared_case, 2)),
+                 ("simulator: a launch of a booted device makes no lease read (ruling 7)",
+                  lease_ps_count_check(booted_case, 0))]
+    return dead_case, ps_counts
 
 
 # The simulator cases need a POSIX shell for the fake xcrun and ps. Windows has neither to fake, so
@@ -27113,9 +30442,19 @@ if os.name != "nt":
     sim_route_label = "simulator: an owner override lifts a test of a shut-down device (simulator-boot-route)"
     LOG_FAMILY[sim_route_label] = FAMILY
     LOG_CHECKS = LOG_CHECKS + ((sim_route_label, sim_route_override_check()),)
-    sim_eperm_label = "simulator: a lock whose pid the guard cannot signal (EPERM) reads as free"
-    LOG_FAMILY[sim_eperm_label] = FAMILY
-    LOG_CHECKS = LOG_CHECKS + ((sim_eperm_label, sim_lock_eperm_check),)
+    sim_lease_label = "simulator: an owner override lifts an MCP launch of a shut-down device (simulator-boot-lease)"
+    LOG_FAMILY[sim_lease_label] = FAMILY
+    LOG_CHECKS = LOG_CHECKS + ((sim_lease_label, sim_lease_override_check()),)
+    lease_dead_case, lease_ps_counts = register_simulator_lease_cases()
+    lease_write_label = "simulator: the lease read writes nothing: a dead lease is refused and sim-lease's files keep their bytes"
+    LOG_FAMILY[lease_write_label] = FAMILY
+    LOG_CHECKS = LOG_CHECKS + ((lease_write_label, lease_no_write_check(lease_dead_case)),)
+    for ps_count_label, ps_count_check in lease_ps_counts:
+        LOG_FAMILY[ps_count_label] = FAMILY
+        LOG_CHECKS = LOG_CHECKS + ((ps_count_label, ps_count_check),)
+    lease_ps_label = "simulator: the lease fixtures' fake ps answers each named pid's start and no other"
+    LOG_FAMILY[lease_ps_label] = FAMILY
+    LOG_CHECKS = LOG_CHECKS + ((lease_ps_label, lease_fake_ps_check()),)
 else:
     skip_case("simulator: the boot, hold and bypass rules, every case of the family", NO_SIMULATOR)
 
@@ -27192,6 +30531,10 @@ LOG_RULE_FAMILY = (
     ("worktree-home: an agent's cd into a sibling agent tree", "worktree-home"),
     ("worktree-home: a cd to a checkout's own root", "worktree-home"),
     ("worktree-home: the cd exemptions pass", "worktree-home"),
+    ("worktree-home: an agent's write into its own red-run folder", "worktree-home"),
+    ("worktree-home: the own red-run folder's root", "worktree-home"),
+    ("worktree-home: a red-run folder nested under another linked worktree", "worktree-home"),
+    ("worktree-home: a write into the own red-run folder spelled", "worktree-home"),
     ("worktree-home: a cd in a comment, in quotes", "worktree-home"),
     ("worktree-home: an owner override lifts a bare cd", "worktree-home"),
     ("worktree-home: a later path field", "worktree-home"),
@@ -27240,7 +30583,7 @@ SKIP = "skip"
 def run_cases():
     mode = os.environ.get("GUARD_TESTS", "")
     if mode not in GUARD_TESTS_MODES:
-        print("GUARD_TESTS=%r: want unset or 'windows-slice'. Nothing ran." % mode)
+        say("GUARD_TESTS=%r: want unset or 'windows-slice'. Nothing ran." % mode)
         return 2
     fam = GUARD_FAMILY
     cases = [c for c in CASES if (not mode or c["windows"]) and (not fam or c["family"] == fam)]
@@ -27248,18 +30591,18 @@ def run_cases():
             if (not mode or check in WINDOWS_CHECKERS) and (not fam or LOG_FAMILY.get(label) == fam)]
     total = len(cases) + len(logs)
     if mode and not total:
-        print("GUARD_TESTS=windows-slice: no case is tagged. Nothing ran.")
+        say("GUARD_TESTS=windows-slice: no case is tagged. Nothing ran.")
         return 2
     # One list, so a shard takes its share of the log checks too, and the shards stay disjoint.
     picked = shard_of(cases + logs, GUARD_SHARD)
     cases = [c for c in picked if isinstance(c, dict)]
     logs = [c for c in picked if not isinstance(c, dict)]
-    print("guard cases, %d in all" % (len(CASES) + len(LOG_CHECKS)))
-    print("GUARD_TESTS=%s GUARD_FAMILY=%s: %d cases selected to run"
-          % (mode or "(unset)", fam or "(unset)", total))
-    print("GUARD_SHARD=%d/%d: %d of those cases run in this shard" % (GUARD_SHARD + (len(picked),)))
-    print("fixtures under " + ROOT)
-    print()
+    say("guard cases, %d in all" % (len(CASES) + len(LOG_CHECKS)))
+    say("GUARD_TESTS=%s GUARD_FAMILY=%s: %d cases selected to run"
+        % (mode or "(unset)", fam or "(unset)", total))
+    say("GUARD_SHARD=%d/%d: %d of those cases run in this shard" % (GUARD_SHARD + (len(picked),)))
+    say("fixtures under " + ROOT)
+    say("")
     failed = 0
     ran = 0
     skipped = 0
@@ -27269,7 +30612,9 @@ def run_cases():
         if only and only not in case["name"]:
             continue
         ran += 1
+        beat("case %d of %d, before it runs" % (ran, len(cases)))
         got, reason = decide(case)
+        beat("case %d of %d, after it ran" % (ran, len(cases)))
         ok = got == case["expected"]
         note = ""
         if ok and case.get("silent") and reason:
@@ -27293,23 +30638,25 @@ def run_cases():
         elif not ok:
             note = "  (%s)" % reason[:110] if reason else ""
         failed += 0 if ok else 1
-        print("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
+        say("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
             "PASS" if ok else "FAIL", got, case["expected"], case["tool"], case["name"], note))
     if any((not only or only in label) and check not in FIXTURELESS_CHECKS for label, check in logs):
         materialize_all()  # a log check names its fixtures in its own code, not in a case's fields
     for label, checker in logs:
         if only and only not in label:
             continue
+        beat("log check, before it runs")
         ok, note = checker()
+        beat("log check, after it ran")
         if ok == SKIP:  # cannot run on this platform: shown and counted, never a PASS, never a failure
             skipped += 1
-            print("SKIP  %s  (%s)" % (label, note))
+            say("SKIP  %s  (%s)" % (label, note))
             continue
         ran += 1
         failed += 0 if ok else 1
-        print("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
+        say("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
             "PASS" if ok else "FAIL", "logged" if ok else "wrong", "logged", "Bash", label, note))
-    print()
+    say("")
     shutil.rmtree(ROOT, ignore_errors=True)
     OWNED.kill()
     for orphan in ORPHAN_PIDS:   # the sleeps this file started, by their own pids
@@ -27318,15 +30665,15 @@ def run_cases():
         except OSError:
             pass
     if (mode or fam or only or GUARD_SHARD != (1, 1)) and not ran:
-        print("test_guard FAIL: ran 0 cases (GUARD_TESTS=%s, GUARD_FAMILY=%s, MUTATE_ONLY=%s, "
-              "GUARD_SHARD=%d/%d matched none, or matched only skips: %d skipped)" % (
-                  mode or "(unset)", fam or "(unset)", only or "(unset)", GUARD_SHARD[0], GUARD_SHARD[1],
-                  skipped))
+        say("test_guard FAIL: ran 0 cases (GUARD_TESTS=%s, GUARD_FAMILY=%s, MUTATE_ONLY=%s, "
+            "GUARD_SHARD=%d/%d matched none, or matched only skips: %d skipped)" % (
+                mode or "(unset)", fam or "(unset)", only or "(unset)", GUARD_SHARD[0], GUARD_SHARD[1],
+                skipped))
         return 1
     if failed:
-        print("test_guard FAIL: %d of %d cases wrong, %d skipped" % (failed, ran, skipped))
+        say("test_guard FAIL: %d of %d cases wrong, %d skipped" % (failed, ran, skipped))
         return 1
-    print("test_guard PASS: %d of %d cases right, %d skipped" % (ran, ran, skipped))
+    say("test_guard PASS: %d of %d cases right, %d skipped" % (ran, ran, skipped))
     return 0
 
 

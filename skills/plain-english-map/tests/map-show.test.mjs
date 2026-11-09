@@ -4,22 +4,28 @@
 //   a file path  prints its area id, its map line sentence, its fact lines, its `## Homes` lines and its trace steps.
 //   an area id   prints each map line of that area as `path — sentence`, with no fact line.
 //   a folder     (ends with `/`) prints each map line whose path starts with it.
+//   a decision id  (the config sets `decisionsDir` and `decisionIdPattern`, and the arg wholly matches the pattern) prints each
+//                map line whose decisions line cites it, as `path — sentence`. `--full` after the id first prints each record
+//                it names, as `<heading> — <path>`. A record that no map line cites: `no map line cites <id>` on stderr, exit 1.
+//                An id that names no record: one plain stderr line that names the id and the decisions folder, exit 1.
 //   nothing      prints `no map line for <arg>` on stderr and exits 1. No arg prints a usage line and exits 2.
 //   unreadable   a map page the command cannot read: one plain stderr line, exit 3, no stack trace.
 //
 // A map line is a list line whose path the config's `codeExtensions` accepts, as MAP1 reads it. The fixture names
-// only `ts`, so a `.py` or `.json` line is no map line there. A case that needs one sets `codeExtensions` in its own
-// scratch copy. A Tables row is never a map line.
+// only `ts`, so a `.py` or `.json` line is no code map line there: map-show lists it only when a record names its file.
+// A case that needs a code line of another extension sets `codeExtensions` in its own scratch copy. A Tables row is never a map line.
 //
 // Every case calls `needFile` first, so on a checkout with no command each case fails for the missing file.
 // The fixture holds one area (`core`), one Homes page and one trace page, so `src/home.ts` reaches every kind of line.
+// The decision cases (23 to 23j) run on `tests/fixture-decisions/`: its config names ts, tsx, py and sh and sets both decision keys.
+// D7 is cited by four map lines there, D18 by one, and no record is D99.
 // `run` joins stdout and stderr in `out`, stdout first, so the stderr of a run is what follows its stdout.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { SKILL, gitIn, junction, needFile, run, scratchRepo } from './helpers.mjs';
+import { HERE, SKILL, gitIn, junction, needFile, run, scratchRepo, subLineIds } from './helpers.mjs';
 
 const CLI = join(SKILL, 'scripts', 'map-show.mjs');
 const CHECK = join(SKILL, 'scripts', 'map-check.mjs');
@@ -52,6 +58,21 @@ const NOTES_STEP = 'Gives the saved notes that the title counts';
 const RETRY_FACT = 'A failed call waits 30 s before its next try.';
 const SCREENS_LINE = 'Lists the screen keys of the fixture app.';
 const PY_EXTS = ['ts', 'py', 'json'];
+
+// The decision fixture and the files its cases read: the config, the map page, the two records and the four code files that D7 cites.
+const DECISIONS = join(HERE, 'fixture-decisions');
+const DECISIONS_TRACKED = [
+  'map.config.json', 'docs/map/core.md', 'docs/records/D007-retry-wait.md', 'docs/records/D018-cache-size.md',
+  'src/retry.ts', 'src/cache.ts', 'src/page.tsx', 'src/comments.py', 'src/run.sh',
+];
+// The map lines that cite D7 in the decision fixture, each as `path — sentence`, and the record line `--full` prints for D7.
+const D7_ROWS = [
+  'src/retry.ts — Holds the retry wait.',
+  'src/page.tsx — Renders a paragraph, with a comment after it.',
+  'src/comments.py — Holds a retry wait in Python, with a comment.',
+  'src/run.sh — Runs the retry script, with a comment.',
+];
+const D7_HEAD = 'D007 Retry wait — docs/records/D007-retry-wait.md';
 
 /** The command with `args`, run in a fresh copy of the fixture, after the check that names the missing file. */
 const show = (args, dir = scratchRepo()) => {
@@ -99,6 +120,12 @@ const tablesRepo = () => {
   return dir;
 };
 
+/** A scratch copy of the decision fixture, with the records and code files it tracks. */
+const decisionsRepo = () => scratchRepo({ fixture: DECISIONS, track: DECISIONS_TRACKED });
+
+/** The non-empty lines of a run's stdout. */
+const linesOf = (out) => out.split('\n').filter((l) => l !== '');
+
 test('1. a file path prints its area id', () => {
   const r = show(['src/home.ts']);
   // The scope first: the file must be found, or the area id holds for the wrong reason.
@@ -118,6 +145,8 @@ test('3. a file path prints its fact line', () => {
   assert.ok(r.stdout.includes(HOME_FACT), `the output must print the fact line of src/home.ts\n${dump(r)}`);
 });
 
+// This case asserts that a non-code file no record names, with no Decisions or Debts line, prints no map line. A non-code map line is
+// listed only through the record that names its file (decision `map-lists-record-named`).
 test('3b. a .py file is no map line while codeExtensions is ts, so its value fact does not print', () => {
   const dir = scratchRepo();
   // The scope first: a ts file must print, so the command reads the map.
@@ -136,6 +165,45 @@ test('3c. with codeExtensions that name py, a .py file prints its map line and i
   assert.equal(r.status, 0, `a .py file that the config names must exit 0\n${dump(r)}`);
   assert.ok(r.stdout.includes('Holds the retry wait.'), `the output must print the map line of src/retry.py\n${dump(r)}`);
   assert.ok(r.stdout.includes(RETRY_FACT), `the output must print the value fact line of src/retry.py\n${dump(r)}`);
+});
+
+/** The decision fixture, with one tracked non-code file, `assets/badge.svg`, and `lines` appended to its map page under `## Code files`. */
+const withBadge = (lines) => {
+  const dir = decisionsRepo();
+  mkdirSync(join(dir, 'assets'));
+  writeFileSync(join(dir, 'assets', 'badge.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>\n');
+  gitIn(dir, 'add', '-N', 'assets/badge.svg');
+  const page = join(dir, 'docs', 'map', 'core.md');
+  writeFileSync(page, `${readFileSync(page, 'utf8').replace(/\n*$/, '\n')}${lines.join('\n')}\n`);
+  return dir;
+};
+
+/** A non-code file that no record names is out of scope: the command exits 1, prints nothing, and its one stderr line names no map line. */
+const assertOutOfScope = (r, file) => {
+  assert.equal(r.status, 1, `${file} is named by no record, so it is out of scope and must exit 1\n${dump(r)}`);
+  assert.equal(r.stdout.trim(), '', 'nothing prints on stdout');
+  assert.equal(stderrOf(r).trim(), `no map line for ${file}`, `stderr must hold one line: no map line for ${file}`);
+};
+
+// A non-code file that no record names is out of scope, with or without a Decisions or Debts line on its map line (decision `map-lists-record-named`).
+test('3d. a non-code file that no record names is no map line, though its map line has a Decisions line', () => {
+  const dir = withBadge(['- `assets/badge.svg` — Holds the badge.', '  - Decisions: `D7`']);
+  // The scope first: the svg's map line must hold its Decisions line, and a code file of the same page must print its map line.
+  assert.deepEqual(subLineIds(dir, 'docs/map/core.md', 'assets/badge.svg', 'Decisions'), ['D7'], 'scope: the svg map line holds a Decisions line');
+  const scope = show(['src/retry.ts'], dir);
+  assert.equal(scope.status, 0, `a code file with a map line must exit 0\n${dump(scope)}`);
+  assert.ok(scope.stdout.includes('Holds the retry wait.'), `the code file must print its map line\n${dump(scope)}`);
+  assertOutOfScope(show(['assets/badge.svg'], dir), 'assets/badge.svg');
+});
+
+test('3e. a non-code file that no record names is no map line, though its map line has a Debts line', () => {
+  const dir = withBadge(['- `assets/badge.svg` — Holds the badge.', '  - Debts: `retry-backoff`']);
+  // The scope first: the svg's map line must hold its Debts line, and a code file of the same page must print its map line.
+  assert.deepEqual(subLineIds(dir, 'docs/map/core.md', 'assets/badge.svg', 'Debts'), ['retry-backoff'], 'scope: the svg map line holds a Debts line');
+  const scope = show(['src/retry.ts'], dir);
+  assert.equal(scope.status, 0, `a code file with a map line must exit 0\n${dump(scope)}`);
+  assert.ok(scope.stdout.includes('Holds the retry wait.'), `the code file must print its map line\n${dump(scope)}`);
+  assertOutOfScope(show(['assets/badge.svg'], dir), 'assets/badge.svg');
 });
 
 test('4. a file path prints the Homes line that cites it', () => {
@@ -438,4 +506,152 @@ test('22d. an absolute folder arg that ends in / prints the same output as the r
   const abs = show([`${join(realpathSync.native(dir), 'src')}/`], dir);
   assert.equal(abs.status, 0, `an absolute folder arg that ends in / must exit 0 and print the folder's map lines\n${dump(abs)}`);
   assert.equal(abs.stdout, plain.stdout, `an absolute folder arg that ends in / must print the same output as src/\n${dump(abs)}`);
+});
+
+test('23. a decision id prints each map line that cites it, one per line, and no other', () => {
+  const dir = decisionsRepo();
+  const r = show(['D7'], dir);
+  // The scope first: D7 names a record, so it must exit 0, or the rows below hold for a command that printed nothing.
+  assert.equal(r.status, 0, `a decision id that names a record must exit 0\n${dump(r)}`);
+  assert.deepEqual(linesOf(r.stdout).sort(), [...D7_ROWS].sort(), `D7 must print one line for each of its four citing map lines, and no other\n${dump(r)}`);
+  assert.ok(!r.stdout.includes('src/cache.ts'), `src/cache.ts cites D18, not D7, so the output must not print it\n${dump(r)}`);
+});
+
+test('23b. the zero-padded id D007 prints the same output as D7', () => {
+  const dir = decisionsRepo();
+  const plain = show(['D7'], dir);
+  // The scope first: D7 must print its citing line, or equal output proves nothing.
+  assert.equal(plain.status, 0, `D7 must exit 0\n${dump(plain)}`);
+  assert.ok(lineWith(plain.stdout, 'src/retry.ts', 'Holds the retry wait.'), `D7 must print the map line of src/retry.ts\n${dump(plain)}`);
+  const padded = show(['D007'], dir);
+  assert.equal(padded.status, 0, `the zero-padded id D007 must exit 0\n${dump(padded)}`);
+  assert.equal(padded.stdout, plain.stdout, `the zero-padded id D007 must print the same output as D7\n${dump(padded)}`);
+});
+
+test('23c. --full after the id prints first the record heading and its path, then the map lines', () => {
+  const dir = decisionsRepo();
+  // The scope first: without --full, D7 must print its citing lines, or the record line below holds for a command that printed nothing.
+  const plain = show(['D7'], dir);
+  assert.equal(plain.status, 0, `D7 must exit 0\n${dump(plain)}`);
+  const r = show(['D7', '--full'], dir);
+  assert.equal(r.status, 0, `D7 --full must exit 0\n${dump(r)}`);
+  const lines = linesOf(r.stdout);
+  assert.equal(lines[0], D7_HEAD, `--full must print the record line first, as the heading and the path\n${dump(r)}`);
+  assert.deepEqual(lines.slice(1).sort(), [...D7_ROWS].sort(), `--full must print the map lines after the record line\n${dump(r)}`);
+});
+
+test('23d. an id that names a record no map line cites exits 1, with one plain stderr line', () => {
+  const dir = decisionsRepo();
+  const record = join(dir, 'docs', 'records', 'D020-unused.md');
+  writeFileSync(record, '# D020 Unused\n\nNo map line cites this record.\n');
+  gitIn(dir, 'add', '-N', '.');
+  // The scope first: the record must be on disk, or "no map line cites" holds for an id that names nothing.
+  assert.ok(existsSync(record), 'the scratch copy must hold the record docs/records/D020-unused.md');
+  const r = show(['D020'], dir);
+  plainFailure(r, 1, 'an id that names a record no map line cites');
+  assert.equal(stderrOf(r).trim(), 'no map line cites D020', 'stderr must hold one line: no map line cites D020');
+});
+
+test('23e. an id that names no record exits 1, with one plain stderr line that names the id and the decisions folder', () => {
+  const dir = decisionsRepo();
+  // The scope first: the folder must still hold records, so "no record" holds for D99 and not for an empty folder.
+  assert.ok(existsSync(join(dir, 'docs', 'records', 'D007-retry-wait.md')), 'the scratch copy must hold the record D007-retry-wait.md');
+  const r = show(['D99'], dir);
+  plainFailure(r, 1, 'an id that names no record');
+  assert.ok(stderrOf(r).includes('D99'), `the stderr line must name the id D99\n${dump(r)}`);
+  assert.ok(stderrOf(r).includes('docs/records/'), `the stderr line must name the decisions folder docs/records/\n${dump(r)}`);
+});
+
+test('23f. with an empty decisions folder, an id names no record: one plain stderr line names the id and the folder', () => {
+  const dir = decisionsRepo();
+  for (const f of ['docs/records/D007-retry-wait.md', 'docs/records/D018-cache-size.md']) {
+    rmSync(join(dir, f));
+    gitIn(dir, 'rm', '-q', '--cached', '--', f);
+  }
+  // The scope first: the command must still run in the empty folder, or "no record" holds for a command that crashed.
+  const scope = show(['src/retry.ts'], dir);
+  assert.equal(scope.status, 0, `a path must still exit 0 with no record in the decisions folder\n${dump(scope)}`);
+  assert.ok(scope.stdout.includes('Holds the retry wait.'), `a path must still print its map line\n${dump(scope)}`);
+  const r = show(['D7'], dir);
+  plainFailure(r, 1, 'an id in an empty decisions folder');
+  assert.ok(stderrOf(r).includes('D7'), `the stderr line must name the id D7\n${dump(r)}`);
+  assert.ok(stderrOf(r).includes('docs/records/'), `the stderr line must name the decisions folder docs/records/\n${dump(r)}`);
+});
+
+test('23g. a decision id cited by 250 map lines prints all 250, with no cap', () => {
+  const dir = decisionsRepo();
+  const N = 250;
+  mkdirSync(join(dir, 'src', 'many'));
+  const rows = [];
+  for (let i = 0; i < N; i++) {
+    const n = String(i).padStart(3, '0');
+    writeFileSync(join(dir, 'src', 'many', `f${n}.ts`), 'export {};\n');
+    rows.push(`- \`src/many/f${n}.ts\` — Generated line ${n}.`, '  - Decisions: `D7`');
+  }
+  writeFileSync(join(dir, 'docs', 'map', 'many.md'), `# Many\n\n## Code files\n\n${rows.join('\n')}\n`);
+  gitIn(dir, 'add', '-N', '.');
+  // The scope first: the four fixture lines that cite D7 must print with the 250, or the count below holds for a command that printed too little.
+  const r = show(['D7'], dir);
+  assert.equal(r.status, 0, `D7 must exit 0 with 250 citing map lines\n${dump(r)}`);
+  assert.ok(lineWith(r.stdout, 'src/retry.ts', 'Holds the retry wait.'), `the fixture map line of src/retry.ts must print with the 250\n${dump(r)}`);
+  assert.equal(linesOf(r.stdout).length, N + D7_ROWS.length, `D7 must print one line for each of its ${N + D7_ROWS.length} citing map lines, with no cap\n${dump(r)}`);
+});
+
+test('23h. with no decision keys, D7 is looked up as a path or an area, and prints no map line', () => {
+  const dir = scratchRepo();
+  // The scope first: a path must print its map line, or "no map line" holds for a command that printed nothing.
+  const scope = show(['src/home.ts'], dir);
+  assert.equal(scope.status, 0, `a path with a map line must exit 0\n${dump(scope)}`);
+  assert.ok(scope.stdout.includes(HOME_LINE), `the path must print its map line\n${dump(scope)}`);
+  const r = show(['D7'], dir);
+  assert.equal(r.status, 1, `with no decision keys, D7 is no path or area, so it must exit 1\n${dump(r)}`);
+  assert.equal(r.stdout.trim(), '', 'nothing prints on stdout');
+  assert.equal(stderrOf(r).trim(), 'no map line for D7', 'stderr must hold one line: no map line for D7');
+});
+
+test('23i. an arg that only partly matches decisionIdPattern is no decision id', () => {
+  const dir = decisionsRepo();
+  // The scope first: a path must print its map line, or "no map line" holds for a command that printed nothing.
+  const scope = show(['src/retry.ts'], dir);
+  assert.equal(scope.status, 0, `a path with a map line must exit 0\n${dump(scope)}`);
+  assert.ok(scope.stdout.includes('Holds the retry wait.'), `the path must print its map line\n${dump(scope)}`);
+  const r = show(['D7x'], dir);
+  assert.equal(r.status, 1, `D7x does not wholly match D\\d+, so it is no decision id and must exit 1\n${dump(r)}`);
+  assert.equal(r.stdout.trim(), '', 'nothing prints on stdout');
+  assert.equal(stderrOf(r).trim(), 'no map line for D7x', 'stderr must hold one line: no map line for D7x');
+});
+
+test('23j. the id reads each map line\'s decisions line, not the cites in the source comments', () => {
+  const dir = decisionsRepo();
+  const page = join(dir, 'docs', 'map', 'core.md');
+  const before = readFileSync(page, 'utf8');
+  const cacheBlock = '- `src/cache.ts` — Holds the cache size.\n  - Decisions: `D18`';
+  const retryBlock = '- `src/retry.ts` — Holds the retry wait.\n  - Decisions: `D7`\n';
+  // The map now cites D7 on src/cache.ts, with a zero-padded id, and drops the D7 line under src/retry.ts.
+  // The source comments stay as they are: retry.ts still cites D7 there, and cache.ts cites D18 only.
+  const edited = before
+    .replace(cacheBlock, '- `src/cache.ts` — Holds the cache size.\n  - Decisions: `D18`, `D007`')
+    .replace(retryBlock, '- `src/retry.ts` — Holds the retry wait.\n');
+  // The scope first: both edits must take, or the rows below hold for a page that did not change.
+  assert.ok(edited.includes('`D18`, `D007`'), 'the edit must add D007 to the decisions line of src/cache.ts');
+  assert.ok(!edited.includes(retryBlock), 'the edit must drop the D7 decisions line under src/retry.ts');
+  writeFileSync(page, edited);
+  const scope = show(['src/cache.ts'], dir);
+  assert.equal(scope.status, 0, `the edited page must still resolve src/cache.ts\n${dump(scope)}`);
+  assert.ok(scope.stdout.includes('Holds the cache size.'), `the edited page must still print the map line of src/cache.ts\n${dump(scope)}`);
+  const r = show(['D7'], dir);
+  assert.equal(r.status, 0, `D7 must exit 0 with its cite on src/cache.ts\n${dump(r)}`);
+  // D7_ROWS without its first row, src/retry.ts, plus the map line of src/cache.ts that now cites D7.
+  const expected = ['src/cache.ts — Holds the cache size.', ...D7_ROWS.slice(1)];
+  assert.deepEqual(linesOf(r.stdout).sort(), [...expected].sort(), `D7 must print the map lines whose decisions line cites it: src/cache.ts, and not src/retry.ts\n${dump(r)}`);
+});
+
+// A non-code file that no record names is out of scope for an id too: its decisions line may hold the id, and the id still lists no such line (decision `map-lists-record-named`).
+test('23k. a decision id does not list a non-code file that no record names, though its decisions line holds the id', () => {
+  const dir = withBadge(['- `assets/badge.svg` — Holds the badge.', '  - Decisions: `D7`']);
+  const r = show(['D7'], dir);
+  // The scope first: D7 names a record and the code lines that cite it must print, or "no svg" holds for a command that printed nothing.
+  assert.equal(r.status, 0, `D7 names a record and is cited by code lines, so it must exit 0\n${dump(r)}`);
+  assert.ok(r.stdout.includes('src/retry.ts — Holds the retry wait.'), `D7 must print the map line of src/retry.ts\n${dump(r)}`);
+  assert.ok(!r.stdout.includes('assets/badge.svg'), `assets/badge.svg is named by no record, so D7 must not list it, though its decisions line holds D7\n${dump(r)}`);
 });

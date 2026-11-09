@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from unittest import mock
 
@@ -230,22 +231,31 @@ class GuardMutantLayoutTests(unittest.TestCase):
                          "the copied guard cannot import lint/layout.py from its root: " + result.stderr[-300:])
 
 
+def scaffold_sources(**extra):
+    """The `sources` a scaffold is built from: a short text for each file, and a case replaces one
+    by keyword (`test_sweep=` is the suite the scaffold runs)."""
+    sources = {
+        "sweep": "SWEEP\n", "guard": "GUARD\n", "session_end_sweep": "END\n",
+        "agent_end_reap": "REAP\n", "test_sweep": "", "test_session_end_sweep": "",
+        "settings_json": "{}\n",
+    }
+    sources.update(extra)
+    return sources
+
+
 class BuildScaffoldSiblingTests(unittest.TestCase):
     """`build_scaffold` writes every guard module in `sources` (a key `guard_<name>` is
-    hooks/guard_<name>.py) into <scaffold>/hooks, and a mutant aimed at one lands in that file."""
+    hooks/guard_<name>.py) into <scaffold>/hooks, and a mutant aimed at one lands in that file.
+    It also lays down <scaffold>/lint with every lint/*.py module that is not a test, and the
+    lint/layout.json the guard reads."""
 
     def setUp(self):
-        self.scaffold = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, self.scaffold, True)
+        self.run = _test_temp.run_folder()
+        self.scaffold = os.path.join(self.run, "scaffold")
+        self.addCleanup(shutil.rmtree, self.run, True)
 
     def sources(self, **extra):
-        sources = {
-            "sweep": "SWEEP\n", "guard": "GUARD\n", "session_end_sweep": "END\n",
-            "agent_end_reap": "REAP\n", "test_sweep": "", "test_session_end_sweep": "",
-            "settings_json": "{}\n",
-        }
-        sources.update(extra)
-        return sources
+        return scaffold_sources(**extra)
 
     def test_sibling_guard_module_is_copied_into_the_scaffold_unmutated(self):
         mutate_sweep.build_scaffold(self.scaffold, self.sources(guard_x="SIBLING\n"),
@@ -270,6 +280,24 @@ class BuildScaffoldSiblingTests(unittest.TestCase):
         # import, so every mutant reads killed for a cause that is not the mutation.
         mutate_sweep.build_scaffold(self.scaffold, self.sources(), "sweep", "X")
         self.assertTrue(os.path.exists(os.path.join(self.scaffold, "hooks", "git_reads.py")))
+
+    def test_scaffold_lint_holds_every_lint_module_and_layout_json(self):
+        # A suite and the copied guard load lint modules by name, from any import form. A module the
+        # scaffold lacks fails the run on import, so every mutant reads survived for a cause that is
+        # not the mutation. The guard also reads lint/layout.json from the scaffold.
+        lint_dir = os.path.join(mutate_sweep.REPO_ROOT, "lint")
+        expected = {name for name in os.listdir(lint_dir)
+                    if name.endswith(".py") and not name.startswith("test_")}
+        self.assertIn("layout.py", expected,
+                      "the real lint/ holds no layout.py, saw %r" % (sorted(expected),))
+        mutate_sweep.build_scaffold(self.scaffold, self.sources(), "sweep", "X")
+        scaffold_lint = os.path.join(self.scaffold, "lint")
+        self.assertTrue(os.path.isfile(os.path.join(scaffold_lint, "_test_git.py")),
+                        "the scaffold lacks its control, lint/_test_git.py")
+        missing = sorted(expected - set(os.listdir(scaffold_lint)))
+        self.assertEqual(missing, [], "scaffold lint/ lacks module(s): " + ", ".join(missing))
+        self.assertTrue(os.path.isfile(os.path.join(scaffold_lint, "layout.json")),
+                        "scaffold lint/ lacks lint/layout.json, the data file the guard reads")
 
 
 class FakeRun:
@@ -341,6 +369,142 @@ class StagedSuiteTests(unittest.TestCase):
     def test_mutate_full_runs_only_the_full_suite(self):
         fake = staged({None: (1, FULL_RED, FULL_RED)}, full=True)
         self.assertStaged(fake, [None], (1, FULL_RED))
+
+
+# A required case that ERRORS (a throw, not an assert) prints no FAIL line for its own name, so the
+# verdict reads WRONG CAUSE. The report must still name what it saw: the ERROR block and the final
+# exception. The incident read `saw: FAILED (errors=1)` and hid the TimeoutExpired.
+ERROR_CASE = "test_required_fixture"
+ERROR_SUITE = textwrap.dedent("""\
+    import subprocess
+    import unittest
+
+
+    class Fixture(unittest.TestCase):
+        def test_required_fixture(self):
+            raise subprocess.TimeoutExpired("sleep 9", 5)
+
+
+    if __name__ == "__main__":
+        unittest.main(verbosity=2)
+""")
+# A red with FAIL lines only. No case the mutation names exists here, so the full suite runs.
+FAIL_SUITE = textwrap.dedent("""\
+    import unittest
+
+
+    class Fixture(unittest.TestCase):
+        def test_other_fixture(self):
+            self.assertEqual(1, 2)
+
+
+    if __name__ == "__main__":
+        unittest.main(verbosity=2)
+""")
+LABEL = "fixture: a no-op mutant, so the suite is the only thing under test"
+
+
+def verdict_seen(code, red, seen):
+    """report_verdict with REQUIRED as the required case, and `seen` as its diagnostics."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        return mutate_shared.report_verdict("mutant", code, red, REQUIRED, seen=seen)
+
+
+class SeenNeverChangesTheVerdictTests(unittest.TestCase):
+    """Controls, green on the head. `seen` is diagnostics only: the verdict reads `red` alone, so an ERROR
+    block that names the required case must not turn a WRONG CAUSE into a kill."""
+
+    def test_an_error_in_the_required_case_with_no_fail_line_is_wrong_cause(self):
+        seen = ["ERROR: " + REQUIRED + " (mod.Class.test_x)", "subprocess.TimeoutExpired: sleep 9"]
+        self.assertEqual(verdict_seen(1, ["FAILED (errors=1)"], seen), "wrong_cause")
+
+    def test_seen_lines_naming_the_required_case_never_make_a_kill(self):
+        seen = ["ERROR: " + REQUIRED + " (mod.Class.test_x)"]
+        self.assertEqual(verdict_seen(1, RED_WRONG, seen), "wrong_cause")
+
+
+class GuardDriverErrorLinesTests(unittest.TestCase):
+    """The two drivers return their ERROR lines as `seen`. The guard driver reads a suite's stdout only, and
+    unittest writes its ERROR blocks to stderr, so the guard driver's `seen` misses them. The sweep driver
+    reads both streams, and is the control."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        self.config = os.path.join(self.run, "cfg")
+        os.makedirs(self.config)
+        write_files(self.run, {"test_fixture_suite.py": ERROR_SUITE})
+        self.suite = os.path.join(self.run, "test_fixture_suite.py")
+
+    def assertErrorBlockSeen(self, seen, driver):
+        self.assertTrue(any(line.startswith("ERROR: " + ERROR_CASE + " (") for line in seen),
+                        "the %s driver's seen holds no ERROR line for its failing case: %r" % (driver, seen))
+
+    def test_the_sweep_driver_returns_the_error_block_as_seen(self):
+        result = mutate_sweep.run_suite(self.suite, self.config)
+        self.assertErrorBlockSeen(result[3], "sweep")
+
+    def test_the_guard_driver_returns_the_error_block_as_seen(self):
+        result = mutate_guard.run_suite(self.suite, "GUARD_UNDER_TEST",
+                                        os.path.join(self.run, "copy.py"), self.config)
+        self.assertErrorBlockSeen(result[3], "guard")
+
+
+class ErrorBlockReportTests(unittest.TestCase):
+    """A mutant's suite runs through `run_mutants`, the path every mutation test takes, so each case reads
+    the report a reader sees. An ERROR in the required case is WRONG CAUSE, and the report names the ERROR
+    block and the final exception under `saw:`. A FAIL-only red prints no ERROR line."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("MUTATE_FULL", None)  # a developer's setting must not change which suite runs
+
+    def run_fixture(self, suite):
+        sources = scaffold_sources(test_sweep=suite)
+        entry = (LABEL, "sweep", "SWEEP", "SWEEP", ERROR_CASE)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = mutate_shared.run_mutants(
+                [entry], lambda item: mutate_sweep.run_mutant(sources, self.run, 0, item))
+        return code, out.getvalue().splitlines()
+
+    def saw(self, lines):
+        return [line.strip() for line in lines if line.strip().startswith("saw: ")]
+
+    def assertWrongCause(self, code, lines):
+        """The scope, checked before any saw: line: the run failed and the mutant reads WRONG CAUSE."""
+        self.assertEqual(code, 1, "the run must fail: the required case did not kill the mutant")
+        self.assertTrue(any(line.startswith("WRONG CAUSE ") and LABEL in line for line in lines),
+                        "the mutant must read WRONG CAUSE, not killed; the report said: %r" % lines)
+
+    def test_an_error_in_the_required_case_reads_wrong_cause(self):
+        code, lines = self.run_fixture(ERROR_SUITE)
+        self.assertWrongCause(code, lines)
+
+    def test_the_report_names_the_error_block_under_saw(self):
+        code, lines = self.run_fixture(ERROR_SUITE)
+        self.assertWrongCause(code, lines)
+        self.assertTrue(any(line.startswith("saw: ERROR: " + ERROR_CASE + " (") for line in self.saw(lines)),
+                        "the WRONG CAUSE report must print the ERROR block under saw:, saw %r" % self.saw(lines))
+
+    def test_the_report_prints_the_final_exception_line_under_saw(self):
+        code, lines = self.run_fixture(ERROR_SUITE)
+        self.assertWrongCause(code, lines)
+        self.assertTrue(any(line.startswith("saw: subprocess.TimeoutExpired: ") for line in self.saw(lines)),
+                        "the WRONG CAUSE report must print the final exception under saw:, saw %r"
+                        % self.saw(lines))
+
+    def test_a_fail_only_red_prints_no_error_line(self):
+        code, lines = self.run_fixture(FAIL_SUITE)
+        self.assertWrongCause(code, lines)
+        self.assertTrue(any(line.startswith("saw: FAIL: test_other_fixture (") for line in self.saw(lines)),
+                        "a FAIL line must still print under saw:, saw %r" % self.saw(lines))
+        self.assertFalse(any(line.startswith("saw: ERROR:") for line in self.saw(lines)),
+                         "a FAIL-only red printed an ERROR line under saw:, saw %r" % self.saw(lines))
 
 
 if __name__ == "__main__":

@@ -18,13 +18,14 @@ Every republish of a waiting page is main's `skills/waiting-page/page.html` with
   - Every `Artifact` call also runs the session-home record step that every guard call runs (`session_home_keep`): one path walk and one small file read, and one write only when the record is missing or changed.
   - Per waiting-page publish: one python import of `stale_pages`, one read-only git process (no fetch, no network), one file read, one stamp file write.
   - Session start: one python start and one git process, only in a repo with a waiting page. Any other repo pays one grep.
+  - The writer's wake pass (`stale_pages.py --page ... --items`): 0 gh processes without `--items`; with it, one gh process per open item with `waits`, at most 50, each ended or killed at 30 s before the next. No file written, no timer, no process left running (`test_stale_pages.py` proves the call counts).
   - No timer, no new long-lived process, no new log beyond the one `noted` line on unknown or on a failed stamp write.
 - Known limit: that the `/artifact/` and `/code/artifact/` forms with one id name one page is unmeasured.
 - Known limit: a first publish with no `url` passes. So does a republish by the same `file_path` with no `url`: it redeploys to the same url, unjudged.
 - Known limit: the stamp is written at PreToolUse, so a publish that then fails still stamps. A stamp write that fails logs one `noted` line under `page-stale`.
 - Known limit: the session-start line compares blob shas, not `matches`. A `page.html` edit that `matches` ignores (title text, white space) prints the line until the page is republished.
 - Known limit: the rule never fetches. A stale local `origin/main` makes an old page read as current, and a newer page as behind.
-- Known limit: an `ArtifactData` write is not gated here. It writes items, not page code.
+- Known limit: an `ArtifactData` write is not judged by this guard. It writes items, not page code.
 - Known limit: a fresh cloud container has no stamp, so its session start prints no line.
 - Known limit: the stamp records the last allowed publish from this clone, not the live page. A publish from another machine, or by hand, moves the page without moving the stamp.
 

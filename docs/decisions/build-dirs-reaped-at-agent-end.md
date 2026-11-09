@@ -21,8 +21,9 @@ deletes a folder only when each check gives a confirmed yes. Any read that canno
 3. The tree holds no lock other than a Claude agent lock (`sweep.AGENT_LOCK_RE`). A person's lock, an empty reason or unknown
    text keeps. An agent lock does not keep, live or stale: the live host holds one on every agent tree all session, so it says
    nothing about activity. Keeping on it would keep every build folder until the session ends, the disk-full failure this record
-   exists to prevent.
-4. No live session has a cwd inside the tree (`guard.worktree_live_session`).
+   exists to prevent. An agent lock does not keep build folders (owner, 2026-10-28, the owner's waiting-page
+   item 35 a): the harness holds a lock on every agent tree all session.
+4. No live session has a cwd inside the tree (`git_reads.worktree_live_session`).
 5. No process has a cwd anywhere in the tree, read again after the edit read and just before the pass, so a build started during the hook keeps. The
    reap stops no process there. A build runs from the worktree root and writes
    into the folder, so a cwd check on the folder alone deleted live builds (likely risk, 2026-10-27).
@@ -38,13 +39,11 @@ deletes a folder only when each check gives a confirmed yes. Any read that canno
 - A `buildDirs` value that is not a list of strings deletes nothing, defaults included. `sweep.read_optout` is the one reader of
   `.claude/janitor.json`.
 - Windows deletes the same as macOS and Linux (owner, 2026-10-12). `sweep.is_link` is the one link test.
-- An agent lock does not keep build folders (owner, 2026-10-28, waiting-page item 35 a): the harness holds a lock on
-  every agent tree all session.
 - The hook stops its build-folder scan after 20 s and keeps what it did not reach. The hook's own limit is 60 s.
 - The sweep deletes leftover trash only in registered, non-primary worktrees directly under `.claude/worktrees`.
 
 Reason: native agents built the iOS app in their own worktrees. The disk filled and `native-check` failed with ENOSPC. The daily
-janitor skips registered worktrees and the agent-end reap stopped only processes. Governing records: `agent-end-reap-stops-what-a-finished-agent-left` (the process reap; its checks and 60 s timeout apply here),
+janitor skips registered worktrees, so this reap is the only tier that frees their build folders. Governing records: `agent-end-reap-stops-what-a-finished-agent-left` (the process reap; its checks and 60 s timeout apply here),
 `the-janitor-is-one-machine-wide-sweep` (its `huskNames` key covers unregistered folders only, so it is not reused),
 `unattended-sweep-stops-proven-orphans`.
 

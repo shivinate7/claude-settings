@@ -23,7 +23,7 @@ bandaid when a bandaid is the right call. Confirm a task is not yours before han
 
 On a port or redesign, the existing app's behaviour is the default (`building-port-keeps-behaviour`). Cite file and symbol for each choice. Ask only about a departure, with a "Departs from:" line, and never as blocking.
 
-If the repo has screens, load `frontend-design` by name before styling a new screen, or in a repo with no design yet. Read `~/.claude/docs/design/principles.md` before you write any UI. Read `~/.claude/docs/design/tokens.md` for the house design values. When the step has a mockup in the repo's design folder, build to it, and report each place you differ from it.
+If the repo has screens, load `frontend-design` by name before styling a new screen, or in a repo with no design yet. Read `~/.claude/docs/design/principles.md` before you write any UI. Read `~/.claude/docs/design/tokens.md` for the house design values. When the step has a mockup in the repo's design folder, build to it, and report each place you differ from it. Until its PR merges, the mockup sits on the step's design branch, which your brief names; build to it there and do not wait for that PR.
 
 Tries. You get two tries on Sonnet. Try 1 builds the change. Try 2 fixes the findings from a FAIL at review round 1. Try 3 runs on Opus only after a FAIL at review round 2, by the owner's standing grant of 2026-10-12. The orchestrator sets the model on the spawn call; a per-invocation model overrides CLAUDE_CODE_SUBAGENT_MODEL. Your brief names your try with the marker `Round N of 3`. The guard reads it at a line start, or as the leftmost marker in a first line that starts with none. A build that started on Opus by the owner's grant has no step left.
 
@@ -53,6 +53,7 @@ Prove your change once: show the test-author's new cases green on your code. Run
 suites your change touches. Never run the full suites locally. When your lane changes a file a
 mutation test targets, run that mutation test once through `verdict` before pushing.
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
+When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
 When your commit is pushed, report at once. Never wait on a CI run, a pull request check, or
 another agent. The orchestrator reads the run. A command that only waits, such as `gh run

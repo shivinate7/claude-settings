@@ -59,6 +59,8 @@ export const junction = (target) => {
 export const gitIn = (dir, ...a) =>
   execFileSync('git', ['-c', 'core.autocrlf=false', ...a], { cwd: dir, env: cleanEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
 
+// The files of `tests/fixture/` that the scratch repository must track.
+const FIXTURE_TRACKED = ['map.config.json', 'src/home.ts', 'src/notes.ts', 'src/screens.ts', 'src/retry.py', 'src/caller.py', 'config.json', 'docs/map/core.md', 'docs/map/homes.md', 'docs/map/traces/home.md', 'src/home.spec.ts', 'src/pkg/index.ts', 'src/pkg.spec.ts','src/retry_check.py', 'src/run_retry_check.py'];
 /** Commits every change of `dir`. With `epoch` (unix seconds) the author time is that epoch in UTC, which is what `git blame` and `git log %at` read. Without it, the commit has the current time. The commit runs with an empty hooks folder. */
 export const commitAt = (dir, epoch, message) => {
   gitIn(dir, 'add', '-A');
@@ -86,13 +88,14 @@ export const gitShim = (match = '') => {
 };
 
 /**
- * A copy of `tests/fixture/` in a fresh git repository in tmp. `git add -N` lists each file for `git ls-files` and writes no object.
+ * A copy of `fixture` (default `tests/fixture/`) in a fresh git repository in tmp. `track` lists the files the copy must track.
+ * `git add -N` lists each file for `git ls-files` and writes no object.
  * With `commit`, the files are committed too, so `git rev-parse HEAD` works. A host repository that builds a page has a commit.
  * The commit runs with an empty hooks folder, so no hook of the machine runs in the scratch repository.
  */
-export const scratchRepo = ({ commit = false } = {}) => {
+export const scratchRepo = ({ commit = false, fixture = FIXTURE, track = FIXTURE_TRACKED } = {}) => {
   const dir = tmpFolder('pemap-repo-');
-  cpSync(FIXTURE, dir, { recursive: true });
+  cpSync(fixture, dir, { recursive: true });
   // A Windows checkout (core.autocrlf) holds the fixture with CRLF. The cases edit it by `\n` and by exact text, so the copy is LF on every platform.
   // Every fixture file is text. The product reads CRLF fine, and format-version.test.mjs builds its CRLF repositories itself.
   for (const rel of readdirSync(dir, { recursive: true })) {
@@ -105,7 +108,7 @@ export const scratchRepo = ({ commit = false } = {}) => {
   else git('add', '-N', '.');
   // The scope first: the copy must be a git repository that tracks the fixture, or a verdict below says nothing about the skill.
   const tracked = git('ls-files').split('\n').map((l) => l.trim());
-  for (const f of ['map.config.json', 'src/home.ts', 'src/notes.ts', 'src/screens.ts', 'src/retry.py', 'src/caller.py', 'config.json', 'docs/map/core.md', 'docs/map/homes.md', 'docs/map/traces/home.md'])
+  for (const f of track)
     assert.ok(tracked.includes(f), `the scratch repository does not track ${f}`);
   if (commit) assert.match(git('rev-parse', 'HEAD').trim(), /^[0-9a-f]{40}$/, 'the scratch repository has no commit');
   return dir;
@@ -120,11 +123,67 @@ export const dropMapLine = (dir, file) => {
   writeFileSync(p, kept.join('\n'));
 };
 
-export const IDS = ['MAP1', 'MAP2', 'MAP3', 'MAP4', 'MAP5', 'MAP6', 'MAP7', 'MAP8', 'MAP9'];
+export const IDS = ['MAP1', 'MAP2', 'MAP3', 'MAP4', 'MAP5', 'MAP6', 'MAP7', 'MAP8', 'MAP9', 'MAP10', 'MAP11'];
+
+// The verdict a check prints when the fixture leaves its setting out. MAP10 skips when no decision key is set.
+const DEFAULT_VERDICT = { MAP10: 'SKIP' };
 
 /** The verdict lines of a run as one string, such as `MAP1=PASS MAP2=FAIL`. A line looks like `[PASS] MAP1`. */
 export const verdicts = (out) =>
   [...out.matchAll(/^\[(PASS|FAIL|SKIP)\]\s+(MAP\d+)\b/gm)].map((m) => `${m[2]}=${m[1]}`).join(' ');
 
 /** What the verdict string says when every check in `IDS` passes, except the ids in `except`, which get the given verdict. */
-export const expected = (except = {}) => IDS.map((id) => `${id}=${except[id] ?? 'PASS'}`).join(' ');
+export const expected = (except = {}) => IDS.map((id) => `${id}=${except[id] ?? DEFAULT_VERDICT[id] ?? 'PASS'}`).join(' ');
+
+/** The verdict of one check in a run (`PASS`, `FAIL` or `SKIP`), or null when the run prints no line for it. */
+export const verdictOf = (out, id) => out.match(new RegExp(`^\\[(PASS|FAIL|SKIP)\\] ${id}\\b`, 'm'))?.[1] ?? null;
+
+/** The `[FAIL]` lines of a run. */
+export const failLines = (out) => out.split('\n').filter((l) => l.startsWith('[FAIL]'));
+
+/** The first 1500 characters of a run's output, for a failure message. */
+export const tail = (out) => out.slice(0, 1500);
+
+/** Reads a file of a scratch repository as text. */
+export const readIn = (dir, rel) => readFileSync(join(dir, rel), 'utf8');
+
+/** Writes a file of a scratch repository. The folder must exist. */
+export const writeIn = (dir, rel, body) => writeFileSync(join(dir, rel), body);
+
+// ---- Sub-lines of a map line: `  - Decisions: ` and `  - Debts: ` (one home, read and set by the decision and the record-named suites).
+const SUB_LINE_RE = /^\s+[-*+]\s/; // an indented list line under a map line
+
+const mapIndexOf = (lines, page, file) => {
+  const found = lines.flatMap((l, i) => (l.startsWith(`- \`${file}\` `) ? [i] : []));
+  assert.equal(found.length, 1, `${page} must hold exactly one map line for ${file}`);
+  return found[0];
+};
+
+/** The ids on the sub-line labelled `label` under the map line of `file` on `page`, in order. [] when it has none. The label may sit at any position among the sub-lines. */
+export const subLineIds = (dir, page, file, label) => {
+  const lines = readIn(dir, page).split('\n');
+  const labelled = new RegExp(`^\\s+[-*+]\\s+${label}:`);
+  const ids = [];
+  for (let j = mapIndexOf(lines, page, file) + 1; j < lines.length && SUB_LINE_RE.test(lines[j]); j++)
+    if (labelled.test(lines[j])) ids.push(...[...lines[j].matchAll(/`([^`]+)`/g)].map((m) => m[1]));
+  return ids;
+};
+
+/** Sets the sub-line labelled `label` under the map line of `file` to `ids`, or removes it when `ids` is null. Edits the page only. */
+export const setSubLine = (dir, page, file, label, ids) => {
+  const lines = readIn(dir, page).split('\n');
+  const i = mapIndexOf(lines, page, file);
+  const labelled = new RegExp(`^\\s+[-*+]\\s+${label}:`);
+  for (let j = i + 1; j < lines.length && SUB_LINE_RE.test(lines[j]); ) {
+    if (labelled.test(lines[j])) lines.splice(j, 1);
+    else j++;
+  }
+  if (ids) lines.splice(i + 1, 0, `  - ${label}: ${ids.map((d) => `\`${d}\``).join(', ')}`);
+  writeIn(dir, page, lines.join('\n'));
+};
+
+/** The debts folder of a repository, as lint/layout.py `path()` gives it. It is read from lint/layout.json by that one home, never written here. */
+export const debtsDirOf = (dir) =>
+  execFileSync('python3', ['-c', 'import sys; sys.path.insert(0, sys.argv[1]); import layout; print(layout.path(sys.argv[2], "debts"))', join(ROOT, 'lint'), dir], {
+    cwd: dir, env: cleanEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();

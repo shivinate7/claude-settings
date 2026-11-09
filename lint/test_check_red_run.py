@@ -19,6 +19,7 @@ change commits on top. The check runs as the copy at lint/check_red_run.py in th
 module path, which a stub run uses.
 """
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -159,24 +160,55 @@ class CheckCase(Fixture):
         return out
 
     def scratch_repo_test_commit(self, red=None):
-        """One test commit in a repo that lacks the gate file at HEAD, the shape of any repo but claude-settings.
-        The tree's disk copy of the script is untracked, so the case also rejects a gate read from disk."""
+        """One test commit in a repo that lacks the check file at HEAD, the shape of any repo but claude-settings.
+        The tree's disk copy of the script is untracked, so the case also rejects a check read from disk."""
         self.base(check=False)
         rel = self.new_test_path()
         sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=red)
         self.assertFalse(self.has_file("HEAD", CHECK_REL))
         return rel, sha
 
-    def test_untrailered_test_commit_is_flagged(self):
+    def flagged_untrailered(self):
+        """Flag one test commit that carries no trailer. Returns the check's output."""
         self.base()
         rel = self.new_test_path()
         sha = self.commit("add widget tests", {rel: TEST_TEXT})
-        out = self.assertFlagged(sha, "add widget tests", rel)
-        # The check's message states both trailer forms, and how to add a trailer to a pushed commit.
+        return self.assertFlagged(sha, "add widget tests", rel)
+
+    def test_untrailered_test_commit_is_flagged(self):
+        out = self.flagged_untrailered()
+        # The check's message states both trailer forms, and how to add a trailer to a commit.
         self.assertIn("Red-run: <command> -> <N> failed on <sha>", out, out)
         self.assertIn("Red-run: none: <reason>", out, out)
         self.assertIn("reword", out, out)
-        self.assertIn("--force-with-lease", out, out)
+
+    def test_remedy_names_no_force_or_interactive_route(self):
+        out = self.flagged_untrailered()
+        # The sessions cannot run a forced push or an interactive rebase.
+        self.assertIsNone(re.search(r"--force|\s-f\b", out), "remedy names a forced push:\n" + out)
+        self.assertIsNone(re.search(r"rebase\s+(-i\b|--interactive)", out),
+                          "remedy names an interactive rebase:\n" + out)
+        self.assertIsNone(re.search(r"(?:^|[\s`])\+[\w/:]", out), "remedy names a + refspec:\n" + out)
+
+    def test_remedy_amend_carries_a_message(self):
+        out = self.flagged_untrailered()
+        self.assertIn("--amend", out, "remedy names no amend route for the last commit:\n" + out)
+        # An amend with no -m opens an editor, which a session cannot drive.
+        for amend in re.finditer(r"--amend", out):
+            segment = re.split(r"[`\n]", out[amend.end():], maxsplit=1)[0]
+            self.assertIsNotNone(re.search(r"(?<![\w-])-m\b|--message\b", segment),
+                                 "remedy names an amend with no -m:\n" + out)
+
+    def test_remedy_names_plain_push(self):
+        out = self.flagged_untrailered()
+        pushes = re.findall(r"git push[^`\n]*", out)
+        self.assertTrue(any(not re.search(r"--force|\s-f\b", push) for push in pushes),
+                        "remedy names no git push without a force flag:\n" + out)
+
+    def test_remedy_names_cherry_pick_route(self):
+        out = self.flagged_untrailered()
+        # A pushed older commit goes onto a new branch by cherry-pick, since an interactive rebase cannot run.
+        self.assertIn("cherry-pick", out, "remedy names no cherry-pick route for a pushed older commit:\n" + out)
 
     def test_valid_red_run_trailer_passes(self):
         for red in (GOOD, "Red-run: python3 lint/test_widgets.py -> 1 failed on abcdef1",

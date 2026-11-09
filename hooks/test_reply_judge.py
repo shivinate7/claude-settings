@@ -19,20 +19,26 @@ not load cannot make a "never called" check pass for no reason.
 
 Sampling cases (case 8 on) run several Stops of one config dir in a row. Each Stop is still a
 new process, so the counter must persist in files, not in memory.
+
+Route-row cases give each run its own rows file and point GUARD_ROUTE_ROWS at it, so no run reads the
+repo's rows file. The stub logs each read of that file in the hook process to RJ_OPENS.
 """
 import json
+import importlib.util
 import os
 import re
 import shutil
 import subprocess
 import sys
-import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
+
 MODULE_PATH = os.environ.get("REPLY_JUDGE_UNDER_TEST") or os.path.join(HERE, "reply_judge.py")
 SETTINGS_PATH = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO_ROOT, "settings.json")
-ROOT = tempfile.mkdtemp(prefix="reply_judge_cases_")
+ROOT = _test_temp.run_folder()
 STUB_DIR = os.path.join(ROOT, "stub")
 FAILED = []
 RED_CASES = []
@@ -79,6 +85,13 @@ def _fake_run(argv, **kwargs):
     with open(os.environ["RJ_RECORD"], "a", encoding="utf-8") as f:
         f.write(json.dumps(rec) + "\\n")
     scenario = os.environ.get("RJ_SCENARIO", "")
+    if scenario == "doable_if_shown":
+        # A judge can name a doable route only from a row the prompt carries: the answer comes back only
+        # when the prompt holds the marker id RJ_DOABLE_ID, else the judge answers ok.
+        marker = os.environ.get("RJ_DOABLE_ID") or ""
+        if marker and marker in (stdin or ""):
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"result": os.environ.get("RJ_ANSWER", "")}), "")
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"result": json.dumps({"ok": True})}), "")
     if scenario == "timeout":
         raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
     if scenario == "error":
@@ -89,6 +102,24 @@ def _fake_run(argv, **kwargs):
         return subprocess.CompletedProcess(argv, 0, json.dumps({"result": "Looks fine to me."}), "")
     return subprocess.CompletedProcess(argv, 0, json.dumps({"result": os.environ.get("RJ_ANSWER", "")}), "")
 
+
+if os.environ.get("RJ_OPENS"):
+    # A spy on reads of the route rows file, in the hook process only. It logs each open of that file to
+    # RJ_OPENS, a file of its own, so the calls record stays the record of model calls alone.
+    import builtins
+    _real_open = builtins.open
+    _rows_env = os.environ.get("GUARD_ROUTE_ROWS") or ""
+
+    def _spy_open(file, *args, **kwargs):
+        if isinstance(file, (str, bytes, os.PathLike)):
+            name = os.fsdecode(file)
+            if os.path.basename(name) == "route_rows.json" or (
+                    _rows_env and os.path.abspath(name) == os.path.abspath(_rows_env)):
+                with _real_open(os.environ["RJ_OPENS"], "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"opened": name}) + "\\n")
+        return _real_open(file, *args, **kwargs)
+
+    builtins.open = _spy_open
 
 with open(os.environ["RJ_LOADED"], "w", encoding="utf-8") as f:
     f.write("loaded")
@@ -138,28 +169,45 @@ class Run:
         if os.path.exists(record):
             with open(record, encoding="utf-8") as f:
                 self.calls = [json.loads(line) for line in f if line.strip()]
+        self.opens = []  # each read of the route rows file in the hook process, from the stub's spy
+        opened = os.path.join(base, "opens.jsonl")
+        if os.path.exists(opened):
+            with open(opened, encoding="utf-8") as f:
+                self.opens = [json.loads(line) for line in f if line.strip()]
 
     def prompt(self):
         # The prompt travels on the child's stdin, never in argv (Windows caps a command line).
         return (self.calls[0].get("stdin") or "") if self.calls else ""
 
 
+MISSING_ROWS = object()  # the rows file is absent: GUARD_ROUTE_ROWS names a path that does not exist
+
+
 def run_hook(text, scenario="ok", answer="", stop_active=False, config=None, session=REPLY_SESSION,
-             fail_replace=False, fail_remove=False):
+             fail_replace=False, fail_remove=False, rows=MISSING_ROWS, doable="", surface="local"):
     """One Stop, one new process. With no `config`, the config dir is fresh and empty, so the
     Stop is the session's first. A shared `config` carries the counter from Stop to Stop.
     `text` may be ABSENT: the payload then has no last_assistant_message key at all.
     `fail_replace` makes every os.replace in the hook process raise (a fake write failure).
-    `fail_remove` makes os.remove raise on a counter file (a fake read-only counter)."""
+    `fail_remove` makes os.remove raise on a counter file (a fake read-only counter).
+    `rows` is the route rows file: a list of rows written as {"rows": [...]}, or MISSING_ROWS for no
+    file. The path always comes from GUARD_ROUTE_ROWS, so no run reads the repo's own rows file.
+    `doable` is the id the "doable_if_shown" stub looks for in the prompt.
+    `surface` is "local" (the default: CLAUDE_CODE_REMOTE is unset) or "cloud" (CLAUDE_CODE_REMOTE is "true")."""
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     os.makedirs(base, exist_ok=True)
     if config is None:
         config = os.path.join(base, "config")
     os.makedirs(config, exist_ok=True)  # empty on first use: no settings, hooks, credential or token
+    rows_file = os.path.join(base, "route_rows.json")
+    if rows is not MISSING_ROWS:
+        write_rows(rows_file, rows)
     env = dict(os.environ)
-    for name in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"):
+    for name in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_REMOTE"):
         env.pop(name, None)
+    if surface == "cloud":
+        env["CLAUDE_CODE_REMOTE"] = "true"  # guard_core.is_cloud reads exactly this
     if fail_replace:
         env["RJ_FAIL_REPLACE"] = "1"
     else:
@@ -173,8 +221,11 @@ def run_hook(text, scenario="ok", answer="", stop_active=False, config=None, ses
         PYTHONPATH=STUB_DIR,
         RJ_SCENARIO=scenario,
         RJ_ANSWER=answer,
+        RJ_DOABLE_ID=doable,
         RJ_RECORD=os.path.join(base, "calls.jsonl"),
         RJ_LOADED=os.path.join(base, "loaded"),
+        RJ_OPENS=os.path.join(base, "opens.jsonl"),
+        GUARD_ROUTE_ROWS=rows_file,
     )
     payload = {
         "session_id": session,
@@ -1375,6 +1426,255 @@ def case_prompt_spares_a_reply_that_rewrote_the_item():
           has_pin(sentences, ("never flag",), ("pr review thread",), ("another artifact",)), sentences)
 
 
+# ----------------------------------------------------------- route rows (claims-carry-backing, part (v) layer (b))
+# A "Why yours" line that cites `(route <id>)` puts three kinds of rows in the judge prompt: the cited row, every
+# other row with its act, and every row whose act is one of the cited row's `alternates` (a list of act values,
+# as the rows file holds them). A rows file that is missing or holds no rows gives the prompt it gets today. The
+# fixtures: one act with a refused route and a works route, two rows in the alternate act, and one unrelated act.
+# judge_row builds a row in the rows file's shape. It is not test_refusal_note.route_row: that fixture ties each
+# act to its row id and sets no alternates.
+
+ROUTE_ACT = "amend the trailer of a commit already pushed to its branch"
+ALT_ACT = "rewrite the history of a branch"
+OTHER_ACT = "push a commit straight to main"
+
+
+def judge_row(row_id, act, route, outcome, alternates=None, surface="local"):
+    row = {"id": row_id, "act": act, "route": route, "surface": surface, "outcome": outcome,
+           "measured": "2026-11-05", "cc_version": "2.1.0", "evidence": "fixture transcript",
+           "by": "test-author", "pattern": "fixture-" + row_id}
+    if alternates is not None:
+        row["alternates"] = alternates
+    return row
+
+
+CITED_ROW = judge_row("trailer-amend-pushed", ROUTE_ACT, "git commit --amend on the pushed branch", "refused",
+                      alternates=[ALT_ACT])
+SAME_ACT_ROW = judge_row("cherry-pick-to-new-branch", ROUTE_ACT, "cherry-pick to a new branch", "works")
+ALT_ROW = judge_row("rebase-fixup-new-branch", ALT_ACT, "git rebase -i fixup on a new branch", "works")
+ALT_ROW_B = judge_row("filter-branch-new-branch", ALT_ACT, "git filter-branch on a new branch", "works")
+OTHER_ROW = judge_row("push-main-direct", OTHER_ACT, "git push origin main", "refused")
+ALL_ROWS = [CITED_ROW, SAME_ACT_ROW, ALT_ROW, ALT_ROW_B, OTHER_ROW]
+CITED_ID = CITED_ROW["id"]
+SAME_ACT_ID = SAME_ACT_ROW["id"]
+
+# A reply must not hand a commit's trailer to the owner as "only you can": a cherry-pick to a new
+# branch carries the trailer with no refusal, so the judge flags that step as doable
+# (decision claims-carry-backing).
+TRAILER_REPLY = (
+    "> **Done**\n> BUILT: the hook change is pushed on branch prose-truth-reply-judge-t.\n"
+    "> Input Needed: commit abc1234 needs a new trailer.\n\n"
+    "Why yours: only you can change your commit; check: check_red_run reads only the commit's own message "
+    "(route %s).\n" % CITED_ID
+)
+DOABLE_ANSWER = json.dumps({"ok": False, "reason": "output-never-hand-off-doable-step: doable: cherry-pick to a "
+                            "new branch (route %s)." % SAME_ACT_ID})
+
+
+def write_rows(path, rows):
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({"rows": rows}, handle)
+
+
+def reference_module():
+    """The hook's module, loaded in this process, for its INSTRUCTIONS: the prompt text it builds today."""
+    spec = importlib.util.spec_from_file_location("reply_judge_reference", MODULE_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# Scope first: each case checks the judge's one model call, then the rows it carries.
+
+def case_route_cite_carries_cited_same_act_and_alternate_rows():
+    run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=ALL_ROWS)
+    check("route rows, cite: claude called once", len(run.calls) == 1, run.calls)
+    prompt = run.prompt()
+    for label, row in (("cited row", CITED_ROW), ("same-act row", SAME_ACT_ROW), ("alternate-act row", ALT_ROW),
+                       ("second alternate-act row", ALT_ROW_B)):
+        check("route rows, cite: the prompt carries the %s" % label,
+              row["route"] in prompt and row["id"] in prompt, prompt[:300])
+    check("route rows, cite: a row of another act does not ride the prompt",
+          OTHER_ROW["route"] not in prompt and OTHER_ROW["id"] not in prompt, prompt[:300])
+
+
+# A full rows file: 300 rows of another act. Only the rows the cite names ride the prompt.
+
+def case_route_cite_skips_other_acts_in_a_full_rows_file():
+    filler = [judge_row("filler-%03d" % n, OTHER_ACT, "filler route %03d" % n, "refused") for n in range(300)]
+    run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=[CITED_ROW, SAME_ACT_ROW, ALT_ROW, ALT_ROW_B] + filler)
+    check("full rows file: claude called once", len(run.calls) == 1, run.calls)
+    prompt = run.prompt()
+    check("full rows file: the same-act row rides the prompt", SAME_ACT_ROW["route"] in prompt, prompt[:300])
+    check("full rows file: the alternate-act rows ride the prompt",
+          ALT_ROW["route"] in prompt and ALT_ROW_B["route"] in prompt, prompt[:300])
+    carried = sum(1 for n in range(300) if ("filler route %03d" % n) in prompt)
+    check("full rows file: no row of another act rides the prompt", carried == 0,
+          "%d filler rows in the prompt" % carried)
+
+
+# The incident. The model names a doable route only when the prompt carries that route's row (the stub).
+# The note it prints must name the route.
+
+def case_trailer_hand_off_names_the_doable_route():
+    run = run_hook(TRAILER_REPLY, scenario="doable_if_shown", answer=DOABLE_ANSWER, rows=ALL_ROWS,
+                   doable=SAME_ACT_ID)
+    check("trailer hand-off: claude called once", len(run.calls) == 1, run.calls)
+    check("trailer hand-off: exit 0", run.code == 0, run.code)
+    got = parse_stdout(run)
+    specific = got.get("hookSpecificOutput") if got else None
+    note = specific.get("additionalContext") if isinstance(specific, dict) else None
+    check("trailer hand-off: the judge prints a Stop note", isinstance(note, str) and note.strip() != "",
+          run.out or run.err)
+    check("trailer hand-off: the note names the doable route %s" % SAME_ACT_ID,
+          isinstance(note, str) and SAME_ACT_ID in note, note)
+
+
+# No rows file, or a file with no rows: today's prompt, and no route text in its head. The expected prompt is
+# the hook's INSTRUCTIONS with the same reply, so a route sentence added to the head fails here.
+
+def case_no_route_rows_keeps_today_prompt():
+    expected = "%s\n\nReply:\n%s" % (reference_module().INSTRUCTIONS, TRAILER_REPLY)
+    for label, rows in (("rows file missing", MISSING_ROWS), ("rows file holds no rows", [])):
+        run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=rows)
+        check("no route rows (%s): claude called once" % label, len(run.calls) == 1, run.calls)
+        check("no route rows (%s): the prompt is today's prompt" % label, run.prompt() == expected,
+              run.prompt()[:300])
+        head = run.prompt().split(TRAILER_REPLY, 1)[0]
+        check("no route rows (%s): the prompt head names no route" % label, "route" not in head.lower(), head[:300])
+
+
+# Cost: the rows file is read only for a reply with a Why yours line, and once per hook run. The model is
+# still called once per judged reply.
+
+def case_route_rows_are_read_once_and_only_for_a_why_yours_line():
+    plain = run_hook(MARK, answer=OK_ANSWER, rows=ALL_ROWS)
+    check("rows read, no Why yours: claude called once", len(plain.calls) == 1, plain.calls)
+    check("rows read, no Why yours: the rows file is never read", plain.opens == [], plain.opens)
+    cited = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=ALL_ROWS)
+    check("rows read, Why yours: claude called once", len(cited.calls) == 1, cited.calls)
+    check("rows read, Why yours: the rows file is read once", len(cited.opens) == 1, cited.opens)
+
+
+# --------------------------------------------------------------------------- route rows 2: surface, cap order, head
+# Each case checks the judge's one model call first, then the rows or the block text the prompt carries.
+
+CLOUD_ROW = judge_row("cherry-pick-cloud-only", ROUTE_ACT, "cloud-only cherry-pick route", "works", surface="cloud")
+
+
+def sentences_of(text):
+    """The lowercase sentences of `text`, split at a period or a line break."""
+    return [s.strip() for s in re.split(r"[.\n]", text.lower()) if s.strip()]
+
+
+def route_block_sentences(run, reply):
+    """The sentences the prompt adds beside today's prompt: neither the hook's INSTRUCTIONS nor the reply. Where the
+    block sits is not pinned, so a block before the reply and one after it read the same."""
+    own = set(sentences_of(reference_module().INSTRUCTIONS)) | set(sentences_of(reply))
+    return [s for s in sentences_of(run.prompt()) if s not in own]
+
+
+# A cloud "works" row is no route for a local session, so it never rides a local prompt.
+
+def case_local_session_carries_no_cloud_row():
+    run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=ALL_ROWS + [CLOUD_ROW], surface="local")
+    check("surface, local: claude called once", len(run.calls) == 1, run.calls)
+    prompt = run.prompt()
+    check("surface, local: the local same-act row rides the prompt", SAME_ACT_ROW["route"] in prompt, prompt[:300])
+    check("surface, local: a cloud works row does not ride the prompt", CLOUD_ROW["route"] not in prompt, prompt[:300])
+
+
+# The same rows in a cloud session: the cloud row rides, and the local same-act row does not.
+
+def case_cloud_session_carries_cloud_rows_not_local_ones():
+    run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=ALL_ROWS + [CLOUD_ROW], surface="cloud")
+    check("surface, cloud: claude called once", len(run.calls) == 1, run.calls)
+    prompt = run.prompt()
+    check("surface, cloud: the cloud works row rides the prompt", CLOUD_ROW["route"] in prompt, prompt[:300])
+    check("surface, cloud: a local row does not ride the prompt", SAME_ACT_ROW["route"] not in prompt, prompt[:300])
+
+
+# Forty same-act rows come before the alternate-act rows in the file. The outcome pinned is that an alternate-act
+# row still reaches the prompt, not how the cap orders the rows.
+
+def case_alternate_act_row_survives_forty_same_act_rows():
+    same = [judge_row("same-%02d" % n, ROUTE_ACT, "cherry-pick route %02d" % n, "works") for n in range(40)]
+    run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=[CITED_ROW] + same + [ALT_ROW, ALT_ROW_B])
+    check("cap order: claude called once", len(run.calls) == 1, run.calls)
+    prompt = run.prompt()
+    check("cap order: the cited row rides the prompt", CITED_ROW["route"] in prompt, prompt[:300])
+    check("cap order: at least one alternate-act row rides the prompt",
+          ALT_ROW["route"] in prompt or ALT_ROW_B["route"] in prompt, prompt[:300])
+
+
+# The block must not tell the judge to flag every time. One sentence says to flag only when a works row on this
+# surface covers the act.
+
+def case_route_block_flags_only_on_a_works_row_on_this_surface():
+    run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=ALL_ROWS)
+    check("route head: claude called once", len(run.calls) == 1, run.calls)
+    block = route_block_sentences(run, TRAILER_REPLY)
+    check("route head: a sentence says flag only when a works row on this surface covers the act",
+          has_pin(block, ("flag",), ("only", "unless", "when", " if "), ("works",), ("surface",)), block)
+
+
+# --------------------------------------------------------------------------- route rows: one id, two surfaces, the cap
+# The cite names one id, and two rows carry it: a local refused row and a cloud works row. Each row lists its own
+# alternate act. A local session carries only its own surface's rows, so the cloud row and the works row for the
+# cloud row's alternate act stay out, while the local row and the works row for the local row's alternate act ride.
+
+SPLIT_ID = "amend-pushed-two-surfaces"
+SPLIT_ACT_B = "reset a pushed branch to an older commit"  # the local row's alternate act
+SPLIT_ACT_C = "delete the remote branch and push it again"  # the cloud row's alternate act
+SPLIT_LOCAL = judge_row(SPLIT_ID, ROUTE_ACT, "local amend route", "refused", alternates=[SPLIT_ACT_B])
+SPLIT_CLOUD = judge_row(SPLIT_ID, ROUTE_ACT, "cloud amend route", "works", alternates=[SPLIT_ACT_C],
+                        surface="cloud")
+SPLIT_B_WORKS = judge_row("reset-pushed-local", SPLIT_ACT_B, "local reset route", "works")
+SPLIT_C_WORKS = judge_row("repush-remote-local", SPLIT_ACT_C, "local repush route", "works")
+
+
+def cite_reply(route_id):
+    """TRAILER_REPLY with its `(route <id>)` cite named `route_id`, so one case can cite a row of its own."""
+    return TRAILER_REPLY.replace("(route %s)" % CITED_ID, "(route %s)" % route_id)
+
+
+def case_shared_route_id_carries_only_its_surface_rows():
+    rows = [SPLIT_LOCAL, SPLIT_CLOUD, SPLIT_B_WORKS, SPLIT_C_WORKS]
+    run = run_hook(cite_reply(SPLIT_ID), answer=OK_ANSWER, rows=rows, surface="local")
+    check("split id, local: claude called once", len(run.calls) == 1, run.calls)
+    prompt = run.prompt()
+    check("split id, local: the local row of the cited id rides the prompt", SPLIT_LOCAL["route"] in prompt,
+          prompt[:300])
+    check("split id, local: the works row for the local row's alternate act rides the prompt",
+          SPLIT_B_WORKS["route"] in prompt, prompt[:300])
+    check("split id, local: the cloud row of the cited id does not ride the prompt",
+          SPLIT_CLOUD["route"] not in prompt, prompt[:300])
+    check("split id, local: the works row for the cloud row's alternate act does not ride the prompt",
+          SPLIT_C_WORKS["route"] not in prompt, prompt[:300])
+
+
+# One act holds thirty-one refused rows, and its one works row comes last in the file. The cite names the first
+# refused row. The cap holds at thirty rows, so the works row must be one of the thirty that ride: a works row
+# behind a long run of refused rows of its own act is still the act's evidence for the judge.
+
+CAP_ACT = "rename a pushed branch on the remote"
+CAP_REFUSED = [judge_row("cap-refused-%02d" % n, CAP_ACT, "cap refused route %02d" % n, "refused")
+               for n in range(31)]
+CAP_WORKS = judge_row("cap-works", CAP_ACT, "cap works route", "works")
+
+
+def case_cap_keeps_a_works_row_behind_thirty_one_refused_rows():
+    run = run_hook(cite_reply(CAP_REFUSED[0]["id"]), answer=OK_ANSWER, rows=CAP_REFUSED + [CAP_WORKS],
+                   surface="local")
+    check("cap, one act: claude called once", len(run.calls) == 1, run.calls)
+    prompt = run.prompt()
+    check("cap, one act: the works row rides the prompt under the thirty-row cap",
+          CAP_WORKS["route"] in prompt, prompt[:300])
+    carried = prompt.count('"outcome": ')
+    check("cap, one act: no more than thirty route rows ride the prompt", carried <= 30,
+          "%d route rows in the prompt" % carried)
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -1432,6 +1732,17 @@ CASES = (
     case_prompt_flags_a_recommended_option_that_widens,
     case_widens_finding_logs_its_rule,
     case_prompt_flags_a_pick_one_question_whose_options_could_combine,
+    case_route_cite_carries_cited_same_act_and_alternate_rows,
+    case_route_cite_skips_other_acts_in_a_full_rows_file,
+    case_trailer_hand_off_names_the_doable_route,
+    case_no_route_rows_keeps_today_prompt,
+    case_route_rows_are_read_once_and_only_for_a_why_yours_line,
+    case_local_session_carries_no_cloud_row,
+    case_cloud_session_carries_cloud_rows_not_local_ones,
+    case_alternate_act_row_survives_forty_same_act_rows,
+    case_route_block_flags_only_on_a_works_row_on_this_surface,
+    case_shared_route_id_carries_only_its_surface_rows,
+    case_cap_keeps_a_works_row_behind_thirty_one_refused_rows,
 )
 
 

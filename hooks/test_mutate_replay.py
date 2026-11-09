@@ -23,7 +23,9 @@ asks for the score. The failure classes under test:
   whole t7_store_and_seams.py still score whole;
 - a file the real q_max or banchi profile does not read as product (a `*.test.mjs` browser test, a
   `scripts/*-selftest.py`) is never mutated: a pull request that changes only such files and a suite reads NO_PRODUCT,
-  and a product file beside them still reads OK.
+  and a product file beside them still reads OK;
+- a child repository's profile (REPLAY_PROFILES mailaudit, home, ios_adblock, joyous, degen) names its sample product
+  file and suite, uses only the keys the claude_settings, q_max and banchi profiles use, and reads no suite as product.
 
 The JavaScript cases need the typescript package: `npm ci --ignore-scripts --no-audit --no-fund` at the
 repository root. A missing package is a FAIL, never a skip. A contract name missing from
@@ -243,6 +245,15 @@ test('nothing imports the broken file', () => {
 });
 """
 CHECK_SRC = "export function gate(n) {\n  if (n > 1) {\n    return true;\n  }\n  return false;\n}\n"
+GRADE_SRC = "export function grade(n) {\n  if (n >= 60) {\n    return 'P';\n  }\n  return 'F';\n}\n"
+GRADE_TEST = JS_HEAD + """
+import { grade } from '../src/grade.mjs';
+
+test('grade passes at sixty', () => {
+  assert.equal(grade(60), 'P');
+  assert.equal(grade(59), 'F');
+});
+"""
 CHECK_TEST = JS_HEAD + """
 import { gate } from '../src/gate.mjs';
 
@@ -382,7 +393,10 @@ def edge_fixture():
                                 {"src/broken.mjs": "export const x = ;\n", "test/broken.test.mjs": BROKEN_TEST}),
                 3: pull_request(repo, 3, "Gate deletes a red suite",
                                 {"src/gate.mjs": CHECK_SRC, "test/gate.test.mjs": CHECK_TEST,
-                                 "test/old.test.mjs": None})}
+                                 "test/old.test.mjs": None}),
+                4: pull_request(repo, 4, "Grade with a file that does not parse",
+                                {"src/grade.mjs": GRADE_SRC, "test/grade.test.mjs": GRADE_TEST,
+                                 "src/broken-late.mjs": "export const x = ;\n"})}
         CACHE["edge"] = {"repo": repo, "sha": shas}
     return CACHE["edge"]
 
@@ -538,18 +552,50 @@ test('passY is exported', () => {
 });
 """
 SELECT_PROFILE = dict(JS_PROFILE, select=["node", "harness/tests-for.mjs", "{path}"])
+BANCHI_SELECT = ["python3", "scripts/tests-for.py", "{path}"]  # the per-file selector both banchi parts name
+# A selector that a later pull request adds at HEAD. Its lists live in harness/lists.mjs, a sibling it imports, so a
+# copy of the selector alone cannot run.
+SELECTOR_IMPORTS_LISTS = """\
+import { LISTS } from './lists.mjs';
+const path = process.argv[2];
+console.log('tests for ' + path);
+for (const suite of LISTS[path] || []) {
+  console.log(suite);
+}
+"""
+LISTS_MODULE = """\
+export const LISTS = {
+  'src/x.mjs': ['test/a.test.mjs', 'test/unchanged.test.mjs'],
+  'src/y.mjs': ['test/b.test.mjs'],
+};
+"""
+# A selector at HEAD that lists both suites for both files. The commit's own selector must win over it.
+SELECTOR_LISTS_BOTH = """\
+const path = process.argv[2];
+console.log('tests for ' + path);
+console.log('test/a.test.mjs');
+console.log('test/b.test.mjs');
+"""
+LATER_IMPORTS = {"harness/tests-for.mjs": SELECTOR_IMPORTS_LISTS, "harness/lists.mjs": LISTS_MODULE}
+LATER_BOTH = {"harness/tests-for.mjs": SELECTOR_LISTS_BOTH}
+# A root file named node at HEAD. The select argv's `node` is a command PATH resolves, never this file.
+LATER_BARE_NODE = dict(LATER_IMPORTS, node="not a program\n")
 
 
-def select_fixture(name, selector=SELECTOR_LISTS, pr_deletes_selector=False):
+def select_fixture(name, selector=SELECTOR_LISTS, pr_deletes_selector=False, later=None):
     """One merged pull request, 1, that changes src/x.mjs, src/y.mjs, test/a.test.mjs and test/b.test.mjs. Its base
-    holds `selector` at harness/tests-for.mjs. With `pr_deletes_selector` the pull request deletes that file, so the
-    selector is missing at its commit. Built once per `name`."""
+    holds `selector` at harness/tests-for.mjs, or no selector when `selector` is None. With `pr_deletes_selector` the
+    pull request deletes that file, so the selector is missing at its commit. With `later`, a {path: text} map, a
+    second merged pull request, 2, writes those files after pull request 1: the repository's HEAD is then pull
+    request 2's merge, and `sha` stays pull request 1's. Built once per `name`."""
     key = "select-" + name
     if key not in CACHE:
         repo = new_repo(name)
-        put(repo, {"README.md": "base\n", "src/x.mjs": SELECT_X_BASE, "src/y.mjs": SELECT_Y_BASE,
-                   "test/a.test.mjs": SELECT_A_BASE, "test/b.test.mjs": SELECT_B_BASE,
-                   "harness/tests-for.mjs": selector})
+        base = {"README.md": "base\n", "src/x.mjs": SELECT_X_BASE, "src/y.mjs": SELECT_Y_BASE,
+                "test/a.test.mjs": SELECT_A_BASE, "test/b.test.mjs": SELECT_B_BASE}
+        if selector is not None:
+            base["harness/tests-for.mjs"] = selector
+        put(repo, base)
         commit(repo, "Base")
         logs = {"a": os.path.join(fresh(), "runs-a.txt"), "b": os.path.join(fresh(), "runs-b.txt")}
         files = {"src/x.mjs": SELECT_X_PR, "src/y.mjs": SELECT_Y_PR,
@@ -560,6 +606,8 @@ def select_fixture(name, selector=SELECTOR_LISTS, pr_deletes_selector=False):
         sha = pull_request(repo, 1, "Select per file", files)
         mutants = {"x": expected_mutants(repo, sha, "src/x.mjs", lines=changed(repo, sha, "src/x.mjs")),
                    "y": expected_mutants(repo, sha, "src/y.mjs", lines=changed(repo, sha, "src/y.mjs"))}
+        if later:
+            pull_request(repo, 2, "Add the later selector", later)
         CACHE[key] = {"repo": repo, "sha": sha, "logs": logs, "mutants": mutants}
     return CACHE[key]
 
@@ -684,12 +732,12 @@ BANCHI_METHOD = ("class Odd:\n    detail = 'odd'\n\n    def passed(self):\n     
                  "def run():\n    return Odd()\n")
 
 
-def banchi_part():
-    """The banchi per-module runner's profile part, as hooks/mutate_guard.py names it."""
+def banchi_part(part="py"):
+    """The banchi runner's profile part `part` ("py" or "ts"), as hooks/mutate_guard.py names it."""
     try:
-        return mutate_guard.REPLAY_PROFILES["banchi"]["parts"]["py"]
+        return mutate_guard.REPLAY_PROFILES["banchi"]["parts"][part]
     except (KeyError, TypeError):
-        raise AssertionError("REPLAY_PROFILES has no banchi py part")
+        raise AssertionError("REPLAY_PROFILES has no banchi %s part" % part)
 
 
 def banchi_profile():
@@ -992,7 +1040,7 @@ def py_rows():
 def edge_rows():
     fixture = edge_fixture()
     if "edge_rows" not in CACHE:
-        CACHE["edge_rows"] = {n: replay(fixture["repo"], fixture["sha"][n], JS_PROFILE) for n in range(1, 4)}
+        CACHE["edge_rows"] = {n: replay(fixture["repo"], fixture["sha"][n], JS_PROFILE) for n in range(1, 5)}
     return CACHE["edge_rows"]
 
 
@@ -1241,6 +1289,48 @@ BANCHI_STATUS_TEXT = "def status(count):\n    return count >= 1\n"
 BANCHI_ROUTES = "server/send_routes.py"
 BANCHI_ROUTES_TEXT = 'def route(path):\n    return path == "/status"\n'
 BANCHI_BASE = {"README.md": "base\n", **banchi_harness(BANCHI_GREEN)}
+# claude_settings: each case's base holds only README.md, except cs_suite_out, whose base holds the suite it changes.
+# A pull request adds the files its case names. A suite imports its module from its own folder.
+CS_SUITE_HEAD = """import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+"""
+CS_STALE = "skills/waiting-page/stale_pages.py"
+CS_STALE_TEXT = "def stale(count):\n    return count >= 1\n"
+CS_STALE_SUITE = "skills/waiting-page/test_stale_pages.py"
+CS_STALE_SUITE_TEXT = CS_SUITE_HEAD + """import stale_pages  # noqa: E402
+
+sys.exit(0 if stale_pages.stale(1) and not stale_pages.stale(0) else 1)
+"""
+CS_STALE_SUITE_CHANGED = CS_STALE_SUITE_TEXT + "# this change touches the suite too\n"
+CS_FIXTURE = "skills/plain-english-map/tests/fixture/src/retry.py"
+CS_FIXTURE_TEXT = "def retry(count):\n    return count < 3\n"
+CS_HELPER = "skills/waiting-page/tests/merged_page.py"
+CS_HELPER_TEXT = "def merged(page):\n    return page is not None\n"
+CS_GUARD = "hooks/guard.py"
+CS_GUARD_TEXT = "def allowed(n):\n    return n >= 1\n"
+CS_GUARD_SUITE = "hooks/test_guard_scope.py"
+CS_GUARD_SUITE_TEXT = CS_SUITE_HEAD + """import guard  # noqa: E402
+
+sys.exit(0 if guard.allowed(1) and not guard.allowed(0) else 1)
+"""
+CS_LINT = "lint/check_scope.py"
+CS_LINT_TEXT = "def scope(n):\n    return n >= 1\n"
+CS_LINT_SUITE = "lint/test_check_scope.py"
+CS_LINT_SUITE_TEXT = CS_SUITE_HEAD + """import check_scope  # noqa: E402
+
+sys.exit(0 if check_scope.scope(1) and not check_scope.scope(0) else 1)
+"""
+CS_FIXTURES_CLI = "hooks/fixtures_cli/main.py"
+CS_FIXTURES_CLI_TEXT = "def run(n):\n    return n >= 1\n"
+CS_FIXTURES_CLI_SUITE = "hooks/test_fixtures_cli.py"
+CS_FIXTURES_CLI_SUITE_TEXT = CS_SUITE_HEAD + """from fixtures_cli import main  # noqa: E402
+
+sys.exit(0 if main.run(1) and not main.run(0) else 1)
+"""
+CS_DEMO_FIXTURE = "skills/demo/fixture/a.py"
+CS_DEMO_FIXTURE_TEXT = "def a(n):\n    return n < 3\n"
 
 
 def qmax_profile():
@@ -1248,7 +1338,13 @@ def qmax_profile():
     return dict(mutate_guard.REPLAY_PROFILES["q_max"], install=None)
 
 
-PRODUCT_PROFILES = {"q_max": qmax_profile, "banchi": banchi_profile}
+def claude_settings_profile():
+    """The claude_settings profile as hooks/mutate_guard.py names it. Its `code` and `code_not` are read here, never
+    copied, so a widened scope changes these cases with it."""
+    return dict(mutate_guard.REPLAY_PROFILES["claude_settings"])
+
+
+PRODUCT_PROFILES = {"q_max": qmax_profile, "banchi": banchi_profile, "claude_settings": claude_settings_profile}
 # case: (profile name, the base commit's files, the pull request's files). A new case adds one entry here.
 PRODUCT_CASES = {
     "qmax_test_file": ("q_max", QMAX_BASE,
@@ -1261,6 +1357,23 @@ PRODUCT_CASES = {
                         {BANCHI_SELFTEST: BANCHI_SELFTEST_TEXT, BANCHI_SUITE: BANCHI_SUITE_CHANGED}),
     "banchi_status": ("banchi", BANCHI_BASE, {BANCHI_STATUS: BANCHI_STATUS_TEXT, BANCHI_SUITE: BANCHI_SUITE_CHANGED}),
     "banchi_routes": ("banchi", BANCHI_BASE, {BANCHI_ROUTES: BANCHI_ROUTES_TEXT, BANCHI_SUITE: BANCHI_SUITE_CHANGED}),
+    "cs_skills_source": ("claude_settings", {"README.md": "base\n"},
+                         {CS_STALE: CS_STALE_TEXT, CS_STALE_SUITE: CS_STALE_SUITE_TEXT}),
+    "cs_hooks_source": ("claude_settings", {"README.md": "base\n"},
+                        {CS_GUARD: CS_GUARD_TEXT, CS_GUARD_SUITE: CS_GUARD_SUITE_TEXT}),
+    "cs_lint_source": ("claude_settings", {"README.md": "base\n"},
+                       {CS_LINT: CS_LINT_TEXT, CS_LINT_SUITE: CS_LINT_SUITE_TEXT}),
+    "cs_fixture_out": ("claude_settings", {"README.md": "base\n"},
+                       {CS_FIXTURE: CS_FIXTURE_TEXT, CS_STALE_SUITE: CS_STALE_SUITE_TEXT}),
+    "cs_helper_out": ("claude_settings", {"README.md": "base\n"},
+                      {CS_HELPER: CS_HELPER_TEXT, CS_STALE_SUITE: CS_STALE_SUITE_TEXT}),
+    "cs_suite_out": ("claude_settings", {"README.md": "base\n", CS_STALE_SUITE: CS_STALE_SUITE_TEXT},
+                     {CS_STALE_SUITE: CS_STALE_SUITE_CHANGED}),
+    "cs_fixtures_folder_in": ("claude_settings", {"README.md": "base\n"},
+                              {CS_FIXTURES_CLI: CS_FIXTURES_CLI_TEXT,
+                               CS_FIXTURES_CLI_SUITE: CS_FIXTURES_CLI_SUITE_TEXT}),
+    "cs_demo_fixture_out": ("claude_settings", {"README.md": "base\n"},
+                            {CS_DEMO_FIXTURE: CS_DEMO_FIXTURE_TEXT, CS_STALE_SUITE: CS_STALE_SUITE_TEXT}),
 }
 
 
@@ -1315,6 +1428,263 @@ class BanchiSelftestTests(unittest.TestCase):
         self.assertEqual(row["status"], "OK", api("format_replay_row")(row))
 
 
+# The child repositories' profiles: the REPLAY_PROFILES keys mailaudit, home, ios_adblock, joyous and degen. A row is
+# (key, part, sample product file, sample suite, pins). `part` is None for a repository with one profile; home and
+# ios_adblock name each part. The samples are hardcoded paths, since CI has no child clones. `pins` holds the literal
+# classify, argv, install and lockfile of the row, and link where the row installs.
+CHILD_ROWS = [
+    ("mailaudit", None, "src/view-rules.mjs", "test/view-rules.test.mjs", {
+        "classify": "fail_line", "argv": ["node", "{suite}"],
+        "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+        "lockfile": "package-lock.json", "link": "node_modules"}),
+    ("home", "js", "web/model.js", "web/model.test.js", {
+        "classify": "node_tap", "argv": ["node", "--test", "--test-reporter=tap", "{suite}"],
+        "install": None, "lockfile": None}),
+    ("home", "py", "tools/switchbot-ble-gaps.py", "tools/test_switchbot_ble_gaps.py", {
+        "classify": "fail_line", "argv": ["python3", "{suite}"], "install": None, "lockfile": None}),
+    ("ios_adblock", "node", "chrome/slice.mjs", "chrome/test/slice.test.mjs", {
+        "classify": "node_tap", "argv": ["node", "--test", "--test-reporter=tap", "{suite}"],
+        "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+        "lockfile": "chrome/package-lock.json", "link": "node_modules"}),
+    ("ios_adblock", "shell", "ios/WebExtension/src/strictmode.js", "tests/test_strictmode.sh", {
+        "classify": "fail_line", "argv": ["bash", "{suite}"], "install": None, "lockfile": None}),
+    ("joyous", None, "src/lib/conversions/normalize.ts", "tests/conversions/normalize.test.ts", {
+        "classify": "node_tap",
+        "argv": ["node", "--experimental-strip-types", "--test", "--test-reporter=tap", "{suite}"],
+        "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+        "lockfile": "package-lock.json", "link": "node_modules"}),
+    ("degen", None, "server/jd.py", "tests/addon/test_jd_heal.py", {
+        "classify": "fail_line",
+        "argv": ["env", "FEED_FREE_FLOOR_GB=0", "{deps}/venv/bin/python", "-m", "unittest", "{suite}"],
+        "install": [[sys.executable, "-m", "venv", "{deps}/venv"],
+                    ["{deps}/venv/bin/pip", "install", "--quiet", "--disable-pip-version-check", "-r",
+                     "requirements-all.txt"]],
+        "lockfile": "requirements-all.txt", "link": None}),
+]
+# Suites left out of ios_adblock: test_chrome_slice.sh is TAP, which the node part covers; test_build_rules.sh and
+# test_export_lists.sh are zsh; test_merge_chunks.sh needs macOS Swift.
+IOS_LEFT_OUT = ["tests/test_chrome_slice.sh", "tests/test_build_rules.sh", "tests/test_export_lists.sh",
+                "tests/test_merge_chunks.sh"]
+
+
+def child_label(key, part):
+    return key if part is None else "%s %s" % (key, part)
+
+
+def child_profile(key, part):
+    """The child profile `key`, or its `part`, as hooks/mutate_guard.py names it. A missing key or part is a FAIL
+    line."""
+    entry = mutate_guard.REPLAY_PROFILES.get(key)
+    if entry is None:
+        raise AssertionError("REPLAY_PROFILES has no %s key" % key)
+    if part is None:
+        return entry
+    try:
+        return entry["parts"][part]
+    except (KeyError, TypeError):
+        raise AssertionError("REPLAY_PROFILES %s has no %s part" % (key, part))
+
+
+def known_profile_keys():
+    """The keys the claude_settings, q_max and banchi entries use. A child profile uses no other key: no new field."""
+    banchi = mutate_guard.REPLAY_PROFILES.get("banchi", {})
+    entries = [mutate_guard.REPLAY_PROFILES.get("claude_settings", {}), mutate_guard.REPLAY_PROFILES.get("q_max", {}),
+               banchi, *banchi.get("parts", {}).values()]
+    return set().union(*entries)
+
+
+def child_pattern(profile, field, label):
+    """The regex in `field` of a child profile. A missing or non-text field is a FAIL line, never a KeyError."""
+    value = profile.get(field)
+    if not isinstance(value, str):
+        raise AssertionError("%s has no %s regex" % (label, field))
+    return re.compile(value)
+
+
+def child_is_product(profile, label, path):
+    """`code` matches `path` and `code_not` does not: the rule replay_pr applies to each changed file."""
+    code = child_pattern(profile, "code", label)
+    not_code = child_pattern(profile, "code_not", label) if profile.get("code_not") else None
+    return bool(code.search(path)) and not (not_code and not_code.search(path))
+
+
+def replay_value(profile, field):
+    """The value the replay reads for `field`. A row that installs reads link and lockfile with the replay's defaults; a
+    row with no install reads the raw value, None."""
+    if profile.get("install") is None:
+        return profile.get(field)
+    return profile.get(field, {"link": "node_modules", "lockfile": "package-lock.json"}.get(field))
+
+
+class ChildProfileTests(unittest.TestCase):
+    """Each child repository's profile, pinned by the literal values in CHILD_ROWS, by its sample paths and by
+    IOS_LEFT_OUT, and read here, never run: a child clone is not in CI. A red here means the profile changed from its
+    pin or lost its key or part. That change is the defect, not a stale case."""
+
+    def test_each_child_profile_key_exists(self):
+        for key, part, _, _, _ in CHILD_ROWS:
+            with self.subTest(profile=child_label(key, part)):
+                child_profile(key, part)
+
+    def test_each_child_profile_uses_only_the_known_keys(self):
+        known = known_profile_keys()
+        for key, part, _, _, _ in CHILD_ROWS:
+            label = child_label(key, part)
+            with self.subTest(profile=label):
+                extra = (set(child_profile(key, part)) | set(mutate_guard.REPLAY_PROFILES[key])) - known
+                self.assertFalse(extra, "%s uses keys no claude_settings, q_max or banchi entry uses: %s"
+                                 % (label, sorted(extra)))
+
+    def test_each_child_profile_code_matches_the_sample_product_file(self):
+        for key, part, product, _, _ in CHILD_ROWS:
+            label = child_label(key, part)
+            with self.subTest(profile=label):
+                self.assertTrue(child_is_product(child_profile(key, part), label, product),
+                                "%s: code does not match the sample product file %s" % (label, product))
+
+    def test_each_child_profile_code_skips_the_sample_suite(self):
+        for key, part, _, suite, _ in CHILD_ROWS:
+            label = child_label(key, part)
+            with self.subTest(profile=label):
+                self.assertFalse(child_is_product(child_profile(key, part), label, suite),
+                                 "%s: code matches the sample suite %s, so a suite is mutated as product"
+                                 % (label, suite))
+
+    def test_each_child_profile_tests_matches_the_sample_suite(self):
+        for key, part, _, suite, _ in CHILD_ROWS:
+            label = child_label(key, part)
+            with self.subTest(profile=label):
+                tests = child_pattern(child_profile(key, part), "tests", label)
+                self.assertTrue(tests.search(suite), "%s: tests does not match the sample suite %s" % (label, suite))
+
+    def test_each_child_profile_classify_is_a_known_classifier(self):
+        for key, part, _, _, _ in CHILD_ROWS:
+            label = child_label(key, part)
+            with self.subTest(profile=label):
+                classify = child_profile(key, part).get("classify")
+                self.assertTrue(isinstance(classify, str) and classify in mutate_shared.CLASSIFIERS,
+                                "%s: classify %r is not a mutate_shared.CLASSIFIERS name" % (label, classify))
+
+    def test_each_child_profile_select_is_a_list_holding_the_path(self):
+        for key, part, _, _, _ in CHILD_ROWS:
+            label = child_label(key, part)
+            with self.subTest(profile=label):
+                select = child_profile(key, part).get("select")
+                self.assertTrue(isinstance(select, list) and "{path}" in select,
+                                "%s: select is not a list holding {path}" % label)
+
+    def test_each_child_row_pins_the_four_fields(self):
+        for key, part, _, _, pins in CHILD_ROWS:
+            label = child_label(key, part)
+            with self.subTest(profile=label):
+                missing = {"classify", "argv", "install", "lockfile"} - set(pins)
+                self.assertFalse(missing, "%s pins no %s" % (label, ", ".join(sorted(missing))))
+
+    def test_each_child_profile_pins_its_literal_values(self):
+        for key, part, _, _, pins in CHILD_ROWS:
+            label = child_label(key, part)
+            profile = child_profile(key, part)
+            for field, want in pins.items():
+                with self.subTest(profile=label, field=field):
+                    got = replay_value(profile, field)
+                    self.assertEqual(got, want, "%s: %s is %r, want %r" % (label, field, got, want))
+
+    def test_mailaudit_code_skips_a_worker_test_file(self):
+        self.assertFalse(child_is_product(child_profile("mailaudit", None), "mailaudit", "worker/core.test.mjs"),
+                         "mailaudit code reads the suite worker/core.test.mjs as product")
+
+    def test_joyous_code_skips_astro_files(self):
+        self.assertFalse(child_is_product(child_profile("joyous", None), "joyous", "src/pages/index.astro"),
+                         "joyous code reads a .astro file as product")
+
+    def test_joyous_code_skips_a_test_file_under_src(self):
+        self.assertFalse(child_is_product(child_profile("joyous", None), "joyous", "src/lib/x.test.ts"),
+                         "joyous code reads the test file src/lib/x.test.ts as product")
+
+    def test_degen_tests_skip_the_web_folder(self):
+        tests = child_pattern(child_profile("degen", None), "tests", "degen")
+        self.assertIsNone(tests.search("tests/web/test_feed.py"),
+                          "degen tests reads tests/web/test_feed.py, a browser suite, as a unittest suite")
+
+    def test_home_code_skips_its_suites(self):
+        for part, suite in (("js", "web/model.test.js"), ("py", "tools/test_switchbot_ble_gaps.py")):
+            label = child_label("home", part)
+            with self.subTest(profile=label):
+                self.assertFalse(child_is_product(child_profile("home", part), label, suite),
+                                 "%s code reads the suite %s as product" % (label, suite))
+
+    def test_ios_adblock_tests_skip_the_suites_left_out(self):
+        for part in ("node", "shell"):
+            label = child_label("ios_adblock", part)
+            for path in IOS_LEFT_OUT:
+                with self.subTest(profile=label, suite=path):
+                    tests = child_pattern(child_profile("ios_adblock", part), "tests", label)
+                    self.assertIsNone(tests.search(path), "%s tests selects %s, which IOS_LEFT_OUT leaves out"
+                                      % (label, path))
+
+
+class ClaudeSettingsScopeTests(unittest.TestCase):
+    """Pins the product scope that the claude_settings profile reads from hooks/mutate_guard.py through `code` and
+    `code_not`. A .py file under skills/ is product. A file under hooks/ or lint/ stays product. A fixture folder, a
+    tests/ folder or a suite under skills/ is not. A folder named fixtures_cli is product: the fixture term matches a
+    whole folder name only."""
+
+    def test_a_skills_source_file_is_product(self):
+        row = product_row("cs_skills_source")
+        self.assertEqual(row["status"], "OK", "%s reads %s, not product: %s"
+                         % (CS_STALE, row["status"], api("format_replay_row")(row)))
+
+    def test_a_hooks_source_file_is_still_product(self):
+        row = product_row("cs_hooks_source")
+        self.assertEqual(row["status"], "OK", "%s reads %s, not product: %s"
+                         % (CS_GUARD, row["status"], api("format_replay_row")(row)))
+
+    def test_a_lint_source_file_is_still_product(self):
+        row = product_row("cs_lint_source")
+        self.assertEqual(row["status"], "OK", "%s reads %s, not product: %s"
+                         % (CS_LINT, row["status"], api("format_replay_row")(row)))
+
+    def test_a_fixture_under_a_skills_tests_folder_is_not_product(self):
+        row = product_row("cs_fixture_out")
+        self.assertEqual(row["status"], "NO_PRODUCT", "%s reads %s, not NO_PRODUCT: %s"
+                         % (CS_FIXTURE, row["status"], api("format_replay_row")(row)))
+
+    def test_a_helper_under_a_skills_tests_folder_is_not_product(self):
+        row = product_row("cs_helper_out")
+        self.assertEqual(row["status"], "NO_PRODUCT", "%s reads %s, not NO_PRODUCT: %s"
+                         % (CS_HELPER, row["status"], api("format_replay_row")(row)))
+
+    def test_a_suite_under_skills_is_not_product(self):
+        row = product_row("cs_suite_out")
+        self.assertEqual(row["status"], "NO_PRODUCT", "%s reads %s, not NO_PRODUCT: %s"
+                         % (CS_STALE_SUITE, row["status"], api("format_replay_row")(row)))
+
+    def test_a_module_in_a_folder_named_fixtures_cli_is_product(self):
+        row = product_row("cs_fixtures_folder_in")
+        self.assertEqual(row["status"], "OK", "%s reads %s, not product: %s"
+                         % (CS_FIXTURES_CLI, row["status"], api("format_replay_row")(row)))
+
+    def test_a_module_in_a_fixture_folder_under_skills_is_not_product(self):
+        row = product_row("cs_demo_fixture_out")
+        self.assertEqual(row["status"], "NO_PRODUCT", "%s reads %s, not NO_PRODUCT: %s"
+                         % (CS_DEMO_FIXTURE, row["status"], api("format_replay_row")(row)))
+
+
+class ClaudeSettingsSelectPinTests(unittest.TestCase):
+    """Pins the select command of the real claude_settings profile: it prints the suite beside a skills/ file. The
+    command runs in this checkout, so the suite must be tracked here."""
+
+    def test_the_selector_names_the_suite_beside_a_skills_file(self):
+        select = mutate_guard.REPLAY_PROFILES["claude_settings"]["select"]
+        argv = [part.replace("{path}", CS_STALE) for part in select]
+        done = subprocess.run(argv, cwd=REPO, capture_output=True, text=True, encoding="utf-8", timeout=120)
+        self.assertEqual(done.returncode, 0, "the select command of claude_settings exited %d: %s"
+                         % (done.returncode, done.stderr.strip()))
+        listed = [line.strip() for line in done.stdout.splitlines()]
+        self.assertIn(CS_STALE_SUITE, listed, "the select command of claude_settings does not name %s for %s; it "
+                      "printed %r" % (CS_STALE_SUITE, CS_STALE, listed))
+
+
 class EdgeTests(unittest.TestCase):
 
     def test_a_pr_with_no_mutant_on_its_lines_is_unknown(self):
@@ -1331,6 +1701,13 @@ class EdgeTests(unittest.TestCase):
         row = edge_rows()[3]
         self.assertEqual(row["status"], "OK")
         self.assertNotIn("test/old.test.mjs", row["unusable"])
+
+    def test_a_skipped_file_reads_the_row_unknown_when_other_files_made_mutants(self):
+        row = edge_rows()[4]
+        self.assertEqual(sorted(row["skipped"]), ["src/broken-late.mjs"])
+        self.assertGreater(row["made"], 0, "src/grade.mjs must make mutants, or the row is UNKNOWN for another cause")
+        self.assertEqual(row["status"], "UNKNOWN",
+                         "a file that does not parse is skipped, so the row must not read OK with a rate")
 
 
 class HangTests(unittest.TestCase):
@@ -1406,10 +1783,12 @@ class EarlyStopTests(unittest.TestCase):
 
 
 class SelectTests(unittest.TestCase):
-    """The profile's `select` argv names the suites to run against each product file's mutants."""
+    """The profile's `select` argv names the suites to run against each product file's mutants, and the selector a
+    replay reads when its commit has none."""
 
-    def test_a_changed_suite_the_selector_does_not_list_for_a_file_never_runs_on_its_mutants(self):
-        row, runs, fixture = select_run("main")
+    def assert_per_file_runs(self, row, runs, fixture):
+        """The row reads OK with both suites green on the clean source. Each suite ran its clean run and the mutants of
+        the one file its selector lists: suite a on src/x.mjs, suite b on src/y.mjs."""
         made_x, made_y = len(fixture["mutants"]["x"]), len(fixture["mutants"]["y"])
         self.assertGreater(made_x, 0, "src/x.mjs needs mutants")
         self.assertGreater(made_y, 0, "src/y.mjs needs mutants")
@@ -1420,6 +1799,38 @@ class SelectTests(unittest.TestCase):
                          "src/x.mjs only" % (runs["a"], made_x))
         self.assertEqual(runs["b"], 1 + made_y, "suite b ran %d times, want its clean run and the %d mutants of "
                          "src/y.mjs only" % (runs["b"], made_y))
+
+    def test_a_changed_suite_the_selector_does_not_list_for_a_file_never_runs_on_its_mutants(self):
+        row, runs, fixture = select_run("main")
+        self.assert_per_file_runs(row, runs, fixture)
+
+    def test_a_selector_missing_at_the_pr_commit_runs_the_copy_at_head(self):
+        """The commit has no selector, so the copy at HEAD runs, with its folder: the sibling it imports comes along.
+        The row names the file it read from HEAD."""
+        row, runs, fixture = select_run("added-later", selector=None, later=LATER_IMPORTS)
+        self.assert_per_file_runs(row, runs, fixture)
+        notes = repr(row.get("notes"))
+        self.assertIn("harness/tests-for.mjs", notes, "the row must name the selector it read from HEAD")
+        self.assertNotIn("every changed suite runs", notes, "the row fell back to every changed suite")
+
+    def test_a_bare_command_name_is_never_served_from_head(self):
+        """A select argv part with no slash is a command PATH resolves. A root file named node at HEAD is not that
+        command: the run keeps `node`, each suite runs on its own file's mutants, and no note names node."""
+        row, runs, fixture = select_run("bare-node", selector=None, later=LATER_BARE_NODE)
+        self.assert_per_file_runs(row, runs, fixture)
+        notes = row.get("notes") or []
+        self.assertFalse([note for note in notes if re.search(r"\bnode\b", note)],
+                         "a note names the bare command node: %r" % notes)
+        self.assertTrue(any("harness/tests-for.mjs" in note for note in notes),
+                        "the note for the selector read from HEAD is missing: %r" % notes)
+
+    def test_a_selector_at_the_pr_commit_wins_over_a_later_one_at_head(self):
+        """Passes on the old code too: the commit's own selector is read first, so the later one at HEAD never runs.
+        It pins that order: a replay that read HEAD first would run both suites on both files."""
+        row, runs, fixture = select_run("commit-wins", later=LATER_BOTH)
+        self.assert_per_file_runs(row, runs, fixture)
+        self.assertNotIn("harness/tests-for.mjs", repr(row.get("notes")),
+                         "the row names a selector read from HEAD, but the commit's own selector should run")
 
     def test_a_selector_that_fails_for_one_file_runs_every_changed_suite_on_that_file(self):
         row, runs, fixture = select_run("fails", selector=SELECTOR_FAILS_FOR_Y)
@@ -1440,6 +1851,12 @@ class SelectTests(unittest.TestCase):
         notes = repr(row.get("notes"))
         self.assertIn("src/x.mjs", notes, "the row must record the fallback for src/x.mjs")
         self.assertIn("src/y.mjs", notes, "the row must record the fallback for src/y.mjs")
+
+    def test_the_banchi_ts_part_names_the_per_file_selector(self):
+        self.assertEqual(banchi_part("ts").get("select"), BANCHI_SELECT, "the banchi ts part has no per-file selector")
+
+    def test_the_banchi_py_part_names_the_per_file_selector(self):
+        self.assertEqual(banchi_part("py").get("select"), BANCHI_SELECT, "the banchi py part has no per-file selector")
 
 
 class PrBudgetTests(unittest.TestCase):

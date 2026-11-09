@@ -67,6 +67,7 @@ import threading
 import time
 import uuid
 from collections import Counter
+from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -763,12 +764,11 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     worktree also needs to be merged and idle 1 hour, so a stale installed job fails safe.
     ATTENDED (a person's run) skips those two keeps. AGENT_RULE (on by default) lets a clean,
     fully pushed tree under `.claude/worktrees/agent-*` go after 4 idle hours even when those two
-    keeps hold it. A repo's own `reap:worktrees` script turns it off. BATCH (`merged_batch`) is
-    the one read that says which commits are in the default branch. FAST reads no remote and no
-    push state: the tree goes only when its HEAD is in the default branch (and idle 1 hour,
-    unless attended), and with no BATCH nothing is proven, so it stays. OWN_LOCK_RULE (on by
-    default) frees the calling session's own agent lock once the tree is clean, merged, idle 30
-    minutes and unused; the agent-end reap turns it off."""
+    keeps hold it. BATCH (`merged_batch`) is the one read that says which commits are in the
+    default branch. FAST reads no remote and no push state: the tree goes only when its HEAD is
+    in the default branch (and idle 1 hour, unless attended), and with no BATCH nothing is
+    proven, so it stays. OWN_LOCK_RULE (on by default) frees the calling session's own agent
+    lock once the tree is clean, merged, idle 30 minutes and unused; the agent-end reap turns it off."""
     lock_idle = None  # an agent lock's idle is read even when attended, and before any status
     if AGENT_LOCK_RE.match(entry.get("locked_reason") or ""):
         lock_idle = entry["idle"] if "idle" in entry else worktree_idle_seconds(entry["path"])
@@ -2242,9 +2242,28 @@ def _removed_count(decisions):
     return sum(1 for d in decisions if d["action"] == "reap" and not d.get("error"))
 
 
+# The newest lines are the only ones a reader needs (the preview's "last --confirm run" line); at one
+# line per repository per run, 2000 lines is months of daily runs. A root's newest line outlives the
+# cut, up to MAX_RUN_LOG_ROOTS of them: a machine has tens of roots, and without the bound a log of
+# one-off roots would never shrink.
+MAX_RUN_LOG_LINES = 2000
+MAX_RUN_LOG_ROOTS = 200
+# Guards one append-then-trim (read the file, rewrite it) against another thread of this process doing
+# the same, so a trim never drops a line a second append just wrote. A sweep run does not contend:
+# `_pmap` with acts runs its roots one at a time.
+_RUN_LOG_LOCK = threading.Lock()
+
+
+def run_log_key(root: str) -> str:
+    """One spelling of a root for the run log: the writer's trim, the preview's reader and its lookup all
+    compare roots through this, so a symlinked or differently cased path finds its line."""
+    return os.path.normcase(os.path.realpath(root))
+
+
 def append_run_log(path: str, results):
-    """One JSON line per repository, so a run's yield is readable later. Never fails the sweep:
-    the reaping is done by now, and a log that cannot be written is only a missing line."""
+    """One JSON line per repository, so a run's yield is readable later. Keeps the last
+    MAX_RUN_LOG_LINES lines. Never fails the sweep: the reaping is done by now, and a log that
+    cannot be written is only a missing line."""
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         lines = []
@@ -2259,10 +2278,82 @@ def append_run_log(path: str, results):
                 "branches_reaped": _removed_count(result["branches"]),
                 "time_ms": int(time.time() * 1000),
             }))
-        with open(path, "a", encoding="utf-8") as handle:
-            handle.write("\n".join(lines) + "\n")
+        with _RUN_LOG_LOCK:
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write("\n".join(lines) + "\n")
+            with open(path, encoding="utf-8") as handle:
+                kept = handle.readlines()
+            if len(kept) > MAX_RUN_LOG_LINES:
+                temp = "%s.%d.tmp" % (path, os.getpid())
+                try:
+                    with open(temp, "w", encoding="utf-8") as handle:
+                        handle.writelines(_trim_run_log(kept))
+                    os.replace(temp, path)
+                except OSError as exc:  # the log stays as it was, untrimmed
+                    try:
+                        os.remove(temp)
+                    except OSError:
+                        pass
+                    print("janitor: run log not trimmed (%s)" % exc)
     except (OSError, ValueError) as exc:
         print("janitor: run log not written (%s)" % exc)
+
+
+def _trim_run_log(lines):
+    """The last MAX_RUN_LOG_LINES of LINES, plus the newest MAX_RUN_LOG_ROOTS of the lines that are a
+    root's newest and fall before the cut, in file order. The preview reads one line per root, so a
+    root that has not run lately keeps its line. The result never exceeds the two bounds added."""
+    cut = len(lines) - MAX_RUN_LOG_LINES
+    newest = {}
+    keys = {}
+    for number, text in enumerate(lines):
+        try:
+            root = json.loads(text)["root"]
+            if root not in keys:
+                keys[root] = run_log_key(root)
+            newest[keys[root]] = number
+        except (ValueError, KeyError, TypeError, OSError):
+            continue
+    keep = set(sorted(number for number in newest.values() if number < cut)[-MAX_RUN_LOG_ROOTS:])
+    return [text for number, text in enumerate(lines) if number >= cut or number in keep]
+
+
+def read_last_runs(path: str):
+    """The newest run-log line for each root, as {run_log_key(root): line}. One read of PATH.
+    A missing file is {}. An unreadable file raises OSError; a line that is not JSON is skipped."""
+    last = {}
+    keys = {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for text in handle:
+                try:
+                    row = json.loads(text)
+                    if row["root"] not in keys:
+                        keys[row["root"]] = run_log_key(row["root"])
+                    last[keys[row["root"]]] = row
+                except (ValueError, KeyError, TypeError, OSError):
+                    continue
+    except FileNotFoundError:
+        pass
+    return last
+
+
+def last_run_line(last, root: str, path: str) -> str:
+    """The preview's one line about a root's last --confirm run. LAST is read_last_runs' answer, or an
+    exception that read raised."""
+    if isinstance(last, Exception):
+        return "last --confirm run: unknown (%s)" % type(last).__name__
+    row = last.get(run_log_key(root))
+    if row is None:
+        return "last --confirm run: none in %s" % path
+    try:
+        import local_time
+        at = datetime.fromtimestamp(int(row["time_ms"]) / 1000, timezone.utc)
+        when = local_time.line(lambda: at).split(None, 2)[2]  # the date, time, zone name and offset
+        return "last --confirm run: %s, %s worktrees removed, %s branches reaped" % (
+            when, row["worktrees_removed"], row["branches_reaped"])
+    except (KeyError, TypeError, ValueError, OverflowError, OSError) as err:
+        return "last --confirm run: unknown (%s)" % type(err).__name__
 
 
 def append_restore_log(path: str, repo: str, branch: str, commit: str):
@@ -2709,47 +2800,6 @@ def _is_toplevel(path: str) -> bool:
 MODES = ("full", "tier1", "branches")
 
 
-REAPER_SCRIPT = "reap:worktrees"
-# session_end_sweep.py kills this sweep at 25 s (SWEEP_TIMEOUT_SECONDS). The repo's own script has
-# to end well inside that, or the kill orphans its npm child, so it gets 15 s. After a timeout the
-# older rules alone judge the trees.
-REAPER_TIMEOUT_SECONDS = 15
-
-
-def repo_reaper(root: str):
-    """The repo's own agent-worktree remover: ("none", None) when `<root>/package.json` is absent
-    or defines no `reap:worktrees` script, ("script", None) when it does, ("unreadable", why) when
-    package.json cannot be read or parsed. The agent rule needs "none"."""
-    package = os.path.join(root, "package.json")
-    if not os.path.isfile(package):
-        return "none", None
-    try:
-        with open(package, encoding="utf-8") as handle:
-            scripts = json.load(handle).get("scripts") or {}
-        return ("script" if REAPER_SCRIPT in scripts else "none"), None
-    except Exception as exc:
-        return "unreadable", "package.json unreadable: %s" % exc
-
-
-def run_repo_reaper(root: str):
-    """Run `npm run reap:worktrees -- --remove` in ROOT. Returns None on success, else why it
-    failed. npm is resolved with shutil.which (npm.cmd on Windows); prompts are off."""
-    npm = shutil.which("npm")
-    if npm is None:
-        return "npm not found"
-    try:
-        done = _nowindow.run(
-            [npm, "run", REAPER_SCRIPT, "--", "--remove"], cwd=root, capture_output=True,
-            text=True, encoding="utf-8", errors="replace", timeout=REAPER_TIMEOUT_SECONDS,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
-    except Exception as exc:
-        return "npm run %s failed: %s" % (REAPER_SCRIPT, exc)
-    if done.returncode != 0:
-        return "npm run %s exited %d: %s" % (REAPER_SCRIPT, done.returncode,
-                                             (done.stderr or done.stdout).strip()[-200:])
-    return None
-
-
 # Only the SessionEnd run has a deadline. session_end_sweep.py kills its sweep after min(25 s,
 # the time its hook has left) and passes that number as `--deadline-seconds N`. The budget counts
 # from the start of the pass: the pass judges trees until min(JUDGE_BUDGET_SECONDS, N minus
@@ -2761,6 +2811,7 @@ JUDGE_BUDGET_SECONDS = 12
 DEADLINE_TAIL_SECONDS = 7.5
 _now = time.monotonic  # `main` reads it at a pass's start; the cases replace it with their own clock
 _DEADLINE = None  # a `_now()` time while `main` runs; None means no deadline
+_LAST_RUN = None  # a function while a preview prints its report: a root to its last --confirm run line
 
 
 def _past_deadline() -> bool:
@@ -2890,23 +2941,9 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     if mode not in ("branches", "fast"):
         result["pruned"] = prune_registrations(root, confirm)
 
-    # The agent rule (when-a-worktree-may-be-removed) is the default remover of finished agent
-    # trees. A repo with its own `reap:worktrees` script gets that script instead, run before the
-    # list is read so the trees it removes are not judged; an unreadable package.json turns the
-    # rule off.
+    # The agent rule (when-a-worktree-may-be-removed) is the remover of finished agent trees in
+    # every repo: the sweep never runs code a repository supplies, so no repo script replaces it.
     agent_rule = mode == "full" and not attended
-    if agent_rule:
-        reaper, why = repo_reaper(root)
-        if reaper != "none":
-            agent_rule = False
-            if reaper == "unreadable":
-                result["reaper"] = why
-            elif confirm and _past_deadline():
-                result["reaper"] = "not run: deadline"
-            elif confirm:
-                result["reaper"] = run_repo_reaper(root) or "ran"
-            else:
-                result["reaper"] = "would run"
 
     entries = parse_worktree_list(root)
     if entries is None:
@@ -3060,6 +3097,8 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
     for result in results:
         print("", file=out)
         print("== %s ==" % result["root"], file=out)
+        if _LAST_RUN:
+            print("  %s" % _LAST_RUN(result["root"]), file=out)
         if result["refused"]:
             refused_repos.append((result["root"], result["refused"]))
             print("  REFUSED: %s -- reaps nothing in this repository" % result["refused"],
@@ -3070,8 +3109,6 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
         if not result["branches"] and not result["worktrees"] and not result["listeners"] \
                 and not has_prune and result.get("husks", []) == [] and result.get("strays", []) == []:  # None is unknown
             print("  nothing to examine", file=out)
-        if result.get("reaper"):
-            print("  reaper    %s: %s" % (REAPER_SCRIPT, result["reaper"]), file=out)
         if pruned and pruned["names"] is None:
             print("  prune     UNREADABLE -- %s; nothing pruned" % pruned["error"], file=out)
         elif pruned:
@@ -3252,6 +3289,10 @@ def main(argv=None) -> int:
     parser.add_argument("--root", metavar="PATH",
                          help="sweep the one repository PATH belongs to (PATH may be a linked "
                               "worktree or a folder inside it); adds to any ROOT given")
+    parser.add_argument("--session-end", action="store_true", dest="session_end",
+                         help="the SessionEnd run only: judges branches and worktrees in its "
+                              "own repository only, stops proven orphans machine-wide like the "
+                              "scheduled job, and skips the loose-process report")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--tier1", action="store_true",
                        help="only stale registrations and husks. The one mode that acts "
@@ -3339,7 +3380,18 @@ def _sweep_roots(args, roots, restore_log_path, mode):
     results = list(_pmap(
         one,
         roots, args.confirm or mode == "tier1", _ROOT_POOL))
-    print_sweep_report(results, args.confirm or mode == "tier1")
+    global _LAST_RUN
+    if not args.confirm and mode != "tier1":  # a preview: one read of the run log, not one per root
+        run_log = default_run_log_path()
+        try:
+            last = read_last_runs(run_log)
+        except OSError as err:
+            last = err
+        _LAST_RUN = lambda root: last_run_line(last, root, run_log)  # noqa: E731
+    try:
+        print_sweep_report(results, args.confirm or mode == "tier1")
+    finally:
+        _LAST_RUN = None
     if args.confirm:
         if any(_removed_count(r["worktrees"]) + _removed_count(r["branches"]) for r in results):
             try:
@@ -3355,7 +3407,8 @@ def _sweep_roots(args, roots, restore_log_path, mode):
         return 0
     dead = find_dead_rooted()
     print_dead_rooted_report(dead)
-    if not _past_deadline():
+    # SessionEnd skips the loose-process report: the hook discards its output.
+    if not getattr(args, "session_end", False) and not _past_deadline():
         print_loose_processes_report(find_loose_processes())
     if args.confirm:
         reaped = reaped_listener_decisions(results)

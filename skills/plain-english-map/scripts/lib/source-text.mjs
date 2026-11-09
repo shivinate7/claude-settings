@@ -56,8 +56,9 @@ const HEREDOC = /<<(-?)[ \t]*(?:'([^'\n]+)'|"([^"\n]+)"|\\?([\w.-]+))/y;
  * after one of `;&|()<>`, so `$#` and `${#x}` open none. A heredoc body runs from the line after its operator to its end line,
  * which `<<-` may indent with tabs, and no quote in it opens a string. An operator inside `((...))` is a shift, never a heredoc.
  * Stated limit: a quote inside `$(...)` within a double-quoted string ends that string.
+ * With `keepStrings`, the text of strings and heredoc bodies stays as written, so only the comments are blanked.
  */
-export const blankShell = (src) => {
+export const blankShell = (src, { keepStrings = false } = {}) => {
   const blank = (ch) => (ch === "\n" ? "\n" : " ");
   const n = src.length;
   let out = "";
@@ -72,7 +73,7 @@ export const blankShell = (src) => {
         const eol = at === -1 ? n : at;
         const line = src.slice(i, eol);
         const ends = (tabs ? line.replace(/^\t+/, "") : line) === word;
-        out += (ends ? line : " ".repeat(line.length)) + (eol < n ? "\n" : "");
+        out += (ends || keepStrings ? line : " ".repeat(line.length)) + (eol < n ? "\n" : "");
         i = eol + 1;
         if (ends) break;
       }
@@ -87,8 +88,8 @@ export const blankShell = (src) => {
     if (state === "comment") { out += " "; i++; continue; }
     if (state !== "code") {
       if (c === (state === "double" ? '"' : "'")) { state = "code"; out += c; }
-      else if (c === "\\" && state !== "single" && i + 1 < n) { out += " " + blank(src[i + 1]); i++; }
-      else out += blank(c);
+      else if (c === "\\" && state !== "single" && i + 1 < n) { out += keepStrings ? c + src[i + 1] : " " + blank(src[i + 1]); i++; }
+      else out += keepStrings ? c : blank(c);
       i++; continue;
     }
     if (c === "\\" && i + 1 < n) { out += c + src[i + 1]; i += 2; continue; }
@@ -106,6 +107,49 @@ export const blankShell = (src) => {
     else if (c === "#" && (i === 0 || /[\s;&|()<>]/.test(src[i - 1]))) { state = "comment"; out += " "; i++; continue; }
     out += c; i++;
   }
+  return out;
+};
+
+/**
+ * Python source with every `#` comment blanked to spaces, and the text of every string blanked too, at the same offsets as the file.
+ * Quotes and newlines stay. A string is single-, double- or triple-quoted, and a `\` takes the next character (a raw string too, as in Python).
+ * A single- or double-quoted string ends at its line end if it is unterminated. A `#` inside a string, a triple-quoted one included, opens no comment.
+ * With `keepStrings`, the text of strings stays as written, so only the comments are blanked.
+ * Stated limit: a quote inside the braces of an f-string ends that string, as it did before Python 3.12.
+ */
+export const blankPython = (src, { keepStrings = false } = {}) => {
+  const blank = (ch) => (ch === "\n" ? "\n" : " ");
+  const text = (ch) => (keepStrings ? ch : blank(ch));
+  const n = src.length;
+  let out = "";
+  let i = 0;
+  while (i < n) {
+    const c = src[i];
+    if (c === "#") { while (i < n && src[i] !== "\n") { out += " "; i++; } continue; }
+    if (c !== "'" && c !== '"') { out += c; i++; continue; }
+    const q = src.startsWith(c.repeat(3), i) ? c.repeat(3) : c;
+    out += q; i += q.length;
+    while (i < n) {
+      if (src.startsWith(q, i)) { out += q; i += q.length; break; }
+      if (src[i] === "\\" && i + 1 < n) { out += text(src[i]) + text(src[i + 1]); i += 2; continue; }
+      if (q.length === 1 && src[i] === "\n") break;
+      out += text(src[i]); i++;
+    }
+  }
+  return out;
+};
+
+/**
+ * The comments of one source file, and nothing else: every other character is a space, a newline stays, and each offset still points
+ * at the same character of the file. The reader follows the file name: Python by `blankPython`, shell by `blankShell`, any other name by
+ * the JS scanner `blankComments`. A string is never a comment, so text in a string, a Python triple-quoted string or a heredoc is blanked here.
+ */
+export const commentsOf = (src, file) => {
+  const kept = /\.py$/.test(file ?? "") ? blankPython(src, { keepStrings: true })
+    : /\.(sh|bash)$/.test(file ?? "") ? blankShell(src, { keepStrings: true })
+    : blankComments(src, file);
+  let out = "";
+  for (let i = 0; i < src.length; i++) out += kept[i] !== src[i] || src[i] === "\n" ? src[i] : " ";
   return out;
 };
 

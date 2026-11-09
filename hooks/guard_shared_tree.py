@@ -173,20 +173,25 @@ def stash_discards(args) -> bool:
     return stash_action(args) not in STASH_READ_ACTIONS
 
 
+# The reset modes that can lose work. Each one takes the same verdict.
+RESET_DISCARD_FLAGS = ("--hard", "--merge", "--keep")
+
+
 def reset_discards(args) -> bool:
     """True when a `git reset` call can overwrite the working tree with no way back.
 
-    Only `--hard` rewrites tracked files in the working tree unconditionally (MEASURED against
-    a real uncommitted change, 2026-09-17: it was gone after the reset). The default, with no
-    flag and no paths, and `--soft`, `--mixed`, `--keep`, and `--merge` all leave the working
-    tree alone or abort when a local change would be overwritten (MEASURED the same day: `git
-    reset --keep` and `git reset --merge` both stopped with "error: Entry 'f.txt' not uptodate.
-    Cannot merge." against a modified file, and the file kept its uncommitted line). A `reset`
-    that names paths only ever touches the index, and git refuses to combine `--hard` with a
-    path at all ("fatal: Cannot do hard reset with paths."), so no path form can lose the
-    working tree either.
+    `--hard` rewrites tracked files unconditionally. `--merge HEAD` also reverts a staged edit
+    and deletes a staged new file, with exit 0. `--keep` and `--merge` at another commit move
+    the branch exactly as `--hard` does, so all three take one verdict.
+    Two false alarms are accepted on purpose: `reset --keep HEAD` over a dirty tree, and
+    `reset --merge HEAD` over an unstaged-only edit. Both keep the work yet are refused, and
+    Claude has no reason to write either.
+    The default, `--soft` and `--mixed` leave the working tree alone. A `reset` that names
+    paths only touches the index, and git refuses to combine a path with `--hard` ("fatal:
+    Cannot do hard reset with paths."). `--merge` and `--keep` get the same refusal ("fatal:
+    Cannot do merge reset with paths."), so a path form never reaches the working tree.
     """
-    return "--hard" in args
+    return any(flag in args for flag in RESET_DISCARD_FLAGS)
 
 
 def restore_discards(args) -> bool:
@@ -293,8 +298,8 @@ def shared_tree_hit(segment: str) -> str:
 # False there, and the rule keeps its old fail-closed deny: nothing was read, so nothing is
 # proven. Only git failing to ANSWER is unreadable, which is arm 2 below.
 #
-# A CLEAN TREE PASSES A `reset --hard` ONLY AT `HEAD`, OR WITH NO TARGET AT ALL. A `reset --hard`
-# can lose two different things, and the subject read covers only one of them.
+# A CLEAN TREE PASSES A `reset --hard` (OR `--merge`, OR `--keep`) ONLY AT `HEAD`, OR WITH NO
+# TARGET AT ALL. A `reset --hard` can lose two different things, and the subject read covers only one of them.
 #
 #   uncommitted work  has no copy anywhere. `git status --porcelain` reports it, so an empty
 #                     answer proves there is none to lose.
@@ -308,9 +313,9 @@ def shared_tree_hit(segment: str) -> str:
 # (MEASURED on 1be660c in a pristine repository with an empty
 # porcelain: `git reset --hard HEAD` answered allow, and so did `git reset --hard HEAD~1`.)
 RESTORE_OPT_WITH_VALUE = {"-s", "--source", "--conflict", "--pathspec-from-file"}
-# `git reset` takes a value after this one. A pathspec form cannot carry `--hard` at all ("fatal:
-# Cannot do hard reset with paths."), which `reset_discards` above already records, so the plain
-# operand of a `--hard` call is always the target and never a path.
+# `git reset` takes a value after this one. A pathspec form cannot carry `--hard`, `--merge` or
+# `--keep`, which `reset_discards` above records, so the plain operand of such a call is
+# always the target and never a path.
 RESET_OPT_WITH_VALUE = {"--pathspec-from-file"}
 RESET_HEAD_TARGETS = ("", "HEAD")
 # `git clean -e <pattern>` carries a value. Without this, the pattern would land in the pathspec

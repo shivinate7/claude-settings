@@ -72,6 +72,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   detached-launch      deny. A command that starts a process and detaches it from the session.
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
   live-stream, waiter  deny. A command that follows a stream with no end, or polls with sleep.
+  verdict-pipe         deny. A `verdict` stage piped into another command: the exit is the last
+                       stage's, and a filter can cut verdict's FAIL line.
   background-end       deny. A background command with no end note. (background-needs-end-note)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)
@@ -121,6 +123,16 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
+  conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker
+                       line in one file's added lines, read with `git diff --check`: the index, or the working
+                       tree (untracked files too) when `-a`, a pathspec or an earlier add reaches the file; a
+                       `merge`, `rebase` or `cherry-pick --continue` counts as a commit. It judges a commit only
+                       when each earlier segment is a git add, commit or read, `true`, `false` or `cd`. Also a
+                       `git push` whose net range (remote-tracking tip, else upstream, else default base, up
+                       to the pushed ref, else HEAD) adds such a file; and a push after a commit the guard
+                       could not judge, when that commit covers a triplet already in the tree or the chain
+                       runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
+                       (commit-refuses-conflict-markers)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
@@ -137,6 +149,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
 Other tools, in `judge` order:
   worktree-home        deny. A call from an agent whose shell cwd or write target is outside its
                        own recorded worktree. Read and Grep pass, so a stranded agent can report.
+                       A Write or Edit strictly inside the caller's own `agent-<id>-<suffix>`
+                       red-run folder passes.
                        No record (a non-isolated agent, or the orchestrator) allows everything.
                        No override lifts it. (an-agent-outside-its-home-tree-must-stop)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
@@ -149,7 +163,9 @@ Other tools, in `judge` order:
                        A Bash or PowerShell `cd`, `pushd` or `Set-Location` into another
                        checkout is refused too, bare or chained; the cd target in the caller's
                        recorded home, a session's recorded home, or the caller's own
-                       `agent-<id>-<suffix>` red-run folder passes that act.
+                       `agent-<id>-<suffix>` red-run folder passes that act. A write strictly
+                       inside that red-run folder passes too, here and in worktree-home; the
+                       folder root does not (no `rm -rf <red>`).
                        A write or `cd` into a separate clone of the same repo (same origin, read
                        from the config files) is refused too, as is a write from a cwd stranded
                        in one while `CLAUDE_PROJECT_DIR` names the home clone; a git verb that
@@ -185,6 +201,20 @@ Other tools, in `judge` order:
                        shorthand key is not seen. A regex literal after `)`, `return` or
                        `typeof` that holds a quote can hide an `agent()` call.
                        (agent-model-cap)
+  brief-claim-has-probe
+                       deny. An Agent or Task brief to a builder or a test-author with a sentence that says what
+                       main, origin/main or today passes, allows, accepts, refuses, rejects or blocks, for an input
+                       (a backtick span, a double-quoted string, or a single-quoted one), when no command line holds
+                       that input, as the whole text between quotes or the whole line, with a result line right
+                       under it. Active form: `main` or `origin/main` (a backticked one too) with the verb next to
+                       it, or today with it, they, guard, hook, rule or check; "the main session" is no subject.
+                       Passive form: `X` is refused on main. Fenced text is read. A command line is a line of its own
+                       in a fence, in backticks, or after `$ `, led by python, python3, git, verdict, bash, sh, node,
+                       npm, npx, pytest, gh, grep, rg or jq; a line that holds a claim is never one. A path after in,
+                       at, from, under, inside, within or via is a locator, not an input. A line that starts with
+                       `Add a case:` or `Must deny:` is case data. A sentence with no input is not judged. A lone
+                       backtick reads to the line's end. Other roles pass. An override lifts it.
+                       (brief-claim-has-probe)
   lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt is
                        not exactly `/effort medium` (LANE_EFFORT), with no trimming. A lane tag is
                        any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
@@ -199,6 +229,12 @@ Other tools, in `judge` order:
                        the host is never read. With no readable repo, any tag `cs-repo:<owner>/<name>`
                        passes. The deny reason names the tag to add.
                        Runs after lane-effort-pin. An override lifts it. (agent-model-cap, session-tiers)
+  load-brake           deny. On a local session, a lane-start call, an agent's shell or file write, or a lane
+                       session's own shell or file write, when the machine is busy (lane starts only) or full. A
+                       lane session is one whose own newest get_session record carries `cs-build:lane` and no other
+                       `cs-build:` tag; the coordinator, triage and the batch runner are never braked on their own
+                       calls. The transcript is read only at full. A cloud session skips it. An override lifts it.
+                       (machine-load-brake)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-bypass
@@ -216,9 +252,10 @@ Other tools, in `judge` order:
                        deny. An `xcodebuild -destination` that names a shut-down simulator. Judged
                        after the cap and twin rules. The remedy is `sim-test` for the `test` action,
                        else the generic destination. An override lifts it. (sim-test-is-the-one-boot-path)
-  simulator-boot-locked
-                       deny. A simulator MCP `launch` of a shut-down device while the sim-test lock
-                       has a live holder. Judged after the cap and twin rules. An override lifts it.
+  simulator-boot-lease
+                       deny. A simulator MCP `launch` of a shut-down device, lock or no lock: no session
+                       holds a lease for it. The remedy is `sim-test`. Judged after the cap and twin
+                       rules. A launch of a booted device passes. An override lifts it.
                        (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
@@ -266,7 +303,10 @@ The model judges (hooks/call_judge.py, hooks/prose_judge.py, hooks/sendmessage_s
 refuse() too, so an override lifts them.
 """
 
+import difflib
 import importlib
+import importlib.machinery
+import importlib.util
 import json
 import os
 import re
@@ -350,12 +390,13 @@ while True:
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
             PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
-            parent_delete_hit, push_ask_hit, push_target, push_text, push_verdict, rm_delete_hit,
+            parent_delete_hit, push_ask_hit, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
-            BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, gh_call_of, git_call_of,
-            merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
+            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
+            conflict_markers_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
@@ -368,6 +409,7 @@ while True:
         _loading = "guard_env"
         from guard_env import (
             ENV_ADVICE, ENV_TOOL_REASON, _substitutions, env_heredoc_refusal, env_refusal, is_env,
+            substitution_commands,
         )
         _loading = "guard_kill"
         from guard_kill import (
@@ -379,9 +421,10 @@ while True:
         _loading = "guard_stream"
         from guard_stream import (
             BACKGROUND_END_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
-            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, WAITER_REASON, background_end_hit,
+            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, VERDICT_PIPE_REASON, WAITER_REASON,
+            background_end_hit,
             live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern,
-            narrated_tail_hit, waiter_verdict,
+            narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
         _loading = "guard_rm_var"
         from guard_rm_var import (
@@ -760,7 +803,7 @@ def in_throwaway(segments, number: int, cwd: str, ends=()) -> bool:
     return all(folder and path_is_inside(folder, tempfile.gettempdir()) for folder in judged)
 
 
-# decision lanes-start-in-tool-worktrees: a lane tree comes only from the tool's own isolation.
+# decision lanes-start-in-tool-worktrees: a worktree comes only from the tool's own isolation.
 HAND_MADE_VALUE_OPTIONS = ("-b", "-B", "--reason")
 
 
@@ -824,10 +867,10 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
 
 
 WORKTREE_HAND_MADE_REASON = (
-    "Rule (hand-made worktree): a lane tree comes only from the Agent tool's isolation "
+    "Rule (hand-made worktree): a worktree comes only from the Agent tool's isolation "
     "'worktree' option or from the EnterWorktree tool, never from a tree made by hand. "
-    "A hand-made tree sends a lane to work in the main clone and loses the isolation. "
-    "Remedy: start the lane with one of those two tools. Call EnterWorktree with a `name` and no "
+    "A hand-made tree sends an agent or a session to work in the main clone and loses the isolation. "
+    "Remedy: start the work with one of those two tools. Call EnterWorktree with a `name` and no "
     "`path`. If the tool's isolation was refused, "
     "make no tree by hand: stop and report to the owner which layer refused and its exact "
     "message. A guard refusal starts \"Rule (\" and names its rule. Any other refusal is the "
@@ -1509,6 +1552,7 @@ AUTHOR_BASENAMES = {"requirements-dev.txt"}
 # The three mutation tests are test code for a test-author, named one by one so a later product
 # mutate_*.py stays a builder's. A builder keeps editing them: they are not test paths. Case folds as in `is_test_rel`.
 AUTHOR_MUTATION_TESTS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
+MUTATION_TEST_NAMES = {name.rsplit("/", 1)[-1] for name in AUTHOR_MUTATION_TESTS}
 TEST_CONFIG = re.compile(
     r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
     r"|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+|\.mocharc(?:\.\w+)?|[^/]+\.xctestplan)$")
@@ -1595,9 +1639,332 @@ def is_test_config_rel(rel: str) -> bool:
 
 def author_path_ok(rel: str) -> bool:
     """A test-author may change a test path, test config, or a dev dependency list. `package.json`
-    and `pyproject.toml` pass here and are read by content in `role_offences`."""
+    and `pyproject.toml` pass here and are read by content in `role_offences`. A workflow does not pass
+    here: its whole test-run steps pass in `role_write_hit` and `role_offences` (`workflow_test_steps_only`)."""
     return (is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES
             or norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS)
+
+
+# ---- workflow files (decision builders-cannot-edit-tests). The test-author check and the builder check are two
+# verdicts that share the step and run readers below. A test-author changes a workflow only by adding, removing or
+# moving whole test-run steps, so a new suite gets its CI step. A builder changes any workflow line, except one
+# that disables tests or drops a test run.
+WORKFLOW_REL = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
+# The only keys a test-run step holds. `continue-on-error`, `env`, `uses`, `with` are no test-run key.
+WORKFLOW_STEP_KEYS = {"name", "if", "run", "shell", "working-directory", "timeout-minutes"}
+WORKFLOW_STEP_START = re.compile(r"^(\s*)-\s+(name|run):")
+WORKFLOW_KEY_LINE = re.compile(r"^(\s*)(?:-\s+)?([A-Za-z][\w-]*):\s*(.*)$")
+WORKFLOW_INTERPRETERS = {"python", "python3", "node", "bash", "sh", "pwsh"}
+# Interpreter flags whose next token is their value, not the script (`python -X utf8`, `node -r ts-node/register`).
+WORKFLOW_VALUE_FLAGS = {"-X", "-W", "-r", "--require", "--import", "-o"}
+# Interpreter flags after which a command or module follows, so no script path does (`python -m`, `bash -c`).
+WORKFLOW_NO_PATH_FLAGS = {"-c", "-m"}
+WORKFLOW_DISABLE_STEP = re.compile(
+    r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:false|\$\{\{\s*false\s*\}\}))(?:\s+#.*)?\s*$")  # YAML: a comment needs space before `#`
+
+
+def is_workflow_rel(rel: str) -> bool:
+    """True when a repository-relative path is a GitHub workflow file (`.github/workflows/*.yml|*.yaml`)."""
+    return bool(WORKFLOW_REL.match(norm(rel).lstrip("/").lower()))
+
+
+def workflow_path(token: str) -> str:
+    """One spelling of a path a run line names: `\\` as `/`, no leading `./`."""
+    token = token.replace("\\", "/")
+    while token.startswith("./"):
+        token = token[2:]
+    return token
+
+
+def workflow_script_index(args):
+    """The index in `args` (the tokens after an interpreter) of the script it runs: the first token past the
+    interpreter's flags and their values, or None when a `-c` or `-m` runs a command or module instead."""
+    index = 0
+    while index < len(args) and args[index].startswith("-"):
+        if args[index] == "--":
+            index += 1
+            break
+        if args[index] in WORKFLOW_NO_PATH_FLAGS:
+            return None
+        index += 2 if args[index] in WORKFLOW_VALUE_FLAGS else 1
+    return index if index < len(args) else None
+
+
+# Commands that run the command after them. Each maps to the flags that take a value (their next token is
+# not the wrapped command); `timeout` also takes a duration, and `coverage` and `uv` run their subcommand `run`.
+WORKFLOW_WRAPPERS = {
+    "timeout": {"-k", "-s", "--kill-after", "--signal"},
+    "xvfb-run": {"-e", "-n", "-f", "-s", "-w", "--error-file", "--server-num", "--auth-file",
+                 "--server-args", "--wait"},
+    "env": {"-u", "-C", "--unset", "--chdir"},
+    "nice": {"-n", "--adjustment"},
+    "coverage": {"--rcfile", "--include", "--omit", "--source", "--data-file", "--context"},
+    "uv": {"--with", "--python", "-p", "--project", "--directory", "--group", "--extra", "--env-file",
+           "--package", "-w", "--with-requirements"},
+}
+WORKFLOW_RUN_SUBCOMMAND = {"coverage", "uv"}
+
+
+def workflow_unwrap(tokens):
+    """`tokens` without the wrapper commands before the command they run (`timeout 600`, `xvfb-run -a`,
+    `env FOO=1`, `nice`, `coverage run`, `uv run`, `python -m coverage run`), each with its own flags and
+    values. A wrapper that wraps nothing, or `coverage` or `uv` with another subcommand, is left as it is."""
+    tokens = list(tokens)
+    while tokens:
+        if (tokens[0] in WORKFLOW_INTERPRETERS and tokens[1:4] == ["-m", "coverage", "run"]):
+            tokens = tokens[4:]
+            name = "coverage"
+        elif tokens[0] in WORKFLOW_WRAPPERS:
+            name, tokens = tokens[0], tokens[1:]
+            if name in WORKFLOW_RUN_SUBCOMMAND:
+                # `uv` takes global flags before `run`; skip them to find it.
+                probe = 0
+                while probe < len(tokens) and tokens[probe].startswith("-"):
+                    probe += 2 if tokens[probe] in WORKFLOW_WRAPPERS[name] else 1
+                if tokens[probe:probe + 1] != ["run"]:
+                    return [name] + tokens
+                tokens = tokens[probe + 1:]
+        else:
+            break
+        values = WORKFLOW_WRAPPERS[name]
+        while tokens and (tokens[0].startswith("-") or (name == "env" and re.match(r"^\w+=", tokens[0]))):
+            tokens = tokens[2:] if tokens[0] in values else tokens[1:]
+        if name == "timeout" and tokens:
+            tokens = tokens[1:]   # the duration
+    return tokens
+
+
+def workflow_step_disables(line: str) -> bool:
+    """True when one step line is `continue-on-error: true` or `if: false`, so the step runs no test that counts."""
+    return bool(WORKFLOW_DISABLE_STEP.match(line))
+
+
+def workflow_run_is_test(value: str) -> bool:
+    """True when one single-line `run:` value is `[interpreter] <test path> [args]` and nothing else.
+    A tokenizer that keeps quotes whole judges it, so a `#` or `//` in quotes is an argument and an
+    unquoted `&&`, `;`, `|`, redirect or `$(` is a token of its own that no test run holds."""
+    value = value.strip()
+    if not value or value[0] in "|>\"'&*!%@`" or "$(" in value or "`" in value:
+        return False
+    lexer = shlex.shlex(value, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    if any(set(tok) <= set(lexer.punctuation_chars) for tok in tokens):
+        return False
+    script = 0
+    tokens = workflow_unwrap(tokens)
+    if tokens and tokens[0] in WORKFLOW_INTERPRETERS:
+        tokens = tokens[1:]
+        script = workflow_script_index(tokens)
+    if script is None or not tokens or ".." in norm(tokens[script]).split("/") or not is_test_rel(tokens[script]):
+        return False
+    rest = tokens[:script] + tokens[script + 1:]
+    return not TEST_DISABLE_FLAGS.search(" ".join(rest)) and not disables_tests([value], [])
+
+
+def workflow_test_step(lines) -> bool:
+    """True when `lines` (non-blank) are exactly one whole test-run step."""
+    start = WORKFLOW_STEP_START.match(lines[0]) if lines else None
+    if not start:
+        return False
+    keys = []
+    for line in lines:
+        found = WORKFLOW_KEY_LINE.match(line)
+        if not found or found.group(2) not in WORKFLOW_STEP_KEYS or (
+                line is not lines[0] and (len(found.group(1)) <= len(start.group(1)) or line.lstrip().startswith("- "))):
+            return False
+        keys.append((found.group(2), found.group(3)))
+        if disables_tests([line], []) or workflow_step_disables(line):
+            return False
+    runs = [value for key, value in keys if key == "run"]
+    return len(runs) == 1 and len(set(key for key, _ in keys)) == len(keys) and workflow_run_is_test(runs[0])
+
+
+def workflow_step_chunk(lines) -> bool:
+    """True when the non-blank `lines` split into whole test-run steps, each starting at a step line."""
+    lines = [line for line in lines if line.strip()]
+    if not lines:
+        return True
+    indent = len(WORKFLOW_STEP_START.match(lines[0]).group(1)) if WORKFLOW_STEP_START.match(lines[0]) else None
+    if indent is None:
+        return False
+    steps = []
+    for line in lines:
+        starts = WORKFLOW_STEP_START.match(line)
+        if starts and len(starts.group(1)) == indent:
+            steps.append([line])
+        else:
+            steps[-1].append(line)
+    return all(workflow_test_step(step) for step in steps)
+
+
+def workflow_changed_lines(old_text: str, new_text: str):
+    """The (removed, added) line groups of a diff from `old_text` to `new_text`, one pair per change."""
+    old, new = old_text.splitlines(), new_text.splitlines()
+    ops = difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes()
+    return [(old[i1:i2], new[j1:j2]) for tag, i1, i2, j1, j2 in ops if tag != "equal"]
+
+
+def workflow_test_steps_only(old_text: str, new_text: str) -> bool:
+    """True when every added and removed non-blank line of the change forms whole test-run steps."""
+    return all(workflow_step_chunk(removed) and workflow_step_chunk(added)
+               for removed, added in workflow_changed_lines(old_text, new_text))
+
+
+WORKFLOW_COMMAND_SPLIT = re.compile(r"&&|\|\||[;|]")
+WORKFLOW_RUN_PREFIX = re.compile(r"^\s*(?:-\s+)?run:\s*")
+WORKFLOW_RUN_BLOCK = re.compile(r"^(\s*)(?:-\s+)?run:\s*[|>][+-]?\s*$")
+
+
+def workflow_runs_test(path: str) -> bool:
+    """A run of this path is a test run: a test path, or a mutation test (not a test path for edit ownership).
+    A mutation test counts by file name, so `cd hooks && python3 mutate_guard.py` and a `working-directory`
+    step are runs too."""
+    return is_test_rel(path) or basename(norm(path).lower()) in MUTATION_TEST_NAMES
+
+
+def workflow_command_tests(command: str) -> set:
+    """The test paths one shell command line runs, each in its `workflow_path` spelling: the script an
+    interpreter runs past its flags, every test path after a test runner, or the command itself when it is a
+    test path. A lint tool that is given a test folder (`ruff check tests/`) runs none."""
+    found = set()
+    for segment in WORKFLOW_COMMAND_SPLIT.split(command):
+        # A quoted value with a space is one word. No escape character, so a Windows `tests\x.py` keeps its
+        # backslash for `workflow_path` to turn into `/`.
+        lexer = shlex.shlex(segment, posix=True)
+        lexer.whitespace_split, lexer.commenters, lexer.escape = True, "", ""
+        try:
+            tokens = list(lexer)
+        except ValueError:
+            tokens = [tok.strip("\"'") for tok in segment.split()]
+        while tokens:
+            if re.match(r"^\w+=", tokens[0]) or tokens[0] in ("npx", "sudo", "time"):
+                tokens.pop(0)
+            elif workflow_unwrap(tokens) != tokens:
+                tokens = workflow_unwrap(tokens)
+            else:
+                break
+        if not tokens:
+            continue
+        runner = bool(TEST_RUNNER_CONTEXT.search(segment))
+        if tokens[0] in WORKFLOW_INTERPRETERS:
+            script = workflow_script_index(tokens[1:])
+            args = tokens[1:] if runner else ([] if script is None else [tokens[1 + script]])
+        else:
+            args = tokens if runner else tokens[:1]
+        found.update(workflow_path(tok) for tok in args if workflow_runs_test(workflow_path(tok)))
+    return found
+
+
+def workflow_run_commands(text: str):
+    """The command lines of every `run:` in `text`: an inline value, or each line of a block scalar."""
+    commands, block = [], None
+    for line in text.splitlines():
+        if block is not None:
+            if not line.strip() or len(line) - len(line.lstrip()) > block:
+                commands.append(line.strip())
+                continue
+            block = None
+        opened = WORKFLOW_RUN_BLOCK.match(line)
+        if opened:
+            block = len(opened.group(1)) + (2 if line.lstrip().startswith("- ") else 0)
+        elif WORKFLOW_RUN_PREFIX.match(line):
+            commands.append(WORKFLOW_RUN_PREFIX.sub("", line, count=1))
+    return commands
+
+
+def workflow_invoked_tests(text: str) -> set:
+    """Every test path a `run:` line of the workflow text runs."""
+    return set().union(set(), *(workflow_command_tests(cmd) for cmd in workflow_run_commands(text)))
+
+
+def workflow_command_is_test(command: str) -> bool:
+    return bool(workflow_command_tests(command) or TEST_RUNNER_CONTEXT.search(command))
+
+
+def workflow_added_indexes(old_text: str, new_text: str):
+    """The line numbers of `new_text` that the change from `old_text` adds."""
+    ops = difflib.SequenceMatcher(None, old_text.splitlines(), new_text.splitlines(), autojunk=False).get_opcodes()
+    return [index for tag, _i1, _i2, j1, j2 in ops if tag != "equal" for index in range(j1, j2)]
+
+
+def workflow_step_lines(lines, index: int):
+    """The lines of the step (or job) that holds `lines[index]`: those at the key's indent or deeper, up to
+    and with the `- ` line that opens the step. A fragment ends at its own first and last line."""
+    def indent(line):
+        return len(line) - len(line.lstrip())
+    key = indent(lines[index]) + (2 if lines[index].lstrip().startswith("- ") else 0)
+    start = index
+    while start > 0 and not lines[start].lstrip().startswith("- "):
+        above = lines[start - 1]
+        if above.strip() and indent(above) < key:
+            start = start - 1 if above.lstrip().startswith("- ") and indent(above) == key - 2 else start
+            break
+        start -= 1
+    end = index + 1
+    while end < len(lines) and (not lines[end].strip() or indent(lines[end]) >= key):
+        end += 1
+    return lines[start:end]
+
+
+def workflow_disables_tests(old_text: str, new_text: str) -> bool:
+    """True when an added line of the change disables tests: a disable name or flag on a line that calls
+    a test runner or runs a test path through an interpreter."""
+    for _removed, added in workflow_changed_lines(old_text, new_text):
+        for line in added:
+            if (TEST_DISABLE_NAMES.search(line) or TEST_DISABLE_FLAGS.search(line)) and (
+                    TEST_RUNNER_CONTEXT.search(line)
+                    or workflow_command_tests(WORKFLOW_RUN_PREFIX.sub("", line, count=1))):
+                return True
+    return False
+
+
+def workflow_disables_step(old_text: str, new_text: str) -> bool:
+    """True when the change adds `continue-on-error: true` or `if: false` to a step that runs tests."""
+    lines = new_text.splitlines()
+    return any(
+        workflow_step_disables(lines[index])
+        and any(workflow_command_is_test(cmd) for cmd in workflow_run_commands("\n".join(workflow_step_lines(lines, index))))
+        for index in workflow_added_indexes(old_text, new_text))
+
+
+def workflow_drops_tests(old_text: str, new_text: str) -> bool:
+    """True when a test path that a run line runs in `old_text` is run nowhere in `new_text`."""
+    return bool(workflow_invoked_tests(old_text) - workflow_invoked_tests(new_text))
+
+
+def workflow_builder_refused(old_text: str, new_text: str) -> bool:
+    """The one verdict on a builder's workflow change, for the write tools and the commit diff."""
+    return (workflow_disables_tests(old_text, new_text) or workflow_disables_step(old_text, new_text)
+            or workflow_drops_tests(old_text, new_text))
+
+
+def workflow_pairs(tool_input, full: str):
+    """The (old, new) texts a write tool call makes of a workflow: an Edit's old and new string, each edit
+    of a MultiEdit, a Write's file on disk (empty if none) and its content; None when the call has none."""
+    if not isinstance(tool_input, dict):
+        return None
+    edits = tool_input.get("edits")
+    if isinstance(edits, list):
+        pairs = [(e.get("old_string"), e.get("new_string")) for e in edits if isinstance(e, dict)]
+    elif "old_string" in tool_input or "new_string" in tool_input:
+        pairs = [(tool_input.get("old_string"), tool_input.get("new_string"))]
+    elif "content" in tool_input:
+        try:
+            with open(full, encoding="utf-8", errors="replace") as handle:
+                disk = handle.read()
+        except Exception:
+            disk = ""
+        pairs = [(disk, tool_input.get("content"))]
+    else:
+        return None
+    if not pairs or any(not isinstance(o, str) or not isinstance(n, str) for o, n in pairs):
+        return None
+    return pairs
 
 
 def design_folder():
@@ -1695,6 +2062,10 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         ok = author_path_ok if role == AUTHOR_ROLE else designer_path_ok
         if ok(rel) or under_session_scratchpad(full, session_id):
             return ""
+        if role == AUTHOR_ROLE and is_workflow_rel(rel):
+            pairs = workflow_pairs(tool_input, full)
+            if pairs and all(workflow_test_steps_only(o, n) for o, n in pairs):
+                return ""
         # `session_id` is the parent's, the same for an agent (decision
         # an-agent-outside-its-home-tree-must-stop), and so is the id in the scratchpad path.
         # Another session's scratchpad is neither this one's nor "outside a repository".
@@ -1707,6 +2078,9 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
+        return target
+    if is_workflow_rel(rel) and any(
+            workflow_builder_refused(o, n) for o, n in workflow_pairs(tool_input, _expanded(target, cwd)) or ()):
         return target
     return ""
 
@@ -1932,7 +2306,10 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
         # reads `../...`, which no role owns.
         real = os.path.realpath(os.path.join(top, rel))
         names = [rel, os.path.relpath(real, top)]
-        if role == AUTHOR_ROLE:
+        if role == AUTHOR_ROLE and is_workflow_rel(rel) and all(
+                is_workflow_rel(n) or author_path_ok(n) for n in names):
+            bad = not workflow_test_steps_only(text_at(root, old, rel), text_at(root, new, rel))
+        elif role == AUTHOR_ROLE:
             bad = not all(author_path_ok(n) for n in names)
             if not bad and basename(rel) == "package.json":
                 bad = not package_json_author_ok(text_at(root, old, rel), text_at(root, new, rel))
@@ -1944,7 +2321,8 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
             bad = not all(designer_path_ok(n) for n in names)
         else:
             bad = any(is_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
-                text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines()))
+                text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines())) or (
+                is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel), text_at(root, new, rel)))
         if bad:
             found.append(rel)
     return found
@@ -2040,7 +2418,7 @@ SESSION_TOOL = "mcp__ccd_session__start_session"
 CREATE_SESSION_TOOL = "mcp__claude-code-remote__create_session"
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
-LANE_TAG = "cs-build:lane"
+from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with lint/report_guard.py
 LANE_EFFORT_REASON = (
     "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
     "prompt. Start the lane with that prompt, then send the brief by send_message (decision agent-model-cap)."
@@ -2268,6 +2646,269 @@ def brief_markers(brief) -> list:
 def builder_third_round(brief) -> bool:
     """True when a brief holds a builder's third-round marker, in either spelling."""
     return any(kind.lower() in BUILDER_MARKERS and n == "3" for kind, n in brief_markers(brief))
+
+
+# BRIEF CLAIMS NEED A PROBE (rule brief-claim-has-probe, decision brief-claim-has-probe). A brief to a builder or a
+# test-author that says what main, origin/main or "today" passes, allows, accepts, refuses, rejects or blocks for an
+# input must carry the probe that showed it: a command line that holds the input, and a result line under it. The scan
+# reads the brief in one pass, line by line, and masks each line's quoted spans once (_claim_mask). An input is a
+# backtick span, a double-quoted string (backticks inside it too, so a quoted case text is one data span, not a claim)
+# or a single-quoted one that opens after a non-word character; an apostrophe or a lone quote opens nothing, and a lone
+# backtick reads to the line's end. A claim is a clause in the active form (a subject, then the verb) or the passive
+# form (`X` is refused on main), and the clause ends at ", so", ", and" or ", then". The subject is `main` or
+# `origin/main` with the verb next to it (so "the main session" is no subject), or today with it, they, guard, hook,
+# rule or check. A backticked `main` is still the word. The verb may be negated (doesn't refuse, never refuses) or be
+# "lets ... through". The verb may be a base or -ing form before "on main" or "today" ("`a` and `b` pass on main",
+# "listed `X` as passing on main"). A leading "On main," or "Today" before the inputs and the verb is a claim too, and
+# so is a subject with "today" later ("The guard refuses `x` today"). With no input after the verb, the clause takes
+# every input of its own only when nothing but today, now or punctuation follows the verb. A claim clause with no
+# input of its own that says it or them, or says both, all, each or these at its end, before "of them", "of these"
+# or "of those", or before a count word (all three, both cases, each one, both today), takes the inputs of its own
+# sentence if it has any, else those of the sentence, or the run of list lines, right before it; one that ends with ":"
+# takes the list lines after it, up to a "Controls ...:" heading. Fenced text is read too. A NUL in a brief is a space. A path after in, at, from, under, inside, within or via is a locator, not an input.
+# Cost: pure text work inside the one guard call. No process, no file.
+BRIEF_CLAIM_ROLES = ("builder", "test-author")
+_CLAIM_VERB = r"(?:passes|passed|allows|allowed|accepts|accepted|refuses|refused|rejects|rejected|blocks|blocked)"
+_CLAIM_BASE = r"(?:pass|allow|accept|refuse|reject|block)"
+_CLAIM_THROUGH = r"\b(?=[^.!?;]*\bthrough\b)"   # lets counts as a verb only with through after it
+_CLAIM_NOT = r"(?:(?:does|did|do)\s+not|(?:does|did|do)n['\u2019]t)\s+"
+_CLAIM_ADVERB = r"(?:(?:still|also|now|today|currently|already|even|always|never)\s+)?"
+_CLAIM_MAIN = r"(?<![\w/.-])(?:origin/main|main)(?![\w/-])(?!\.\w)"
+_CLAIM_ING = r"(?:passing|allowing|accepting|refusing|rejecting|blocking)"
+_CLAIM_ANY = r"(?:" + _CLAIM_VERB + r"|" + _CLAIM_BASE + r"|" + _CLAIM_ING + r")"
+_CLAIM_SUBJECT = r"(?:it|they|guard|hook|rule|check)"
+_CLAIM_ACTS = (_CLAIM_ADVERB + r"(?:" + _CLAIM_VERB + r"\b|lets" + _CLAIM_THROUGH
+               + r"|" + _CLAIM_NOT + _CLAIM_ADVERB + r"(?:" + _CLAIM_BASE + r"\b|let" + _CLAIM_THROUGH + r"))")
+_CLAIM_ACTIVE_LEAD = (r"(?:" + _CLAIM_MAIN + r"|(?<![\w/.-])today,?\s+(?:(?:the|this)\s+)?" + _CLAIM_SUBJECT + r")\s+"
+                      + _CLAIM_ACTS)
+BRIEF_CLAIM_ACTIVE_LEAD = re.compile(_CLAIM_ACTIVE_LEAD, re.IGNORECASE)
+BRIEF_CLAIM_ACTIVE = re.compile(
+    _CLAIM_ACTIVE_LEAD
+    # A subject first and "today" later in the sentence: "The guard refuses `x` today."
+    + r"|(?<![\w/.-])(?:(?:the|this)\s+)?" + _CLAIM_SUBJECT + r"\s+" + _CLAIM_ACTS + r"(?=[^.!?;]*\btoday\b)",
+    re.IGNORECASE)
+BRIEF_CLAIM_TODAY = re.compile(r"\btoday\b", re.IGNORECASE)
+BRIEF_CLAIM_PASSIVE = re.compile(
+    r"(?:\b(?:is|are|was|were|gets|get)\s+)?\b" + _CLAIM_ANY + r"\b\s+"
+    r"(?:(?:on|by)\s+(?:origin/main|main)(?![\w/-])|today\b)", re.IGNORECASE)
+# A leading "On main," or "Today" then the inputs, then the verb: "On main, `a` passes." The inputs are the masked
+# spans between the frame and the verb.
+BRIEF_CLAIM_FRAMED = re.compile(
+    r"(?<![\w/.-])(?:on\s+(?:origin/main|main)(?![\w/-])|today\b),?\s+"
+    r"(?:\x00\d+\x00(?:\s*,\s*(?:and\s+)?|\s+and\s+|\s+)?)+" + _CLAIM_ADVERB + r"(?:" + _CLAIM_NOT + r")?"
+    + _CLAIM_ADVERB + _CLAIM_ANY + r"\b", re.IGNORECASE)
+BRIEF_CLAIM_SPAN = re.compile(
+    r"(`+)(.+?)\1(?!`)|`+(.*)$|\"([^\"\n]+)\"|(?<!\w)'([^'`\n]+)'(?!\w)")
+BRIEF_CLAIM_MASK = re.compile(r"\x00(\d+)\x00")
+BRIEF_CLAIM_LOCATOR = re.compile(r"\b(?:in|at|from|under|inside|within|via)\s+$", re.IGNORECASE)
+BRIEF_CLAIM_BREAK = re.compile(r",\s+(?:so|and|then)\b", re.IGNORECASE)
+# it and them are referents anywhere in the clause. both, all, each and these only at the clause end, or before
+# "of them", "of these" or "of those": "main passes all tests" has no referent, "main passes all of them" has one.
+BRIEF_CLAIM_REFERENT = re.compile(
+    r"\b(?:it|them)\b|\b(?:both|all|each|these)\b(?=[\s.!?:;,)]*$|\s+of\s+(?:them|these|those)\b)", re.IGNORECASE)
+# A count word that names the inputs before it: "all three", "both cases", "these two", "each one", "both today".
+_CLAIM_COUNT_WORD = r"(?:one|ones|two|three|four|five|six|seven|eight|nine|ten|\d+|cases?|inputs?)"
+BRIEF_CLAIM_COUNT = re.compile(
+    r"\b(?:both|all|each|these)\s+(?:" + _CLAIM_COUNT_WORD + r"\b(?:\s+(?:today|now)\b)?|(?:today|now)\b)[\s.!?:;,)]*$",
+    re.IGNORECASE)
+# What may follow a verb for the active form to take every input of its clause: today, now and punctuation only.
+BRIEF_CLAIM_BARE = re.compile(r"(?:\s|[.,:;!?)\"']|\b(?:today|now)\b)*", re.IGNORECASE)
+# A heading that closes a claimed list: "Controls that must still pass:", bare, bulleted or numbered.
+BRIEF_CLAIM_HEADING = re.compile(r"(?:(?:[-*+]|\d+[.)])\s+)?controls?\b[^:]*:\s*$", re.IGNORECASE)
+BRIEF_CLAIM_LIST = re.compile(r"(?:[-*+]|\d+[.)])\s")
+BRIEF_CLAIM_COMMAND = re.compile(
+    r"(?:(?:cd\s[^&|;\n]*&&|echo\s[^|\n]*\||[A-Za-z_]\w*=\S*|time)\s+)*"
+    r"(?:\S*/)?(?:python3?|git|verdict|bash|sh|node|npm|npx|pytest|gh|grep|rg|jq)(?=\s|$)")
+BRIEF_CLAIM_INLINE = re.compile(r"`([^`]+)`(.*)$")
+BRIEF_CLAIM_REASON = (
+    "The brief says what main, origin/main or today does with an input, and carries no probe for it. Add the probe, "
+    "or drop the claim. The probe is the command you ran, on a line of its own, that holds the input in quotes (in a "
+    "fence, in backticks, or after `$ `): for example `python3 ...`, `git show origin/main:<path>` piped into it, or "
+    "`verdict ...`; and its result line right under it. Each input with no probe: %s. "
+    "(decision brief-claim-has-probe, a brief's claim about main carries the probe that showed it)"
+)
+
+
+def _claim_mask(text: str):
+    """The line with each input masked as \\x00n\\x00, and the inputs in the order met. A backticked main stays the
+    word, so it can be a subject."""
+    spans = []
+    text = text.replace("\x00", " ")   # a NUL in a brief would read as a marker of its own
+
+    def mask(hit):
+        body = next((g for g in hit.groups()[1:] if g is not None), "").strip()
+        if hit.group(1) and body.lower() in ("main", "origin/main"):
+            return body
+        spans.append(body)
+        return "\x00%d\x00" % (len(spans) - 1)
+
+    return BRIEF_CLAIM_SPAN.sub(mask, text), spans
+
+
+def _claim_refers(text: str) -> bool:
+    """True when the clause text says it, them, or a count of inputs (both, all three, each one, these two today)."""
+    return bool(BRIEF_CLAIM_REFERENT.search(text) or BRIEF_CLAIM_COUNT.search(text))
+
+
+def _claim_active(sentence: str):
+    """The leftmost active-form match in one masked sentence, or None. The subject-first form needs "today" later in
+    its sentence, so it is searched only up to the last "today": its lookahead then ends there and the scan stays
+    linear in the sentence."""
+    clause = BRIEF_CLAIM_ACTIVE_LEAD.search(sentence)
+    late = None
+    for late in BRIEF_CLAIM_TODAY.finditer(sentence):
+        pass
+    if late is not None:
+        subject = BRIEF_CLAIM_ACTIVE.search(sentence, 0, late.end())
+        if subject is not None and (clause is None or subject.start() < clause.start()):
+            return subject
+    return clause
+
+
+def _claim_clause(sentence: str, marks: list):
+    """The claim in one masked sentence, or None. A claim is (claimed, refer): the inputs its clause names, and, when
+    it names none, "after" for a clause that ends with ":", "before" for one that says both, all, them, it, each or
+    these, else None. The active form names the inputs after its verb, the passive form those before it; either falls
+    back to every input in its clause. marks are the sentence's (offset, input) pairs."""
+    clause = _claim_active(sentence)
+    passive = clause is None
+    framed = False
+    if passive:
+        clause = BRIEF_CLAIM_PASSIVE.search(sentence)
+        if clause is None:
+            clause = BRIEF_CLAIM_FRAMED.search(sentence)
+            framed = True
+            if clause is None:
+                return None
+    lo = max((b.end() for b in BRIEF_CLAIM_BREAK.finditer(sentence, 0, clause.start())), default=0)
+    stop = BRIEF_CLAIM_BREAK.search(sentence, clause.end())
+    hi = stop.start() if stop else len(sentence)
+    first, last = (clause.start(), clause.end()) if framed else (lo, clause.start()) if passive else (clause.end(), hi)
+    claimed = [item for at, item in marks if first <= at < last]
+    if not claimed and (passive or BRIEF_CLAIM_BARE.fullmatch(sentence, clause.end(), hi)):
+        claimed = [item for at, item in marks if lo <= at < hi]
+    refers = _claim_refers(sentence[first:last])
+    if not claimed and not passive and refers:   # "Edit `x`, because main refuses it."
+        claimed = [item for at, item in marks if lo <= at < hi]
+    if claimed:
+        return claimed, None
+    if sentence[lo:hi].rstrip().endswith(":"):
+        return [], "after"
+    return [], "before" if refers else None
+
+
+def _claim_line(text: str) -> list:
+    """One line's sentences, in order, each as (inputs, claim): the sentence's inputs with locators left out, and its
+    claim from _claim_clause, or None."""
+    plain, spans = _claim_mask(text)
+    sentences = []
+    for sentence in re.split(r"(?<=[.!?;])\s+", plain):
+        marks = []
+        for m in BRIEF_CLAIM_MASK.finditer(sentence):
+            item = spans[int(m.group(1))]
+            locator = (bool(BRIEF_CLAIM_LOCATOR.search(sentence[:m.start()])) and len(item.split()) == 1
+                       and ("/" in item or "." in item))
+            if item and not locator:
+                marks.append((m.start(), item))
+        sentences.append(([item for _, item in marks], _claim_clause(sentence, marks)))
+    return sentences
+
+
+def _claim_rows(brief: str) -> list:
+    """The rows of a brief, in line order, for brief_claim_gaps: ("claim", [inputs]), ("cmd", text, result or None),
+    ("out", text) and ("fence", None). A result is only the row right after its command, so a fence marker or a claim
+    ends it. A fence marker with no partner is a plain line. A line that holds a claim is a claim row first, so it is
+    never its own probe. A claim that refers back takes the inputs of the sentence before it, or of the whole run of
+    list lines before it; a claim that ends with ":" takes the inputs of the list lines after it."""
+    lines = brief.split("\n")
+    marks = [i for i, line in enumerate(lines) if line.strip().startswith("```")]
+    if len(marks) % 2:
+        marks.pop()
+    marks = set(marks)
+    rows, fenced = [], False
+    before, block, waiting = [], [], None   # the inputs a referent takes; the list run; the claim that takes a list
+    for i, line in enumerate(lines):
+        if i in marks:
+            fenced = not fenced
+            rows.append(("fence", None))
+            continue
+        text = line.strip()
+        if not text:
+            continue
+        command = text if fenced else text[2:] if text[:2] in ("$ ", "> ") else None
+        if command is not None and BRIEF_CLAIM_COMMAND.match(command.lstrip("$> ")):
+            rows.append(("cmd", command, None))
+            before, block, waiting = [], [], None
+            continue
+        listed = bool(BRIEF_CLAIM_LIST.match(text))
+        sentences = _claim_line(text)
+        own = [item for inputs, _ in sentences for item in inputs]
+        if waiting is not None and not own and BRIEF_CLAIM_HEADING.match(text):
+            waiting = None
+        elif listed and waiting is not None:
+            waiting.extend(own)
+        else:
+            waiting = None
+        claimed, takes_list = [], False
+        for inputs, claim in sentences:
+            if claim:
+                items, refer = claim
+                claimed.extend(before if refer == "before" else items)
+                takes_list = takes_list or refer == "after"
+            before = inputs
+        block = (block + own) if listed else []
+        if listed:
+            before = block
+        if claimed or takes_list:
+            rows.append(("claim", claimed))
+            if takes_list:
+                waiting = claimed
+            continue
+        inline = BRIEF_CLAIM_INLINE.match(text) if text.startswith("`") and not fenced else None
+        if inline and BRIEF_CLAIM_COMMAND.match(inline.group(1).lstrip("$> ")):
+            rows.append(("cmd", inline.group(1), inline.group(2).strip(" -:=>–—→") or None))
+        else:
+            rows.append(("out", text))
+    return rows
+
+
+def _claim_probed(key: str, texts: list) -> bool:
+    """True when a probe line holds the input as a whole argument: the same text between quotes, or the whole line.
+    A longer input that merely contains it, such as `git push --force` for `git push`, is another input."""
+    shown = re.compile(r"(?:^|['\"`])" + re.escape(key) + r"(?:$|['\"`])")
+    return any(shown.search(text) for text in texts)
+
+
+def brief_claim_gaps(brief) -> list:
+    """The inputs a brief claims something about for main or today, with no probe, in the order claimed. An input has a
+    probe when a command line holds it, or the result line right under that command does, and that result line is
+    there (_claim_probed). A brief that is not text claims nothing. Pure."""
+    if not isinstance(brief, str):
+        return []
+    rows = _claim_rows(brief)
+    probes = []
+    for i, row in enumerate(rows):
+        if row[0] != "cmd":
+            continue
+        result = row[2]
+        if result is None and i + 1 < len(rows) and rows[i + 1][0] == "out":
+            result = rows[i + 1][1]
+        if result is not None:
+            probes.append([" ".join(row[1].split()), " ".join(result.split())])
+    gaps = []
+    for row in rows:
+        for item in row[1] if row[0] == "claim" else ():
+            key = " ".join(item.split())
+            if item not in gaps and not any(_claim_probed(key, texts) for texts in probes):
+                gaps.append(item)
+    return gaps
+
+
+def brief_claim_hit(tool: str, tool_input) -> list:
+    """Every input an Agent or Task brief to a builder or a test-author claims about main with no probe, or []."""
+    if tool not in SPAWN_TOOLS or role_key(tool_input.get("subagent_type")) not in BRIEF_CLAIM_ROLES:
+        return []
+    return brief_claim_gaps(tool_input.get("prompt"))
 
 
 # A Workflow agent() call is read statically; one whose prompt or model the scan cannot read passes.
@@ -2591,27 +3232,27 @@ def role_model_one(tool_input):
     return ROLE_NO_MODEL_REASON % ("" if row == ROLE_MODEL_RANK[0] else " (%s)" % row), ROLE_NO_MODEL_MATCH + role, False
 
 
-# THE MACHINE-LOAD BRAKE (decision machine-load-brake). A lane-start call reads the machine's load once. Memory in
+# THE MACHINE-LOAD BRAKE (decision machine-load-brake). A start call (a call that starts a lane or an agent) reads the machine's load once. Memory in
 # use is a share of this machine's memory; disk free on the home drive is in GB (2**30 bytes) against the drive's
 # size. Busy (memory over 85%, or disk free under the smaller of 10% of the disk and 15 GB) refuses a Workflow and an
 # explicit background Agent or Task call. An Agent or Task call passes at busy only when it leaves
 # run_in_background out or sets it false. (In the desktop harness a left-out call still runs in the background
-# and the field is not offered, so busy does not slow an Agent lane there.) Full (memory over 95%, disk free
-# under the smaller of 5% of the disk and 5 GB) refuses every lane. A reading that cannot be read counts as normal. Only an
-# agent's shell or file write also reads load (RUNNING_LANE_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
+# and the field is not offered, so busy does not slow an Agent call there.) Full (memory over 95%, disk free
+# under the smaller of 5% of the disk and 5 GB) refuses every start call. A reading that cannot be read counts as normal. Only an
+# agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
 # "true") skips the brake and reads nothing, because the brake guards the owner's own machine.
-LANE_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
+START_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
 LOAD_BUSY_MEMORY = 85.0
 LOAD_FULL_MEMORY = 95.0
 LOAD_BUSY_DISK_SHARE, LOAD_BUSY_DISK_GB = 10.0, 15.0   # busy: free under the smaller of the two
 LOAD_FULL_DISK_SHARE, LOAD_FULL_DISK_GB = 5.0, 5.0
 GIB = 2 ** 30
-LOAD_CITE = "(decision machine-load-brake, a busy or full machine starts no new lane)"
-LOAD_LANE_CITE = "(decision machine-load-brake, a full machine stops a running lane at its next shell or file write)"
+LOAD_CITE = "(decision machine-load-brake, a busy or full machine starts no new lane or agent)"
+LOAD_LANE_CITE = "(decision machine-load-brake, a full machine stops a running agent at its next shell or file write)"
 LOAD_BUSY_REASON = "the machine is busy (%s). %s " + LOAD_CITE
-LOAD_BUSY_AGENT_FORM = ", or start this lane as an Agent call that leaves run_in_background out or sets it false"
+LOAD_BUSY_AGENT_FORM = ", or make this an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
-LOAD_FULL_REASON = "the machine is full (%s). No new lane starts until the load drops. Wait, then retry. " + LOAD_CITE
+LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Wait, then retry. " + LOAD_CITE
 
 
 def _read_memory():
@@ -2674,9 +3315,9 @@ def _load_value(reading: dict, key: str):
 
 
 def load_hit(tool: str, tool_input) -> tuple:
-    """(rule reason, matched) when the machine's load refuses this lane-start call, else ("", ""). The one
+    """(rule reason, matched) when the machine's load refuses this start call, else ("", ""). The one
     read of the call: a failed read or an unread value counts as normal. A cloud session is never braked."""
-    if tool not in LANE_TOOLS or is_cloud():
+    if tool not in START_TOOLS or is_cloud():
         return "", ""
     try:
         reading = read_load()
@@ -2712,20 +3353,22 @@ def load_hit(tool: str, tool_input) -> tuple:
     return "", ""
 
 
-# A RUNNING LANE (decision machine-load-brake, "Running lanes"). An agent's own call that can fill a disk (a shell or
-# a file write) reads the load once, inside this hook that already runs for the call. Full refuses it, so a lane
+# A RUNNING AGENT (decision machine-load-brake, "Running agents"). An agent's own call that can fill a disk (a shell or
+# a file write) reads the load once, inside this hook that already runs for the call. Full refuses it, so an agent
 # stops even while its orchestrator waits on the owner. Busy lets it run. The orchestrator's own calls read nothing,
-# so the session that frees the disk is never braked by the full disk.
-RUNNING_LANE_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
-LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this lane now: end your turn and report the reading to "
+# so the session that frees the disk is never braked by the full disk. A lane session (a session whose own record
+# carries the lane tag, lane_session_hit) is braked the same way on its own calls, since it is a lane too.
+RUNNING_AGENT_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
+LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this agent now: end your turn and report the reading to "
                          "your orchestrator, which frees space or waits for the load to drop. " + LOAD_LANE_CITE)
 
 
-def running_lane_hit(payload, tool: str) -> tuple:
+def running_agent_hit(payload, tool: str) -> tuple:
     """(rule reason, matched) when an agent's disk-filling call meets a full machine, else ("", ""). One read
-    per such call; none for the orchestrator, and none for a lane-start call, which load_hit reads."""
+    per such call; none for the orchestrator or a lane session (lane_session_hit judges that), and none for a
+    start call, which load_hit reads."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
-    if is_cloud() or tool not in RUNNING_LANE_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
+    if is_cloud() or tool not in RUNNING_AGENT_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
         return "", ""
     try:
         reading = read_load()
@@ -2733,6 +3376,36 @@ def running_lane_hit(payload, tool: str) -> tuple:
         return "", ""
     full = load_full(reading)
     return (LOAD_LANE_FULL_REASON % ", ".join(full), ", ".join(full)) if full else ("", "")
+
+
+LOAD_SESSION_FULL_REASON = ("the machine is full (%s). You are a lane session: end your turn now and send this "
+                            "reading to your parent with send_message to @parent, which frees space or waits for the "
+                            "load to drop. " + LOAD_LANE_CITE)
+
+
+def lane_session_hit(payload, tool: str) -> tuple:
+    """(rule reason, matched) when a lane session's own disk-filling call meets a full machine, else ("", "").
+    A call with an agent_id is an agent's (running_agent_hit). The load is read once; the transcript is read only
+    at full, and an unread record or any error counts as no lane."""
+    if not isinstance(payload, dict) or is_cloud() or tool not in RUNNING_AGENT_TOOLS or payload.get("agent_id"):
+        return "", ""
+    try:  # fails closed: an unimportable override or an unread id is no lane, so the later checks still run
+        import override
+        own_id = override.remote_session_id()
+        if own_id is None:
+            return "", ""
+        full = load_full(read_load())
+        transcript = payload.get("transcript_path")
+        if not full or not isinstance(transcript, str) or not transcript:
+            return "", ""
+        import own_session
+        tags, tagged_after, _parent = own_session.own_session_read(transcript, own_id)
+        names = [t.strip().casefold() for t in tags if isinstance(t, str)] if isinstance(tags, list) else []
+        if tagged_after or LANE_TAG not in names or any(n.startswith("cs-build:") and n != LANE_TAG for n in names):
+            return "", ""
+    except Exception:
+        return "", ""
+    return LOAD_SESSION_FULL_REASON % ", ".join(full), ", ".join(full)
 
 
 def load_full(reading) -> list:
@@ -2937,9 +3610,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "git-env-set", GIT_ENV_REASON, matched)
 
-    # 1. Shared trees.
+    # 1. Shared trees. The shell runs a command inside `$( )` or backticks, so each such text is
+    # read as a command of its own, after the command (rules 1, 2 and 4 read `texts` the same way).
+    # Not a recursive judge_shell: that clears PENDING_ASK and would lose a deny.
+    texts = [stripped, *substitution_commands(raw, stripped)]
     whole_root = []   # command_root reads the whole command: once per command, never per segment
-    for segment in split_segments(stripped):
+    for segment in (part for text in texts for part in split_segments(text)):
         if not segment.strip():
             continue
         words = segment_tokens(segment)
@@ -3040,7 +3716,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                    reason.format(command=live.index(number) + 1, total=len(live), kind=kind,
                                  program=kind if " " in kind else "git " + kind), matched)
 
-    # 1c2. A lane worktree made by hand, outside the tool's own folder.
+    # 1c2. A worktree made by hand, outside the tool's own folder.
     for number, segment in enumerate(segments):
         if segment.strip():
             matched = hand_made_worktree_hit(segments, number, cwd, ends)
@@ -3072,24 +3748,25 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
     # judge nothing rather than guess what it would run.
-    previous = None
     call_tokens = []
-    for segment in split_segments(stripped):
-        if not segment.strip():
-            continue
-        tokens = segment_tokens(segment)
-        if tokens is None:
-            previous = None
-            continue
-        call_tokens.append(tokens)
-        matched = kill_hit(tokens) or kill_fed_by_name(tokens) or kill_fed_by_pipe(tokens, previous)
-        previous = tokens
-        if matched:
-            refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
-        # Every agent shares the main session's id, so only the main session may own by tag.
-        matched = foreign_pid_kill(tokens, transcript, "" if agent else session_id)
-        if matched:
-            refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
+    for text in texts:
+        previous = None   # a pipe never reaches across a substitution's edge
+        for segment in split_segments(text):
+            if not segment.strip():
+                continue
+            tokens = segment_tokens(segment)
+            if tokens is None:
+                previous = None
+                continue
+            call_tokens.append(tokens)
+            matched = kill_hit(tokens) or kill_fed_by_name(tokens) or kill_fed_by_pipe(tokens, previous)
+            previous = tokens
+            if matched:
+                refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
+            # Every agent shares the main session's id, so only the main session may own by tag.
+            matched = foreign_pid_kill(tokens, transcript, "" if agent else session_id)
+            if matched:
+                refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
     # The whole call, not one segment: an `lsof -t` pid list reaches a kill across a filter, a loop or a file.
     matched = lsof_pids_reach_kill(call_tokens)
     if matched:
@@ -3125,6 +3802,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = narrated_tail_hit(stripped)
     if matched:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
+    matched = verdict_pipe_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "verdict-pipe", VERDICT_PIPE_REASON, matched)
     matched = background_end_hit(split_segments(stripped), background, description)
     if matched:
         refuse(tool, "deny", "background-end", BACKGROUND_END_REASON, matched)
@@ -3160,16 +3840,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 4. A wide delete refuses, and a force push asks.
     # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
-    delete_segments = [delete_text(segment) for segment in split_segments(stripped)]
-    for number in range(len(delete_segments)):
-        matched, reason = parent_delete_hit(delete_segments, number, cwd)
-        if matched:
-            refuse(tool, "deny", "destructive-delete", reason, matched)
+    delete_texts = [[delete_text(segment) for segment in split_segments(text)] for text in texts]
+    for delete_segments in delete_texts:
+        for number in range(len(delete_segments)):
+            matched, reason = parent_delete_hit(delete_segments, number, cwd)
+            if matched:
+                refuse(tool, "deny", "destructive-delete", reason, matched)
     for pattern in DESTRUCTIVE_DELETE:
         found = pattern.search(cmd)
         if found:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, found.group(0))
-    for segment in delete_segments:
+    for segment in (part for delete_segments in delete_texts for part in delete_segments):
         matched = rm_delete_hit(segment) or cmd_exe_delete_hit(segment)
         if matched:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, matched)
@@ -3178,15 +3859,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
-    for segment in split_segments(stripped):
-        for subcommand, args in git_calls(push_text(segment)):
-            where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
-            verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
+    for segment in (part for text in texts for part in split_segments(text)):
+        for args, where, overrides in _push_calls(segment, stripped, cwd):
+            verdict = push_verdict(args, where, overrides)
             if verdict == "ask":
                 ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
-            elif subcommand == "push" and not read_verb("push", args):
+            elif not read_verb("push", args):
                 # Owner rulings 206 a and 207 a: a non-forced push that writes main or master, or an
                 # implied destination off the branch's upstream. A dry run writes nothing.
                 kind = push_ask_hit(args, where, overrides)
@@ -3240,6 +3920,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "records-page", RECORDS_PAGE_REASON, matched)
 
+    # 6c2. A commit or push that would carry all three conflict markers in one file (rule conflict-markers).
+    # Cost: a few short `git` reads per commit or push segment, and none for a command with neither.
+    kind, matched = conflict_markers_hit(stripped, cwd)
+    if matched:
+        markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
+                          CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
+        refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
+
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)
     if matched:
@@ -3252,7 +3940,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 7c. A builder's shell write to a test file. The path comes from the stripped command, a script's
     # own writes (a python or node heredoc body, -c, -e) from the raw one. Only an agent with a builder
-    # role is judged, the same gate as the Edit tools.
+    # role is judged, the same guard as the Edit tools.
     if role == BUILDER_ROLE:
         matched = builder_shell_test_hit(raw, stripped, cwd)
         if matched:
@@ -3275,7 +3963,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # ------------------------------------------------------------------ a waiting-page item states the question form
 #
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
-# `command-in-item`, `gh-login-switch`, `task-names-check`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
+# `command-in-item`, `gh-login-switch`, `task-names-check`, `task-why-cited`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
 # write to this repo's waiting page.
 from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
@@ -3436,6 +4124,32 @@ def _run_check_designs(page_file, item):
     if run.returncode == 0:
         return 0, ""
     return 3, (run.stderr.strip().splitlines() or ["exit %d" % run.returncode])[-1]
+
+
+# ------------------------------------------------------------------ a design names its file, in a mockup home
+#
+# Rule `mockup-home` (decision mockup-home). An ArtifactData set or update of a waiting item whose data carries `designs`
+# is denied when a design has no `file`, or a `file` outside the repo's design folder (lint/layout.py mockup_home_problem;
+# a machine-home path is outside it). It judges the path's shape only, so it reads no file, asks no origin and starts no
+# node; the roadmap build checks that origin holds the file. It runs before `page-item-design`. An item that is closed or
+# has no `designs` is not judged. An unreadable layout allows and logs one `noted` line.
+MOCKUP_HOME_FIX = " (decision mockup-home, a mockup kept off the repo is gone with the machine or the account that holds it)"
+
+
+def mockup_home_hit(writes, tool_input, cwd):
+    """(reason, matched) for the first `designs` entry of `writes` with no `file` or a refused one, else None.
+    Fails open on any unread state."""
+    import question_form
+    try:
+        root = question_form.waiting_page_root(tool_input, cwd)
+        found = question_form.design_file_problems(writes, root) if root else []
+    except Exception as err:
+        record(DATA_TOOL, "noted", "mockup-home", "unknown: " + cap_safe(type(err).__name__ + ": " + str(err), 100))
+        return None
+    if not found:
+        return None
+    doc_id, slug, problem = found[0]
+    return "design " + cap_safe(slug, 40) + ": " + problem + MOCKUP_HOME_FIX, "item " + cap_safe(str(doc_id or "?"), 40)
 
 
 def page_design_hit(writes, tool_input, cwd):
@@ -3750,36 +4464,35 @@ def _sim_route_remedy(rest: list) -> str:
     return "Use `-destination 'generic/platform=iOS Simulator'` instead, and boot nothing."
 
 
-def sim_lock_holder():
-    """The holder of <config>/state/sim-test.lock as a string (a live pid, or "unknown" for a lock folder with no
-    readable pid file under 60 s old), or "" when the lock is free. The lock is the one bin/sim-test takes."""
+def sim_lease_holds(session: str, udids: list) -> bool:
+    """True when SESSION holds a live sim-lease whose slot maps to every UDID in UDIDS (decision
+    sim-test-is-the-one-boot-path, ruling 5). The slot map, the liveness test and the read live in bin/sim-lease,
+    loaded by path as it has no .py name. An empty session or UDIDS, or any failure to load or read, is False:
+    the refusal stands. The read takes no lock and writes nothing, and no bytecode file is written for the load."""
+    if not session or not udids:
+        return False
+    keep = sys.dont_write_bytecode
     try:
-        lock = os.path.join(guard_core.config_dir(), "state", "sim-test.lock")
-        age = time.time() - os.stat(lock).st_mtime
-        try:
-            with open(os.path.join(lock, "pid"), encoding="utf-8") as f:
-                text = f.read().strip()
-        except OSError:
-            text = ""
-        if text.isdigit() and int(text) > 0:
-            try:
-                os.kill(int(text), 0)
-            except ProcessLookupError:
-                return ""
-            except PermissionError:
-                return ""  # bin/sim-test reads a failed `kill -0`, EPERM too, as a holder that is gone
-            except OSError:
-                pass
-            return text
-        return "unknown" if age < 60 else ""
+        sys.dont_write_bytecode = True
+        path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "bin", "sim-lease")
+        loader = importlib.machinery.SourceFileLoader("sim_lease", path)
+        spec = importlib.util.spec_from_loader("sim_lease", loader)
+        lease = importlib.util.module_from_spec(spec)
+        loader.exec_module(lease)
+        held = {lease.SLOT_UDID[e["slot"]].casefold() for e in lease.live_leases()
+                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID}
     except Exception:
-        return ""  # fail open: an unreadable lock is not held
+        return False
+    finally:
+        sys.dont_write_bytecode = keep
+    return all(u.casefold() in held for u in udids)
 
 
-def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
+def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str = "") -> None:
     """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted. After those two
     rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
-    simulator-boot-route, and an MCP launch while the sim-test lock is held as simulator-boot-locked."""
+    simulator-boot-route, and an MCP launch as simulator-boot-lease, unless SESSION holds a live sim-lease whose
+    slot is the launched device (sim_lease_holds)."""
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor"))
         import sweep
@@ -3793,7 +4506,8 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
     shut_down = []
     for name in names:
         name, os_ = name if isinstance(name, tuple) else (name, "")  # a destination's OS= picks a runtime
-        hits = [d for d in devices if name.upper() == d["udid"].upper() or name == d["name"]]  # a UDID has no case
+        key = name.strip().casefold()  # a name compares without case or outer spaces; a UDID has no case
+        hits = [d for d in devices if key == d["udid"].casefold() or key == d["name"].strip().casefold()]
         if os_:  # not importable from sim_boot_record: its version() is nested in by_name_ok
             hits = [d for d in hits if (v := d["runtime"].split("SimRuntime.")[-1].split("-", 1)[-1].replace("-", ".")) == os_
                     or v.startswith(os_ + ".")] or hits  # no runtime matches: judge them all
@@ -3815,15 +4529,16 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
                 refuse(tool, "deny", "simulator-boot-twin",
                        "An idle booted simulator of the same type and runtime exists: %s (%s). Use it "
                        "instead of booting another." % (twin["name"], twin["udid"]), name)
-        shut_down.append(name)
-    for name in shut_down:
+        shut_down.append((name, [h["udid"] for h in hits]))
+    for name, udids in shut_down:
         if tool == SIM_MCP:
-            holder = sim_lock_holder()
-            if holder:
-                refuse(tool, "deny", "simulator-boot-locked",
-                       "`sim-test` holds the one simulator lock (pid %s). A launch of a shut-down simulator "
-                       "boots outside that lock. Wait for sim-test to end, or launch a simulator that is "
-                       "already booted. (decision sim-test-is-the-one-boot-path)" % holder, name)
+            if sim_lease_holds(session, udids):
+                continue  # this session's live lease is for this very device: the boot is under the lease
+            refuse(tool, "deny", "simulator-boot-lease",
+                   "A launch of the shut-down simulator %s boots it outside the one lock: the Mac "
+                   "shares one simulator across repos, and `sim-test` holds that lock. Run `sim-test`, "
+                   "which boots it under the lock, or launch a simulator that is already booted. "
+                   "(decision sim-test-is-the-one-boot-path)" % name, name)
         elif (remedies or {}).get(name):
             refuse(tool, "deny", "simulator-boot-route",
                    "`xcodebuild -destination` boots %s outside the `sim-test` lock. %s "
@@ -3860,7 +4575,8 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
             except Exception:
                 resolved_target = write_target
             if (path_is_inside(resolved_target, home_primary) is True
-                    and path_is_inside(resolved_target, home) is False):
+                    and path_is_inside(resolved_target, home) is False
+                    and not _own_red_run(payload, home_primary, resolved_target, False)):
                 return "write target outside recorded agent home"
     return ""
 
@@ -4063,18 +4779,33 @@ def _cd_home_exempt(payload, cwd: str, target: str) -> bool:
     return bool(held) and path_is_inside(target, held) is True
 
 
-def _cd_red_run(payload, roots, owner: str) -> bool:
-    """True when OWNER, the checkout a `cd` moves into, is the caller's own test-author red-run
-    folder `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The id and its dash match
-    whole, so a sibling whose id only starts with this one does not pass."""
+# The shell verbs that may name the red-run folder's own root: `cp x <red>/` writes inside it. No
+# other verb may, so `rm -rf <red>` stays refused (an-agent-outside-its-home-tree-must-stop).
+RED_RUN_ROOT_VERBS = ("cp",)
+
+
+def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool:
+    """True when PATH is inside the caller's own test-author red-run folder
+    `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The one home for that test: the
+    `cd` act and the write act of other-checkout, and worktree-home's Write target, all ask it.
+    PRIMARY is the primary checkout alone, so a folder under a linked worktree never counts. The id and
+    its dash match whole, so a sibling whose id only starts with this one does not pass. ROOT_OK False
+    leaves the folder itself out: a write passes only strictly inside it, so a delete of the folder
+    is still refused. Both sides compare case-folded and realpath'd (`path_is_inside`)."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
-    if not isinstance(agent_id, str) or not agent_id or not owner:
+    if not isinstance(agent_id, str) or not agent_id or not primary or not path:
         return False
-    folder = os.path.dirname(owner)
-    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")
-            and os.path.basename(folder) == "worktrees"
-            and os.path.basename(os.path.dirname(folder)) == ".claude"
-            and os.path.dirname(os.path.dirname(folder)) in roots)
+    holder = os.path.join(primary, ".claude", "worktrees")
+    folder = path
+    while True:
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return False
+        if (path_is_inside(parent, holder) is True and path_is_inside(holder, parent) is True
+                and os.path.normcase(os.path.basename(folder)).startswith(
+                    os.path.normcase("agent-" + agent_id + "-"))):
+            return root_ok or folder != path
+        folder = parent
 
 
 def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = "",
@@ -4086,7 +4817,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     valid `session_id`; a caller that omits `has_agent` gets no exemption. An unreadable git
     state, or a cwd in no checkout, is unknown and passes. One git read per call that can write.
     A shell `cd`, `pushd` or `Set-Location` that moves into another checkout is refused too, unless
-    `payload` marks the target as the caller's own home or red-run folder; a `cd` toward a folder
+    `payload` marks the target as the caller's own home or red-run folder (a write strictly inside that red-run
+    folder passes too, a shell `cp` may also name its root); a `cd` toward a folder
     under another `.git` entry spends the git read. A target in a separate clone of the same repo
     (the nearest `.git` above it names another common dir with the same origin, read by file) is
     refused the same way; the clone check spawns no git. Liftable by an owner override, unlike `worktree_home_hit`
@@ -4124,7 +4856,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     temp = os.path.realpath(tempfile.gettempdir())
     clone_hit = {}   # target -> True when the hit was a separate clone, not a checkout of this one
 
-    def elsewhere(target, at):
+    def elsewhere(target, at, verb=""):
         try:
             resolved = _resolved(target, at)
             owner = _owning_checkout(resolved, roots)
@@ -4144,13 +4876,14 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
             return True
         # The primary's `.git` is the clone's common directory, shared by every checkout.
         return (bool(owner) and owner != own
-                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)
+                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True
+                and not _own_red_run(payload, roots[0], resolved, verb in RED_RUN_ROOT_VERBS))
 
     for move in moves:
-        if elsewhere(move, where) and not _cd_red_run(payload, roots, _owning_checkout(move, roots)):
+        if elsewhere(move, where) and not _own_red_run(payload, roots[0], move):
             return (OTHER_CLONE_CD_DETAIL if clone_hit.get(move) else OTHER_CHECKOUT_CD_DETAIL) + move
     if targets is None:
-        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True) if writes else ""
+        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True) if writes else ""
         if not hit:
             # A git verb that changes files, run in a separate clone or from a stranded cwd. The one
             # reader of such verbs is session_home_git_hit; only the folder test differs.
@@ -4458,11 +5191,13 @@ def judge(payload) -> None:
     if role_reason:
         refuse(tool, "deny", "agent-role-model", role_reason, role_matched)
 
-    # 9c. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
+    # 9c. The machine-load brake: one read on a start call, and one on an agent's or a lane session's shell or file write.
     # It runs before the Opus refusal, because a lifted refusal exits refuse() at once and would skip this deny.
     load_reason, load_matched = load_hit(tool, tool_input)
     if not load_reason:
-        load_reason, load_matched = running_lane_hit(payload, tool)
+        load_reason, load_matched = running_agent_hit(payload, tool)
+    if not load_reason:
+        load_reason, load_matched = lane_session_hit(payload, tool)
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)
 
@@ -4476,6 +5211,13 @@ def judge(payload) -> None:
                   if opus_unread else ""),
                opus_model,
                spawn_role=opus_role or "general-purpose")
+
+    # 9e. A builder's or test-author's brief that claims what main or today does with an input carries the probe that
+    # showed it (rule brief-claim-has-probe). An override lifts it: the owner may mean the brief as it stands.
+    claimed = brief_claim_hit(tool, tool_input)
+    if claimed:
+        named = ", ".join("`" + item[:120].replace("`", "'") + "`" for item in claimed)
+        refuse(tool, "deny", "brief-claim-has-probe", BRIEF_CLAIM_REASON % named, named[:120])
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:
@@ -4529,6 +5271,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "gh-login-switch", question_form.PAGE_REASONS["gh-login-switch"], matched)
         if rule == "task-names-check":
             refuse(tool, "deny", "task-names-check", question_form.PAGE_REASONS["task-names-check"], matched)
+        if rule == "task-why-cited":
+            refuse(tool, "deny", "task-why-cited", question_form.PAGE_REASONS["task-why-cited"], matched)
         if rule == "owner-judge":
             refuse(tool, "deny", "owner-judge", question_form.PAGE_REASONS["owner-judge"], matched)
         if rule == "option-letter-keys":
@@ -4542,6 +5286,9 @@ def judge(payload) -> None:
         if rule == "item-field-rendered":
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
         if item_writes:
+            unhomed = mockup_home_hit(item_writes, tool_input, cwd)
+            if unhomed:
+                refuse(tool, "deny", "mockup-home", unhomed[0], unhomed[1])
             unseen = page_design_hit(item_writes, tool_input, cwd)
             if unseen:
                 refuse(tool, "deny", "page-item-design", unseen[0], unseen[1])
@@ -4579,7 +5326,8 @@ def judge(payload) -> None:
         names = list(dict.fromkeys(v for v in map(tool_input.get, ("device", "udid"))
                                    if isinstance(v, str) and v))
         if tool_input.get("action") == "launch" and names:
-            sim_boot_refusal(tool, names)
+            sid = payload.get("session_id") if isinstance(payload, dict) else ""
+            sim_boot_refusal(tool, names, None, sid if isinstance(sid, str) else "")
         return
 
     if tool not in WRITE_TOOLS:

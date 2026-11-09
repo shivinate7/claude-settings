@@ -55,7 +55,7 @@ record ids and no incident text.
     lints) reads git diff through process substitution. It has no fail-closed check.
   - lint/test_all_jobs_passed.py reads only the cs checks workflow, through CHECKS_YML (the
     variable that sets that path).
-  - actions/code-check/standard.json:53 skips the typecheck for javascript. checkJs is not adopted.
+  - lint/code_check_standard.json:53 skips the typecheck for javascript. checkJs is not adopted.
   - .github/workflows/checks.yml:89-90 runs zizmor (a GitHub workflow linter) as a plain step.
   - lint/rule_audit.py reads only CLAUDE.md and the shiv-stylisms output style (RULE_FILES).
   - lint/stale_cites.py takes --range only. It has no whole-tree mode.
@@ -95,7 +95,7 @@ gloss here. The reader did not return the titles.
 
 | # | Guard (file:symbol, what it stops) | Record | Incident | Verdict | Home or fact |
 |---|---|---|---|---|---|
-| 1 | guard-shell.py: clause_checkout, clause_stash, clause_reset. Stops a checkout or restore path, a stash pop or drop, and reset --hard over a dirty tree. | D179, D173 | 2026-09-06 checkout lost about 240 lines | PROMOTE (reset --merge, --keep); DUPLICATE ? (Codex half) | cs hooks/guard_shared_tree.py:shared_tree_hit misses reset --merge and --keep. Promote those two (not placed). Skipped in Claude Code. The Codex half has no cs runner (D135). Waits on owner question 1 |
+| 1 | guard-shell.py: clause_checkout, clause_stash, clause_reset. Stops a checkout or restore path, a stash pop or drop, and reset --hard over a dirty tree. | D179, D173 | 2026-09-06 checkout lost about 240 lines | PROMOTE (reset --merge, --keep); DUPLICATE ? (Codex half) | cs hooks/guard_shared_tree.py:shared_tree_hit missed reset --merge and --keep. Those two are placed in hooks/guard_shared_tree.py reset_discards by lane guard-reset-merge-keep. Skipped in Claude Code. The Codex half has no cs runner (D135). Waits on owner question 1 |
 | 2 | guard-shell.py: clause_tree_bash, clause_tree_write. Stops a write outside this checkout. | D179 | 2026-09-06 about 1,500 lines written into the main checkout | DUPLICATE | cs hooks/guard.py rule other-checkout. Double fire live in Claude Code |
 | 3 | guard-shell.py: clause_wait. Stops a sleep or poll loop, and a waiter that matches itself in pgrep. | D179, D173 | 2026-09-12 pgrep waiter; 119-round merge loop | DUPLICATE | cs hooks/guard_stream.py:waiter_verdict. Double fire live |
 | 4 | guard-shell.py: clause_narrate (NARRATORS). Stops make merge piped into tail. | D235, D179 | 2026-09-20 | PROMOTE (--confirm spelling); DUPLICATE (rest) | cs hooks/guard_stream.py:narrated_tail_hit misses make merge with --confirm piped into tail (probed). Promote that spelling (not placed). The rest double fires live |
@@ -232,7 +232,7 @@ Labels such as DOC1 and ENV1 are the audit's row labels. The audit gives no file
 |---|---|---|---|
 | 1 | .github/workflows/check.yml scope step | STAYS ? | none |
 | 2 | Check, links and nightly workflow jobs that call cs actions | CONSUMER | cs actions/* (pinned da8d8073) |
-| 3 | Makefile lint-py: ruff check (ruff, a Python linter) | DUPLICATE ? | actions/code-check standard.json (ruff 0.17.3). This repo pins 0.17.0. Remove the local pin |
+| 3 | Makefile lint-py: ruff check (ruff, a Python linter) | DUPLICATE ? | lint/code_check_standard.json (ruff 0.17.3). This repo pins 0.17.0. Remove the local pin |
 | 3b | Makefile lint-py: ruff format check | STAYS ? | none |
 | 4 | Makefile lint-js: tsc --noEmit | DUPLICATE | actions/code-check typescript (runs twice in CI today) |
 | 5 | Makefile lint-actions: zizmor | PROMOTE ? | new actions/zizmor (lane zizmor-shared-action) |
@@ -403,8 +403,8 @@ copy, so no CI gap.
 
 ### 11. mjs-load-files
 
-- **cs files:** actions/code-check covers .mjs imports. Its standard.json skips the javascript
-  typecheck (line 53: checkJs not adopted). Tests: new case in actions/code-check/test_action.py.
+- **cs files:** actions/code-check covers .mjs imports. Its standard, lint/code_check_standard.json, skips the javascript
+  typecheck (checkJs not adopted). Tests: new case in actions/code-check/test_action.py.
 - **Done check:** a .mjs file with a broken import is red on the current code, green after.
 - **Child removals:** q_max row 18 (harness/load-files.mjs) stays, partly. PR #1135 (lane mjs-load-files) found that the shared check misses a bare package absent from node_modules, and .ts files run through tsx. The child keeps its own check for those until its own tsc covers them.
 - **Order:** the child pins the shared action or hook first, then removes its copy, so no CI gap.
@@ -413,7 +413,6 @@ copy, so no CI gap.
 
 These items have no lane and no owner question yet. Each needs a lane or an owner call:
 
-- banchi row 1: promote the reset --merge and --keep part into hooks/guard_shared_tree.py.
 - banchi row 4: promote the --confirm spelling into hooks/guard_stream.py.
 - banchi row 7: promote the file and bash-c clauses into hooks/guard.py silent_write_hit.
 - banchi row 21 (zeroth hook copy) and row 47 (fixed sleeps in Playwright specs).
@@ -480,7 +479,7 @@ that waits on a lane or an owner question says so.
 
 ### degen
 
-- Row 3 (ruff, "?"): cs actions/code-check standard.json pins ruff 0.17.3. This repo pins 0.17.0.
+- Row 3 (ruff, "?"): cs lint/code_check_standard.json pins ruff 0.17.3. This repo pins 0.17.0.
   Remove the local pin. Ruff format stays.
 - Row 4: tsc --noEmit runs twice in CI. Remove the local step. cs actions/code-check typescript runs
   it.

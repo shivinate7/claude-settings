@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Print a waiting page rebuilt and republished the way the writer does it, for page.test.mjs.
 
-    python3 skills/waiting-page/tests/merged_page.py --page LIVE.html [--no-roadmap] [--current PHASE] [--data JSON]
+    python3 skills/waiting-page/tests/merged_page.py --page LIVE.html [--no-roadmap] [--current PHASE] [--data JSON] [--live JSON]
 
 Builds the roadmap data block of a fixture roadmap repo (skills/roadmap/build.py --block), splices
 it into LIVE.html (skills/waiting-page/splice.py) and prints the result. With --no-roadmap the repo
@@ -52,9 +52,9 @@ def steps_current_in(current):
     return steps
 
 
-def run(argv, what):
+def run(argv, what, ok=(0,)):
     done = _nowindow.run(argv, capture_output=True, text=True, encoding="utf-8")
-    if done.returncode != 0:
+    if done.returncode not in ok:
         sys.stderr.write("%s failed (exit %d): %s\n%s%s" % (what, done.returncode, " ".join(argv), done.stdout, done.stderr))
         raise SystemExit(1)
 
@@ -64,6 +64,7 @@ def main():
     ap.add_argument("--page", required=True, help="the live page to splice the block into")
     ap.add_argument("--no-roadmap", action="store_true", help="a repo with no record branch")
     ap.add_argument("--current", choices=PHASE_KEYS, help="the phase the rail marks as current")
+    ap.add_argument("--live", help="the live-work file's text, as JSON: build.py --live reads it")
     ap.add_argument("--data", help='the steps and meta docs to bake, as JSON {"steps": {file stem: step}, "meta": {file stem: doc}}')
     args = ap.parse_args()
     if args.no_roadmap and args.current:
@@ -89,8 +90,14 @@ def main():
             repo = test_build.make_repo(folder, steps=steps, meta=meta)
             test_build.git(repo, "checkout", "-q", "main")
         block, merged = os.path.join(folder, "block.html"), os.path.join(folder, "merged.html")
-        run([sys.executable, str(ROOT / "skills" / "roadmap" / "build.py"), "--repo", str(repo), "--block",
-             "--out", block], "the roadmap build")
+        build = [sys.executable, str(ROOT / "skills" / "roadmap" / "build.py"), "--repo", str(repo), "--block", "--out", block]
+        if args.live:
+            live = os.path.join(folder, "live.json")
+            with open(live, "w", encoding="utf-8") as f:
+                f.write(args.live)
+            build += ["--live", live]
+        # Exit 1 is a red line (a stalled step): the build still wrote its block, which is what the page shows.
+        run(build, "the roadmap build", ok=(0, 1) if args.live else (0,))
         run([sys.executable, str(ROOT / "skills" / "waiting-page" / "splice.py"), "--page", args.page,
              "--block", block, "--out", merged], "the splice")
         with open(merged, "rb") as f:

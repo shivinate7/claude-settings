@@ -6,6 +6,12 @@ description: Use after a change to a screen in a repo that has screens. Runs two
 Run this in the orchestrator. Agents never spawn, so the orchestrator spawns both reviewers.
 The ruling is decision design-skills (third-party design skills), 2026-10-10.
 
+## When it runs
+
+Beside review round 1, on the first built head. The blind reviewers (A and B) and the compare
+step all run then. Fixes go to the builder with the round-1 code findings. Any change to a screen file
+after round 1 gets a second design read (decision `design-agents`).
+
 ## Pinned sources
 
 - Vercel rules: `https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/434b7f91364665f2f733b310ec54809bf8f37937/command.md`.
@@ -26,6 +32,7 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
    also capture the same screens on main at every size and theme. `bin/shoot` also writes
    each rendered page as `.html`. Run `python3 ~/.claude/lint/label_once.py` on those files, and
    give its hits to Reviewer A and the design reviewer (`ux-label-once`, a label shows once).
+   Touch per size: a phone or tablet gets `hasTouch` (so `(pointer: coarse)` matches; the 44 px touch floor), a desktop gets none (a mouse; 24 px), per decision `ux-house-rules` (the UX rules for builders and reviewers) and checklist `ux-a11y-floor`. Take each touch shot as a viewport shot: a full-page or element shot drops the coarse match for that page. A touch shot proves layout under touch emulation, not a feel (`verification-green-proves-only-its-fixtures`; decision `feel-fix-waits-device-check`).
 2. **Spawn two blind reviewers.** Each brief names only the changed pages, routes and
    built screenshots, plus the reviewer's own instructions below. Never give a reviewer the repo's
    design spec, tokens or design decisions.
@@ -59,6 +66,7 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
    judges each screen against the mockup, or against those main screenshots when there is none, and
    against the repo's design rules, and sets each finding against them. Do not change the list. The design reviewer is not blind, so it never takes the
    place of Reviewer A or B.
+   Until the kept pair's PR merges, the mockup sits on the step's design branch, which the brief names; the reviewer does not wait for that PR.
 5. **Sort each finding.**
    - Agrees with the repo, or is a plain defect (accessibility, broken layout, overflow): fix
      before merge. The reviewers never fix. Send the fix to the builder.
@@ -86,8 +94,8 @@ It is not a review of a built screen.
    style changed; else `new`. It names the parts that decide the verdict. In an iOS repo, it also gives
    each mockup the `native` or `web-like` line of step 7.
 3. When every mockup is `same`, the orchestrator puts one flag at the top of the owner's list: the set
-   holds no new structure. It offers one more round of blind lanes, from the template.
-4. When a blind mockup is `same`, the orchestrator reads that lane's brief against the template
+   holds no new structure. It offers one more round of blind designers, from the template.
+4. When a blind mockup is `same`, the orchestrator reads that designer's brief against the template
    (`blind_brief.py`) and names any fault beside the verdict.
 
 ## Rules
@@ -95,7 +103,8 @@ It is not a review of a built screen.
 - No conformity either way. The repo does not silence a skill. A skill does not restyle the
   repo on its own.
 - A skill update does not change a look by itself. Each source stays at its pin.
-- A round is steps 2 to 5, with a new pair of blind reviewers. Round cap and open findings:
+- A design review is steps 2 to 5, with a new pair of blind reviewers. It runs at round 1. A second design read
+  follows decision `design-agents`. Round cap and open findings:
   `roles-review-cap-three`, `roles-findings-are-debts-or-notes`.
 - House rules (decision ux-house-rules, the UX rules for builders and reviewers): a builder reads `~/.claude/docs/design/principles.md` before it writes UI. Reviewer A's brief asks for the house checklist (step 2). House design values: `~/.claude/docs/design/tokens.md`.
 - Layout and spacing: Reviewer A's house checklist covers the rules in `~/.claude/docs/design/layout.md` (gap on the parent, layout primitives, a control beside its area, container queries, fluid tokens).

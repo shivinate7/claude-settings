@@ -21,7 +21,8 @@ Contract the builder codes against:
     word `override` (the rest is the reason, logged to guard.log). The whole-prompt forms
     `override <n>[m|h]` and `override off` keep their meaning. The cases for that are the override_* ones.
     The Opus word in plain words (`send opus judges`) is judged once by a model. The opus_ask_* cases run
-    the grant in this process and stand in decision_watch.invoke_model, so no model runs.
+    the grant in this process and stand in decision_watch.invoke_model, so no model runs. The opus_scope_*
+    and opus_list_* cases call override.grant_opus_ask directly, with the judge and the scope read stood in.
 
 Set LOCAL_TIME_UNDER_TEST to test another file.
 
@@ -34,6 +35,7 @@ The expected strings are hardcoded here. They are never computed with zoneinfo i
 """
 import contextlib
 import importlib.util
+import inspect
 import io
 import json
 import os
@@ -691,13 +693,14 @@ class JudgeStub:
         return self.answer, self.error
 
 
-def opus_type(prompt, answer=None, error=None, at=OV_NOW, transcript=None, remote=None, extra=None):
+def opus_type(prompt, answer=None, error=None, at=OV_NOW, transcript=None, remote=None, extra=None, cfg=None):
     """The owner types `prompt` into the prompt hook's grant, with the model stood in. Returns (config dir, judge
-    calls, stdout, stderr). The grant's files and guard.log land in the config dir. `transcript` is the payload's
-    transcript_path (no key when None). `remote` is CLAUDE_CODE_REMOTE_SESSION_ID for the grant (unset when None).
-    `extra` holds more keys of the hook payload, such as `source`, merged in as given (none when None)."""
+    calls, stdout, stderr). The grant's files and guard.log land in the config dir, a new one unless `cfg` names it.
+    `transcript` is the payload's transcript_path (no key when None). `remote` is CLAUDE_CODE_REMOTE_SESSION_ID for
+    the grant (unset when None). `extra` holds more keys of the hook payload, such as `source`, merged in as given
+    (none when None)."""
     _, decision_watch = hooks_modules()
-    cfg = ov_cfg()
+    cfg = cfg or ov_cfg()
     stub = JudgeStub(answer, error)
     payload = {"hook_event_name": "UserPromptSubmit", "session_id": OV_SESSION, "prompt": prompt, "cwd": HERE}
     if transcript is not None:
@@ -714,7 +717,7 @@ def opus_type(prompt, answer=None, error=None, at=OV_NOW, transcript=None, remot
             local_time_under_test().grant_override(raw, at)
     finally:
         decision_watch.invoke_model = real_invoke
-    return cfg, stub.calls, out.getvalue(), err.getvalue()
+    return cfg, judge_calls(stub.calls), out.getvalue(), err.getvalue()
 
 
 def transcript_record(kind, content, is_meta=False, origin=None, prompt_source=None):
@@ -903,16 +906,23 @@ def case_opus_ask_length_and_role_from_the_words():
           "got %r" % (got,))
 
 
-def case_opus_ask_two_roles_grant_nothing():
-    # Two distinct roles named grant nothing: the words do not say which agents to lift.
-    for prompt in ("use opus for reviewers, not builders 30m", "send opus for reviewers and builders"):
-        cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
-        took = take_spawn(cfg, "reviewer")
-        check("opus ask: %r reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
-        check("opus ask: %r names two roles and writes no Opus override" % prompt, opus_override(cfg) is None,
-              "files %r" % ov_files(cfg))
-        check("opus ask: %r leaves an Opus reviewer spawn refused" % prompt, not lifted(took),
-              "take() returned %r for a reviewer spawn" % (took,))
+def case_opus_ask_two_roles_grant_both():
+    # The two roles the ask names are both granted, as a sorted list (decision owner-override). A negated role still
+    # grants nothing: the negation case holds `use opus for reviewers, not builders 30m`.
+    cfg, calls, _, _ = opus_type("send opus for reviewers and builders", answer={"ok": True})
+    got = opus_override(cfg)
+    check("opus ask: `send opus for reviewers and builders` reaches the judge once", len(calls) == 1,
+          "judge calls %d" % len(calls))
+    check("opus ask: the two roles the words name are both granted, as the sorted list [builder, reviewer]",
+          got is not None and got[0] == "opus" and got[2] == ["builder", "reviewer"],
+          "got %r; files %r" % (got, ov_files(cfg)))
+    builder, reviewer, author = take_spawn(cfg, "builder"), take_spawn(cfg, "reviewer"), take_spawn(cfg, "test-author")
+    check("opus ask: a builder spawn is lifted under the two-role override", lifted(builder),
+          "take() returned %r for a builder spawn" % (builder,))
+    check("opus ask: a reviewer spawn is lifted under the two-role override", lifted(reviewer),
+          "take() returned %r for a reviewer spawn" % (reviewer,))
+    check("opus ask: a test-author spawn stays refused under the two-role override", author is None,
+          "take() returned %r for a test-author spawn" % (author,))
 
 
 def case_opus_ask_addressee_is_not_a_role():
@@ -934,9 +944,11 @@ def case_opus_ask_addressee_is_not_a_role():
 
 def case_opus_ask_negated_role_grants_nothing():
     # A role word with a negation near it grants nothing. A role word with no negation still names its role.
+    # The second role of the last prompt is negated, so it grants nothing even though two roles are named (ruling 226 b).
     for prompt in ("send opus judges, not reviewers", "send opus judges, no reviewers",
                    "send opus judges, don't use reviewers", "send opus judges, never reviewers",
-                   "send opus judges except reviewers", "send opus judges without reviewers"):
+                   "send opus judges except reviewers", "send opus judges without reviewers",
+                   "use opus for reviewers, not builders 30m"):
         cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
         check("opus ask: %r reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
         check("opus ask: %r names a negated role and writes no Opus override" % prompt, opus_override(cfg) is None,
@@ -1517,6 +1529,528 @@ def case_opus_ask_source_keyword_forms_are_untouched():
           and abs((got[1] - (OV_NOW + timedelta(minutes=15))).total_seconds()) <= 1, "got %r" % (got,))
 
 
+# PLAIN ASK SCOPE (decision owner-override). A plain ask that names no role takes its roles from the owner's nearby typed
+# prompts, read by scope_judge. When those name none, it grants every role for 2h, and it never asks. These cases call
+# grant_opus_ask directly, with the yes/no judge and the scope read stood in. A case about excluded records checks first
+# that the read runs on the plain prompt, and only then checks the excluded words, so an empty read cannot pass that
+# check by accident.
+SCOPE_WORDS = {"builder": "builders", "reviewer": "reviewers"}  # the word the scope stand-in finds for each role
+EVERY_ROLE_2H = b'{"kind": "opus", "until": "2026-10-18T20:00:00+00:00", "role": null}'  # OV_NOW + 2h, role null
+BUILDER_2H = b'{"kind": "opus", "until": "2026-10-18T20:00:00+00:00", "role": "builder"}'
+# Each record names the role `reviewers`, and the plain prompt after it names none.
+EXCLUDED_RECORDS = (
+    ("an isMeta record", transcript_record("user", "reviewers please audit", is_meta=True)),
+    ("a promptSource system record", transcript_record("user", "reviewers please audit", prompt_source="system")),
+    ("a task-notification origin record",
+     transcript_record("user", "reviewers please audit", origin={"kind": "task-notification"})),
+    ("a peer origin record", transcript_record("user", "reviewers please audit", origin={"kind": "peer"})),
+    ("a /effort command record", transcript_record("user", EFFORT_COMMAND.replace("medium", "reviewers please audit"))),
+    ("a fired-task block", transcript_record("user", "reviewers please audit " + FIRED_REMINDER)),
+    ("an assistant record", assistant_turn("reviewers please audit")),
+    ("a tool result record",
+     transcript_record("user", [{"type": "tool_result", "tool_use_id": "t2", "content": "reviewers please audit"}])),
+)
+
+
+def judge_calls(calls):
+    """The calls that are the yes/no judge's: each prompt starts with call_judge.OPUS_ASK_PROMPT. A scope read's model call
+    carries another prompt, so it is left out."""
+    hooks_modules()
+    import call_judge
+    return [call for call in calls if call[0].startswith(call_judge.OPUS_ASK_PROMPT)]
+
+
+class JudgeRecorder:
+    """Stands in for the yes/no judge (call_judge.opus_ask). It answers `answer` and records each text it is given."""
+
+    def __init__(self, answer=True):
+        self.answer, self.texts = answer, []
+
+    def __call__(self, text):
+        self.texts.append(text)
+        return self.answer
+
+
+class ScopeStub:
+    """Stands in for the scope read, scope_judge(ask_text, context). It records each call as (ask text, context list).
+    With `reads`, it names the roles whose words the context holds, or None. Otherwise it answers `answer`, and it
+    raises `error` when one is given."""
+
+    def __init__(self, answer=None, reads=False, error=None):
+        self.answer, self.reads, self.error, self.calls = answer, reads, error, []
+
+    def __call__(self, ask_text, context):
+        self.calls.append((ask_text, list(context)))
+        if self.error is not None:
+            raise self.error
+        if self.reads:
+            named = sorted({role for role, word in SCOPE_WORDS.items() if any(word in entry for entry in context)})
+            return named or None
+        return self.answer
+
+
+class FileReadingScope:
+    """Stands in for the scope read. During its own call it reads the session's Opus override file and keeps what it saw
+    in `seen`, so a case can check the file the read finds. It answers `answer`, or raises `error` when one is given."""
+
+    def __init__(self, cfg, answer=None, error=None):
+        self.cfg, self.answer, self.error, self.seen, self.calls = cfg, answer, error, None, []
+
+    def __call__(self, ask_text, context):
+        self.calls.append((ask_text, list(context)))
+        self.seen = opus_override(self.cfg)
+        if self.error is not None:
+            raise self.error
+        return self.answer
+
+
+def grant_direct(cfg, prompt, transcript, judge, scope, remote=None):
+    """grant_opus_ask for `prompt` in the config dir `cfg` at OV_NOW, with the judge and the scope read stood in. The scope
+    read is passed only when grant_opus_ask takes it: a build without it runs the plain path, and the case fails on the
+    file that path wrote, not on a TypeError. Returns what grant_opus_ask returns."""
+    override, _ = hooks_modules()
+    kwargs = {"judge": judge, "transcript": transcript}
+    if "scope_judge" in inspect.signature(override.grant_opus_ask).parameters:
+        kwargs["scope_judge"] = scope
+    with config_dir_env(cfg), remote_env(remote):  # `remote` is CLAUDE_CODE_REMOTE_SESSION_ID for the grant, unset when None
+        return override.grant_opus_ask(OV_SESSION, prompt, OV_NOW, **kwargs)
+
+
+def scope_grant(prompt, lines, scope, judge_answer=True, cfg=None, remote=None):
+    """The plain ask `prompt` after the transcript `lines`, which the harness writes with the ask as its last record.
+    `lines` None means no transcript_path, and `cfg` names the config dir (a new one when None). Returns (config dir,
+    judge, scope, exception or None): a raise is returned, so the case names it instead of crashing. A kill is returned
+    too: KeyboardInterrupt and SystemExit pass through every `except Exception`, so the case reads what the kill left."""
+    cfg, judge = cfg or ov_cfg(), JudgeRecorder(judge_answer)
+    path = transcript_file(lines + [owner_turn(prompt)]) if lines is not None else None
+    try:
+        grant_direct(cfg, prompt, path, judge, scope, remote)
+    except (Exception, KeyboardInterrupt, SystemExit) as exc:
+        return cfg, judge, scope, exc
+    return cfg, judge, scope, None
+
+
+def write_opus_file(cfg, role, until=OV_NOW + timedelta(hours=2)):
+    """An Opus override file as the grant writes it: kind opus, the end in UTC, and role (null, one role, or a sorted list)."""
+    path = os.path.join(cfg, "state", "override", "opus", OV_SESSION + ".json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({"kind": "opus", "until": until.astimezone(timezone.utc).isoformat(), "role": role}, handle)
+
+
+def opus_bytes(cfg, session=OV_SESSION):
+    """The bytes of the session's Opus override file, or None when there is none."""
+    try:
+        with open(os.path.join(cfg, "state", "override", "opus", session + ".json"), "rb") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+def case_opus_scope_context_names_builders_grants_builder():
+    cfg, judge, scope, _ = scope_grant("send opus now", [owner_turn("builders should do the refactor next")],
+                                       ScopeStub(reads=True))
+    ran = len(scope.calls) == 1
+    check("opus scope: a plain ask after an earlier builders prompt calls the scope read once", ran,
+          "read calls %d" % len(scope.calls))
+    if ran:
+        check("opus scope: the read is given the ask's text and the earlier prompt",
+              scope.calls[0] == ("send opus now", ["builders should do the refactor next"]), "read %r" % (scope.calls[0],))
+    got = opus_override(cfg)
+    check("opus scope: the earlier builders prompt grants the builder role, as one role string",
+          got is not None and got[0] == "opus" and got[2] == "builder", "got %r; files %r" % (got, ov_files(cfg)))
+    builder, reviewer = take_spawn(cfg, "builder"), take_spawn(cfg, "reviewer")
+    check("opus scope: a builder spawn is lifted under the scoped override", lifted(builder),
+          "take() returned %r for a builder spawn" % (builder,))
+    check("opus scope: a reviewer spawn stays refused under the builder scope", not lifted(reviewer),
+          "take() returned %r for a reviewer spawn" % (reviewer,))
+
+
+def case_opus_scope_reads_the_plain_prompts_oldest_first():
+    lines = [owner_turn("the refactor is next"), owner_turn("builders should review it")]
+    cfg, judge, scope, _ = scope_grant("send opus now", lines, ScopeStub(reads=True))
+    ran = len(scope.calls) == 1
+    check("opus scope: two earlier plain prompts call the scope read once", ran, "read calls %d" % len(scope.calls))
+    if ran:
+        check("opus scope: the read's context holds both prompts, oldest first",
+              scope.calls[0][1] == ["the refactor is next", "builders should review it"],
+              "context %r" % (scope.calls[0][1],))
+    got = opus_override(cfg)
+    check("opus scope: the one prompt that names builders grants the builder role",
+          got is not None and got[2] == "builder", "got %r" % (got,))
+
+
+def case_opus_scope_reads_only_the_transcript_tail():
+    # Full size: more than a megabyte of assistant text. The owner prompt at its top is outside the tail the reader takes,
+    # so only the prompt at the end is read. The top prompt names reviewers; if it were read, two roles would be granted.
+    filler = [assistant_turn("filler " * 60)] * 3000
+    lines = [owner_turn("reviewers should audit the top")] + filler + [owner_turn("builders should review it")]
+    cfg, judge, scope, _ = scope_grant("send opus now", lines, ScopeStub(reads=True))
+    ran = len(scope.calls) == 1
+    check("opus scope: a transcript of more than a megabyte calls the scope read once", ran,
+          "read calls %d" % len(scope.calls))
+    if ran:
+        check("opus scope: the read's context is the prompt in the tail only",
+              scope.calls[0][1] == ["builders should review it"], "context %r" % (scope.calls[0][1],))
+    got = opus_override(cfg)
+    check("opus scope: the tail prompt grants the builder role alone",
+          got is not None and got[2] == "builder", "got %r" % (got,))
+
+
+def case_opus_scope_without_an_earlier_prompt_grants_every_role():
+    # Guard, passes on the old build too: with no earlier owner prompt the scope read is not called and every role is
+    # granted. The positive pair is the context case above.
+    for name, lines in (("no transcript_path", None), ("an empty transcript", []),
+                        ("only assistant and tool records", [assistant_turn("reading the brief"), tool_result_turn()])):
+        cfg, judge, scope, _ = scope_grant("send opus now", lines, ScopeStub(reads=True))
+        check("opus scope: with %s, the scope read is not called" % name, scope.calls == [],
+              "read calls %d" % len(scope.calls))
+        got = opus_override(cfg)
+        check("opus scope: with %s, the ask grants every role" % name, got is not None and got[2] is None,
+              "got %r" % (got,))
+
+
+def case_opus_scope_not_read_when_the_ask_names_a_role_or_length_is_unclear():
+    # Guard, passes on the old build too: the roles the ask names win, so the read is not called, and an ask that grants
+    # nothing never calls it either. The earlier prompt names builders, so a read that ran would show.
+    lines = [owner_turn("builders should do the refactor next")]
+    cfg, judge, scope, _ = scope_grant("send opus reviewers", lines, ScopeStub(reads=True))
+    check("opus scope: an ask that names reviewers does not call the scope read", scope.calls == [],
+          "read calls %d" % len(scope.calls))
+    got = opus_override(cfg)
+    check("opus scope: the reviewers the ask names win over the builders in its context",
+          got is not None and got[2] == "reviewer", "got %r" % (got,))
+    for prompt in ("send opus judges, not reviewers", "send opus judges for 0.5h"):
+        cfg, judge, scope, _ = scope_grant(prompt, lines, ScopeStub(reads=True))
+        check("opus scope: %r grants nothing and calls no scope read" % prompt,
+              scope.calls == [] and opus_override(cfg) is None,
+              "read calls %d; files %r" % (len(scope.calls), ov_files(cfg)))
+
+
+def case_opus_scope_not_read_when_the_judge_says_no():
+    # Guard, passes on the old build too: a judge that says no grants nothing and reads no context.
+    lines = [owner_turn("builders should do the refactor next")]
+    cfg, judge, scope, _ = scope_grant("send opus now", lines, ScopeStub(reads=True), judge_answer=False)
+    check("opus scope: a judge that says no is asked once, and the scope read is not called",
+          judge.texts == ["send opus now"] and scope.calls == [], "judge texts %r; read calls %d"
+          % (judge.texts, len(scope.calls)))
+    check("opus scope: a judge that says no writes no override", opus_override(cfg) is None,
+          "files %r" % ov_files(cfg))
+
+
+def case_opus_scope_judge_is_given_the_ask_text_only():
+    # Guard, passes on the old build too: the yes/no judge gets the ask's own text and never the earlier prompts. The
+    # positive pair is the context case above, which the read reaches.
+    lines = [owner_turn("builders should do the refactor next")]
+    cfg, judge, scope, _ = scope_grant("send opus now", lines, ScopeStub(reads=True))
+    check("opus scope: the judge is asked once, with the ask's own text and no context",
+          judge.texts == ["send opus now"], "judge texts %r" % (judge.texts,))
+
+
+def case_opus_scope_plain_prompt_naming_reviewers_is_read():
+    # The positive pair of the excluded-records case: the same shape with the words in a plain owner prompt. The read
+    # runs with both prompts, and the reviewer role is granted.
+    lines = [owner_turn("reviewers please audit"), owner_turn("the refactor is next")]
+    cfg, judge, scope, _ = scope_grant("send opus now", lines, ScopeStub(reads=True))
+    ran = len(scope.calls) == 1
+    check("opus scope: a plain prompt naming reviewers calls the scope read once", ran, "read calls %d" % len(scope.calls))
+    if ran:
+        check("opus scope: the read is given both plain prompts, oldest first",
+              scope.calls[0][1] == ["reviewers please audit", "the refactor is next"], "context %r" % (scope.calls[0][1],))
+    got = opus_override(cfg)
+    check("opus scope: the plain prompt that names reviewers grants the reviewer role",
+          got is not None and got[2] == "reviewer", "got %r" % (got,))
+
+
+def case_opus_scope_excluded_records_never_reach_the_read():
+    # Each record in EXCLUDED_RECORDS holds the words `reviewers please audit`. The plain prompt after it names no role.
+    # The read must run on that plain prompt alone (first check); only then are the excluded words checked.
+    for name, record in EXCLUDED_RECORDS:
+        lines = [record, owner_turn("the refactor is next")]
+        cfg, judge, scope, _ = scope_grant("send opus now", lines, ScopeStub(reads=True))
+        ran = len(scope.calls) == 1 and scope.calls[0][1] == ["the refactor is next"]
+        check("opus scope: after %s, the read runs once on the plain prompt alone" % name, ran,
+              "read calls %r" % (scope.calls,))
+        if ran:
+            check("opus scope: after %s, no context entry holds the excluded words" % name,
+                  not any("reviewers" in entry for entry in scope.calls[0][1]), "context %r" % (scope.calls[0][1],))
+        got = opus_override(cfg)
+        check("opus scope: after %s, the ask grants every role" % name, got is not None and got[2] is None,
+              "got %r" % (got,))
+
+
+def case_opus_scope_pasted_block_in_a_prior_prompt_never_reaches_the_read():
+    # A pasted block is not the owner's words. Its text never reaches the read; the words around it do.
+    pasted = 'look at this <pasted_content index="1">reviewers please audit</pasted_content> then the refactor'
+    cfg, judge, scope, _ = scope_grant("send opus now", [owner_turn(pasted)], ScopeStub(reads=True))
+    ran = len(scope.calls) == 1
+    check("opus scope: a prior prompt with a pasted block calls the scope read once", ran,
+          "read calls %d" % len(scope.calls))
+    if ran:
+        context = scope.calls[0][1]
+        check("opus scope: the words around the paste reach the read",
+              len(context) == 1 and "look at this" in context[0] and "then the refactor" in context[0],
+              "context %r" % (context,))
+        check("opus scope: the pasted words never reach the read", not any("reviewers" in entry for entry in context),
+              "context %r" % (context,))
+    got = opus_override(cfg)
+    check("opus scope: the pasted block alone grants every role", got is not None and got[2] is None, "got %r" % (got,))
+    # The same words as plain text name reviewers: the positive pair, red on the old build.
+    cfg, judge, scope, _ = scope_grant("send opus now", [owner_turn("look at this, reviewers please audit, then the refactor")],
+                                       ScopeStub(reads=True))
+    got = opus_override(cfg)
+    check("opus scope: the same words as plain text grant the reviewer role",
+          got is not None and got[2] == "reviewer", "got %r" % (got,))
+
+
+def case_opus_scope_the_asks_own_record_is_not_context():
+    # The ask's own record is the last record of the transcript. It is not an earlier prompt, so its words never reach the read.
+    prompt = 'send opus now <pasted_content index="1">reviewers please audit</pasted_content>'
+    cfg, judge, scope, _ = scope_grant(prompt, [owner_turn("the refactor is next")], ScopeStub(reads=True))
+    ran = len(scope.calls) == 1 and scope.calls[0][1] == ["the refactor is next"]
+    check("opus scope: with the ask as its own last record, the read runs once on the earlier prompt alone", ran,
+          "read calls %r" % (scope.calls,))
+    if ran:
+        check("opus scope: the ask's own words are not in the read's context",
+              not any("send opus now" in entry for entry in scope.calls[0][1]), "context %r" % (scope.calls[0][1],))
+    override, _ = hooks_modules()
+    check("opus scope: the judge is given the ask's stripped text, pasted block cut",
+          judge.texts == [override._strip_blocks(prompt)], "judge texts %r" % (judge.texts,))
+
+
+def case_opus_scope_odd_answer_or_error_grants_every_role():
+    # Guard, passes on the old build too: a raise, a bare string, a dict, an unknown role alone, an empty list and no answer
+    # each grant every role. None of them raises out of the grant, and none grants nothing.
+    for name, stub in (
+            ("the read raises", ScopeStub(error=RuntimeError("fixture: the read failed"))),
+            ("the read answers a bare string", ScopeStub(answer="builder")),
+            ("the read answers a dict", ScopeStub(answer={"roles": ["builder"]})),
+            ("the read names only an unknown role", ScopeStub(answer=["wizard"])),
+            ("the read answers an empty list", ScopeStub(answer=[])),
+            ("the read answers None", ScopeStub(answer=None))):
+        cfg, judge, _, raised = scope_grant("send opus now", [owner_turn("builders should do the refactor next")], stub)
+        check("opus scope: %s, the grant does not raise" % name, raised is None, "raised %r" % (raised,))
+        got = opus_override(cfg)
+        check("opus scope: %s, the ask writes an override for every role" % name,
+              got is not None and got[0] == "opus" and got[2] is None, "got %r; files %r" % (got, ov_files(cfg)))
+
+
+def case_opus_scope_drops_an_unknown_role_and_keeps_the_rest():
+    cfg, judge, scope, _ = scope_grant("send opus now", [owner_turn("builders should do the refactor next")],
+                                       ScopeStub(answer=["wizard", "builder"]))
+    got = opus_override(cfg)
+    check("opus scope: the read names wizard, which is no role, and builder: the grant names builder alone",
+          got is not None and got[2] == "builder", "got %r" % (got,))
+
+
+def case_opus_scope_two_roles_from_the_read_grant_both_sorted():
+    cfg, judge, scope, _ = scope_grant("send opus now", [owner_turn("reviewers and builders should do the refactor")],
+                                       ScopeStub(reads=True))
+    got = opus_override(cfg)
+    check("opus scope: an earlier prompt naming both roles grants both, as the sorted list [builder, reviewer]",
+          got is not None and got[2] == ["builder", "reviewer"], "got %r" % (got,))
+
+
+def case_opus_list_role_lifts_its_roles_and_refuses_the_rest():
+    # The file's role may be a sorted list of two or more roles: a spawn of a listed role is lifted, any other is refused.
+    cfg = ov_cfg()
+    write_opus_file(cfg, ["builder", "reviewer"])
+    builder, reviewer, author = take_spawn(cfg, "builder"), take_spawn(cfg, "reviewer"), take_spawn(cfg, "test-author")
+    check("opus list: a builder spawn is lifted under the builder and reviewer list", lifted(builder),
+          "take() returned %r" % (builder,))
+    check("opus list: a reviewer spawn is lifted under the builder and reviewer list", lifted(reviewer),
+          "take() returned %r" % (reviewer,))
+    check("opus list: a test-author spawn is refused under the builder and reviewer list", author is None,
+          "take() returned %r" % (author,))
+
+
+def case_opus_keyword_files_keep_their_bytes():
+    # Guard, passes on the old build too: the keyword forms write the bytes they wrote before the scope read, and the
+    # keyword forms never call the judge or the scope read.
+    cfg, calls, _, _ = opus_type("opus 2h", answer={"ok": True})
+    check("opus keyword: `opus 2h` makes no judge call", calls == [], "judge calls %d" % len(calls))
+    check("opus keyword: `opus 2h` writes the every-role file bytes it wrote before", opus_bytes(cfg) == EVERY_ROLE_2H,
+          "bytes %r" % (opus_bytes(cfg),))
+    cfg = ov_cfg()
+    opus_type("opus builders 2h", answer={"ok": True}, cfg=cfg)
+    check("opus keyword: `opus builders 2h` writes the builder file bytes it wrote before",
+          opus_bytes(cfg) == BUILDER_2H, "bytes %r" % (opus_bytes(cfg),))
+    opus_type("opus off", answer={"ok": True}, cfg=cfg)
+    check("opus keyword: `opus off` removes the file", opus_bytes(cfg) is None, "bytes %r" % (opus_bytes(cfg),))
+
+
+# THE EVERY-ROLE FILE FIRST (decision owner-override). The prompt hook can be killed while the scope read runs: its timeout
+# is 30 s in settings.json. With no scope the grant is every role, so the every-role file is written before the read, and
+# a valid answer then narrows it. A kill during the read leaves the every-role file.
+def case_opus_scope_read_sees_every_role_before_it_runs():
+    cfg = ov_cfg()
+    stub = FileReadingScope(cfg, answer=["builder"])
+    scope_grant("send opus now", [owner_turn("builders should do the refactor next")], stub, cfg=cfg)
+    ran = len(stub.calls) == 1
+    check("opus scope: a plain ask after an earlier builders prompt calls the read once", ran,
+          "read calls %d" % len(stub.calls))
+    if ran:
+        seen = stub.seen
+        check("opus scope: during the read the Opus override file exists with role null",
+              seen is not None and seen[0] == "opus" and seen[2] is None, "file during the read %r" % (seen,))
+        check("opus scope: during the read the file ends two hours after the grant",
+              seen is not None and abs((seen[1] - (OV_NOW + timedelta(hours=2))).total_seconds()) <= 1,
+              "file during the read %r" % (seen,))
+
+
+def case_opus_scope_a_kill_during_the_read_leaves_every_role():
+    # A kill during the read, modelled as the KeyboardInterrupt or SystemExit the interpreter raises, leaves an every-role
+    # override two hours long: no scope means every role.
+    for name, kill in (("a KeyboardInterrupt", KeyboardInterrupt()), ("a SystemExit", SystemExit(1))):
+        cfg = ov_cfg()
+        stub = ScopeStub(error=kill)
+        scope_grant("send opus now", [owner_turn("builders should do the refactor next")], stub, cfg=cfg)
+        ran = len(stub.calls) == 1
+        check("opus scope: %s during the read, the read was reached" % name, ran, "read calls %d" % len(stub.calls))
+        got = opus_override(cfg)
+        check("opus scope: %s during the read leaves an every-role override, two hours long" % name,
+              got is not None and got[0] == "opus" and got[2] is None
+              and abs((got[1] - (OV_NOW + timedelta(hours=2))).total_seconds()) <= 1,
+              "got %r; files %r" % (got, ov_files(cfg)))
+
+
+def case_opus_scope_valid_answer_ends_narrowed():
+    # Guard, passes on the build too: a valid answer still narrows the every-role file, and the two-hour end is kept.
+    cfg = ov_cfg()
+    scope_grant("send opus now", [owner_turn("builders should do the refactor next")], ScopeStub(answer=["builder"]), cfg=cfg)
+    got = opus_override(cfg)
+    check("opus scope: a valid answer ends the file narrowed to builder",
+          got is not None and got[0] == "opus" and got[2] == "builder", "got %r" % (got,))
+    check("opus scope: the narrowed file keeps the two-hour end",
+          got is not None and abs((got[1] - (OV_NOW + timedelta(hours=2))).total_seconds()) <= 1, "got %r" % (got,))
+
+
+# NEGATION AFTER A ROLE, AND THE MODEL'S ROLE NAMES (decision owner-override). A negation within three words after a role
+# word negates that role, as one within three words before it does, for one role or two. The model's raw role strings
+# reach override.py, which is the one filter: it ignores case and keeps the roles in ASK_ROLES.
+@contextlib.contextmanager
+def model_answers(answer=None, error=None):
+    """decision_watch.invoke_model stood in for the block. It answers (answer, error) and records each call."""
+    _, decision_watch = hooks_modules()
+    stub = JudgeStub(answer, error)
+    real = decision_watch.invoke_model
+    decision_watch.invoke_model = stub
+    try:
+        yield stub
+    finally:
+        decision_watch.invoke_model = real
+
+
+def real_scope_read():
+    """call_judge.opus_scope, the scope read the prompt hook uses when a caller passes none."""
+    hooks_modules()
+    import call_judge
+    return call_judge.opus_scope
+
+
+def case_opus_ask_negation_after_a_role_grants_nothing():
+    for prompt in ("send opus builders, not needed", "send opus builders, don't do the tests",
+                   "send opus builders never", "send opus builders except the tests",
+                   "send opus builders, reviewers are not needed", "send opus reviewers and builders, not tests"):
+        cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
+        check("opus ask: %r reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
+        check("opus ask: %r has a negation after a role and writes no Opus override" % prompt,
+              opus_override(cfg) is None, "files %r" % ov_files(cfg))
+
+
+def case_opus_ask_far_negation_still_grants():
+    # Guard, passes on the build too: a negation more than three words after the role names no role's negation.
+    cfg, calls, _, _ = opus_type("send opus builders for the sprint review, not the code", answer={"ok": True})
+    got = opus_override(cfg)
+    check("opus ask: `send opus builders for the sprint review, not the code` still names builder",
+          got is not None and got[2] == "builder", "got %r" % (got,))
+    cfg, calls, _, _ = opus_type("send opus builders and reviewers today and then review the notes, not the code",
+                                 answer={"ok": True})
+    got = opus_override(cfg)
+    check("opus ask: a negation more than three words after both roles still names both",
+          got is not None and got[2] == ["builder", "reviewer"], "got %r" % (got,))
+
+
+def case_opus_scope_override_filter_ignores_case():
+    # Guard, passes on the build too: the one filter in override.py takes a role in any case.
+    cfg, judge, scope, _ = scope_grant("send opus now", [owner_turn("builders should do the refactor next")],
+                                       ScopeStub(answer=["Builder"]))
+    got = opus_override(cfg)
+    check("opus scope: a read that answers Builder narrows the grant to builder",
+          got is not None and got[2] == "builder", "got %r" % (got,))
+
+
+def case_opus_scope_model_roles_narrow_case_insensitively():
+    # The prompt hook's scope read gets the model's answer Builder. The read passes the role strings on, and override.py
+    # narrows the grant to builder. Today the read's own filter drops Builder, so the grant is every role.
+    cfg = ov_cfg()
+    with model_answers({"ok": True, "roles": ["Builder"]}) as model:
+        scope_grant("send opus now", [owner_turn("builders should do the refactor next")], real_scope_read(), cfg=cfg)
+    check("opus scope: the model is asked for the roles once", len(model.calls) == 1, "model calls %d" % len(model.calls))
+    got = opus_override(cfg)
+    check("opus scope: a model answer of Builder narrows the grant to builder",
+          got is not None and got[2] == "builder", "got %r; files %r" % (got, ov_files(cfg)))
+
+
+def case_opus_scope_returns_the_models_raw_role_strings():
+    # The read returns the model's role strings as it was given them, unknown ones too: the filter is override.py's alone.
+    with model_answers({"ok": True, "roles": ["Builder", "wizard"]}):
+        got = real_scope_read()("send opus now", ["builders should do the refactor next"])
+    check("opus scope: the read returns the model's role strings as given, for override.py to filter",
+          got == ["Builder", "wizard"], "got %r" % (got,))
+
+
+# EXCLUSION WORDS AND CLOUD SEEDS (decision owner-override). Words that exclude a role negate it, and two roles name both
+# only when a plain list (commas, and, or, &, plus) joins them. In a cloud session the first owner record is the seed
+# brief, and the scope read skips it, as the seed check does.
+def case_opus_ask_exclusion_words_grant_nothing():
+    for prompt in ("send opus builders, excluding reviewers", "send opus for builders instead of reviewers",
+                   "send opus builders, skip reviewers", "send opus builders only, leave reviewers out",
+                   "send opus builders and ignore the reviewers", "send opus judges, skip reviewers"):
+        cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
+        check("opus ask: %r reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
+        check("opus ask: %r excludes a role and writes no Opus override" % prompt, opus_override(cfg) is None,
+              "files %r" % ov_files(cfg))
+
+
+def case_opus_ask_plain_lists_still_grant_both():
+    # Guard, passes on the build too: a plain list (and, a comma, or) between two roles names both roles.
+    for prompt, minutes in (("send opus builders and reviewers", 120), ("send opus builders, reviewers", 120),
+                            ("use opus for builders or reviewers for 30m", 30)):
+        cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
+        got = opus_override(cfg)
+        check("opus ask: %r reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
+        check("opus ask: %r names builder and reviewer, as the sorted list" % prompt,
+              got is not None and got[2] == ["builder", "reviewer"], "got %r" % (got,))
+        check("opus ask: %r ends %d minutes after the grant" % (prompt, minutes),
+              got is not None and abs((got[1] - (OV_NOW + timedelta(minutes=minutes))).total_seconds()) <= 1,
+              "got %r" % (got,))
+
+
+def case_opus_scope_cloud_seed_record_is_not_context():
+    # In a cloud session the first owner record is the seed brief. The scope read skips it, so the seed's reviewers never
+    # reach the read, and the later plain prompt names no role: every role.
+    lines = [owner_turn("reviewers please audit"), owner_turn("the refactor is next")]
+    cfg, judge, scope, _ = scope_grant("send opus now", lines, ScopeStub(reads=True), remote="cse_seed0001")
+    ran = len(scope.calls) == 1
+    check("opus scope: in a cloud session the read runs once", ran, "read calls %d" % len(scope.calls))
+    if ran:
+        check("opus scope: the read skips the seed record and holds the later prompt alone",
+              scope.calls[0][1] == ["the refactor is next"], "context %r" % (scope.calls[0][1],))
+    got = opus_override(cfg)
+    check("opus scope: in a cloud session the seed's reviewers do not grant the reviewer role",
+          got is not None and got[2] is None, "got %r" % (got,))
+
+
+def case_opus_scope_seed_record_names_reviewer_outside_a_cloud_session():
+    # Guard, passes on the build too: the same transcript with no cloud session names reviewer from the first record.
+    lines = [owner_turn("reviewers please audit"), owner_turn("the refactor is next")]
+    cfg, judge, scope, _ = scope_grant("send opus now", lines, ScopeStub(reads=True))
+    got = opus_override(cfg)
+    check("opus scope: outside a cloud session the first record's reviewers grant the reviewer role",
+          got is not None and got[2] == "reviewer", "got %r" % (got,))
+
+
 def main():
     try:
         case_table_in_process()
@@ -1546,7 +2080,7 @@ def main():
         case_opus_ask_failure_fails_closed()
         case_opus_ask_builders_only_lifts_builders()
         case_opus_ask_length_and_role_from_the_words()
-        case_opus_ask_two_roles_grant_nothing()
+        case_opus_ask_two_roles_grant_both()
         case_opus_ask_addressee_is_not_a_role()
         case_opus_ask_negated_role_grants_nothing()
         case_opus_ask_two_lengths_grant_nothing()
@@ -1580,6 +2114,34 @@ def main():
         case_opus_ask_source_absent_falls_back_to_the_transcript()
         case_opus_ask_loop_wakeup_check_in_without_its_record_never_grants()
         case_opus_ask_source_keyword_forms_are_untouched()
+        case_opus_scope_context_names_builders_grants_builder()
+        case_opus_scope_reads_the_plain_prompts_oldest_first()
+        case_opus_scope_reads_only_the_transcript_tail()
+        case_opus_scope_without_an_earlier_prompt_grants_every_role()
+        case_opus_scope_not_read_when_the_ask_names_a_role_or_length_is_unclear()
+        case_opus_scope_not_read_when_the_judge_says_no()
+        case_opus_scope_judge_is_given_the_ask_text_only()
+        case_opus_scope_plain_prompt_naming_reviewers_is_read()
+        case_opus_scope_excluded_records_never_reach_the_read()
+        case_opus_scope_pasted_block_in_a_prior_prompt_never_reaches_the_read()
+        case_opus_scope_the_asks_own_record_is_not_context()
+        case_opus_scope_odd_answer_or_error_grants_every_role()
+        case_opus_scope_drops_an_unknown_role_and_keeps_the_rest()
+        case_opus_scope_two_roles_from_the_read_grant_both_sorted()
+        case_opus_list_role_lifts_its_roles_and_refuses_the_rest()
+        case_opus_keyword_files_keep_their_bytes()
+        case_opus_scope_read_sees_every_role_before_it_runs()
+        case_opus_scope_a_kill_during_the_read_leaves_every_role()
+        case_opus_scope_valid_answer_ends_narrowed()
+        case_opus_ask_negation_after_a_role_grants_nothing()
+        case_opus_ask_far_negation_still_grants()
+        case_opus_scope_override_filter_ignores_case()
+        case_opus_scope_model_roles_narrow_case_insensitively()
+        case_opus_scope_returns_the_models_raw_role_strings()
+        case_opus_ask_exclusion_words_grant_nothing()
+        case_opus_ask_plain_lists_still_grant_both()
+        case_opus_scope_cloud_seed_record_is_not_context()
+        case_opus_scope_seed_record_names_reviewer_outside_a_cloud_session()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:

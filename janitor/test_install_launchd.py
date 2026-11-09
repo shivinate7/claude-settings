@@ -137,9 +137,11 @@ class GeneratesPlistForAnOrdinaryCheckout(unittest.TestCase):
         with open(plist_path, "rb") as handle:
             data = plistlib.load(handle)
         self.assertEqual(data["StartCalendarInterval"], {"Hour": 5, "Minute": 42})
-        # Exactly sweep.py (not session_end_sweep.py), then the one flag.
+        # Exactly sweep.py (not session_end_sweep.py), then the one flag. The daily job never
+        # carries --session-end: that flag scopes the SessionEnd run to its own repository only.
         self.assertEqual(data["ProgramArguments"][1:],
                          [os.path.join(self.repo, "janitor", "sweep.py"), "--confirm"])
+        self.assertNotIn("--session-end", data["ProgramArguments"])
 
     def test_never_touches_the_repo_tree_git_status_stays_clean(self):
         """Check 7: the generated plist must not become a tracked path. Uses the ordinary

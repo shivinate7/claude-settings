@@ -1,6 +1,6 @@
 # Waiting page, lane page-shows-last-answer: design notes
 
-Mockup: `docs/design/last-answer.html`. Screen: `skills/waiting-page/page.html` (main 42822fef). Lane kind: informed.
+Mockup: `docs/design/last-answer.html`. Screen: `skills/waiting-page/page.html` (main 42822fef). Designer kind: informed.
 Deep links: `#s=page|edges|draft|open-1a|open-1b|receipt-2a|receipt-2b|receipt-2c|lane-3a|lane-3b`,
 `&w=all|390|800|1280`, `&t=light|dark`, `&lab=off`, `&hide=<state>,...`. Each option state has a Hide control.
 The mockup draws with page.html's own `<style>` (lines 8 to 612 at 42822fef), plus the new rules in `#newcss`.

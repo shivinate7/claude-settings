@@ -4,8 +4,9 @@
 Reads one JSON object on stdin (the SessionEnd hook payload: `cwd` is the ending session's own
 working directory). Resolves the git repository that `cwd` sits in -- the PRIMARY checkout, not
 a linked worktree's own path, see `git_reads.primary_checkout`'s own docstring for why that
-distinction matters -- and runs `janitor/sweep.py <that root> --confirm` there. Nothing else is
-swept. Always exits 0.
+distinction matters -- and runs `janitor/sweep.py <that root> --confirm --session-end` there. The
+run judges branches and worktrees in that repository only, stops proven orphans machine-wide like
+the scheduled job, and skips the loose-process report. Always exits 0.
 
 FAILS OPEN, ON PURPOSE. This script's own job is to let the session end; it is never the thing
 that decides whether a branch or a worktree is reapable. Every way this script itself can go
@@ -252,7 +253,7 @@ def handle(hook, start=None, elapsed_seconds=None) -> None:
 
     try:
         _nowindow.run(
-            [sys.executable, SWEEP_PATH, root, "--confirm",
+            [sys.executable, SWEEP_PATH, root, "--confirm", "--session-end",
              "--deadline-seconds", str(sweep_timeout)],  # the only run with a deadline
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             timeout=sweep_timeout,  # nothing reads the sweep's output; a pipe would outlive a kill on Windows

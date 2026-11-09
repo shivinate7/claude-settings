@@ -17,8 +17,10 @@ Destructive git calls this suite drives (`git branch -D`, `git worktree remove`,
 itself, never typed by hand through a shell, the same way hooks/test_guard.py drives its own
 fixtures.
 """
+import argparse
 import concurrent.futures
 import contextlib
+import errno
 import gc
 import hashlib
 import io
@@ -45,6 +47,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import guard  # noqa: E402
 import sweep  # noqa: E402
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 VCS = "g" + "it"  # assembled so this file cannot itself look like the command it tests
 IDENT = ["-c", "user.email=janitor-cases@example.invalid", "-c", "user.name=janitor-cases"]
@@ -1718,7 +1721,7 @@ class LooseProcessTests(unittest.TestCase):
         stubs = {
             (os, "kill"): lambda pid, sig: sent.append(pid),
             (sweep, "reap_listener"): lambda d: sent.append(d["pid"]),
-            (sweep, "find_dead_rooted"): lambda: [],
+            (sweep, "find_dead_rooted"): lambda *a, **k: [],  # any signature: the daily read may pass checkout_paths
         }
         real = {key: getattr(*key) for key in stubs}
         repo = os.path.join(self.home, "repo")
@@ -1733,6 +1736,219 @@ class LooseProcessTests(unittest.TestCase):
                 setattr(key[0], key[1], fn)
         self.assertNotIn(self.marked, sent)
         self.assertIsNone(self.procs[0].poll())
+
+
+# ----------------------------------------- the SessionEnd run's reads (janitor/sweep.py)
+#
+# The SessionEnd run (`--session-end`, `args.session_end`) reads no loose processes, reads the machine's
+# pid list once, and stops every proven dead-rooted orphan, in any repository, as the scheduled job does.
+# The branch and worktree tiers stay one repository's. Every machine read below is answered from a
+# fixture table by `fake_process_table`, so a case decides the rule and not this machine's processes.
+# Each missing script path is real, under real folders, so `sweep._project_ancestor` decides exactly as
+# it does on a live machine.
+
+SCOPE_PIDS = {"primary": 900101, "other": 900103, "ancestor": 900104, "loose": 900106}
+
+
+def build_scope_fixture(name):
+    """One base folder under ROOT, holding:
+      proj      this session's primary checkout, a real repository
+      other     another repository, never a root of the run
+      .claude   so a missing script directly under base resolves to base as its project ancestor
+    Every script is missing under a missing folder, so each is a dead-rooted candidate on a live
+    machine. Returns the paths and `rows` (pid -> argv) for `fake_process_table`."""
+    base = os.path.join(ROOT, "scope-" + name)
+    os.makedirs(os.path.join(base, ".claude"))
+    proj, other = os.path.join(base, "proj"), os.path.join(base, "other")
+    make_repo(proj, {"f.txt": "x\n"})
+    make_repo(other, {"f.txt": "x\n"})
+    rows = {
+        SCOPE_PIDS["primary"]: "sh " + os.path.join(proj, "tools", "serve.sh"),
+        SCOPE_PIDS["other"]: "sh " + os.path.join(other, "tools", "serve.sh"),
+        SCOPE_PIDS["ancestor"]: "sh " + os.path.join(base, "elsewhere", "x.sh"),
+        SCOPE_PIDS["loose"]: "zsh -c source %s && true" % os.path.join(
+            base, ".claude", "shell-snapshots", "snapshot-zsh-1"),
+    }
+    return {"base": base, "proj": proj, "other": other, "rows": rows}
+
+
+@contextlib.contextmanager
+def fake_process_table(rows):
+    """The machine's process reads, answered from `rows` (pid -> argv): the pid list, each command,
+    and orphan and owner (every listed process is an orphan of this user). `send_signal` records
+    each pid it is asked to signal. `os.kill` is a net: a signal that bypassed `send_signal` is
+    recorded too, and never sent. Yields a record: `pid_reads` (pid-list reads), `signals`, `kills`,
+    and `reset()`, which zeroes the reads and both lists."""
+    table = types.SimpleNamespace(pid_reads=0, signals=[], kills=[])
+
+    def reset():
+        table.pid_reads, table.signals, table.kills = 0, [], []
+
+    def pids():
+        table.pid_reads += 1
+        return list(rows)
+
+    def signal_pid(pid):
+        table.signals.append(pid)
+        return True
+
+    def kill(pid, sig):
+        table.kills.append(pid)
+
+    table.reset = reset
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch.object(sweep, "list_all_pids", pids))
+        stack.enter_context(mock.patch.object(sweep, "process_command", lambda pid: rows.get(pid)))
+        stack.enter_context(mock.patch.object(sweep, "is_orphan", lambda pid: True))
+        stack.enter_context(mock.patch.object(sweep, "is_current_user_process", lambda pid: True))
+        stack.enter_context(mock.patch.object(sweep, "send_signal", signal_pid))
+        stack.enter_context(mock.patch.object(os, "kill", kill))
+        yield table
+
+
+def fake_result(root):
+    """One repository's result with every key `sweep_repo` returns, and no worktree."""
+    return {"root": root, "refused": None, "branches": [], "listeners": [], "pruned": None,
+            "husks": [], "strays": [], "trash": [], "reaper": "none", "worktrees": []}
+
+
+def sweep_over_fixture(fx, session_end, before=None):
+    """One `sweep._sweep_roots` run over the fixture machine, the way `main` calls it for the
+    SessionEnd hook (`session_end`) or the daily job (not `session_end`). `before`, when given, is
+    called first, inside the same stubs, to read the scope the case starts from; its value comes
+    back as `before`. Returns what the run read and signalled."""
+    seen = {"loose": 0, "sim": 0, "temp": 0, "before": None}
+    real_loose = sweep.find_loose_processes
+
+    def loose():
+        seen["loose"] += 1
+        return real_loose()
+
+    def sim(confirm, record_path=None):
+        seen["sim"] += 1
+        return []
+
+    def temp(confirm):
+        seen["temp"] += 1
+        return 0
+
+    args = argparse.Namespace(confirm=True, attended=False, session_end=session_end)
+    log = os.path.join(fx["base"], "restore.log")
+    env = {"HOME": fx["base"], "USERPROFILE": fx["base"],
+           "JANITOR_RUN_LOG": os.path.join(fx["base"], "run.log")}
+    with fake_process_table(fx["rows"]) as table, contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch.dict(os.environ, env))
+        stack.enter_context(mock.patch.object(
+            sweep, "sweep_repo", lambda root, *a, **k: fake_result(root)))
+        stack.enter_context(mock.patch.object(sweep, "find_loose_processes", loose))
+        stack.enter_context(mock.patch.object(sweep, "sim_tier", sim))
+        stack.enter_context(mock.patch.object(sweep, "temp_tier", temp))
+        stack.enter_context(mock.patch.object(sweep, "find_swept_listeners", lambda paths: []))
+        stack.enter_context(mock.patch.object(sweep, "print_grace_period_report",
+                                              lambda *a, **k: None))
+        if before is not None:
+            seen["before"] = before()
+            table.reset()
+        with contextlib.redirect_stdout(io.StringIO()):
+            seen["code"] = sweep._sweep_roots(args, [fx["proj"]], log, "full")
+        seen["signals"] = list(table.signals)
+        seen["kills"] = list(table.kills)
+        seen["pid_reads"] = table.pid_reads
+    return seen
+
+
+def pids_of(decisions):
+    return {d["pid"] for d in decisions or []}
+
+
+class SessionEndScopeTests(unittest.TestCase):
+    """`sweep._sweep_roots` for the SessionEnd run, against the daily job on the same fixture."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fx = build_scope_fixture("session-end-run")
+
+    def test_the_session_end_run_signals_the_orphan_under_its_primary_checkout(self):
+        seen = sweep_over_fixture(self.fx, session_end=True)
+        self.assertIn(SCOPE_PIDS["primary"], seen["signals"],
+                      "the orphan under this repository's primary checkout was not signalled")
+
+    def test_the_session_end_run_signals_a_proven_orphan_in_another_repository(self):
+        """The dead-rooted stop is as wide at SessionEnd as the scheduled job's: a proven orphan
+        whose script sat under another repository is signalled by either run."""
+        seen = sweep_over_fixture(self.fx, session_end=True,
+                                  before=lambda: sweep.find_dead_rooted())
+        self.assertIn(SCOPE_PIDS["other"], pids_of(seen["before"]),
+                      "precondition: the machine-wide read did not see the other repository's "
+                      "orphan, so this case proves nothing")
+        self.assertIn(SCOPE_PIDS["other"], seen["signals"],
+                      "the session-end run left a proven orphan in another repository alone, "
+                      "where the scheduled job signals it")
+
+    def test_the_session_end_run_signals_an_orphan_whose_project_ancestor_is_its_parent(self):
+        """A missing script under a folder that carries `.claude` has that parent as its project
+        ancestor. The scheduled job signals it, so the session-end run does too."""
+        seen = sweep_over_fixture(self.fx, session_end=True,
+                                  before=lambda: sweep.find_dead_rooted())
+        self.assertIn(SCOPE_PIDS["ancestor"], pids_of(seen["before"]),
+                      "precondition: the machine-wide read did not see the parent-ancestor orphan")
+        self.assertIn(SCOPE_PIDS["ancestor"], seen["signals"],
+                      "the session-end run left a parent-ancestor orphan alone, where the "
+                      "scheduled job signals it")
+
+    def test_the_session_end_run_scans_no_loose_processes(self):
+        seen = sweep_over_fixture(self.fx, session_end=True)
+        self.assertEqual(seen["loose"], 0,
+                         "the session-end run scanned loose processes %d time(s)" % seen["loose"])
+
+    def test_the_session_end_run_reads_the_machine_pid_list_once(self):
+        """Cost: one machine pid-list read per session end (the dead-rooted read). The old run
+        reads it twice, once more for the loose-process scan."""
+        seen = sweep_over_fixture(self.fx, session_end=True)
+        self.assertEqual(seen["pid_reads"], 1,
+                         "the session-end run read the machine pid list %d times" % seen["pid_reads"])
+
+    def test_the_session_end_run_still_runs_the_simulator_and_temp_tiers(self):
+        seen = sweep_over_fixture(self.fx, session_end=True)
+        self.assertEqual(seen["sim"], 1, "the session-end run did not run the simulator tier")
+        self.assertEqual(seen["temp"], 1, "the session-end run did not run the temp-folder tier")
+
+    def test_the_daily_run_still_signals_another_repos_orphan(self):
+        """Control: the daily run is machine-wide, and the session-end run must match it."""
+        seen = sweep_over_fixture(self.fx, session_end=False)
+        self.assertIn(SCOPE_PIDS["other"], seen["signals"])
+
+    def test_the_daily_run_still_scans_loose_processes_and_reads_the_pid_list_twice(self):
+        """Control: the daily run keeps the dead-rooted read and the loose-process scan."""
+        seen = sweep_over_fixture(self.fx, session_end=False)
+        self.assertEqual(seen["loose"], 1)
+        self.assertEqual(seen["pid_reads"], 2)
+
+    def test_main_accepts_the_session_end_flag_in_full_mode(self):
+        """Flag parsing only: `main` takes --session-end with a root and runs the full mode. Old
+        code rejects the flag at argparse, which is the one red a main-level case can give."""
+        seen = {}
+
+        def fake_roots(args, roots, restore_log_path, mode):
+            seen.update(session_end=getattr(args, "session_end", None), mode=mode, roots=roots)
+            return 0
+
+        argv = ["--confirm", "--session-end", "--restore-log",
+                os.path.join(self.fx["base"], "restore.log"), self.fx["proj"]]
+        with mock.patch.object(sweep, "_sweep_roots", fake_roots), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            try:
+                code = sweep.main(argv)
+            except SystemExit as exit_:
+                code = None
+                refused = exit_.code
+        if code is None:
+            self.fail("sweep.main rejected --session-end (exit %r), so the SessionEnd run cannot "
+                      "be scoped" % (refused,))
+        self.assertEqual(code, 0)
+        self.assertEqual(seen["mode"], "full", "--session-end changed the mode to %r" % seen["mode"])
+        self.assertIs(seen["session_end"], True)
 
 
 class PrimaryCheckoutExclusionTests(unittest.TestCase):
@@ -3868,6 +4084,360 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
         self.assertEqual(runs, seeds, "the hook lost rows that were not its own: %s" % runs)
 
 
+class _BrokenStderr:
+    """A stderr whose every write raises ERROR: a closed pipe raises BrokenPipeError (the default), a closed file
+    ValueError. Counts the writes it refused, so a case can assert that the stderr line ran."""
+
+    def __init__(self, error=None):
+        self.writes = 0
+        self.error = error if error is not None else BrokenPipeError(32, "stderr pipe closed (stand-in)")
+
+    def write(self, text):
+        self.writes += 1
+        raise self.error
+
+
+class _RunawayRetry(BaseException):
+    """A read the case refused past READ_TRY_BUDGET: a retry that no deadline stopped. A BaseException, so log()'s
+    own `except Exception` cannot turn it into a drop row and hide the runaway."""
+
+
+READ_TRY_BUDGET = 1000  # refusals one case allows; at LOG_RETRY_SECONDS, a 5 s wait is about 250 tries
+
+
+class _VirtualClock:
+    """Stands in for the `time` module that agent_end_reap sees. monotonic() reads a clock that only sleep()
+    moves, so a retry's pauses are counted, never waited, and no wall clock is read."""
+
+    def __init__(self):
+        self.now = 1000.0
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+    def flush(self):
+        pass
+
+
+class AgentEndLogReadTests(unittest.TestCase):
+    """janitor/agent_end_reap.py log(), the read before the rewrite. The log is read under its lock and
+    rewritten with the new row, so a read that is refused must not become the loss of every prior row.
+    The refusal is a stand-in `open` on the log path only: the lock file and the temp write run for real."""
+
+    @classmethod
+    def setUpClass(cls):
+        import agent_end_reap
+        cls.reap = agent_end_reap
+
+    def setUp(self):
+        """A lasting refusal waits LOG_WAIT_SECONDS before its row drops. A short wait keeps each such case fast;
+        the cases pin the drop, not the length of the wait. Restored after each case."""
+        wait = mock.patch.object(self.reap, "LOG_WAIT_SECONDS", 0.3)
+        wait.start()
+        self.addCleanup(wait.stop)
+
+    def scoped_log_path(self):
+        """A run folder, and the payload log path that CLAUDE_CONFIG_DIR gives under it. The path is
+        checked to sit inside the folder before any test probes it."""
+        folder = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, folder, True)
+        env = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": folder})
+        env.start()
+        self.addCleanup(env.stop)
+        path = self.reap.log_path()
+        self.assertEqual(os.path.commonpath([os.path.normcase(path), os.path.normcase(folder)]),
+                         os.path.normcase(folder), "the payload log path %r is outside the run folder" % path)
+        return path
+
+    @contextlib.contextmanager
+    def refused_log_reads(self, path, times=None, error=None):
+        """Every read of the payload log at PATH raises ERROR, PermissionError by default, as a log held by another
+        process would. With TIMES, only the first TIMES reads are refused, as a log held for a moment is. Yields the
+        list of refused reads, so a case can assert that the refusal happened. A read refused past READ_TRY_BUDGET
+        raises _RunawayRetry, so a retry that no deadline stops fails the case, not the run."""
+        real_open = io.open
+        refused = []
+
+        def refuse_log_read(file, mode="r", *args, **kwargs):
+            if file == path and not set(mode) & set("wax+") and (times is None or len(refused) < times):
+                if len(refused) >= READ_TRY_BUDGET:
+                    raise _RunawayRetry("the payload log read was refused %d times; no deadline stopped it" % len(refused))
+                refused.append(file)
+                raise error if error is not None else PermissionError(13, "payload log held by another process (stand-in)", file)
+            return real_open(file, mode, *args, **kwargs)
+
+        with mock.patch.object(self.reap, "open", new=refuse_log_read, create=True):
+            yield refused
+
+    @contextlib.contextmanager
+    def virtual_clock(self):
+        """Patches the `time` agent_end_reap's log() reads to a _VirtualClock. strftime stays real, so the drop
+        row's `at` is a real log time. Yields the clock, whose `sleeps` lists each pause a retry took."""
+        clock = _VirtualClock()
+        stand_in = types.SimpleNamespace(monotonic=clock.monotonic, sleep=clock.sleep, strftime=time.strftime)
+        with mock.patch.object(self.reap, "time", stand_in):
+            yield clock
+
+    def drops_file(self, path):
+        """The drops file beside the payload log at PATH. The name is built here, not taken from
+        agent_end_reap.drops_path(), so a build without that name fails on an assert, not on a crash."""
+        return os.path.join(os.path.dirname(path), "agent-end-drops.jsonl")
+
+    def read_drops(self, path):
+        """The rows of the drops file, or [] when it does not exist, so a missing file fails a count, not a read."""
+        drops = self.drops_file(path)
+        if not os.path.exists(drops):
+            return []
+        with io.open(drops, encoding="utf-8") as handle:
+            return [json.loads(line) for line in handle.read().splitlines()]
+
+    def assert_one_drop_row(self, path, run):
+        """Exactly one drop row, for RUN, with the keys log() writes and an `at` in the log's own time format,
+        which carries a UTC offset. Returns the row."""
+        rows = self.read_drops(path)
+        self.assertEqual(len(rows), 1, "the drops file holds %d row(s), want 1 for the dropped row: %r" % (len(rows), rows))
+        row = rows[0]
+        self.assertEqual(set(row), {"at", "run", "error"},
+                         "the drop row's keys are %r, want at, run and error" % sorted(row))
+        self.assertEqual(row["run"], run, "the drop row names run %r, want %r" % (row["run"], run))
+        try:
+            datetime.strptime(row["at"], "%Y-%m-%dT%H:%M:%S%z")
+        except (TypeError, ValueError):
+            self.fail("the drop row's at %r is not a log time with a UTC offset" % (row["at"],))
+        return row
+
+    def seed_payload_log(self, path, runs):
+        """Writes the payload log at PATH with one done row per run in RUNS, in order."""
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with io.open(path, "w", encoding="utf-8") as handle:
+            handle.writelines(json.dumps({"raw": "{}", "run": run, "state": "done"}) + "\n" for run in runs)
+
+    def read_runs(self, path):
+        """The run ids of the payload log at PATH, in file order."""
+        with io.open(path, encoding="utf-8") as handle:
+            return [json.loads(line).get("run") for line in handle.read().splitlines()]
+
+    def test_a_refused_read_of_the_payload_log_keeps_its_rows(self):
+        """A read of the payload log that raises PermissionError must not make log() rewrite the log without
+        the rows it could not read. The seeded log is the largest one that a rewrite with the new row keeps
+        whole (MAX_LOG_LINES - 1 prior rows), so the row cap cannot drop a seed by itself."""
+        path = self.scoped_log_path()
+        seeded = ["seed-%d" % n for n in range(self.reap.MAX_LOG_LINES - 1)]
+        self.seed_payload_log(path, seeded)
+        with self.refused_log_reads(path) as refused:
+            self.reap.log({"raw": "{}", "run": "new-run", "state": "done"})
+        with io.open(path, encoding="utf-8") as handle:
+            kept = [json.loads(line).get("run") for line in handle.read().splitlines()]
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        missing = [run for run in seeded if run not in kept]
+        self.assertEqual(len(missing), 0, "a refused read of the payload log dropped %d of %d prior rows"
+                         % (len(missing), len(seeded)))
+
+    def test_a_missing_payload_log_starts_with_only_the_new_row(self):
+        """The control: a missing log is not a failed read. log() starts a new log that holds just the new row."""
+        path = self.scoped_log_path()
+        self.assertFalse(os.path.exists(path), "the payload log exists before its first write")
+        self.reap.log({"raw": "{}", "run": "first-run", "state": "done"})
+        with io.open(path, encoding="utf-8") as handle:
+            kept = [json.loads(line).get("run") for line in handle.read().splitlines()]
+        self.assertEqual(kept, ["first-run"], "a missing payload log did not start with just the new row")
+
+    def test_a_refused_read_writes_one_drop_row_with_its_run_id(self):
+        """A refused read drops the new row. The drop goes to the drops file, with its run id, so a reader sees it."""
+        path = self.scoped_log_path()
+        with self.refused_log_reads(path) as refused:
+            self.reap.log({"raw": "{}", "run": "refused-run", "state": "done"})
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        row = self.assert_one_drop_row(path, "refused-run")
+        self.assertIn("PermissionError", row["error"],
+                      "the drop row's error does not name the refused read: %r" % row["error"])
+
+    def test_a_read_refused_for_a_moment_is_retried_and_the_new_row_lands(self):
+        """A read of the payload log refused twice, then granted, is retried until it is granted, as the replace is.
+        The new row lands after every prior row, and no drop row is written. Each refusal is followed by one pause of
+        LOG_RETRY_SECONDS. The seed is the largest log that a rewrite with the new row keeps whole. give_up_at bounds
+        a retry that never ends, so a broken fix fails fast."""
+        path = self.scoped_log_path()
+        seeded = ["seed-%d" % n for n in range(self.reap.MAX_LOG_LINES - 1)]
+        self.seed_payload_log(path, seeded)
+        with self.virtual_clock() as clock, self.refused_log_reads(path, times=2) as refused, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.reap.log({"raw": "{}", "run": "new-run", "state": "done"}, give_up_at=clock.now + 2)
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        self.assertEqual(len(clock.sleeps), len(refused),
+                         "a read refused %d times paused %d time(s), want one pause per refusal"
+                         % (len(refused), len(clock.sleeps)))
+        self.assertEqual(clock.sleeps, [self.reap.LOG_RETRY_SECONDS] * len(refused),
+                         "a pause between two tries is not LOG_RETRY_SECONDS: %r" % (clock.sleeps,))
+        self.assertEqual(self.read_runs(path), seeded + ["new-run"],
+                         "a read refused twice, then granted, did not land the new row after the prior rows")
+        self.assertFalse(os.path.exists(self.drops_file(path)), "a read refused twice, then granted, wrote a drop row")
+
+    def test_a_read_refused_past_give_up_at_drops_the_new_row_and_keeps_the_prior_rows(self):
+        """A read refused for good drops the new row once give_up_at passes, as one drop row, and every prior row
+        stays. The wait is LOG_WAIT_SECONDS, 5 s here, and give_up_at is 0.2 s ahead, so a read that ignores
+        give_up_at runs past it. The clock is virtual: the case counts the pauses and never waits."""
+        path = self.scoped_log_path()
+        seeded = ["seed-%d" % n for n in range(self.reap.MAX_LOG_LINES - 1)]
+        self.seed_payload_log(path, seeded)
+        with mock.patch.object(self.reap, "LOG_WAIT_SECONDS", 5), self.virtual_clock() as clock, \
+                self.refused_log_reads(path) as refused, contextlib.redirect_stderr(io.StringIO()):
+            start = clock.now
+            try:
+                self.reap.log({"raw": "{}", "run": "lasting-run", "state": "done"}, give_up_at=start + 0.2)
+            except _RunawayRetry as exc:
+                self.fail("the read retry never gave up: %s" % exc)
+            waited = clock.now - start
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        self.assertLess(waited, 2, "the read retry waited %.2f s, but give_up_at allowed 0.2 s" % waited)
+        self.assertEqual(self.read_runs(path), seeded, "a lasting refusal changed the prior rows")
+        self.assert_one_drop_row(path, "lasting-run")
+
+    def test_a_read_failing_with_another_oserror_is_tried_once_and_drops_the_row(self):
+        """A read that fails with an OSError other than PermissionError is not retried. It is tried once, the new row
+        drops, every prior row stays, and one drop row names the read's OSError."""
+        path = self.scoped_log_path()
+        seeded = ["seed-%d" % n for n in range(self.reap.MAX_LOG_LINES - 1)]
+        self.seed_payload_log(path, seeded)
+        eio = OSError(errno.EIO, "payload log read failed (stand-in)")
+        with self.virtual_clock(), self.refused_log_reads(path, error=eio) as refused, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.reap.log({"raw": "{}", "run": "eio-run", "state": "done"})
+        self.assertTrue(refused, "the forced OSError never reached the log read, so the case tested nothing")
+        self.assertEqual(len(refused), 1, "an OSError other than PermissionError was tried %d times, want once"
+                         % len(refused))
+        self.assertEqual(self.read_runs(path), seeded, "a read that failed with an OSError changed the prior rows")
+        row = self.assert_one_drop_row(path, "eio-run")
+        self.assertIn("OSError", row["error"], "the drop row's error does not name the failed read: %r" % row["error"])
+
+    def test_a_forced_lock_timeout_writes_one_drop_row_with_its_run_id(self):
+        """A lock wait that runs past give_up_at drops the new row as LogWaitTimeout. Another run holds the lock
+        through the module's own _log_lock, so the wait is real. give_up_at is already past, so no case sleeps."""
+        path = self.scoped_log_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with self.reap._log_lock(path, time.monotonic() + 5):
+            with self.assertRaises(self.reap.LogWaitTimeout, msg="the lock is not held, so the case tested nothing"):
+                with self.reap._log_lock(path, time.monotonic() - 1):
+                    pass
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.reap.log({"raw": "{}", "run": "timeout-run", "state": "done"}, give_up_at=time.monotonic() - 1)
+        row = self.assert_one_drop_row(path, "timeout-run")
+        self.assertIn("LogWaitTimeout", row["error"],
+                      "the drop row's error does not name the lock timeout: %r" % row["error"])
+
+    def test_a_failed_replace_writes_one_drop_row_with_its_run_id(self):
+        """A replace refused with an error other than PermissionError drops the new row too."""
+        path = self.scoped_log_path()
+        refusal = OSError(5, "disk write refused (stand-in)")
+        with mock.patch.object(self.reap.os, "replace", side_effect=refusal) as replace, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.reap.log({"raw": "{}", "run": "write-run", "state": "done"})
+        self.assertTrue(replace.called, "the replace never ran, so the case tested nothing")
+        row = self.assert_one_drop_row(path, "write-run")
+        self.assertIn("OSError", row["error"], "the drop row's error does not name the failed write: %r" % row["error"])
+
+    def test_a_successful_write_writes_no_drop_row(self):
+        """The green control: a write that lands drops no row, so the drops file is never made."""
+        path = self.scoped_log_path()
+        self.reap.log({"raw": "{}", "run": "ok-run", "state": "done"})
+        with io.open(path, encoding="utf-8") as handle:
+            kept = [json.loads(line).get("run") for line in handle.read().splitlines()]
+        self.assertEqual(kept, ["ok-run"], "control: the successful write did not land its row: %r" % kept)
+        self.assertFalse(os.path.exists(self.drops_file(path)), "a successful write created the drops file")
+
+    def full_drops_bytes(self):
+        """A drops file of exactly 256 KiB: 256 JSON rows of one KiB each, so every line parses as a drop row."""
+        rows = []
+        for n in range(256):
+            blank = json.dumps({"at": "2026-10-13T12:00:00-0500", "run": "seed-%d" % n, "error": ""}) + "\n"
+            rows.append(json.dumps({"at": "2026-10-13T12:00:00-0500", "run": "seed-%d" % n,
+                                    "error": "x" * (1024 - len(blank))}) + "\n")
+        return "".join(rows).encode("utf-8")
+
+    def test_a_drop_while_stderr_is_broken_still_writes_its_row(self):
+        """The stderr line runs before the drops append. A broken stderr must not stop the drop: log() returns,
+        and the drop row lands."""
+        path = self.scoped_log_path()
+        broken = _BrokenStderr()
+        raised = None
+        with self.refused_log_reads(path) as refused, mock.patch.object(sys, "stderr", broken):
+            try:
+                self.reap.log({"raw": "{}", "run": "broken-run", "state": "done"})
+            except Exception as exc:
+                raised = exc
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        self.assertTrue(broken.writes, "the broken stderr was never written to, so the case tested nothing")
+        self.assertIsNone(raised, "log() raised %r when stderr was broken, before the drop row was written" % (raised,))
+        self.assert_one_drop_row(path, "broken-run")
+
+    def test_a_drop_while_stderr_is_closed_still_returns_and_writes_its_row(self):
+        """A closed file raises ValueError on write, not OSError. The drop row is written before the stderr line, and
+        the stderr line's own except covers ValueError too, so log() returns and the drop row lands."""
+        path = self.scoped_log_path()
+        closed = _BrokenStderr(ValueError("I/O operation on closed file (stand-in)"))
+        raised = None
+        with self.virtual_clock(), self.refused_log_reads(path) as refused, mock.patch.object(sys, "stderr", closed):
+            try:
+                self.reap.log({"raw": "{}", "run": "closed-run", "state": "done"})
+            except Exception as exc:
+                raised = exc
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        self.assertTrue(closed.writes, "the closed stderr was never written to, so the case tested nothing")
+        self.assertIsNone(raised, "log() raised %r when stderr was closed, after the drop row was written" % (raised,))
+        self.assert_one_drop_row(path, "closed-run")
+
+    def test_a_drop_whose_drops_file_cannot_be_appended_to_does_not_raise(self):
+        """The best-effort append: a drops path that is a directory cannot be opened for append. log() must still
+        return. The append's own except covers it."""
+        path = self.scoped_log_path()
+        os.makedirs(self.drops_file(path))
+        raised = None
+        with self.refused_log_reads(path) as refused, contextlib.redirect_stderr(io.StringIO()):
+            try:
+                self.reap.log({"raw": "{}", "run": "append-run", "state": "done"})
+            except Exception as exc:
+                raised = exc
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        self.assertTrue(os.path.isdir(self.drops_file(path)), "the drops path is not a directory, so no append was refused")
+        self.assertIsNone(raised, "log() raised %r when the drops file could not be appended to" % (raised,))
+
+    def test_two_drops_in_a_row_leave_two_rows_in_the_drops_file(self):
+        """The drops file is appended to, not rewritten: the second drop keeps the first row."""
+        path = self.scoped_log_path()
+        with self.refused_log_reads(path) as refused, contextlib.redirect_stderr(io.StringIO()):
+            self.reap.log({"raw": "{}", "run": "first-run", "state": "done"})
+            self.reap.log({"raw": "{}", "run": "second-run", "state": "done"})
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        runs = [row.get("run") for row in self.read_drops(path)]
+        self.assertEqual(runs, ["first-run", "second-run"], "the drops file holds runs %r, want both drops in order" % (runs,))
+
+    def test_a_drops_file_at_256_KiB_moves_to_old_and_the_next_drop_starts_a_fresh_file(self):
+        """The drops file is bounded. At 256 KiB or more, the next drop moves the file to `<drops>.old`, replacing
+        any old one, and starts a fresh file with just the new row. The seed is exactly 256 KiB, so this pins "at"."""
+        path = self.scoped_log_path()
+        drops = self.drops_file(path)
+        old = drops + ".old"
+        seed = self.full_drops_bytes()
+        os.makedirs(os.path.dirname(drops), exist_ok=True)
+        with io.open(old, "wb") as handle:
+            handle.write(b'{"at": "2026-10-01T12:00:00-0500", "run": "stale-run", "error": "x"}\n')
+        with io.open(drops, "wb") as handle:
+            handle.write(seed)
+        self.assertEqual(os.path.getsize(drops), 256 * 1024, "control: the seeded drops file is not 256 KiB")
+        with self.refused_log_reads(path) as refused, contextlib.redirect_stderr(io.StringIO()):
+            self.reap.log({"raw": "{}", "run": "rotate-run", "state": "done"})
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        with io.open(old, "rb") as handle:
+            moved = handle.read()
+        self.assertEqual(moved, seed, "the drops file at 256 KiB was not moved to <drops>.old, which does not hold its rows")
+        self.assert_one_drop_row(path, "rotate-run")
+
+
 class AgentEndReapBatchTests(unittest.TestCase):
     """janitor/agent_end_reap.py reads every process's cwd in ONE batch call, never one call per
     pid: about 1,300 pids at 27 ms each overrun the 60 s hook timeout. The fake table answers
@@ -5678,12 +6248,42 @@ class RunLogTests(unittest.TestCase):
                 "branch old-merged was not created")
         require(os.path.isdir(self.wt), "the detached worktree was not created")
 
-    def _main(self, argv):
-        with mock.patch.dict(os.environ, {"JANITOR_RUN_LOG": self.log}), _machine_quiet(), \
+    def _main(self, argv, report=None, run_log=None):
+        real_report = sweep.print_sweep_report
+
+        def tee(results, confirm, out=None):  # the report's `out=sys.stdout` default is bound at import
+            return real_report(results, confirm, out=report if report is not None else io.StringIO())
+
+        with mock.patch.dict(os.environ, {"JANITOR_RUN_LOG": run_log or self.log}), _machine_quiet(), \
                 mock.patch.object(shutil, "disk_usage",
                                   return_value=types.SimpleNamespace(total=1, used=1, free=4242)), \
+                mock.patch.object(sweep, "print_sweep_report", tee), \
                 contextlib.redirect_stdout(io.StringIO()):
             return sweep.main(argv + ["--restore-log", self.restore])
+
+    def _write_run_lines(self, roots):
+        with open(self.log, "w", encoding="utf-8") as handle:
+            for index, root in enumerate(roots):
+                handle.write(json.dumps({"root": root, "free_bytes": 1, "worktrees_removed": 0,
+                                         "branches_reaped": 0, "time_ms": index}) + "\n")
+
+    def _append(self, root):
+        sweep.append_run_log(self.log, [{"root": root, "worktrees": [], "branches": []}])
+
+    def _seed_run_log(self):
+        """One --confirm run, which writes a line for each repository. Its report is not kept."""
+        _age_admin_files(self.wt, 7200)
+        self._main([self.busy, self.idle, "--confirm"])
+        require(os.path.isfile(self.log), "the seeding --confirm run wrote no run log")
+
+    def _last_run_line(self, text, root):
+        """The line the report prints right after ROOT's section header."""
+        lines = text.splitlines()
+        headers = [i for i, line in enumerate(lines)
+                   if line.startswith("== ") and line.endswith(" ==") and _norm_path(line[3:-3]) == _norm_path(root)]
+        self.assertEqual(len(headers), 1, "the report has no single section for %s: %r" % (root, text))
+        index = headers[0] + 1
+        return lines[index] if index < len(lines) else ""
 
     def test_confirm_appends_one_line_per_repository_with_the_four_fields(self):
         _age_admin_files(self.wt, 7200)  # quiet for 2 hours: the strict idle rule allows the reap
@@ -5744,6 +6344,199 @@ class RunLogTests(unittest.TestCase):
         roots = [_norm_path(r.get("root", "")) for r in _read_run_log(self.log)]
         self.assertIn(_norm_path(self.busy), roots, "no run-log line for the first repository")
 
+    def test_preview_prints_each_roots_last_run_line_and_opens_the_run_log_once(self):
+        self._seed_run_log()
+        opened = []
+        real_open = open
+
+        def spy(file, *args, **kwargs):
+            if isinstance(file, str) and _norm_path(file) == _norm_path(self.log):
+                opened.append(file)
+            return real_open(file, *args, **kwargs)
+
+        report = io.StringIO()
+        with mock.patch("builtins.open", spy):
+            self._main([self.busy, self.idle], report=report)
+        text = report.getvalue()
+        busy_line = self._last_run_line(text, self.busy)
+        idle_line = self._last_run_line(text, self.idle)
+        self.assertTrue(busy_line.startswith("  last --confirm run: "), "no last-run line under busy: %r" % busy_line)
+        self.assertIn(", 1 worktrees removed, 1 branches reaped", busy_line)
+        self.assertTrue(idle_line.startswith("  last --confirm run: "), "no last-run line under idle: %r" % idle_line)
+        self.assertIn(", 0 worktrees removed, 0 branches reaped", idle_line)
+        self.assertEqual(len(opened), 1, "the preview opened the run log %d times for two roots" % len(opened))
+
+    def test_preview_with_no_run_log_says_none_in_the_log_path(self):
+        require(not os.path.exists(self.log), "the run log exists before any run")
+        report = io.StringIO()
+        self._main([self.busy, self.idle], report=report)
+        text = report.getvalue()
+        for root in (self.busy, self.idle):
+            self.assertEqual(self._last_run_line(text, root), "  last --confirm run: none in %s" % self.log)
+
+    def test_preview_with_an_unreadable_run_log_says_unknown_with_the_error_name(self):
+        os.makedirs(self.log)  # a directory cannot be read as a log
+        try:
+            open(self.log, encoding="utf-8")
+        except OSError as err:
+            name = type(err).__name__
+        else:
+            self.fail("opening a directory as a file did not fail on this platform")
+        report = io.StringIO()
+        self._main([self.busy, self.idle], report=report)
+        text = report.getvalue()
+        for root in (self.busy, self.idle):
+            self.assertEqual(self._last_run_line(text, root), "  last --confirm run: unknown (%s)" % name)
+
+    def test_confirm_and_tier1_runs_print_no_last_run_line(self):
+        self._seed_run_log()
+        preview = io.StringIO()
+        self._main([self.busy, self.idle], report=preview)
+        self.assertTrue(self._last_run_line(preview.getvalue(), self.idle).startswith("  last --confirm run: "),
+                        "control: the preview should print a last-run line")
+        for flag in ("--confirm", "--tier1"):
+            report = io.StringIO()
+            self._main([self.busy, self.idle, flag], report=report)
+            self.assertNotIn("last --confirm run:", report.getvalue(), "a %s run printed a last-run line" % flag)
+
+    def test_cap_keeps_the_newest_lines_and_leaves_no_temp_file(self):
+        cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)  # the fallback lets an older build fail on the count
+        # Three roots reused, each with a line inside the window: no root line lies before the cut, so the
+        # file holds exactly the cap (the root bound adds nothing here).
+        self._write_run_lines(["old-%d" % (i % 3) for i in range(cap)])
+        self._append("new-1")
+        kept = _read_run_log(self.log)
+        self.assertEqual(len(kept), cap, "the run log kept %d lines, not the cap of %d" % (len(kept), cap))
+        self.assertEqual(kept[0]["time_ms"], 1, "the oldest kept line is not the second-oldest line")
+        self.assertEqual(kept[-1]["root"], "new-1", "the newest line is not the one just appended")
+        leftovers = [name for name in os.listdir(self.base) if name.endswith(".tmp")]
+        self.assertEqual(leftovers, [], "the trim left a temp file behind: %r" % leftovers)
+
+    def test_roots_past_the_cut_are_bounded_to_the_newest_max_run_log_roots(self):
+        cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)
+        roots_kept = getattr(sweep, "MAX_RUN_LOG_ROOTS", 200)  # the fallback lets an older build fail on the count
+        total = 3000  # one-off roots: 1000 lines sit before the cut, and only the newest roots_kept of them stay
+        results = [{"root": "root-%04d" % i, "worktrees": [], "branches": []} for i in range(total)]
+        sweep.append_run_log(self.log, results)
+        kept = _read_run_log(self.log)
+        self.assertEqual(len(kept), cap + roots_kept,
+                         "the run log kept %d lines, not the cap of %d plus %d root lines"
+                         % (len(kept), cap, roots_kept))
+        roots = [row["root"] for row in kept]
+        want = ["root-%04d" % i for i in range(total - cap - roots_kept, total)]
+        self.assertTrue(roots == want,  # not assertEqual: its failure would print every kept root
+                        "the kept lines are not the newest %d roots past the cut, then the newest %d lines"
+                        % (roots_kept, cap))
+
+    def test_each_roots_newest_line_survives_the_cap(self):
+        cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)
+        self._write_run_lines(["quiet-root"] + ["busy-root"] * cap)
+        self._append("newest-root")
+        roots = [row["root"] for row in _read_run_log(self.log)]
+        self.assertTrue("quiet-root" in roots,  # not assertIn: its failure would print every kept line
+                        "the cap dropped quiet-root's only run line: its preview would print none in %s" % self.log)
+
+    def test_threaded_appends_under_the_cap_keep_every_line_valid_json(self):
+        cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)
+        # Four prefill roots reused and every thread line inside the window, so the file ends at exactly the cap.
+        self._write_run_lines(["old-%d" % (i % 4) for i in range(cap - 5)])
+        threads, per_thread = 8, 10
+        barrier = threading.Barrier(threads)
+        lock = getattr(sweep, "_RUN_LOG_LOCK", None)
+        errors, unlocked = [], []
+        real_replace = os.replace
+
+        def spy_replace(src, dst, *args, **kwargs):
+            if lock is None or not lock.locked():
+                unlocked.append(dst)
+            return real_replace(src, dst, *args, **kwargs)
+
+        def worker(index):
+            try:
+                barrier.wait()
+                for number in range(per_thread):
+                    self._append("t%d-%d" % (index, number))
+            except Exception as err:  # reported by the assert below; a thread would otherwise lose it
+                errors.append(repr(err))
+
+        with mock.patch.object(os, "replace", spy_replace):
+            workers = [threading.Thread(target=worker, args=(i,)) for i in range(threads)]
+            for thread in workers:
+                thread.start()
+            for thread in workers:
+                thread.join()
+        self.assertEqual(errors, [], "an append raised in a thread: %r" % errors)
+        self.assertEqual(unlocked, [], "the trim replaced the run log outside the run-log lock %d times" % len(unlocked))
+        with open(self.log, encoding="utf-8") as handle:
+            raw = handle.readlines()
+        bad = []
+        for text in raw:
+            try:
+                json.loads(text)
+            except ValueError:
+                bad.append(text)
+        self.assertEqual(bad, [], "a run-log line is not valid JSON: %r" % bad[:1])
+        self.assertEqual(len(raw), cap, "the run log holds %d lines, not the cap of %d" % (len(raw), cap))
+
+    def test_append_run_log_never_raises_on_an_oserror(self):
+        result = {"root": self.base, "worktrees": [], "branches": []}
+        real_open = open
+
+        def refuse_log(file, *args, **kwargs):
+            if isinstance(file, str) and _norm_path(file) == _norm_path(self.log):
+                raise OSError("injected: the run log cannot be opened")
+            return real_open(file, *args, **kwargs)
+
+        with mock.patch("builtins.open", refuse_log), contextlib.redirect_stdout(io.StringIO()):
+            sweep.append_run_log(self.log, [result])  # must return, not raise
+
+        cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)
+        self._write_run_lines(["old-%05d" % i for i in range(cap)])
+
+        def refuse_replace(src, dst, *args, **kwargs):
+            raise OSError("injected: the trim cannot replace the run log")
+
+        with mock.patch.object(os, "replace", refuse_replace), contextlib.redirect_stdout(io.StringIO()):
+            sweep.append_run_log(self.log, [dict(result, root="kept-root")])  # must return, not raise
+        self.assertEqual(_read_run_log(self.log)[-1]["root"], "kept-root",
+                         "the appended line did not survive a failed trim")
+
+    def test_a_trim_whose_replace_fails_leaves_no_temp_file_and_the_log_as_appended(self):
+        cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)  # the fallback lets an older build fail on the temp file
+        self._write_run_lines(["old-%d" % (i % 3) for i in range(cap)])
+        with open(self.log, encoding="utf-8") as handle:
+            before = handle.read()
+
+        def refuse(src, dst, *args, **kwargs):
+            raise OSError("injected: the trim cannot replace the run log")
+
+        with mock.patch.object(os, "replace", refuse), contextlib.redirect_stdout(io.StringIO()):
+            self._append("kept-root")  # must return, not raise
+        leftovers = [name for name in os.listdir(self.base) if name.endswith(".tmp")]
+        self.assertEqual(leftovers, [], "a failed trim left a temp file behind: %r" % leftovers)
+        with open(self.log, encoding="utf-8") as handle:
+            after = handle.read()
+        self.assertTrue(after.startswith(before), "a failed trim changed lines the append did not write")
+        appended = [json.loads(text)["root"] for text in after[len(before):].splitlines()]
+        self.assertEqual(appended, ["kept-root"], "the log is not the lines as appended: %r" % appended[-3:])
+
+    def test_a_run_under_a_symlinked_root_is_the_last_run_on_the_real_path_and_on_the_link(self):
+        link = os.path.join(self.base, "busy-link")
+        try:
+            os.symlink(self.busy, link)
+        except OSError as err:
+            raise unittest.SkipTest("os.symlink is not allowed on this platform: %s" % err)
+        _age_admin_files(self.wt, 7200)  # quiet for 2 hours: the strict idle rule allows the reap
+        self._main([link, self.idle, "--confirm"])
+        logged = [row["root"] for row in _read_run_log(self.log)] if os.path.isfile(self.log) else []
+        self.assertIn(link, logged, "the confirm run did not log the symlink as the root: %r" % logged)
+        for root in (os.path.realpath(link), link):
+            report = io.StringIO()
+            self._main([root, self.idle], report=report)
+            line = self._last_run_line(report.getvalue(), root)
+            self.assertIn(", 1 worktrees removed, 1 branches reaped", line,
+                          "the preview on %s did not print the real last-run line: %r" % (root, line))
+
 
 @contextlib.contextmanager
 def _process_table(rows):
@@ -5787,19 +6580,19 @@ class AgentWorktreeReapTests(unittest.TestCase):
     case here forbids one of their removals. The agent rule removes a tree only when ALL hold:
     its path is `<repo>/.claude/worktrees/agent-*` (a branch or a detached HEAD); it is clean
     (no uncommitted, no untracked file); no process has a cwd inside it; its last change is 4
-    hours old or more; its HEAD commit is reachable from a remote-tracking ref. A repo whose
-    package.json defines `reap:worktrees` gets that script run with `--remove` instead. A read
-    that fails keeps the tree. A tree that should go below is pushed and not merged, which the
+    hours old or more; its HEAD commit is reachable from a remote-tracking ref. The sweep never
+    runs code a repository supplies: a `reap:worktrees` script in its package.json is ignored, and
+    npm is never run. A read that fails keeps the tree. A tree that should go below is pushed and not merged, which the
     older rulings keep before 24 hours, so its removal at 5 hours can only be the agent rule's,
     and its keep can only be that rule's refusal.
 
     The incident shape: a lane pushes `HEAD:<lane>` from a local branch of another name, so a
-    remover that trusts the branch's upstream reads the tree as never pushed.
+    check that trusts the branch's upstream reads the tree as never pushed.
 
     Seams. Clock: `time.time` runs HOURS ahead, so no file is touched and nothing sleeps.
     Process table: `sweep.list_all_pids` and `sweep.process_cwd` (darwin: `_all_cwds_macos`).
-    npm: a stub `npm` first on PATH logs argv and cwd. It is a real executable, so the sweep
-    may reach it by any call form. Failed git read: `subprocess.run` answers 128 for one tree.
+    npm: a stub `npm` first on PATH logs argv and cwd; the sweep must never call it. It is a real
+    executable, so the sweep may reach it by any call form. Failed git read: `subprocess.run` answers 128 for one tree.
     A kept tree must also see no `git worktree remove` call: git refuses a dirty tree on its own,
     and that refusal is not the sweep's guard. Every keep case also holds a control tree (`agent-ctl`) that must be removed in the same run,
     so a sweep that does nothing, or stops early, cannot pass a keep case."""
@@ -5935,7 +6728,7 @@ class AgentWorktreeReapTests(unittest.TestCase):
                       "the sweep touched the remote")
         self.assertEqual(run_vcs(self.repo, "cat-file", "-e", sha + "^{commit}").returncode, 0,
                          "the lane's commit is gone from the repository")
-        self.assertEqual(self.npm_calls(), [], "a repo with no `reap:worktrees` script ran npm")
+        self.assertEqual(self.npm_calls(), [], "the sweep ran npm: it never runs code a repository supplies")
 
     # ---- (b) the 4 hour floor
 
@@ -6001,24 +6794,46 @@ class AgentWorktreeReapTests(unittest.TestCase):
         self.assertTrue(self.listed(self.repo))
         self.assertRemoved(ctl, out)
 
-    # ---- (g) the repo's own remover
+    # ---- (g) a repo's package.json script is never run; the agent rule judges its trees
 
-    def test_g_runs_the_repos_remover_with_remove_and_removes_nothing_itself(self):
-        write(os.path.join(self.repo, "package.json"),
-              json.dumps({"name": "x", "scripts": {"reap:worktrees": "node reap.mjs"}}))
+    SCRIPTED_PACKAGE_JSON = b'{"name": "x", "scripts": {"reap:worktrees": "node reap.mjs"}}'
+
+    def main_package_json(self, raw):
+        """Commit RAW as the repo's package.json on main, and push main. A tree made after this
+        call starts from that file."""
+        with open(os.path.join(self.repo, "package.json"), "wb") as handle:
+            handle.write(raw)
         run_vcs(self.repo, "add", "-A")
-        self.assertEqual(run_vcs(self.repo, *IDENT, "commit", "-q", "-m", "reaper").returncode, 0)
+        require(run_vcs(self.repo, *IDENT, "commit", "-q", "-m", "package.json").returncode == 0,
+                "commit of package.json failed")
         require(run_vcs(self.repo, "push", "-q", "origin", "main").returncode == 0, "push of main failed")
-        tree = self.agent("g")  # the built-in rule would remove it at 5 hours
+
+    def test_g_a_repo_package_json_script_is_never_run(self):
+        self.main_package_json(self.SCRIPTED_PACKAGE_JSON)
+        self.agent("g")  # idle 5 hours: the agent rule's to remove, whatever the script says
+        self.run_sweep(5)
+        self.assertEqual(self.npm_calls(), [], "the sweep ran npm for a repo whose package.json "
+                         "holds a `reap:worktrees` script: it never runs code a repository supplies")
+
+    def test_g_the_agent_rule_removes_the_tree_despite_a_repo_package_json_script(self):
+        self.main_package_json(self.SCRIPTED_PACKAGE_JSON)
+        tree = self.agent("g")
         out = self.run_sweep(5)
-        calls = self.npm_calls()
-        self.assertEqual(len(calls), 1, "npm calls: %r\n%s" % (calls, out))
-        argv = calls[0]["argv"]
-        self.assertIn("reap:worktrees", argv)
-        self.assertIn("--remove", argv)
-        self.assertLess(argv.index("reap:worktrees"), argv.index("--remove"), argv)
-        self.assertEqual(_norm_path(calls[0]["cwd"]), _norm_path(self.repo))
-        self.assertKept(tree, out)
+        self.assertRemoved(tree, out)
+
+    def test_g_an_unparseable_package_json_keeps_the_agent_rule_and_runs_no_npm(self):
+        self.main_package_json(b'{"scripts": {"reap:worktrees": "node reap.mjs"')  # cut short
+        tree = self.agent("g")
+        out = self.run_sweep(5)
+        self.assertEqual(self.npm_calls(), [], "the sweep ran npm for an unparseable package.json")
+        self.assertRemoved(tree, out)
+
+    def test_g_an_unreadable_package_json_keeps_the_agent_rule_and_runs_no_npm(self):
+        self.main_package_json(b'\xff\xfe{"scripts": {}}')  # not UTF-8: the read fails
+        tree = self.agent("g")
+        out = self.run_sweep(5)
+        self.assertEqual(self.npm_calls(), [], "the sweep ran npm for an unreadable package.json")
+        self.assertRemoved(tree, out)
 
     # ---- (i) a detached tree: the red-run checkout a test-author makes under .claude/worktrees
 

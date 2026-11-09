@@ -22,7 +22,7 @@ export const boundSeamReader = () => seamReader;
 export const OPTIONAL_KEYS = Object.freeze(['screenKeys', 'modelSeam', 'workerStage', 'migrationsDir']);
 
 /** The map format this skill reads and writes. `map.config.json` holds `formatVersion`, and a missing key means version 1. Raise it with one step in `map-upgrade.mjs`. */
-export const MAP_FORMAT_VERSION = 3;
+export const MAP_FORMAT_VERSION = 6;
 
 /** The format version of a parsed config. A value that is no whole number, or a version newer than the skill, is an error. It never answers a version the skill cannot read. */
 export const readFormatVersion = (cfg) => {
@@ -75,7 +75,7 @@ export const validateMapConfig = (cfg, root = process.cwd(), { git = true } = {}
   if (!isObject(cfg)) bad('is not an object: the top level must be a JSON object');
   // The version first: a newer map may hold keys this skill does not know, and the refusal must say "update the skill", not "unknown key".
   if (readFormatVersion(cfg) < MAP_FORMAT_VERSION) bad(`"formatVersion" is ${readFormatVersion(cfg)}, and this skill reads version ${MAP_FORMAT_VERSION}. Run node <skill>/scripts/map-upgrade.mjs from the repository root, then run this command again.`);
-  known(cfg, ['formatVersion', 'title', 'codeExtensions', 'mapPaths', ...OPTIONAL_KEYS, 'requireAllKeys']);
+  known(cfg, ['formatVersion', 'title', 'codeExtensions', 'mapPaths', ...OPTIONAL_KEYS, 'decisionsDir', 'decisionIdPattern', 'requireAllKeys']);
   text(cfg, 'title', 'title');
   if ('requireAllKeys' in cfg && typeof cfg.requireAllKeys !== 'boolean') bad('"requireAllKeys" must be true or false');
   // With the flag on, a left-out optional key is an error, so a deleted key goes red and never skips in silence.
@@ -93,6 +93,16 @@ export const validateMapConfig = (cfg, root = process.cwd(), { git = true } = {}
       return posix(p) + (/[\\/]$/.test(p) ? '/' : '');
     });
     withGit.push(() => { for (const p of mapPaths) if (!trackedFiles().some((f) => f.startsWith(p))) bad(`"mapPaths" names ${p}, and no tracked file starts with it`); });
+  }
+  // The two decision keys go together. Neither is in `OPTIONAL_KEYS`: a repo with no decision records needs no key, and `requireAllKeys` never asks for one.
+  for (const [k, other] of [['decisionsDir', 'decisionIdPattern'], ['decisionIdPattern', 'decisionsDir']])
+    if (k in cfg && !(other in cfg)) bad(`has "${k}" and no "${other}": set both or neither`);
+  if ('decisionsDir' in cfg) {
+    text(cfg, 'decisionsDir', 'decisionsDir');
+    place(cfg.decisionsDir, 'decisionsDir', 'folder');
+    text(cfg, 'decisionIdPattern', 'decisionIdPattern');
+    try { new RegExp(cfg.decisionIdPattern); } catch (e) { bad(`"decisionIdPattern" is no regular expression: ${e.message}`); }
+    if (new RegExp(`^(?:${cfg.decisionIdPattern})$`).test('')) bad('"decisionIdPattern" matches the empty text, so it names no id');
   }
   const readTracked = (f) => readFileSync(path.join(root, f), 'utf8');
   if ('screenKeys' in cfg) {
@@ -140,6 +150,7 @@ export const validateMapConfig = (cfg, root = process.cwd(), { git = true } = {}
     ...('modelSeam' in cfg && { modelSeam: Object.freeze({ file: posix(cfg.modelSeam.file) }) }),
     ...('workerStage' in cfg && { workerStage: Object.freeze({ ...cfg.workerStage }) }),
     ...('migrationsDir' in cfg && { migrationsDir: `${posix(cfg.migrationsDir)}/` }),
+    ...('decisionsDir' in cfg && { decisionsDir: `${posix(cfg.decisionsDir)}/`, decisionIdPattern: cfg.decisionIdPattern }),
   });
   if (git) VALID.add(out);
   return out;

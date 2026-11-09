@@ -53,9 +53,9 @@ TASK_XML_NAMESPACE = "http://schemas.microsoft.com/windows/2004/02/mit/task"
 
 
 def resolve_primary_checkout(where: str):
-    """Same read `install_launchd.py.resolve_primary_checkout` makes, kept as its own local copy
-    here rather than imported across scripts. It reads the parent of the one `.git` directory
-    every worktree of a clone shares. Used only to NAME the remedy when refusing."""
+    """The main checkout of `where`'s clone, or None. Reads the parent of the one `.git`
+    directory every worktree of a clone shares. A local read, not imported: `install_launchd.py`
+    calls `guard.primary_checkout` for the same answer. Used only to NAME the remedy when refusing."""
     top = guard._git(where, "rev-parse", "--show-toplevel")
     if top is None or top.returncode != 0:
         return None

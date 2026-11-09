@@ -1,0 +1,1 @@
+export { homeTitle } from '../home';

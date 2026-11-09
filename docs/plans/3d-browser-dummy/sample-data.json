@@ -1,0 +1,518 @@
+{
+ "source": "roadmap branch, waiting/ export, read 2026-11-06. Trimmed static sample.",
+ "items": [
+  {
+   "n": 281,
+   "kind": "decision",
+   "status": "open",
+   "title": "The 10-message stop on your Mac is Claude Code's own limit. Ask Anthropic for a setting?",
+   "short": "10-message stop: ask Anthropic?",
+   "rank": 4,
+   "group": null,
+   "added": "2026-11-06T18:49:30Z",
+   "options": [
+    "Live with it, and send feedback",
+    "Live with it only"
+   ],
+   "steps": [],
+   "pick": "a"
+  },
+  {
+   "n": 280,
+   "kind": "decision",
+   "status": "open",
+   "title": "mailaudit: can a Reset be undone from the Recent list?",
+   "short": "mailaudit: undo a Reset from Recent?",
+   "rank": 3,
+   "group": null,
+   "added": "2026-11-06T18:47:30Z",
+   "options": [
+    "Reset gets a Recent row",
+    "Keep Reset out of Recent"
+   ],
+   "steps": [],
+   "pick": "a"
+  },
+  {
+   "n": 279,
+   "kind": "decision",
+   "status": "open",
+   "title": "Which ways of adding an independent agent that argues back should we adopt?",
+   "short": "Independent pushback: which to adopt",
+   "rank": 3,
+   "group": null,
+   "added": "2026-11-06T18:43:00Z",
+   "options": [
+    "Blind reviewer brief",
+    "Replay cases for each judge",
+    "Guard fix check on sonnet",
+    "Blind plan refuter"
+   ],
+   "steps": [],
+   "pick": [
+    "a",
+    "b",
+    "c",
+    "d"
+   ]
+  },
+  {
+   "n": 278,
+   "kind": "decision",
+   "status": "open",
+   "title": "Which auto-mode allow lines should land?",
+   "short": "Auto-mode allow lines",
+   "rank": 3,
+   "group": null,
+   "added": "2026-11-06T18:40:00Z",
+   "options": [
+    "Cancel a CI run of your own",
+    "Delete a check-in of your own"
+   ],
+   "steps": [],
+   "pick": null
+  },
+  {
+   "n": 277,
+   "kind": "decision",
+   "status": "open",
+   "title": "Which page should the first 3D test copy port: this Cockpit page, or another one?",
+   "short": "3D test copy: which page",
+   "rank": 4,
+   "group": null,
+   "added": "2026-11-06T18:37:00Z",
+   "options": [
+    "The Cockpit page, as a separate test copy",
+    "Another page (say which in your note)"
+   ],
+   "steps": [],
+   "pick": "a"
+  },
+  {
+   "n": 276,
+   "kind": "decision",
+   "status": "open",
+   "title": "Should every check fail in CI when it can't read its input, and should your stale-cites-at-merge ruling be rewritten to\u2026",
+   "short": "One rule for an unknown read",
+   "rank": 1,
+   "group": null,
+   "added": "2026-11-06T18:33:00Z",
+   "options": [
+    "Grant: one rule, and rewrite line 18",
+    "Keep line 18 as written"
+   ],
+   "steps": [],
+   "pick": "a"
+  },
+  {
+   "n": 275,
+   "kind": "decision",
+   "status": "open",
+   "title": "Style lint: when it can't read the base commit, fail it, pass a shallow clone, or fetch the full history first?",
+   "short": "Style lint, unreadable base",
+   "rank": 2,
+   "group": null,
+   "added": "2026-11-06T18:08:00Z",
+   "options": [
+    "Fail whenever the base can't be read",
+    "Pass a shallow clone, fail anything else",
+    "Fetch the full history once, then fail"
+   ],
+   "steps": [],
+   "pick": "c"
+  },
+  {
+   "n": 274,
+   "kind": "decision",
+   "status": "open",
+   "title": "Who archives finished lane sessions: the batch runner, a janitor session, or the coordinator?",
+   "short": "Who archives lanes",
+   "rank": 2,
+   "group": null,
+   "added": "2026-11-06T17:37:00Z",
+   "options": [
+    "The batch runner archives, from a worked-out list",
+    "A standing janitor session",
+    "The coordinator archives its own lanes"
+   ],
+   "steps": [],
+   "pick": "a"
+  },
+  {
+   "n": 272,
+   "kind": "decision",
+   "status": "open",
+   "title": "Swift layout rule: add a check and narrow it, file debts, or retire it?",
+   "short": "Swift layout rule",
+   "rank": 3,
+   "group": null,
+   "added": "2026-11-06T17:34:00Z",
+   "options": [
+    "Narrow it and add a check",
+    "Keep it as written, one debt per app",
+    "Retire the Swift section"
+   ],
+   "steps": [],
+   "pick": "a"
+  },
+  {
+   "n": 271,
+   "kind": "decision",
+   "status": "open",
+   "title": "Does a fix check follow a FAIL in any review round, or only round 3?",
+   "short": "fix check: after round 3 only?",
+   "rank": 3,
+   "group": null,
+   "added": "2026-11-05T22:12:00Z",
+   "options": [
+    "A fix check only after round 3",
+    "A fix check after any round's FAIL"
+   ],
+   "steps": [],
+   "pick": null
+  },
+  {
+   "n": 273,
+   "kind": "task",
+   "status": "open",
+   "title": "Test whether sessions on your Mac, PC and the cloud can message each other",
+   "short": "Cross-machine message test",
+   "rank": 3,
+   "group": null,
+   "added": "2026-11-06T17:36:00Z",
+   "options": [],
+   "steps": [
+    "Turn on Remote Control on your Mac and on your PC: in the Claude desktop app, Settings, Claude Code\u2026",
+    "On the Mac, in a Claude Code session, type /list-agents. Check that the PC session and at least one\u2026",
+    "From the PC session, send the Mac session a message, and send one back.",
+    "From a cloud session, send the PC session a message (a cloud session uses send_message).",
+    "From the Mac, send a cloud session a message."
+   ],
+   "pick": null
+  },
+  {
+   "n": 262,
+   "kind": "task",
+   "status": "open",
+   "title": "Add the own-branch lease-push line to settings.json on GitHub",
+   "short": "settings: own-branch lease push",
+   "rank": 2,
+   "group": null,
+   "added": "2026-11-05T13:55:00Z",
+   "options": [],
+   "steps": [
+    "Open the settings.json edit link below.",
+    "Under \"autoMode\" \u2192 \"allow\", find the \"Archived Branch Delete\" entry and paste the line right after \u2026",
+    "Press \"Commit changes\", choose \"Create a new branch and start a pull request\", and confirm.",
+    "Mark done."
+   ],
+   "pick": null
+  },
+  {
+   "n": 240,
+   "kind": "task",
+   "status": "open",
+   "title": "Republish the banchi, degen, home and mailaudit Cockpits from main, signed in to your other account",
+   "short": "Republish 4 Cockpits",
+   "rank": 2,
+   "group": null,
+   "added": "2026-11-04T06:35:00Z",
+   "options": [],
+   "steps": [
+    "Open a Claude Code session signed in to the account that owns these four pages.",
+    "Paste this prompt and send it: For each of these Cockpit pages, run the waiting-page skill's \"Keep \u2026",
+    "Reply here when it reports, or let that session's report stand."
+   ],
+   "pick": null
+  },
+  {
+   "n": 91,
+   "kind": "task",
+   "status": "open",
+   "title": "Put your Apple account ids in the Mac account file",
+   "short": "",
+   "rank": 2,
+   "group": null,
+   "added": "2026-10-30T00:49:00Z",
+   "options": [],
+   "steps": [
+    "Open the Claude app on your Mac and start a local Claude Code session.",
+    "Paste this prompt and send it: Work in my degen checkout (clone shivinate7/degen if missing). Read \u2026",
+    "Done when that session prints the five key names: team_id, device_udid, asc_key_id, asc_issuer_id, \u2026"
+   ],
+   "pick": null
+  },
+  {
+   "n": 269,
+   "kind": "task",
+   "status": "closed",
+   "title": "Rebuild the cloud environment snapshot",
+   "short": "rebuild cloud env snapshot",
+   "rank": 3,
+   "group": null,
+   "added": "2026-11-05T18:05:00Z",
+   "options": [],
+   "steps": [
+    "In any cloud session, open the environment menu in the session's title bar.",
+    "Choose Edit, then Setup script.",
+    "Save with no change; that rebuilds the snapshot.",
+    "Mark done. It is done when a new session starts without the EXECPATH line."
+   ],
+   "pick": null
+  },
+  {
+   "n": 267,
+   "kind": "task",
+   "status": "closed",
+   "title": "Add the Relayed Grant line to settings.json on GitHub",
+   "short": "settings: Relayed Grant line",
+   "rank": 2,
+   "group": null,
+   "added": "2026-11-05T16:27:00Z",
+   "options": [],
+   "steps": [
+    "Open the settings.json edit link below.",
+    "Under \"autoMode\" \u2192 \"allow\", find the \"Archived Branch Delete\" entry and paste the line right after \u2026",
+    "Press \"Commit changes\", choose \"Create a new branch and start a pull request\", and confirm.",
+    "Mark done."
+   ],
+   "pick": null
+  },
+  {
+   "n": 263,
+   "kind": "task",
+   "status": "closed",
+   "title": "Type your word in lane review-fix-check (232)",
+   "short": "type 232 a in 1 lane",
+   "rank": 2,
+   "group": null,
+   "added": "2026-11-05T13:55:00Z",
+   "options": [],
+   "steps": [
+    "Open lane review-fix-check (link below) and type: 232 a",
+    "Mark done."
+   ],
+   "pick": null
+  },
+  {
+   "n": 257,
+   "kind": "decision",
+   "status": "closed",
+   "title": "Lease pushes: auto mode refuses a lane's fix to its own branch. Allow it, leave it, or remove the cause?",
+   "short": "Lease push refusals: allow, leave, or fix cause?",
+   "rank": 30,
+   "group": null,
+   "added": "2026-11-04T23:56:00Z",
+   "options": [
+    "Bash allow rule for the lease push (Goes against your ruling: a repo changes to\u2026",
+    "Leave it as it is",
+    "Auto-mode prose allow entry (Goes against your ruling: a repo changes to fit a \u2026",
+    "Remove the cause in the red-run check"
+   ],
+   "steps": [],
+   "pick": null
+  },
+  {
+   "n": 255,
+   "kind": "decision",
+   "status": "closed",
+   "title": "When a fix after the last review round edits a guard or a check, does it owe the net-value test again?",
+   "short": "Post-round-3 guard fix: net-value again?",
+   "rank": 3,
+   "group": null,
+   "added": "2026-11-04T13:59:30Z",
+   "options": [
+    "No: the fix check is enough",
+    "Yes: judge net value again on the fixed head"
+   ],
+   "steps": [],
+   "pick": "a"
+  },
+  {
+   "n": 254,
+   "kind": "task",
+   "status": "closed",
+   "title": "Type go in lane review-fix-check",
+   "short": "Type go in lane review-fix-check",
+   "rank": 1,
+   "group": null,
+   "added": "2026-11-04T13:58:30Z",
+   "options": [],
+   "steps": [
+    "Open https://claude.ai/code/session_013NEJKzRvvmoLf7T9kB4uEe.",
+    "Type: go"
+   ],
+   "pick": null
+  }
+ ],
+ "steps": [
+  {
+   "id": "craft-book",
+   "title": "shivpedia: what a session learns in one repo, the next repo starts with",
+   "phase": "cleanup",
+   "status": "doing",
+   "order": 102.7
+  },
+  {
+   "id": "c55",
+   "title": "The roadmap gets re-weighed as a whole, and notes stay short",
+   "phase": "cleanup",
+   "status": "todo",
+   "order": 103.2
+  },
+  {
+   "id": "local-folder-for-owner-acts",
+   "title": "A session on shiv's Mac runs the acts the cloud refuses: protection writes, branch deletes, closing his PRs",
+   "phase": "cleanup",
+   "status": "todo",
+   "order": 103.21
+  },
+  {
+   "id": "roadmap-live-check-true",
+   "title": "The roadmap's in-progress check sees every live lane",
+   "phase": "cleanup",
+   "status": "doing",
+   "order": 103.21001
+  },
+  {
+   "id": "roadmap-one-writer",
+   "title": "Only triage pushes to the roadmap branch",
+   "phase": "cleanup",
+   "status": "doing",
+   "order": 103.21002
+  },
+  {
+   "id": "question-checks-past-rulings",
+   "title": "Before a question reaches the owner, past rulings on it are found and cited",
+   "phase": "cleanup",
+   "status": "doing",
+   "order": 103.21003
+  },
+  {
+   "id": "install-log-offset",
+   "title": "install.sh and install.ps1 write log times with their UTC offset",
+   "phase": "cleanup",
+   "status": "doing",
+   "order": 103.21004
+  },
+  {
+   "id": "glossary-meets-owner-halfway",
+   "title": "Sessions read the owner's words by meaning and answer in the glossary term",
+   "phase": "cleanup",
+   "status": "doing",
+   "order": 103.21005
+  },
+  {
+   "id": "sim-machine-lock",
+   "title": "Every simulator boot on the Mac goes through one machine-wide lock",
+   "phase": "cleanup",
+   "status": "doing",
+   "order": 103.21006
+  },
+  {
+   "id": "sim-crash-loop-stop",
+   "title": "sim-test stops a simulator that is crash-looping",
+   "phase": "cleanup",
+   "status": "doing",
+   "order": 103.21007
+  },
+  {
+   "id": "inbox-roadmap-task-home",
+   "title": "The feedback inbox accepts a roadmap step as a task home",
+   "phase": "cleanup",
+   "status": "todo",
+   "order": 103.21008
+  },
+  {
+   "id": "comment-narration-patterns",
+   "title": "The comment check catches history phrases and lets dated or rounding why-comments pass",
+   "phase": "cleanup",
+   "status": "todo",
+   "order": 103.21009
+  },
+  {
+   "id": "merge-ignores-superseded-runs",
+   "title": "The merge tool judges each check by the newest run on the head",
+   "phase": "cleanup",
+   "status": "doing",
+   "order": 103.2101
+  },
+  {
+   "id": "merge-tool-stale-run-unknown",
+   "title": "The merge tool clears a cancelled scheduled run on an older main once a newer run passed",
+   "phase": "cleanup",
+   "status": "todo",
+   "order": 103.210101
+  },
+  {
+   "id": "red-main-same-sha-green",
+   "title": "The merge tool clears a red run on main when a newer run on the same commit passed",
+   "phase": "cleanup",
+   "status": "todo",
+   "order": 103.210102
+  },
+  {
+   "id": "time-pinned-tests-go",
+   "title": "Tests that pass or fail on clock speed become outcome checks, then CI caps return to measured",
+   "phase": "cleanup",
+   "status": "doing",
+   "order": 103.21011
+  },
+  {
+   "id": "handoff-checkpoint-before-cloud-compact",
+   "title": "The last handoff checkpoint comes before the cloud compacts",
+   "phase": "cleanup",
+   "status": "todo",
+   "order": 103.21012
+  },
+  {
+   "id": "cc-update-behavior-diff",
+   "title": "A Claude Code update that changes compaction is caught and reported",
+   "phase": "cleanup",
+   "status": "todo",
+   "order": 103.21013
+  },
+  {
+   "id": "c178",
+   "title": "home drops its uncalled copy of degen's LAN check",
+   "phase": "rollout",
+   "status": "done",
+   "order": 304.6
+  },
+  {
+   "id": "cloud-refresh-clone",
+   "title": "A cloud session on a child repo gets claude-settings with its git history, so compliance-check can name the p\u2026",
+   "phase": "cleanup",
+   "status": "done",
+   "order": 309.5
+  },
+  {
+   "id": "r1",
+   "title": "Run compliance-check on each child repo",
+   "phase": "rollout",
+   "status": "done",
+   "order": 310
+  },
+  {
+   "id": "l2",
+   "title": "Add a second design opinion",
+   "phase": "later",
+   "status": "done",
+   "order": 420
+  },
+  {
+   "id": "c8",
+   "title": "Try the sandbox on your Mac",
+   "phase": "later",
+   "status": "done",
+   "order": 450
+  },
+  {
+   "id": "c9",
+   "title": "Optional: fail a guard rule with no test",
+   "phase": "later",
+   "status": "done",
+   "order": 460
+  }
+ ]
+}

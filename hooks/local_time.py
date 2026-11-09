@@ -103,7 +103,8 @@ def override_line(result):
     if kind == "opus-off":
         return "Opus override: ended."
     if kind == "opus":
-        who = "%s spawns" % result[2] if result[2] else "spawns"
+        roles = " and ".join(result[2]) if isinstance(result[2], list) else result[2]  # one role, or a list of 2 or more
+        who = "%s spawns" % roles if roles else "spawns"
         return "Opus override: Opus %s go through without the ask until %s." % (who, central_hhmm(until))
     if kind == "once":
         return "Override: the next refused act goes through, once. It ends at %s if unused." % central_hhmm(until)
@@ -313,8 +314,10 @@ def grant_override(raw, at):
     (`opus <n>[m|h]`, `opus <role> <n>[m|h]`, `opus off`; decision owner-override): grants or ends
     the session's override and prints one line. A prompt no keyword form grants goes to
     override.grant_opus_ask, the plain Opus ask (`send opus judges`): one model call, only for an owner prompt
-    that carries the word `opus`, none otherwise. That call is why the settings.json row has "timeout": 30.
-    Any failure is one stderr line, no override."""
+    that carries the word `opus`, none otherwise. An ask that names no role also reads the owner's earlier typed
+    prompts for the roles they name: one more model call, only after a yes and only when such a prompt exists; no
+    role named means every role (decision owner-override). Those calls are why the
+    settings.json row has "timeout": 30. Any failure is one stderr line, no override."""
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override
@@ -329,6 +332,21 @@ def grant_override(raw, at):
         pass  # stdin is no hook payload: capture() reports that once
     except Exception as e:  # advisory: the time line and capture still run
         print("local_time: override: %s" % e, file=sys.stderr)
+
+
+def mail_lines(raw):
+    """Prints the mailbox's open messages after the time line (hooks/mail.py). It starts no process of its own."""
+    try:
+        hook = json.loads(raw.decode("utf-8"))
+    except ValueError:
+        return
+    try:
+        import mail
+        lines = mail.turn_start_lines(hook if isinstance(hook, dict) else {}, os.environ)
+    except Exception as e:  # an unread mailbox shows as unknown, never as empty
+        lines = ["mail unknown: %s" % (" ".join(str(e).split())[:120] or type(e).__name__)]
+    for text in lines:
+        print(text)
 
 
 OLD_FLAG_ENDS = "2026-11-09"
@@ -352,6 +370,7 @@ def main(argv):
             raw = sys.stdin.buffer.read()
             grant_override(raw, now)
             capture(raw, stamp[len("Local time: "):])
+            mail_lines(raw)
     except Exception as e:  # advisory hook: fail open; one stderr line shows in --debug
         print("local_time: %s" % e, file=sys.stderr)
     return 0

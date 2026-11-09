@@ -90,10 +90,8 @@ def primary_checkout(where: str):
     The common directory's parent (`dirname`) is always the primary checkout, ordinary checkout
     or linked worktree alike.
 
-    Callers that need this to name a remedy (`janitor/install_launchd.py`) or to sweep the right
-    repository (`janitor/session_end_sweep.py`) both used to carry their own copy of this same
-    read; this is the one constant they now both point at (CLAUDE.md,
-    "building-allow-list-is-the-constant").
+    The one read for callers that name a remedy (`janitor/install_launchd.py`) or sweep the right
+    repository (`janitor/session_end_sweep.py`) (CLAUDE.md, "building-allow-list-is-the-constant").
     """
     common_dir = _common_dir(where)
     if not common_dir:

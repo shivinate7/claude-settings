@@ -16,8 +16,8 @@ stops. When the worktree is removed is in `when-a-worktree-may-be-removed`.
 primary checkout. Reason: no session record names an agent, so a running agent's worktree reads as
 "not live".
 
-Owner ruling, 2026-09-27: the sweep skips each process whose cwd is under a `.claude/worktrees/*`
-checkout. It leaves those folders to janitor/agent_end_reap.py.
+The sweep skips each process whose cwd is under a `.claude/worktrees/*` checkout. This reaper owns
+those folders (owner ruling, 2026-09-27).
 
 ### The reaper
 
@@ -28,7 +28,7 @@ checkout. It leaves those folders to janitor/agent_end_reap.py.
 The reaper stops one process only when each read below answers a confirmed yes:
 
 1. The process cwd is inside the target, read in one batch.
-2. No live session has a cwd inside the target (`guard.worktree_live_session`).
+2. No live session has a cwd inside the target (`git_reads.worktree_live_session`).
 3. The root of its process tree inside the target is orphaned. The reaper climbs from the
    process to each live parent whose cwd is also inside the target. Then it asks
    `sweep.is_orphan` about the last one. A live parent outside the target means keep. A
@@ -43,17 +43,24 @@ On Windows, `cmd &` then another line in one foreground Bash call outlives the a
 A `run_in_background` task of a live agent hangs from a live host outside the worktree, so the reaper
 keeps it. The agent's own shells have the live host as parent, so they keep the tree (`when-a-worktree-may-be-removed`).
 
-Owner ruling, 2026-09-27: the reaper stops each orphaned tree inside an ended agent's worktree, not
-only listeners. The reaper targets only the ending agent's tree.
+The reaper stops each orphaned tree inside the ended agent's worktree, not only listeners. It targets
+only that tree (owner ruling, 2026-09-27).
 
-Owner ruling, 2026-10-10: the guard's ownership change changes the guard's kill rule only. The reaper's
-reads stay as above (`a-kill-by-pid-needs-an-owned-pid`).
+The guard's kill rule is separate from the reaper's reads. The guard's ownership change
+(`a-kill-by-pid-needs-an-owned-pid`) did not change them (owner ruling, 2026-10-10).
 
-Owner ruling, 2026-10-10: the reap reads every process's cwd in one batch call
-(`sweep._read_all_cwds_macos`). A failed or empty read returns None, which means keep. Reason: a reap
-that hit the 60 s hook cap sent no signal and left a server running. The batch timeout stays below the
-hook cap.
+The reap reads every process's cwd in one batch call (`sweep._read_all_cwds_macos`). A failed or empty
+read returns None, which means keep. The batch timeout stays below the hook cap (owner ruling,
+2026-10-10). Reason: a reap that hit the 60 s hook cap sent no signal and left a server running.
 
-Owner ruling, 2026-10-26: scratchpad orphans are reaped at session end by `janitor/session_end_sweep.py`, not at agent end. Reason: the session and its agents share one scratchpad and no agent tag exists, so an agent-end reap would stop live servers of the session or of a sibling lane. The session-end reap stops a process only when its parent is init, its exec environment holds exactly `CLAUDE_CODE_SESSION_ID=<payload session_id>`, and its cwd is inside the realpath of the payload `scratchpad_dir`. No `scratchpad_dir` stops nothing. A failed read keeps. `janitor/agent_end_reap.py` stays as above.
+Scratchpad orphans are reaped at session end by `janitor/session_end_sweep.py`, not at agent end (owner ruling, 2026-10-26). Reason: the session and its agents share one scratchpad and no agent tag exists, so an agent-end reap would stop live servers of the session or of a sibling lane. The session-end reap stops a process only when its parent is init, its exec environment holds exactly `CLAUDE_CODE_SESSION_ID=<payload session_id>`, and its cwd is inside the realpath of the payload `scratchpad_dir`. No `scratchpad_dir` stops nothing. A failed read keeps. The agent-end reap keeps the reads above and covers the ending agent's tree only.
 
-The payload log is written under a lock file. Measured on b0c87cb (PR 322 review): 13 of 120 rows were lost at 3 writers with a shared temp name and no lock.
+## The payload log
+
+The payload log is `state/agent-end-payloads.jsonl` under the config dir. Each agent end writes a `started` row, then a `done` row. The `done` row replaces the `started` row when that row is still the last line. Writes take the lock file `<log>.lock`. Measured on b0c87cb (PR 322 review): 13 of 120 rows were lost at 3 writers with a shared temp name and no lock.
+
+Cap: the last 200 rows (`MAX_LOG_LINES` in `janitor/agent_end_reap.py`).
+
+Reader: `hooks/daily_note.py` (`agent_end_failures`), at the first startup of each Central day. It prints one line that counts the runs whose day is in the window and that have a `started` row with no `done` row, or a row with an `error`. A run whose rows the cap cut is not counted. `janitor/prove_agent_end_reap.py` reads the last row of the log in its own empty temp config dir.
+
+Cost: each agent end rewrites the log twice, through a temp file and a replace, and takes the lock file. The log starts no process: its writer is the SubagentStop hook that already runs. The note reads the log once a day.

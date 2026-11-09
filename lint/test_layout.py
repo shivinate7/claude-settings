@@ -223,6 +223,24 @@ class LayoutFile(Tree):
                 self.origin(url)
                 self.assertEqual(self.layout.repo_name(self.tree), want)
 
+    def test_repo_name_reads_an_origin_with_a_port_after_the_host(self):
+        """repo_name reads the owner and name of a GitHub origin with a port between the host and the path."""
+        for url in ("ssh://git@github.com:22/shivinate7/q_max.git", "https://github.com:443/shivinate7/q_max.git"):
+            with self.subTest(url=url):
+                self.setUp()
+                self.origin(url)
+                self.assertEqual(self.layout.repo_name(self.tree), "shivinate7/q_max",
+                                 "repo_name reads no owner/name from an origin with a port after the host")
+
+    def test_repo_name_is_none_when_the_origin_path_runs_past_owner_and_name(self):
+        """A GitHub origin names one owner and one name. A path past them, or a name under a folder, is no repo."""
+        for url in ("https://github.com/o/n/pulls", "git@github.com:o/sub/n.git", "https://github.com/o/n.git/pulls"):
+            with self.subTest(url=url):
+                self.setUp()
+                self.origin(url)
+                self.assertIsNone(self.layout.repo_name(self.tree),
+                                  "repo_name reads a name past the owner and name as the repo")
+
     def test_an_unreadable_git_file_is_no_origin_never_a_crash(self):
         with open(os.path.join(self.tree, ".git"), "wb") as f:
             f.write(b"gitdir: \xff\xfe\x00\n")
@@ -1333,6 +1351,112 @@ class Identity(Tree):
         script = os.path.join(worktree, "lint", "check_layout.py")
         self.assertEqual(run([script], worktree), (0, ""))
         self.assertEqual(run([script], os.path.join(worktree, "lint")), (0, ""))
+
+
+# The mockup homes of a repo (rule building-allow-list-is-the-constant). The repo is "fixture", from its origin, so
+# its machine home is <home>/Developer/fixture-imports: the name segment of owner/name, never the owner.
+MACHINE = "fixture-imports"
+ORIGIN = "git@github.com:owner/fixture.git"
+WIN_HOME = "C:\\Users\\x"  # a Windows owner's home, given as the judge's home
+APP_SUPPORT = "~/Library/Application Support/Claude-Work/side-session-notes/abc123/a.html"
+SHOT_URL = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asset/shot.png"
+
+
+class MockupHomes(Tree):
+    """The one mockup home of a repo is its design folder: a mockup is a repo path under it, and git holds it. The
+    machine-home form ~/Developer/<repo name>-imports is refused. Two readers:
+    mockup_homes(root, home=None) names the folders, and mockup_home_problem(root, file, home=None) gives None for a
+    file in the design folder and a sentence for any other file. The home is passed in, so no case reads or writes
+    the real home. A missing name fails by name (not built yet)."""
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+        self.put(".git/config", '[remote "origin"]\n\turl = %s\n' % ORIGIN)
+        self.home = os.path.join(self.tree, "home")
+        os.makedirs(self.home)
+
+    def fn(self, name):
+        found = getattr(self.layout, name, None)
+        if found is None:
+            self.fail("lint/layout.py has no %s yet" % name)
+        return found
+
+    def judge(self, file, home=None):
+        return self.fn("mockup_home_problem")(self.tree, file, home=self.home if home is None else home)
+
+    def passes(self, file, home=None):
+        problem = self.judge(file, home)
+        self.assertIsNone(problem, "the judge refused %r: %s" % (file, problem))
+
+    def refuses(self, file, home=None):
+        problem = self.judge(file, home)
+        self.assertIsInstance(problem, str, "the judge passed %r, want a refusal" % (file,))
+        self.assertTrue(problem.strip(), "the judge refused %r with no sentence" % (file,))
+
+    def test_the_only_home_is_the_design_folder(self):
+        homes = [str(h) for h in self.fn("mockup_homes")(self.tree) if h]
+        design = os.path.join(self.tree, *self.layout.path(self.tree, "design").split("/"))
+        self.assertEqual(homes, [design], "mockup_homes names a home other than the design folder")
+
+    def test_item_file_under_the_machine_home_is_refused(self):
+        self.refuses(os.path.join(self.home, "Developer", MACHINE, "item48", "a.html"))
+
+    def test_tilde_machine_home_form_is_refused(self):
+        self.refuses("~/Developer/%s/item48/a.html" % MACHINE)
+
+    def test_windows_owner_machine_home_file_is_refused(self):
+        self.refuses("C:\\Users\\x\\Developer\\%s\\item48\\a.html" % MACHINE, home=WIN_HOME)
+
+    def test_design_folder_file_passes_when_repo_relative(self):
+        self.passes("docs/design/item48/a.html")
+
+    def test_design_folder_file_passes_when_absolute_in_the_checkout(self):
+        self.passes(os.path.join(self.tree, "docs", "design", "item48", "a.html"))
+
+    def test_application_support_path_with_spaces_fails(self):
+        self.refuses(APP_SUPPORT)
+
+    def test_windows_appdata_mockup_fails(self):
+        self.refuses("C:\\Users\\x\\AppData\\Roaming\\Claude-Work\\side-session-notes\\abc123\\a.html", home=WIN_HOME)
+
+    def test_dotdot_escape_out_of_the_design_folder_fails(self):
+        self.refuses("docs/design/../../escape/a.html")
+
+    def test_http_url_fails(self):
+        self.refuses("https://example.com/shot.png")
+
+    def test_claude_artifact_asset_url_fails(self):
+        self.refuses(SHOT_URL)
+
+    def test_missing_file_fails(self):
+        self.refuses(None)
+
+    def test_empty_file_fails(self):
+        self.refuses("")
+
+    def test_file_directly_in_the_imports_folder_fails(self):
+        self.refuses("~/Developer/%s/a.html" % MACHINE)
+
+    def test_checkout_file_outside_the_design_folder_fails(self):
+        self.refuses(os.path.join(self.tree, "scratch", "a.html"))
+
+    def test_relative_file_outside_the_design_folder_fails(self):
+        self.refuses("scratch/a.html")
+
+    def test_the_refusal_names_the_design_folder_and_not_the_machine_home(self):
+        problem = self.judge(APP_SUPPORT)
+        self.assertIn(self.layout.path(self.tree, "design"), problem, "the refusal does not name the design folder")
+        self.assertNotIn(MACHINE, problem, "the refusal names the machine home, which no longer holds a mockup")
+
+    def test_a_folder_path_with_a_trailing_slash_is_refused(self):
+        self.refuses("docs/design/item48/")
+
+    def test_a_folder_path_with_a_trailing_backslash_is_refused(self):
+        self.refuses("docs\\design\\item48\\")
+
+    def test_the_design_folder_itself_is_refused(self):
+        self.refuses("docs/design")
 
 
 if __name__ == "__main__":

@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Before a designer spawn, reads its brief. A blind brief must follow the design-explore template and name nothing of today's product. An informed or directed brief must say how many blind lanes its run has.
+"""Before a designer spawn, reads its brief. A blind brief must follow the design-explore template and name nothing of today's product. An informed or directed brief must say how many blind designers its run has.
 
 Decision blind-briefs-use-a-template. Standard library only.
 
-- A blind brief (first line `Lane kind: blind`) follows skills/design-explore/blind-brief.md: a `Lane:`
+- A blind brief (first line `Designer kind: blind`) follows skills/design-explore/blind-brief.md: a `Designer:`
   line, the free sections Job and Device, and the fixed sections House rules and Deliver word for
   word. A free section may not name the current product, a screenshot or mockup, a path or link, the
   spec or tokens, or a keep or match rule, and holds no colour, font or spacing value (brief_faults).
   A blind brief has no Palette section: a section on colour, font, spacing or tokens is refused
   (`token-section`). Roadmap step c191: the d4 brief's Palette held a repo's brand hex.
-- An informed or directed brief carries `Blind lanes: <n>` with n of 1 or more, or
-  `Blind lanes: none, owner: "<the owner's words>"`.
-- A designer brief with no kind line is a small change outside design-explore, and passes.
+- An informed or directed brief carries `Blind designers: <n>` with n of 1 or more, or
+  `Blind designers: none, owner: "<the owner's words>"`.
+- A designer brief with no kind line is a small change outside design-explore, and passes. A brief with the
+  retired kind header (OLD_KIND_LINE) is refused, and the refusal names KIND_HEADER.
 
 Hook: PreToolUse on Agent and Task. A refusal goes through guard_core.refuse(), the one home of the
 owner override and the guard.log line, with rule `blind-brief`. Fail open: junk input, a missing
@@ -45,10 +46,20 @@ SPAWN_TOOLS = ("Agent", "Task")
 FREE = ("Job", "Device")
 FIXED = ("House rules", "Deliver")
 
-KIND_LINE = re.compile(r"^lane kind:\s*(blind|informed|directed)\b", re.I)
-BLIND_KIND_ONLY = re.compile(r"^lane kind:\s*blind\s*$", re.I)
-LANE_LINE = re.compile(r"^Lane:\s*[A-Za-z0-9][\w-]*-blind-[1-9][0-9]*\s*$")
-BLIND_LANES = re.compile(r"^blind lanes:\s*(.*?)\s*$", re.I | re.M)
+# The brief's three header lines, one constant each. Every reader below builds its pattern from them, and the
+# refusals name them.
+KIND_HEADER = "Designer kind:"
+DESIGNER_HEADER = "Designer:"
+COUNT_HEADER = "Blind designers:"
+# `\s*:` lets a space come before the colon, `\**` lets bold close after it: `**Designer kind:** blind`.
+KIND_LINE = re.compile(r"^designer\s+kind\s*:\**\s*(blind|informed|directed)\b", re.I)
+BLIND_KIND_ONLY = re.compile(r"^" + re.escape(KIND_HEADER) + r"\s*blind\s*$", re.I)
+# Leading markdown marks a model writes before a header: list dashes and stars, heading hashes, quote marks.
+LEADING_MARKS = re.compile(r"^[\s>*#-]+")
+LANE_LINE = re.compile(r"^" + re.escape(DESIGNER_HEADER) + r"\s*[A-Za-z0-9][\w-]*-blind-[1-9][0-9]*\s*$")
+BLIND_COUNT = re.compile(r"^" + re.escape(COUNT_HEADER) + r"\s*(.*?)\s*$", re.I | re.M)
+# The kind header before the rename. kind_of never reads it; the spawn hook refuses it and names KIND_HEADER.
+OLD_KIND_LINE = re.compile(r"^lane\s+kind\s*:", re.I)
 OWNER_NONE = re.compile(r"^none,\s*owner:\s*\"[^\"]*\w[^\"]*\"$", re.I)
 HEADING = re.compile(r"^##\s+(.*?)\s*$")
 PLACEHOLDER = re.compile(r"<[A-Za-z][^<>\n]{2,}>")
@@ -134,11 +145,11 @@ TOKEN_SECTION = re.compile(r"palett|colou?r|fonts?\b|typograph|typeface|spacing|
 
 
 def kind_of(text):
-    """The lane kind of the brief's first `Lane kind:` line, lowercased, or None. The line may come after
+    """The designer kind of the brief's first KIND_HEADER line, lowercased, or None. The line may come after
     a preamble, so a preamble hides no kind; brief_faults still refuses a blind brief whose first line
     is not the kind."""
     for line in text.splitlines():
-        m = KIND_LINE.match(line.strip())
+        m = KIND_LINE.match(LEADING_MARKS.sub("", line))
         if m:
             return m.group(1).lower()
     return None
@@ -225,34 +236,51 @@ def _words(text):
 
 def duo_faults(device, poses):
     """Faults of a Device section in a repo that draws both Duo poses: `duo-unfolded` when it never names the
-    unfolded pose, `duo-order` when it names the unfolded pose before the folded one. Order is read from the
+    unfolded pose, `duo-order` when it draws the unfolded pose before the folded one. Order is read from the
     pose words, the words in one device name and not in the other ("folded", "unfolded"), and only when both
     appear. So "Duo unfolded, then folded" is an order fault."""
     folded, unfolded = poses
     if not names_device(device, unfolded):
         return [("duo-unfolded", "Device", unfolded)]
-    at_folded, at_unfolded = _pose_rank(device, folded, unfolded), _pose_rank(device, unfolded, folded)
-    if at_folded is not None and at_unfolded is not None and at_unfolded < at_folded:
+    words = _words(device)
+    at_folded, at_unfolded = _pose_index(words, folded, unfolded), _pose_index(words, unfolded, folded)
+    if at_folded is None or at_unfolded is None:
+        return []
+    first = at_folded < at_unfolded  # text order: the folded pose is named first
+    if _order_word_between(words, at_folded, at_unfolded):
+        first = not first
+    if not first:
         return [("duo-order", "Device", "%s before %s" % (unfolded, folded))]
     return []
 
 
-ORDER_WORDS = {"after": -1, "before": 1}  # "drawn after the folded pose": folded goes first
+def _pose_index(words, name, other):
+    """The index in `words` of the first pose word of device `name`, or None. A pose word is a word of
+    `name` that is not in device `other`."""
+    pose = set(_words(name)) - set(_words(other))
+    return next((i for i, word in enumerate(words) if word in pose), None)
 
 
-def _pose_rank(text, name, other):
-    """The draw rank of the first pose word of device `name` in `text`, or None. A pose word is a word of
-    `name` that is not in device `other`. The rank is the word index. A pose word with "after" or "before" in
-    the two words before it ranks first or last, so "unfolded, drawn after the folded pose" puts folded
-    first."""
-    words, pose = _words(text), set(_words(name)) - set(_words(other))
-    for index, word in enumerate(words):
-        if word in pose:
-            for near in words[max(0, index - 2):index]:
-                if near in ORDER_WORDS:
-                    return ORDER_WORDS[near] * len(words)
-            return index
-    return None
+ORDER_FILLER = frozenset({"the", "a", "an", "duo", "iphone"})
+
+
+def _order_word_between(words, one, two):
+    """True when an order word ties the two poses directly, so the pose named first is drawn last. Either
+    "before" plus only filler sits directly ahead of the first pose word ("Before the folded Duo, draw the
+    unfolded Duo"), or every word from the last "after" between the poses up to the second pose word is
+    filler ("after the Duo unfolded"). Anything else ("after the header, before the folded Duo", "after
+    that, draw the Duo folded"), or "after" in front of both poses, leaves the text order."""
+    low, high = min(one, two), max(one, two)
+    ahead = low - 1
+    while ahead >= 0 and words[ahead] in ORDER_FILLER:
+        ahead -= 1
+    flip = ahead >= 0 and words[ahead] == "before"
+    between = words[low + 1:high]
+    if "after" in between:
+        last = len(between) - 1 - between[::-1].index("after")
+        if all(word in ORDER_FILLER for word in between[last + 1:]):
+            flip = not flip
+    return flip
 
 
 def ios_skill_faults(text, devices):
@@ -282,7 +310,7 @@ def brief_faults(text, current=(), template=None, devices=None):
     if not lines or not KIND_LINE.match(lines[0]) or kind_of(text) != "blind":
         faults.append(("kind", "first line", lines[0] if lines else ""))
     if not any(LANE_LINE.match(line) for line in lines):
-        faults.append(("lane", "header", "no Lane line"))
+        faults.append(("designer", "header", "no %s line" % DESIGNER_HEADER.rstrip(":")))
     for index, line in enumerate(lines):
         if KIND_LINE.match(line):
             # The kind line holds the kind and nothing else, and only once: text after it hides a value.
@@ -334,10 +362,10 @@ def brief_faults(text, current=(), template=None, devices=None):
     return faults
 
 
-def blind_lanes_ok(text):
-    """True when an informed or directed brief says its run has a blind lane, or carries the owner's
+def blind_designers_ok(text):
+    """True when an informed or directed brief says its run has a blind designer, or carries the owner's
     words for none."""
-    m = BLIND_LANES.search(text)
+    m = BLIND_COUNT.search(text)
     if not m:
         return False
     value = m.group(1)
@@ -352,7 +380,7 @@ def run_faults(texts, owner_none="", current=(), template=None, devices=None):
     for index, text in enumerate(texts):
         kind = kind_of(text)
         if kind is None:
-            faults.append(("kind", "brief %d" % (index + 1), "no Lane kind line"))
+            faults.append(("kind", "brief %d" % (index + 1), "no %s line" % KIND_HEADER.rstrip(":")))
         elif kind == "blind":
             blind += 1
             faults.extend((code, "brief %d, %s" % (index + 1, where), matched)
@@ -363,7 +391,7 @@ def run_faults(texts, owner_none="", current=(), template=None, devices=None):
     if not texts:
         faults.append(("no-brief", "run", ""))
     elif blind == 0 and not owner_none.strip():
-        faults.append(("no-blind-lane", "run", "no blind lane, and no owner words for none"))
+        faults.append(("no-blind-designer", "run", "no blind designer, and no grant for none"))
     return faults
 
 
@@ -379,9 +407,12 @@ REFUSE_BLIND = ("this blind designer brief breaks the template: %s. Build it aga
 REFUSE_IOS = ("This designer brief is for an iPhone app: it must name skill ios-apps (ios-skill), whose "
              "Mockups section the designer reads before it draws, and its Device section names the Duo "
              "folded, then unfolded.")
-REFUSE_COUNT = ("an informed or directed designer brief must carry a line `Blind lanes: <n>`, with n of 1 or "
-              "more, or `Blind lanes: none, owner: \"<the owner's words>\"`. Start the run's blind lanes "
-              "too (skill design-explore).")
+REFUSE_COUNT = ("an informed or directed designer brief must carry a line `%s <n>`, with n of 1 or "
+              "more, or `%s none, owner: \"<the owner's words>\"`. Start the run's blind designers "
+              "too (skill design-explore)." % (COUNT_HEADER, COUNT_HEADER))
+REFUSE_OLD_KIND = ("this designer brief starts with the retired kind header. Its first line is now "
+                   "`%s blind|informed|directed`, its blind brief's name line is `%s`, and its count line is "
+                   "`%s` (skill design-explore)." % (KIND_HEADER, DESIGNER_HEADER, COUNT_HEADER))
 
 
 def refuse(payload, tool, reason, matched):
@@ -419,6 +450,8 @@ def hook(stdin):
         return
     kind = kind_of(prompt)
     if kind is None:
+        if any(OLD_KIND_LINE.match(LEADING_MARKS.sub("", line)) for line in prompt.splitlines()):
+            refuse(payload, payload["tool_name"], REFUSE_OLD_KIND, "old kind header")
         return
     cwd = payload.get("cwd")
     devices = device_names(cwd) if isinstance(cwd, str) and cwd else None
@@ -433,11 +466,11 @@ def hook(stdin):
                 reason += " " + REFUSE_IOS
             refuse(payload, payload["tool_name"], reason, describe(faults)[:200])
         return
-    reasons = [] if blind_lanes_ok(prompt) else [REFUSE_COUNT]
+    reasons = [] if blind_designers_ok(prompt) else [REFUSE_COUNT]
     if ios_skill_faults(prompt, devices):
         reasons.append(REFUSE_IOS)
     if reasons:
-        refuse(payload, payload["tool_name"], " ".join(reasons), "Blind lanes line or ios-apps: " + kind)
+        refuse(payload, payload["tool_name"], " ".join(reasons), "Blind designers line or ios-apps: " + kind)
 
 
 def cli(argv):
@@ -445,7 +478,7 @@ def cli(argv):
     parser.add_argument("--run", required=True, help="the folder of the run's *.md briefs")
     parser.add_argument("--current", action="append", default=[], help="a view of today's product")
     parser.add_argument("--root", help="the repo whose resolved device list each blind brief's Device section must lead with")
-    parser.add_argument("--owner-asked-none", default="", help="the owner's words for a run with no blind lane")
+    parser.add_argument("--owner-asked-none", default="", help="the owner's words for a run with no blind designer")
     args = parser.parse_args(argv)
     try:
         names = sorted(n for n in os.listdir(args.run) if n.endswith(".md"))

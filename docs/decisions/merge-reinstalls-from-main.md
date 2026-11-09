@@ -17,6 +17,9 @@
    change cannot find the script, so the tool reports FAILED. When the local main does not move, the install runs from the old
    main and the tool reports the failed move and exits non-zero (owner ruling, undated).
 
+Open: the SessionStart refresh lock has no test. A refresh child that outlives 10 minutes can remove a
+newer start's lock (debt `refresh-lock-untested`).
+
 Reason: a merge that adds a file must reach `~/.claude` with no hand install. Links to the clone itself would follow its
 checked-out lane branch, so unreviewed hooks would go live.
 

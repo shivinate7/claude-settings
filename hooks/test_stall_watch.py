@@ -266,6 +266,18 @@ def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, qui
     return rc, text, secs, cmd
 
 
+def job_files(cmd):
+    """The LOG and BEAT paths a rewrite names, read off its --log and --beat flags. The one home of
+    that parse. The wrapper writes `;` straight after the beat path, so a lexer that splits punctuation
+    off reads the path as one token. A missing flag gives None."""
+    def flag_value(flag):
+        tail = cmd.split(" %s " % flag, 1)
+        if len(tail) != 2:
+            return None
+        return shlex.shlex(tail[1], posix=True, punctuation_chars=True).get_token()
+    return flag_value("--log"), flag_value("--beat")
+
+
 def stall_problems(rc, text, secs, sleep_args=None):
     """Checks shared by the stall cases. Return a list of problems."""
     problems = expect(rc == 3, f"exit {rc}, want 3")
@@ -806,7 +818,9 @@ def reap_ends_a_job_that_no_report_names():
 @posix_case
 def log_keeps_growing_after_watcher_exits():
     """7. after the watcher exits 3, the command's later output still reaches the log"""
-    rc, text, _secs, _cmd = run_rewritten("echo first; sleep 4; echo second")
+    # The tail sleep keeps the job alive after its last write, so the poll below sees LOG before a
+    # job that removes its own log at exit does so.
+    rc, text, _secs, _cmd = run_rewritten("echo first; sleep 4; echo second; sleep 2")
     problems = expect(rc == 3, f"exit {rc}, want 3 (the 4 s gap is a stall)")
     m = LOG_RE.search(text)
     if not m:
@@ -834,10 +848,9 @@ def rewrite_log_lies_under_scratch():
     # A stalled job skips the wrapper's own `rm -f` (case 7), so only the folder's removal clears its
     # log. The check reads the path off the rewrite, never a count of files in the system temp dir.
     cmd, _hso = rewrite("echo hi")
-    tail = cmd.split(" --log ", 1)
-    if len(tail) != 2:
+    log, _beat = job_files(cmd)
+    if log is None:
         return ["the rewrite has no --log"]
-    log = shlex.split(tail[1])[0]
     scratch = os.path.realpath(SCRATCH)
     return expect(os.path.isabs(log) and os.path.realpath(log).startswith(scratch + os.sep),
                   f"--log {log} lies outside {scratch}: the hook took the system temp dir, "
@@ -1027,24 +1040,120 @@ def bare_verdict_is_no_stall():
 
 @posix_case
 def beat_file_is_removed_when_the_job_ends():
-    """24d. the rewrite names a beat file next to LOG, exports it as STALL_WATCH_BEAT, and removes it with LOG"""
-    orig = 'echo "beat=$STALL_WATCH_BEAT"; echo x >> "$STALL_WATCH_BEAT"; [ -s "$STALL_WATCH_BEAT" ] && echo held'
+    """24d. a job that writes its beat file exits 5: the rewrite exports STALL_WATCH_BEAT, the wrapper keeps
+    the exit code, relays each output line once, and removes the beat file and LOG when the job ends"""
+    orig = ('echo "beat=$STALL_WATCH_BEAT"; echo x >> "$STALL_WATCH_BEAT"; [ -s "$STALL_WATCH_BEAT" ] && echo held; '
+            'exit 5')
     rc, text, _secs, cmd = run_rewritten(orig)
     reap()
-    problems = expect(rc == 0, f"exit {rc}, want 0")
+    problems = expect(rc == 5, f"exit {rc}, want 5")
     m = re.search(r"^beat=(\S+)$", text, re.M)
     if not m:
         return problems + ["the job saw no STALL_WATCH_BEAT: " + text[:200]]
     beat = m.group(1)
     problems += expect("held" in text.splitlines(), "the job could not write to the beat file")
     problems += expect(beat.endswith(".beat"), f"beat path {beat} does not end in .beat")
-    tail = cmd.split(" --log ", 1)
-    if len(tail) != 2:
+    log, _beat = job_files(cmd)
+    if log is None:
         return problems + ["the rewrite has no --log"]
-    log = shlex.split(tail[1])[0]
     problems += expect(os.path.realpath(os.path.dirname(beat)) == os.path.realpath(os.path.dirname(log)),
                        f"beat {beat} is not in the folder of LOG {log}")
+    # The job's lines, plus the beat line the watcher relays, each once: no byte lost or doubled.
+    problems += expect(sorted(text.splitlines()) == sorted(["beat=" + beat, "held", "x"]),
+                       f"relayed lines {text.splitlines()!r}, want the job's three lines once each")
     problems += expect(not os.path.exists(beat), f"beat file {beat} is still there after the job ended")
+    problems += expect(not os.path.exists(log), f"LOG {log} is still there after the job ended")
+    return problems
+
+
+def wait_until(cond, secs):
+    """Poll cond until it holds or secs pass. Return whether it held. This bound is the only wait."""
+    deadline = time.monotonic() + secs
+    while True:
+        if cond():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.2)
+
+
+def stall_then_end_problems(shell):
+    """A1 for one shell. The job prints a line, stalls, then ends after the wrapper has returned."""
+    done = os.path.join(new_dir(), "done")  # the job's last act, so the wait below has a file to see
+    orig = 'echo pre-stall-line; echo x >> "$STALL_WATCH_BEAT"; sleep 4; touch %s' % shlex.quote(done)
+    try:
+        rc, text, _secs, cmd = run_rewritten(orig, shell=shell)
+        log, beat = job_files(cmd)
+        if log is None or beat is None:
+            return ["the rewrite names no --log or no --beat"]
+        lines = text.splitlines()
+        problems = expect(rc == 3, f"exit {rc}, want 3")
+        problems += expect(any(line.startswith("STALL:") for line in lines), "no STALL: line on the wrapper's stdout")
+        # Scope: both files exist when the wrapper returns, so their removal below proves something.
+        problems += expect(os.path.exists(log), f"LOG {log} is gone when the wrapper returns")
+        problems += expect(os.path.exists(beat), f"BEAT {beat} is gone when the wrapper returns")
+        header = next((i for i, line in enumerate(lines) if re.match(r"Last \d+ output lines:$", line)), None)
+        problems += expect(header is not None, "the STALL report has no 'Last N output lines:' header")
+        if header is not None:
+            problems += expect(any("pre-stall-line" in line for line in lines[header + 1:]),
+                               "the pre-stall line is not in the report's tail")
+        problems += expect(wait_until(lambda: os.path.exists(done), 30), "the job did not end within 30 s")
+        wait_until(lambda: not (os.path.exists(log) or os.path.exists(beat)), 5)
+        problems += expect(not os.path.exists(log), f"LOG {log} is left after the job ended")
+        problems += expect(not os.path.exists(beat), f"BEAT {beat} is left after the job ended")
+        return problems
+    finally:
+        reap()
+
+
+@posix_case
+def stalled_job_leaves_no_files_when_it_ends():
+    """A1. a job that stalls, then ends: the STALL report reaches stdout with the pre-stall line in its
+    tail, and once the job ends neither LOG nor BEAT is left"""
+    problems = []
+    for shell in shells():
+        problems += ["%s: %s" % (shell, p) for p in stall_then_end_problems(shell)]
+    return problems
+
+
+@posix_case
+def exit_code_job_leaves_no_files():
+    """A2. a job that exits 7 with no stall: the wrapper returns 7, and neither LOG nor BEAT is left"""
+    problems = []
+    for shell in shells():
+        rc, text, _secs, cmd = run_rewritten('echo out; echo x >> "$STALL_WATCH_BEAT"; exit 7', shell=shell)
+        reap()
+        log, beat = job_files(cmd)
+        if log is None or beat is None:
+            return problems + ["the rewrite names no --log or no --beat"]
+        found = expect(rc == 7, f"exit {rc}, want 7")
+        found += expect("out" in text.splitlines(), f"the job's line is not relayed: {text!r}")
+        found += expect(not os.path.exists(log), f"LOG {log} is left after the wrapper returned")
+        found += expect(not os.path.exists(beat), f"BEAT {beat} is left after the wrapper returned")
+        problems += ["%s: %s" % (shell, p) for p in found]
+    return problems
+
+
+@posix_case
+def fast_job_output_is_relayed_on_every_run():
+    """A4. a job that ends at once, run 20 times in each shell: all its output is relayed every time, and a
+    job with no output relays none. A fix that deletes LOG at the job's exit must not win this race"""
+    fast = (
+        ("echo hi", "hi\n"),
+        ("printf '%s\\n' " + " ".join("l%d" % i for i in range(200)),
+         "".join("l%d\n" % i for i in range(200))),
+        ("true", ""),
+    )
+    problems = []
+    for shell in shells():
+        for orig, want in fast:
+            for n in range(20):
+                rc, text, _secs, _cmd = run_rewritten(orig, shell=shell)
+                reap()
+                found = expect(rc == 0, f"exit {rc}, want 0")
+                found += expect(text == want, f"output {text[:80]!r}, want {want[:80]!r}")
+                if found:  # the first bad run says enough; a long list hides it
+                    return problems + ["%s, %r, run %d: %s" % (shell, orig[:20], n + 1, p) for p in found]
     return problems
 
 

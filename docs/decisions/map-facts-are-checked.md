@@ -40,7 +40,7 @@ Banchi, a child repo, was read Oct 30. Its `server concurrency` audit row (banch
 ## Limits
 
 - Other languages (Swift, SQL, shell) use a line regex. It is not a parser.
-- MAP2 (each map path is tracked) is not scoped by `mapPaths`. Only MAP1 is.
+- `mapPaths` scopes MAP1 (each code file has a map line) and MAP7 (no "In plain words" note in code). MAP2 (each map path is tracked) is not scoped.
 - Table lines and screen lines are not checked for bare numbers. The plan named them. The code checks map lines and trace steps.
 - A second copy inside one repo is a reviewer's call. Copies across repos belong to `lint/find_copies.py`.
 

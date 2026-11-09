@@ -69,6 +69,19 @@ dropped_api() {
   if [ -n "$jqf" ]; then jq -r "$jqf" "$file"; exit $?; fi
   cat "$file"
 }
+# contents_api "$@": one workflow file at a head, `repos/<repo>/contents/<path>` with the ref in the query or as an -f ref= field.
+# Serves $CONTENTS/<ref>/<path> when that file exists, else $CONTENTS_DEFAULT, a file with one job and no if:, so a case that
+# sets no file reads every job name as one that may run. Raw when an Accept header asks for raw, else the JSON reply with base64 content.
+contents_api() {
+  local route="$2" path ref="" file arg
+  path="${route#*/contents/}"
+  case "$path" in *\?ref=*) ref="${path#*\?ref=}"; path="${path%%\?*}" ;; esac
+  for arg in "$@"; do case "$arg" in ref=*) ref="${arg#ref=}" ;; esac; done
+  file="$CONTENTS/$ref/$path"
+  [ -f "$file" ] || file="$CONTENTS_DEFAULT"
+  if printf '%s\n' "$@" | grep -q 'vnd.github.raw'; then cat "$file"; else printf '{"encoding":"base64","content":"%s"}\n' "$(base64 -w0 < "$file")"; fi
+  exit 0
+}
 if [ "$1" = api ]; then classify "$@" >> "${DROP_READS:-/dev/null}"; fi
 if [ -n "${FAIL:-}" ] && [[ "$1 $2" == $FAIL ]]; then echo "gh: HTTP 500 (fake)" >&2; exit 1; fi
 if [ -n "${EMPTY:-}" ] && [[ "$1 $2" == $EMPTY ]]; then exit 0; fi
@@ -84,6 +97,7 @@ case "$1 $2" in
         echo "$2" >> "${READS:-/dev/null}"
         if [ -f "${JOBS:-/nonexistent}/$id" ]; then cat "$JOBS/$id"; else echo "gh: no jobs fixture for run $id (fake)" >&2; exit 1; fi ;;
       --method|*/pulls|*/pulls\?*|*/check-runs*|*/issues/*/comments*) dropped_api "$@" ;;
+      */contents/*) contents_api "$@" ;;
       *) cat "$WORKFLOWS" ;;
     esac ;;
   "issue list") echo "${OPEN:-}" ;;
@@ -100,10 +114,10 @@ chmod +x "$tmp/bin/gh"
 gh_run() {
   local id concl
   case "$1" in ci) id=1 ;; deploy) id=2 ;; alarm) id=3 ;; pages) id=4 ;; old) id=5 ;; gone) id=6 ;; late) id=7 ;;
-    dman) id=8 ;; dinact) id=9 ;; links) id=10 ;; esac
+    dman) id=8 ;; dinact) id=9 ;; links) id=10 ;; checks) id=11 ;; esac
   concl="\"$2\""; [ "$2" = null ] && concl=null
-  printf '{"workflowName":"%s","workflowDatabaseId":%s,"databaseId":%s,"conclusion":%s,"createdAt":"%s","url":"%s","event":"%s","status":"%s"}\n' \
-    "$1" "$id" "$6" "$concl" "$3" "$4" "$5" "${7:-completed}"
+  printf '{"workflowName":"%s","workflowDatabaseId":%s,"databaseId":%s,"conclusion":%s,"createdAt":"%s","url":"%s","event":"%s","status":"%s","headSha":"%040x"}\n' \
+    "$1" "$id" "$6" "$concl" "$3" "$4" "$5" "${7:-completed}" "$6"
 }
 # A case starts with its runs: runs_are clears the jobs of the case before the jobs_of lines that follow it.
 runs_are() { printf '%s\n' "$@" | jq -s . > "$tmp/runs"; rm -rf "$tmp/jobs"; mkdir -p "$tmp/jobs"; }
@@ -120,17 +134,28 @@ cat > "$tmp/workflows" <<'JSON'
   {"id": 3, "name": "alarm", "path": ".github/workflows/alarm.yml", "state": "active"},
   {"id": 4, "name": "pages build and deployment", "path": "dynamic/pages/pages-build-deployment", "state": "active"},
   {"id": 5, "name": "old", "path": ".github/workflows/old.yml", "state": "deleted"}]}
-{"total_count": 9, "workflows": [
+{"total_count": 10, "workflows": [
   {"id": 7, "name": "late", "path": ".github/workflows/late.yml", "state": "active"},
   {"id": 8, "name": "dman", "path": ".github/workflows/dman.yml", "state": "disabled_manually"},
   {"id": 9, "name": "dinact", "path": ".github/workflows/dinact.yml", "state": "disabled_inactivity"},
-  {"id": 10, "name": "links", "path": ".github/workflows/links.yml", "state": "active"}]}
+  {"id": 10, "name": "links", "path": ".github/workflows/links.yml", "state": "active"},
+  {"id": 11, "name": "checks", "path": ".github/workflows/checks.yml", "state": "active"}]}
 JSON
+# The file a head serves when a case sets none (contents_api): one job with no if:.
+cat > "$tmp/no-if.yml" <<'YML'
+name: checks
+on: push
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+YML
 bad=0
 t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs reads: "none", or the run paths read, in any order]
   : > "$tmp/log"; : > "$tmp/reads"
   out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" READS="$tmp/reads" LOG="$tmp/log" \
-    FAIL="${3:-}" EMPTY="${4:-}" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
+    FAIL="${3:-}" EMPTY="${4:-}" CONTENTS="$tmp/contents" CONTENTS_DEFAULT="$tmp/no-if.yml" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
   code=$?
   shown="$(grep -v '^::warning::' <<<"$out")" # the verdict, without annotations
   ok=0
@@ -266,6 +291,42 @@ t unknown issue-create-fails-is-unknown-exit-0 "issue create"
 OPEN=42 PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" LOG="$tmp/log" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" >/dev/null 2>&1
 if grep -q "COMMENT issue comment 42" "$tmp/log" && ! grep -q ISSUE "$tmp/log"; then echo "ok   open-issue-gets-a-comment-not-a-duplicate"
 else echo "FAIL open-issue-gets-a-comment-not-a-duplicate"; bad=1; fi
+# A failed run's red job is cleared by a newer green run of the other group only when that run passes every job the red run needs.
+# A job the red run did not fail, whose job-level if: needs pull_request (the other event), is not needed. A red job always is.
+# The workflow file is read at the green run's head (headSha) through the contents route.
+serve_real_checks() { mkdir -p "$tmp/contents/$1/.github/workflows" && cp "$root/.github/workflows/checks.yml" "$tmp/contents/$1/.github/workflows/checks.yml"; }
+# The live nightly case: schedule run 41817705653 failed on checks-windows-merge-3, all-jobs-passed and ci-done skipped. The newer
+# push run 41905916525 passed merge-3 and skipped the same two. The file is the real checks.yml, at the push run's head.
+live_pair() {
+  runs_are "$(gh_run checks success 2026-11-03T14:12:08Z https://runs/live-push-41905916525 push 41905916525)" \
+    "$(gh_run checks failure 2026-11-02T06:00:21Z https://runs/live-schedule-41817705653 schedule 41817705653)"
+  jobs_of 41817705653 checks-windows-merge-3:failure all-jobs-passed:skipped ci-done:skipped
+  jobs_of 41905916525 checks-windows-merge-3:success all-jobs-passed:skipped ci-done:skipped
+  serve_real_checks "$(printf '%040x' 41905916525)"
+}
+live_pair
+t green live-nightly-red-schedule-is-cleared-by-the-newer-push-run-that-passed-its-red-job "" ""
+live_pair
+t unknown live-nightly-failed-read-of-the-workflow-file-is-unknown-not-clear "api *contents/*"
+# A red job whose if: excludes the push event (all-jobs-passed is pull_request-only) is never dropped, so the failed schedule run alarms.
+runs_are "$(gh_run checks success 2026-11-03T14:12:08Z https://runs/pr-only-push-52 push 52)" \
+  "$(gh_run checks failure 2026-11-02T06:00:21Z https://runs/pr-only-schedule-51 schedule 51)"
+jobs_of 51 checks-windows-merge-3:success all-jobs-passed:failure
+jobs_of 52 checks-windows-merge-3:success all-jobs-passed:skipped
+serve_real_checks "$(printf '%040x' 52)"
+t red red-job-whose-if-excludes-the-push-event-is-never-dropped "" "" https://runs/pr-only-schedule-51
+# A certain red needs no workflow file: a red job the newer green run lacks, or did not pass, alarms even when the contents read fails.
+runs_are "$(gh_run checks success 2026-11-03T14:12:08Z https://runs/absent-push-61 push 61)" \
+  "$(gh_run checks failure 2026-11-02T06:00:21Z https://runs/absent-schedule-60 schedule 60)"
+jobs_of 60 checks-windows-merge-3:failure all-jobs-passed:skipped
+jobs_of 61 all-jobs-passed:skipped
+t red red-job-missing-from-the-newer-run-is-red-when-the-workflow-read-fails "api *contents/*" "" https://runs/absent-schedule-60
+runs_are "$(gh_run checks success 2026-11-03T14:12:08Z https://runs/skipped-push-63 push 63)" \
+  "$(gh_run checks failure 2026-11-02T06:00:21Z https://runs/skipped-schedule-62 schedule 62)"
+jobs_of 62 checks-windows-merge-3:failure all-jobs-passed:skipped
+jobs_of 63 checks-windows-merge-3:skipped all-jobs-passed:skipped
+t red red-job-skipped-in-the-newer-run-is-red-when-the-workflow-read-fails "api *contents/*" "" https://runs/skipped-schedule-62
+
 # --- dropped-start: dropped.sh alarms on a pull request whose all-jobs-passed run never started ---
 # A case builds its fixtures under $dd, then drun runs dropped.sh once: CHECK unset, NOW given, fake gh.
 dropped="$here/dropped.sh"

@@ -1,15 +1,15 @@
 // The check command of the skill, run on a small fixture repository (`tests/fixture/`).
 //
-// `node <skill>/scripts/map-check.mjs`, run from the root of a repository that has `map.config.json`, runs the 9 MAP checks.
+// `node <skill>/scripts/map-check.mjs`, run from the root of a repository that has `map.config.json`, runs the 11 MAP checks.
 // It prints one line for each: `[PASS] MAPn`, `[FAIL] MAPn <message>` or `[SKIP] MAPn <reason>`. It exits non-zero on a FAIL.
 // Each case runs in a fresh copy of the fixture in this run's temp folder, so the checkout never changes. The child env has no `NODE_PATH`.
 // So the command must find `typescript` by itself, from claude-settings' own `node_modules`.
 //
 // The fixture config names a screen keys file, so the validator parses it with `typescript` in every run.
-// The fixture has no `modelSeam` and no `requireAllKeys`. Each check runs, and each one passes.
+// The fixture has no `modelSeam` and no `requireAllKeys`. Each check runs. Each one passes, except MAP10, which skips because the fixture sets no decision key.
 //
-//   1a. A clean fixture: one PASS line for each of MAP1 to MAP9, and exit 0.
-//   1b. One map line removed: MAP1 FAILS and names the file, the other 8 stay PASS, and the exit code is not 0.
+//   1a. A clean fixture: one line for each of MAP1 to MAP11 (MAP10 SKIPs, the fixture sets no decision key), and exit 0.
+//   1b. One map line removed: MAP1 FAILS and names the file, the other 9 stay PASS, MAP10 stays SKIP, and the exit code is not 0.
 //   1c, 1d. The same two runs through a junction to the skill folder. That is how `~/.claude/skills/<name>` reaches the skill.
 //       A command that compares `import.meta.url` with the typed `process.argv[1]` prints nothing there, and exits 0.
 //   A.  An import of the module from a stdin script (`node -`) never crashes, and it runs no command.
@@ -23,11 +23,11 @@ import { SKILL, dropMapLine, expected, junction, needFile, run, scratchRepo, ver
 const CLI = join(SKILL, 'scripts', 'map-check.mjs');
 const REL = 'scripts/map-check.mjs';
 
-test('1a. on a clean fixture the command prints one PASS line for each of MAP1 to MAP9 and exits 0', () => {
+test('1a. on a clean fixture the command prints 11 lines, one for each of MAP1 to MAP11, and exits 0', () => {
   needFile(REL);
   const r = run([CLI], scratchRepo());
   assert.equal(r.signal, null, `the command died with a signal: ${r.signal}`);
-  assert.equal(verdicts(r.out), expected(), `each check must print one PASS line\n${r.out.slice(0, 1500)}`);
+  assert.equal(verdicts(r.out), expected(), `each check must print one line\n${r.out.slice(0, 1500)}`);
   assert.equal(r.status, 0, `the command must exit 0 on a clean fixture\n${r.out.slice(0, 1500)}`);
 });
 
@@ -41,11 +41,11 @@ test('1b. with one map line removed the command exits non-zero, MAP1 fails, and 
   assert.notEqual(r.status, 0, 'the command must exit non-zero when a check fails');
 });
 
-test('1c. run through a junction to the skill folder, the command prints 9 PASS lines and exits 0', () => {
+test('1c. run through a junction to the skill folder, the command prints 11 lines, one for each of MAP1 to MAP11, and exits 0', () => {
   needFile(REL);
   const script = join(junction(SKILL), 'scripts', 'map-check.mjs');
   const r = run([script], scratchRepo());
-  assert.equal(verdicts(r.out), expected(), `each check must print one PASS line\n${r.out.slice(0, 1500)}`);
+  assert.equal(verdicts(r.out), expected(), `each check must print one line\n${r.out.slice(0, 1500)}`);
   assert.equal(r.status, 0, `the command must exit 0 on a clean fixture\n${r.out.slice(0, 1500)}`);
 });
 

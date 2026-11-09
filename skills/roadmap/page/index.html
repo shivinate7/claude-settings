@@ -329,6 +329,37 @@ html{scrollbar-gutter:stable;overflow-y:scroll;overflow-x:hidden}
 .tag.st-review_ready{color:var(--good);background:var(--good-soft)}
 .tag.st-failed,.tag.st-stopped{color:var(--warn);background:var(--warn-soft)}
 @media (max-width:560px){ .live li{grid-template-columns:minmax(0,1fr);gap:2px} }
+/* The stalled band: the box, head and row grid of Live work. A red edge only while something is stalled. */
+.stall{margin:0 0 14px;border:1px solid var(--line);border-radius:var(--radius-m);background:var(--surface)}
+.stall.hot{box-shadow:inset 4px 0 0 var(--bad)}
+.stall .sth{display:flex;flex-wrap:wrap;align-items:center;gap:2px 10px;padding:8px 12px;min-height:40px;font-size:13px}
+.stall .sth h3{display:inline-flex;align-items:center;gap:6px;margin:0;font-size:13px;font-weight:600;color:var(--ink)}
+.stall .sth.calm h3{color:var(--muted)}
+.stall .sth .lead{flex:1 1 24ch;min-width:0;color:var(--muted)}
+.stall h4{margin:0;padding:8px 12px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border-top:1px solid var(--line)}
+.stall ul{list-style:none;margin:0;padding:0}
+.stall li{display:grid;grid-template-columns:120px minmax(0,1fr);gap:10px;align-items:baseline;padding:6px 12px;border-top:1px solid var(--line);font-size:13px}
+.stall h4+ul>li:first-child{border-top:0}
+.stall li .tx{text-align:left;color:var(--ink)}
+.stall li .tx:hover{text-decoration:underline}
+.stall li .fx{display:block;font-size:12px;color:var(--muted)}
+.stall li .fx.land{color:var(--good);font-weight:600}
+.stall li .fx.bad,.stall .unk{color:var(--warn)}
+.stall li .fx.why{color:var(--ink)}
+.stall li .ln{font-family:var(--font-num);font-size:12px;overflow-wrap:anywhere}
+.stall li.unkrow{grid-template-columns:minmax(0,1fr)}
+.stall li.unkrow summary{cursor:pointer;display:inline-flex;align-items:center;min-height:40px;font-size:13px;color:var(--muted)}
+.stall li.unkrow pre{margin:0 0 8px}
+.stall .g{display:inline-flex;vertical-align:-2px}
+.stall .pz{border-top:1px solid var(--line)}
+.stall .pz>summary{cursor:pointer;display:flex;align-items:center;gap:6px;min-height:40px;padding:0 12px;font-size:13px;font-weight:600;color:var(--muted)}
+.stall details pre{margin:0 12px 8px;font-family:var(--font-num);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.stall .nr{padding:8px 12px;font-size:13px}
+.tag.stl{background:var(--bad-soft);color:var(--bad)}
+.tag.pzd{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+.tag.ic{display:inline-grid;place-items:center;min-width:24px;padding:0 4px}
+.tag.ic svg{width:12px;height:12px}
+@media (max-width:560px){ .stall li{grid-template-columns:40px minmax(0,1fr);gap:0 8px} .stall li.it,.stall li.unkrow{grid-template-columns:minmax(0,1fr)} .stall .sth .lead{flex-basis:100%} }
 </style>
 <!-- /build:style -->
 
@@ -358,6 +389,7 @@ html{scrollbar-gutter:stable;overflow-y:scroll;overflow-x:hidden}
   <section class="now" id="now" aria-label="Where you are"><div class="notice"><p class="muted">Loading the plan…</p></div></section>
 <!-- build:stamps -->
 <p class="stamps" id="stamps" aria-label="Where each panel was read"></p>
+<section class="stall" id="stall" aria-label="Stalled steps"></section>
 <details class="live" id="live" aria-label="Live work"></details>
 <!-- /build:stamps -->
   <nav class="rail" id="rail" aria-label="Phases"></nav>
@@ -436,6 +468,10 @@ const GLYPH = {
   blocked:'<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="1" y="1" width="12" height="12" rx="2.5" fill="var(--bad)"/><path d="M4 7h6" stroke="var(--surface)" stroke-width="1.8"/></svg>'
 };
 const glyph = s => `<span class="g">${GLYPH[s]||GLYPH.todo}</span>`;
+/* The stalled band's script sets this. A stalled or paused step is drawn Stalled or Paused, never In progress. */
+let stallKind = () => '';
+/* A stalled or paused step keeps status active, so a count or a mark that reads the status alone calls it In progress. */
+const shownState = s => s.status==='active' && stallKind(s.id) || s.status;
 
 /* ---------- state ---------- */
 let db = null, steps = [], topics = null, cull = null, phases = null, advisor = null;
@@ -516,7 +552,7 @@ function delta(cur,ref,{downGood=true,pctMode=false,neutral=false}={}){
 
 /* ---------- where you are ---------- */
 function renderNow(){
-  const cur=curPhase(), ss=byPhase(cur.k), done=ss.filter(s=>s.status==='done').length, act=ss.filter(s=>s.status==='active').length;
+  const cur=curPhase(), ss=byPhase(cur.k), done=ss.filter(s=>s.status==='done').length, act=ss.filter(s=>shownState(s)==='active').length;
   const tot=steps.length, tdone=steps.filter(s=>s.status==='done').length;
   const active=workOrder(steps.filter(s=>s.status==='active')), nu=nextUp(), off=offTrack();
   const w = n => ss.length ? n/ss.length*100 : 0;
@@ -538,7 +574,7 @@ function renderNow(){
 function renderRail(){
   const cur=curPhase(), shown=shownPhase();
   $('#rail').innerHTML = PH.map(p=>{
-    const ss=byPhase(p.k), d=ss.filter(s=>s.status==='done').length, a=ss.filter(s=>s.status==='active').length, b=ss.filter(s=>s.status==='blocked').length;
+    const ss=byPhase(p.k), d=ss.filter(s=>s.status==='done').length, a=ss.filter(s=>shownState(s)==='active').length, b=ss.filter(s=>s.status==='blocked').length;
     const w=n=>ss.length?n/ss.length*100:0;
     return `<button data-phase="${p.k}" aria-pressed="${p.k===shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${p===cur?', current phase':''}"><div class="nm"><span>${esc(p.n)}${p===cur?'<span class="here" title="Current phase: the first with work left"></span>':''}</span><span class="num">${d}/${ss.length}</span></div>
       <div class="bar">${segs(d,a,b,ss.length)}</div></button>`;
@@ -595,13 +631,13 @@ function metaTiles(k){
 
 /* ---------- steps ---------- */
 function stepRow(s, nextIds){
-  const ni = nextIds.indexOf(s.id);
-  const tags = (s.status==='active'?'<span class="tag t-now">Now</span>':'') + (ni>=0?`<span class="tag next">Next ${ni+1}</span>`:'') + (s.status==='blocked'?'<span class="tag blk">Blocked</span>':'');
+  const ni = nextIds.indexOf(s.id), sk = stallKind(s.id), shown = sk || s.status;
+  const tags = (s.status==='active'&&!sk?'<span class="tag t-now">Now</span>':'') + (ni>=0?`<span class="tag next">Next ${ni+1}</span>`:'') + (s.status==='blocked'?'<span class="tag blk">Blocked</span>':'');
   const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id);
-  const lbl = LABEL[s.status]||LABEL.todo;
+  const lbl = LABEL[shown]||LABEL.todo;
   return `<li class="st ${s.status}${open?' open':''}" id="s-${esc(s.id)}">
     <div class="rw">
-      <button class="sp" data-cycle="${esc(s.id)}" ${db&&!db.readOnly?'':'disabled'} title="${lbl}. Tap to change." aria-label="${esc(s.id)} status: ${lbl}. Tap to change.">${glyph(s.status)}</button>
+      <button class="sp" data-cycle="${esc(s.id)}" ${db&&!db.readOnly?'':'disabled'} title="${lbl}. Tap to change." aria-label="${esc(s.id)} status: ${lbl}. Tap to change.">${glyph(shown)}</button>
       <button class="tg" data-row="${esc(s.id)}" aria-expanded="${open}"><span class="id">${esc(s.id)}</span><span class="ttl">${esc(s.title||'Untitled step')}</span>
         <span class="meta">${tags}</span><span class="chev" aria-hidden="true">▶</span></button>
     </div>
@@ -624,7 +660,7 @@ function defaultPage(list){ const ix=list.findIndex(s=>s.status!=='done'); retur
 
 function renderPhase(){
   const k=shownPhase(), p=PH.find(x=>x.k===k), ss=byPhase(k), cur=curPhase();
-  const open=openList(k), done=doneList(k), d=done.length, a=ss.filter(s=>s.status==='active').length;
+  const open=openList(k), done=doneList(k), d=done.length, a=ss.filter(s=>shownState(s)==='active').length;
   const nextIds = nextUp().map(s=>s.id), size=pageSize();
   const pages=Math.max(1,Math.ceil(open.length/size));
   if(ui.page[k]==null) ui.page[k]=defaultPage(open);
@@ -690,12 +726,12 @@ function burnCard(){
   return `<div class="card"><header><h3>Steps done, running total</h3><span class="lbl"><span class="num">${cum[cum.length-1]}</span> of <span class="num">${steps.length}</span></span></header>
     <div class="burn">${s}</div><div class="legend"><span><span class="dot" style="border-radius:2px"></span> done so far</span><span><span class="dot" style="background:var(--line-2);border-radius:2px"></span> steps changed that day</span></div></div>`;
 }
-const KIND = s => s.status==='done'?'Done':s.status==='active'?'In progress':s.status==='blocked'?'Blocked':'Updated';
+const KIND = s => s.status==='done'?'Done':shownState(s)==='stalled'?'Stalled':shownState(s)==='paused'?'Paused':s.status==='active'?'In progress':s.status==='blocked'?'Blocked':'Updated';
 function feedCard(n=8){
   const recent=steps.filter(s=>when(s.updatedAt)).sort((a,b)=>when(b.updatedAt)-when(a.updatedAt)).slice(0,n);
   if(!recent.length) return '';
   return `<div class="card"><header><h3>Latest changes</h3><span class="lbl">${dayLabel(new Date())}</span></header>
-    <ul class="feed">${recent.map(s=>`<li><span class="when">${fresh(s.updatedAt)?timeLabel(when(s.updatedAt)):ago(s.updatedAt)}</span><span class="what"><span class="kind ${s.status}">${KIND(s)}</span> · <button data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> ${esc(s.title)}</button></span></li>`).join('')}</ul>
+    <ul class="feed">${recent.map(s=>`<li><span class="when">${fresh(s.updatedAt)?timeLabel(when(s.updatedAt)):ago(s.updatedAt)}</span><span class="what"><span class="kind ${shownState(s)}">${KIND(s)}</span> · <button data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> ${esc(s.title)}</button></span></li>`).join('')}</ul>
     <button class="morelink" data-view-go="log">All changes by day →</button></div>`;
 }
 function renderSide(){
@@ -715,7 +751,7 @@ function renderLog(){
     const all=ev.filter(e=>dayKey(e.d)===g.k), nd=all.filter(e=>e.s.status==='done').length, cont = gi===0 && before===g.k;
     return `<div class="day"><h3><span>${dayLabel(g.d)}${cont?' <span class="lbl">continued</span>':''}</span><span class="lbl">${perDay[g.k]} change${perDay[g.k]===1?'':'s'}${nd?` · <span style="color:var(--good)">${nd} done</span>`:''}</span></h3>
     ${g.list.map(e=>{ const s=e.s;
-      return `<div class="ev ${s.status}"><span class="when">${timeLabel(e.d)}</span>${glyph(s.status)}<div><span class="kind ${s.status}">${KIND(s)}</span> · <button data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> <span class="t">${esc(s.title)}</span></button>
+      return `<div class="ev ${s.status}"><span class="when">${timeLabel(e.d)}</span>${glyph(shownState(s))}<div><span class="kind ${shownState(s)}">${KIND(s)}</span> · <button data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> <span class="t">${esc(s.title)}</span></button>
         <div class="gist">${esc(firstSentence(s.note)||firstSentence(s.why))}</div></div></div>`; }).join('')}</div>`;
   }).join('')}${pager('log',pg,pages,ev.length,'changes')}</section>
   <p class="lead" style="padding:8px 2px">Each step shows once, on the day it last changed.</p>`;
@@ -852,7 +888,7 @@ function unavailable(){
   try { db = c && typeof c.use==='function' ? await c.use('db') : null; } catch(e) { db=null; }
   if(!db){ unavailable(); return; }
   db.collection('steps').orderBy('order').onSnapshot(snap=>{
-    steps=snap.docs.map(d=>({id:d.id, ...d.data()})).map(s=>({...s, status:ORDER.includes(s.status)?s.status:'todo'}));
+    steps=snap.docs.map(d=>({id:d.id, ...d.data()})).map(s=>({...s, status:s.status==='doing'?'active':ORDER.includes(s.status)?s.status:'todo'}));
     got.steps=true; renderPlan();
   }, ()=>unavailable());
   db.collection('topics').orderBy('order').onSnapshot(snap=>{ topics=snap.docs.map(d=>({id:d.id, ...d.data()})); got.topics=true; renderRef(); },
@@ -876,6 +912,87 @@ function unavailable(){
     const unk = String(p.read).startsWith('unknown');
     return `<span${unk?' class="unk"':''}><span class="sk">${esc(p.name)}</span> ${p.home?`<span class="id">${esc(p.home)}</span> `:''}read at <span class="num">${esc(p.read)}</span></span>`;
   }).join('');
+})();
+/* The stalled band: an in-progress step with no live lane and no open pull request, or a waiting item routed to a lane that
+   is gone. The build writes ROADMAP_BUILD.stalled; this only draws it. The action is said once, here; a step row carries a
+   mark only. Step titles and each pause come from `steps`, which the page reads from its database, so the band draws again
+   with every plan render. Not read is a line, never none. */
+(() => {
+  const el = document.getElementById('stall'), box = document.getElementById('phases');
+  if(!el) return;
+  const r = window.ROADMAP_BUILD && window.ROADMAP_BUILD.stalled;
+  const reason = v => { const m = /^unknown \(([\s\S]*)\)$/.exec(String(v == null ? '' : v)); return m ? m[1] : String(v == null ? '' : v); };
+  const G = {
+    stalled: '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.5a5.5 5.5 0 1 1-5.2 3.7" fill="none" stroke="var(--bad)" stroke-width="1.8" stroke-linecap="round"/><circle cx="7" cy="7" r="1.7" fill="var(--bad)"/></svg>',
+    paused: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--muted)" stroke-width="1.6"/><path d="M5.6 4.7v4.6M8.4 4.7v4.6" stroke="var(--muted)" stroke-width="1.6"/></svg>'
+  };
+  const mark = k => `<span class="g">${G[k]}</span>`;
+  const DECIDES = {owner:'Owner', coordinator:'Coordinator', triage:'Triage'};
+  const ids = v => Array.isArray(v) ? v.filter(x => typeof x === 'string') : [];
+  const read = r && typeof r === 'object' && Array.isArray(r.steps)
+    ? {steps: r.steps.filter(x => x && typeof x.id === 'string'), paused: ids(r.paused),
+       bad: Object.fromEntries((Array.isArray(r.badPause) ? r.badPause : []).filter(b => b && typeof b.id === 'string').map(b => [b.id, String(b.why == null ? '' : b.why)])),
+       items: Array.isArray(r.items) ? r.items.filter(x => x && x.n != null) : null, itemsWhy: typeof r.itemsWhy === 'string' ? r.itemsWhy : ''}
+    : null;
+  const why = !r || typeof r !== 'object' ? ['this page holds no stalled read', 'unknown (this page was not built by build.py)']
+    : ['the build could not read the steps', typeof r.why === 'string' && r.why ? r.why : 'unknown (the build gave no reason)'];
+  const stalledIds = new Set(read ? read.steps.map(x => x.id) : []), pausedIds = new Set(read ? read.paused : []);
+  let pzOpen = null;
+  const step = id => steps.find(x => x.id === id) || {};
+  const title = id => step(id).title || 'Untitled step';
+  const draw = () => {
+    if(!read){
+      el.className = 'stall';
+      el.innerHTML = `<p class="nr"><span class="lh">Stalled steps</span> <span class="unk">not read: ${esc(why[0])}</span></p><details><summary class="muted" style="padding:0 12px;cursor:pointer">What the build said</summary><pre>${esc(reason(why[1]))}</pre></details>`;
+      return;
+    }
+    const items = read.items, n = read.steps.length + (items ? items.length : 0);
+    el.className = 'stall' + (n ? ' hot' : '');
+    const head = n ? `<div class="sth"><h3>${mark('stalled')}Stalled: <span class="num">${n}</span></h3><span class="lead">No live lane and no open pull request. Triage resumes, pauses or closes each.</span></div>`
+      : items ? `<div class="sth calm"><h3>${glyph('done')}No stalled step</h3></div>`
+      : `<div class="sth calm"><h3>No step is stalled</h3></div>`;
+    const fix = x => {
+      const m = Array.isArray(x.fix) ? x.fix.filter(v => typeof v === 'string' && v) : typeof x.fix === 'string' && x.fix !== 'todo' ? [x.fix] : [];
+      if(m.length) return `<span class="fx land">done: landed in ${esc(m.join(', '))}</span>`;
+      return Object.prototype.hasOwnProperty.call(read.bad, x.id) ? `<span class="fx bad">Pause not counted: ${esc(read.bad[x.id])}.</span>` : '';
+    };
+    const rows = read.steps.map(x => `<li><span class="id">${esc(x.id)}</span><span><button class="tx" data-go="${esc(x.id)}">${esc(title(x.id))}</button>${fix(x)}</span></li>`).join('');
+    const itemPart = !items ? `<h4>Waiting items</h4><ul><li class="unkrow"><span class="unk">not read: no item carries its lane yet</span>${reason(read.itemsWhy) ? `<details><summary>What the build said</summary><pre>${esc(reason(read.itemsWhy))}</pre></details>` : ''}</li></ul>`
+      : items.length ? `<h4>Waiting items</h4><ul>${items.map(it => `<li class="it"><span>Item <span class="num">${esc(it.n)}</span></span><span>Answer routed to <span class="ln">${esc(it.lane)}</span>; lane gone</span></li>`).join('')}</ul>` : '';
+    const stepPart = read.steps.length ? (items && !items.length ? `<ul>${rows}</ul>` : `<h4>Steps</h4><ul>${rows}</ul>`) : '';
+    const open = pzOpen == null ? !n : pzOpen;
+    const pz = read.paused.length ? `<details class="pz"${open ? ' open' : ''}><summary>${mark('paused')}Paused: <span class="num">${read.paused.length}</span></summary><ul>${read.paused.map(id => {
+      const p = step(id).paused || {}, d = p.at ? new Date(p.at) : null, who = DECIDES[p.decides];
+      const line = [who ? who + ' decides' : '', !d || isNaN(d) ? '' : 'paused <span class="num">' + esc(d.toLocaleString('en-US', {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})) + '</span>'].filter(Boolean).join('; ');
+      return `<li><span class="id">${esc(id)}</span><span><button class="tx" data-go="${esc(id)}">${esc(title(id))}</button>${p.why ? `<span class="fx why">${esc(p.why)}</span>` : ''}${line ? `<span class="fx">${line}</span>` : ''}</span></li>`;
+    }).join('')}</ul></details>` : '';
+    el.innerHTML = head + stepPart + (n || !items ? itemPart : '') + pz;
+    const d = el.querySelector('details.pz');
+    if(d) d.addEventListener('toggle', () => { pzOpen = d.open; });
+  };
+  /* A stalled or paused step shows its mark, not the in-progress mark, in Doing now and as a tag on its row. */
+  const label = k => k === 'stalled' ? 'Stalled' : 'Paused';
+  Object.assign(GLYPH, G); Object.assign(LABEL, {stalled: 'Stalled', paused: 'Paused'});
+  stallKind = id => stalledIds.has(id) ? 'stalled' : pausedIds.has(id) ? 'paused' : '';
+  const marks = () => {
+    document.querySelectorAll('#now li .tx[data-go]').forEach(b => {
+      const k = stalledIds.has(b.dataset.go) ? 'stalled' : pausedIds.has(b.dataset.go) ? 'paused' : '';
+      const g = k && b.parentElement.querySelector('.g');
+      if(g && !g.dataset.stall){ g.dataset.stall = k; g.setAttribute('role', 'img'); g.setAttribute('aria-label', label(k)); g.innerHTML = G[k]; }
+    });
+    const put = (id, k) => {
+      const meta = document.querySelector(`#s-${CSS.escape(id)} .meta`);
+      if(meta && !meta.querySelector('.tag.' + (k === 'stalled' ? 'stl' : 'pzd')))
+        meta.insertAdjacentHTML('beforeend', `<span class="tag ${k === 'stalled' ? 'stl' : 'pzd'} ic" role="img" aria-label="${label(k)}" title="${label(k)}${k === 'stalled' ? ': no live lane and no open pull request' : ''}">${G[k]}</span>`);
+    };
+    stalledIds.forEach(id => put(id, 'stalled'));
+    pausedIds.forEach(id => put(id, 'paused'));
+  };
+  const inner = renderPlan;
+  renderPlan = function(){ inner(); draw(); marks(); };
+  /* The steps may have drawn before this script ran, with no stalled read. Draw them again with it. */
+  if(got.steps) renderPlan(); else { draw(); marks(); }
+  if(box) new MutationObserver(marks).observe(box, {childList:true, subtree:true});
 })();
 /* "Landed in #N" on each open step a merged Step: trailer names, until triage closes it. */
 (() => {

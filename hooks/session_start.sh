@@ -1,6 +1,6 @@
 #!/bin/sh
 # Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. On resume it says when the session's recorded worktree is gone. Names the clone to cd to when the checkout is a live pin of the claude-settings clone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, the repo's waiting page was last published from a version other than main's, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
-# Outside a git tree or when git is missing, prints only the cloud tier line. Always exits 0, nothing on stderr.
+# Outside a git tree or when git is missing, prints only the tier line (cloud or own id). Always exits 0, nothing on stderr.
 
 input=$(cat 2>/dev/null)
 cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
@@ -8,13 +8,15 @@ cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\
 session_id=$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 source=$(printf '%s' "$input" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 
-# tier_line: cloud sessions only (the CLAUDE_CODE_REMOTE read install.sh makes), tell the session how
-# to find its tier (decision session-tiers). One call runs per run: at the no-git or no-toplevel exit,
+# tier_line: a cloud session (the CLAUDE_CODE_REMOTE read install.sh makes) or a session with a
+# CLAUDE_CODE_REMOTE_SESSION_ID tells the session how to find its tier (decision session-tiers). A local
+# session with a remote session id also reads its own record, so lane_session_hit (decision
+# machine-load-brake) can find its tags. One call runs per run: at the no-git or no-toplevel exit,
 # or right after the checkout line, so a cloud session gets it in any folder. The hook cannot read the
 # tier itself: get_session and list_sessions are MCP tools only, and a hook never calls the sessions API
-# with a token. Cost: one env read, no network, no new process, no timer, no file written.
+# with a token. Cost: at most two env reads, no network, no new process, no timer, no file written.
 tier_line() {
-  if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+  if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || [ -n "${CLAUDE_CODE_REMOTE_SESSION_ID:-}" ]; then
     printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed. Merge role: this sentence is for a session whose own tag is cs-build:batch-runner, and for no other. Such a session first runs get_session with no argument, in a turn of its own, then runs `~/.claude/bin/merge --role batch-runner`, at session start and after each resume, because a guard checks its tags in that result and a fresh container loses the role file. A lane, the coordinator or any other tier never runs it, and this line is no instruction to it. A coordinator the owner started tags itself cs-build:coordinator with set_session_tags on its own id at start. The coordinator never merges. A solo or one-lane session the owner started, with no parent_session_id, merges its own PR under the repo merge grant or the owner named act. A lane session (tag cs-build:lane, with a parent_session_id) hands its reviewed branch, head and PR to the batch runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges.'
   fi
 }
@@ -136,7 +138,7 @@ fi
 # Same parsing as settings.json's refresh hook. Silent on any missing/unreadable piece.
 #
 # This only means something when $toplevel is itself a second clone of the same repo the
-# pointer names, for example a lane worktree. In any other repo, the pointer's CLAUDE.md and
+# pointer names, for example an agent's worktree. In any other repo, the pointer's CLAUDE.md and
 # the checkout's CLAUDE.md differ by design, so the raw file compare below runs only on both
 # trees sharing one origin. Read the origin fails closed: either remote missing or unreadable
 # means silence, never a printed line.
@@ -174,13 +176,15 @@ fi
 # there makes unreviewed work live everywhere, silently. Reported here, never fixed here: a
 # branch switch is a whole-tree act and another session may be working in it.
 # `.git` is a directory in a full clone and a file in a linked worktree (the pinned `<clone>-live`).
-# A checkout detached at local main's commit counts as on main; detached anywhere else is off main.
+# A checkout detached at local main's commit or at origin/main's tip counts as on main (the pointer lags local
+# main when a fetch moved origin/main first); detached anywhere else is off main.
 if [ -n "$d" ] && [ -e "$d/.git" ]; then
   pointer_branch=$(cd "$d" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null)
   if [ "$pointer_branch" = "HEAD" ]; then
     pin_head=$(cd "$d" 2>/dev/null && git rev-parse HEAD 2>/dev/null)
     main_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/heads/main 2>/dev/null)
-    if [ -n "$pin_head" ] && [ "$pin_head" = "$main_head" ]; then
+    origin_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/main 2>/dev/null)
+    if [ -n "$pin_head" ] && { [ "$pin_head" = "$main_head" ] || [ "$pin_head" = "$origin_head" ]; }; then
       pointer_branch=main
     else
       pointer_branch="a detached HEAD"

@@ -95,9 +95,31 @@ a turn end in these cases:
   - an open standing item has an id that is not a whole token in the handoff;
   - the inbox cannot be read. The block names the file: a Stop hook's stderr never reaches the owner,
     so a silent pass would drop feedback. This stays advisory, per decision guard-hooks-fail-closed:
-    `stop_hook_active` true exits with no output, so the block costs one turn at most.
+    `stop_hook_active` true exits with no output, so the block costs one turn at most;
+  - waiting-export-check (export_check, roadmap step waiting-export-check; runs before the inbox read, so it
+    needs no inbox file). It blocks a stop of the page writer's session when the whole transcript holds a
+    non-sidechain ArtifactData set, update, batch or delete of an exported collection (layout
+    WAITING_COLLECTIONS, by `collection` or a `doc_id` or `path` prefix) to the waiting page
+    (layout.is_waiting_page_url) whose tool_result is no error, and the newest such write is newer than the
+    newest commit on origin/<record branch> that touches the waiting copy folder (waiting_copy), unless a later
+    shell run (Bash or PowerShell) of export_page.py ended with the line `same`, or with `<page id>: same`
+    under --all. No commit on the folder at all counts as older. This session is the writer when the newest
+    meta/page get names the hook's session id or the id the remote env names (override.remote_session_id). A
+    writer named there decides alone. Only when none is named does an interpreter run of export_page.py
+    (EXPORT_RUN) before the write make this session the writer. A session that is not the writer, or whose
+    writer cannot be told, passes with no note: receipts and answers are not its to export. Incident: the waiting/ copy of
+    the roadmap went stale from 06:41 to 19:04 CST on Nov 5 while the page took items 261 to 271. Harm: a lost
+    or moved page then loses those items (decision waiting-data-in-repo). The reason names export_page.py and
+    the waiting-page skill section "Keep a copy in the repo". A transcript that cannot be read passes. A
+    failed read of the layout or the ref after a page write passes with the systemMessage "Feedback guard:
+    waiting copy export not checked". With stop_hook_active the reason goes to systemMessage and nothing
+    blocks. Cost: the transcript read at each Stop. A writer's write of an exported collection to any artifact
+    then makes one rev-parse and one is_waiting_page_url read per distinct url; one git log follows only
+    when a write is to the waiting page. All inside the Stop process; no process or file of its own (rule
+    outcomes-mechanize-rules). Test S6 proves it.
 Repeats (decision owner-feedback-inbox, "Repeats"): on every Stop, `stop_hook_active` or not, the
-guard judges the well-formed, open items whose ids the turn state's `judged` list does not hold. A
+guard judges the well-formed, open items, except `[repo]` items (feedback for another repo), whose ids
+the turn state's `judged` list does not hold. A
 state file that predates the key counts every item there as judged. One model call per Stop covers
 all new items (`invoke_model`, model REPEAT_MODEL, REPEAT_TIMEOUT seconds, no effort). The model
 compares each item's owner message by meaning with at most REPEAT_MAX candidates (REPEAT_SHARES per
@@ -131,6 +153,7 @@ import override  # noqa: E402  the one home of the roadmap record ref and folder
 import ruling_home  # noqa: E402  the one home of "a branch's tree holds this file"
 import precompact_handoff  # noqa: E402  the one home of the handoff path
 from shared_names import MACHINE_TAGS  # noqa: E402  the one home of the machine notice tags
+from guard_core import SHELL_TOOLS  # noqa: E402  the one home of the shell tool names (Bash, PowerShell)
 
 ITEM = re.compile(r"- (fb-\S+)(?:\s+(.*))?$")
 KINDS = ("ruling", "task", "question", "note", "standing", "page", "repo")
@@ -142,7 +165,7 @@ _writes_n = _transcript.writes_n
 _is_n = _transcript.is_n
 REPO_HOME = re.compile(r"repo:([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)")
 STEP_HOME = re.compile(r"step:([A-Za-z0-9_-]+)")
-STEP_PATH = "roadmap/data/steps/%s.json"  # where a `step:<slug>` home resolves, as a blob on some ref
+STEP_PATH = override.STEP_DIR + "%s.json"  # where a `step:<slug>` home resolves, as a blob on some ref
 NOT_A_GRANT = "not-a-grant"  # the home of a [note] that says its grant word is no grant
 # A chat answer to waiting-page item n: `<n> <letter>` (a to h), an optional parenthetical, one per
 # comma or line. Letters outside a to h are no answer, so "1 y, 2 n" passes.
@@ -153,8 +176,13 @@ _WORD = r"(?<![A-Za-z0-9_])(?:%s)(?![A-Za-z0-9_])"
 GRANT = re.compile(_WORD % r"approval|approved?|grant(?:ed)?|authori[sz]ed?|go[ -]ahead|permissions? to",
                    re.IGNORECASE)
 # A grant word alone is no grant: the message also names an act or a scope.
-ACT = re.compile(_WORD % r"merge|push|delete|deploy|release|publish|always|standing|from now on"
-                 r"|(?:all|any|every)\s+(?:repos?|prs?|branch(?:es)?)", re.IGNORECASE)
+_STANDING_ACT = r"always|standing|from now on|(?:all|any|every)\s+(?:repos?|prs?|branch(?:es)?)"
+ACT = re.compile(_WORD % (r"merge|push|delete|deploy|release|publish|" + _STANDING_ACT), re.IGNORECASE)
+# A standing scope however worded. ACT keeps its short list; these words only bar a once: home.
+_STANDING_SCOPE = (r"whenever|going forward|from here on|in (?:the )?future|by default|"
+                   r"until (?:withdrawn|revoked|further notice|i say otherwise)|(?:each|every)\s+time|"
+                   r"(?:all|any|every)\s+(?:open|green|new|future)")
+STANDING = re.compile(_WORD % (_STANDING_ACT + "|" + _STANDING_SCOPE), re.IGNORECASE)  # no one-shot home covers it
 CLOSED_TOKEN = re.compile(r"(?<!\S)\[closed\](?!\S)")
 # A grant's [ruling] home may also be one of these root files, when git tracks it on some branch.
 GRANT_ROOT_HOMES = ("settings.json", ".claude/CLAUDE.md")
@@ -176,8 +204,24 @@ FAIL_OPEN = "Feedback guard: ruling and task homes not checked (%s)."
 FAIL_OPEN_SENDS = "Feedback guard: %s sends not checked (%s)."  # label: page or repo
 FAIL_OPEN_CLOSED = "Feedback guard: closed note homes not checked (%s)."
 FAIL_OPEN_FILING = "Feedback guard: page filing not checked (%s)."
-GRANT_HOMES = ("a [ruling] item whose home is a tracked file, a [page] item `page:<n>` with its send, or a"
-               " [note] item `-> %s` when the words are no grant" % NOT_A_GRANT)
+FAIL_OPEN_EXPORT = "Feedback guard: waiting copy export not checked (%s)."
+EXPORT_SCRIPT = "export_page.py"
+EXPORT_SAME = "same"  # the verdict export_page.py prints when nothing differs
+# A shell command that runs the export: an interpreter, then a path whose last part is export_page.py. A grep
+# of the script or a file such as test_export_page.py is no run.
+EXPORT_RUN = re.compile(r"(?:^|[\s;&|(])(?:python3?|py)(?:\.exe)?\s+(?:-\S+\s+)*[\"']?(?:\S*[/\\])?"
+                        r"export_page\.py(?=[\"'\s]|$)")
+EXPORT_REASON = (
+    "Waiting copy not exported: this session wrote to the waiting page, and no commit on origin/%s has"
+    " touched %s/ since. Run skills/waiting-page/export_page.py as the waiting-page skill section"
+    " \"Keep a copy in the repo\" says, commit and push the record branch, then stop. An export run whose"
+    " verdict is `same` also clears this.")
+EXPORT_CITE = " (decision waiting-data-in-repo, roadmap step waiting-export-check)"
+ONCE_HOME = "once:"  # the home prefix of a [note] that records a one-shot approval: `once:<act>`
+STANDING_HOMES = "a [ruling] item whose home is a tracked file, or a [page] item `page:<n>` with its send"
+GRANT_HOMES = ("a [ruling] item whose home is a tracked file, a [page] item `page:<n>` with its send, a"
+               " [note] item `-> %s` when the words are no grant, or a [note] item `-> %s<act>` for a one-shot"
+               " grant" % (NOT_A_GRANT, ONCE_HOME))
 BULLET = re.compile(r"[ \t]*(?:[-*+\u2022]|\d+[.)])[ \t]+\S")
 
 
@@ -313,12 +357,33 @@ def step_home(rest):
     return STEP_HOME.fullmatch(home_path(rest)) if home_word(rest) else None
 
 
+def waiting_copy(layout, root):
+    """(record branch, copy folder) of the waiting copy of `root`: the folder is the export of the waiting-page
+    registry entry, else layout.path "waiting-data". The one home of that resolution, for the filing check
+    (Homes.filed_numbers) and the export check (export_check). Raises layout.LayoutError."""
+    branch = layout.record_branch(root)
+    waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
+    return branch, (waiting[0]["export"] if waiting else layout.path(root, "waiting-data")).strip("/")
+
+
+def session_repo(session_id):
+    """The folder the session's inbox sidecar binds (local_time.write_repo_marker), or None."""
+    try:
+        marker = local_time.repo_marker_path(session_id)
+        with open(marker, encoding="utf-8") as f:
+            return f.read().strip() or None
+    except (OSError, TypeError, ValueError):
+        return None
+
+
 class Homes:
     """Checks ruling and task homes against the layout. `skip` holds the reason the check stood
     down, once, for the systemMessage line."""
 
-    def __init__(self, cwd):
+    def __init__(self, cwd, worked_in=None):
         self.cwd, self.skip, self.skip_closed, self.skip_filing = cwd, None, None, None
+        self.worked_in = worked_in  # the folder the inbox's sidecar binds: where the session worked
+        self._tops = None  # the repo tops of worked_in and cwd, read once per Stop
         self._filed = None  # (numbers or None, branch, folder), read once per Stop
         self._top = None  # (the cwd's repo top or None,), read once per Stop
 
@@ -326,34 +391,57 @@ class Homes:
         run = ruling_home._run_git(where, ["rev-parse", "--show-toplevel"])
         return os.path.realpath(run.stdout.strip()) if run.returncode == 0 and run.stdout.strip() else None
 
+    def _repos(self):
+        """The repo tops a relative home is judged in: the one the inbox sidecar binds (where the session worked)
+        and the Stop's cwd, each only when it is in a repo, the same repo once. Empty: neither resolves."""
+        if self._tops is None:
+            tops = []
+            for where in (self.worked_in, self.cwd):
+                top = self._root(where) if where and os.path.isdir(where) else None
+                if top is not None and top not in tops:
+                    tops.append(top)
+            self._tops = tops
+        return self._tops
+
     def _locate(self, found, closed=False):
-        """(root, rel, error) for the path a home names. `root` is None with `error` set when an absolute
-        path is in no git repo, and with no error when the session's folder is in none: the check stands down."""
+        """([(root, rel)], error) for the path a home names. An absolute path gives its own repo, or an error
+        when it is in no repo. A relative path gives one pair per repo of `_repos`; none, with no error,
+        when the session's folder and the Stop's cwd are both in none: the check stands down."""
         if os.path.isabs(found):
             parent = os.path.dirname(found)
             root = self._root(parent) if os.path.isdir(parent) else None
             if root is None:
-                return None, None, "names %s, which is in no git repo" % found
-            return root, os.path.relpath(os.path.realpath(found), root).replace(os.sep, "/"), None
-        start = self.cwd if self.cwd and os.path.isdir(self.cwd) else None
-        root = self._root(start) if start else None
-        if root is None:
+                return [], "names %s, which is in no git repo" % found
+            return [(root, os.path.relpath(os.path.realpath(found), root).replace(os.sep, "/"))], None
+        roots = self._repos()
+        if not roots:
             self._stand_down("the session's folder is in no git repo", closed)
-            return None, None, None
-        return root, os.path.normpath(found).replace(os.sep, "/"), None
+            return [], None
+        return [(root, os.path.normpath(found).replace(os.sep, "/")) for root in roots], None
 
     def _held(self, path, closed=False):
         """(error, held) for a repo-relative or absolute path: `held` is true when some branch's tree holds
-        it, or when the check stood down. `error` is set when an absolute path is in no git repo. The one
-        read behind a task's or a closed note's `step:<slug>` home and a closed note's file home."""
-        root, rel, err = self._locate(path, closed)
+        it in one of the repos, or when the check stood down. `error` is set when an absolute path is in no
+        repo. The one read behind a task's or a closed note's `step:<slug>` home and a closed note's
+        file home."""
+        places, err = self._locate(path, closed)
         if err:
             return err, False
-        return None, root is None or ruling_home.value_resolves(rel, root)
+        held, read, failed = not places, not places, None
+        for root, rel in places:  # a repo git cannot read is skipped; a readable one still decides
+            try:
+                held = ruling_home.value_resolves(rel, root) or held
+                read = True
+            except ruling_home._GitFailure as e:
+                failed = failed or e
+        if not read:  # no repo could be read: the caller stands the check down
+            raise failed
+        return None, held
 
     def problem(self, item_id, kind, rest, grant=False):
-        """None when the home is good or the check stood down, else the reason text. `grant` is true in a
-        block that holds a grant word: a ruling may then name a GRANT_ROOT_HOMES file, if git tracks it."""
+        """None when the home is good in some repo or the check stood down, else the reason text (the first
+        repo's). `grant` is true in a block that holds a grant word: a ruling may then name a GRANT_ROOT_HOMES
+        file, if the repo tracks it."""
         try:
             import layout  # lint/layout.py, the one home of where each kind lives
         except ImportError as e:
@@ -366,26 +454,37 @@ class Homes:
                     return None
                 return "%s [task] %s" % (item_id, err) if err else (
                     "%s [task]: `step:%s` is no task home, as no branch holds its step file" % (item_id, step.group(1)))
-            root, rel, err = self._locate(home_path(rest))
+            places, err = self._locate(home_path(rest))
             if err:
                 return "%s [%s] %s" % (item_id, kind, err)
-            if root is None:
-                return None
-            if not (grant and kind == "ruling" and rel in GRANT_ROOT_HOMES):
-                homes = kind_homes(layout, root, kind)
-                keys = ", ".join(HOME_KINDS[kind])
-                if not homes:
-                    return ("%s [%s]: this repo has no %s home; none of the layout keys %s is in it"
-                            % (item_id, kind, kind, keys))
-                if not any(rel == h or rel.startswith(h + "/") for h in homes):
-                    return ("%s [%s]: %s is not a tracked %s home. %s homes: %s. The handoff and memory are no home%s"
-                            % (item_id, kind, rel, kind, kind.capitalize(), ", ".join(homes),
-                               ". A task may instead name `step:<slug>`" if kind == "task" else ""))
-            if not ruling_home.value_resolves(rel, root):
-                return "%s [%s]: its home is not a file that git tracks on any branch" % (item_id, kind)
-            return None
+            reasons, failed = [], None
+            for root, rel in places:  # a repo whose read fails is skipped; a readable one still decides
+                try:
+                    reasons.append(self._judge(layout, item_id, kind, root, rel, grant))
+                except (layout.LayoutError, ruling_home._GitFailure) as e:
+                    failed = failed or e
+            if not reasons:  # no repo could be read (or none resolved): stand down
+                return self._stand_down(failed) if failed else None
+            return None if None in reasons else reasons[0]
         except (layout.LayoutError, ruling_home._GitFailure) as e:
             return self._stand_down(e)
+
+    @staticmethod
+    def _judge(layout, item_id, kind, root, rel, grant):
+        """None when the home `rel` is good in the repo at `root`, else the reason text."""
+        if not (grant and kind == "ruling" and rel in GRANT_ROOT_HOMES):
+            homes = kind_homes(layout, root, kind)
+            keys = ", ".join(HOME_KINDS[kind])
+            if not homes:
+                return ("%s [%s]: this repo has no %s home; none of the layout keys %s is in it"
+                        % (item_id, kind, kind, keys))
+            if not any(rel == h or rel.startswith(h + "/") for h in homes):
+                return ("%s [%s]: %s is not a tracked %s home. %s homes: %s. The handoff and memory are no home%s"
+                        % (item_id, kind, rel, kind, kind.capitalize(), ", ".join(homes),
+                           ". A task may instead name `step:<slug>`" if kind == "task" else ""))
+        if not ruling_home.value_resolves(rel, root):
+            return "%s [%s]: its home is not a file that git tracks on any branch" % (item_id, kind)
+        return None
 
     def closed_problem(self, item_id, rest):
         """None when a closed note's home is a page, a not-a-grant verdict, a `step:<slug>` whose step file
@@ -466,9 +565,7 @@ class Homes:
             root = self._cwd_root()
             if root is None or layout.waiting_page(root) == "unknown":
                 return self._filed
-            branch = layout.record_branch(root)
-            waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
-            folder = (waiting[0]["export"] if waiting else layout.path(root, "waiting-data")).strip("/")
+            branch, folder = waiting_copy(layout, root)
             ref = "refs/remotes/origin/" + branch
             run = ruling_home._run_git(root, ["grep", "-I", "-e", ".", ref, "--", folder + "/items/"])
         except (layout.LayoutError, ruling_home._GitFailure) as e:
@@ -538,6 +635,7 @@ class Pages:
 
     def __init__(self, path):
         self.path, self.records, self.owners, self.unread, self.skip = path, None, None, None, {}
+        self.failed = set()
 
     def _load(self):
         if self.records is None:
@@ -549,6 +647,7 @@ class Pages:
             except (OSError, ValueError) as e:
                 self.unread = "the transcript cannot be read: %s" % (" ".join(str(e).split())
                                                                       or type(e).__name__)
+            self.failed = _transcript.failed_tool_use_ids(self.records)
             for i, rec in enumerate(self.records):
                 text = _transcript.owner_text(rec, MACHINE_TAGS)
                 if text is not None:
@@ -573,7 +672,9 @@ class Pages:
         return anchors[k - 1] + 1
 
     def _uses_after(self, start):
-        return (use for r in self.records[start:] if r.get("type") == "assistant" for use in _transcript.tool_uses(r))
+        """The tool_use blocks after `start` whose result is no error; a failed send proves nothing."""
+        return (use for r in self.records[start:] if r.get("type") == "assistant"
+                for use in _transcript.tool_uses(r) if use.get("id") not in self.failed)
 
     def proof_state(self, text, k, proof, stamp, label="page"):
         """True when a tool_use that `proof(use)` accepts follows the owner record that anchors the
@@ -740,20 +841,34 @@ def is_grant(text):
     return GRANT.search(plain) is not None and ACT.search(plain) is not None
 
 
+def once_home(it, text):
+    """True when the item is an open `[note] -> once:<act>` for a one-shot approval. A message with a standing
+    word is a standing grant, so no once: home covers it."""
+    word = home_word(it[1])
+    return (it[1].startswith("[note]") and not it[3] and word.startswith(ONCE_HOME)
+            and len(word) > len(ONCE_HOME) and STANDING.search(unfenced(text)) is None)
+
+
 def grant_problem(b, text, items):
     """The reason for a message that grants and has no home for it, else None. A home is a [ruling] item
-    (its own check judges the path), an open [page] item (its own check judges the send), or a
-    `[note] -> not-a-grant` item. `items` holds item() of each item line of the block."""
+    (its own check judges the path), an open [page] item (its own check judges the send), a
+    `[note] -> not-a-grant` item, or an open `[note] -> once:<act>` item when the message holds no standing
+    word. `items` holds item() of each item line of the block."""
     if not is_grant(text):
         return None
     for it in items:
         if it is None or not it[2]:
             continue
         if it[1].startswith("[ruling]") or (it[1].startswith("[page]") and not it[3]) or (
-                it[1].startswith("[note]") and home_word(it[1]) == NOT_A_GRANT):
+                it[1].startswith("[note]") and home_word(it[1]) == NOT_A_GRANT) or once_home(it, text):
             return None
-    return ("the message at %s (%s) holds a grant word and has no home for it: add %s"
-            % (b["stamp"], text.split("\n")[0][:40], GRANT_HOMES))
+    head = text.split("\n")[0][:40]
+    barred = any(it is not None and it[2] and it[1].startswith("[note]") and home_word(it[1]).startswith(ONCE_HOME)
+                 for it in items) and STANDING.search(unfenced(text)) is not None
+    if barred:
+        return ("the message at %s (%s) holds a grant word and has no home for it: a standing word bars a %s home,"
+                " so add %s" % (b["stamp"], head, ONCE_HOME, STANDING_HOMES))
+    return "the message at %s (%s) holds a grant word and has no home for it: add %s" % (b["stamp"], head, GRANT_HOMES)
 
 
 def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
@@ -808,7 +923,8 @@ MARK = " repeats "  # appended to an item line, before the ref
 REF_KINDS = ("roadmap", "debt", "todo", "note", "inbox")  # the candidate ref prefixes
 # A mark the guard wrote: ` repeats <ref>` at the line tail, before an optional ` [closed]`. The item's
 # own words may hold "repeats", so a bare substring is not a mark.
-MARKED = re.compile(r"%s(?:%s):\S+(?: \[closed\])?\s*$" % (re.escape(MARK), "|".join(REF_KINDS)))
+# An inbox ref is `inbox:<sid8>@<date> <hh:mm>`, so it holds one space (inbox_candidates).
+MARKED = re.compile(r"%s(?:%s):\S+(?: \d{2}:\d{2})?(?: \[closed\])?\s*$" % (re.escape(MARK), "|".join(REF_KINDS)))
 INBOX_SUFFIX = ".inbox.md"
 
 
@@ -847,12 +963,13 @@ def squash(text, cut=REPEAT_CUT):
 
 
 def new_items(blocks, judged):
-    """[(id, block index)] for each well-formed, open item whose id is not in `judged`."""
+    """[(id, block index)] for each well-formed, open item whose id is not in `judged`. A [repo] item is
+    feedback for another repo, so it is never compared with this repo's roadmap and backlog."""
     seen, out = set(judged), []
     for n, b in enumerate(blocks):
         for ln in b["items"]:
             it = item(ln)
-            if it is not None and it[2] and not it[3] and it[0] not in seen:
+            if it is not None and it[2] and not it[3] and it[0] not in seen and not it[1].startswith("[repo]"):
                 seen.add(it[0])
                 out.append((it[0], n))
     return out
@@ -1070,12 +1187,136 @@ def judge_stop(homes, inbox, blocks, judged):
     return [flag_text(*h, h[0] in placed) for h in hits], (None if why is None else not_checked(why))
 
 
+def _ts(rec):
+    return _transcript.parse_utc_timestamp(rec.get("timestamp"))
+
+
+def _exported_write(inp, collections):
+    """True when an ArtifactData input writes (set, update, batch or delete) a collection the waiting copy
+    exports: named by `collection`, or by a `doc_id` or `path` of the form `<collection>/...`. A batch that
+    names none is counted, since its writes are not read. `delete` is counted here and in no shared list."""
+    verb = inp.get("action", inp.get("op"))
+    if isinstance(verb, str) and verb not in _transcript.WRITE_VERBS + ("delete",):
+        return False
+    named = [inp["collection"]] if isinstance(inp.get("collection"), str) else [
+        inp[k].partition("/")[0] for k in ("doc_id", "path") if isinstance(inp.get(k), str) and "/" in inp[k]]
+    return any(c in collections for c in named) or (not named and verb == "batch")
+
+
+def _scan_transcript(records, collections):
+    """(writes, exports, results) of the non-sidechain records. `writes` is [(epoch, id, url)] for each
+    ArtifactData write of an exported collection; `exports` is [(epoch, id)] for each shell call naming
+    export_page.py; `results` maps a tool_use id to (is_error, the non-blank lines of its tool_result)."""
+    writes, exports, results = [], [], {}
+    for rec in records:
+        if rec.get("isSidechain"):
+            continue
+        when = _ts(rec)
+        for use in _transcript.tool_uses(rec):
+            inp, name = use.get("input"), str(use.get("name", ""))
+            if not isinstance(inp, dict) or when is None:
+                continue
+            if name.startswith(ARTIFACT_DATA):
+                if _exported_write(inp, collections) and isinstance(inp.get("url"), str):
+                    writes.append((when, use.get("id"), inp["url"]))
+            elif name in SHELL_TOOLS and EXPORT_RUN.search(str(inp.get("command", ""))):
+                exports.append((when, use.get("id")))
+        for block in _transcript.tool_results(rec):
+            lines = [ln.strip() for ln in _transcript.result_text(block).splitlines() if ln.strip()]
+            results[block.get("tool_use_id")] = (bool(block.get("is_error")), lines)
+    return writes, exports, results
+
+
+def _cleared(exports, results, newest, page_id):
+    """True when an export run after `newest` ended with the verdict `same`: as its last line, or, for the
+    `--all` form, as the line `<page id>: same`."""
+    for when, uid in exports:
+        failed, lines = results.get(uid, (True, []))
+        if when > newest and not failed and lines and (
+                lines[-1] == EXPORT_SAME or "%s: %s" % (page_id, EXPORT_SAME) in lines):
+            return True
+    return False
+
+
+def export_check(cwd, transcript_path, session_id):
+    """(reason, note) of the export check (roadmap step waiting-export-check). `reason` is the block text
+    when this session is the page writer and the transcript holds a successful ArtifactData write of an
+    exported collection to the repo's waiting page that is newer than the newest commit on origin/<record
+    branch> touching the waiting copy folder, and no later shell run of export_page.py cleared it (verdict
+    `same`, or `<page id>: same` under --all). This session is the writer when the newest meta/page get names
+    `session_id` or the id the remote env names (override.remote_session_id). A writer named there decides
+    alone. Only when none is named does an interpreter run of export_page.py (EXPORT_RUN) before the write
+    make this session the writer. A session that is not the writer, or whose writer cannot be told, passes
+    with no note. `note` is the systemMessage text only after a page write was found and a read of the repo
+    or the layout failed: that is never a block. A transcript that cannot be read gives neither. The whole
+    transcript is read and timestamps decide, so a write in an earlier turn still counts."""
+    try:
+        records = _transcript.read_transcript(transcript_path)
+        import layout
+    except (OSError, TypeError, ValueError, ImportError):
+        return None, None  # no transcript to read (a hook run with none is normal), or no layout
+    writes, exports, results = _scan_transcript(records, layout.WAITING_COLLECTIONS)
+    writes = [w for w in writes if w[1] in results and not results[w[1]][0]]
+    if not writes:
+        return None, None  # nothing is read from the repo before a write is found
+    writer = _transcript.page_writer_id(records)
+    if writer:
+        is_writer = writer in (session_id, override.remote_session_id())
+    else:
+        is_writer = any(e[0] < max(w[0] for w in writes) for e in exports)
+    if not is_writer:
+        return None, None  # receipts and answers are not this session's to export
+    try:
+        root = Homes(cwd)._cwd_root()
+        if root is None:
+            return None, None
+        is_page = {url: layout.is_waiting_page_url(root, url) for url in {w[2] for w in writes}}
+        wrote = [w[0] for w in writes if is_page[w[2]]]
+        if not wrote:
+            return None, None
+        newest = max(wrote)
+        waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
+        if _cleared(exports, results, newest, waiting[0]["id"] if waiting else ""):
+            return None, None
+        branch, folder = waiting_copy(layout, root)
+        run = ruling_home._run_git(root, ["log", "-1", "--format=%ct", "refs/remotes/origin/" + branch,
+                                          "--", folder + "/"])
+    except (layout.LayoutError, ruling_home._GitFailure) as e:
+        return None, FAIL_OPEN_EXPORT % (" ".join(str(e).split()) or type(e).__name__)
+    out = run.stdout.strip()
+    if run.returncode != 0 or (out and not out.isdigit()):
+        return None, FAIL_OPEN_EXPORT % ("origin/%s cannot be read" % branch)
+    return (None, None) if int(out or 0) >= newest else (EXPORT_REASON % (branch, folder), None)
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
+        try:  # before the inbox read, so a session with no inbox file is checked too
+            ex_reason, ex_note = export_check(hook.get("cwd"), hook.get("transcript_path"), hook.get("session_id"))
+        except Exception as e:  # advisory: a crash passes, and says so
+            ex_reason, ex_note = None, FAIL_OPEN_EXPORT % (" ".join(str(e).split()) or type(e).__name__)
+        out = inbox_stop(hook)
+        if ex_reason and hook.get("stop_hook_active"):
+            ex_note = " ".join(filter(None, [ex_note, ex_reason]))  # no second block; the owner still reads it
+        elif ex_reason:
+            prior = out.get("reason")
+            out.update(decision="block", reason=(prior + " " if prior else "") + ex_reason + EXPORT_CITE)
+        if ex_note:
+            out["systemMessage"] = " ".join(filter(None, [out.get("systemMessage"), ex_note]))
+        if out:
+            print(json.dumps(out))
+    except Exception as e:  # advisory: a crash passes, and says so on stderr
+        print("feedback_guard: %s" % e, file=sys.stderr)
+    return 0
+
+
+def inbox_stop(hook):
+    """The inbox check of one Stop: the output dict, empty for a pass. A crash goes to stderr and passes."""
+    try:
         paths = local_time.inbox_paths(hook.get("session_id"))
         if paths is None:
-            return 0
+            return {}
         inbox, turns = paths
         inbox = os.path.abspath(inbox)  # CLAUDE_CONFIG_DIR may be relative; the reason promises an absolute path
         out = {}
@@ -1083,10 +1324,10 @@ def main():
             with open(inbox, encoding="utf-8") as f:
                 blocks = parse(f.read())
         except FileNotFoundError:
-            return 0
+            return {}
         except (OSError, UnicodeDecodeError):
             blocks = None
-        homes, flags, note = Homes(hook.get("cwd")), [], None
+        homes, flags, note = Homes(hook.get("cwd"), session_repo(hook.get("session_id"))), [], None
         if blocks is not None:
             seen, burst, judged = read_state(turns, len(blocks))
             burst = burst_indexes(blocks, seen, burst)
@@ -1095,9 +1336,7 @@ def main():
             write_state(turns, len(blocks), burst, list(dict.fromkeys((judged or []) + ids)))
         if hook.get("stop_hook_active"):
             msg = " ".join(flags + ([note] if note else []))
-            if msg:
-                print(json.dumps({"systemMessage": msg}))
-            return 0
+            return {"systemMessage": msg} if msg else {}
         if blocks is None:
             reasons = found = ["the inbox file %s cannot be read" % os.path.basename(inbox)]
         else:
@@ -1126,11 +1365,10 @@ def main():
                           " and no new heading is needed. Send each page ruling to the page writer, each repo item's"
                           " message to that repo's triage session, and put open standing ids in the handoff."
                           if found else "."))
-        if out:
-            print(json.dumps(out))
+        return out
     except Exception as e:  # advisory: a crash passes, and says so on stderr
         print("feedback_guard: %s" % e, file=sys.stderr)
-    return 0
+    return {}
 
 
 if __name__ == "__main__":

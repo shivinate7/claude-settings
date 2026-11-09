@@ -666,6 +666,30 @@ class HookSweepsNothingWhenTooLittleBudgetRemains(unittest.TestCase):
         self.assertNotIn("--attended", calls[0])  # strict is the default
 
 
+def hook_starts(mod, repo, elapsed, every_call=False):
+    """The argv of each sweep subprocess `handle` starts, or with `every_call`, the argv of every
+    process `handle` starts, git reads included, in order. The sweep is not run: its start is
+    answered with an empty success. The git reads run for real, through the patched `run`."""
+    calls = []
+    real_run = mod.subprocess.run
+
+    def record_call(*args, **kwargs):
+        argv = args[0] if args else kwargs.get("args")
+        is_sweep = isinstance(argv, list) and mod.SWEEP_PATH in argv
+        if every_call or is_sweep:
+            calls.append(argv)
+        if is_sweep:
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+        return real_run(*args, **kwargs)
+
+    mod.subprocess.run = record_call
+    try:
+        mod.handle({"hook_event_name": "SessionEnd", "cwd": repo}, elapsed_seconds=elapsed)
+    finally:
+        mod.subprocess.run = real_run
+    return calls
+
+
 def deadline_value(argv):
     """The number after `--deadline-seconds` (as two arguments or as `=N`), or None when absent."""
     for i, arg in enumerate(argv):
@@ -687,22 +711,7 @@ class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
         self.mod = session_end_sweep
 
     def sweep_argv_for(self, repo, elapsed):
-        calls = []
-        real_run = self.mod.subprocess.run
-
-        def record_call(*args, **kwargs):
-            argv = args[0] if args else kwargs.get("args")
-            if isinstance(argv, list) and self.mod.SWEEP_PATH in argv:
-                calls.append(argv)
-                return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
-            return real_run(*args, **kwargs)
-
-        self.mod.subprocess.run = record_call
-        try:
-            self.mod.handle({"hook_event_name": "SessionEnd", "cwd": repo}, elapsed_seconds=elapsed)
-        finally:
-            self.mod.subprocess.run = real_run
-        return calls
+        return hook_starts(self.mod, repo, elapsed)
 
     def test_the_sweep_is_passed_the_time_left_as_a_deadline_flag(self):
         repo = os.path.join(ROOT, "deadline_flag_repo")
@@ -715,6 +724,43 @@ class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
                 value = deadline_value(calls[0])
                 self.assertIsNotNone(value, "the sweep got no --deadline-seconds: %r" % (calls[0],))
                 self.assertAlmostEqual(value, self.mod.remaining_sweep_timeout_seconds(elapsed))
+
+    def test_the_sweep_is_told_it_is_the_session_end_run(self):
+        """The SessionEnd run scopes the sweep to this session's own repository. Without
+        `--session-end` the sweep reads every machine-wide tier, which is the daily job's job."""
+        repo = os.path.join(ROOT, "session_end_flag_repo")
+        make_repo(repo)
+        calls = self.sweep_argv_for(repo, 0.0)
+        self.assertEqual(len(calls), 1, "the hook ran the sweep %d times" % len(calls))
+        self.assertIn("--session-end", calls[0],
+                      "the SessionEnd sweep was not told it is session-scoped: %r" % (calls[0],))
+
+
+class SessionEndHookStartsOneSweepProcess(unittest.TestCase):
+    """Cost of the SessionEnd path (rule outcomes-mechanize-rules: a test proves the cost a hook
+    states). One payload with a cwd and no scratchpad, the case every session end takes.
+
+    Measured on main before the SessionEnd scope change, with `hook_starts(..., every_call=True)`, one fixture
+    repository with one commit: 3 process starts in all, 2 git (`git_reads.primary_checkout`) and
+    1 sweep subprocess, with 0 `ps` reads (no scratchpad in the payload). The sweep's own pid-list
+    reads are measured by SessionEndScopeTests in janitor/test_sweep.py.
+    """
+
+    def setUp(self):
+        import session_end_sweep
+        self.mod = session_end_sweep
+
+    def test_the_hook_starts_exactly_one_sweep_subprocess_and_no_ps(self):
+        repo = os.path.join(ROOT, "cost_one_sweep_repo")
+        make_repo(repo)
+        starts = hook_starts(self.mod, repo, 0.0, every_call=True)
+        sweeps = [a for a in starts if isinstance(a, list) and self.mod.SWEEP_PATH in a]
+        ps = [a for a in starts if isinstance(a, list) and a and a[0] == "ps"]
+        git = [a for a in starts if isinstance(a, list) and a and a[0] == "git"]
+        self.assertEqual(len(sweeps), 1, "the hook started %d sweep subprocesses" % len(sweeps))
+        self.assertEqual(len(ps), 0, "the hook started %d ps reads with no scratchpad" % len(ps))
+        self.assertEqual(len(git), 2, "the hook started %d git reads, expected the 2 of "
+                                      "git_reads.primary_checkout" % len(git))
 
 
 from sweep import FETCH_THROTTLE_SECONDS  # noqa: E402  the window, read from its one home
@@ -1043,16 +1089,21 @@ def assert_heartbeat_stops(case, path, what):
         last = now
 
 
+STOPPED = set()  # beat paths already stopped, so kill_holder stops each holder once
+
+
 def kill_holder(pid):
-    """Stop one holder this suite started, two ways, and need no ps. Its stop file ends its loop with no
-    pid, so the stop works where the shell's pid space and this Python's differ (Windows). The `kill`
-    runs in the shell's own pid space, because the pid is the shell's `$!`: os.kill from this Python
-    would read it as a Windows pid and could stop an unrelated process. A `kill` that finds no process
-    does nothing, so a holder that already ended is fine."""
-    for held, beat in HOLDERS:
-        if held == pid:
-            write(beat + ".stop", "")
-    run_capped(["sh", "-c", 'kill "$1" 2>/dev/null; true', "sh", str(pid)], timeout=10)
+    """Stop each holder this suite started with `pid`, once. The stop file ends the holder's loop on every
+    platform. Off Windows a shell `kill` also runs, since the pid is the shell's `$!`; a `kill` that finds
+    no process does nothing. On Windows the MSYS pid is not a Windows pid, so only the stop file is used."""
+    beats = [beat for held, beat in HOLDERS if held == pid and beat not in STOPPED]
+    if not beats:
+        return
+    for beat in beats:
+        write(beat + ".stop", "")
+    if os.name != "nt":
+        run_capped(["sh", "-c", 'kill "$1" 2>/dev/null; true', "sh", str(pid)], timeout=10)
+    STOPPED.update(beats)  # last: a stop that raised is retried by the next call, not skipped
 
 
 def spawn_orphan(cwd, env_entries=()):
@@ -1216,6 +1267,75 @@ class SkippedCaseLeavesNoHolder(unittest.TestCase):
         def no_ps(argv):
             raise FileNotFoundError(2, "No such file or directory", argv[0])
         self.assert_skips_and_leaves_no_holder("sess-no-ps", no_ps)
+
+
+class KillHolderStopsOnce(unittest.TestCase):
+    """kill_holder sends one kill per holder. A later call for the same holder does nothing: its pid may
+    belong to another process by then."""
+
+    def test_a_second_kill_of_one_holder_sends_no_second_kill(self):
+        beat = os.path.join(ROOT, uuid.uuid4().hex + ".beat")
+        sent = []
+
+        def record(argv, timeout, **kwargs):
+            sent.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch.object(sys.modules[__name__], "HOLDERS", [(4242, beat)]), \
+                mock.patch.object(sys.modules[__name__], "run_capped", record):
+            kill_holder(4242)
+            kill_holder(4242)
+        self.assertTrue(os.path.exists(beat + ".stop"), "kill_holder wrote no stop file for its holder")
+        shell_kills = [argv for argv in sent if argv[:1] == ["sh"]]
+        self.assertEqual(len(shell_kills), 0 if os.name == "nt" else 1,
+                         "two kill_holder calls for one holder sent %d shell kills" % len(shell_kills))
+
+
+class KillHolderRetriesAFailedStop(unittest.TestCase):
+    """A stop that raised did not stop its holder, so the next kill_holder call for that holder tries again.
+    Otherwise the at-exit stop skips the holder, and it runs on."""
+
+    def test_a_failed_stop_file_write_is_retried(self):
+        beat = os.path.join(ROOT, uuid.uuid4().hex + ".beat")
+        real_write = write
+        calls = []
+
+        def flaky_write(path, text):
+            calls.append(path)
+            if len(calls) == 1:
+                raise OSError("the first stop write fails")
+            real_write(path, text)
+
+        def no_kill(argv, timeout, **kwargs):
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch.object(sys.modules[__name__], "HOLDERS", [(4343, beat)]), \
+                mock.patch.object(sys.modules[__name__], "write", flaky_write), \
+                mock.patch.object(sys.modules[__name__], "run_capped", no_kill):
+            with self.assertRaises(OSError):
+                kill_holder(4343)
+            kill_holder(4343)
+        self.assertTrue(os.path.exists(beat + ".stop"),
+                        "the retry after a failed stop write wrote no stop file, so the holder is never stopped")
+
+    def test_a_failed_kill_is_retried(self):
+        if os.name == "nt":
+            self.skipTest("Windows sends no shell kill, so there is no kill to fail")
+        beat = os.path.join(ROOT, uuid.uuid4().hex + ".beat")
+        sent = []
+
+        def flaky_kill(argv, timeout, **kwargs):
+            sent.append(list(argv))
+            if len(sent) == 1:
+                raise OSError("the first kill fails")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch.object(sys.modules[__name__], "HOLDERS", [(4444, beat)]), \
+                mock.patch.object(sys.modules[__name__], "run_capped", flaky_kill):
+            with self.assertRaises(OSError):
+                kill_holder(4444)
+            kill_holder(4444)
+        self.assertEqual(len(sent), 2, "a failed kill was not retried: %d kill attempts" % len(sent))
 
 
 class SweepGetsNoPipes(unittest.TestCase):

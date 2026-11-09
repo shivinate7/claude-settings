@@ -93,14 +93,21 @@ def guard_tree(dest: str) -> None:
         shutil.copy(path, dest)
 
 
-def find_anchor(folder: str, old: str):
+def find_anchor(folder: str, old: str, files=None):
     """Return (path, text) of the one guard module or git_reads.py in `folder` that holds `old`
-    exactly once. Raise StaleMutant on zero matches, AmbiguousMutant on two or more, across all."""
+    exactly once. Raise StaleMutant on zero matches, AmbiguousMutant on two or more, across all.
+    `files` (folder-relative names) replaces that list: a known defect names the file it plants in."""
     hits = []
-    for path in anchor_files(folder):
+    paths = anchor_files(folder) if files is None else [os.path.join(folder, name) for name in files]
+    for path in paths:
         # Universal newlines: a checkout may hold CRLF, and an anchor spells a line break "\n".
-        with open(path, encoding="utf-8") as handle:
-            text = handle.read()
+        try:
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read()
+        except FileNotFoundError:
+            if files is None:
+                raise
+            raise StaleMutant("STALE: %s is not in %s" % (os.path.relpath(path, folder), folder))
         hits.extend([(path, text)] * text.count(old))
     if not hits:
         raise StaleMutant("STALE: anchor text is in no guard module in %s" % folder)
@@ -110,10 +117,10 @@ def find_anchor(folder: str, old: str):
     return hits[0]
 
 
-def apply_mutant(tree: str, old: str, new: str) -> str:
-    """Replace `old` with `new` in the one guard module in `tree` that holds it. Return its path.
-    Write nothing when the anchor is stale or ambiguous (see find_anchor)."""
-    path, text = find_anchor(tree, old)
+def apply_mutant(tree: str, old: str, new: str, files=None) -> str:
+    """Replace `old` with `new` in the one guard module in `tree` that holds it (or in `files`, see
+    find_anchor). Return its path. Write nothing when the anchor is stale or ambiguous."""
+    path, text = find_anchor(tree, old, files)
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(text.replace(old, new, 1))
     return path
@@ -159,15 +166,48 @@ def skip_reason(only_on):
     return "%s-only, this platform is %s" % (only_on, here)
 
 
-def report_verdict(label: str, code, red, required: str) -> str:
+_ERROR_HEADER = re.compile(r"^ERROR: ")
+_RULE_LINE = re.compile(r"^(=|-){10,}\s*$")
+
+
+def diagnostic_lines(output: str) -> list:
+    """Each unittest `ERROR: ...` header in `output`, then that block's final exception line.
+
+    A case that throws prints no FAIL line, so a WRONG CAUSE report built from FAIL lines alone
+    shows only `FAILED (errors=1)` and loses the exception (a TimeoutExpired on Windows run
+    42063704930). A block runs from its header to the next rule line of `=` or `-`; the dashed
+    rule right under the header is skipped. Blocks with no traceback give the header alone."""
+    lines = output.splitlines()
+    found = []
+    index = 0
+    while index < len(lines):
+        if not _ERROR_HEADER.match(lines[index]):
+            index += 1
+            continue
+        found.append(lines[index].rstrip())
+        index += 1
+        if index < len(lines) and _RULE_LINE.match(lines[index]):
+            index += 1
+        last = None
+        while index < len(lines) and not _RULE_LINE.match(lines[index]):
+            if lines[index].strip():
+                last = lines[index].rstrip()
+            index += 1
+        if last is not None:
+            found.append(last)
+    return found
+
+
+def report_verdict(label: str, code, red, required: str, seen=()) -> str:
     """Classify and print one mutant's verdict. Returns "survived", "wrong_cause", or "killed".
 
     A nonzero exit plus any red line is not proof, because every red line may belong to some OTHER
     case than the one the mutation's label names. `required` is the case
     name (or a distinctive fragment of it) that must appear among the suite's own FAIL lines
     before a kill counts as proof; a red suite that misses it is WRONG CAUSE, not KILLED.
-    A WRONG CAUSE also prints the red lines it actually saw, bounded by WRONG_CAUSE_LINES_SHOWN, because a bare count says
-    nothing about which case broke.
+    A WRONG CAUSE also prints the red lines it actually saw, then `seen` (the suite's ERROR
+    lines, see `diagnostic_lines`), as one report bounded by WRONG_CAUSE_LINES_SHOWN, because a
+    bare count says nothing about which case broke. `seen` never changes the verdict: only `red` does.
     """
     if code == 0 or not red:
         print("SURVIVED    %-62s %2d red" % (label, len(red)), flush=True)
@@ -175,11 +215,12 @@ def report_verdict(label: str, code, red, required: str) -> str:
     if not any(required in line for line in red):
         print("WRONG CAUSE %-62s %2d red, missing %r" % (
             label, len(red), required), flush=True)
-        for line in red[:WRONG_CAUSE_LINES_SHOWN]:
+        shown = list(red) + list(seen)
+        for line in shown[:WRONG_CAUSE_LINES_SHOWN]:
             print("            saw: %s" % line.strip(), flush=True)
-        if len(red) > WRONG_CAUSE_LINES_SHOWN:
+        if len(shown) > WRONG_CAUSE_LINES_SHOWN:
             print("            saw: ... and %d more" % (
-                len(red) - WRONG_CAUSE_LINES_SHOWN), flush=True)
+                len(shown) - WRONG_CAUSE_LINES_SHOWN), flush=True)
         return "wrong_cause"
     print("KILLED      %-62s %2d red" % (label, len(red)), flush=True)
     return "killed"
@@ -210,13 +251,29 @@ def staged_suite(run, required: str):
     return code, red
 
 
+def staged_suite_seen(run, required: str):
+    """`staged_suite` plus the diagnostics of the run that gave the verdict. Return (code, red, seen).
+
+    `run(only)` returns (code, red, ran) or (code, red, ran, seen); a runner that has no `seen`
+    reads as an empty one. `seen` is the last run's, which is the run `staged_suite` returned."""
+    last = []
+
+    def stage(only):
+        code, red, ran, *extra = run(only)
+        last[:] = extra[0] if extra else []
+        return code, red, ran
+
+    code, red = staged_suite(stage, required)
+    return code, red, list(last)
+
+
 def run_mutants(entries, run_one):
     """Run every entry through `run_one`, in parallel, printing each mutant's verdict as it
     lands, then the tally line. Returns 0 when every mutant was killed (a caller's own `main`
     should return that, or 1 otherwise), so a caller can end with
     `return mutate_shared.run_mutants(MUTATIONS, run_one)`.
 
-    `run_one(entry) -> (label, code, red, required, skip)` is supplied by the caller: it applies
+    `run_one(entry) -> (label, code, red, required, skip[, seen])` is supplied by the caller: it applies
     one mutation and runs its suite however that caller lays a mutant out on disk (one file next
     to a shared work directory, or a whole per-mutant scaffold -- see this module's own
     docstring for why that part is not shared). This function owns only the parallel dispatch,
@@ -229,12 +286,12 @@ def run_mutants(entries, run_one):
     wrong_cause = 0
     skipped = 0
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        for label, code, red, required, skip in pool.map(run_one, entries):
+        for label, code, red, required, skip, *more in pool.map(run_one, entries):
             if skip:
                 skipped += 1
                 print("SKIPPED     %-62s %s" % (label, skip), flush=True)
                 continue
-            status = report_verdict(label, code, red, required)
+            status = report_verdict(label, code, red, required, more[0] if more else ())
             if status == "survived":
                 survivors += 1
             elif status == "wrong_cause":
@@ -471,6 +528,7 @@ def run_suite_file(folder: str, rel: str, timeout: float, argv=None, classify=No
 _LIVE_GROUPS = set()  # process group ids of the children running now, so a signal can kill them
 _LIVE_LOCK = threading.RLock()  # re-entrant: a signal handler runs on the main thread, which may hold it
 _STOP = threading.Event()  # set by `request_stop`: no child starts after it
+CUT = object()  # a mutant the budget cut: `_replay_in` scores it not_run and counts it in a note
 
 
 def run_in_group(command, cwd: str, timeout: float, env=None):
@@ -545,10 +603,12 @@ def score_target(root: str, target: str, tests, limit: int = 10, timeout=None, j
 
     Returns a row: file, status ("OK" or "UNKNOWN"), reason, made, killed, crashed, survived, rate
     (killed / made, None when UNKNOWN), killers {suite: mutants it killed}, silent [usable suites that
-    killed none], unusable {suite: why}. See the report-mode comment above for what counts as a kill.
+    killed none], unusable {suite: why}, unloaded [usable suites that stay green on a wholly broken copy
+    of the target: they never loaded it]. See the report-mode comment above for what counts as a kill.
     """
     row = {"file": target, "status": "UNKNOWN", "reason": "", "made": 0, "killed": 0, "crashed": 0,
-           "survived": 0, "rate": None, "killers": {}, "silent": [], "unusable": {}}
+           "survived": 0, "rate": None, "killers": {}, "silent": [], "unusable": {},
+           "unloaded": []}
     path = os.path.join(root, target)
     if not os.path.isfile(path):
         row["reason"] = "target file is missing"
@@ -591,6 +651,17 @@ def score_target(root: str, target: str, tests, limit: int = 10, timeout=None, j
             row["reason"] = "no suite is green on the clean source"
             return row
         bound = timeout or max(60.0, 4 * slowest)
+        # A copy that raises on import: a suite that loads the target cannot stay green on it.
+        broken = os.path.join(work, "broken")
+        shutil.copytree(clean, broken, symlinks=True)
+        _write(os.path.join(broken, target), 'raise RuntimeError("wholly broken copy of the target")\n')
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            broken_kinds = list(pool.map(lambda rel: run_suite_file(broken, rel, bound)[0], usable))
+        unloaded = [rel for rel, kind in zip(usable, broken_kinds) if kind == "pass"]
+        row["unloaded"] = unloaded
+        if len(unloaded) == len(usable):  # no suite is shown to load the file, so a rate would score suites that never ran it
+            row["reason"] = "every usable suite stays green on a wholly broken copy of the file"
+            return row
 
         def one(item):
             number, (_label, text) = item
@@ -622,6 +693,7 @@ def score_target(root: str, target: str, tests, limit: int = 10, timeout=None, j
     row["made"] = len(mutants)
     row["rate"] = row["killed"] / row["made"]
     row["silent"] = [rel for rel in usable if row["killers"][rel] == 0]
+    row["unloaded"] = unloaded
     row["status"] = "OK"
     return row
 
@@ -640,6 +712,8 @@ def format_report(rows, gold=None) -> str:
     for row in rows:
         for rel, why in sorted(row["unusable"].items()):
             lines.append("  unusable for %s: %s (%s)" % (row["file"], rel, why))
+        for rel in row.get("unloaded", []):
+            lines.append("  unloaded for %s: %s (green on a wholly broken copy of the file)" % (row["file"], rel))
     if gold is not None:
         lines.append("gold standard: %s" % gold)
     return "\n".join(lines)
@@ -653,18 +727,25 @@ def format_report(rows, gold=None) -> str:
 # Read on demand; no timer, no long-lived process, not a required CI job. The two counts of report
 # mode hold here: a crash is not a kill, and a suite red on the clean source is not a killer.
 # Cost per pull request: one control run per suite, one run per suite per mutant, one `git worktree`
-# per job, one install per lockfile hash. Written: a temp folder of checkouts and one deps folder
-# per lockfile hash, all removed at the end. The target repository is left as found.
+# per job, one install per lockfile hash, install and link. Written: a temp folder of checkouts and one deps folder
+# per lockfile hash, install and link, all removed at the end. The target repository is left as found. `--known-defects` runs the same
+# installs in its own deps folder, each up to INSTALL_TIMEOUT. In the action
+# that is a second install, because the `--changed` step removes its deps. A profile with a `select`
+# adds, per pull request, one git read for each script path in its argv that the commit lacks, and one folder
+# extract for a script that HEAD holds.
 #
 # A PROFILE says how one repository is read: {"code": regex of product files, "code_not": regex of
 # files to leave out (optional), "tests": regex of suite files, "argv": the command with {suite} (the
 # suite path from `cwd`) and {deps} (the install folder), "classify": a CLASSIFIERS name, "cwd": the folder
-# the command runs in (optional), "install": argv, or a list of argv, run once per lockfile hash with the
+# the command runs in (optional), "install": argv, or a list of argv, run once per lockfile hash, install and link, with the
 # lockfile beside it in the deps folder (None for no install), "lockfile": its path in the repository,
 # "link": the folder the install makes, linked into each checkout beside the lockfile (None for none),
 # "select": argv with {path}, run in a checkout at the pull request's commit, that prints the suites which
 # test one product file (a changed suite is run on the mutants of that file only when its line is listed; a select
-# that fails, or is missing, runs every changed suite and adds a row note),
+# that fails, or is missing, runs every changed suite and adds a row note). A script the argv names that the commit
+# lacks is read from the clone's HEAD instead, with its whole folder, so the siblings it loads come along; the row
+# names it. The commit's own copy wins. Only a part with a "/" is a script path: a bare command name resolves on
+# PATH, so a bare root name such as `select.sh` is never served from HEAD; `./select.sh` is, with the whole tree,
 # "suite_filter": {"paths": regex, "keep": a SUITE_FILTERS name} (optional); a changed file that "tests" matches
 # and "paths" matches is a suite only when the filter reads its text as one,
 # "sparse_skip": top folders left out of each checkout}. A profile of {"parts": {name: profile}} runs
@@ -798,7 +879,8 @@ def _is_suite(repo: str, sha: str, profile: dict, path: str) -> bool:
 
 def _ensure_deps(repo: str, sha: str, profile: dict, deps_root: str):
     """The install folder for `sha`'s lockfile: (folder or None, why it is unusable). The install runs once
-    per lockfile hash under `deps_root`, with the lockfile (and its package.json) beside it."""
+    per lockfile hash, install argv and link under `deps_root`, with the lockfile (and its package.json) beside it.
+    Two parts with one lockfile and one install share a folder; a different install gets its own."""
     install = profile.get("install")
     if not install:
         return None, ""
@@ -807,7 +889,8 @@ def _ensure_deps(repo: str, sha: str, profile: dict, deps_root: str):
         data = _file_at(repo, sha, lock)
     except ValueError:
         return None, "no lockfile %s at this commit" % lock
-    folder = os.path.join(deps_root, hashlib.sha1(data).hexdigest()[:16])
+    key = hashlib.sha1(data + json.dumps([install, profile.get("link", "node_modules")]).encode("utf-8"))
+    folder = os.path.join(deps_root, key.hexdigest()[:16])
     failed, done_mark = os.path.join(folder, "FAILED"), os.path.join(folder, "DONE")
     if os.path.exists(done_mark):
         return folder, ""
@@ -829,7 +912,7 @@ def _ensure_deps(repo: str, sha: str, profile: dict, deps_root: str):
             if timed_out:
                 why = "install passed %d s and was killed" % INSTALL_TIMEOUT
             else:
-                why = "" if code == 0 else "install exited %d: %s" % (code, output.strip()[-300:])
+                why = "" if code == 0 else "install exited %d: %s" % (code, " ".join(output.split())[-300:])
         except OSError as error:
             why = "install did not run: %s" % error
         if why:
@@ -851,11 +934,23 @@ def _make_checkout(repo: str, sha: str, dest: str, skip, overrides: dict, deps, 
     _git(dest, "checkout-index", "-z", "--stdin", stdin="\0".join(keep).encode("utf-8") + b"\0")
     for path, text in overrides.items():
         _write(os.path.join(dest, path), text)
+    _link_deps(dest, deps, profile)
+
+
+def _link_deps(dest: str, deps, profile: dict) -> None:
+    """Link the install folder `deps` into checkout `dest` beside the profile's lockfile, as `link`. Nothing to link for no
+    folder or no `link`. A link already there to the same target stays: two parts with one lockfile and one install share one
+    folder. Any other path at the link name (a tracked file or folder, another target) raises OSError naming it."""
     link_name = profile.get("link", "node_modules")
     if deps and link_name:
         link = os.path.join(dest, os.path.dirname(profile.get("lockfile", "package-lock.json")), link_name)
+        target = os.path.join(deps, link_name)
+        if os.path.lexists(link):
+            if os.path.islink(link) and os.readlink(link) == target:
+                return
+            raise OSError("%s exists and is not a link to %s" % (link, target))
         os.makedirs(os.path.dirname(link), exist_ok=True)
-        os.symlink(os.path.join(deps, link_name), link)
+        os.symlink(target, link)
 
 
 def _drop_checkout(repo: str, dest: str) -> None:
@@ -872,12 +967,13 @@ def _drop_checkout(repo: str, dest: str) -> None:
 def _replay_row(repo: str, sha: str) -> dict:
     number, title = _pr_of(repo, sha)
     return {"pr": number, "sha": sha, "title": title, "status": "UNKNOWN", "reason": "", "made": 0,
-            "killed": 0, "crashed": 0, "survived": 0, "not_run": 0, "survivors": [], "unusable": {},
-            "skipped": {}, "notes": []}
+            "killed": 0, "crashed": 0, "survived": 0, "not_run": 0, "survivors": [], "not_run_at": [],
+            "unusable": {}, "skipped": {}, "notes": []}
 
 
 def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0, suite_timeout: float = 120,
-              jobs=None, deps=None, pr_budget=None, progress=None) -> dict:
+              jobs=None, deps=None, pr_budget=None, progress=None, base=None, select_all: bool = False,
+              wall_deadline: bool = False) -> dict:
     """Score the suites the pull request merged at `sha` changed against mechanical mutants of the product
     lines it added. Returns a row: pr, sha, title, status ("OK", "UNKNOWN", "NO_PRODUCT" for no product
     file changed, "NO_TESTS" for product code with no suite changed), reason, made, killed, crashed,
@@ -887,12 +983,20 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
     `pr_budget` seconds, counted from the start of this call, had passed before it started. It is never
     a survivor. `progress(line)`, when given, gets one line as each mutant finishes.
     `deps` is a folder shared by many calls, for the installs; None makes one and removes it.
-    A run is read as in report mode: only an assertion kills, and an unusable suite is not a killer."""
+    A run is read as in report mode: only an assertion kills, and an unusable suite is not a killer.
+    `base` is the commit the added lines are read against (default: the first parent of `sha`), so a
+    change that is no merge commit can be scored from its merge base. `select_all` (the `--changed` mode)
+    runs, on the mutants of each file, every suite the profile's `select` lists for it, changed or not;
+    a change with no suite is then no NO_TESTS row, and a mutant no suite reaches is not_run, with its
+    line in `not_run_at`. Without `select_all`, only changed suites run.
+    `wall_deadline` makes `pr_budget` a wall deadline: when it passes, the suites still running are killed
+    (`request_stop`), and each mutant they ran is not_run, never crashed or survived. A note counts the
+    mutants the budget cut. The stop is cleared on the way out. Without it, a running mutant is let finish."""
     started = time.time()
     row = _replay_row(repo, sha)
     code_re, tests_re = re.compile(profile["code"]), re.compile(profile["tests"])
     not_re = re.compile(profile["code_not"]) if profile.get("code_not") else None
-    base = "%s^1" % sha
+    base = base or "%s^1" % sha
     try:
         files = _changed_files(repo, base, sha)
     except ValueError as error:
@@ -904,7 +1008,7 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
     if not code:
         row["status"] = "NO_PRODUCT"
         return row
-    if not suites:
+    if not suites and not select_all:
         row["status"] = "NO_TESTS"
         return row
 
@@ -912,19 +1016,46 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
     try:
         return _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, suite_timeout,
                           jobs or job_count(), deps or os.path.join(own, "deps"),
-                          None if pr_budget is None else started + pr_budget, progress)
+                          None if pr_budget is None else started + pr_budget, progress, select_all, wall_deadline)
     finally:
         shutil.rmtree(own, ignore_errors=True)
 
 
-def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float):
+def _head_copy(repo: str, rel: str, own: str):
+    """The absolute path of repo-relative file `rel` as the clone's HEAD holds it, extracted into `own` with its whole
+    folder so a sibling it loads from beside itself is there too; None when HEAD has no such file. `git archive`
+    leaves out an export-ignore sibling, and a symlinked sibling is not copied."""
+    import io
+    import tarfile
+    try:
+        archive = _git(repo, "archive", "HEAD", "--", os.path.dirname(rel) or rel, binary=True)
+    except ValueError:
+        return None
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+        for member in tar.getmembers():
+            if member.isfile():
+                target = os.path.join(own, member.name)
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with open(target, "wb") as handle:
+                    handle.write(tar.extractfile(member).read())
+    found = os.path.join(own, rel)
+    return found if os.path.isfile(found) else None
+
+
+def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float, head=None):
     """The changed `suites` that the profile's `select` lists for product file `path`, run in checkout `dest`:
     (suites or None, note). None means no list: select is missing from the profile, or failed, and the note says why
-    for a failure. A suite name is a line of the output; any other line is ignored."""
+    for a failure. A suite name is a line of the output; any other line is ignored. With `suites` None, every
+    listed line that the profile's `tests` regex matches and `dest` holds is a suite, changed or not.
+    `head(part)` serves a select argv part that has a "/" and no `{` and that `dest` lacks (a script the commit
+    lacks): the absolute path of the copy at the clone's HEAD, or None. A bare command name is left to PATH.
+    The run stays in `dest`."""
     select = profile.get("select")
     if not select:
         return None, ""
-    argv = [part.replace("{path}", path) for part in select]
+    argv = [head(part) or part if head and "/" in part and "{" not in part
+            and not os.path.exists(os.path.join(dest, part)) else part for part in select]
+    argv = [part.replace("{path}", path) for part in argv]
     try:
         code, output, timed_out = run_in_group(argv, dest, timeout)
     except OSError as error:
@@ -932,11 +1063,14 @@ def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float):
     if timed_out or code != 0:
         return None, "%s: select %s, every changed suite runs" % (path, "timed out" if timed_out else "exited %d" % code)
     listed = {line.strip() for line in output.splitlines()}
+    if suites is None:
+        return sorted(name for name in listed if name and re.search(profile["tests"], name)
+                      and os.path.isfile(os.path.join(dest, name))), ""
     return [suite for suite in suites if suite in listed], ""
 
 
 def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, suite_timeout, jobs, deps,
-               deadline=None, progress=None):
+               deadline=None, progress=None, select_all=False, wall_deadline=False):
     """The body of `replay_pr`, inside the temp folder `own`."""
     clean = {}  # path -> the text a clean run holds: the source, or its normalized form for Python
     found, parse_errors = [], {}
@@ -1005,6 +1139,30 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
             return run_suite_file(dest, suite, bound, argv=command(suite), classify=classify,
                                   cwd=os.path.join(dest, cwd_rel))
 
+        # The suites that `select` lists for each file. None for a file means no list (no select, or it failed): the
+        # changed suites run. With `select_all` the listed suites are the ones to run, so they take the control run.
+        changed = list(suites)
+        paths = sorted({mutant[0] for mutant in mutants})
+        head_copies = {}  # select argv part -> its copy at HEAD (None when HEAD has none), read once per replay
+
+        def head(part):
+            if part not in head_copies:
+                head_copies[part] = _head_copy(repo, part, os.path.join(own, "head"))
+                if head_copies[part]:
+                    row["notes"].append("%s: missing at the commit, read from HEAD" % part)
+            return head_copies[part]
+
+        listed_by = {}
+        for path in paths:
+            listed, note = borrow(lambda dest: _select_suites(profile, dest, path, None if select_all else changed,
+                                                              suite_timeout, head))
+            if note:
+                row["notes"].append(note)
+            listed_by[path] = listed
+        if select_all:
+            suites = sorted({name for path in paths for name in (changed if listed_by[path] is None
+                                                                  else listed_by[path])})
+
         with ThreadPoolExecutor(max_workers=count) as pool:
             control = list(pool.map(lambda suite: borrow(lambda dest: run_one(dest, suite, suite_timeout)), suites))
         usable = []
@@ -1015,31 +1173,35 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
                 slowest = max(slowest, seconds)
             else:
                 row["unusable"][suite] = "not green on the clean source (%s)" % kind
-        if not usable:
+        if not usable and not select_all:
             row["reason"] = "no suite is green on the clean source"
             return row
         usable = [suite for _seconds, suite in sorted(usable)]  # the quickest first: the first assertion ends a mutant
         bound = min(suite_timeout, max(10.0, 5 * slowest))
 
-        # The suites to run on the mutants of each file: the usable changed suites that `select` lists for it, or
-        # all of them when there is no list. A file no usable changed suite reaches gets none: its mutants are not_run.
+        # The suites to run on the mutants of each file: the usable suites that `select` lists for it, or the usable
+        # changed ones when there is no list. A file no usable suite reaches gets none: its mutants are not_run.
         allowed = {}
-        for path in sorted({mutant[0] for mutant in mutants}):
-            listed, note = borrow(lambda dest: _select_suites(profile, dest, path, suites, suite_timeout))
-            if note:
-                row["notes"].append(note)
+        for path in paths:
+            listed = listed_by[path]
             if listed is None:
-                allowed[path] = list(usable)
+                allowed[path] = [suite for suite in usable if suite in changed]
                 continue
             allowed[path] = [suite for suite in usable if suite in listed]
             if not allowed[path]:
-                row["notes"].append("%s: %s" % (path, "no changed suite reaches it" if not listed else
-                                                "the changed suites that reach it are unusable"))
+                who = "suite" if select_all else "changed suite"
+                row["notes"].append("%s: %s" % (path, "no %s reaches it" % who if not listed else
+                                                "the %ss that reach it are unusable" % who))
+
+        expired = threading.Event()  # set by the deadline timer, after it has stopped the live suites
+        progress_lock = threading.Lock()  # print writes text and newline apart, so workers' lines would interleave
 
         def score(dest, mutant):
             path, label, text = mutant
-            if not allowed[path] or (deadline is not None and time.time() > deadline):
+            if not allowed[path]:
                 return None
+            if deadline is not None and (time.time() > deadline or expired.is_set()):
+                return CUT
             _write(os.path.join(dest, path), text)
             try:
                 kinds = set()
@@ -1048,23 +1210,49 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
                     kinds.add(kind)
                     if kind == "assert":
                         break
+            except RuntimeError:  # `run_in_group` refuses a start after `request_stop`
+                if expired.is_set():
+                    return CUT
+                raise
             finally:
                 _write(os.path.join(dest, path), clean[path])
+            if "assert" not in kinds and expired.is_set():
+                return CUT  # the deadline killed a suite part way: its exit says nothing about the mutant
             if progress:
                 verdict = ("killed" if "assert" in kinds else "crashed" if kinds & {"crash", "timeout"}
                            else "survived")
-                progress("  #%d mutant %s  %s:%d %s" % (row["pr"], verdict, path, _line_of(label), label))
+                with progress_lock:
+                    progress("  #%d mutant %s  %s:%d %s" % (row["pr"], verdict, path, _line_of(label), label))
             return kinds
 
-        with ThreadPoolExecutor(max_workers=count) as pool:
-            outcomes = list(pool.map(lambda mutant: borrow(lambda dest: score(dest, mutant)), mutants))
+        timer = None
+        if wall_deadline and deadline is not None:
+            def expire():
+                expired.set()
+                request_stop()
+
+            timer = threading.Timer(max(0.0, deadline - time.time()), expire)
+            timer.daemon = True
+            timer.start()
+        try:
+            with ThreadPoolExecutor(max_workers=count) as pool:
+                outcomes = list(pool.map(lambda mutant: borrow(lambda dest: score(dest, mutant)), mutants))
+        finally:
+            if timer is not None:
+                timer.cancel()
+                timer.join()  # the callback is short: after this, `expired` is final
+                if expired.is_set():
+                    clear_stop()
     finally:
         for dest in made_dirs:
             _drop_checkout(repo, dest)
 
+    cut = 0
     for (path, label, _text), kinds in zip(mutants, outcomes):
-        if kinds is None:
+        if kinds is None or kinds is CUT:
             row["not_run"] += 1
+            row["not_run_at"].append((path, _line_of(label), label))
+            cut += kinds is CUT
         elif "assert" in kinds:
             row["killed"] += 1
         elif kinds & {"crash", "timeout"}:
@@ -1073,8 +1261,15 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
             row["survived"] += 1
             row["survivors"].append((path, _line_of(label), label))
     row["made"] = len(mutants)
+    if cut:
+        row["notes"].append("the budget cut %d of %d mutants: not_run" % (cut, len(mutants)))
     if row["not_run"] == row["made"]:
         row["reason"] = "no mutant ran (%d not run)" % row["not_run"]
+        return row
+    if parse_errors:
+        # a rate over the files that parsed would read as the whole pull request's
+        row["reason"] = "%d file(s) did not parse and were skipped (%s): no rate" % (
+            len(parse_errors), ", ".join(sorted(parse_errors)))
         return row
     row["status"] = "OK"
     return row
@@ -1153,4 +1348,113 @@ def format_replay(rows) -> str:
             len(scored), sum(r["killed"] for r in scored), sum(r["made"] - r.get("not_run", 0) for r in scored),
             sum(r["crashed"] for r in scored), sum(r["survived"] for r in scored),
             ", %d not_run" % not_run if not_run else ""))
+    return "\n".join(lines)
+
+
+def changed_summary(rows) -> dict:
+    """The totals of the rows that `--changed` scored: made, killed, crashed, survived, not_run, and `untested`, the
+    sorted unique `path:line` of each line with a mutant that survived or was not run. A line with one killed and one
+    surviving mutant is untested: the share counts mutants, and the list names the lines where a wrong edit got through."""
+    total = {key: sum(row.get(key, 0) for row in rows) for key in ("made", "killed", "crashed", "survived", "not_run")}
+    lines = {(path, line) for row in rows for path, line, _label in row.get("survivors", []) + row.get("not_run_at", [])}
+    total["untested"] = ["%s:%d" % pair for pair in sorted(lines)]
+    return total
+
+
+def format_changed(rows) -> str:
+    """The `--changed` report: each row as `format_replay_row` writes it, then one `catch share: K/R` line (K killed over R
+    mutants that ran, a crash is no kill; a percentage only when R is above 0, so UNKNOWN never reads as a rate), then one
+    `untested: path:line` line for each untested line."""
+    total = changed_summary(rows)
+    ran = total["made"] - total["not_run"]
+    lines = [format_replay_row(row) for row in rows]
+    share = "%.1f%%" % (100.0 * total["killed"] / ran) if ran else ""
+    lines.append("catch share: %d/%d%s" % (total["killed"], ran, " (%s)" % share if share else ""))
+    lines.extend("untested: %s" % where for where in total["untested"])
+    return "\n".join(lines)
+
+
+def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeout: float = 120) -> list:
+    """Replay planted defects against a clone's HEAD. Each defect is {id, name, file, old, new, argv, classify}: `old` is the one
+    text in `file` that the plant replaces with `new`, and `argv` is the catcher suite, read by the classifier `classify`.
+    Returns [{id, name, verdict, reason}] with the verdict CAUGHT (the suite prints an assertion on the planted copy), MISS
+    (the suite passed, crashed or timed out on it) or UNKNOWN (the anchor is stale or ambiguous, the entry is malformed, the
+    suite is not green on the clean copy, or the install or its link failed). Only an assertion catches, as in a replay. The run
+    is in a checkout of HEAD made like a replay's, so the working tree and the repository are left as found.
+    The checkout is prepared as `--changed` prepares its own. For each part of `profile` (the values of a `parts` profile, else
+    the profile itself) the install runs under `deps`, a folder the caller removes, and its folder is linked beside the
+    lockfile. Parts with one lockfile and one install share one install and one link; any other install runs once more. When an
+    install or a link fails, every defect reads UNKNOWN and its reason names the install and the cause."""
+    if not defects:
+        return []
+    sha = _git(repo, "rev-parse", "HEAD").strip()
+    own = tempfile.mkdtemp(prefix="mutate_defects_")
+    dest = os.path.join(own, "w")
+    results = []
+
+    def all_unknown(reason: str) -> list:
+        return [{"id": str(d.get("id", "?")) if isinstance(d, dict) else "?",
+                 "name": str(d.get("name", "")) if isinstance(d, dict) else "", "verdict": "UNKNOWN", "reason": reason}
+                for d in defects]
+
+    try:
+        _make_checkout(repo, sha, dest, set(), {}, None, {})
+        for part in (list(profile["parts"].values()) if "parts" in profile else [profile]):
+            folder, why = _ensure_deps(repo, sha, part, deps)
+            if why:
+                return all_unknown("the install of the profile failed: %s" % why)
+            try:
+                _link_deps(dest, folder, part)
+            except OSError as error:
+                return all_unknown("the install could not be linked into the checkout: %s" % error)
+        for defect in defects:
+            results.append(_known_defect(dest, defect, suite_timeout))
+    finally:
+        _drop_checkout(repo, dest)
+        shutil.rmtree(own, ignore_errors=True)
+    return results
+
+
+def _known_defect(dest: str, defect: dict, suite_timeout: float) -> dict:
+    """One planted defect in checkout `dest`, which is left as it was found."""
+    result = {"id": str(defect.get("id", "?")), "name": str(defect.get("name", "")), "verdict": "UNKNOWN", "reason": ""}
+    try:
+        file, old, new, argv = defect["file"], defect["old"], defect["new"], list(defect["argv"])
+        classify = CLASSIFIERS[defect["classify"]]
+    except (KeyError, TypeError) as error:
+        result["reason"] = "the entry is malformed: %s %s" % (type(error).__name__, error)
+        return result
+    try:
+        path, text = find_anchor(dest, old, [file])
+    except (StaleMutant, AmbiguousMutant) as error:
+        result["reason"] = str(error)
+        return result
+    try:
+        control = run_suite_file(dest, "", suite_timeout, argv=argv, classify=classify, cwd=dest)[0]
+        if control != "pass":
+            result["reason"] = "the suite is not green on the clean copy (%s)" % control
+            return result
+        apply_mutant(dest, old, new, [file])
+        try:
+            kind = run_suite_file(dest, "", suite_timeout, argv=argv, classify=classify, cwd=dest)[0]
+        finally:
+            _write(path, text)
+    except OSError as error:
+        result["reason"] = "the suite did not run: %s" % error
+        return result
+    result["verdict"] = "CAUGHT" if kind == "assert" else "MISS"
+    if kind != "assert":
+        result["reason"] = {"pass": "the suite passed on the planted defect", "crash": "the suite crashed with no assertion",
+                            "timeout": "the suite passed the timeout"}.get(kind, kind)
+    return result
+
+
+def format_known_defects(results) -> str:
+    """One `CAUGHT|MISS|UNKNOWN id: name [reason]` line for each defect, then a totals line. No defect reads one line."""
+    if not results:
+        return "no known defects listed"
+    lines = ["%s %s: %s%s" % (r["verdict"], r["id"], r["name"], " [%s]" % r["reason"] if r["reason"] else "")
+             for r in results]
+    counts = {verdict: sum(1 for r in results if r["verdict"] == verdict) for verdict in ("CAUGHT", "MISS", "UNKNOWN")}
+    lines.append("known defects: %d caught, %d miss, %d unknown" % (counts["CAUGHT"], counts["MISS"], counts["UNKNOWN"]))
     return "\n".join(lines)

@@ -145,6 +145,9 @@ merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MO
                         Posts nothing: the lane posts it as a PR comment.
 merge --reviewed        one line per open PR that has a review record comment: its state (bad when the newest does not parse) and live CI.
                         Then the PRs with no record.
+merge --reviewed --root DIR [--root DIR ...]
+                        the same list for each repo checkout DIR, one block each, then one batch line per repo:
+                        `open batch now: OWNER/NAME #a`, or `build next batch on the running head: ...`. A failed root prints unknown.
 merge --dev ...         run the checkout's own tree, not origin main
 ```
 
@@ -283,10 +286,10 @@ The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 
 
 `bin/sim-test` runs `xcodebuild test` on one phone simulator. It runs on macOS only, under `/bin/bash` 3.2.
 Run it from the folder that holds the project: `sim-test <xcodebuild test args without -destination>`.
-It reuses the first booted iPhone. With none booted, it boots the shared iPhone 18 Pro, runs the tests, and shuts that simulator down, also on failure, INT and TERM.
+It runs on the Duo by default, or on the iPhone 18 Pro with `--device pro`. It reuses the first booted device of that role. With none booted, it boots the role's device, runs the tests, and shuts that simulator down, also on failure, INT and TERM. With the other phone kind booted, it boots nothing and exits 1. `--hold [--for S] [-- CMD]` keeps the device for S seconds (default 300, max 900) under the same lock, with no xcodebuild.
 Before that boot it applies the guard's cap itself: with 2 devices of any kind booted, it boots nothing, names them, and exits 1.
 It never shuts down a simulator it did not boot. The exit code is xcodebuild's. It holds one Mac-wide lock for the whole run (`state/sim-test.lock` under the config folder). A second run waits for it, up to `SIM_TEST_LOCK_WAIT` seconds (default 300), then exits 1. It also stops a simulator whose SpringBoard crash-loops.
-On its own boot it first takes the pro lease from `bin/sim-lease`, the Mac-wide simulator queue: `sim-lease take --device duo|pro`, `give` and `status`. A take waits for its turn and the load bars (5-minute load under 100, 1-minute load under 60; slot 2 under 60), up to `SIM_LEASE_WAIT` seconds (default 300), then exits 1. A holder that dies is reaped by pid. It does nothing off macOS or under `CI`.
+On its own boot it first takes the role's lease from `bin/sim-lease`, the Mac-wide simulator queue: `sim-lease take --device duo|pro [--udid]`, `give` and `status`. After the grant it checks the booted list again before it boots. A take waits for its turn and the load bars (5-minute load under 100, 1-minute load under 60; slot 2 under 60), up to `SIM_LEASE_WAIT` seconds (default 300), then exits 1. A holder that dies is reaped by pid. It does nothing off macOS or under `CI`.
 
 ## Session tiers and a roadmap record for a repo
 

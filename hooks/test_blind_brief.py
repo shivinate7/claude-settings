@@ -7,16 +7,16 @@ Run it from the repository root:
 
 Contract (the module's own docstring):
 - `brief_faults(text, current=())` lists the faults of one blind brief. A clean brief has none.
-  A brief must follow skills/design-explore/blind-brief.md: a `Lane kind: blind` line, a `Lane:` line,
+  A brief must follow skills/design-explore/blind-brief.md: a `Designer kind: blind` line, a `Designer:` line,
   the free sections Job and Device, and the fixed sections House rules and Deliver word for word. A
   free section may not name the current product, a screenshot or mockup, a path or link, the spec or
   tokens, or a keep or match rule, and holds no colour, font or spacing value. A Palette section, or any
   other colour, font or spacing section, is refused. `current` names views of today's product, refused as words.
 - `run_faults(texts, owner_none="")` lists the faults of one explore run: a brief with no kind line,
-  each blind brief's faults, and a run with no blind lane unless the owner's words for none are given.
+  each blind brief's faults, and a run with no blind designer unless the owner's words for none are given.
 - `--run DIR` checks every *.md brief in DIR: exit 0 clean, 1 with one line per fault, 2 unreadable.
 - As a PreToolUse hook on Agent and Task, a designer spawn is judged by its brief. A blind brief with
-  a fault, or an informed or directed brief with no `Blind lanes:` line of 1 or more (or `none` with
+  a fault, or an informed or directed brief with no `Blind designers:` line of 1 or more (or `none` with
   the owner's quoted words), is refused with rule `blind-brief`. Any other spawn passes. Junk input
   passes with no output.
 
@@ -85,7 +85,7 @@ def fixed(name):
     return body.split("\n## ", 1)[0].strip()
 
 
-def brief(job=JOB, device=DEVICE, palette=None, header="Lane kind: blind\nLane: packages-blind-1",
+def brief(job=JOB, device=DEVICE, palette=None, header="Designer kind: blind\nDesigner: packages-blind-1",
           extra=""):
     return "\n".join([
         header, "",
@@ -130,7 +130,7 @@ class BriefFaults(unittest.TestCase):
             self.assertIn("placeholder", codes(self.m.brief_faults(handle.read())))
 
     def test_duo_brief_is_refused(self):
-        found = codes(self.m.brief_faults("Lane kind: blind\nLane: duo-blind-1\n\n" + DUO_BRIEF))
+        found = codes(self.m.brief_faults("Designer kind: blind\nDesigner: duo-blind-1\n\n" + DUO_BRIEF))
         self.assertTrue({"outside", "section-missing"} <= found, found)
 
     def test_duo_keep_rule_is_refused(self):
@@ -273,9 +273,9 @@ class BriefFaults(unittest.TestCase):
                 self.assertIn(key, codes(self.m.brief_faults(brief(device=DEVICE + "\n" + line))))
 
     def test_text_on_the_kind_line_or_a_second_kind_line_is_refused(self):
-        for header in ("Lane kind: blind, accent #3d5af1\nLane: packages-blind-1",
-                       "Lane kind: blind\nLane kind: blind #3d5af1\nLane: packages-blind-1",
-                       "Lane kind: blind\nLane kind: blind\nLane: packages-blind-1"):
+        for header in ("Designer kind: blind, accent #3d5af1\nDesigner: packages-blind-1",
+                       "Designer kind: blind\nDesigner kind: blind #3d5af1\nDesigner: packages-blind-1",
+                       "Designer kind: blind\nDesigner kind: blind\nDesigner: packages-blind-1"):
             with self.subTest(header=header):
                 self.assertIn("outside", codes(self.m.brief_faults(brief(header=header))))
 
@@ -308,11 +308,11 @@ class BriefFaults(unittest.TestCase):
         self.assertIn("section-empty", codes(self.m.brief_faults(brief(device=""))))
 
     def test_text_outside_the_template_is_refused(self):
-        header = "Lane kind: blind\nLane: packages-blind-1\nSee the app before you start."
+        header = "Designer kind: blind\nDesigner: packages-blind-1\nSee the app before you start."
         self.assertIn("outside", codes(self.m.brief_faults(brief(header=header))))
 
-    def test_missing_lane_line_is_refused(self):
-        self.assertIn("lane", codes(self.m.brief_faults(brief(header="Lane kind: blind"))))
+    def test_missing_designer_line_is_refused(self):
+        self.assertIn("designer", codes(self.m.brief_faults(brief(header="Designer kind: blind"))))
 
     def test_sub_heading_inside_job_passes(self):
         self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n### On mail day\nHe sorts by seller.")), [])
@@ -326,11 +326,26 @@ class BriefFaults(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n" + line)), [])
 
-    def test_lane_name_with_capitals_and_underscore_passes(self):
-        self.assertEqual(self.m.brief_faults(brief(header="Lane kind: blind\nLane: Pack_view-blind-1")), [])
+    def test_designer_name_with_capitals_and_underscore_passes(self):
+        self.assertEqual(self.m.brief_faults(brief(header="Designer kind: blind\nDesigner: Pack_view-blind-1")), [])
 
     def test_wrong_kind_line_is_refused(self):
-        self.assertIn("kind", codes(self.m.brief_faults(brief(header="Lane kind: informed\nLane: packages-blind-1"))))
+        self.assertIn("kind", codes(self.m.brief_faults(brief(header="Designer kind: informed\nDesigner: packages-blind-1"))))
+
+    def test_plain_kind_header_is_read(self):
+        self.assertEqual(self.m.kind_of("Designer kind: blind\nDesigner: packages-blind-1"), "blind")
+
+    def test_kind_header_after_markdown_marks_is_read(self):
+        for line in ("- Designer kind: blind", "**Designer kind:** blind"):
+            with self.subTest(line=line):
+                self.assertEqual(self.m.kind_of(line + "\nDesigner: packages-blind-1"), "blind")
+
+    def test_old_kind_header_is_not_read_as_a_kind(self):
+        # The header before the designer rename, quoted here as data. kind_of reads only the designer
+        # header, so the old one names no kind, and run_faults refuses it for that.
+        old = brief(header="Lane kind: blind\nLane: packages-blind-1")  # glossary-ok: the old header, quoted to be refused
+        self.assertIsNone(self.m.kind_of(old))
+        self.assertIn("kind", codes(self.m.run_faults([old])))
 
 
 class RunFaults(unittest.TestCase):
@@ -338,23 +353,23 @@ class RunFaults(unittest.TestCase):
     def setUpClass(cls):
         cls.m = load()
 
-    def test_duo_run_with_no_blind_lane_is_refused(self):
-        # The incident run: one brief, no blind lane.
-        found = codes(self.m.run_faults(["Lane kind: informed\nBlind lanes: 0\n\n" + DUO_BRIEF]))
-        self.assertIn("no-blind-lane", found)
+    def test_duo_run_with_no_blind_designer_is_refused(self):
+        # The incident run: one brief, no blind designer.
+        found = codes(self.m.run_faults(["Designer kind: informed\nBlind designers: 0\n\n" + DUO_BRIEF]))
+        self.assertIn("no-blind-designer", found)
 
     def test_run_with_a_brief_with_no_kind_is_refused(self):
         self.assertIn("kind", codes(self.m.run_faults([brief(), DUO_BRIEF])))
 
-    def test_run_with_a_clean_blind_lane_passes(self):
-        informed = "Lane kind: informed\nBlind lanes: 1\n\nDraw the packages screen from the spec."
+    def test_run_with_a_clean_blind_designer_passes(self):
+        informed = "Designer kind: informed\nBlind designers: 1\n\nDraw the packages screen from the spec."
         self.assertEqual(self.m.run_faults([brief(), informed]), [])
 
-    def test_run_with_only_informed_lanes_passes_on_owner_words(self):
-        informed = "Lane kind: informed\nBlind lanes: none\n\nDraw it."
-        self.assertEqual(self.m.run_faults([informed], owner_none="only informed lanes this time"), [])
+    def test_run_with_only_informed_designers_passes_on_owner_grant(self):
+        informed = "Designer kind: informed\nBlind designers: none\n\nDraw it."
+        self.assertEqual(self.m.run_faults([informed], owner_none="only informed designers this time"), [])
 
-    def test_run_with_a_bad_blind_lane_is_refused(self):
+    def test_run_with_a_bad_blind_designer_is_refused(self):
         bad = brief(job=JOB + "\nKeep the current layout.")
         self.assertIn("keep", codes(self.m.run_faults([bad])))
 
@@ -375,10 +390,10 @@ class Cli(unittest.TestCase):
     def test_duo_folder_exits_1_and_names_the_fault(self):
         with tempfile.TemporaryDirectory() as folder:
             with open(os.path.join(folder, "duo-informed-1.md"), "w", encoding="utf-8") as h:
-                h.write("Lane kind: informed\nBlind lanes: 0\n\n" + DUO_BRIEF)
+                h.write("Designer kind: informed\nBlind designers: 0\n\n" + DUO_BRIEF)
             done = run_cli("--run", folder)
             self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
-            self.assertIn("no-blind-lane", done.stdout)
+            self.assertIn("no-blind-designer", done.stdout)
 
     def test_current_names_reach_the_check(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -391,7 +406,7 @@ class Cli(unittest.TestCase):
     def test_owner_none_reaches_the_check(self):
         with tempfile.TemporaryDirectory() as folder:
             with open(os.path.join(folder, "packages-informed-1.md"), "w", encoding="utf-8") as h:
-                h.write("Lane kind: informed\nBlind lanes: none\n\nDraw it.")
+                h.write("Designer kind: informed\nBlind designers: none\n\nDraw it.")
             done = run_cli("--run", folder, "--owner-asked-none", "informed only")
             self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
 
@@ -442,7 +457,7 @@ class Devices(unittest.TestCase):
         self.addCleanup(out.tearDown)
         done = out.hook({"hook_event_name": "PreToolUse", "tool_name": "Agent", "session_id": "s1", "cwd": root,
                          "tool_input": {"subagent_type": "designer", "prompt": brief(device="A phone."),
-                                        "description": "lane"}})
+                                        "description": "designer"}})
         out.assertRefused(done)
 
     def test_the_cli_takes_the_repo_root(self):
@@ -478,6 +493,14 @@ class Devices(unittest.TestCase):
                     self.assertNotIn(name, text.lower())
 
 
+def designer_lines(path):
+    """The lines of an agent file after its front matter."""
+    with open(path, encoding="utf-8") as h:
+        lines = h.read().splitlines()
+    fence = [i for i, line in enumerate(lines) if line == "---"]
+    return lines[fence[1] + 1:] if len(fence) > 1 and fence[0] == 0 else lines
+
+
 class DesignerSteps(unittest.TestCase):
     """The designer loads a design skill before it draws and critiques its own mockup before it reports.
 
@@ -489,15 +512,12 @@ class DesignerSteps(unittest.TestCase):
     DRAW = "For each screen the brief names"
     REPORT = "Report once"
     NEGATED = re.compile(r"\b(?:never|not|no|skip|skips|without)\b|n't", re.I)
-    # The blind-lane exception is a skip by nature, so a sentence that names it never orders the run.
+    # The blind-designer exception is a skip by nature, so a sentence that names it never orders the run.
     SETUP = re.compile(r"\b(?:Setup|Launcher)\b")
 
     @classmethod
     def setUpClass(cls):
-        with open(os.path.join(HERE, "..", "agents", "designer.md"), encoding="utf-8") as h:
-            lines = h.read().splitlines()
-        fence = [i for i, line in enumerate(lines) if line == "---"]
-        cls.lines = lines[fence[1] + 1:] if len(fence) > 1 and fence[0] == 0 else lines
+        cls.lines = designer_lines(os.path.join(HERE, "..", "agents", "designer.md"))
 
     def at(self, anchor):
         hits = [i for i, line in enumerate(self.lines) if line.startswith(anchor)]
@@ -514,7 +534,7 @@ class DesignerSteps(unittest.TestCase):
         return (all(re.search(w, sentence, re.I) for w in (r"\brun\b", r"\bimpeccable\b", r"\bcritique\b"))
                 and not self.NEGATED.search(sentence) and not self.SETUP.search(sentence))
 
-    def skips_setup_in_a_blind_lane(self, sentence):
+    def skips_setup_in_a_blind_designer(self, sentence):
         skip = re.search(r"\bskip\b", sentence, re.I)
         return bool(skip and not self.NEGATED.search(sentence[:skip.start()]) and re.search(r"\bblind\b", sentence, re.I)
                     and "Setup" in sentence and "Launcher unavailable" in sentence)
@@ -530,12 +550,28 @@ class DesignerSteps(unittest.TestCase):
                         "no step has a sentence that runs `impeccable` `critique` on its own mockup before the line "
                         "starting %r" % self.REPORT)
 
-    def test_a_blind_lane_critique_skips_impeccable_setup_and_its_launcher_fallback(self):
-        # Setup and the Launcher fallback read PRODUCT.md and DESIGN.md, which a blind lane may not read.
-        self.assertTrue(any(self.skips_setup_in_a_blind_lane(s)
+    def test_a_blind_designer_critique_skips_impeccable_setup_and_its_launcher_fallback(self):
+        # Setup and the Launcher fallback read PRODUCT.md and DESIGN.md, which a blind designer may not read.
+        self.assertTrue(any(self.skips_setup_in_a_blind_designer(s)
                             for step in self.steps(self.REPORT, start=self.DRAW) for s in step),
                         "no sentence between the lines starting %r and %r skips impeccable's Setup and its "
-                        "Launcher fallback in a blind lane" % (self.DRAW, self.REPORT))
+                        "Launcher fallback in a blind designer" % (self.DRAW, self.REPORT))
+
+    def tells_skip_impeccable_context(self, sentence):
+        if re.search(r"\b(?:not|never)\s+skip\b|n't\s+skip\b", sentence, re.I):
+            return False
+        return bool(re.search(r"\bskip\b|\b(?:not|never)\s+run\b|n't\s+run\b", sentence, re.I))
+
+    def test_informed_or_directed_designer_skips_impeccable_context_and_uses_the_launcher_fallback(self):
+        # The review-only guard refuses the launcher to an informed or directed designer. A blind designer skips
+        # the fallback already, so the sentence names the other kinds and never the blind one.
+        found = [s for step in self.steps(self.REPORT) for s in step
+                 if re.search(r"impeccable context", s, re.I) and "Launcher unavailable" in s
+                 and re.search(r"\b(?:informed|directed)\b", s, re.I) and not re.search(r"\bblind\b", s, re.I)
+                 and self.tells_skip_impeccable_context(s)]
+        self.assertTrue(found, "no sentence before the line starting %r tells an informed or directed designer "
+                        "to skip `impeccable context` and use the \"Launcher unavailable\" fallback, "
+                        "without naming the blind kind" % self.REPORT)
 
 
 class Hook(unittest.TestCase):
@@ -555,7 +591,7 @@ class Hook(unittest.TestCase):
 
     def spawn(self, prompt, role="designer", tool="Agent"):
         return self.hook({"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": "s1",
-                          "tool_input": {"subagent_type": role, "prompt": prompt, "description": "lane"}})
+                          "tool_input": {"subagent_type": role, "prompt": prompt, "description": "designer"}})
 
     def assertRefused(self, out):
         self.assertTrue(out, "want a refusal, got no output")
@@ -567,7 +603,7 @@ class Hook(unittest.TestCase):
         self.assertEqual(self.spawn(brief()), "")
 
     def test_duo_blind_designer_spawn_is_refused(self):
-        self.assertRefused(self.spawn("Lane kind: blind\nLane: duo-blind-1\n\n" + DUO_BRIEF))
+        self.assertRefused(self.spawn("Designer kind: blind\nDesigner: duo-blind-1\n\n" + DUO_BRIEF))
 
     def test_blind_spawn_with_keep_rule_is_refused_on_task_too(self):
         self.assertRefused(self.spawn(brief(job=JOB + "\nKeep the current layout."), tool="Task"))
@@ -575,33 +611,53 @@ class Hook(unittest.TestCase):
     def test_plugin_prefixed_designer_is_judged(self):
         self.assertRefused(self.spawn(brief(job=JOB + "\nKeep the current layout."), role="kit:designer"))
 
-    def test_informed_spawn_with_no_blind_lanes_line_is_refused(self):
-        self.assertRefused(self.spawn("Lane kind: informed\n\n" + DUO_BRIEF))
+    def test_informed_spawn_with_no_blind_designers_line_is_refused(self):
+        self.assertRefused(self.spawn("Designer kind: informed\n\n" + DUO_BRIEF))
 
-    def test_informed_spawn_with_zero_blind_lanes_is_refused(self):
-        self.assertRefused(self.spawn("Lane kind: directed, denser\nBlind lanes: 0\n\nDraw it."))
+    def test_informed_spawn_with_zero_blind_designers_is_refused(self):
+        self.assertRefused(self.spawn("Designer kind: directed, denser\nBlind designers: 0\n\nDraw it."))
 
-    def test_informed_spawn_with_blind_lanes_passes(self):
-        self.assertEqual(self.spawn("Lane kind: informed\nBlind lanes: 2\n\n" + DUO_BRIEF), "")
+    def test_informed_spawn_with_blind_designers_passes(self):
+        self.assertEqual(self.spawn("Designer kind: informed\nBlind designers: 2\n\n" + DUO_BRIEF), "")
 
     def test_informed_spawn_with_owner_none_passes(self):
-        self.assertEqual(self.spawn('Lane kind: informed\nBlind lanes: none, owner: "informed only"\n\nDraw it.'), "")
+        self.assertEqual(self.spawn('Designer kind: informed\nBlind designers: none, owner: "informed only"\n\nDraw it.'), "")
 
     def test_owner_none_with_no_words_is_refused(self):
-        self.assertRefused(self.spawn("Lane kind: informed\nBlind lanes: none\n\nDraw it."))
+        self.assertRefused(self.spawn("Designer kind: informed\nBlind designers: none\n\nDraw it."))
 
     def test_blind_kind_after_a_preamble_is_judged(self):
-        self.assertRefused(self.spawn("You are the designer.\nLane kind: blind\nLane: duo-blind-1\n\n" + DUO_BRIEF))
+        self.assertRefused(self.spawn("You are the designer.\nDesigner kind: blind\nDesigner: duo-blind-1\n\n" + DUO_BRIEF))
 
     def test_informed_kind_after_a_preamble_is_judged(self):
-        self.assertRefused(self.spawn("You are the designer.\nLane kind: informed\n\nDraw it."))
+        self.assertRefused(self.spawn("You are the designer.\nDesigner kind: informed\n\nDraw it."))
+
+    def test_old_kind_header_shapes_are_refused_and_name_the_designer_header(self):
+        # The old header is refused, never read as a kind, in each shape a model writes it. The plain
+        # shape is the control. The reason names the new header.
+        shapes = ("Lane kind: blind", "- Lane kind: blind", "* Lane kind: blind", "**Lane kind:** blind",  # glossary-ok: the old header in each shape, quoted to be refused
+                  "## Lane kind: blind", "Lane kind : blind")  # glossary-ok: the old header in each shape, quoted to be refused
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                out = self.spawn(shape + "\nLane: duo-blind-1\n\n" + DUO_BRIEF)
+                self.assertRefused(out)
+                self.assertIn("Designer kind:", reason_of(out))
+
+    def test_old_informed_kind_line_is_refused_and_names_the_designer_header(self):
+        out = self.spawn("Lane kind: informed\nBlind lanes: 2\n\n" + DUO_BRIEF)  # glossary-ok: the old header, quoted to be refused
+        self.assertRefused(out)
+        self.assertIn("Designer kind:", reason_of(out))
+
+    def test_old_kind_header_quoted_mid_sentence_is_not_refused(self):
+        # Green control: the old header counts at a line start only, so prose that quotes it names no kind.
+        self.assertEqual(self.spawn("Its note says Lane kind: blind is retired.\n\n" + DUO_BRIEF), "")  # glossary-ok: quoted mid-sentence, not at a line start
 
     def test_designer_spawn_with_no_kind_passes(self):
         # A small change to one screen skips design-explore and names no kind.
         self.assertEqual(self.spawn(DUO_BRIEF), "")
 
     def test_other_role_passes(self):
-        self.assertEqual(self.spawn("Lane kind: blind\n" + DUO_BRIEF, role="builder"), "")
+        self.assertEqual(self.spawn("Designer kind: blind\n" + DUO_BRIEF, role="builder"), "")
 
     def test_other_tool_passes(self):
         self.assertEqual(self.hook({"tool_name": "Bash", "tool_input": {"command": "true"}}), "")
@@ -611,7 +667,7 @@ class Hook(unittest.TestCase):
         self.assertEqual(self.hook("[]"), "")
 
     def test_refusal_is_logged(self):
-        self.spawn(brief(job=JOB + "\nKeep the current layout."))
+        self.assertRefused(self.spawn(brief(job=JOB + "\nKeep the current layout.")))
         with open(os.path.join(self.config.name, "guard.log"), encoding="utf-8") as handle:
             self.assertIn("blind-brief", handle.read())
 
@@ -643,7 +699,7 @@ def check_run(texts, root=None):
     """The CLI's verdict on one explore run of briefs, as (exit code, fault codes, stdout)."""
     folder = tempfile.mkdtemp(dir=RUN_FOLDER)
     for index, text in enumerate(texts):
-        with open(os.path.join(folder, "lane-%d.md" % (index + 1)), "w", encoding="utf-8") as handle:
+        with open(os.path.join(folder, "designer-%d.md" % (index + 1)), "w", encoding="utf-8") as handle:
             handle.write(text)
     done = run_cli("--run", folder, *(["--root", root] if root else []))
     return done.returncode, fault_codes(done.stdout), done.stdout
@@ -653,7 +709,7 @@ def spawn_in(root, prompt, role="designer", tool="Agent"):
     """The hook's stdout for one spawn whose cwd is `root`. Its config folder is under the run folder."""
     config = tempfile.mkdtemp(dir=RUN_FOLDER)
     payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": "s1", "cwd": root,
-               "tool_input": {"subagent_type": role, "prompt": prompt, "description": "lane"}}
+               "tool_input": {"subagent_type": role, "prompt": prompt, "description": "designer"}}
     done = subprocess.run([sys.executable, MODULE], input=json.dumps(payload), capture_output=True, text=True,
                           env=dict(os.environ, CLAUDE_CONFIG_DIR=config), timeout=60)
     if done.returncode != 0:
@@ -704,17 +760,19 @@ class IosApps(unittest.TestCase):
         self.assertIn("ios-skill", reason_of(out))
 
     def test_informed_spawn_without_ios_apps_gets_ios_skill(self):
-        prompt = "Lane kind: informed\nBlind lanes: 2\n\nDraw the packages screens: the iPhone Duo, folded, then unfolded."
+        prompt = "Designer kind: informed\nBlind designers: 2\n\nDraw the packages screens: the iPhone Duo, folded, then unfolded."
         out = spawn_in(self.ios, prompt)
         self.assertTrue(out, "want a refusal, got no output")
         self.assertIn("ios-skill", reason_of(out))
 
-    def test_informed_spawn_still_needs_its_blind_lanes_line(self):
-        prompt = "Lane kind: informed\n\nFollow skill ios-apps. Draw the iPhone Duo, folded, then unfolded."
-        self.assertIn("Blind lanes", reason_of(spawn_in(self.ios, prompt)))
+    def test_informed_spawn_still_needs_its_blind_designers_line(self):
+        prompt = "Designer kind: informed\n\nFollow skill ios-apps. Draw the iPhone Duo, folded, then unfolded."
+        out = spawn_in(self.ios, prompt)
+        self.assertTrue(out, "want a refusal, got no output")
+        self.assertIn("Blind designers", reason_of(out))
 
-    def test_informed_spawn_with_blind_lanes_and_ios_apps_passes(self):
-        prompt = "Lane kind: informed\nBlind lanes: 2\n\nFollow skill ios-apps. Draw the iPhone Duo, folded, then unfolded."
+    def test_informed_spawn_with_blind_designers_and_ios_apps_passes(self):
+        prompt = "Designer kind: informed\nBlind designers: 2\n\nFollow skill ios-apps. Draw the iPhone Duo, folded, then unfolded."
         self.assertEqual(spawn_in(self.ios, prompt), "")
 
     def test_valid_ios_blind_brief_has_zero_faults(self):
@@ -758,6 +816,46 @@ class IosApps(unittest.TestCase):
     def test_full_form_folded_then_unfolded_gets_no_duo_order(self):
         found, out = self.device_codes("iPhone Duo, folded, then iPhone Duo, unfolded.")
         self.assertEqual(found, set(), out)
+
+    def test_short_form_unfolded_after_folded_gets_no_duo_order(self):
+        found, out = self.device_codes("Draw the Duo unfolded after the Duo folded.")
+        self.assertEqual(found, set(), out)
+
+    def test_short_form_folded_after_unfolded_gets_duo_order(self):
+        found, out = self.device_codes("Draw the Duo folded after the Duo unfolded.")
+        self.assertEqual(found, {"duo-order"}, out)
+
+    def test_unfolded_after_the_header_before_the_folded_duo_gets_duo_order(self):
+        found, out = self.device_codes("Draw the Duo unfolded after the header, before the folded Duo.")
+        self.assertEqual(found, {"duo-order"}, "unfolded is drawn before folded, so duo-order: " + out)
+
+    def test_unfolded_first_then_after_that_the_folded_duo_gets_duo_order(self):
+        found, out = self.device_codes("Draw the Duo unfolded first. After that, draw the Duo folded.")
+        self.assertEqual(found, {"duo-order"}, "unfolded is drawn before folded, so duo-order: " + out)
+
+    def test_unfolded_then_after_a_pause_the_folded_duo_gets_duo_order(self):
+        found, out = self.device_codes("Duo unfolded, then after a pause the folded Duo.")
+        self.assertEqual(found, {"duo-order"}, "unfolded is drawn before folded, so duo-order: " + out)
+
+    def test_unfolded_first_then_after_that_the_duo_folded_gets_duo_order(self):
+        found, out = self.device_codes("Draw the Duo unfolded first, then after that the Duo folded.")
+        self.assertEqual(found, {"duo-order"}, "unfolded is drawn before folded, so duo-order: " + out)
+
+    def test_folded_first_then_after_that_the_duo_unfolded_gets_no_duo_order(self):
+        found, out = self.device_codes("Draw the Duo folded first, then after that the Duo unfolded.")
+        self.assertEqual(found, set(), "folded is drawn before unfolded, so no duo-order: " + out)
+
+    def test_folded_after_the_header_before_the_unfolded_duo_gets_no_duo_order(self):
+        found, out = self.device_codes("Draw the folded Duo after the header, before the unfolded Duo.")
+        self.assertEqual(found, set(), "folded is drawn before unfolded, so no duo-order: " + out)
+
+    def test_before_the_folded_duo_draw_the_unfolded_gets_duo_order(self):
+        found, out = self.device_codes("Before the folded Duo, draw the unfolded Duo.")
+        self.assertEqual(found, {"duo-order"}, "unfolded is drawn before folded, so duo-order: " + out)
+
+    def test_before_the_unfolded_duo_draw_the_folded_gets_no_duo_order(self):
+        found, out = self.device_codes("Before the unfolded Duo, draw the folded Duo.")
+        self.assertEqual(found, set(), "folded is drawn before unfolded, so no duo-order: " + out)
 
 
 def tearDownModule():

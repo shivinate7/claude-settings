@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""CLI tests for the scope detector (.github/scripts/ci-scope.sh).
+"""CLI tests for the scope detector (.github/scripts/ci-scope.sh) and the mod test runner (.github/scripts/mod-tests.sh).
 
-Each case builds a scratch git repo, commits a base, commits the changed paths, runs the script
+Each scope case builds a scratch git repo, commits a base, commits the changed paths, runs the script
 with EVENT and BASE_SHA set, and reads the name=value lines it wrote to $GITHUB_OUTPUT.
-CI_SCOPE overrides the script path (for a successor). Needs bash on PATH.
+CI_SCOPE overrides the script path (for a successor). Needs bash on PATH. The mod runner cases build a
+scratch tree with a copy of mod-tests.sh and run it there; they need node on PATH.
 
 Output names pinned (the `scope` job re-exports them as job outputs):
   JOB_FLAGS  one per check job except the lint job `checks`: checks_windows, checks_windows_merge,
@@ -22,6 +23,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  copies the script under test into a scratch tree; rm_tree removes the run folder
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
@@ -37,8 +41,9 @@ def git(cwd, *a):
     return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def run(paths, event="pull_request", base="auto", existing=(), landed=None):
-    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit."""
+def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref=""):
+    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `head_ref` is HEAD_REF,
+    empty when not given, so no HEAD_REF of the caller's environment reaches the script."""
     with tempfile.TemporaryDirectory() as d:
         git(d, "init", "-q")
         git(d, "config", "user.email", "t@t")
@@ -65,7 +70,7 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None):
         git(d, "add", "-A")
         git(d, "commit", "-qm", "head", "--allow-empty")
         out = os.path.join(d, "..", f"out-{os.getpid()}.txt")
-        env = dict(os.environ, EVENT=event, GITHUB_OUTPUT=out,
+        env = dict(os.environ, EVENT=event, GITHUB_OUTPUT=out, HEAD_REF=head_ref,
                    BASE_SHA=sha if base == "auto" else base)
         r = subprocess.run([BASH, os.path.abspath(SCRIPT)], cwd=d, env=env, capture_output=True, text=True)
         assert r.returncode == 0, r.stdout + r.stderr
@@ -301,13 +306,17 @@ class Scope(unittest.TestCase):
     # Each arm that turns `mods` on starts both mod jobs, as a new file and as an edit. An edit leaves every
     # other job flag off, so the set is exact. A new file under lint/ or skills/ is in a landed dir, which adds
     # shell_macos and guard by its own rule, so a new file is checked for the jobs it must not start.
-    MOD_ARMS = ["mods/zz-new/a.mjs", "lint/test_scanner_traps.mjs", "skills/plain-english-map/README.md"]
+    # `.gitignore` is an arm too: skills/plain-english-map/tests/typescript-home.test.mjs reads it, so a .gitignore-only
+    # pull request must run the CI step. It keeps `code`, which its lint suites read.
+    MOD_ARMS = ["mods/zz-new/a.mjs", "lint/test_scanner_traps.mjs", "skills/plain-english-map/README.md", ".gitignore"]
 
     def test_each_mods_arm_starts_the_windows_and_macos_jobs(self):
         for p in self.MOD_ARMS:
             with self.subTest(path=p, edit=True):
-                want = {"mods", "checks_windows", "checks_macos"} | ({"code"} if p.startswith("lint/") else set())
-                self.assertEqual(self.true_set(run([p], existing=[p])), want)
+                code_arm = p.startswith("lint/") or p == ".gitignore"
+                want = {"mods", "checks_windows", "checks_macos"} | ({"code"} if code_arm else set())
+                self.assertEqual(self.true_set(run([p], existing=[p])), want,
+                                 msg=f"{p}: the mods arm must start the CI step and both mod jobs, and keep code")
             with self.subTest(path=p, edit=False):
                 self.assertFlags(run([p]), want_true=["mods"] + self.MOD_JOBS,
                                  want_false=["checks_windows_merge", "checks_windows_rest", "pointer_windows"])
@@ -414,6 +423,108 @@ class Scope(unittest.TestCase):
         self.assertFlags(got, want_false=["code", "shoot"])
         self.assertIn("checks_guard", got, got)
         self.assertEqual(got["checks_guard"], "false", f"checks_guard: {got}")
+
+
+# The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
+# root, so each case runs a copy of it inside a scratch tree under the run folder.
+@unittest.skipUnless(BASH, "bash not on PATH")
+class ModTestsRunsEveryCheck(unittest.TestCase):
+    SENTINEL = "zz-mod-check-ran"
+    # Candidate names for the passing test file. find lists by the filesystem's directory order, which depends on
+    # the names, so a case tries these until one lists check.mjs where it needs it.
+    TEST_NAMES = ["plain-diff.test.mjs"] + [f"{c}.test.mjs" for c in "abcdefghijklmnop"]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.run_dir = _test_temp.run_folder()
+
+    @classmethod
+    def tearDownClass(cls):
+        tracked_tree.rm_tree(cls.run_dir)
+
+    def setUp(self):
+        # In CI a missing node is a red run, never a skip: the mod phase cannot run without it.
+        if shutil.which("node") is None:
+            if os.environ.get("CI"):
+                self.fail("node is not on PATH in CI, so the mod phase cannot run")
+            self.skipTest("node not on PATH")
+
+    @staticmethod
+    def node_script(exit_code, say=None):
+        """A node file that prints `say` to stderr, then exits with `exit_code`."""
+        printed = f"console.error({say!r});\n" if say else ""
+        return printed + f"process.exit({exit_code});\n"
+
+    def make_tree(self, name, test=None, check=None, test_name="plain-diff.test.mjs"):
+        """A scratch tree: mod-tests.sh, one mod test file (passing by default), and mods/plain-diff/check.mjs if `check` is given."""
+        tree = os.path.join(self.run_dir, name)
+        tracked_tree.copy_tracked(tree, ".github/scripts")
+        plain = os.path.join(tree, "mods", "plain-diff")
+        os.makedirs(plain)
+        with open(os.path.join(plain, test_name), "w") as f:
+            f.write(test or self.node_script(0))
+        if check is not None:
+            with open(os.path.join(plain, "check.mjs"), "w") as f:
+                f.write(check)
+        return tree
+
+    def run_phase(self, tree):
+        """The mods phase of the copied script, run from `tree`, which holds every file the phase can see."""
+        return subprocess.run([BASH, os.path.join(tree, ".github", "scripts", "mod-tests.sh"), "mods"],
+                              cwd=tree, capture_output=True, text=True)
+
+    def listing(self, tree):
+        """The .mjs files under mods/ in the order find lists them. The mod phase lists a subset of these in the same order."""
+        r = subprocess.run(["find", "mods", "-type", "f", "-name", "*.mjs"], cwd=tree, capture_output=True, text=True, check=True)
+        return r.stdout.split()
+
+    def tree_listing_check(self, name, check_last):
+        """A scratch tree with one passing test file and the red check, listed last (check_last) or first."""
+        for i, test_name in enumerate(self.TEST_NAMES):
+            tree = self.make_tree(f"{name}-{i}", check=self.node_script(1, self.SENTINEL), test_name=test_name)
+            listed = self.listing(tree)
+            if len(listed) == 2 and listed[-1].endswith("check.mjs") == check_last:
+                return tree
+        self.fail(f"no candidate test name lists check.mjs {'last' if check_last else 'first'} on this filesystem")
+
+    # Scope first: the phase ran at all. The asserts after it say what the phase did with the check file. Both orders run,
+    # because a phase that takes only the last file's exit code hides a red check listed before a passing file.
+    def test_a_red_check_script_fails_the_mod_phase_in_either_order(self):
+        for check_last in (True, False):
+            with self.subTest(check_last=check_last):
+                r = self.run_phase(self.tree_listing_check(f"red-check-{check_last}", check_last))
+                self.assertIn("mod tests:", r.stdout, "the mod phase printed no count line, so it did not run")
+                # Named failure: check.mjs never runs, because the phase globs *.test.mjs only.
+                self.assertIn(self.SENTINEL, r.stdout + r.stderr, "mods/plain-diff/check.mjs did not run: the mod phase skips it")
+                self.assertNotEqual(r.returncode, 0, "mods/plain-diff/check.mjs failed, and the mod phase still exited 0")
+
+    # Green control: a passing check file leaves the phase green, so the fix cannot turn it red.
+    def test_a_green_check_script_leaves_the_mod_phase_green(self):
+        r = self.run_phase(self.make_tree("green-check", check=self.node_script(0, self.SENTINEL)))
+        self.assertIn("mod tests:", r.stdout, "the mod phase printed no count line, so it did not run")
+        self.assertEqual(r.returncode, 0, f"a passing mods/plain-diff/check.mjs turned the mod phase red:\n{r.stdout}{r.stderr}")
+
+    # Green control: a red *.test.mjs already fails the phase.
+    def test_a_red_test_file_fails_the_mod_phase(self):
+        r = self.run_phase(self.make_tree("red-test", test=self.node_script(1)))
+        self.assertIn("mod tests:", r.stdout, "the mod phase printed no count line, so it did not run")
+        self.assertNotEqual(r.returncode, 0, "a red *.test.mjs passed the mod phase")
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class MutationReport(unittest.TestCase):
+    """The mutation_report output: on a pull request only from a `batch-` branch, and on every other event."""
+
+    # Named failure: the mutation-report job starts on every pull request, or on none, not only the batch ones.
+    def test_only_a_batch_pull_request_turns_it_on_and_a_push_always_does(self):
+        feature = run(["README.md"], head_ref="feature-x")
+        self.assertIn("mutation_report", feature, feature)
+        self.assertEqual(feature["mutation_report"], "false", f"a pull request from feature-x: {feature}")
+        batch = run(["README.md"], head_ref="batch-11")
+        self.assertEqual(batch["mutation_report"], "true", f"a pull request from batch-11: {batch}")
+        push = run(["README.md"], event="push")
+        self.assertEqual(push["mutation_report"], "true", f"a push: {push}")
+
 
 if __name__ == "__main__":
     unittest.main()
