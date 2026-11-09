@@ -289,6 +289,8 @@ RED = [
     ("credential name with a live-key value", "API_KEY='" + "sk_live_" + "9fQ2xZ7Lk3'", "9fQ2xZ7Lk3"),
     ("password in minified code with a real value", 'password:"' + "hunter2" + '-Secret!"', "hunter2-Secret!"),
     ("URL credentials on a host name with a short password", "https://user:" + "p4ss" + "@host.example.com/", "p4ss"),
+    ("password that starts with !0", "password:" + "!0hunter2", "!0hunter2"),
+    ("credential name with a value that starts with return", "api_key=" + "return9fQ2xZ7Lk3", "return9fQ2xZ7Lk3"),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -300,6 +302,9 @@ GREEN = [
     ("minified JS boolean after a password word", "password:!0"),
     ("minified code with :// and a colon and @ across quotes and brackets", '"https://a"})];U&&(c=I==null||x:y@b'),
     ("minified keyCode comparison", "e.keyCode===13&&e.preventDefault()"),
+    # The same shapes as a real bundled page has them: booleans in a run, and a switch case on a key event name.
+    ("minified JS booleans in a run after a password word", "password:!0,range:!0,search:!0,tel:!0};function"),
+    ("minified switch case on a key event name", 'switch(a){case "keyup":return-1!==Hj.indexOf(b.keyCode);'),
     ("password manager", "password manager"),
     ("private key rotation", "rotate the private key"),
     # A public key block is not a secret. A fix that drops PRIVATE from the shape would refuse it.

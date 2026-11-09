@@ -145,6 +145,10 @@ SECRET_SHAPES = (
 # a word after it on the same line may be the secret (`none hunter2`). Anything else is refused.
 PLAIN_VALUES = frozenset(("optional", "required", "none", "null", "empty", "unset", "hidden", "redacted", "omitted"))
 JS_BOOLEANS = frozenset(("!0", "!1"))  # minified `true` and `false`
+# A minified boolean that ends the value or is followed by the next `,` `;` `}` `)` of a run: `password:!0,range:!0`.
+JS_BOOLEAN_RUN = re.compile(r"!(?:0|1)(?:[,;})].*)?")
+# A JS keyword then a non-word: code after a `case "keyup":`, not a literal value.
+JS_KEYWORD_VALUE = re.compile(r"(?:return|void|typeof|throw)[-+!~(]")
 MASK_VALUE = re.compile(r"[*•#]{3,}|[xX]{3,}")
 # `<placeholder words>` has no digits. A variable reference has an ALL_CAPS name, so `$Tr0ub4dor` and `${hunter2}` refuse.
 PLACEHOLDER_VALUE = re.compile(
@@ -201,6 +205,8 @@ def bare_value(value):
 def password_is_no_secret(found):
     """True when the value after a password word is a plain word, a mask or a placeholder, or `found` is
     `PWD=<path>`, and nothing but blanks follows it on its line."""
+    if JS_BOOLEAN_RUN.fullmatch(found.group(2)):
+        return True
     if REST_OF_LINE.match(found.string, found.end()).group(0).strip():
         return False
     value = bare_value(found.group(2))
@@ -261,6 +267,8 @@ def credential_is_no_secret(found):
     if value:
         return found.group("sep") == ":" and letters_are_words(value)
     value = found.group("mixed")
+    if value and JS_KEYWORD_VALUE.match(value):
+        return True
     return (bool(value) and HYPHEN_WORDS.fullmatch(value) is not None
             and found.string[found.end():found.end() + 1] in VALUE_END | {""}
             and letters_are_words(re.sub(r"\d", "", value)))
