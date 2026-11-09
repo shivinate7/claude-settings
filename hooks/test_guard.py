@@ -13041,6 +13041,24 @@ sh("frozen shell: a case with the pattern alone on its line, a cd into the confi
 sh("frozen shell: a case with a) on the header line and the cd on a later line, then esac and sed -i on "
    "settings.json, from outside, denies [header pattern control]",
    "case x in a)\ncd " + slash(CFG) + "\n;;\nesac; sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
+# A pattern glued to its body (`a)cd`) is an arm the guard does not close, so the cd leaks past esac. The cd in arm a
+# runs only when a is taken, yet `;;` does not reset the folder state, so the write in arm b is judged in the config
+# folder. The three controls after it hold `;&` and a lone quote in quoted text, a comment or an echo: not arm syntax.
+sh("frozen shell: a case arm with its pattern glued to a cd into the config folder, then esac and sed -i on "
+   "settings.json, from outside, denies [glued arm body red]",
+   "case x in a)cd " + slash(CFG) + ";; esac; sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a case whose arm a cds into the config folder and whose later arm b runs sed -i on settings.json, "
+   "from outside, allows [cd does not carry into a later arm red]",
+   "case x in\na) cd " + slash(CFG) + " ;;\nb) sed -i s/a/b/ settings.json ;;\nesac", "allow", cwd=NOGIT)
+sh("frozen shell: an echo of a quoted ;& b) cd into the config folder, then sed -i on settings.json, from outside, "
+   "allows [quoted fall-through control]",
+   "echo 'x ;& b) cd " + slash(CFG) + "'; sed -i s/a/b/ settings.json", "allow", cwd=NOGIT)
+sh("frozen shell: a # comment holding ;& b) cd into the config folder, then sed -i on settings.json, from outside, "
+   "allows [comment fall-through control]",
+   "# x ;& b) cd " + slash(CFG) + "\nsed -i s/a/b/ settings.json", "allow", cwd=NOGIT)
+sh("frozen shell: a case arm that echoes a lone quote, then esac and sed -i on settings.json, from outside, "
+   "allows [lone quote in a case arm control]",
+   "case x in a) echo \"don't\" ;; esac; sed -i s/a/b/ settings.json", "allow", cwd=NOGIT)
 # Five cds, then a frozen write. The absolute chain is refused. The `../` chain reaches the same folders, and the walk
 # normalises each `..` step, so it is refused too. Both chains end on the config folder, and the notes.txt rows are the
 # same chains on a file that is not frozen.
