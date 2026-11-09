@@ -1180,10 +1180,10 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertIsNone(self.stop(bad, True))
 
     def test_rw_three_stops_block_once_and_leave_no_marker(self):
-        # Pin (green on 3cfa1b1f9) of the three-Stop probe in review note 75: Stop 1 blocks for the missing report and
-        # writes the marker, Stop 2 gives a correction block and consumes it, Stop 3 stays quiet. The shared step
-        # missing_report_block() is the first stop. test_rw_second_rewrite_stays_quiet checks the outputs only, so this
-        # case reads the marker file too: a correction that re-arms it would loop.
+        # Catches: a report marker that is not written, or that a correction leaves behind. Stop 1 blocks for the
+        # missing report and writes the marker, Stop 2 gives a correction block and consumes it, Stop 3 stays quiet.
+        # The shared step missing_report_block() is the first stop. test_rw_second_rewrite_stays_quiet checks the
+        # outputs only, so this case reads the marker file too: a correction that re-arms it would loop.
         import local_time  # hooks/ is on sys.path; the same path helper the guard writes through
         marker = local_time.report_marker_path(self.sid)
         self.assertIsNotNone(marker, "no marker path for the test session")
@@ -1541,9 +1541,9 @@ class CompactionCarryTests(unittest.TestCase):
         # Catches: a PR with no "#" passes as a source: "PR2", "PR3", "PR   <n>" (spaces), "PR <n>", "GitHub PR <n>",
         # "pr 2 of the plan", "the PR 3 times", and a bare PR beside a page or git word, which that word does not
         # rescue: "PR <n> on the page", "PR <n> (page)", "PRs <n> (page)", "PR no. <n> (page)", "PR-<n> on the page",
-        # "PR: 978 (git)", "PR number 978 (git)". The pick (coordinator, 2026-11-08 07:54 CST): a PR source needs
+        # "PR: 97 (git)", "PR number 97 (git)". The coordinator's pick: a PR source needs
         # "#<n>". The "#" form is the source (test_cc_green_recovered_item_naming_a_commit_pr_or_url_passes), and the
-        # green controls are "PR #3" and "PR #978 on the page" (test_cc_green_spaced_pr_hash_is_a_source).
+        # green controls are "PR #3" and "PR #97 on the page" (test_cc_green_spaced_pr_hash_is_a_source).
         items = ["ruling X from PR2", "ruling X from PR3", "ruling X from PR   3", "ruling X from PR 978",
                  "ruling X from GitHub PR 978", "ruling X from pr 2 of the plan", "ruling X from the PR 3 times",
                  "ruling X from PR 978 on the page", "ruling X from PRs 978 (page)", "ruling X from PR no. 978 (page)",
@@ -1614,7 +1614,7 @@ class CompactionCarryTests(unittest.TestCase):
 
     def test_cc_green_spaced_pr_hash_is_a_source(self):
         # Catches: "PR #<n>" refused as sourceless. It is the control for the cases above: a narrowing that drops
-        # only the no-space forms must leave it a source. "PR #978 on the page" is the control for the page-word case.
+        # only the no-space forms must leave it a source. "PR #97 on the page" is the control for the page-word case.
         for item in ("ruling X from PR #3", "ruling X from PR #978 on the page"):
             with self.subTest(item=item):
                 reply = report_lines("Recovered: " + item, "Handoff gave: none")
