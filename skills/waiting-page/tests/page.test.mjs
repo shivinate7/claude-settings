@@ -3917,7 +3917,7 @@ const restoredGlyph = (g) => {
   const first = g.lines[0];
   return g.glyphTop >= first.t - 1 && g.glyphTop <= first.b ? null : `the check glyph's top is ${Math.round(g.glyphTop)} px, outside the first line box at ${Math.round(first.t)} to ${Math.round(first.b)} px`;
 };
-// Named reds: the two sizes the round 2 review named. Each is one width, so a failure names it.
+// Named reds: the two sizes where a word of the Restored. message breaks. Each is one width, so a failure names it.
 for (const [width, pct] of [[220, 200], [280, 300]]) for (const scheme of SCHEMES) {
   test(`ask list, ${scheme}: ${sizeWhere(width, pct)}: no line of the Restored. message holds a fragment of a word`, async (t) => {
     const page = await restoredPage(t, { width, pct, scheme }); if (!page) return;
@@ -8493,13 +8493,18 @@ for (const scheme of ["light", "dark"]) test(`a long lane slug and an unbroken r
 // The owner's last answer holds the note, and the card's thread (section#thread-<id>) draws it as a .rnote. The token is THREAD_TOKEN: 60
 // characters with no break. Each sweep resizes one page through every width from 180 to 390 wide in steps of 5 px, at 100%, 200% and 300% text.
 // 1280 wide at 100% is the control: the token fits there. The panel the thread must stay inside is its item card (article.card).
-async function tokenCardPage(t, { width, pct = 100, scheme = "light" }) {
+// wideBlock: when given, a text-free block of that many px is put in the thread after the note, to test the track against a child that asks for more width.
+async function tokenCardPage(t, { width, pct = 100, scheme = "light", wideBlock = 0 }) {
   const it = mk("tok-thread", 1, { lastAnswer: { choice: "a", note: THREAD_TOKEN, at: LA_AT } });
   const page = await open(t, { items: [it], viewport: { width, height: 800 }, scheme }); if (!page) return null;
   if (pct !== 100) await zoomedTo(page, pct);
   await mustHave(page, "#thread-tok-thread .rnote", "the owner's note in the thread");
   const said = await page.locator("#thread-tok-thread .rnote").textContent();
   assert.ok(said.includes(THREAD_TOKEN), `the thread's note reads ${JSON.stringify(said.slice(0, 40))}, not the token`);
+  if (wideBlock) {
+    await page.evaluate((px) => document.getElementById("thread-tok-thread").insertAdjacentHTML("beforeend", `<span class="wide" style="display: block; width: ${px}px; height: 1px"></span>`), wideBlock);
+    await mustHave(page, "#thread-tok-thread > .wide", `the ${wideBlock} px block in the thread`);
+  }
   return page;
 }
 // The thread's box, then its text, against its card's edges, to half a pixel. A box inside the card can still hold text that runs past it.
@@ -8536,6 +8541,17 @@ for (const scheme of SCHEMES) {
     const page = await tokenCardPage(t, { width: 1280, scheme }); if (!page) return;
     const fault = await sidewaysFault(page);
     assert.ok(!fault, fault);
+  });
+}
+
+// A text-free block 480 px wide, wider than the thread at every width here. The thread's track is minmax(0, 1fr), so the block does not
+// widen it, and the note's text wraps inside the card. The check measures the thread and its text, not the block, which sits past the thread's edge.
+for (const pct of [100, 200, 300]) for (const scheme of SCHEMES) {
+  test(`item card, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, a 480 px block in the thread leaves the thread inside its card`, async (t) => {
+    const page = await tokenCardPage(t, { width: 180, pct, scheme, wideBlock: 480 }); if (!page) return;
+    const widths = widthsFrom(180, 390, 5);
+    const faults = await sweepWidths(page, widths, 800, threadInCardFault);
+    assert.equal(faults.length, 0, `${faults.length} of ${widths.length} widths put the thread outside its card, the first: ${faults[0]}`);
   });
 }
 
