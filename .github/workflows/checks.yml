@@ -102,7 +102,7 @@ jobs:
           echo "$PWD/actions/code-check/tools/node_modules/.bin" >> "$GITHUB_PATH"
 
       # Ruff, mypy (strict, over the .code-check.json list), ShellCheck, tsc and astro-check, from the table in
-      # actions/code-check/standard.json. Fails on a tracked language with no row. No format step.
+      # lint/code_check_standard.json. Fails on a tracked language with no row. No format step.
       - name: Code check
         uses: $/actions/code-check
         with:
@@ -206,6 +206,9 @@ jobs:
       - name: Daily note fixture suite
         run: python3 hooks/test_daily_note.py
 
+      - name: Git mailbox suite
+        run: python3 hooks/test_mail.py
+
       - name: No-window helper fixture suite
         run: python3 hooks/test_nowindow.py
 
@@ -224,6 +227,10 @@ jobs:
 
       - name: Guard wrappers fixture suite
         run: python3 hooks/test_wrappers.py
+
+      # Fuzzes every deny check that judge_shell and judge reach, with each tool judge branches on. Linux only, like the other guard-module suites here.
+      - name: Deny checks never raise suite
+        run: python3 hooks/test_checks_never_raise.py
 
       - name: Session start notice suite
         run: python3 hooks/test_session_start.py
@@ -246,8 +253,14 @@ jobs:
       - name: Stop-hook hand-off cite suite
         run: python3 lint/test_report_guard_handoff.py
 
+      - name: Stop-hook cannot-claim suite
+        run: python3 lint/test_report_guard_cannot.py
+
       - name: Stop-hook landing fixture suite
         run: python3 lint/test_report_guard_landing.py
+
+      - name: Stop-hook owner-safe reason suite
+        run: python3 lint/test_report_guard_remedy.py
 
       - name: Stop-hook review-record fixture suite
         run: python3 lint/test_report_guard_review.py
@@ -280,6 +293,9 @@ jobs:
       - name: Wait-pid helper fixture suite
         run: python3 lint/test_wait_pid.py
 
+      - name: Wait-until helper fixture suite
+        run: python3 lint/test_wait_until.py
+
       - name: sim-lease fixture suite
         run: python3 lint/test_sim_lease.py
 
@@ -306,6 +322,9 @@ jobs:
 
       - name: Scope detector fixture suite
         run: python3 lint/test_ci_scope.py
+
+      - name: Touched-test selector fixture suite
+        run: python3 lint/test_touched_tests.py
 
       - name: rm shim fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -345,11 +364,17 @@ jobs:
       - name: Hook stub fixture suite
         run: python3 lint/test_check_hook_stubs.py
 
+      - name: Hook dup-name fixture suite
+        run: python3 lint/test_check_hook_dup_names.py
+
       - name: Record slug fixture suite
         run: python3 lint/test_check_record_slugs.py
 
       - name: Red-run trailer fixture suite
         run: python3 lint/test_check_red_run.py
+
+      - name: Plan refuter fixture suite
+        run: python3 lint/test_check_plan_refuter.py
 
       - name: Copy finder fixture suite
         run: python3 lint/test_find_copies.py
@@ -369,6 +394,9 @@ jobs:
       - name: Hook stub check
         run: python3 lint/check_hook_stubs.py
 
+      - name: Hook dup-name check
+        run: python3 lint/check_hook_dup_names.py
+
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
 
@@ -378,6 +406,12 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_red_run.py --base "origin/$BASE_REF"
+
+      - name: Plan refuter line
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 lint/check_plan_refuter.py --base "origin/$BASE_REF"
 
       # No `if:`: ci-scope.sh turns no flag on for a docs/map/*.md path, and a map page changed alone must still be read.
       # The script says why it runs `npm ci` first.
@@ -537,7 +571,9 @@ jobs:
       - name: Playwright setup action suite
         run: python3 actions/playwright-setup/test_action.py
 
-      # Its own 4 min watchdog reads a hang red, names the hung test and prints the process tree.
+      # The suite's own watchdog (actions/stamp/suite_watchdog.mjs) ends it at 180 s. A hang reads red,
+      # with the hung test named and its process tree killed. A process the suite started and left
+      # running reads red too, killed and named; so does a sweep that could not read.
       - name: Record stamp engine fixture suite
         run: node actions/stamp/test_stamp.mjs
 
@@ -975,9 +1011,17 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_report_guard_handoff.py
 
+      - name: Stop-hook cannot-claim suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_cannot.py
+
       - name: Stop-hook landing fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_report_guard_landing.py
+
+      - name: Stop-hook owner-safe reason suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_remedy.py
 
       - name: Ruling home fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -995,12 +1039,20 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_wait_pid.py
 
+      - name: Wait-until helper fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_wait_until.py
+
       - name: Unknown-read contract (guard + session_start)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/check_unknown_reads_contract.py
 
-      # This suite takes 1.5 min at most. Its own 4 min watchdog reads a hang red, names the hung test,
-      # prints the process tree and kills it. timeout-minutes is the backstop.
+      # The suite's own watchdog (actions/stamp/suite_watchdog.mjs) ends it at 180 s; the slowest normal
+      # run took 102 s (run 42456407663). A hang reads red there, with the hung test named, and its process
+      # tree killed. A process the suite started and left running reads red too, killed and named with its
+      # pid and command line, even on a normal finish; so does a sweep that could not read. Worst case,
+      # with every bounded call counted: 180 s cap + 30 s hard stop + 35 s longest blocking call + 10 s
+      # kills + 2 s output drain = 257 s. The CI step's timeout-minutes (300 s) is the backstop.
       - name: Record stamp engine fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         timeout-minutes: 5
@@ -1219,6 +1271,15 @@ jobs:
       - name: Guard mutation test
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/mutate_guard.py
+
+      # The progress beat of hooks/test_guard.py (decision stall-watch). Runs in this job, not checks-guard, which sits at 84%
+      # of its cap (decision ci-job-caps); this job is projected at 64% of 25 min, and this step adds 101 s locally (16 tests, about 1.7 min,
+      # so about 71%, past the 70% warn line of the merge tool).
+      # Same `guard` scope flag as the guard mutation test above. Own 5 min cap (3x the local time), so a hang reads red here.
+      - name: Guard progress beat suite
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        timeout-minutes: 5 # provisional: no CI run yet; 101 s measured locally
+        run: python3 hooks/test_guard_beat.py
 
   # The mutation report of a batch (decision mutation-report-scores-suites, owner item mutation-ci-job, 2026-11-05). It runs on
   # a pull request from a `batch-` branch (the scope flag mutation_report, set from the head ref) and on workflow_dispatch.
@@ -1643,9 +1704,17 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python lint/test_report_guard_handoff.py
 
+      - name: Stop-hook cannot-claim suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python lint/test_report_guard_cannot.py
+
       - name: Stop-hook landing fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python lint/test_report_guard_landing.py
+
+      - name: Stop-hook owner-safe reason suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python lint/test_report_guard_remedy.py
 
       - name: Ruling home fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -1679,8 +1748,13 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python janitor/test_install_schtasks.py
 
-      # This suite takes 1.5 min at most. Its own 4 min watchdog reads a hang red, names the hung test,
-      # prints the process tree and kills it. timeout-minutes is the backstop.
+      # The suite's own watchdog (actions/stamp/suite_watchdog.mjs) ends it at 180 s; the slowest normal
+      # run took 102 s (run 42456407663). A hang reads red there, with the hung test named, and its process
+      # tree killed. A process the suite started and left running reads red too, killed and named with its
+      # pid and command line, even on a normal finish; so does a sweep that could not read. It runs the
+      # tests in a Job Object, and a run that cannot get one fails with "FAIL - no job object". Worst
+      # case, with every bounded call counted: 180 s cap + 30 s hard stop + 35 s longest blocking call
+      # + 10 s kills + 2 s output drain = 257 s. The CI step's timeout-minutes (300 s) is the backstop.
       - name: Record stamp engine fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         timeout-minutes: 5
