@@ -15105,7 +15105,8 @@ class ReviewFixBaseCarry(ReviewFixBaseFixture):
         self.assertIn("hold different files", err, "the refusal does not name the differing trees:\n" + err)
 
     def test_a_plain_copy_of_a_source_held_after_round_3_is_refused_as_the_held_record_is(self):
-        # the copy repeats a held record: a record whose Fix check is FAIL, so the FAIL refusal of the source applies to what it repeats.
+        # the copy repeats a record that review_state holds for its Fix check: a FAIL after the final round (REVIEW_LAST_ROUND, 3). The FAIL refusal of the source applies to what it repeats.
+        # A Fix check FAIL with fewer rounds reads open, not held.
         # Control, green on the old code: the same copy of a PASS record is carried
         rc, out, err = self.carried(self.carry_host(*self.source_copy_pair("PASS"), source_state="closed", trees=self.pair_trees()), url=self.link())
         self.assertEqual(rc, 0, "control: a plain copy of a PASS record was refused:\n" + out + err)
