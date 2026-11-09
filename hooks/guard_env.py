@@ -2016,6 +2016,48 @@ def _find_names_no_env(expression, runners: bool = False) -> bool:
     return all(any(names) for names in alternatives)
 
 
+def _find_type_d_bounds_all(expression, runners: bool = False) -> bool:
+    """True when an unnegated `-type d` bounds every alternative of a find expression that reaches what the
+    search is handed, so find hands over folders alone. Alternatives are the parts between two top-level `-o`.
+    With `runners` set, the ones that count hold a `-exec`, `-execdir`, `-ok` or `-okdir`, and its `-type d`
+    must come before the runner. Otherwise the ones that count hold no `-prune` (a prune branch prints only the
+    folder it stops at, which a `-type d` branch of its own prints too). The `-type d` must stand in the
+    alternative itself, not in a paren group: a group, or a runner inside one, is not read, so the answer is
+    False. One `-type d` in one alternative of an `-o` chain then does not decide the others (`-type d -o
+    -type f -exec grep K {} +` hands over files)."""
+    alternatives, current = [], []
+    for word in expression:
+        if word in ("-o", "-or"):
+            alternatives.append(current)
+            current = []
+        else:
+            current.append(word)
+    alternatives.append(current)
+    found = False
+    for words in alternatives:
+        folders, runs, level, at = False, False, 0, 0
+        while at < len(words):
+            word = words[at]
+            if word == "(":
+                level += 1
+            elif word == ")":
+                level -= 1
+            elif word in ENV_FIND_RUNNERS:
+                if level:
+                    return False
+                runs = True
+                while at < len(words) and words[at] not in ENV_FIND_RUNNER_ENDS:
+                    at += 1
+            elif word == "-type" and words[at + 1:at + 2] == ["d"] and not level and not runs:
+                folders = folders or not (at > 0 and words[at - 1] in ("!", "-not"))
+            at += 1
+        reaches = runs if runners else "-prune" not in words
+        if reaches and not folders:
+            return False
+        found = found or (reaches and folders)
+    return found
+
+
 def _find_depth_limits(expression):
     """(min depth, max depth) that find's `-mindepth N` and `-maxdepth N` set, the max None for no limit. A
     value that is not a number, or a missing one, sets no limit. With a repeat, the wider limit stands."""
@@ -2284,7 +2326,7 @@ def _feed_source(command: str, rest, here: str, reads_folders: bool = True,
         while at < len(bare) and not (bare[at].startswith("-") or bare[at] in ENV_FIND_EXPRESSION):
             starts.append((rest[at], bare[at]))
             at += 1
-        if any(bare[i + 1:i + 2] == ["d"] for i, w in enumerate(bare) if w == "-type"):
+        if _find_type_d_bounds_all(bare[at:], exec_feed):
             # A `-exec` program gets each folder find prints, and a search that reads folders reads each whole. Every
             # folder find prints is the start folder or lies below it, so the start folders hold what is read.
             if not exec_feed:
