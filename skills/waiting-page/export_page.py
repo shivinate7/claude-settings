@@ -31,7 +31,9 @@ shapes, except that a version pin such as `react@18.3.1` and a retina name such 
 Credentials in a URL, `scheme://user:password@host`, refuse on any host, an IP host too. A file that is not UTF-8 is
 read as latin-1; only a file with a NUL byte is binary and not scanned, whatever its name. Only the shape counts:
 words such as "token budget" or "password manager" pass. So do a password word with a placeholder, a mask or a plain
-word as its value and only blanks or plain prose (a function word, then letter words) after it on its line,
+word as its value and only blanks or plain prose after it on its line (a function word, then letter words, with no
+non-function word later in the line after a `,` `;` or and/or/but/is/are; the `,` `;` or `.` that ends the value does
+not count),
 `PWD=<path>`, a no-reply address and an ssh remote of a public git host.
 A personal fact in plain words passes too. A postal address (street, PO box, "City, ST ZIP") is a shape.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
@@ -121,9 +123,20 @@ STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|M
 # other `key`, `secret`, `token` or `cookie` in a name counts, however it is glued to the word before it.
 EVERYDAY_KEY_WORDS = ("monkey", "hotkey", "turkey", "turnkey", "donkey", "whiskey", "jockey", "hockey", "lackey")
 KEY_WORD = r"(?:secret|token|cookie|" + "".join("(?<!(?<![A-Za-z])%s)" % w[:-3] for w in EVERYDAY_KEY_WORDS) + r"key)"
-# The letter and the digit of a random-looking value are looked for in its first characters only: a lookahead to the
-# end of a long run, from each key word in it (`key=key=...`), makes the scan quadratic.
+# A credential name: a key word, then name characters up to the next key word, then `=` or `:`. Each name character is
+# read once, so a long name or a long run scans in linear time.
+CREDENTIAL_NAME = KEY_WORD + r"(?:(?!" + KEY_WORD + r")[A-Za-z0-9_-])*[\"']?[ \t]*(?P<sep>[=:])[ \t]*[\"']?"
+VALUE_CHARS = r"[A-Za-z0-9+/_.~%=-]"  # the characters of a credential value
+# The `credential-name` shape looks for the letter and the digit of a value in its first VALUE_LOOKAHEAD_MAX + 1
+# characters: a lookahead to the end of a long run, from each key word in it (`key=key=...`), makes the scan quadratic.
+# A longer value is matched whole by LONG_CREDENTIAL_VALUE and read once by long_value_is_no_secret.
 VALUE_LOOKAHEAD_MAX = 256
+# It has no lookahead and no end condition: a value shorter than its bound fails within that many characters, and a
+# match takes the whole run, so finditer reads each run once. A key word inside the run starts no match of its own,
+# so its value is read only as part of this one: after `key=` + 260 letters, `token: ` + 300 digits + `a` passes,
+# because the run ends at the `:` and `token` lies inside the match, so the digits and the `a` are never its value.
+LONG_CREDENTIAL_VALUE = re.compile(
+    CREDENTIAL_NAME + r"(?P<value>" + VALUE_CHARS + r"{" + str(VALUE_LOOKAHEAD_MAX + 1) + r",})", re.I)
 # Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
 # from starting inside a longer word ("risk-" and "btn-sk-" are not "sk-").
 SECRET_SHAPES = (
@@ -164,10 +177,12 @@ SECRET_SHAPES = (
     # `localStorage.getItem(` and prose such as "Token: Authorization needed" pass. A letters-only value that reads as
     # words (letters_are_words) passes too, after a `:` only.
     ("credential-name", re.compile(
-        KEY_WORD + r"(?:(?!" + KEY_WORD + r")[A-Za-z0-9_-])*[\"']?[ \t]*(?P<sep>[=:])[ \t]*[\"']?(?:"
-        r"(?=[A-Za-z0-9+/_.~%=-]{0," + str(VALUE_LOOKAHEAD_MAX) + r"}[A-Za-z])"
-        r"(?=[A-Za-z0-9+/_.~%=-]{0," + str(VALUE_LOOKAHEAD_MAX) + r"}\d)[A-Za-z0-9+/_.~%=-]{8,}"
+        CREDENTIAL_NAME + r"(?:"
+        r"(?=" + VALUE_CHARS + r"{0," + str(VALUE_LOOKAHEAD_MAX) + r"}[A-Za-z])"
+        r"(?=" + VALUE_CHARS + r"{0," + str(VALUE_LOOKAHEAD_MAX) + r"}\d)" + VALUE_CHARS + r"{8,}"
         r"|(?!(?-i:[A-Za-z_-]*[a-z]{3}[A-Z]))(?P<letters>[A-Za-z_-]{12,})(?=[\"']?[ \t]*(?:[,;}\r\n]|\Z)))", re.I)),
+    # A credential value longer than the lookaheads above read: refused when it has a letter and a digit anywhere.
+    ("credential-name", LONG_CREDENTIAL_VALUE),
     # A well-known cookie name set with "=" to a value of 8 or more characters with a digit in it.
     ("cookie-value", re.compile(
         r"(?<![A-Za-z0-9_.-])(?:cf_clearance|__cf_bm|sessionid|session_id|sid|csrftoken|PHPSESSID|JSESSIONID)[ \t]*=[ \t]*"
@@ -186,8 +201,9 @@ SECRET_SHAPES = (
 )
 # A value after a password word that names no secret: a word, a mask, a template placeholder or (after PWD) a path,
 # after trailing `.,;`, a closing backtick, a `)` or `]` that closes a wrapper opened before the match, and one pair of
-# wrapping quotes or brackets are taken off (bare_value). Only blanks or plain prose (PROSE_REST)
-# may follow it on its line: another word there may be the secret (`none hunter2`). Anything else is refused.
+# wrapping quotes or brackets are taken off (bare_value). Only blanks or plain prose (rest_is_prose: a function word,
+# then letter words, and after a `,` `;` or and/or/but/is/are only function words) may follow it on its line: another
+# word there may be the secret (`none hunter2`). Anything else is refused.
 PLAIN_VALUES = frozenset(("optional", "required", "none", "null", "empty", "unset", "hidden", "redacted", "omitted"))
 MASK_VALUE = re.compile(r"[*•#]{3,}|[xX]{3,}")
 # `<placeholder words>` has no digits. A variable reference has an ALL_CAPS name, so `$Tr0ub4dor` and `${hunter2}` refuse.
@@ -294,6 +310,12 @@ def email_is_no_person(found):
             and found.string[found.end():found.end() + 1] in (":", "/"))
 
 
+def long_value_is_no_secret(found):
+    """True when `found` is a LONG_CREDENTIAL_VALUE match whose value lacks a letter or a digit."""
+    value = found.group("value")
+    return not (any(c.isdigit() for c in value) and any(c.isalpha() for c in value))
+
+
 WORD_SEGMENT = re.compile(r"[a-z]+|[A-Z]+|[A-Z][a-z]+")  # one word in lower case, upper case or capitalised
 LOWER_WORD = re.compile(r"[a-z]+")  # a separated part in lower case only
 # Four or more consonants in a row; `y` counts as a consonant here. It finds `nstr` in `monstrous`.
@@ -325,7 +347,11 @@ def letters_are_words(value):
 
 
 def credential_is_no_secret(found):
-    """True when a `:` set a letters-only value that reads as words. An `=` assigns, so it never passes."""
+    """True when `found` names no secret. A LONG_CREDENTIAL_VALUE match passes when its value lacks a letter or a
+    digit. A match of the other `credential-name` shape passes when a `:` set a letters-only value that reads as
+    words; an `=` assigns, so it never passes."""
+    if found.re is LONG_CREDENTIAL_VALUE:
+        return long_value_is_no_secret(found)
     value = found.group("letters")
     return found.group("sep") == ":" and bool(value) and letters_are_words(value)
 
