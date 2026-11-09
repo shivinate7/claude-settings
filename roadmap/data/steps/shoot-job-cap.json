@@ -5,6 +5,7 @@
   "order": 933,
   "owner": "coordinator",
   "why": "Coordinator 16:15 CST Nov 9: on batch 70 (#2470, head f2d25d149) the checks-shoot job was cancelled at its 10 min cap (.github/workflows/checks.yml) while still passing, after the batch added waiting-page tests (#2347, #2383, #2423, #2429, #2466). The same job took 8 min on 624dcc188 and 7 min on 8bc28980b.",
-  "note": "Fix: split the waiting-page suite into its own job, or raise the cap from measured runs, per decision ci-job-caps. Done check: the shoot jobs pass on a tree with batch 70's page tests, and each cap cites its measured runs. Related: ci-guard-headroom (lane session_013NEJKypwFEtaJwfYrMpZ5T). Lane starting 16:15 CST Nov 9 (coordinator); id to come.",
-  "updatedAt": "2026-11-09T16:16:00-06:00"
+  "note": "Fix: split the waiting-page suite into its own job, or raise the cap from measured runs, per decision ci-job-caps. Done check: the shoot jobs pass on a tree with batch 70's page tests, and each cap cites its measured runs. Related: ci-guard-headroom (lane session_013NEJKypwFEtaJwfYrMpZ5T). Lane session_013NEJL2Xf2CDoR4VGP4EE6P started 16:16 CST Nov 9 (coordinator).",
+  "updatedAt": "2026-11-09T16:18:00-06:00",
+  "lane": "session_013NEJL2Xf2CDoR4VGP4EE6P"
 }
