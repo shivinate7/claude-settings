@@ -1244,14 +1244,14 @@ def step_dup_hit(tool: str, tool_input, transcript: str, cwd: str = ""):
             raise ValueError("not proved")
         held = _step_held_hit(steps, subject, records.get(target, ([], False))[0], target, cwd)
         if held:
-            return "ask", held[0], held[1]
+            return held
     except (Exception, SystemExit):
-        return ("ask",) + unknown
+        return "ask", unknown[0], unknown[1]
     return None
 
 
 def _step_held_hit(steps, subject, target_tags, target, cwd: str):
-    """(matched, reason) when a step is held by a lane the list read did not show, else None; raises when a read fails.
+    """("ask", matched, reason) when a step is held by a lane the list read did not show, else None; raises when a read fails.
     An open pull request in a cs-repo of `subject` whose head is lane_head_refs(step), unless the target's own tags
     carry the step, or the step record's `lane` field names a session id other than `target`. The pull request read
     is open_pull_rows, the one reader archive_hit uses; the record is read from override.STEP_REF."""
@@ -1267,7 +1267,7 @@ def _step_held_hit(steps, subject, target_tags, target, cwd: str):
                     raise ValueError("not an owner/name repo tag")
                 for row in open_pull_rows(module, repo):
                     if str(row["head"]["ref"]).lower() in lane_head_refs(step):
-                        return ("lane step " + step + " has open pull request " + str(row.get("number", "?")),
+                        return ("ask", "lane step " + step + " has open pull request " + str(row.get("number", "?")),
                                 STEP_DUP_PR_REASON % (row.get("number", "?"), step))
         record = override.STEP_DIR + step + ".json"
         listed = _git(cwd, "ls-tree", "--name-only", override.STEP_REF, "--", record) if cwd else None
@@ -1283,7 +1283,7 @@ def _step_held_hit(steps, subject, target_tags, target, cwd: str):
         named = [i for i in re.findall(r"session_[A-Za-z0-9_-]+", lane) if i != target] \
             if isinstance(lane, str) and not lane.strip().lower().startswith("coordinator") else []
         if named:
-            return ("lane step " + step + " recorded for " + named[0], STEP_DUP_RECORD_REASON % (step, named[0]))
+            return ("ask", "lane step " + step + " recorded for " + named[0], STEP_DUP_RECORD_REASON % (step, named[0]))
     return None
 
 
