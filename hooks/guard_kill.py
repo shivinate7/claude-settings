@@ -634,10 +634,10 @@ def glued_background_hit(cmd: str) -> str:
     detaches nothing. The waiter judges the command first: it reads `sleep 99 &echo ok` as a long pause."""
     if is_powershell(cmd):
         return ""   # PowerShell reads `&word` as its call operator, never a job
-    cmd = _strip_heredoc_bodies_unconditionally(cmd)
-    if "$!" in cmd:
+    shell = _strip_heredoc_bodies_unconditionally(cmd)
+    if "$!" in shell:
         return ""
-    for segment in split_segments(cmd):
+    for segment in split_segments(shell):
         pieces = split_background(_mask_arithmetic(segment))
         for at in range(len(pieces) - 1):
             left, right = pieces[at], pieces[at + 1]
