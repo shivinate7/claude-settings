@@ -482,8 +482,8 @@ def _commit_page_id(top, working):
 
 
 def records_page_hit(stripped: str, cwd: str) -> str:
-    """Return the commit when it would hold a records page that is none of HEAD's, the base tip's
-    and origin/<base>'s, else ''. Each segment is judged from its own command word."""
+    """Return the commit when it would hold a records page that is none of HEAD's, the base tip's,
+    origin/<base>'s and MERGE_HEAD's (MERGE_HEAD on origin/<base>'s first-parent line), else ''. Each segment is judged from its own command word."""
     staged = generated = False   # an earlier `git add` reaches the page / an earlier segment rewrites it
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
