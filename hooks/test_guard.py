@@ -5319,6 +5319,16 @@ sh("git-after-cd: a check, then ; an if whose else body holds a git push, is ref
    carries=("&&",))
 sh("git-after-cd: an if whose else body holds a git push, with no check before it, passes",
    'if [ -n "$X" ]; then :; else %s push -u origin b; fi' % VCS, "allow", cwd=NOGIT)
+# A TEST THAT IS NO CHECK, AND AN ELIF TEST THAT IS ONE. A `!` test runs its else body when its command passes, and a git
+# call is no check of the project, so neither else body runs on a failed check: both pushes pass. The `if` test of the
+# last case is `[ -n "$X" ]`, a condition word, so the elif test guards its else body and that push is refused.
+sh("git-after-cd: an if ! test whose else body pushes, with an exit in its then body, passes",
+   "if ! pytest -q; then exit 1; else %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: an if on a git diff whose else body pushes, passes",
+   "if %s diff --quiet; then echo same; else %s push -u origin b; fi" % (VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: an elif test that is a check guards its else body with a git push, is refused",
+   'if [ -n "$X" ]; then :; elif pytest -q; then :; else %s push -u origin b; fi' % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
 # A COMPOUND'S TEST OR AN EXIT TAIL CLEARS ONLY ITS OWN COMMANDS. An elif body, an until body, a `|| exit` after a
 # git fetch, and an if whose test is a git fetch each cover only their own command. The walk keeps going back past
 # them, so a check joined by `;` further back still guards the push, and each push here is refused. A `|| exit` after
@@ -5596,19 +5606,37 @@ sh("git-after-cd: a printf piped to a git commit -F, then && a git push -u, pass
 # tail's, so the push after `;` runs when pytest fails. Bash runs each push here on a failed check, so each is refused.
 sh("git-after-cd: a git push -u in the else branch of an if on a check, is refused",
    "if pytest -q; then echo ok; else %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT,
-   carries=("&&",))
+   carries=("&&", "else"))
 sh("git-after-cd: a git push -u in the body of an until on a check, is refused",
    "until pytest -q; do %s push -u origin b; done" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&",))
 sh("git-after-cd: a check piped to tail, then ; a git push -u, is refused and names pipefail",
    "pytest -q | tail -5; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("pipefail",))
+# A PIPE THAT ENDS IN true HIDES THE CHECK BEFORE IT. true is inert, so the pipe's status is true's, and the push after `;`
+# runs when pytest fails. The reason is the pipe's, which names pipefail.
+sh("git-after-cd: a check piped to true, then ; a git push -u, is refused and names pipefail",
+   "pytest | true; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("pipefail",))
 # A DATA SOURCE OR A LISTING PIPED TO A PUSH. Neither first stage runs a check, so no check hides behind the pipe, and
 # the push after it is no push on a failed check. Both are allowed.
 sh("git-after-cd: a cat piped to a while loop with a git push in its body, passes",
    "cat f | while read b; do %s push origin $b; done" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: an ls piped to head, then && a git push -u, passes",
    "ls | head -1 && %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+# A DATA SOURCE A PIPE CAN HIDE NO CHECK. find, head and tail read or print, so a push after a pipe through one of them
+# passes. A find that writes (`-delete`), or a substitution in the stage, is a check again, so the push after it is refused.
+sh("git-after-cd: a find piped to head, then && a git push -u, passes",
+   "find . -name x | head -1 && %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a head piped to cat, then && a git push -u, passes",
+   "head -1 f | cat && %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a tail piped to cat, then && a git push -u, passes",
+   "tail -1 f | cat && %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a substitution in a cat piped to head, then && a git push -u, is refused",
+   "cat $(make x) | head && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("pipefail",))
+sh("git-after-cd: a find that deletes piped to head, then && a git push -u, is refused",
+   "find . -delete | head && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("pipefail",))
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
 # git-after-cd rule refuses the push after the cd, and the crash is logged as a guard crash. The planted copy
 # raises at that try. The intact copy, on the same landing cd, is the control, so the refusal can only come
