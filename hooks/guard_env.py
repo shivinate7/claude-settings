@@ -922,6 +922,7 @@ def _ag_hidden_regex_refusal(words, position: int) -> str:
         try:
             regex = _posix_classes_to_python(_shell_value(regex))
             with warnings.catch_warnings():
+                # A bracket set such as `[[a]` warns on stderr (nested set). The verdict stands.
                 warnings.simplefilter("ignore", FutureWarning)
                 compiled = re.compile(regex)
             try:
@@ -1249,8 +1250,8 @@ def _glob_picked(name: str, relative: str, rules, by_name: bool = False) -> tupl
     """(whether a file is read, whether the rule that read it overrides the ignore rules), by the
     include and exclude `rules` as grep applies them: the LAST rule whose glob matches the file
     decides. With no match, a file is read unless the first rule is an include."""
-    for kind, glob, fold, overrides in reversed(rules):
-        if _glob_picks(name, relative, glob, fold, by_name):
+    for kind, pattern, fold, overrides in reversed(rules):
+        if _glob_picks(name, relative, pattern, fold, by_name):
             return kind == "include", kind == "include" and overrides
     return not rules or rules[0][0] != "include", False
 
