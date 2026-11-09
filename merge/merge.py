@@ -3523,7 +3523,7 @@ def freeze_markers(lines):
     return begins, ends
 
 def parse_freeze(body):
-    """-> None when the body holds no block, else {name, on: (branch, sha) or None, lanes: {PR: head}, dropped: [PR], at: (begin line, end line)}.
+    """-> None when the body holds no block, else {name, on: (branch, sha) or None, base: sha or None, lanes: {PR: head}, dropped: [PR], at: (begin line, end line)}.
     A body with more or fewer than one begin and one end marker, or a line in the block this tool cannot read, is a Stop."""
     lines = body.split("\n")
     begins, ends = freeze_markers(lines)
@@ -3531,7 +3531,7 @@ def parse_freeze(body):
         return None
     if len(begins) != 1 or len(ends) != 1 or ends[0] < begins[0]:
         raise Stop(f"the pull request body holds {len(begins)} begin and {len(ends)} end marker lines outside a code block, not one pair. Fix the body by hand. {FREEZE_CITE}")
-    block = {"name": None, "on": None, "lanes": {}, "dropped": [], "at": (begins[0], ends[0])}
+    block = {"name": None, "on": None, "base": None, "lanes": {}, "dropped": [], "at": (begins[0], ends[0])}
     for line in (x.rstrip("\r") for x in lines[begins[0] + 1:ends[0]]):
         if not line.strip():
             continue
@@ -3539,6 +3539,8 @@ def parse_freeze(body):
             block["name"] = m.group(1)
         elif m := re.fullmatch(r"On: (\S+) ([0-9a-f]{40})", line):
             block["on"] = m.group(1, 2)
+        elif m := re.fullmatch(r"Base: ([0-9a-f]{40})", line):
+            block["base"] = m.group(1)
         elif m := re.fullmatch(r"Lane: #(\d+) ([0-9a-f]{40})", line):
             if int(m.group(1)) in block["lanes"]:
                 raise Stop(f"the frozen block lists #{m.group(1)} twice. Fix the body by hand. {FREEZE_CITE}")
@@ -3551,9 +3553,11 @@ def parse_freeze(body):
         raise Stop(f"the frozen block names no batch or no lane. Fix the body by hand. {FREEZE_CITE}")
     return block
 
-def freeze_lines(name, lanes, dropped=(), on=None):
-    """-> the block's lines, markers included. `lanes` is {PR: head}, listed by PR number; `on` is (branch, sha) or None."""
-    return [BATCH_BEGIN, f"Batch: {name}", *([f"On: {on[0]} {on[1]}"] if on else []), *(f"Lane: #{n} {lanes[n]}" for n in sorted(lanes)),
+def freeze_lines(name, lanes, dropped=(), on=None, base=None):
+    """-> the block's lines, markers included. `lanes` is {PR: head}, listed by PR number; `on` is (branch, sha) or None; `base` is the sha
+    of the base branch the batch was built on, or None (a block made before Base was recorded)."""
+    return [BATCH_BEGIN, f"Batch: {name}", *([f"On: {on[0]} {on[1]}"] if on else []), *([f"Base: {base}"] if base else []),
+            *(f"Lane: #{n} {lanes[n]}" for n in sorted(lanes)),
             *(f"Dropped: #{n}" for n in dropped), BATCH_END]
 
 def freeze_rewrite(body, block, lines):
@@ -3562,15 +3566,24 @@ def freeze_rewrite(body, block, lines):
     return "\n".join(old[:block["at"][0]] + lines + old[block["at"][1] + 1:])
 
 def holds(root, head, ref):
-    """True when `ref` holds commit `head`. An unreadable answer is a Stop: it is never read as a lane missing."""
+    """True when `ref` holds commit `head`. A shallow clone cuts the history, so its plain non-ancestor reads unknown: the history is fetched in full once
+    and the read repeated, and only a complete clone says False. Any other unreadable answer is a Stop: it is never read as a lane missing."""
+    import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
     got = ancestor(root, head, ref)
+    if got is None and git_reads.is_shallow(root) is True:
+        c, out = git(root, "fetch", "-q", "--unshallow", "origin")
+        if c:
+            raise Stop(f"cannot read whether {ref} holds {head[:9]}: the clone is shallow and `git fetch --unshallow` failed: {out} {FREEZE_CITE}")
+        got = ancestor(root, head, ref)
     if got is None:
-        raise Stop(f"cannot read whether {ref} holds {head[:9]} (a missing object, or a shallow clone: run `git fetch --unshallow`). {FREEZE_CITE}")
+        raise Stop(f"cannot read whether {ref} holds {head[:9]} (a missing object). {FREEZE_CITE}")
     return got
 
-def build_batch_branch(root, name, start, lanes, lease=None):
+def build_batch_branch(root, name, start, lanes, lease=None, body=None):
     """Merge each lane head of `lanes`, [(PR, head)], no-ff onto `start`, each keeping its own commit, in a temporary worktree, and push
     batch/NAME. -> the new head. With `lease` (the sha origin holds now) the push is a force-with-lease, and a rebuild that changed nothing pushes nothing.
+    `body` is (host, PR, old body, new body): the new body is written after the merges and before the push, so a refused write leaves origin as it was,
+    and a refused push puts the old body back; the branch and the body then never disagree.
     The one home of the batch branch: build, drop and the rebuild on a moved head call it."""
     branch = f"batch/{name}"
     tmp, wt = add_worktree(root, start)
@@ -3581,34 +3594,82 @@ def build_batch_branch(root, name, start, lanes, lease=None):
                 git(wt, "merge", "--abort")
                 raise Stop(f"lane #{n} ({head[:9]}) does not merge into {branch}. Nothing was pushed. Fix the lane or leave it out.\n{out}")
         new = git(wt, "rev-parse", "HEAD")[1]
+        if body:
+            body[0].set_body(body[1], body[3])
         if new != lease:
-            push_branch(wt, branch, lease)
+            try:
+                push_branch(wt, branch, lease)
+            except Stop as e:
+                if body:
+                    try:
+                        body[0].set_body(body[1], body[2])
+                    except Stop as back:
+                        raise Stop(f"{e}\nThe body of #{body[1]} could not be put back ({back}): it lists the new lane set, and {branch} holds the old one.") from e
+                raise
         return new
     finally:
         drop_worktree(root, tmp, wt)
 
+def batch_start(root, block, base):
+    """-> (the sha batch/NAME is rebuilt from, the Base sha its rewritten block records): the On sha of a stacked batch, else the Base recorded at build,
+    else (a block made before Base was recorded) the tip of `base` now, said in one line, because main may have moved since the build."""
+    if block["on"]:
+        return block["on"][1], block["base"]
+    tip = fetch_branch(root, base)  # also brings in the history that holds a recorded Base
+    if block["base"]:
+        return block["base"], block["base"]
+    say(f"merge: batch {block['name']} records no Base line (built before it was recorded); rebuilt on the current tip of {base}, {tip[:9]}.")
+    return tip, tip
+
 def lane_list(numbers):
     return " ".join(f"#{n}" for n in sorted(numbers))
 
-def restack(root, h, moved, new_head, seen=frozenset()):
+def restack(root, h, moved, new_head, gone=None, seen=frozenset()):
     """Batch branch `moved` has a new head. Rebuild each open batch whose block says `On: moved` on it: the same lanes, the On sha updated, force-with-lease,
-    no lint. A batch that then moved is restacked in turn. -> how many it could not rebuild; each is named, and the rest are still rebuilt."""
-    failed = 0
+    no lint. `gone` is {PR: head} of the lanes a drop took off `moved`: a lane of the rebuilt batch that is one of them, or whose head contains one of their
+    heads, comes off too, as a dependent does in a drop. A batch that then moved is restacked in turn. -> how many it could not rebuild; each is named, and
+    the rest are still rebuilt. A body this tool cannot read is named when its branch is a batch or an On line points at `moved`: it may be stacked on it."""
+    failed, gone = 0, gone or {}
     for n, info in h.open_prs():
         try:
-            block = parse_freeze(info["body"])
+            try:
+                block = parse_freeze(info["body"])
+            except Stop:
+                if info["branch"].startswith("batch/") or re.search(rf"^On: {re.escape(moved)} [0-9a-f]{{40}}\r?$", info["body"], re.M):
+                    raise
+                continue  # a pull request that only quotes a marker
             if not block or not block["on"] or block["on"][0] != moved or block["on"][1] == new_head or info["branch"] != f"batch/{block['name']}":
                 continue
             tip = fetch_branch(root, info["branch"])
-            new = build_batch_branch(root, block["name"], new_head, sorted(block["lanes"].items()), lease=tip)
-            h.set_body(n, freeze_rewrite(info["body"], block, freeze_lines(block["name"], block["lanes"], block["dropped"], (moved, new_head))))
-            say(f"merge: batch {block['name']} was on {moved}; rebuilt on its new head {new_head[:9]}.")
+            off = {k: v for k, v in block["lanes"].items() if k in gone or any(g != v and holds(root, g, v) for g in gone.values())}
+            kept = {k: v for k, v in block["lanes"].items() if k not in off}
+            if not kept:
+                raise Stop(f"dropping {lane_list(off)} leaves batch {block['name']} no lane. Close pull request #{n} instead. {FREEZE_CITE}")
+            text = freeze_rewrite(info["body"], block, freeze_lines(block["name"], kept, [*block["dropped"], *sorted(off)], (moved, new_head), block["base"]))
+            new = build_batch_branch(root, block["name"], new_head, sorted(kept.items()), lease=tip, body=(h, n, info["body"], text))
+            say(f"merge: batch {block['name']} was on {moved}; rebuilt on its new head {new_head[:9]}"
+                + (f", without {lane_list(off)}, which stacked on a dropped lane." if off else "."))
             if moved not in seen:
-                failed += restack(root, h, info["branch"], new, seen | {moved})
+                failed += restack(root, h, info["branch"], new, {**gone, **off}, seen | {moved})
         except Stop as e:
             say(f"merge: #{n} ({info['branch']}) could not be rebuilt on {moved}: {e}")
             failed += 1
     return failed
+
+def stacked_without_base(root, h, name, base, infos, running):
+    """Refuse (Stop) a request in which a lane's head contains the head of another open pull request on `base` that the request leaves out: merging the lane
+    would put that pull request's commits into the batch unfrozen. `infos` is {PR: pr() fields} of the request; `running` is the head of the batch it stacks
+    on, or None, and a head that holds is already in."""
+    found = []
+    for n, info in h.open_prs():
+        if n in infos or info["base"] != base:
+            continue
+        head = fetch_branch(root, info["branch"])
+        if running and holds(root, head, running):
+            continue
+        found += [f"#{m} contains the head of #{n}, which is not in this request" for m in sorted(infos) if infos[m]["head"] != head and holds(root, head, infos[m]["head"])]
+    if found:
+        raise Stop("\n".join(found) + f"\nAdd the missing pull request, or leave the stacked lane out. Nothing was pushed. {FREEZE_CITE}")
 
 def batch_build(root, h, name, numbers, on, base):
     """merge --batch-build NAME PR... [--on BRANCH] [--base BRANCH]: the batch branch and its one ready pull request, or the same set again.
@@ -3619,7 +3680,9 @@ def batch_build(root, h, name, numbers, on, base):
         infos[n] = h.pr(n)
         if infos[n]["state"] != "OPEN":
             raise Stop(f"#{n} is {infos[n]['state']}, not open, so it cannot join batch {name}. {FREEZE_CITE}")
-    heads = {n: infos[n]["head"] for n in numbers}  # read once, now: this is the freeze
+        if infos[n]["base"] != base:
+            raise Stop(f"#{n} targets {infos[n]['base']}, and batch {name} targets {base}. Nothing was pushed. Retarget #{n}, or give --base {infos[n]['base']}. {FREEZE_CITE}")
+    heads ={n: infos[n]["head"] for n in numbers}  # read once, now: this is the freeze
     if on:
         running = h.batch_pr(on)
         if running is None or parse_freeze(running[1]["body"]) is None:
@@ -3630,9 +3693,10 @@ def batch_build(root, h, name, numbers, on, base):
         for n in numbers:
             if fetch_branch(root, infos[n]["branch"]) != heads[n]:
                 raise Stop(f"{infos[n]['branch']} moved while #{n} was read. Nothing was pushed. Run again.")
+        stacked_without_base(root, h, name, base, infos, start if on else None)
         build_batch_branch(root, name, start, sorted(heads.items()))
         try:
-            pr = h.create_pr(branch, base, f"Batch {name}", "\n".join(freeze_lines(name, heads, on=(on, start) if on else None)) + "\n")
+            pr = h.create_pr(branch, base, f"Batch {name}", "\n".join(freeze_lines(name, heads, on=(on, start) if on else None, base=None if on else start)) + "\n")
         except Stop as e:
             raise Stop(f"{branch} is on origin, but its pull request was not opened: {e}. Open it by hand with the frozen block, or delete the branch and run again.")
         say(f"merge: batch {name} built: PR #{pr} ready, lanes {lane_list(heads)}")
@@ -3660,8 +3724,10 @@ def batch_build(root, h, name, numbers, on, base):
     now_on = fetch_branch(root, on) if on else None  # a running batch's head moves on a drop, a claim or a heal
     rc = 0
     if any(not holds(root, heads[n], f"origin/{branch}") for n in sorted(heads)) or (on and not holds(root, now_on, f"origin/{branch}")):
-        new = build_batch_branch(root, name, now_on or fetch_branch(root, base), sorted(heads.items()), lease=tip)
-        h.set_body(pr, freeze_rewrite(info["body"], block, freeze_lines(name, heads, block["dropped"], (on, now_on) if on else None)))
+        start, recorded = batch_start(root, block, base)
+        start = now_on or start
+        text = freeze_rewrite(info["body"], block, freeze_lines(name, heads, block["dropped"], (on, now_on) if on else None, recorded))
+        new = build_batch_branch(root, name, start, sorted(heads.items()), lease=tip, body=(h, pr, info["body"], text))
         say(f"merge: batch {name} rebuilt on {on or base}, the same lanes.")
         rc = 1 if restack(root, h, branch, new) else 0
     if info["draft"]:
@@ -3695,11 +3761,12 @@ def batch_drop(root, h, name, number):
     kept = {n: sha for n, sha in lanes.items() if n not in dropping}
     if not kept:
         raise Stop(f"dropping {lane_list(dropping)} leaves batch {name} no lane. To end the batch, close pull request #{pr} instead. {FREEZE_CITE}")
-    new = build_batch_branch(root, name, block["on"][1] if block["on"] else fetch_branch(root, info["base"]), sorted(kept.items()), lease=tip)
-    h.set_body(pr, freeze_rewrite(info["body"], block, freeze_lines(name, kept, [*block["dropped"], *dropping], block["on"])))
+    start, recorded = batch_start(root, block, info["base"])
+    text = freeze_rewrite(info["body"], block, freeze_lines(name, kept, [*block["dropped"], *dropping], block["on"], recorded))
+    new = build_batch_branch(root, name, start, sorted(kept.items()), lease=tip, body=(h, pr, info["body"], text))
     say(f"merge: #{number} dropped from batch {name}.", *(f"merge: #{n} dropped too: its head contains #{number}'s head." for n in dependents),
         f"merge: batch {name} now holds lanes {lane_list(kept)}.")
-    return 1 if restack(root, h, branch, new) else 0
+    return 1 if restack(root, h, branch, new, {n: lanes[n] for n in dropping}) else 0
 
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
 
