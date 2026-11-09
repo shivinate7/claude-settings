@@ -10048,6 +10048,13 @@ PFR_FIX_PASS_RECORD = pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "PASS"
 PFR_FIX_FAIL_RECORD = pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "FAIL"), n=PFR_FIX_PR)
 PFR_ROUND_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "PASS")], n=PFR_FIX_PR)
 
+def pfr_opened_then_fail(command):
+    """A Bash call whose command opens pull request 1467, then an unrecorded reviewer FAIL: the transcript the
+    scanner-trap and shell-quoting cases share."""
+    return (pfr_bash("toolu_pr1", command, "https://github.com/shivinate7/claude-settings/pull/1467\n")
+            + pfr_call("toolu_rev1", PFR_FAIL))
+
+
 # The session's own files, one per case, each a list of JSON lines. An empty list is a zero-byte file.
 PFR_LINES = {
     # The incident: the PR is open, the FAIL comes back in the foreground, then the push.
@@ -10187,6 +10194,20 @@ PFR_LINES = {
                           + pfr_post("toolu_c1", PFR_FAIL_RECORD),
     # A Done label line with no verdict word, then the ruled form on the next line.
     "see-below-ruled": pfr_pr() + pfr_call("toolu_rev1", "Done: see below\n" + pfr_verdict("FAIL", 1) + "\n" + PFR_FINDING),
+    # A Bash create whose body holds an escaped quote. A PowerShell push reads Bash text with PowerShell's rules,
+    # where a backslash-quote closes the string, so the escape decides whether the create is seen.
+    "gh-create-escaped": pfr_opened_then_fail(r'gh pr create --body "a\"b" --head feat'),
+    "gh-create-after-escape": pfr_opened_then_fail(r'echo "x\"" ; gh pr create --draft --title t'),
+    # A Done line wrapped whole in backticks, its label inside the wrap, and the same line without the wrap.
+    "fail-backticked-label": pfr_pr() + pfr_call("toolu_rev1", "`Done: %s`\n%s" % (pfr_verdict("FAIL", 1), PFR_FINDING)),
+    "fail-plain-label": pfr_pr() + pfr_call("toolu_rev1", "Done: %s\n%s" % (pfr_verdict("FAIL", 1), PFR_FINDING)),
+    # Scanner traps: a comment mark or a quote inside quotes, a lone apostrophe, or a line break before the create.
+    "trap-hash": pfr_opened_then_fail('echo "step #1" && gh pr create --draft --title t'),
+    "trap-block-open": pfr_opened_then_fail('echo "/* open" && gh pr create --draft --title t'),
+    "trap-line-open": pfr_opened_then_fail('echo "see http://x" && gh pr create --draft --title t'),
+    "trap-lone-quote": pfr_opened_then_fail("echo don't; gh pr create --draft --title t"),
+    "trap-quoted-apostrophe": pfr_opened_then_fail('echo "don\'t" && gh pr create --draft --title t'),
+    "trap-multi-line": pfr_opened_then_fail('echo "first\nsecond"\ngh pr create --draft --title t'),
     "empty": [],
 }
 # An agent's own file, `<session>/subagents/agent-<id>.jsonl`, keyed by the session name it sits under.
@@ -10416,6 +10437,35 @@ pfr_refuse("a FAIL Done line in backticks with no record, then the push", PFR_PU
 pfr_refuse("a FAIL Done line with a verdict word and no record, then the push", PFR_PUSH, pfr_path("fail-bold-verdict"))
 pfr_allow("a PASS Done line in backticks, with its PASS record posted, then the push", PFR_PUSH,
           pfr_path("pass-backtick-record"))
+# A PowerShell push reads a Bash create's text with PowerShell's rules, so the escape in its body decides whether
+# the create is seen. Each Bash push on the same transcript is the control.
+pfr_refuse("a Bash gh pr create with an escaped quote in its body, an unrecorded FAIL, then a PowerShell push",
+           PFR_PUSH, pfr_path("gh-create-escaped"), tool="PowerShell")
+pfr_refuse("a Bash gh pr create with an escaped quote in its body, an unrecorded FAIL, then a Bash push: the control",
+           PFR_PUSH, pfr_path("gh-create-escaped"))
+pfr_refuse("a real Bash gh pr create after an escaped quote, an unrecorded FAIL, then a PowerShell push",
+           PFR_PUSH, pfr_path("gh-create-after-escape"), tool="PowerShell")
+pfr_refuse("a real Bash gh pr create after an escaped quote, an unrecorded FAIL, then a Bash push: the control",
+           PFR_PUSH, pfr_path("gh-create-after-escape"))
+# A Done line wrapped whole in backticks reads as its report. The plain line is the control.
+pfr_refuse("a FAIL Done line wrapped whole in backticks, PR known, no record, then the push", PFR_PUSH,
+           pfr_path("fail-backticked-label"))
+pfr_refuse("a FAIL plain Done line, PR known, no record, then the push: the control", PFR_PUSH,
+           pfr_path("fail-plain-label"))
+# Scanner traps. Each holds a real gh pr create after the trap, so the unrecorded FAIL denies. They pass on the
+# current scanner and on the regex scanner before it, so they pin behaviour without a red run.
+pfr_refuse("a real create after a # inside quotes, an unrecorded FAIL, then the push", PFR_PUSH,
+           pfr_path("trap-hash"))
+pfr_refuse("a real create after a /* inside quotes, an unrecorded FAIL, then the push", PFR_PUSH,
+           pfr_path("trap-block-open"))
+pfr_refuse("a real create after a // inside quotes, an unrecorded FAIL, then the push", PFR_PUSH,
+           pfr_path("trap-line-open"))
+pfr_refuse("a real create after a lone apostrophe in an unquoted echo, an unrecorded FAIL, then the push", PFR_PUSH,
+           pfr_path("trap-lone-quote"))
+pfr_refuse("a real create after an apostrophe inside double quotes, an unrecorded FAIL, then the push", PFR_PUSH,
+           pfr_path("trap-quoted-apostrophe"))
+pfr_refuse("a real create on the line after a multi-line echo, an unrecorded FAIL, then the push", PFR_PUSH,
+           pfr_path("trap-multi-line"))
 
 
 # A verdict on the Done label line is read. Each shape below is refused with no record, and the record of the
