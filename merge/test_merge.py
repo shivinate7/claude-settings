@@ -15232,37 +15232,32 @@ class BatchFreeze(CloudSession):
     FAILED_STEP_CMD = "/usr/bin/bash -e /tmp/tmp62v2ry54.sh"
     PASSED_STEP_CMD = "/usr/bin/bash -e /tmp/tmp24302j2s.sh"
 
-    def lint_fail_naming(self, *paths, passing=()):
+    def lint_fail_naming(self, *paths, passing=(), log_written=True):
         """ci_job_run's answer for a batch head whose lint FAILs on one step that names each of `paths`, in the log shape ci-job writes: one
         verdict log shared by every step, each step's section headed `=== verdict run <time>: <cmd>`, and the FAIL line carries that same
-        <cmd>. A passing step's section comes first and names each of `passing`. -> the answer as ci_job_run returns it: (state, lines, log, liftable)."""
+        <cmd>. A passing step's section comes first and names each of `passing`. `log_written=False`: the FAIL names a log that is not there,
+        so its step output cannot be read. -> the answer as ci_job_run returns it: (state, lines, log, liftable)."""
         log = os.path.join(self.t, "ci-job-batch.log")
-        put(log, f"=== verdict run 2026-11-09 04:47:54: {self.PASSED_STEP_CMD}\n"
-                 + "".join(f"a passing step prints {p}\n" for p in passing)
-                 + f"=== verdict run 2026-11-09 04:47:54: {self.FAILED_STEP_CMD}\n"
-                 + "".join(f"lint/check_lane_paths.py: FAIL {p}:1: the lane header is missing\n" for p in paths))
-        verdict = f"FAIL {self.FAILED_STEP_CMD} rc=1 (0.2s) log={log}"
-        return ("fail", ["%-15s %s: %s" % ("FAIL", "Check lane paths", verdict)], [f"log={log}"], False)
-
-    def lint_fail_unreadable_log(self):
-        """ci_job_run's answer for a batch head whose lint FAILs, but whose `log=` names a log that is not there: its step output cannot be read."""
-        log = os.path.join(self.t, "ci-job-batch-never-written.log")
+        if log_written:
+            put(log, f"=== verdict run 2026-11-09 04:47:54: {self.PASSED_STEP_CMD}\n"
+                     + "".join(f"a passing step prints {p}\n" for p in passing)
+                     + f"=== verdict run 2026-11-09 04:47:54: {self.FAILED_STEP_CMD}\n"
+                     + "".join(f"lint/check_lane_paths.py: FAIL {p}:1: the lane header is missing\n" for p in paths))
         verdict = f"FAIL {self.FAILED_STEP_CMD} rc=1 (0.2s) log={log}"
         return ("fail", ["%-15s %s: %s" % ("FAIL", "Check lane paths", verdict)], [f"log={log}"], False)
 
     @contextlib.contextmanager
     def blame_spy(self):
         """Spies on merge.blamed_lanes. Yields a list that receives each result the run makes: {} when the log was read and no frozen lane
-        touches a path it names, None when the log could not be read, and an empty list when the blame never ran. create=True: on a commit
-        with no blamed_lanes, the case fails on its own assert, not on the patch."""
+        touches a path it names, None when the log could not be read, and an empty list when the blame never ran."""
         seen = []
-        real = getattr(merge, "blamed_lanes", None)
+        real = merge.blamed_lanes
 
         def spy(*args, **kwargs):
             got = real(*args, **kwargs)
             seen.append(got)
             return got
-        with unittest.mock.patch.object(merge, "blamed_lanes", side_effect=spy, create=True):
+        with unittest.mock.patch.object(merge, "blamed_lanes", side_effect=spy):
             yield seen
 
     def drop_pr_numbers(self, out, name):
@@ -15588,7 +15583,7 @@ class BatchFreeze(CloudSession):
         for n in (101, 102):
             self.lane(n)
         pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check(ready_state=self.lint_fail_unreadable_log()), self.blame_spy() as seen:
+        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming(log_written=False)), self.blame_spy() as seen:
             rc, out = self.run_batch("--batch-build", "nightly", "--ready")
         self.assertEqual(seen, [None], "the lint FAIL's log is not there, so the blame should read it as unreadable (None): blamed_lanes returned %r: %s" % (seen, out))
         self.assertRegex(out, r"blame[^\n]*unknown|unknown[^\n]*blame",
