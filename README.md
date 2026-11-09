@@ -142,7 +142,7 @@ merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, p
 merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
 merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] [--net-value V]
                         print the review record for the head SHA that was reviewed. Exit 1 when the PR's live head is another sha.
-                        Posts nothing: the lane posts it as a PR comment.
+                        Posts it as one comment on the PR; a record that does not parse is not posted (exit 2).
 merge --reviewed        one line per open PR that has a review record comment: its state (bad when the newest does not parse) and live CI.
                         Then the PRs with no record.
 merge --reviewed --root DIR [--root DIR ...]

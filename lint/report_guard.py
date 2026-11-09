@@ -132,7 +132,7 @@ that holds `round <N>` or `reviewer` and a capital PASS or PASSED claims a PASS,
 history word in another clause hides no claim. The line claims it for each PR it names, as
 `#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
 the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
-PR on its line is refused and asks for the PR. The remedy names the act (`merge <pr> --review-record ...`, then post the
+PR on its line is refused and asks for the PR. The remedy names the act (`merge <pr> --review-record ...`, which posts the
 record) and never the live head. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
 checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
@@ -1644,12 +1644,12 @@ REVIEW_PR_RE = re.compile(r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b"
 REVIEW_READ_TIMEOUT = 30  # seconds for one gh read
 REVIEW_NO_PR = (
     "Review-record guard: a line of this reply claims a review PASS but names no pull request. Name it as #<n> on that "
-    "line, and give it a review record for its live head (`merge <pr> --review-record ...`, then post the record on the PR)."
+    "line, and give it a review record for its live head (`merge <pr> --review-record ...`, which posts the record on the PR)."
 )
 REVIEW_NO_RECORD = (
     "Review-record guard: this reply claims a review PASS for PR #%d, and that PR has no review record for its live head. "
     "Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer read> --kind <kind> --guard "
-    "<yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a comment on PR #%d, then report again."
+    "<yes|no> --round <N:ROLE:MODEL:VERDICT>`, which posts the record on PR #%d, then report again."
 )
 
 
