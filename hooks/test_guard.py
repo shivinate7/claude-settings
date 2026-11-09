@@ -18668,12 +18668,15 @@ def pd_repo(name, stamp, origin=None):
     return where
 
 
+MH_ORIGIN = "git@github.com:owner/fixture.git"
+PD_REPO = "owner/fixture"  # the repo MH_ORIGIN names: the `repo` every open decision of this family carries
 PD_FILE = "docs/design/item48/a.html"  # a design's file: inside the checkout's design folder (rule mockup-home)
 
 
 def pd_item(designs=None, **over):
     """A decision that every other waiting-page rule passes. Option a carries the picture, option b has none."""
-    item = {"id": PD_DOC, "kind": "decision", "status": "open", "title": "Which fill should the volume card show?",
+    item = {"id": PD_DOC, "kind": "decision", "status": "open", "repo": PD_REPO,
+            "title": "Which fill should the volume card show?",
             "context": "The volume card shows the stock level.",
             "options": [{"key": "a", "label": "Full card", "how": "The card shows the full stock.", "design": "m1"},
                         {"key": "b", "label": "Empty card", "how": "The card shows no stock."}],
@@ -18685,7 +18688,7 @@ def pd_item(designs=None, **over):
 
 def pd_plain():
     """A decision with no picture. Its text says design, so a check that reads words would run the checker."""
-    return with_stake({"id": PD_DOC, "kind": "decision", "status": "open",
+    return with_stake({"id": PD_DOC, "kind": "decision", "status": "open", "repo": PD_REPO,
                        "title": "Which design review comes first?", "context": "The design review of the volume card is due.",
                        "options": [{"key": "a", "label": "Review first", "how": "A design review before the build."},
                                    {"key": "b", "label": "Build first", "how": "The build before any design review."}]},
@@ -18994,7 +18997,6 @@ LOG_CHECKS_EXTRA.append(("page-item-design: a batch whose second item misses is 
 # is denied before the picture check starts node. The machine-home form ~/Developer/<repo name>-imports is refused too.
 # The checker here is a stub that passes, so a call of it is counted and nothing renders. The judge reads no file.
 MH_RULE = "mockup-home"
-MH_ORIGIN = "git@github.com:owner/fixture.git"
 MH_MACHINE = "~/Developer/fixture-imports/item48/a.html"
 MH_APP_SUPPORT = "~/Library/Application Support/Claude-Work/side-session-notes/abc123/a.html"
 MH_SHOT = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asset/shot.png"
