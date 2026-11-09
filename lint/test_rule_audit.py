@@ -818,7 +818,6 @@ REFUSAL_UNCITED_EXEMPT = {
     "merge:base_job_caps: cannot read to look for .github/workflows": ("refusal-matches-rule", "the workflow folder on the base could not be listed, and the stop prints git's output"),
     "merge:base_verdict: cannot read origin/ to look for .github/workflows": ("refusal-matches-rule", "the workflow folder on the base could not be listed, and the stop prints git's output"),
     "merge:confirm: the pull request is": ("refusal-matches-rule", "the pull request is closed or conflicting, and the stop names GitHub's state"),
-    "merge:confirm: moved: gh says": ("refusal-matches-rule", "the branch moved during the run, and the stop prints both heads; nothing was claimed"),
     "merge:confirm: the push of was refused": ("refusal-matches-rule", "a plain push was refused, so nothing reaches origin, and the stop prints only that", 2),
     "merge:confirm: why": ("refusal-matches-rule", "the check wait's reason is a Host method's return, which the reader cannot follow"),
     "merge:confirm: merge: the worktree is gone": ("refusal-matches-rule", "the worktree is gone, so the claim cannot be reverted, and the stop names the claim and the branch"),
@@ -827,7 +826,6 @@ REFUSAL_UNCITED_EXEMPT = {
     "merge:confirm: the local main did not move in": ("refusal-matches-rule", "the local main cannot fast-forward in that tree, so the stop names the fix by hand"),
     "merge:confirm: is not on . Nothing was moved": ("refusal-matches-rule", "the commit is not on origin, so no local move was made, and the stop names only that"),
     "merge:confirm: is not on origin/. Nothing was moved": ("refusal-matches-rule", "the commit is not on origin's base, so no local move was made, and the stop names only that"),
-    "merge:draft_step: moved: gh says": ("refusal-matches-rule", "the branch moved during the run, and the stop prints both heads; nothing was claimed"),
     "merge:draft_step: the push of was refused": ("refusal-matches-rule", "a plain push was refused, so nothing reaches origin, and the stop prints only that"),
     "merge:ff_main: git fetch origin failed, so the local main": ("refusal-matches-rule", "git fetch failed, so the local main cannot be moved, and the stop prints git's output"),
     "merge:host_default_branch: network error from `gh api repos`": ("refusal-matches-rule", "gh failed on a network error after its retries, and the stop says to run again"),
@@ -845,10 +843,8 @@ REFUSAL_UNCITED_EXEMPT = {
     "merge:main: cannot read the config on origin/": ("refusal-matches-rule", "the config file cannot be read on the base, and the stop prints the read's error"),
     "merge:main: cannot read origin/ to look for": ("refusal-matches-rule", "the config folder on the base cannot be listed, and the stop prints git's output"),
     "merge:main: git fetch origin failed": ("refusal-matches-rule", "git fetch failed, so the base cannot be read, and the stop prints git's output"),
-    "merge:open_worktree: git fetch origin failed": ("refusal-matches-rule", "git fetch failed, so the worktree cannot open, and the stop prints git's output"),
     "merge:add_worktree: cannot make the worktree": ("refusal-matches-rule", "git could not add the worktree, and the stop prints git's output"),
     "merge:preview: the pull request is": ("refusal-matches-rule", "the pull request is closed or conflicting, and the stop names GitHub's state"),
-    "merge:preview: moved: gh says": ("refusal-matches-rule", "the branch moved during the run, and the stop prints both heads; nothing was claimed"),
     "merge:prove: network error on the fetch of origin": ("refusal-matches-rule", "a network error hit the fetch of the base after its retries, and the claim stays on the branch"),
 }
 
