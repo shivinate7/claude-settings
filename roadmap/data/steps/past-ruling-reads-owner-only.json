@@ -1,11 +1,11 @@
 {
   "title": "The past-ruling judge counts only an owner ruling, never an incident or a recommended pick",
   "why": "Two false alarms of the Stop hook's past-ruling guard on Nov 8. (1) Coordinator 11:38 CST: it told lane silent-undo-reads-retire-run (session_013NEJL4TDRWqka4aSU2Bv7L) that step mixed-merge-resolver holds a coordinator ruling that \"the orchestrator resolves it by hand\", but that step's own why calls the hand merge an incident against roles-orchestrator-never-builds; the lane followed it and pushed a hand merge (1a444eb96 on #1932). (2) Triage 10:51 CST: it read item 431's recommended `pick` as the owner's answer, though the page held no answer. Fix: the judge cites a ruling only from an owner answer or a sentence that names the owner as its source (premise P44 test), never from an incident, a recommendation or a coordinator note.",
-  "note": "",
+  "note": " Possible false alarm (lane replacement-pr-carries-review, via the coordinator 19:22 CST Nov 8): the past-ruling stop hook cited a record named review-fix-check-round, which does not exist in docs/decisions, and called a new lane at round 1 ruled out, while hold-unsafe-after-round-3 says the finding becomes one. The judge should cite only records that exist.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
   "status": "todo",
   "order": 764,
-  "updatedAt": "2026-11-08T11:38:00-06:00"
+  "updatedAt": "2026-11-08T19:24:00-06:00"
 }

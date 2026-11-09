@@ -137,3 +137,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - coordinator-scope-missed-writes, add (same source): the `gh api -X PUT repos/o/r/contents/<path>` write is not read for coordinators.
 - shared-names-case-w-scope (same source): case (w) in test_shared_names.py tests _test_temp.sweep, not the role reader.
 - loop-var-literal-idioms (#2123 round 3, same lane; debt loop-var-redirect-literal does not name them): a part-word `$f` in a loop body (`echo "== $f =="`) and `$HOME` or `$D` in a for list stay literal, as on main, because _resolve_loops runs before _resolve_vars.
+- stamp-refusal-three-fixes (lane message-time-matches-clock, via the coordinator 19:22 CST Nov 8, Decision: local-time-central): the stamp refusal names three fixes, not two (STAMP_REASON in hooks/guard_merge.py).
+- dash-separator-space-one-side (same source and decision): the dash separator regex needs a space only before the dash, not on both sides.
+- written-times-says-bash (same source and decision): the "Written times" bullet says Bash, but SHELL_TOOLS also judges PowerShell.

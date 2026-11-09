@@ -1,0 +1,11 @@
+{
+  "title": "q_max gets a named record branch and a named session that lands into it",
+  "why": "q_max origin `roadmap` is 9482af859, an orphan root commit from the page-export run with no main history; `artifact-pages-export` (7b5acb8d7) fast-forwards only from it. q_max has no triage session and no project-ops roadmap, so no one may land it (coordinator 19:22 CST Nov 8).",
+  "note": "Filed by triage, Nov 8 19:24 CST. Question: what is q_max's record branch, and who lands into it? Runner 9 holds; nothing is lost.",
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "todo",
+  "order": 857,
+  "updatedAt": "2026-11-08T19:24:00-06:00"
+}
