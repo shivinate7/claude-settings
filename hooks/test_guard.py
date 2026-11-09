@@ -5589,6 +5589,27 @@ sh("git-after-cd: an else body after a file test, when the then body ends in || 
    "if [ -f a ]; then pytest -q || true; else %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: a check protected by || exit 1, then ; a git push -u origin b, passes",
    "pytest -q || exit 1; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+# AN UNFAILING TAIL IS ANY WORDS, NOT ONLY `true` OR `:`. `echo bad` and `true >/dev/null` exit 0 whatever the check
+# did, so each makes a check unfailing as `true` does: the then body of an if, and the body of a while, run after a
+# failed check, and a push there is refused. The else body of an `|| echo bad` test never runs, so its push passes.
+# `{if` is a plain word, not a keyword, so a push after `;` is judged as after an unknown command: bare `foo; push`
+# is refused the same way. The `|| exit 1` tail ends the shell on a failed check, so it is no unfailing tail.
+# The `while` body follows lane pick 2026-11-09 00:07 CST.
+sh("git-after-cd: UNFAILING-TAIL, an if test of pytest with || echo bad, then a git push -u in its then body, is refused",
+   "if pytest -q || echo bad; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: UNFAILING-TAIL, an if test of pytest with || true >/dev/null, then a git push -u in its then body, is refused",
+   "if pytest -q || true >/dev/null; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: UNFAILING-TAIL, an if test of pytest with || echo bad, whose else body pushes, passes",
+   "if pytest -q || echo bad; then :; else %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: UNFAILING-TAIL, a while test of pytest with || true, then a git push -u in its body, is refused (lane pick 2026-11-09 00:07 CST)",
+   "while pytest -q || true; do %s push -u origin b; break; done" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: UNFAILING-TAIL, a brace-glued {if word, then ; a git push -u, is refused as after an unknown command",
+   "{if true; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: UNFAILING-TAIL, an if test of pytest with || exit 1, then a git push -u in its then body, passes",
+   "if pytest -q || exit 1; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
 # A GLUED `(if true` WITH A PUSH IN ITS ELSE BODY. The `true` test always runs its then body, so the push in the else
 # body never runs on a failed check and passes. The unglued form and the spaced `( if` form pass today. The glued `(if`
 # is refused as a false alarm: `_push_segment_inert` does not pop the `(` in front of `if`.
