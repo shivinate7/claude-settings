@@ -679,8 +679,8 @@ jobs:
 
       - name: install.sh checkout-detection suite
         if: ${{ needs.scope.outputs.code == 'true' }}
-        # Own cap: slowest 6.98 min is 70% of it, so a hang reads red at this step.
-        timeout-minutes: 10
+        # Own cap: n5 (green 7.90, 8.67, 9.60, 9.68 min, runs 42682869856, 42669400649, 42717988296, 42700538152; plus 10.22 min cut at the old 10 min cap, run 42708195330, a floor): cap 14 = slowest green 9.68 / 0.7, rounded up (decision ci-job-caps).
+        timeout-minutes: 14
         run: sh hooks/test_install_src.sh
 
       - name: cloud-setup.sh suite
@@ -872,8 +872,8 @@ jobs:
   shell-macos:
     runs-on: macos-latest
     needs: scope
-    # n30 green, median 21.1, slowest 23.2 min (run 42120437163): cap 34 = slowest / 0.7, rounded up (decision ci-job-caps).
-    timeout-minutes: 34
+    # n30 green, slowest 23.2 min with its suite step at 11.68 (run 42120437163), so about 11.5 min of other steps; the suite step's floor is now 16.2 min (n6, runs 42708195330, 42717988296): 16.2 + 11.5 = 27.7; cap 40 = 27.7 / 0.7, rounded up (decision ci-job-caps).
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
@@ -892,8 +892,8 @@ jobs:
         run: bash -n install.sh
       - name: install.sh checkout-detection suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
-        # Own cap: slowest 11.68 min is 73% of it, so a hang reads red at this step.
-        timeout-minutes: 16
+        # Own cap: n6 (green 9.65, 11.08, 14.32, 15.00 min, runs 42700538152, 42682869856, 42676155839, 42669400649; 16.22 and 16.2 min, runs 42708195330 and 42717988296, each cut at the old 16 min cap with every case passing, so floors): cap 24 = 16.2 / 0.7, rounded up (decision ci-job-caps).
+        timeout-minutes: 24
         run: sh hooks/test_install_src.sh
       - name: install_from_main suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
