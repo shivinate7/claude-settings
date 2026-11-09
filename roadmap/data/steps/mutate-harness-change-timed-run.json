@@ -4,8 +4,8 @@
   "note": "Fix: when a PR touches hooks/mutate_*.py, the merge tool's lane lint (or the PR's own dispatch run) runs checks-mutate-guard on the PR head and reports its time and unknown count. Red case first. Filed 07:23 CST Nov 9. Related: steps lane-lint-checks-from-batch and lane-lint-cheap-checks-first. Page item 463 (mutate-harness-lane-run, 09:03 CST Nov 9): may a lane that touches hooks/mutate_*.py run the mutation job's command, against ruling lanes-run-no-full-ci-job? #2443 held until it is answered. Owner pick on the waiting page (13:09 CST Nov 9): item 463 a. Ruling lanes-run-no-full-ci-job gains one named exception: for a lane that changes the mutation harness, its own suite is the mutation job, run before the batch. #2443 is released with its decision edit.",
   "phase": "now",
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
-  "lane": "",
-  "status": "todo",
+  "lane": "session_013NEJL3z5XQbr2LcTV4ejh2",
+  "status": "doing",
   "order": 909,
-  "updatedAt": "2026-11-09T13:10:00-06:00"
+  "updatedAt": "2026-11-09T13:13:00-06:00"
 }
