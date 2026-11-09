@@ -12,7 +12,7 @@ from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
     _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
     _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
-    is_powershell, norm, resolve_command, segment_tokens, split_segments,
+    inline_script, is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
 
 
@@ -135,21 +135,24 @@ def _span_end(text: str, start: int, escapes: bool) -> int:
 SCRIPT_RUNNER = re.compile(
     r"(?:^|[\s;&|(])(?:(?:(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*-\w*c)|eval|ssh(?:\s+[^\s;&|]+)*)\s*$")
 # ... or to an interpreter that runs it: `python3 -c "..."`, `node -e "..."`, `perl -e "..."`,
-# `php -r "..."`, `deno eval -A "..."`. Deno's permission and other flags (`-A`, `--allow-run`,
-# `--allow-run=git`) sit between `eval` and the script; SCRIPT_RUNNER's `eval` reads only the
-# bare `deno eval`.
+# `php -r "..."`, `deno eval -A "..."`. Deno's flags sit between `eval` and the script: `-A`,
+# `--allow-run=git`, and a flag with its value as the next word (`--ext ts`, `--config x.json`);
+# SCRIPT_RUNNER's `eval` reads only the bare `deno eval`. A flag starts with `-` and a value word
+# never does, so each word has one parse and a failed match stays linear.
 INTERPRETER_RUNNER = re.compile(
     r"(?:^|[\s;&|(])(?:(?:python[\d.]*|node(?:js)?|ruby|perl|php|deno)\s+(?:-\w+\s+)*-\w*[ce]"
-    r"|php\s+(?:-\w+\s+)*-\w*r|deno\s+(?:-\w+\s+)*eval(?:\s+--?[\w-]+(?:=\S*)?)*)\s*$")
+    r"|php\s+(?:-\w+\s+)*-\w*r"
+    r"|deno\s+(?:-\w+\s+)*eval(?:\s+-{1,2}\w[\w-]*(?:=\S*)?(?:\s+[^\s\"'-]\S*)?)*)\s*$")
 # An argv call: `new Deno.Command("git", {args: ["push", "-f"]})` names its program and its
 # arguments as separate strings, so the pairs of one call are read as one command line.
 ARGV_CALL = re.compile(r"\bDeno\.Command\s*\(\s*$")
 # The text between two strings of one argv call. Each part starts with its own character, so a
 # failed fullmatch takes linear time.
 ARGV_GAP = re.compile(r"[\s,]*(?:\{\s*args\s*:\s*\[[\s,]*)?")
-# One argument as one shell word: each character the shell or shlex splits on or unquotes is
-# backslash-escaped, so an argument with a space stays one word. Backslashes, not quotes:
-# PUSH_QUOTED blanks a quoted run with a space in it.
+# One argument as one shell word: each character the shell or shlex splits on is
+# backslash-escaped, so an argument with a space stays one word. The word holds no quote:
+# PUSH_QUOTED reads raw quotes and ignores backslashes, so a quote here could pair with a
+# quote in a neighbouring word and blank the words between.
 ARGV_UNSAFE = re.compile(r"[^\w@%+=:,./-]")
 # Inside a script, a call that runs its string argument as a command, even inside a print.
 CALL_RUNNER = re.compile(
@@ -163,9 +166,13 @@ PRINT_COMMAND = re.compile(r"^[\s\"'(]*(?:(?:sudo|command|builtin)\s+)?(?:echo|p
 
 
 def _argv_word(arg: str) -> str:
-    """One argument as one word of a command line (see ARGV_UNSAFE). An empty one is `''`."""
+    """One argument as one word of a command line (see ARGV_UNSAFE). Its quote characters are
+    dropped, as _push_parse drops them from every push argument. An argument left empty is an
+    escaped space, since the shell has no empty word without quotes. This is a bandaid: the push
+    reader sees a one-space word, which keeps its place, so the words after it keep theirs."""
+    arg = arg.replace("'", "").replace('"', "")
     escaped = ARGV_UNSAFE.sub(lambda m: "\\ " if m.group() == "\n" else "\\" + m.group(), arg)
-    return escaped or "''"
+    return escaped or "\\ "
 
 
 def _printed(script: str) -> bool:
@@ -193,7 +200,9 @@ def _nested_commands(span: str, before: str = "") -> str:
     def emit():
         nonlocal words
         if words:
-            lines.append(" ".join(map(_argv_word, words)) + "\n")
+            # A shell's `-c` argument is a script, read as a runner line of its own.
+            shell = inline_script(words)
+            lines.append(shell + "\n" if shell else " ".join(map(_argv_word, words)) + "\n")
             words = []
 
     while index < len(body):
