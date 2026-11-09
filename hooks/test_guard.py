@@ -15171,8 +15171,18 @@ sh("builder-find: mkdir -p out, cd out, cp ../src/*.txt . writes out/b.txt, no t
 sh("builder-find: mkdir -p out, cd out, cp -r ../tests/unit . writes out/unit/test_x.py, a folder walk from a made folder, is refused",
    "mkdir -p out && cd out && cp -r ../tests/unit .", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
 sh("builder-find: mkdir -p an absolute out, cp of its ../tests/*.py into it, an absolute glob through a made folder, is refused",
-   "mkdir -p %s/out && cp %s/out/../tests/*.py %s/out/" % (FINDCP, FINDCP, FINDCP), "deny", rule=BT,
+   "mkdir -p %s/out && cp %s/out/../tests/*.py %s/out/" % (slash(FINDCP), slash(FINDCP), slash(FINDCP)), "deny", rule=BT,
    carries=("test-author",), **dict(BR, cwd=FINDCP))
+# A `.` part names the folder it follows, so `./..` climbs out of out/, as `../` does. The `cd out/.` form enters the
+# same folder, so it must refuse too. Both copy tests/*.py into out/, which writes a test.
+sh("builder-find: mkdir -p out, cd out, cp ./../tests/*.py . writes out/test_a.py, a dot-dot after a dot, is refused",
+   "mkdir -p out && cd out && cp ./../tests/*.py .", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: mkdir -p out, cd out/., cp ./../tests/*.py . writes out/test_a.py, a dot-dot after a dot, is refused",
+   "mkdir -p out && cd out/. && cp ./../tests/*.py .", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+# Both folders of a/b are absent, so each `..` folds on its own: a/b/.. is a, and a/.. is the repository. The copy
+# writes a/b/test_a.py, a test, so it is refused.
+sh("builder-find: mkdir -p a/b, cd a/b, cp ../../tests/*.py . writes a/b/test_a.py, two absent folders, is refused",
+   "mkdir -p a/b && cd a/b && cp ../../tests/*.py .", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
 # FINDSYM holds link, a symlink to a folder whose parent holds tests/test_a.py. The repository has no tests/ folder,
 # so only the link's real parent holds a match. The glob through `..` reaches that test, so the copy is refused.
 FINDSYM = os.path.join(ROOT, "findsym")
@@ -15193,6 +15203,25 @@ if os.name == "nt":
 else:
     sh("builder-find: cd into a symlink to a folder elsewhere, cp ../tests/*.py . through it, is refused",
        "cd link && cp ../tests/*.py .", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDSYM))
+# FINDNOLINK holds link, a symlink to a folder whose real parent holds no tests folder. The repository has none either,
+# so the glob matches nothing and the copy writes no test: it is allowed.
+FINDNOLINK = os.path.join(ROOT, "findnolink")
+SYM_EMPTY = os.path.join(ROOT, "symempty")
+
+
+def _build_find_no_link():
+    make_repo(FINDNOLINK, {"src/app.py": "x\n", "docs/keep.txt": "x\n"})
+    os.makedirs(os.path.join(SYM_EMPTY, "sub"), exist_ok=True)
+    _make_dir_link(os.path.join(SYM_EMPTY, "sub"), os.path.join(FINDNOLINK, "link"))
+
+
+lazy_fixture([FINDNOLINK], _build_find_no_link)
+if os.name == "nt":
+    skip_case("builder-find: cd into a symlink whose parent holds no tests, cp ../tests/*.py . is allowed",
+              "skipped: this row needs a directory symlink, and this run is on Windows")
+else:
+    sh("builder-find: cd into a symlink whose parent holds no tests, cp ../tests/*.py . is allowed",
+       "cd link && cp ../tests/*.py .", "allow", **dict(BR, cwd=FINDNOLINK))
 # An unmatched glob is judged by its literal text, the same as the dyn/[id].test.tsx case above.
 sh("builder-find: cp of unmatched glob assets/test_*.py into docs/, judged by its literal text, is refused",
    "cp assets/test_*.py docs/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
