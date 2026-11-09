@@ -250,6 +250,9 @@ jobs:
       - name: Stop-hook question route suite
         run: python3 lint/test_report_guard_route.py
 
+      - name: Stop-hook stamped copy suite
+        run: python3 lint/test_report_guard_stamped.py
+
       - name: Stop-hook route row falsifier suite
         run: python3 lint/test_report_guard_falsifier.py
 
@@ -1019,6 +1022,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_report_guard_route.py
 
+      - name: Stop-hook stamped copy suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_stamped.py
+
       - name: Stop-hook route row falsifier suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_report_guard_falsifier.py
@@ -1720,6 +1727,10 @@ jobs:
       - name: Stop-hook question route suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python lint/test_report_guard_route.py
+
+      - name: Stop-hook stamped copy suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python lint/test_report_guard_stamped.py
 
       - name: Stop-hook route row falsifier suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
