@@ -3571,8 +3571,7 @@ def holds(root, head, ref):
     import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
     got = ancestor(root, head, ref)
     if got is None and git_reads.is_shallow(root) is True:
-        # Host.holds_head would read this without changing the clone, but one REST compare per lane pair costs more than one fetch, and a run
-        # in a clone that cannot reach GitHub's API has no other read. So the clone is deepened, and the run says so.
+        # Host.holds_head would read this without changing the clone, but the test host has no such read, so the clone is deepened and the run says so.
         say("merge: the clone is shallow; its history is fetched in full once (git fetch --unshallow), so the clone is no longer shallow.")
         c, out = git(root, "fetch", "-q", "--unshallow", "origin")
         if c:
@@ -3680,11 +3679,11 @@ def holds_commit_of(root, lane, other, kept):
         raise Stop(f"cannot read the common commits of {lane[:9]} and {other[:9]}: {out} {FREEZE_CITE}")
     return any(not any(holds(root, b, k) for k in kept) for b in out.split())
 
-def stacked_without_base(root, h, base, heads, running, own=None):
+def stacked_without_base(root, h, base, heads, running, own=None, remedy="Add the missing pull request, or leave the stacked lane out."):
     """Refuse (Stop) a request in which a lane holds a commit of another open pull request on `base` that the request leaves out: merging the lane
     would put that pull request's commits into the batch unfrozen, an old commit of it as much as its head. `heads` is {PR: head} of the request;
     `running` is the head of the integration branch it stacks on, or None; a commit that it or the base tip holds is already in. `own` is the batch's
-    own pull request. Each other head is the sha the open list gives."""
+    own pull request. Each other head is the sha the open list gives. `remedy` is the route the refusal names."""
     kept = [fetch_branch(root, base), *([running] if running else [])]
     others = [(n, info["head"]) for n, info in h.open_prs() if n not in heads and n != own and info["base"] == base]
     unread = fetch_heads(root, [s for _, s in others])
@@ -3695,7 +3694,7 @@ def stacked_without_base(root, h, base, heads, running, own=None):
             continue
         found += [f"#{m} holds a commit of #{n}, which is not in this request" for m in sorted(heads) if holds_commit_of(root, heads[m], head, kept)]
     if found:
-        raise Stop("\n".join(found) + f"\nAdd the missing pull request, or leave the stacked lane out. Nothing was pushed. {FREEZE_CITE}")
+        raise Stop("\n".join(found) + f"\n{remedy} Nothing was pushed. {FREEZE_CITE}")
 
 def stray_heads(root, tip, block, stops, kept):
     """-> the heads a no-ff merge put on the integration branch at `tip`, along its first parents down to any commit of `stops`, that its frozen block
@@ -3721,7 +3720,9 @@ def sync_batch(root, h, pr, info, block, on, base):
     strays = stray_heads(root, tip, block, stops, kept)
     if not strays and all(holds(root, heads[n], tip) for n in sorted(heads)) and not (on and not holds(root, now_on, tip)):
         return 0
-    stacked_without_base(root, h, base, heads, now_on, own=pr)
+    # a frozen set takes no new lane, and a drop rebuilds on the recorded On sha, so the route is a drop and then this build, which rebuilds on the new head
+    stacked_without_base(root, h, base, heads, now_on, own=pr, remedy=f"Run `merge --batch-drop {name} <lane>` for each lane named, then run this "
+                         f"--batch-build again with the lanes left: it rebuilds {branch} on the head of {on or base} now.")
     start, recorded = batch_start(root, block, base)
     start = now_on or start
     text = freeze_rewrite(info["body"], block, freeze_lines(name, heads, block["dropped"], (on, now_on) if on else None, recorded))
