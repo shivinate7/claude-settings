@@ -422,7 +422,7 @@ class PythonCalendarTest(FinderCase):
         calendar_judge(self, "tests/test_zone.py", text,
                        listed=["t_utc = datetime.now(timezone.utc)", "t_tz = datetime.now(tz)"])
 
-    def test_utcnow_is_listed_beside_a_fixed_epoch(self):
+    def test_utcnow_and_a_local_read_of_an_epoch_are_listed(self):
         text = src(
             "import datetime",
             "import time",
@@ -436,10 +436,10 @@ class PythonCalendarTest(FinderCase):
         )
         self.put("tests/test_utc.py", text)
         calendar_judge(self, "tests/test_utc.py", text,
-                       listed=["t_utc = datetime.utcnow()", "t_utc_dt = datetime.datetime.utcnow()"],
-                       clean=["t_fixed = time.localtime(EPOCH)"])
+                       listed=["t_utc = datetime.utcnow()", "t_utc_dt = datetime.datetime.utcnow()",
+                               "t_fixed = time.localtime(EPOCH)"])
 
-    def test_epoch_and_given_time_forms_are_not_listed(self):
+    def test_local_read_of_an_epoch_is_listed_and_strftime_with_a_time_is_not(self):
         text = src(
             "import time",
             "EPOCH = 0",
@@ -451,8 +451,8 @@ class PythonCalendarTest(FinderCase):
         )
         self.put("tests/test_fixed.py", text)
         calendar_judge(self, "tests/test_fixed.py", text,
-                       listed=["t_now = time.localtime()"],
-                       clean=["t_fixed = time.localtime(EPOCH)", "t_given = time.strftime('%Y', stamp)"])
+                       listed=["t_fixed = time.localtime(EPOCH)", "t_now = time.localtime()"],
+                       clean=["t_given = time.strftime('%Y', stamp)"])
 
     def test_summary_and_counts_include_calendar(self):
         text = src(
@@ -478,11 +478,11 @@ class PythonCalendarTest(FinderCase):
             "EPOCH = 0",
             "",
             "def test_none(stamp):",
-            "    t_fixed = time.localtime(EPOCH)",
+            "    t_fixed = time.gmtime(EPOCH)",
             "    time.sleep(1)",
         )
         self.put("tests/test_none.py", text)
-        calendar_judge(self, "tests/test_none.py", text, clean=["t_fixed = time.localtime(EPOCH)"])
+        calendar_judge(self, "tests/test_none.py", text, clean=["t_fixed = time.gmtime(EPOCH)"])
         self.assertIn("calendar 0", self.last_line(), "calendar not listed in the summary")
 
     def test_hash_opener_in_a_string_does_not_hide_a_form(self):
@@ -531,7 +531,7 @@ class PythonCalendarTest(FinderCase):
         calendar_judge(self, "tests/test_block.py", text,
                        listed=["t_after = datetime.now()"], clean=["t_block = time.localtime()"])
 
-    def test_no_argument_time_readers_are_listed_and_given_time_is_not(self):
+    def test_ctime_and_no_argument_readers_are_listed_and_gmtime_asctime_are_not(self):
         text = src(
             "import time",
             "EPOCH = 0",
@@ -546,9 +546,9 @@ class PythonCalendarTest(FinderCase):
         )
         self.put("tests/test_readers.py", text)
         calendar_judge(self, "tests/test_readers.py", text,
-                       listed=["t_gm_now = time.gmtime()", "t_ct_now = time.ctime()", "t_as_now = time.asctime()"],
-                       clean=["t_gm_fixed = time.gmtime(EPOCH)", "t_ct_fixed = time.ctime(EPOCH)",
-                              "t_as_fixed = time.asctime(stamp)"])
+                       listed=["t_gm_now = time.gmtime()", "t_ct_now = time.ctime()", "t_as_now = time.asctime()",
+                               "t_ct_fixed = time.ctime(EPOCH)"],
+                       clean=["t_gm_fixed = time.gmtime(EPOCH)", "t_as_fixed = time.asctime(stamp)"])
 
     def test_zone_attributes_are_listed(self):
         text = src(
@@ -900,6 +900,53 @@ class PythonCalendarTest(FinderCase):
         )
         self.put("tests/test_bare_zone.py", text)
         calendar_judge(self, "tests/test_bare_zone.py", text, listed=["assert timezone == 0"])
+
+    def test_fromtimestamp_without_a_zone_is_listed_and_a_zone_argument_is_not(self):
+        text = src(
+            "import time",
+            "from datetime import datetime, timezone",
+            "",
+            "EPOCH = 0",
+            "",
+            "def test_fromtimestamp(stamp):",
+            "    t_ft_fixed = datetime.fromtimestamp(EPOCH)",
+            "    t_ft_stamp = datetime.fromtimestamp(stamp)",
+            "    t_ft_utc_kw = datetime.fromtimestamp(stamp, tz=timezone.utc)",
+            "    t_ft_utc_pos = datetime.fromtimestamp(stamp, timezone.utc)",
+            "    t_ft_none_pos = datetime.fromtimestamp(stamp, None)",
+            "    t_ft_none_kw = datetime.fromtimestamp(stamp, tz=None)",
+            "    t_ft_utc = datetime.utcfromtimestamp(stamp)",
+            "    t_gm = time.gmtime(EPOCH)",
+            "    # t_comment = datetime.fromtimestamp(EPOCH)",
+            "    NOTE = 't_note = datetime.fromtimestamp(EPOCH)'",
+        )
+        self.put("tests/test_fromtimestamp.py", text)
+        calendar_judge(self, "tests/test_fromtimestamp.py", text,
+                       listed=["t_ft_fixed = datetime.fromtimestamp(EPOCH)",
+                               "t_ft_stamp = datetime.fromtimestamp(stamp)",
+                               "t_ft_none_pos = datetime.fromtimestamp(stamp, None)",
+                               "t_ft_none_kw = datetime.fromtimestamp(stamp, tz=None)"],
+                       clean=["t_ft_utc_kw = datetime.fromtimestamp(stamp, tz=timezone.utc)",
+                              "t_ft_utc_pos = datetime.fromtimestamp(stamp, timezone.utc)",
+                              "t_ft_utc = datetime.utcfromtimestamp(stamp)", "t_gm = time.gmtime(EPOCH)",
+                              "# t_comment = datetime.fromtimestamp(EPOCH)", "NOTE = 't_note = datetime"])
+
+    def test_astimezone_without_a_zone_is_listed_and_a_zone_argument_is_not(self):
+        text = src(
+            "from datetime import timezone",
+            "",
+            "def test_astimezone(fixed_dt):",
+            "    t_as_local = fixed_dt.astimezone()",
+            "    t_as_utc = fixed_dt.astimezone(timezone.utc)",
+            "    t_as_none_pos = fixed_dt.astimezone(None)",
+            "    t_as_none_kw = fixed_dt.astimezone(tz=None)",
+        )
+        self.put("tests/test_astimezone.py", text)
+        calendar_judge(self, "tests/test_astimezone.py", text,
+                       listed=["t_as_local = fixed_dt.astimezone()",
+                               "t_as_none_pos = fixed_dt.astimezone(None)",
+                               "t_as_none_kw = fixed_dt.astimezone(tz=None)"],
+                       clean=["t_as_utc = fixed_dt.astimezone(timezone.utc)"])
 
 
 # ---- JS/TS: masker then patterns ----------------------------------------------------------------
@@ -1305,6 +1352,24 @@ class JsCalendarTest(FinderCase):
         calendar_judge(self, "tests/bare_date.test.js", text,
                        listed=["const b_0 = Date();", "let b_1 = Date();"])
 
+    def test_bare_date_call_with_an_argument_is_listed(self):
+        text = src(
+            "const a_0 = Date(x);",
+            'const a_1 = Date("2026-01-01");',
+        )
+        self.put("tests/bare_date_arg.test.js", text)
+        calendar_judge(self, "tests/bare_date_arg.test.js", text,
+                       listed=["const a_0 = Date(x);", 'const a_1 = Date("2026-01-01");'])
+
+    def test_new_date_fed_by_a_name_that_holds_a_clock_is_listed(self):
+        text = src(
+            "const t = Date.now();",
+            "const held = new Date(t);",
+        )
+        self.put("tests/clock_held.test.js", text)
+        calendar_judge(self, "tests/clock_held.test.js", text,
+                       listed=["const held = new Date(t);"])
+
     def test_bare_date_in_a_comment_or_a_string_is_not_listed(self):
         text = src(
             "// const note = Date();",
@@ -1498,13 +1563,18 @@ class SwiftCategoriesTest(FinderCase):
         ]
         text = src(*lines)
         self.put("Tests/TimingTests.swift", text)
-        code, out = self.report()
-        self.assertEqual(self.rows(out), pinned(
+        out = calendar_judge(self, "Tests/TimingTests.swift", text, listed=[
+            "let t0 = Date()", "let start = Date()", "let elapsed = Date().timeIntervalSince(start)",
+            "print(Date())",
+        ])
+        self.assertEqual({row for row in self.rows(out) if row[2] == "elapsed-assert"}, pinned(
             "Tests/TimingTests.swift", text,
             *[(f"XCTAssertLessThan(t{i}, 9)", "elapsed-assert") for i in range(len(SWIFT_CLOCKS))],
             ("XCTAssertLessThan(elapsed, 1.0)", "elapsed-assert"),
             ("#expect(elapsed < 2)", "elapsed-assert"),
-        ))
+        ), "the elapsed-assert rows are not the pinned set")
+        other = sorted(row for row in self.rows(out) if row[2] not in ("calendar", "elapsed-assert"))
+        self.assertFalse(other, "a row of another category is listed: %s" % other)
 
     def test_test_cap_forms(self):
         text = src(
@@ -1557,7 +1627,7 @@ class SwiftCategoriesTest(FinderCase):
 
 
 class SwiftCleanTest(FinderCase):
-    def test_patterns_in_comments_and_strings_are_clean(self):
+    def test_patterns_in_comments_and_strings_are_clean_and_a_code_date_is_listed(self):
         text = src(
             "// Thread.sleep(forTimeInterval: 1) and XCTAssertLessThan(Date(), 1)",
             'let s = "measure { executionTimeAllowance = 5 }"',
@@ -1568,7 +1638,144 @@ class SwiftCleanTest(FinderCase):
         )
         self.put("Tests/CleanTests.swift", text)
         code, out = self.report()
-        self.assertEqual((code, self.rows(out)), (0, set()))
+        self.assertFalse(out["unread"], "scope: the fixture was not read: %s" % out["unread"])
+        self.assertEqual(self.rows(out), pinned(
+            "Tests/CleanTests.swift", text, ("print(Date())", "calendar")),
+            "a comment or a string line is listed, or the code-level Date() is not")
+        self.assertEqual(code, 1, "the listed code-level Date() does not set exit 1")
+
+
+class SwiftCalendarTest(FinderCase):
+    def test_calendar_and_zone_reads_are_listed(self):
+        text = src(
+            "import XCTest",
+            "final class CalendarTests: XCTestCase {",
+            "    func testReads() {",
+            "        let c_cal = Calendar.current",
+            "        let c_zone = TimeZone.current",
+            "        let c_now = Date()",
+            "        XCTAssertEqual(Date(), stamp)",
+            "    }",
+            "}",
+        )
+        self.put("Tests/CalendarTests.swift", text)
+        calendar_judge(self, "Tests/CalendarTests.swift", text, listed=[
+            "let c_cal = Calendar.current", "let c_zone = TimeZone.current", "let c_now = Date()",
+            "XCTAssertEqual(Date(), stamp)",
+        ])
+
+    def test_fixed_calendar_and_zone_forms_are_clean(self):
+        text = src(
+            "import XCTest",
+            "final class FixedTests: XCTestCase {",
+            "    func testFixed() {",
+            "        let f_date = Date(timeIntervalSince1970: 0)",
+            "        let f_cal = Calendar(identifier: .gregorian)",
+            '        let f_zone = TimeZone(identifier: "UTC")',
+            "        // let note = Calendar.current",
+            '        let s_text = "let s = TimeZone.current"',
+            "    }",
+            "}",
+        )
+        self.put("Tests/FixedTests.swift", text)
+        calendar_judge(self, "Tests/FixedTests.swift", text, clean=[
+            "let f_date = Date(timeIntervalSince1970: 0)", "let f_cal = Calendar(identifier: .gregorian)",
+            'let f_zone = TimeZone(identifier: "UTC")', "// let note = Calendar.current", "let s_text =",
+        ])
+
+    def test_elapsed_subtraction_in_an_assert_is_elapsed_only(self):
+        text = src(
+            "import XCTest",
+            "final class SpanTests: XCTestCase {",
+            "    func testSpan() {",
+            "        let begin = Date(timeIntervalSince1970: 0)",
+            "        XCTAssertLessThan(Date().timeIntervalSince(begin), 1)",
+            "    }",
+            "}",
+        )
+        self.put("Tests/SpanTests.swift", text)
+        out = calendar_judge(self, "Tests/SpanTests.swift", text,
+                             clean=["XCTAssertLessThan(Date().timeIntervalSince(begin), 1)"])
+        self.assertIn(("Tests/SpanTests.swift", lineno(text, "XCTAssertLessThan(Date()"), "elapsed-assert"),
+                      self.rows(out), "the elapsed subtraction in the assert is no longer elapsed-assert")
+
+    def test_date_now_and_date_since_now_outside_an_assert_are_listed(self):
+        text = src(
+            "import XCTest",
+            "final class StampReadTests: XCTestCase {",
+            "    func testStamps() {",
+            "        let n_now = Date.now",
+            "        let n_soon = Date(timeIntervalSinceNow: 60)",
+            "        let n_fixed = Date(timeIntervalSince1970: 0)",
+            "        let n_ref = Date(timeIntervalSinceReferenceDate: 0)",
+            "        let m_prefix = MyDate.now",
+            "        let m_suffix = Date.nowish",
+            "        let m_since = Date(timeIntervalSinceNowish: 1)",
+            "        print(n_now, n_soon, n_fixed, n_ref)",
+            "    }",
+            "}",
+        )
+        self.put("Tests/StampReadTests.swift", text)
+        calendar_judge(self, "Tests/StampReadTests.swift", text,
+                       listed=["let n_now = Date.now", "let n_soon = Date(timeIntervalSinceNow: 60)"],
+                       clean=["let n_fixed = Date(timeIntervalSince1970: 0)",
+                              "let n_ref = Date(timeIntervalSinceReferenceDate: 0)",
+                              "let m_prefix = MyDate.now", "let m_suffix = Date.nowish",
+                              "let m_since = Date(timeIntervalSinceNowish: 1)"])
+
+    def test_date_now_inside_an_elapsed_assert_is_that_assert_only(self):
+        text = src(
+            "import XCTest",
+            "final class StampSpanTests: XCTestCase {",
+            "    func testSpan() {",
+            "        let s_begin = Date(timeIntervalSince1970: 0)",
+            "        XCTAssertLessThan(Date.now.timeIntervalSince(s_begin), 1)",
+            "    }",
+            "}",
+        )
+        self.put("Tests/StampSpanTests.swift", text)
+        out = calendar_judge(self, "Tests/StampSpanTests.swift", text,
+                             clean=["XCTAssertLessThan(Date.now.timeIntervalSince(s_begin), 1)"])
+        self.assertIn(("Tests/StampSpanTests.swift", lineno(text, "XCTAssertLessThan(Date.now"), "elapsed-assert"),
+                      self.rows(out), "the elapsed subtraction of Date.now is no longer elapsed-assert")
+
+    def test_since_now_inside_an_elapsed_assert_is_that_assert_only(self):
+        text = src(
+            "import XCTest",
+            "final class SinceNowSpanTests: XCTestCase {",
+            "    func testSpan() {",
+            "        let s_since = Date(timeIntervalSince1970: 0)",
+            "        XCTAssertLessThan(Date(timeIntervalSinceNow: 0).timeIntervalSince(s_since), 1)",
+            "    }",
+            "}",
+        )
+        self.put("Tests/SinceNowSpanTests.swift", text)
+        out = calendar_judge(self, "Tests/SinceNowSpanTests.swift", text,
+                             clean=["XCTAssertLessThan(Date(timeIntervalSinceNow: 0).timeIntervalSince(s_since), 1)"])
+        proof = lineno(text, "XCTAssertLessThan(Date(timeIntervalSinceNow")
+        self.assertIn(("Tests/SinceNowSpanTests.swift", proof, "elapsed-assert"), self.rows(out),
+                      "the elapsed subtraction of Date(timeIntervalSinceNow:) is no longer elapsed-assert")
+
+    def test_calendar_forms_after_comment_openers_quotes_and_multi_line_strings(self):
+        text = src(
+            'let u = "http://a.test/"; let z_zone = TimeZone.current',
+            'let v = "http://b.test/"; let n_after_url = Date.now',
+            'let s = "/* not a comment"',
+            "let c_after = Calendar.current",
+            "// Don't use Calendar.current here",
+            "// Don't read Date.now here",
+            "let c_last = Calendar.current",
+            'let block = """',
+            "let t_block = Calendar.current",
+            "let t_block_now = Date.now",
+            '"""',
+        )
+        self.put("Tests/CalendarTrapTests.swift", text)
+        calendar_judge(self, "Tests/CalendarTrapTests.swift", text,
+                       listed=["let z_zone = TimeZone.current", "let n_after_url = Date.now",
+                               "let c_after = Calendar.current", "let c_last = Calendar.current"],
+                       clean=["// Don't use Calendar.current here", "// Don't read Date.now here",
+                              "let t_block = Calendar.current", "let t_block_now = Date.now"])
 
 
 class SwiftTrapsTest(FinderCase):
@@ -1942,6 +2149,581 @@ class HangGuardTest(FinderCase):
                          "a hang guard with an unread file exits %d, not 2" % proc.returncode)
 
 
+# ---- a poll interval in a loop that waits on a condition with a cap is a hang guard (P5) ------
+
+POLL_PATH = "tests/test_poll.py"
+
+
+class PollLoopTest(FinderCase):
+    """A sleep in a loop that waits on a condition with a cap is a wait-cap: listed, never counted. A sleep
+    with no condition, or with no cap, is a fixed wait and stays sleep. Each case pins the sleep line, not
+    the loop line."""
+
+    def listed(self, text, needle):
+        """The categories the finder gives the sleep line, and the exit code. Scope first (P7): the fixture is
+        read and the line has a finding at all."""
+        self.put(POLL_PATH, text)
+        code, out = self.report()
+        line = lineno(text, needle)
+        cats = {cat for path, ln, cat in self.rows(out) if ln == line}
+        self.assertTrue(cats, "scope: the sleep at line %d is not listed at all" % line)
+        return code, cats
+
+    def assert_wait_cap(self, text, needle):
+        code, cats = self.listed(text, needle)
+        self.assertEqual(cats, {"wait-cap"},
+                         "the poll interval is listed as %s, not wait-cap (a hang guard)" % sorted(cats))
+        self.assertEqual(code, 0, "a poll interval listed as wait-cap is counted as time-pinned (exit %d)" % code)
+
+    def assert_sleep(self, text, needle):
+        _, cats = self.listed(text, needle)
+        self.assertEqual(cats, {"sleep"}, "the fixed wait is listed as %s, not sleep" % sorted(cats))
+
+    # The real shapes. Each names the site it copies, so the next reader can find it.
+
+    def test_deadline_in_the_while_test_and_an_if_return_in_the_body(self):
+        # janitor/test_sweep.py, _wait_for_pidport_file and _read_when_ready
+        text = src(
+            "import os",
+            "import time",
+            "",
+            "def wait_for_file(path, timeout=10.0):",
+            "    deadline = time.time() + timeout",
+            "    while time.time() < deadline:",
+            "        if os.path.exists(path) and os.path.getsize(path) > 0:",
+            "            return path",
+            "        time.sleep(0.05)",
+            "    raise AssertionError('never written: %r' % path)",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.05)")
+
+    def test_deadline_and_a_condition_in_the_while_test_with_monotonic_and_a_multi_line_test(self):
+        # janitor/test_sweep.py, the trash-folder wait
+        text = src(
+            "import time",
+            "",
+            "def wait_for_trash_gone(names, is_trash):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline and any(",
+            "            is_trash(n) for n in names()):",
+            "        time.sleep(0.2)",
+            "    return not any(is_trash(n) for n in names())",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.2)")
+
+    def test_deadline_and_a_condition_in_the_while_test_with_time_time(self):
+        # janitor/test_sweep.py, the reap wait
+        text = src(
+            "import time",
+            "",
+            "def wait_for_reap(pid_alive, pid):",
+            "    deadline = time.time() + 5",
+            "    while time.time() < deadline and pid_alive(pid):",
+            "        time.sleep(0.2)",
+            "    return not pid_alive(pid)",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.2)")
+
+    def test_a_negated_condition_and_a_stop_name_in_the_while_test(self):
+        # merge/test_merge.py, the held-call wait (the loop only)
+        text = src(
+            "import os",
+            "import time",
+            "",
+            "def wait_for_marker(marker):",
+            "    stop = time.time() + 60",
+            "    while not os.path.exists(marker) and time.time() < stop:",
+            "        time.sleep(0.05)",
+            "    return os.path.exists(marker)",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.05)")
+
+    def test_three_terms_in_the_while_test(self):
+        # merge/test_lane_lint.py, the lint-start wait
+        text = src(
+            "import time",
+            "",
+            "def wait_for_lint(calls, proc):",
+            "    deadline = time.time() + 60",
+            "    while not calls() and proc.poll() is None and time.time() < deadline:",
+            "        time.sleep(0.05)",
+            "    return calls()",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.05)")
+
+    def test_condition_in_the_while_test_and_the_cap_in_an_if_that_fails(self):
+        # janitor/test_sweep.py, the holder start
+        text = src(
+            "import os",
+            "import subprocess",
+            "import time",
+            "import unittest",
+            "",
+            "class Holder(unittest.TestCase):",
+            "    def start_holder(self, ready):",
+            "        holder = subprocess.Popen(['sleep', '30'])",
+            "        deadline = time.time() + 30",
+            "        while not os.path.exists(ready):",
+            "            if holder.poll() is not None or time.time() > deadline:",
+            "                self.fail('the holder never took the lock')",
+            "            time.sleep(0.02)",
+            "        return holder",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.02)")
+
+    def test_for_range_with_a_direct_condition_that_returns(self):
+        # lint/test_sim_lease.py, queue_waiter
+        text = src(
+            "import time",
+            "",
+            "class Waiter:",
+            "    def queue_waiter(self, status, pid):",
+            "        for _ in range(100):",
+            "            if mentions(status(), pid):",
+            "                return pid",
+            "            time.sleep(0.05)",
+            "        raise AssertionError('not on the queue')",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.05)")
+
+    def test_for_range_with_an_assign_before_the_condition_that_returns(self):
+        # lint/test_wait_pid.py, the child wait
+        text = src(
+            "import time",
+            "",
+            "def wait_for_child(stub, ps_parents):",
+            "    for _ in range(100):",
+            "        found = [p for p, parent in ps_parents().items() if parent == stub]",
+            "        if found:",
+            "            return found[0]",
+            "        time.sleep(0.05)",
+            "    return None",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.05)")
+
+    def test_for_range_with_a_condition_that_breaks(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_flag(flag):",
+            "    for _ in range(50):",
+            "        if flag.is_set():",
+            "            break",
+            "        time.sleep(0.1)",
+            "    return flag.is_set()",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.1)")
+
+    def test_while_true_with_a_condition_return_and_a_deadline_return(self):
+        # hooks/test_stall_watch.py, wait_until
+        text = src(
+            "import time",
+            "",
+            "def wait_until(cond, secs):",
+            "    deadline = time.monotonic() + secs",
+            "    while True:",
+            "        if cond():",
+            "            return True",
+            "        if time.monotonic() >= deadline:",
+            "            return False",
+            "        time.sleep(0.2)",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.2)")
+
+    # The controls. Each must stay sleep, and each passes on the old code.
+
+    def test_a_bare_sleep_before_an_assert_stays_sleep(self):
+        text = src(
+            "import time",
+            "import unittest",
+            "",
+            "class Settle(unittest.TestCase):",
+            "    def test_settles(self):",
+            "        time.sleep(1)",
+            "        self.assertTrue(ready())",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_a_loop_with_no_condition_and_no_cap_stays_sleep(self):
+        text = src("import time", "", "def test_forever():", "    while True:", "        time.sleep(1)")
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_a_condition_with_no_cap_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_ready():",
+            "    while not ready():",
+            "        time.sleep(0.05)",
+            "    return True",
+        )
+        self.assert_sleep(text, "time.sleep(0.05)")
+
+    def test_an_in_body_condition_with_no_cap_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_ready(ready):",
+            "    while True:",
+            "        if ready():",
+            "            return True",
+            "        time.sleep(0.2)",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    def test_a_fixed_count_with_no_condition_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def settle():",
+            "    for _ in range(10):",
+            "        time.sleep(0.1)",
+        )
+        self.assert_sleep(text, "time.sleep(0.1)")
+
+    def test_a_deadline_with_no_condition_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def pause(secs):",
+            "    deadline = time.monotonic() + secs",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    def test_a_sleep_after_the_loop_stays_sleep(self):
+        # merge/test_merge.py, the held call: the sleep follows the loop and its assert
+        text = src(
+            "import os",
+            "import time",
+            "",
+            "def wait_then_settle(marker, out):",
+            "    stop = time.time() + 60",
+            "    while not os.path.exists(marker) and time.time() < stop:",
+            "        time.sleep(0.05)",
+            "    assert os.path.exists(marker), 'the held call never started'",
+            "    time.sleep(4)  # a human watching the terminal gets this long before anything is said",
+            "    return out.getvalue()",
+        )
+        self.assert_sleep(text, "time.sleep(4)")
+
+    def test_a_branch_that_does_not_end_the_wait_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def tick_for(secs, cond, log):",
+            "    deadline = time.monotonic() + secs",
+            "    while time.monotonic() < deadline:",
+            "        if cond():",
+            "            log.append('seen')",
+            "        time.sleep(0.2)",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    def test_a_loop_shape_in_a_comment_or_a_string_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "# while time.monotonic() < deadline: a loop named in a comment",
+            "NOTE = \"don't wait: for _ in range(100): if ready: break\"",
+            "",
+            "def test_settles():",
+            "    time.sleep(1)",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_a_file_of_only_poll_loops_exits_0_with_the_hang_guards_uncounted(self):
+        text = src(
+            "import os",
+            "import time",
+            "",
+            "def wait_for_file(path, timeout=10.0):",
+            "    deadline = time.time() + timeout",
+            "    while time.time() < deadline:",
+            "        if os.path.exists(path):",
+            "            return path",
+            "        time.sleep(0.05)",
+            "    return None",
+            "",
+            "def wait_until(cond, secs):",
+            "    deadline = time.monotonic() + secs",
+            "    while True:",
+            "        if cond():",
+            "            return True",
+            "        if time.monotonic() >= deadline:",
+            "            return False",
+            "        time.sleep(0.2)",
+            "",
+            "def wait_for_flag(flag):",
+            "    for _ in range(50):",
+            "        if flag.is_set():",
+            "            break",
+            "        time.sleep(0.1)",
+            "    return flag.is_set()",
+        )
+        self.put(POLL_PATH, text)
+        proc = run(self.root)
+        self.assertNotIn("UNREAD", proc.stdout, "scope: the fixture was not read")
+        self.assertEqual(proc.returncode, 0,
+                         "a file whose only findings are poll-loop hang guards exits %d, not 0" % proc.returncode)
+        assert_summary(self, proc.stdout, summary_line(0, 0, hang_guards=3))
+
+    # A raise or a fail in an if caps the loop. It does not end the wait, so the loop has no condition.
+
+    def test_for_range_with_an_if_that_raises_is_a_cap_not_a_condition(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        if proc.poll() is not None:",
+            "            raise RuntimeError('the child exited')",
+            "    return ready()",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_while_deadline_with_an_if_that_raises_is_a_cap_not_a_condition(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+            "        if proc.poll() is not None:",
+            "            raise RuntimeError('the child exited')",
+            "    return ready()",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    def test_for_range_with_an_if_that_self_fails_is_a_cap_not_a_condition(self):
+        text = src(
+            "import time",
+            "import unittest",
+            "",
+            "class Child(unittest.TestCase):",
+            "    def wait_for_ready(self, proc, ready):",
+            "        for _ in range(3):",
+            "            time.sleep(1)",
+            "            if proc.poll() is not None:",
+            "                self.fail('the child exited')",
+            "        self.assertTrue(ready())",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_while_deadline_with_an_if_that_calls_fail_is_a_cap_not_a_condition(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+            "        if proc.poll() is not None:",
+            "            fail('the child exited')",
+            "    return ready()",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    # The controls for the raise and fail cases: the same loops with a break or a return stay wait-cap.
+
+    def test_control_for_range_with_an_if_that_breaks_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        if proc.poll() is not None:",
+            "            break",
+            "    return ready()",
+        )
+        self.assert_wait_cap(text, "time.sleep(1)")
+
+    def test_control_for_range_with_an_if_that_returns_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        if proc.poll() is not None:",
+            "            return None",
+            "    return ready()",
+        )
+        self.assert_wait_cap(text, "time.sleep(1)")
+
+    def test_control_while_deadline_with_an_if_that_breaks_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+            "        if proc.poll() is not None:",
+            "            break",
+            "    return ready()",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.2)")
+
+    # A break in an inner loop leaves that loop, not the outer one. A fixed window that decides the verdict
+    # is a sleep too.
+
+    def test_a_break_in_an_inner_loop_does_not_end_the_outer_wait(self):
+        text = src(
+            "import time",
+            "",
+            "def settle(flags, xs):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        if flags.on:",
+            "            for x in xs:",
+            "                break",
+            "    return True",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_control_a_break_in_the_if_itself_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def settle(flags, xs):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        if flags.on:",
+            "            break",
+            "    return True",
+        )
+        self.assert_wait_cap(text, "time.sleep(1)")
+
+    def test_a_fixed_window_that_decides_the_verdict_stays_sleep(self):
+        # janitor/test_session_end_sweep.py, assert_heartbeat_stops: the 1 s window is the verdict
+        text = src(
+            "import time",
+            "",
+            "def assert_heartbeat_stops(case, read_beat, path):",
+            "    last = read_beat(path)",
+            "    deadline = time.time() + 10",
+            "    while True:",
+            "        time.sleep(1.0)",
+            "        now = read_beat(path)",
+            "        if now == last:",
+            "            return",
+            "        if time.time() > deadline:",
+            "            case.fail('the heartbeat still moves')",
+            "        last = now",
+        )
+        self.assert_sleep(text, "time.sleep(1.0)")
+
+    # An if break inside an inner loop leaves that inner loop, so the outer wait has no condition there. An if
+    # return inside an inner loop ends the function, so it is the wait's end and stays a condition (the controls).
+
+    def test_an_if_break_in_an_inner_loop_does_not_end_the_outer_range_wait(self):
+        text = src(
+            "import time",
+            "",
+            "def settle(xs):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        for x in xs:",
+            "            if x.ready:",
+            "                break",
+            "    return True",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_an_if_break_in_an_inner_loop_does_not_end_the_outer_deadline_wait(self):
+        text = src(
+            "import time",
+            "",
+            "def settle(xs):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+            "        for x in xs:",
+            "            if x.ready:",
+            "                break",
+            "    return True",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    def test_control_an_if_return_in_an_inner_loop_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(xs):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        for x in xs:",
+            "            if x.ready:",
+            "                return x",
+            "    return None",
+        )
+        self.assert_wait_cap(text, "time.sleep(1)")
+
+    def test_control_deadline_while_an_if_return_in_an_inner_loop_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(xs):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+            "        for x in xs:",
+            "            if x.ready:",
+            "                return x",
+            "    return None",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.2)")
+
+    # Known limit: the finder lists this real poll as sleep. In a while True, a deadline that only fails is a
+    # fixed window, not a cap (is_hang_guard_poll). The pin fails if the row moves, so the move is seen.
+
+    def test_known_limit_while_true_with_a_failing_deadline_reads_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_until_ready(cond, deadline_at):",
+            "    while True:",
+            "        if cond():",
+            "            break",
+            "        if time.monotonic() > deadline_at:",
+            "            fail('the poll timed out')",
+            "        time.sleep(0.05)",
+            "    return True",
+        )
+        _, cats = self.listed(text, "time.sleep(0.05)")
+        self.assertEqual(cats, {"sleep"},
+                         "known limit (a real poll the finder lists as sleep): this while True poll with a failing "
+                         "deadline now reads %s, not sleep; moving it is a decision to record" % sorted(cats))
+
+    def test_heartbeat_spelling_with_the_deadline_in_the_while_test_is_wait_cap(self):
+        # The fixed window above with its deadline moved into the while test. The deadline is a cap, and the
+        # return is the wait's end, so this is a hang guard.
+        text = src(
+            "import time",
+            "",
+            "def assert_heartbeat_stops(case, read_beat, path):",
+            "    last = read_beat(path)",
+            "    deadline = time.time() + 10",
+            "    while time.time() < deadline:",
+            "        time.sleep(1.0)",
+            "        now = read_beat(path)",
+            "        if now == last:",
+            "            return",
+            "        last = now",
+            "    case.fail('the heartbeat still moves')",
+        )
+        code, cats = self.listed(text, "time.sleep(1.0)")
+        self.assertEqual(cats, {"wait-cap"},
+                         "the heartbeat spelling with the deadline in the while test is listed as %s, not wait-cap"
+                         % sorted(cats))
+        self.assertEqual(code, 0, "the heartbeat spelling is wait-cap but is counted as time-pinned (exit %d)" % code)
+
+
 # ---- helper taint, assert arguments, a Playwright wait, an unlistable folder --------------
 
 class HelperTaintTest(FinderCase):
@@ -2056,10 +2838,14 @@ class DurationThroughCallTest(FinderCase):
             "}",
         )
         self.put("Tests/TraceTests.swift", text)
-        code, out = self.report()
-        self.assertEqual(self.rows(out), pinned(
+        out = calendar_judge(self, "Tests/TraceTests.swift", text,
+                             listed=["let start = Date()", "let end = Date()"])
+        self.assertEqual({row for row in self.rows(out) if row[2] == "elapsed-assert"}, pinned(
             "Tests/TraceTests.swift", text,
-            ('XCTAssertGreaterThanOrEqual(LaunchTrace.ms(end - start)', "elapsed-assert")))
+            ('XCTAssertGreaterThanOrEqual(LaunchTrace.ms(end - start)', "elapsed-assert")),
+            "the elapsed-assert rows are not the pinned set")
+        other = sorted(row for row in self.rows(out) if row[2] not in ("calendar", "elapsed-assert"))
+        self.assertFalse(other, "a row of another category is listed: %s" % other)
 
     def test_swift_interval_and_duration_inside_a_call_are_flagged(self):
         text = src(

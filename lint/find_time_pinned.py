@@ -7,16 +7,25 @@ Lists the tests whose verdict can move with the real clock: a fixed wait, a boun
 a time limit, or a read of the real date. Decision test-practices P5 covers all four: no fixed
 sleep, a synthetic clock for a verdict that depends on elapsed time, a hang guard allowed, and a
 date read counted as a real clock. The tool fixes none, and it writes nothing. Each finding has one category:
-- sleep: a real wait in a test file.
+- sleep: a real wait in a test file. Not a poll interval: a `sleep` in a Python loop that has both a
+  condition and a cap is a wait-cap. A condition is a while-test term other than a bare `True` and a
+  clock comparison, or an `if` in the body that returns or breaks and tests something
+  other than a clock. A cap is a clock compared in the while test or in such an `if`, or, when the while
+  test holds the condition, in an `if` that only raises or fails, or
+  `range(<literal>)` in a `for`. A bare sleep, `while True` with no exit, a condition with no cap, a cap
+  with no condition and a sleep after the loop stay sleep.
 - elapsed-assert: an assert that reads a wall-clock reading or a difference of two.
 - test-cap: a per-test or per-suite time limit (a hang guard, like wait-cap).
-- wait-cap: a fixed time bound on a wait for a condition or a child process (a hang guard). A hang guard
+- wait-cap: a fixed time bound on a wait for a condition or a child process, or the poll interval of such
+  a capped wait loop (a hang guard). A hang guard
   (test-cap or wait-cap) is allowed (decision test-practices P5): it
   is listed, never counted as time-pinned, and never sets exit 1. Check that each cap sits well above
   the run, so it only stops a hang and never decides a verdict by speed.
-- calendar: a read of the real date or zone with no time given (`datetime.now()`, `date.today()`,
-  `time.localtime()`, `time.gmtime()`, `time.ctime()`, `time.asctime()`, `time.strftime(fmt)`,
-  `time.tzname`, `time.timezone`, the date libraries `pendulum.now()`, `arrow.now()`, `arrow.utcnow()`,
+- calendar: a read of the real date or the machine's zone (`datetime.now()`, `date.today()`,
+  `time.localtime(<any>)`, `time.ctime(<any>)`, `time.gmtime()`, `time.asctime()`, `time.strftime(fmt)`,
+  `datetime.fromtimestamp(<x>)` and `<x>.astimezone()` with no zone argument, Swift `Date()`,
+  `Date.now`, `Date(timeIntervalSinceNow: <x>)`,
+  `Calendar.current` and `TimeZone.current`, `time.tzname`, `time.timezone`, the date libraries `pendulum.now()`, `arrow.now()`, `arrow.utcnow()`,
   `pendulum.today()`, `pd.Timestamp.now()`, `pd.Timestamp.today()`, `pd.Timestamp.utcnow()` and Django
   `timezone.now()`, plus, with no argument or only a zone keyword (`tzinfo=` or `timezone=`),
   `arrow.get()`, `timezone.localtime()` and `timezone.localdate()`, JS
@@ -24,8 +33,10 @@ date read counted as a real clock. The tool fixes none, and it writes nothing. E
   or through a name that holds one, any `Date(...)` call without `new`, and the JS date libraries
   `dayjs()`, `dayjs.utc()`, `new dayjs()`, `moment()`, `moment.utc()` and `Temporal.Now.*()`).
   `new Date(0)`, `new Date(EPOCH_MS)` with a declared constant, `dayjs(0)`, `moment.utc(EPOCH)`,
-  `arrow.get(0)`, `timezone.localtime(fixed_dt)` and `pendulum.datetime(...)` read no clock and are
-  not listed. A fake clock hides every calendar row in its scope, even a read it does not fake: in Python a
+  `arrow.get(0)`, `timezone.localtime(fixed_dt)`, `pendulum.datetime(...)`, `time.gmtime(EPOCH)`, a
+  `tz` argument on `fromtimestamp` or `astimezone`, and Swift `Date(timeIntervalSince1970: 0)` read no
+  clock or local zone and are not listed. A Swift `Date()`, `Date.now` or `Date(timeIntervalSinceNow:)` that an assert subtracts is that assert's
+  elapsed-assert row only. A fake clock hides every calendar row in its scope, even a read it does not fake: in Python a
   `@freeze_time(...)` def or class, or the body of a `with freeze_time(...)`; in JS a file that calls
   `jest.useFakeTimers()` or `vi.useFakeTimers()`. Its elapsed-assert rows stay. `time.tzname` and
   `time.timezone` stay listed under `freeze_time`, because freezegun fakes no zone. `Temporal.Now.*()`
@@ -465,10 +476,14 @@ PY_SIGNAL_CAP = {"signal.alarm", "signal.setitimer"}
 PY_PASS_THROUGH = {"round", "int", "float", "abs", "max", "min", "sum", "divmod", "math.floor", "math.ceil"}
 
 
-# A date or zone read with no time given. `time.strftime(fmt)`, `time.localtime()`, `time.gmtime()`,
-# `time.ctime()` and `time.asctime()` read the clock only when no time argument is passed, so they are
-# matched apart from the always-real forms. `time.tzname` and `time.timezone` are attribute reads.
-PY_CALENDAR_NO_ARG = {"time.localtime", "time.gmtime", "time.ctime", "time.asctime", "pandas.Timestamp.utcnow"}
+# A date or zone read with no time given. `time.strftime(fmt)`, `time.gmtime()` and `time.asctime()` read the
+# clock only when no time argument is passed, so they are matched apart from the always-real forms. `time.tzname` and `time.timezone` are attribute reads.
+PY_CALENDAR_NO_ARG = {"time.gmtime", "time.asctime", "pandas.Timestamp.utcnow"}
+# These read the machine's zone even when given a fixed time, so a fixed time does not pin them:
+# `time.localtime(x)` and `time.ctime(x)` always, `datetime.fromtimestamp(x)` and `x.astimezone()` unless a
+# zone is given.
+PY_CALENDAR_LOCAL_ZONE = {"time.localtime", "time.ctime"}
+PY_CALENDAR_FROMTIMESTAMP = {"datetime.fromtimestamp", "datetime.datetime.fromtimestamp"}
 # These read the real date unless a time is given, and take a zone by keyword: with no positional argument and
 # nothing but that keyword, the call still reads the real date.
 PY_CALENDAR_ZONE_KW = {"arrow.get": "tzinfo", "django.utils.timezone.localtime": "timezone",
@@ -496,6 +511,17 @@ def dotted(node):
         parts.append(node.id)
         return ".".join(reversed(parts))
     return None
+
+
+def zone_given(call, index):
+    """True when the call names a zone: a `tz` keyword, or the positional argument at index, that is not None.
+    `tz=None` and `None` ask for the machine's zone. A `*args` or `**kwargs` may hold a zone, so it counts."""
+    def real(node):
+        return not (isinstance(node, ast.Constant) and node.value is None)
+
+    return any(k.arg == "tz" and real(k.value) for k in call.keywords) or (
+        len(call.args) > index and real(call.args[index])) or any(
+        k.arg is None for k in call.keywords) or any(isinstance(a, ast.Starred) for a in call.args)
 
 
 def py_number(node):
@@ -648,6 +674,113 @@ def scan_python(text):
                 ids.update(id(x) for stmt in n.body for x in ast.walk(stmt))
         return ids
 
+    parents = {}
+    for n in ast.walk(tree):
+        for child in ast.iter_child_nodes(n):
+            parents[id(child)] = n
+
+    def terms_of(test):
+        """The terms of a loop or if test, with `and` and `or` flattened."""
+        if isinstance(test, ast.BoolOp):
+            return [t for v in test.values for t in terms_of(v)]
+        return [test]
+
+    def own_nodes(stmts):
+        """Every node under stmts, not entering a nested function, lambda or class."""
+        todo = list(stmts)
+        while todo:
+            node = todo.pop()
+            yield node
+            for child in ast.iter_child_nodes(node):
+                if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    todo.append(child)
+
+    def exits(ifnode, in_inner_loop=False):
+        """True when the if's own branch ends the wait normally: a `return`, or a `break` of the wait loop. A
+        raise or a fail only stops a hang, so it is no exit. A `break` inside a nested loop leaves that loop, so
+        the walk reads that loop's body for a `return` only. Its `else` is read in full. in_inner_loop is True
+        when the if itself sits in a loop nested in the wait loop: then a `break` in its branch is no exit."""
+        def leaves(stmts, in_inner_loop):
+            for n in stmts:
+                if isinstance(n, ast.Return) or (isinstance(n, ast.Break) and not in_inner_loop):
+                    return True
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    continue
+                if isinstance(n, (ast.While, ast.For, ast.AsyncFor)):
+                    if leaves(n.body, True) or leaves(n.orelse, in_inner_loop):
+                        return True
+                    continue
+                for field in ("body", "orelse", "finalbody"):
+                    if leaves(getattr(n, field, None) or [], in_inner_loop):
+                        return True
+                if isinstance(n, ast.Try) and any(leaves(h.body, in_inner_loop) for h in n.handlers):
+                    return True
+                if hasattr(ast, "Match") and isinstance(n, ast.Match) and any(leaves(c.body, in_inner_loop) for c in n.cases):
+                    return True
+            return False
+        return leaves(ifnode.body, in_inner_loop)
+
+    def stops(ifnode):
+        """True when the if's own branch raises or fails the test: it ends a hang, not the wait."""
+        for n in own_nodes(ifnode.body):
+            if isinstance(n, ast.Raise):
+                return True
+            if isinstance(n, ast.Call) and (n.func.attr if isinstance(n.func, ast.Attribute)
+                                            else getattr(n.func, "id", "")) == "fail":
+                return True
+        return False
+
+    def poll_loop_of(start):
+        """The nearest loop whose body holds start in its own scope, or None. A loop's `else` is not its body."""
+        child, node = start, parents.get(id(start))
+        while node is not None and not isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            if isinstance(node, (ast.While, ast.For, ast.AsyncFor)) and child in node.body:
+                return node
+            child, node = node, parents.get(id(node))
+        return None
+
+    def is_hang_guard_poll(call):
+        """A sleep in a loop that has both a condition and a clock or count cap is a hang guard, not a fixed
+        wait (decision test-practices P5). A condition is a while-test term that is neither `True` nor a clock
+        comparison, or an if in the body that returns or breaks and tests something other than a clock. A cap
+        is a clock comparison in the while test or in such an if, or `range(<literal>)` in a for. An if in a
+        nested loop ends the wait only by a `return`. An if that only raises or fails is never the condition.
+        Its clock comparison is a cap only when the while test holds the condition. So a `while True` poll that
+        breaks on its condition and only fails at its deadline is listed as sleep, though it is a real poll: a
+        known limit."""
+        loop = poll_loop_of(call)
+        if loop is None:
+            return False
+        root = parents.get(id(loop))
+        while root is not None and not isinstance(root, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            root = parents.get(id(root))
+        tainted = scope_taint(root if root is not None else tree)
+
+        def clock_term(t):
+            return isinstance(t, ast.Compare) and holds_clock(t, tainted)
+
+        def always_true(t):
+            return isinstance(t, ast.Constant) and bool(t.value)
+
+        all_ifs = [n for n in own_nodes(loop.body) if isinstance(n, ast.If)]
+        ifs = [n for n in all_ifs if exits(n, poll_loop_of(n) is not loop)]
+        has_cond = any(not all(clock_term(t) or always_true(t) for t in terms_of(i.test)) for i in ifs)
+        cap = any(clock_term(t) for i in ifs for t in terms_of(i.test))
+        if isinstance(loop, ast.While):
+            terms = terms_of(loop.test)
+            while_cond = any(not (clock_term(t) or always_true(t)) for t in terms)
+            has_cond = has_cond or while_cond
+            cap = cap or any(clock_term(t) for t in terms)
+            if while_cond:
+                cap = cap or any(clock_term(t) for i in all_ifs if i not in ifs and stops(i)
+                                 for t in terms_of(i.test))
+        else:
+            it = loop.iter
+            cap = cap or (isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == "range"
+                          and bool(it.args) and not it.keywords and all(py_number(a) for a in it.args))
+        return has_cond and cap
+
     found = set()
     calendar_calls = []
     decorator_calls = {id(d) for n in ast.walk(tree)
@@ -659,10 +792,14 @@ def scan_python(text):
         if names & PY_SLEEPS:
             if not (isinstance(first, ast.Constant) and not isinstance(first.value, bool)
                     and isinstance(first.value, (int, float)) and first.value == 0):
-                found.add((call.lineno, "sleep"))  # sleep(0) is a yield, not a wait
+                # sleep(0) is a yield, not a wait. A poll interval of a capped wait loop is a hang guard.
+                found.add((call.lineno, "wait-cap" if is_hang_guard_poll(call) else "sleep"))
         zone_kws = {PY_CALENDAR_ZONE_KW[n] for n in names if n in PY_CALENDAR_ZONE_KW}
-        if names & PY_CALENDAR_NOW or (
+        if names & PY_CALENDAR_NOW or names & PY_CALENDAR_LOCAL_ZONE or (
                 not call.args and not call.keywords and names & PY_CALENDAR_NO_ARG) or (
+                names & PY_CALENDAR_FROMTIMESTAMP and not zone_given(call, 1)) or (
+                isinstance(call.func, ast.Attribute) and call.func.attr == "astimezone"
+                and not zone_given(call, 0)) or (
                 zone_kws and not call.args and all(k.arg in zone_kws for k in call.keywords)) or (
                 len(call.args) == 1 and not call.keywords and names & {"time.strftime"}):
             calendar_calls.append(call)
@@ -1050,6 +1187,10 @@ SWIFT_CLOCK = re.compile(
     r"|ProcessInfo\s*\.\s*processInfo\s*\.\s*systemUptime|mach_absolute_time\s*\("
     r"|\b(?:Continuous|Suspending)Clock\b|\.timeIntervalSince(?:Now)?\b|\.duration\s*\(\s*to\s*:"
     r"|\bclock\s*\.\s*measure\b")
+# A read of the real date or the machine's calendar or zone.
+SWIFT_CALENDAR = re.compile(r"(?<![\w$])Date\s*\(\s*\)|(?<![\w$])Date\.now\b"
+                            r"|(?<![\w$])Date\s*\((?=\s*timeIntervalSinceNow\b)"
+                            r"|(?<![\w$])(?:Calendar|TimeZone)\s*\.\s*current\b")
 SWIFT_PASS_THROUGH = {"abs", "max", "min", "round", "floor", "ceil", "trunc", "Double", "Int", "Float", "CGFloat",
                       "timeIntervalSince", "distance", "duration", "advanced"}
 SWIFT_DECL = re.compile(r"(?<![\w$.])(?:let|var)\s+(?=[A-Za-z_])")
@@ -1206,12 +1347,21 @@ def scan_swift(text):
             hits.add(mm.start(), "sleep")
 
     tainted = clock_taint(m, SWIFT_DECL, SWIFT_CLOCK, SWIFT_PASS_THROUGH, swift_function_returns)
+    elapsed_spans = []
     for mm in SWIFT_ASSERT.finditer(m):
         close = find_close(m, mm.end() - 1)
         if close >= 0:
             a, b = asserted_range(m, mm.end() - 1, close)
             if reads_clock(m, a, b, SWIFT_CLOCK, tainted, SWIFT_PASS_THROUGH, True):
                 hits.add(mm.start(), "elapsed-assert")
+                elapsed_spans.append((a, b))
+
+    # A `Date()` that an assert subtracts or hands to `timeIntervalSince` is that assert's elapsed row alone.
+    for mm in SWIFT_CALENDAR.finditer(m):
+        if mm.group().startswith("Date") and any(
+                a <= mm.start() < b and measured(m, mm.start(), mm.end()) for a, b in elapsed_spans):
+            continue
+        hits.add(mm.start(), "calendar")
 
     for mm in re.finditer(r"(?<![\w.])measure\s*[({]|(?<![\w])self\s*\.\s*measure\s*[({]|executionTimeAllowance"
                           r"|\.timeLimit\s*\(", m):
