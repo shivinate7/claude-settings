@@ -15148,10 +15148,9 @@ sh("builder-find: mkdir -p docs/new, cd docs/new, cp ../../hooks/guard.py . writ
 # Without the cd, the copy writes newd/test_guard.py and is refused, as the mkdir newd case above shows.
 sh("builder-find: mkdir newd, cd docs, cp ../hooks/test_guard.py newd writes docs/newd, a file name, is allowed",
    "mkdir newd && cd docs && cp ../hooks/test_guard.py newd", "allow", **dict(BR, cwd=FINDCP))
-# An unmatched glob stays its text, as bash passes it. cp then fails, and nothing is written, because no file is
-# named assets/test_*.py. The dyn/[id].test.tsx case above has the same shape and expects a refusal.
-sh("builder-find: cp of unmatched glob assets/test_*.py into docs/, nothing matches and nothing is written, is allowed",
-   "cp assets/test_*.py docs/", "allow", **dict(BR, cwd=FINDCP))
+# An unmatched glob is judged by its literal text, the same as the dyn/[id].test.tsx case above.
+sh("builder-find: cp of unmatched glob assets/test_*.py into docs/, judged by its literal text, is refused",
+   "cp assets/test_*.py docs/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
 # FINDLIT holds a file literally named dyn/[id].test.tsx. Its glob matches no file, so bash passes the text on, and
 # the text names that file: bash copies it, so the copy writes docs/[id].test.tsx and is refused. The fixture is
 # separate because only this case needs the file.
