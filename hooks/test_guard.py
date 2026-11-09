@@ -5150,6 +5150,16 @@ sh("detached: (( a&b )) is arithmetic, not a background job, allows [glued pin]"
 # A spaced `&` inside `((` is the AND of the arithmetic too, so it is no background job. The glued pin is its control.
 sh("detached: (( a & b )) is arithmetic, not a background job, allows [arithmetic red]",
    "(( a & b ))", "allow", cwd=NOGIT)
+# A `((` inside quotes is text, not arithmetic, so a spaced `&` after it is a background job. The mask must end at a
+# real closing `))`, never at the end of the segment when the `((` has none. The two arithmetic rows are the controls.
+sh('detached: npm run dev -- --filter "((" &, a spaced & after a quoted (( , is refused as a detached launch '
+   '[quoted paren red]', 'npm run dev -- --filter "((" &', "deny", "detached-launch", cwd=NOGIT)
+sh('detached: echo "((" & make test, a spaced & after a quoted (( , is refused as a detached launch [quoted paren red]',
+   'echo "((" & make test', "deny", "detached-launch", cwd=NOGIT)
+sh('detached: grep "((" log.txt & make test, a spaced & after a quoted (( , is refused as a detached launch '
+   '[quoted paren red]', 'grep "((" log.txt & make test', "deny", "detached-launch", cwd=NOGIT)
+sh("detached: echo $(( 3 & 1 )), a spaced & inside arithmetic, allows [arithmetic control]",
+   "echo $(( 3 & 1 ))", "allow", cwd=NOGIT)
 # `&>` redirects both streams, so this is a pause, not a job. The waiter refuses it today, and the pin holds that.
 sh("waiter: sleep 1&>/dev/null is a pause the waiter refuses, as today [redirect pin]",
    "sleep 1&>/dev/null", "deny", "waiter", cwd=NOGIT)
@@ -12761,10 +12771,29 @@ sh("frozen shell: source <(cat <<'EOF') of a heredoc that cds into the config fo
 sh("frozen shell: source <(cat <<'EOF') with the same cd, then sed -i on notes.txt, "
    "allows [source substitution control]",
    "source <(cat <<'EOF'\ncd " + slash(CFG) + "\nEOF\n); sed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
+# An eval string that cds, and a `source <(` whose cat <<EOF starts on the next line, both run their
+# cd, so the sed after them is judged in the config folder.
+sh("frozen shell: eval \"cd <config folder>\" as a string, then sed -i on settings.json, from outside the config "
+   "folder, denies [eval string red]",
+   'eval "cd ' + slash(CFG) + '"; sed -i s/a/b/ settings.json', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: eval \"cd <config folder>\" as a string, then sed -i on notes.txt, "
+   "allows [eval string control]",
+   'eval "cd ' + slash(CFG) + '"; sed -i s/a/b/ notes.txt', "allow", cwd=NOGIT)
+sh("frozen shell: source <( on one line, cat <<EOF on the next, a cd into the config folder in the body, then sed -i "
+   "on settings.json, denies [split source substitution red]",
+   "source <(\ncat <<EOF\ncd " + slash(CFG) + "\nEOF\n)\nsed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: the same split source substitution, then sed -i on notes.txt, "
+   "allows [split source substitution control]",
+   "source <(\ncat <<EOF\ncd " + slash(CFG) + "\nEOF\n)\nsed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
 sh("frozen shell: source /dev/stdin <<A <<B with unquoted headers, a cd in the second body, then sed -i on "
    "settings.json, denies [unquoted two heredocs pin]",
    "source /dev/stdin <<A <<B\nx\nA\ncd " + slash(CFG) + "\nB\nsed -i s/a/b/ settings.json", "deny", "frozen-path",
    cwd=NOGIT)
+# Bash reads only the last heredoc body as stdin, so a cd in body A never runs and the sed after it stays outside the
+# config folder. The unquoted row just above is its control: the same two bodies with the cd in body B.
+sh("frozen shell: source /dev/stdin <<A <<B with a cd only in body A, then sed -i on settings.json, "
+   "allows [last body red]",
+   "source /dev/stdin <<A <<B\ncd " + slash(CFG) + "\nA\nx\nB\nsed -i s/a/b/ settings.json", "allow", cwd=NOGIT)
 sh("frozen shell: a cd into the config folder in a multi-line if body, then sed -i on settings.json, "
    "denies [if body pin]",
    "if true; then\ncd " + slash(CFG) + "\nfi\nsed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
