@@ -32,7 +32,7 @@ CI: read live by merge --reviewed
 
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
-- The `Fix check` line is optional, comes once after the Round lines, and a PASS is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A fix check PASS counts as its round passing in any round when Guard or check is `no`. When Guard or check is `yes`, a fix check PASS before round 3 does not end review (item 402 a, owner, 2026-11-08 06:08 CST). After round 3, a PASS keeps the net value round 3 gave; with no round recorded it reads open. `--fix-check` also refuses, with exit 2 and no record, a record whose rounds fall below the round floor of the earlier records (see No reset). So a fix check reaches the last round of the record it follows. The floor reads only the round number and the slot a failed fix check fills. After the final round, every fix check, first or chained, keeps the net value, guard and kind of the newest earlier record that reached the final round. That is the record it follows, unless a short record written before this check sits between. `--fix-check` refuses a change with exit 2, no record, and a reason naming the field and both values. Before the final round the three may change. `--fix-check` also refuses, with exit 2 and no record, a record that lacks a Round line of the record it follows (the newest earlier record, or the `--fix-base-record` source): copy every Round line unchanged; extra lines are allowed. A plain `--review-record` with no `--fix-check` is floored where it is read, not where it is written.
+- The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. On every record, a Fix check whose model is not exactly `sonnet` (any letter case; `claude-sonnet-5-5` is not) is open, and `--fix-check` refuses it, whatever Guard or check says (owner item 444 a, 2026-11-08 15:04 CST; it widens item 351 a, 2026-11-07 14:44 CST). A fix check PASS counts as its round passing in any round when Guard or check is `no`. When Guard or check is `yes`, a fix check PASS before round 3 does not end review (item 402 a, owner, 2026-11-08 06:08 CST). After round 3, a PASS keeps the net value round 3 gave; with no round recorded it reads open. `--fix-check` also refuses, with exit 2 and no record, a record whose rounds fall below the round floor of the earlier records (see No reset). So a fix check reaches the last round of the record it follows. The floor reads only the round number and the slot a failed fix check fills. After the final round, every fix check, first or chained, keeps the net value, guard and kind of the newest earlier record that reached the final round. That is the record it follows, unless a short record written before this check sits between. `--fix-check` refuses a change with exit 2, no record, and a reason naming the field and both values. Before the final round the three may change. `--fix-check` also refuses, with exit 2 and no record, a record that lacks a Round line of the record it follows (the newest earlier record, or the `--fix-base-record` source): copy every Round line unchanged; extra lines are allowed. A plain `--review-record` with no `--fix-check` is floored where it is read, not where it is written.
 - A FAIL is open until the next record. It counts as the next round, N+1: that record carries `Round N+1: reviewer, <model>, FAIL` and no Fix check line, so `--fix-check` may follow again. A FAIL that counts as round 3 makes that record a round-3 record. After round 3 a FAIL holds the change (owner item 356 a).
 - A WIDE is open. Its fix starts a new lane at round 1.
 - No reset: a round count never goes down on a PR. The floor is the highest last round over every earlier record that parses, plus 1 when that record has a Fix check FAIL before round 3. A newest record below the floor reads open. Why: `the record on head <9-hex> reached round <F>, so this record's last round <M> is below it; a new lane is a new pull request`, or, when the floor comes from a Fix check FAIL, `a failed fix check on head <9-hex> counts as round <F>, but this record's last round is <M>`. A WIDE sets the floor at its own last round. A new lane is a new branch and PR, so it starts over.
@@ -62,6 +62,26 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 - A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open until round 3 is done, even after a fix check PASSes (item 402 a, owner, 2026-11-08 06:08 CST). The rule owes rounds 2 and 3 when round 1 finds a safety hole.
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
 
+The review a changed head owes. Coordinator pick (owner session coordinator, 2026-11-08 to 2026-11-09). Process-only, not the owner's words. A lane reads it instead of asking.
+
+- A chain gets one fix check.
+- The PR gets one fresh full review at the live head when any of these holds:
+  - the newest record already holds a fix check;
+  - a fix check failed;
+  - a round read an older head than the live one;
+  - the record was made or edited by hand;
+  - the head moved after round 3.
+- The fresh review has these parts:
+  - its brief line 1 is `Round 3 of 3`;
+  - it runs on Sonnet;
+  - it reads the whole diff against main;
+  - it runs the net-value test (record `hold-unsafe-after-round-3`, hold a change with negative net value after round 3).
+- Post it with the lines the merge tool prints: the real round 1 and round 2 lines, the new round 3 line, and no `Fix check` line.
+- Free text goes only below `---`. A record is never edited or deleted.
+- A round 3 FAIL with net value at or above zero merges (round 3 done rule above).
+- A lane merges origin/main once, after the pending batch lands. It uses an ordinary merge commit. It never replays, rebases or force-pushes.
+- A merge with both test and product conflicts waits for the mixed-merge route (decision `mixed-merge-resolver`, not on main yet).
+
 ## The cost
 
 Counted as real `gh` calls, one call per page of a list read. Most reads fit one page of 100.
@@ -70,14 +90,22 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
 - Each ready PR that has a record adds three reads: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
-- `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
+- `merge <pr> --review-record`: one PR read, plus one read per page of 100 changed files: two reads for a PR of 100 files or fewer. The tests `ReviewGuardCost` and `ReviewGuardHostFiles` pin them. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. A chained fix check adds one compare read, and a base that is not the newest earlier record's Head adds one or two more. It writes nothing.
 - The no-reset check reads the comment list that `merge --reviewed` already reads. It adds zero gh calls.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
 
 ## The limits
 
-- Kind, Guard or check, and docs-only are the lane's own claims. The tool does not check paths. It does not tell a record that files an owner ruling from other docs. Kind stays the lane's claim. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`).
+- `--review-record` reads the PR's changed files. A moved file counts at its old path too.
+  - It refuses Guard or check `no` when a path starts with an entry of `GUARD_PATHS` or equals one of `GUARD_FILES`. `GUARD_PATHS` is `stale_cites.RULE_DIRS` plus `merge/` and `githooks/`. `GUARD_FILES` is `settings.json`. A test path (`hooks/guard.py` `is_test_rel`) never counts, because test files alone never count (record `hold-unsafe-after-round-3`).
+  - It refuses a files list shorter than the PR's changed-file count, and a PR read that gives no count. GitHub lists at most 3000 files.
+  - `agents/*.md` is not on the list. Only its `tools` lines are a guard, and a path cannot tell those apart from prompt text.
+  - It refuses Kind `docs-only` when a path does not end in `.md`. It refuses Kind `delete-only` when a path adds lines, or is added, renamed or copied. A file that only loses lines passes, because delete-only "only deletes and adds nothing" (record `hold-unsafe-after-round-3`).
+  - Guard or check `yes` stays allowed with no hit, because a guard can live outside those paths.
+- The path check runs only when `--review-record` writes a record. `merge --reviewed` still trusts a record posted by hand. A read there would add one call per PR.
+- In another repo, a change under `hooks/`, `lint/`, `bin/`, `actions/`, `.github/`, `merge/` or `githooks/`, or to a root `settings.json`, must say Guard or check `yes`. It then owes the net-value test after round 3. A `.claude/settings.json` or `.claude/hooks/` path is not on the list.
+- The tool does not tell a record that files an owner ruling from other docs. Kind `normal` stays the lane's claim. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`).
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
