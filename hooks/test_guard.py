@@ -17465,19 +17465,79 @@ sh("builder-refuse: commit-tree of the empty tree, which drops every file, is de
    agent_id="bld1", agent_type="builder")
 
 
-def plumb_unread_case():
-    """A tree git cannot read is allowed, and logged as role-diff-unread: unknown, never clear."""
-    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-plumb-unread"), _plumb, "builder", "bld1",
-                              commands=[plumb_call(PLUMB_UNKNOWN, "HEAD")])
+def plumb_unread_run(name, repo, command, what):
+    """One `commit-tree` call that git cannot read is allowed silently, and logged as role-diff-unread: unknown,
+    never clear. `what` names the part git cannot read, for the message."""
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + name), repo, "builder", "bld1", commands=[command])
     if out:
         return False, "expected a silent allow, got %r" % out[:60]
     if not any(len(r) == 6 and r[2] == "noted" and r[3] == "role-diff-unread" for r in rows):  # six: session last
-        return False, "no role-diff-unread line for a tree git cannot read"
-    return True, "allowed silently, and the unreadable tree is logged role-diff-unread"
+        return False, "no role-diff-unread line for " + what
+    return True, "allowed silently, and %s is logged role-diff-unread" % what
+
+
+def plumb_unread_case():
+    """A tree git cannot read is allowed, and logged as role-diff-unread: unknown, never clear."""
+    return plumb_unread_run("plumb-unread", _plumb, plumb_call(PLUMB_UNKNOWN, "HEAD"), "a tree git cannot read")
 
 
 LOG_CHECKS_EXTRA.append(("builder-refuse: a commit-tree whose tree git cannot read is allowed and logs role-diff-unread",
                          plumb_unread_case))
+
+# The plumbing edge cases. Each is judged on the tree a call would commit, or logged when the guard cannot read it.
+# A `commit-tree` inside `$( )` or backticks is a command of its own, so it is judged as one. A parent or message
+# word that the shell expands is read as the word it is, and `-pHEAD` is the parent HEAD, as `-p HEAD` is.
+PLUMB_ADD_CALL = plumb_call(plumb_tree(PLUMB_ADD), "HEAD")
+sh("builder-refuse: a commit-tree in $( ) that adds a test file is denied for a builder",
+   "NEW=$(" + PLUMB_ADD_CALL + ")", "deny", rule=PLUMB, cwd=_plumb, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a commit-tree in a quoted $( ) that adds a test file is denied for a builder",
+   'NEW="$(' + PLUMB_ADD_CALL + ')"', "deny", rule=PLUMB, cwd=_plumb, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a commit-tree in backticks that adds a test file is denied for a builder",
+   "NEW=`" + PLUMB_ADD_CALL + "`", "deny", rule=PLUMB, cwd=_plumb, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a commit-tree whose parent is $(git rev-parse HEAD), and whose tree adds a test file, is denied for a builder",
+   plumb_call(plumb_tree(PLUMB_ADD), "$(" + VCS + " rev-parse HEAD)"), "deny", rule=PLUMB, cwd=_plumb,
+   agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a commit-tree with an unquoted -m $(cat msg), parent HEAD, and a tree that adds a test file, is denied for a builder",
+   VCS + " commit-tree " + plumb_tree(PLUMB_ADD) + " -p HEAD -m $(cat msg)", "deny", rule=PLUMB, cwd=_plumb,
+   agent_id="bld1", agent_type="builder")
+LOG_CHECKS_EXTRA.append(("builder-refuse: a commit-tree whose parent is an unresolvable $PARENT word is allowed and logs role-diff-unread",
+                         lambda: plumb_unread_run("plumb-parent-word", _plumb,
+                                                  plumb_call(plumb_tree(PLUMB_ADD), "$PARENT"), "a parent git cannot read")))
+sh("builder-refuse: a commit-tree with -pHEAD, of a product-only tree, is allowed for a builder",
+   VCS + " commit-tree " + plumb_tree(PLUMB_PRODUCT) + " -pHEAD -m x", "allow", cwd=_plumb,
+   agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a commit-tree with -pHEAD, of a tree that adds a test file, is denied for a builder",
+   VCS + " commit-tree " + plumb_tree(PLUMB_ADD) + " -pHEAD -m x", "deny", rule=PLUMB, cwd=_plumb,
+   agent_id="bld1", agent_type="builder")
+# From a subfolder, `ls-tree` names only that folder's paths. The tree is listed from the top of the checkout.
+sh("builder-refuse: a commit-tree with no parent, run from a subfolder, of a tree that adds a test file outside it is denied for a builder",
+   plumb_call(plumb_tree(PLUMB_ADD)), "deny", rule=PLUMB, cwd=os.path.join(_plumb, "src"),
+   agent_id="bld1", agent_type="builder")
+# A root commit with no history in common with HEAD. git's merge of the two refuses it, so the merge is unknown.
+PLUMB_UNRELATED_BODY = ("tree %s\nauthor cases <cases@example.invalid> 0 +0000\n"
+                        "committer cases <cases@example.invalid> 0 +0000\n\nunrelated\n" % PLUMB_EMPTY).encode("utf-8")
+PLUMB_UNRELATED = _git_id(b"commit", PLUMB_UNRELATED_BODY)
+
+
+def _plumb_unrelated_change(w):
+    """The plumbing trees, and the root commit PLUMB_UNRELATED, whose id is fixed at import like a tree's."""
+    _plumb_change(w)
+    made = subprocess.run([VCS, "hash-object", "-t", "commit", "-w", "--stdin"], cwd=w,
+                          input=PLUMB_UNRELATED_BODY, capture_output=True)
+    if made.returncode != 0 or made.stdout.decode("utf-8").strip() != PLUMB_UNRELATED:
+        sys.exit("fixture setup failed: hash-object of the root commit in %r gave %r, not the id _git_id computes: %s"
+                 % (w, made.stdout.decode("utf-8", "replace").strip(), made.stderr.decode("utf-8", "replace").strip()))
+
+
+_plumb_unrelated = diff_repo("plumb-unrelated", _plumb_unrelated_change, exact=True)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a two-parent commit-tree whose parents git cannot merge is allowed and logs role-diff-unread, never judged on the first parent",
+                         lambda: plumb_unread_run("plumb-unmergeable", _plumb_unrelated,
+                                                  plumb_call(plumb_tree(PLUMB_ADD), "HEAD", PLUMB_UNRELATED),
+                                                  "two parents git cannot merge")))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a three-parent commit-tree is allowed and logs role-diff-unread, since git makes no merge of three parents",
+                         lambda: plumb_unread_run("plumb-octopus", _plumb_merge,
+                                                  plumb_call(plumb_tree(PLUMB_MERGE_BAD), "HEAD", "lane", "main"),
+                                                  "three parents")))
 
 _bd_inc = diff_repo("bd-incident", _incident)
 # Case 1: the incident. A reset to the lane tip, then a removed line, is refused at commit and push.
