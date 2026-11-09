@@ -88,6 +88,12 @@
       },
       "test": "hooks/test_guard.py::ceiling: Agent with model opus and no role is denied"
     },
+    "roles-plan-gets-refuter": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No hook sees a Plan agent return without a refuter spawn after it, and none reads the refuter's brief to see that it holds only the task brief and the plan (decision plan-refuter, Known gaps). The pending plan-record check would see a plan record with no Refuter: line. The refuter's Opus spawn sits in roles-sonnet-is-the-ceiling, whose guard row covers it."
+      }
+    },
     "roles-opus-shaped-say-so": {
       "mechanism": {
         "kind": "judgment",
@@ -351,9 +357,11 @@
     },
     "tokens-run-through-verdict": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check sees which command an agent ran a verification through. CI tests only that bin/verdict itself works."
-      }
+        "kind": "guard",
+        "ref": "check-tail",
+        "reason": "Partly mechanized. The guard (check-tail, hooks/guard_stream.py check_tail_hit) refuses `merge --lane-lint` or `merge --review-record` piped into tail or head, foreground or background, and a backgrounded `ci-job` piped into them, with or without a tee between them (a tee with no tail or head after it passes). A call through verdict is not a check-tail refusal, but `verdict <cmd> | tail` is refused first by verdict-pipe. It does not see any other verification command, a PowerShell Select-Object -First or -Last, or a command run outside verdict with no pipe."
+      },
+      "test": "hooks/test_guard.py::check-tail: the incident line, backgrounded, is refused"
     },
     "tokens-point-brief-at-files": {
       "mechanism": {
@@ -479,7 +487,7 @@
         "kind": "check",
         "ref": "lint/report_guard.py",
         "test": "lint/test_report_guard.py::ReportGuardTests.test_67_every_github_landing_tool_with_no_report_blocks",
-        "reason": "The check covers the landing case: a turn that lands a commit, push, merge or opened PR is not a tracking turn and ends with the report. The tracking-only case, one line on a turn that lands nothing, stays a content judgment."
+        "reason": "The check covers the landing case: a turn that lands a commit, push, merge or opened PR is not a tracking turn and ends with the report. The test cited proves the push_files tool; Bash pushes are proved by test_61_sudo_git_push_blocks and test_64_git_dash_c_push_blocks in lint/test_report_guard.py. The tracking-only case, one line on a turn that lands nothing, stays a content judgment."
       }
     },
     "output-never-echo-agent-report": {
@@ -656,7 +664,7 @@
     "output-never-hand-off-doable-step": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Whether a step handed to the user was doable, and whether its block is runnable as is, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) samples 1 Stop in 5 and judges every report that carries Input Needed, for the reason and the check on each item. A finding writes one guard.log line. A block that mixes shells has no code check. Guard rule task-names-check refuses a waiting-page task with no Why yours line (decision task-names-its-check). Guard rule task-why-cited refuses a waiting-page task whose Why yours line gives a capability reason with no cite that holds: a route row that says refused or asks, or a dated measured cite (decision claims-carry-backing, part (v)). The page reads no refusals file. Guard rule gh-login-switch refuses a waiting-page task whose command runs gh with no gh auth switch to a known login before it (decision act-in-place)."
+        "reason": "Whether a step handed to the user was doable, and whether its block is runnable as is, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) samples 1 Stop in 5 and judges every report that carries Input Needed, for the reason and the check on each item. A finding writes one guard.log line. A block that mixes shells has no code check. Guard rule task-names-check refuses a waiting-page task with no Why yours line (decision task-names-its-check). Guard rule task-why-cited refuses a waiting-page task whose Why yours line gives a capability reason with no cite that holds: a route row that says refused or asks, or a dated measured cite (decision claims-carry-backing, part (v)). The page reads no refusals file. Guard rule gh-login-switch refuses a waiting-page task whose command runs gh with no gh auth switch to a known login before it (decision act-in-place). The Stop guard (lint/report_guard.py cannot_problem) refuses a reply line that says an act cannot be done when the turn holds no failed try of that act, or the line names no check (decision claims-carry-backing)."
       }
     },
     "style-table-gold-column": {

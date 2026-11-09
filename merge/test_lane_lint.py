@@ -16,9 +16,11 @@ import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subproc
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
+sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: the pin note's names (hooks/pin_note.py)
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
 import merge  # noqa: E402
+from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
 RUN_FOLDER = _test_temp.run_folder()
@@ -27,9 +29,13 @@ atexit.register(shutil.rmtree, RUN_FOLDER, True)
 PASSING = [("PASS", "record slugs"), ("PASS", "ste lint")]
 FAILING = [("PASS", "record slugs"), ("FAIL", "comment narration")]
 UNKNOWN = [("PASS", "record slugs"), ("unknown", "shellcheck")]
+# The drift line bin/ste-changed prints under the pin note's variable: PIN_NOTE_MARKER, then this text.
+PIN_NOTE_DRIFT = ("CI pins ste-lint at abc1234 (2026-10-01, .github/workflows/checks.yml:5), older than this copy's lint. "
+                  "A line can pass here and fail CI. Move the pin to claude-settings main, in a lane of its own.")
 
 STUB = '''import json, os, subprocess, sys, time
 LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
+DETAILS = __DETAILS__  # step name -> the text after its verdict word; a step not named here reads `stub step`
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
@@ -42,7 +48,7 @@ if "--plan" in sys.argv:
 end = time.time() + SLEEP  # a lint that runs long: it ends after SLEEP s, or at once when the run that started it is gone
 while time.time() < end and os.getppid() == PARENT:
     time.sleep(0.05)
-lines = ["%-15s %s: stub step" % (state, name) for state, name in STEPS]
+lines = ["%-15s %s: %s" % (state, name, DETAILS.get(name, "stub step")) for state, name in STEPS]
 print("\\n".join(lines))
 if RC == 1:
     with open(STEP_LOG, "w", encoding="utf-8") as f:
@@ -123,15 +129,17 @@ class CiJobStub:
         self.stub = os.path.join(self.t, "ci-job-stub.py")
         self.step_log = os.path.join(self.t, "ci-job-step.log")
 
-    def write_stub(self, steps, rc, sleep=0):
-        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set."""
+    def write_stub(self, steps, rc, sleep=0, details=None):
+        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set.
+        `details` maps a step name to the text its line prints after the verdict word (default `stub step`)."""
         text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
-        tm.put(self.stub, text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep)))
+        tm.put(self.stub, text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep))
+               .replace("__DETAILS__", repr(details or {})))
         return self.stub
 
-    def use_ci_job(self, steps, rc):
+    def use_ci_job(self, steps, rc, details=None):
         """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`."""
-        self.write_stub(steps, rc)
+        self.write_stub(steps, rc, details=details)
         patch = unittest.mock.patch.object(merge, "CI_JOB", self.stub)
         patch.start()
         self.addCleanup(patch.stop)
@@ -143,6 +151,50 @@ class CiJobStub:
         with open(self.log, encoding="utf-8") as f:
             calls = [json.loads(line) for line in f if line.strip()]
         return [c for c in calls if "--plan" not in c["argv"]]
+
+
+WAIT_LINE = "GitHub to show the pushed head"  # the progress text of the wait for a pushed head (merge.py wait_checks)
+WAIT_CEILING = 600  # fake seconds a wait may run. The bound is the builder's choice; this ceiling only proves the wait is finite
+WAIT_POLLS_CEILING = 30  # pull request reads one wait may make
+RUNAWAY_PAUSES = 500  # pauses after which a wait that never ends is stopped, so a broken wait cannot hang the run
+LAG_POLLS = 3  # reads that still show the stale head before GitHub shows the pushed one
+
+
+class LagHost(tm.FakeHost):
+    """A FakeHost whose pull request head lags a push: pr() reports `stale` for the first `lag` reads, then the head on origin.
+    now() and pause() are tm.Clock's, so a wait moves a fake clock and costs no real time. lag=0 never reports the stale head."""
+
+    def __init__(self, root, other, stale, lag, clock):
+        super().__init__(root, other)
+        self.stale, self.lag, self.clock, self.minute = stale, lag, clock, 60  # minute: Host's default poll interval, for a wait that reads it
+
+    def now(self):
+        return self.clock.now()
+
+    def pause(self, seconds):
+        if len(self.clock.pauses) >= RUNAWAY_PAUSES:
+            raise AssertionError("the wait paused %d times and never ended" % RUNAWAY_PAUSES)
+        self.clock.pause(seconds)
+
+    def pr(self, n):
+        info = super().pr(n)  # appends this read to pr_calls
+        if len(self.pr_calls) <= self.lag:
+            info["head"] = self.stale
+        return info
+
+
+class IntermediateHeadHost(LagHost):
+    """A LagHost whose pull request shows `middle` on the read after its stale reads, before the pushed head: a third head GitHub shows mid-wait."""
+
+    def __init__(self, root, other, stale, lag, middle, clock):
+        super().__init__(root, other, stale, lag, clock)
+        self.middle = middle
+
+    def pr(self, n):
+        info = super().pr(n)  # appends this read to pr_calls, and reports the stale or the pushed head
+        if len(self.pr_calls) == self.lag + 1:
+            info["head"] = self.middle
+        return info
 
 
 class LaneLint(CiJobStub, tm.CloudSession):
@@ -197,7 +249,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         instead of passing on reads to the end only after the stub's bound."""
         go = os.path.join(self.t, "go")
         text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
-        text = text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(0))
+        text = text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(0)).replace("__DETAILS__", "{}")
         tm.put(self.stub, text.replace("lines = [", PROGRESS.replace("__GO__", repr(go)) + "lines = [", 1))
         harness = os.path.join(self.t, "lane_lint_progress.py")
         tm.put(harness, HARNESS.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
@@ -241,6 +293,20 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertIn(self.head("feat")[:7], lines[0])
         self.assertIn("main", lines[0])
         self.assertIn("batch runner", lines[0])
+
+    def test_a_passing_lint_with_a_stale_pin_prints_the_whole_drift_line_on_its_pass_line(self):
+        self.use_ci_job(PASSING, 0, details={"ste lint": PIN_NOTE_MARKER + PIN_NOTE_DRIFT})
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertIn(PIN_NOTE_MARKER + PIN_NOTE_DRIFT, out, "the PASS line lacks the whole drift line: " + out)
+
+    def test_a_passing_lint_with_no_stale_pin_prints_no_pin_note(self):  # the control
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertNotIn(PIN_NOTE_MARKER, out, "a pass with no drift printed a pin note: " + out)
 
     def test_a_passing_lint_names_its_skipped_ci_steps_on_the_pass_line(self):
         self.use_ci_job(PASSING + [("skipped", "Push-only lint A"), ("skipped", "Push-only lint B")], 0)
@@ -350,6 +416,107 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertFalse(os.path.exists(cwd), "the lint tree is still on disk after an exception")
         self.assertFalse(tm.tree_listed(self.co, cwd), "git still lists the lint tree after an exception")
         self.assertEqual(self.worktrees(), 1)
+
+    def push_lane_commit(self):
+        """The lane's push: one commit on the lane checkout's feat, pushed from there. -> (the head GitHub showed before it, the pushed head).
+        The local head is that commit: the lane checkout's local feat, origin/feat and the pushed head are one sha."""
+        stale = self.head("feat")
+        tm.sh(self.co, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        tm.put(os.path.join(self.co, "lane-push.txt"), "a lane pushes a commit\n")
+        tm.sh(self.co, "git", "add", "-A")
+        tm.sh(self.co, "git", "commit", "-q", "-m", "lane push")
+        tm.sh(self.co, "git", "push", "-q", "origin", "feat")
+        pushed = tm.sh(self.co, "git", "rev-parse", "feat")
+        self.assertNotEqual(stale, pushed, "the case pushed nothing")
+        self.assertEqual(self.head("feat"), pushed, "the push did not land on origin")
+        return stale, pushed
+
+    def lagging_host(self, stale, lag):
+        """self.host becomes a LagHost on the lane checkout, with a fresh tm.Clock. -> the clock."""
+        clock = tm.Clock()
+        self.host = LagHost(self.co, self.other, stale, lag, clock)
+        return clock
+
+    def test_lane_lint_waits_for_github_to_show_the_pushed_head_then_lints_that_head(self):
+        stale, pushed = self.push_lane_commit()
+        clock = self.lagging_host(stale, LAG_POLLS)
+        self.use_ci_job(PASSING, 0)
+        start = clock.now()
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertIn(WAIT_LINE, text, "lane_lint did not wait for GitHub to show the pushed head: " + text)
+        self.assertGreater(clock.now(), start, "lane_lint printed the wait but the fake clock did not move: " + text)
+        self.assertEqual(rc, 0, "lane_lint refused after GitHub showed the pushed head: " + text)
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
+        self.assertEqual(runs[0]["head"], pushed, "the lint ran on a head other than the pushed one")
+        self.assertEqual(len(pass_lines(text)), 1, text)
+
+    def test_lane_lint_refuses_after_a_bounded_wait_when_github_never_shows_the_pushed_head(self):
+        stale, pushed = self.push_lane_commit()
+        clock = self.lagging_host(stale, float("inf"))
+        self.use_ci_job(PASSING, 0)
+        start = clock.now()
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertIn(WAIT_LINE, text, "lane_lint did not wait for GitHub to show the pushed head before it refused: " + text)
+        waited = clock.now() - start
+        self.assertLessEqual(waited, WAIT_CEILING, "the wait had no finite bound: it ran %d fake seconds" % waited)
+        self.assertLessEqual(len(self.host.pr_calls), WAIT_POLLS_CEILING, "the wait read GitHub %d times" % len(self.host.pr_calls))
+        self.assertEqual(rc, 1, "lane_lint did not refuse a head GitHub never showed: " + text)
+        refusal = "\n".join(line for line in text.splitlines() if WAIT_LINE not in line)
+        self.assertIn("GitHub", refusal, "the refusal does not say GitHub never showed the pushed head: " + text)
+        self.assertIn(pushed[:7], refusal, "the refusal does not name the local head GitHub never showed: " + text)
+        self.assertEqual(pass_lines(text), [], text)
+        self.assertEqual(self.lint_calls(), [], "the lint ran on a head GitHub never showed")
+
+    def test_lane_lint_does_not_wait_when_github_already_shows_the_pushed_head(self):  # the control
+        head = self.head("feat")  # nothing pushed here: origin's feat is the pushed head, and GitHub shows it
+        tm.sh(self.co, "git", "checkout", "-q", "-B", "feat", "origin/feat")  # the local head is the pushed head, as in the pushed cases
+        clock = self.lagging_host(head, lag=0)  # lag=0: pr() never reports a stale head
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.lint_run("--lane-lint", "7", head=head)
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(clock.pauses, [], "lane_lint paused although GitHub already showed the pushed head: %s" % clock.pauses)
+        self.assertNotIn(WAIT_LINE, text, "lane_lint printed a wait with nothing to wait for: " + text)
+
+    def test_lane_lint_ref_target_never_waits_for_github(self):
+        sha = self.head("feat")
+        clock = self.lagging_host("0" * 40, float("inf"))  # a pull request read would show a head that never matches the ref
+        self.use_ci_job(PASSING, 0)
+        for target in (sha, "origin/feat"):  # a commit, and a ref that names the same commit
+            with self.subTest(target=target):
+                rc, text = self.lint_run("--lane-lint", target, head=sha)
+                self.assertEqual(rc, 0, text)
+                self.assertEqual(clock.pauses, [], "a commit or ref target paused: %s" % clock.pauses)
+                self.assertNotIn(WAIT_LINE, text, "a commit or ref target printed a wait: " + text)
+        self.assertEqual(self.host.pr_calls, [], "a commit or ref target read the pull request, which it never needs")
+
+    def test_lane_lint_refuses_when_the_pull_request_base_changes_during_the_wait(self):
+        stale, pushed = self.push_lane_commit()
+        self.lagging_host(stale, LAG_POLLS)
+        self.host.base_seq = ["main", "develop"]  # the base reads main on the first read, then develop on every later one
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertIn(WAIT_LINE, text, "lane_lint did not wait for GitHub to show the pushed head, so the base never moved during a wait: " + text)
+        self.assertEqual(rc, 1, "lane_lint did not refuse after the pull request's base moved from main to develop during the wait: " + text)
+        refusal = "\n".join(line for line in text.splitlines() if WAIT_LINE not in line)
+        self.assertIn("develop", refusal, "the refusal does not name the new base: " + text)
+        self.assertIn("main", refusal, "the refusal does not name the base the lint was about to use: " + text)
+        self.assertEqual(pass_lines(text), [], "lane_lint printed PASS against the base the pull request had before the wait: " + text)
+        self.assertEqual(self.lint_calls(), [], "the lint ran although the pull request's base had changed: %s" % self.lint_calls())
+
+    def test_lane_lint_keeps_waiting_through_an_intermediate_head_then_lints_the_pushed_head(self):
+        stale, pushed = self.push_lane_commit()
+        middle = self.head("main")  # a head GitHub shows after the stale ones and before the pushed one: a commit that is neither
+        self.assertNotIn(middle, (stale, pushed), "the case needs a third head")
+        self.host = IntermediateHeadHost(self.co, self.other, stale, LAG_POLLS, middle, tm.Clock())
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertIn(WAIT_LINE, text, "lane_lint did not wait for GitHub to show the pushed head: " + text)
+        self.assertEqual(rc, 0, "lane_lint refused the pushed head after GitHub showed an intermediate head first: " + text)
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
+        self.assertEqual(runs[0]["head"], pushed, "the lint ran on a head other than the pushed one")
+        self.assertEqual(len(pass_lines(text)), 1, text)
 
     def stop_run(self, proc):
         """Cleanup for a run this case started: it is ours, so a live one is killed. The stub ends by itself when its run is gone."""

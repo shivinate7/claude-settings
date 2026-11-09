@@ -25,7 +25,10 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   `lane` when the page item has one, so it can list an item whose lane is gone.
   At each publish, triage also disposes each `stalled step:` line the build prints (the build exits 1 on one): a
   step with no live lane and no open PR becomes `todo` or `done`, or gets a `paused` field with who decides; an item
-  is re-routed or closed. Triage does not end its wake while such a line prints: the Stop hook (`lint/report_guard.py`)
+  is re-routed or closed. When triage marks a step `done`, its note gets the line
+  `Done check green on main: <PR or commit>`, naming where the done check went green. The ref is `#N`, `PR N`,
+  a pull or commit URL, or a commit hash. With no such proof, the step stays open, not `done`.
+  Triage does not end its wake while such a line prints: the Stop hook (`lint/report_guard.py`)
   refuses to end a turn while the newest build output in the transcript has one. A second Stop is released only when
   the report's Input Needed section names every stalled step id and item number, which escalates it to the coordinator.
   Triage, as the page writer, splices it into the repo's one page and
@@ -121,10 +124,10 @@ parent, or miss a message while busy.
   `pr-review-record`). That push makes the record stale, so the lane posts a new review record for the
   new head. When the repo holds a standing merge grant, the batch runner merges under it. The owner is
   not asked.
-- A session that waits on CI sets a one-time check-in on each wait, and again after each red job.
+- A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
-  A turn that ends waiting on a named event sets a one-time check-in for that event. A check-in's own turn sets none unless a new event arrived.
+  A turn that ends waiting on a named event sets a one-time check-in for that event. It sets the next one only when a new named event arrives, such as a red job, never on a wake from anything else.
 - A check-in's message names the home of each list it reads (a page collection, a roadmap ref, a git
   ref or a GitHub query), never a copy.
 
