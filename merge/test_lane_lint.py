@@ -17,9 +17,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: the pin note's names (hooks/pin_note.py)
+sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
 import merge  # noqa: E402
+import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
@@ -151,6 +153,50 @@ class CiJobStub:
         with open(self.log, encoding="utf-8") as f:
             calls = [json.loads(line) for line in f if line.strip()]
         return [c for c in calls if "--plan" not in c["argv"]]
+
+
+WAIT_LINE = "GitHub to show the pushed head"  # the progress text of the wait for a pushed head (merge.py wait_checks)
+WAIT_CEILING = 600  # fake seconds a wait may run. The bound is the builder's choice; this ceiling only proves the wait is finite
+WAIT_POLLS_CEILING = 30  # pull request reads one wait may make
+RUNAWAY_PAUSES = 500  # pauses after which a wait that never ends is stopped, so a broken wait cannot hang the run
+LAG_POLLS = 3  # reads that still show the stale head before GitHub shows the pushed one
+
+
+class LagHost(tm.FakeHost):
+    """A FakeHost whose pull request head lags a push: pr() reports `stale` for the first `lag` reads, then the head on origin.
+    now() and pause() are tm.Clock's, so a wait moves a fake clock and costs no real time. lag=0 never reports the stale head."""
+
+    def __init__(self, root, other, stale, lag, clock):
+        super().__init__(root, other)
+        self.stale, self.lag, self.clock, self.minute = stale, lag, clock, 60  # minute: Host's default poll interval, for a wait that reads it
+
+    def now(self):
+        return self.clock.now()
+
+    def pause(self, seconds):
+        if len(self.clock.pauses) >= RUNAWAY_PAUSES:
+            raise AssertionError("the wait paused %d times and never ended" % RUNAWAY_PAUSES)
+        self.clock.pause(seconds)
+
+    def pr(self, n):
+        info = super().pr(n)  # appends this read to pr_calls
+        if len(self.pr_calls) <= self.lag:
+            info["head"] = self.stale
+        return info
+
+
+class IntermediateHeadHost(LagHost):
+    """A LagHost whose pull request shows `middle` on the read after its stale reads, before the pushed head: a third head GitHub shows mid-wait."""
+
+    def __init__(self, root, other, stale, lag, middle, clock):
+        super().__init__(root, other, stale, lag, clock)
+        self.middle = middle
+
+    def pr(self, n):
+        info = super().pr(n)  # appends this read to pr_calls, and reports the stale or the pushed head
+        if len(self.pr_calls) == self.lag + 1:
+            info["head"] = self.middle
+        return info
 
 
 class LaneLintFixture(CiJobStub, tm.CloudSession):
@@ -349,6 +395,186 @@ class LaneLint(LaneLintFixture):
         rc, out = self.lint_run("--lane-lint", "7", base="release")
         self.assertEqual(rc, 0, out)
 
+    def stacked_pr_on_release(self):
+        """PR 7 is feat, based on release, not main. release moves one commit on after feat forked from it. -> (feat sha, release sha)."""
+        self.push_release_branch()
+        self.host.base = "release"
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "release", "origin/release")
+        tm.put(os.path.join(o, "release-moved.txt"), "release moved after feat forked\n")
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", "release moves on")
+        tm.sh(o, "git", "push", "-q", "origin", "release")
+        return self.head("feat"), tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def contains(self, head, base):
+        """True when `base` is an ancestor of `head`. Read in the second clone, which made both commits, so the lane checkout
+        is not fetched here: the lint must fetch its own base."""
+        return subprocess.run(["git", "-C", self.other, "merge-base", "--is-ancestor", base, head], capture_output=True).returncode == 0
+
+    def merge_release_into_feat(self):
+        """The stacked head merges its base in and is pushed. -> the new head sha."""
+        o = self.other
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        tm.sh(o, "git", "merge", "-q", "--no-ff", "-m", "merge release into feat", "origin/release")
+        tm.sh(o, "git", "push", "-q", "origin", "feat")
+        return self.head("feat")
+
+    def shallow_lane_checkout(self, pin):
+        """self.co becomes a shallow clone of origin with `pin` fetched at depth 1 (testing/shallow_clone.py, the one fixture).
+        The host reads the same checkout, so its root moves with it."""
+        self.co = os.path.join(self.t, "shallow")
+        error = shallow_clone.make(self.bare, self.co, pin)
+        if error:
+            self.fail("the shallow clone could not be built: " + error)
+        self.host.root = self.co
+
+    def test_a_stacked_pr_whose_head_lacks_its_bases_head_fails_and_names_the_base_its_missing_sha_and_the_merge_commit_remedy(self):
+        """The incident: a stacked pull request that lacked its base's head conflicted at merge. The lint passes here, so the
+        refusal comes from the stack check alone."""
+        feat, release = self.stacked_pr_on_release()
+        self.assertFalse(self.contains(feat, release), "precondition: the head already holds the base's head, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        before = self.refs()
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a stacked PR whose head lacks its base's head did not refuse: " + out)
+        self.assertEqual(self.lint_calls(), [], "the ci-job lint ran before the stack check refused: " + out)
+        self.assertEqual(pass_lines(out), [], "a stacked PR whose head lacks its base's head printed a PASS line: " + out)
+        self.assertIn("release", out, "the refusal does not name the base branch: " + out)
+        self.assertIn(release[:7], out, "the refusal does not name the base's missing sha: " + out)
+        self.assertRegex(out, r"(?i)merge commit", "the refusal lacks the merge-commit remedy: " + out)
+        self.assertEqual(self.refs(), before, "a refused lane pushed a ref")
+        self.assertEqual(self.worktrees(), 1, "a refused lane left a worktree behind")
+
+    def test_a_stacked_pr_whose_head_merged_its_base_in_passes_with_the_one_pass_line(self):
+        _, release = self.stacked_pr_on_release()
+        head = self.merge_release_into_feat()
+        self.assertTrue(self.contains(head, release), "precondition: the merge did not bring the base's head into the head")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7", base="release", head=head)
+        self.assertEqual(rc, 0, out)
+        lines = pass_lines(out)
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn(head[:7], lines[0], out)
+
+    def test_a_pr_on_main_whose_head_lacks_mains_head_gets_no_stack_row_and_still_passes(self):
+        """Main moving is not this check's job: a PR based on main gets no stack row."""
+        self.main_moves()
+        new_main = tm.sh(self.other, "git", "rev-parse", "HEAD")
+        self.assertFalse(self.contains(self.head("feat"), new_main), "precondition: the head already holds main's head, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertNotIn(new_main[:7], out, "a PR on main got a stack row that names main's head: " + out)
+
+    def test_the_stack_refusal_is_a_fail_that_no_unknown_ok_reason_lifts(self):
+        feat, release = self.stacked_pr_on_release()
+        self.assertFalse(self.contains(feat, release), "precondition: the head already holds the base's head, so the case probes nothing")
+        self.use_ci_job(UNKNOWN, 2)
+        before = self.refs()
+        rc, out = self.run_lane("--lane-lint", "7", "--lint-unknown-ok", "shellcheck is not on this box")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted the stacked PR's refusal: " + out)
+        self.assertEqual(pass_lines(out), [], "the stacked PR's refusal printed a PASS line: " + out)
+        self.assertRegex(out, r"FAIL", "the stacked PR's refusal does not read as a FAIL: " + out)
+        self.assertIn(release[:7], out, "the stacked PR's refusal does not name the base's missing sha: " + out)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the stacked PR passed without a reason: " + out)
+        self.assertRegex(out, r"FAIL", "the stacked PR's refusal without a reason does not read as a FAIL: " + out)
+        self.assertIn(release[:7], out, "the stacked PR's refusal without a reason does not name the base's missing sha: " + out)
+        self.assertEqual(self.refs(), before, "a refused lane pushed a ref")
+
+    def test_an_unreadable_stack_read_stops_as_unknown_and_no_unknown_ok_reason_lifts_it(self):
+        """git could not tell whether the head holds the base's head (merge.ancestor reads None). The stop is unknown: never a FAIL,
+        never a PASS, and --lint-unknown-ok does not lift it. The lint does not run."""
+        self.stacked_pr_on_release()
+        self.use_ci_job(PASSING, 0)
+        before = self.refs()
+        with unittest.mock.patch.object(merge, "ancestor", return_value=None) as seam:
+            rc, out = self.run_lane("--lane-lint", "7", "--lint-unknown-ok", "shellcheck is not on this box")
+        self.assertTrue(seam.called, "the stack read did not run, so the case probes nothing")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted an unreadable stack read: " + out)
+        self.assertEqual(pass_lines(out), [], "an unreadable stack read printed a PASS line: " + out)
+        self.assertNotRegex(out, r"FAIL", "an unreadable stack read reads as a FAIL: " + out)
+        self.assertRegex(out, r"stack check of .* is unknown", "an unreadable stack read does not stop as unknown: " + out)
+        self.assertEqual(self.lint_calls(), [], "the lint ran past an unreadable stack read: " + out)
+        with unittest.mock.patch.object(merge, "ancestor", return_value=None) as seam:
+            rc, out = self.run_lane("--lane-lint", "7")
+        self.assertTrue(seam.called, "the stack read did not run on the run without a reason")
+        self.assertEqual(rc, 1, "an unreadable stack read passed without a reason: " + out)
+        self.assertEqual(pass_lines(out), [], "an unreadable stack read printed a PASS line without a reason: " + out)
+        self.assertNotRegex(out, r"FAIL", "an unreadable stack read reads as a FAIL without a reason: " + out)
+        self.assertRegex(out, r"stack check of .* is unknown", "an unreadable stack read does not stop as unknown without a reason: " + out)
+        self.assertEqual(self.lint_calls(), [], "the lint ran past an unreadable stack read without a reason: " + out)
+        self.assertEqual(self.refs(), before, "a refused lane pushed a ref")
+
+    def test_the_stack_refusal_claims_no_conflict_and_no_base_move(self):
+        """The head may merge clean, and the lane may never have been based on its base, so the refusal says what is missing and no more."""
+        feat, release = self.stacked_pr_on_release()
+        self.assertFalse(self.contains(feat, release), "precondition: the head already holds the base's head, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a stacked PR whose head lacks its base's head did not refuse: " + out)
+        self.assertNotRegex(out, r"(?i)conflict|moved on", "the stack refusal claims a conflict or a base move the lint cannot see: " + out)
+
+    def test_a_shallow_lane_whose_stacked_head_lacks_its_bases_head_fails_and_names_the_base_its_missing_sha_and_the_merge_commit_remedy(self):
+        """A shallow clone cuts the path, so `merge-base --is-ancestor` exits 1 and branch_is_ancestor reads unknown. The head lacks the base's
+        head in full history (checked on the other clone), so the refusal is a FAIL that names the base, its missing sha and the remedy."""
+        feat, release = self.stacked_pr_on_release()
+        self.assertFalse(self.contains(feat, release), "precondition: the head already holds the base's head, so the case probes nothing")
+        self.shallow_lane_checkout(feat)
+        tm.sh(self.co, "git", "fetch", "-q", "origin", "+refs/heads/release:refs/remotes/origin/release")
+        facts = shallow_clone.facts(self.co, release, feat)
+        self.assertTrue(facts["shallow"], "precondition: the lane checkout is not shallow: " + repr(facts))
+        self.assertEqual(facts["ancestor_rc"], 1, "precondition: the cut does not make the read unknown, so the case probes nothing: " + repr(facts))
+        self.use_ci_job(PASSING, 0)
+        before = self.refs()
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a shallow stacked PR whose head lacks its base's head did not refuse: " + out)
+        self.assertEqual(pass_lines(out), [], "a shallow stacked PR whose head lacks its base's head printed a PASS line: " + out)
+        self.assertRegex(out, r"FAIL", "a shallow stacked PR whose head lacks its base's head reads as unknown, not a FAIL: " + out)
+        self.assertIn(release[:7], out, "the shallow FAIL does not name the base's missing sha: " + out)
+        self.assertRegex(out, r"(?i)merge commit", "the shallow FAIL lacks the merge-commit remedy: " + out)
+        self.assertEqual(self.refs(), before, "a refused lane pushed a ref")
+        self.assertEqual(self.worktrees(), 1, "a refused lane left a worktree behind")
+
+    def test_a_shallow_lane_whose_stacked_head_holds_its_bases_head_passes_at_depth_one(self):
+        """The merge commit alone, in a depth-1 clone: its parents are cut, so the stack read must reach past the cut to see the base's
+        head. On the current code it reads unknown here. A fix that maps every shallow unknown to a FAIL fails this case too."""
+        _, release = self.stacked_pr_on_release()
+        head = self.merge_release_into_feat()
+        self.shallow_lane_checkout(head)
+        tm.sh(self.co, "git", "fetch", "-q", "origin", "+refs/heads/release:refs/remotes/origin/release")
+        facts = shallow_clone.facts(self.co, release, head)
+        self.assertTrue(facts["shallow"], "precondition: the lane checkout is not shallow: " + repr(facts))
+        self.assertTrue(facts["pin_present"], "precondition: the base's head is not in the clone: " + repr(facts))
+        self.assertEqual(facts["ancestor_rc"], 1, "precondition: the cut does not hide the base's head, so the case probes nothing: " + repr(facts))
+        self.assertTrue(self.contains(head, release), "precondition: the merge did not bring the base's head into the head")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a shallow stacked head that holds its base's head reads as unknown, not a pass: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, "a shallow stacked head that holds its base's head printed no single PASS line: " + out)
+        self.assertEqual(len(self.lint_calls()), 1, "the ci-job lint did not run once on the passing shallow head: " + out)
+
+    def test_a_shallow_lane_whose_stacked_head_holds_its_bases_head_at_depth_two_passes(self):
+        """The control beside the depth-1 case: with the merge commit's parents fetched, the path to the base's head is in the clone,
+        so the read is an ancestor and the lint passes."""
+        _, release = self.stacked_pr_on_release()
+        head = self.merge_release_into_feat()
+        self.shallow_lane_checkout(head)
+        tm.sh(self.co, "git", "fetch", "-q", "--depth", "2", "origin", head)  # the merge commit's parents: the path to the base's head
+        tm.sh(self.co, "git", "fetch", "-q", "origin", "+refs/heads/release:refs/remotes/origin/release")
+        facts = shallow_clone.facts(self.co, release, head)
+        self.assertTrue(facts["shallow"], "precondition: the lane checkout is not shallow: " + repr(facts))
+        self.assertEqual(facts["ancestor_rc"], 0, "precondition: the path to the base's head is cut, so the control probes nothing: " + repr(facts))
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7", base="release", head=head)
+        self.assertEqual(rc, 0, out)
+        lines = pass_lines(out)
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn(head[:7], lines[0], out)
+
     def test_an_exception_in_the_lint_run_still_removes_the_worktree(self):
         self.use_ci_job(PASSING, 0)
         real_sh, seen = merge.sh, []
@@ -374,6 +600,107 @@ class LaneLint(LaneLintFixture):
         self.assertFalse(os.path.exists(cwd), "the lint tree is still on disk after an exception")
         self.assertFalse(tm.tree_listed(self.co, cwd), "git still lists the lint tree after an exception")
         self.assertEqual(self.worktrees(), 1)
+
+    def push_lane_commit(self):
+        """The lane's push: one commit on the lane checkout's feat, pushed from there. -> (the head GitHub showed before it, the pushed head).
+        The local head is that commit: the lane checkout's local feat, origin/feat and the pushed head are one sha."""
+        stale = self.head("feat")
+        tm.sh(self.co, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        tm.put(os.path.join(self.co, "lane-push.txt"), "a lane pushes a commit\n")
+        tm.sh(self.co, "git", "add", "-A")
+        tm.sh(self.co, "git", "commit", "-q", "-m", "lane push")
+        tm.sh(self.co, "git", "push", "-q", "origin", "feat")
+        pushed = tm.sh(self.co, "git", "rev-parse", "feat")
+        self.assertNotEqual(stale, pushed, "the case pushed nothing")
+        self.assertEqual(self.head("feat"), pushed, "the push did not land on origin")
+        return stale, pushed
+
+    def lagging_host(self, stale, lag):
+        """self.host becomes a LagHost on the lane checkout, with a fresh tm.Clock. -> the clock."""
+        clock = tm.Clock()
+        self.host = LagHost(self.co, self.other, stale, lag, clock)
+        return clock
+
+    def test_lane_lint_waits_for_github_to_show_the_pushed_head_then_lints_that_head(self):
+        stale, pushed = self.push_lane_commit()
+        clock = self.lagging_host(stale, LAG_POLLS)
+        self.use_ci_job(PASSING, 0)
+        start = clock.now()
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertIn(WAIT_LINE, text, "lane_lint did not wait for GitHub to show the pushed head: " + text)
+        self.assertGreater(clock.now(), start, "lane_lint printed the wait but the fake clock did not move: " + text)
+        self.assertEqual(rc, 0, "lane_lint refused after GitHub showed the pushed head: " + text)
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
+        self.assertEqual(runs[0]["head"], pushed, "the lint ran on a head other than the pushed one")
+        self.assertEqual(len(pass_lines(text)), 1, text)
+
+    def test_lane_lint_refuses_after_a_bounded_wait_when_github_never_shows_the_pushed_head(self):
+        stale, pushed = self.push_lane_commit()
+        clock = self.lagging_host(stale, float("inf"))
+        self.use_ci_job(PASSING, 0)
+        start = clock.now()
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertIn(WAIT_LINE, text, "lane_lint did not wait for GitHub to show the pushed head before it refused: " + text)
+        waited = clock.now() - start
+        self.assertLessEqual(waited, WAIT_CEILING, "the wait had no finite bound: it ran %d fake seconds" % waited)
+        self.assertLessEqual(len(self.host.pr_calls), WAIT_POLLS_CEILING, "the wait read GitHub %d times" % len(self.host.pr_calls))
+        self.assertEqual(rc, 1, "lane_lint did not refuse a head GitHub never showed: " + text)
+        refusal = "\n".join(line for line in text.splitlines() if WAIT_LINE not in line)
+        self.assertIn("GitHub", refusal, "the refusal does not say GitHub never showed the pushed head: " + text)
+        self.assertIn(pushed[:7], refusal, "the refusal does not name the local head GitHub never showed: " + text)
+        self.assertEqual(pass_lines(text), [], text)
+        self.assertEqual(self.lint_calls(), [], "the lint ran on a head GitHub never showed")
+
+    def test_lane_lint_does_not_wait_when_github_already_shows_the_pushed_head(self):  # the control
+        head = self.head("feat")  # nothing pushed here: origin's feat is the pushed head, and GitHub shows it
+        tm.sh(self.co, "git", "checkout", "-q", "-B", "feat", "origin/feat")  # the local head is the pushed head, as in the pushed cases
+        clock = self.lagging_host(head, lag=0)  # lag=0: pr() never reports a stale head
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.lint_run("--lane-lint", "7", head=head)
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(clock.pauses, [], "lane_lint paused although GitHub already showed the pushed head: %s" % clock.pauses)
+        self.assertNotIn(WAIT_LINE, text, "lane_lint printed a wait with nothing to wait for: " + text)
+
+    def test_lane_lint_ref_target_never_waits_for_github(self):
+        sha = self.head("feat")
+        clock = self.lagging_host("0" * 40, float("inf"))  # a pull request read would show a head that never matches the ref
+        self.use_ci_job(PASSING, 0)
+        for target in (sha, "origin/feat"):  # a commit, and a ref that names the same commit
+            with self.subTest(target=target):
+                rc, text = self.lint_run("--lane-lint", target, head=sha)
+                self.assertEqual(rc, 0, text)
+                self.assertEqual(clock.pauses, [], "a commit or ref target paused: %s" % clock.pauses)
+                self.assertNotIn(WAIT_LINE, text, "a commit or ref target printed a wait: " + text)
+        self.assertEqual(self.host.pr_calls, [], "a commit or ref target read the pull request, which it never needs")
+
+    def test_lane_lint_refuses_when_the_pull_request_base_changes_during_the_wait(self):
+        stale, pushed = self.push_lane_commit()
+        self.lagging_host(stale, LAG_POLLS)
+        self.host.base_seq = ["main", "develop"]  # the base reads main on the first read, then develop on every later one
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertIn(WAIT_LINE, text, "lane_lint did not wait for GitHub to show the pushed head, so the base never moved during a wait: " + text)
+        self.assertEqual(rc, 1, "lane_lint did not refuse after the pull request's base moved from main to develop during the wait: " + text)
+        refusal = "\n".join(line for line in text.splitlines() if WAIT_LINE not in line)
+        self.assertIn("develop", refusal, "the refusal does not name the new base: " + text)
+        self.assertIn("main", refusal, "the refusal does not name the base the lint was about to use: " + text)
+        self.assertEqual(pass_lines(text), [], "lane_lint printed PASS against the base the pull request had before the wait: " + text)
+        self.assertEqual(self.lint_calls(), [], "the lint ran although the pull request's base had changed: %s" % self.lint_calls())
+
+    def test_lane_lint_keeps_waiting_through_an_intermediate_head_then_lints_the_pushed_head(self):
+        stale, pushed = self.push_lane_commit()
+        middle = self.head("main")  # a head GitHub shows after the stale ones and before the pushed one: a commit that is neither
+        self.assertNotIn(middle, (stale, pushed), "the case needs a third head")
+        self.host = IntermediateHeadHost(self.co, self.other, stale, LAG_POLLS, middle, tm.Clock())
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertIn(WAIT_LINE, text, "lane_lint did not wait for GitHub to show the pushed head: " + text)
+        self.assertEqual(rc, 0, "lane_lint refused the pushed head after GitHub showed an intermediate head first: " + text)
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
+        self.assertEqual(runs[0]["head"], pushed, "the lint ran on a head other than the pushed one")
+        self.assertEqual(len(pass_lines(text)), 1, text)
 
     def stop_run(self, proc):
         """Cleanup for a run this case started: it is ours, so a live one is killed. The stub ends by itself when its run is gone."""
