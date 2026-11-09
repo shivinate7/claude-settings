@@ -30,6 +30,10 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   command form, read from PUSH_REASON. Its Covers text names the 9 lease-push refusals, requires
   the branch was pushed earlier in this session, and binds the sha to the tip this session last
   pushed. Its Never covers names each act in LEASE_REFUSED (decision auto-mode-owner-acts).
+- One "Own Branch Lease Push, refspec form:" entry quotes both lease forms typed with a source ref,
+  `origin <src>:<branch>`, and names <src> as a local branch, `HEAD` or a commit sha. Its Covers text
+  requires the same earlier push and binds the sha as the lease entry does. Its Never covers names each
+  act in REFSPEC_REFUSED (decision auto-mode-owner-acts).
 - One "Relayed Merge Yes:" entry quotes the merge command derived from merge/cloud_allow.json's
   one `--confirm` merge rule. Its Covers text names the coordinator that relays (cs-build:coordinator),
   the batch runner that merges (cs-build:batch-runner), and the pull request the relay names. Its
@@ -148,6 +152,17 @@ LEASE_REFUSED = (("--force", r"`--force`"), ("-f", r"`-f`"), ("+refspec", r"`\+r
                  ("roadmap", r"`roadmap`"), ("merge-lock", r"`merge-lock`"),
                  ("a branch this session did not push earlier", "did not push earlier"),
                  ("--mirror", r"`--mirror`"), ("--all", r"`--all`"), ("delete", r"\bdelete\b"))
+REFSPEC = "Own Branch Lease Push, refspec form:"
+REFSPEC_IF_INCLUDES_FORM = "`git push --force-with-lease --force-if-includes origin <src>:<branch>`"
+REFSPEC_SHA_FORM = "`git push --force-with-lease=<branch>:<sha> origin <src>:<branch>`"
+# (name, case-insensitive pattern) for the source ref the refspec Covers text names.
+REFSPEC_SRC = (("src is a local branch, HEAD or a commit sha",
+                r"<src> is a local branch, `HEAD` or a commit sha"),)
+# The refspec Never covers names the lease entry's acts, with the `+` read before either ref and the
+# delete named with its empty <src>. The shared items keep their one home in LEASE_REFUSED.
+REFSPEC_REFUSED = tuple(item for item in LEASE_REFUSED if item[0] not in ("+refspec", "delete")) + (
+    ("a + before either ref", r"`\+` before either ref"),
+    ("delete (an empty <src>)", r"a delete \(an empty <src>\)"))
 
 
 def auto_mode():
@@ -551,6 +566,39 @@ class OwnBranchLeasePushIsAllowed(unittest.TestCase):
 
     def test_never_covers_names_each_refused_act(self):
         missing = unnamed_terms(entry_part(self, LEASE, never=True), LEASE_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+
+class OwnBranchLeaseRefspecPushIsAllowed(unittest.TestCase):
+    def test_one_entry_names_the_refspec_form(self):
+        hits = [e for e in auto_mode().get("allow", []) if e.startswith(REFSPEC)]
+        self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
+                         % (REFSPEC, len(hits)))
+
+    def test_covers_quotes_the_if_includes_form(self):
+        self.assertIn(REFSPEC_IF_INCLUDES_FORM, entry_part(self, REFSPEC),
+                      "Covers text does not quote the --force-if-includes form with a source ref")
+
+    def test_covers_quotes_the_sha_form(self):
+        self.assertIn(REFSPEC_SHA_FORM, entry_part(self, REFSPEC),
+                      "Covers text does not quote the lease push with a named sha and a source ref")
+
+    def test_covers_requires_a_push_earlier_in_this_session(self):
+        missing = unnamed_terms(entry_part(self, REFSPEC), LEASE_SCOPE)
+        self.assertFalse(missing, "Covers text does not require an earlier push this session: %r" % missing)
+
+    def test_covers_binds_the_sha_to_the_tip_last_pushed(self):
+        missing = unnamed_terms(entry_part(self, REFSPEC), LEASE_BINDING)
+        self.assertFalse(missing, "Covers text does not bind the lease sha to the tip this session last pushed: %r"
+                         % missing)
+
+    def test_covers_names_the_source_ref(self):
+        missing = unnamed_terms(entry_part(self, REFSPEC), REFSPEC_SRC)
+        self.assertFalse(missing, "Covers text does not name <src> as a local branch, HEAD or a commit sha: %r"
+                         % missing)
+
+    def test_never_covers_names_each_refused_act(self):
+        missing = unnamed_terms(entry_part(self, REFSPEC, never=True), REFSPEC_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
 
 
