@@ -103,6 +103,30 @@ def config_dir() -> str:
     )
 
 
+# The global rules file's one `@<path>/CLAUDE.md` line names the pointer checkout. guard_pointer.POINTER_LINE reads
+# the same shape; the watch cannot import it (its fast exit stays stdlib plus this file), and the pointer mutants
+# anchor on that text, so the two copies stay until they are re-pointed together.
+_POINTER_LINE = re.compile(r"^@(.+)/CLAUDE\.md[ \t]*$", re.MULTILINE)
+_POINTER_READ_MAX = 64 * 1024
+
+
+def pointer_target() -> Optional[str]:
+    """The folder the global rules file's `@` line names, with `~` expanded, or None when the file is missing,
+    unreadable or has no such line. The folder may not exist: the caller decides what that means."""
+    try:
+        with open(os.path.join(config_dir(), "CLAUDE.md"), encoding="utf-8-sig") as handle:
+            text = handle.read(_POINTER_READ_MAX)
+    except Exception:
+        return None
+    match = _POINTER_LINE.search(text)
+    if not match:
+        return None
+    target = match.group(1).strip()
+    if target.startswith("~/") or target.startswith("~\\"):
+        target = os.path.join(os.path.expanduser("~"), target[2:])
+    return os.path.expandvars(os.path.expanduser(target))
+
+
 def refusals_path(session_id: object) -> Optional[str]:
     """The file of tool refusals a session has not yet raised with the owner, or None for an id that
     is not a plain name. Written by hooks/refusal_note.py, read and trimmed by lint/report_guard.py."""

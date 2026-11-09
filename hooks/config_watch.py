@@ -6,7 +6,9 @@ Modes:
   settings file. Reverts a cap change that the guard did not ask about, or a raise past its
   expiry time.
 - Stop: At the end of the turn, checks the agent model cap in each watched settings file.
-  Reverts a cap change that no tool call explains, or a raise past its expiry time.
+  Reverts a cap change that no tool call explains, or a raise past its expiry time. It also
+  reads the pointer checkout's HEAD once and prints one line when that HEAD is off main, or
+  says the HEAD is unknown when it cannot be read (see `pointer_line`).
 
 Claude Code runs this file after every tool call that matches, and again when the turn ends:
 
@@ -100,7 +102,7 @@ def _add_guard_set_dir() -> None:
 
 _add_guard_set_dir()
 
-from shared_names import PROJECT_FROZEN_FILES, config_dir  # noqa: E402  stdlib only
+from shared_names import PROJECT_FROZEN_FILES, config_dir, pointer_target  # noqa: E402  stdlib only
 
 # The guard is imported lazily, by `_load_guard`, so a call where nothing changed exits on the
 # stdlib alone (see `unchanged`). GUARD_UNDER_TEST points the suite at another copy of the guard,
@@ -736,6 +738,78 @@ def _test_clock():
     return clock
 
 
+# ------------------------------------------------------------------ the pointer checkout's HEAD
+#
+# `~/.claude/hooks/*` and `~/.claude/lint/*` are symlinks into the pointer checkout, so a branch
+# left checked out there makes unreviewed work live in every session on the machine. A session
+# that started on main never sees a move made mid-session, so the Stop reads HEAD once per turn.
+# The read runs before the fast exit, on Stop only, and costs at most POINTER_GIT_MAX
+# `git rev-parse` calls: no file, no process left running, no timer. The off-main rule is
+# hooks/session_start.sh's: detached at local main's commit or at origin/main's tip counts as main.
+POINTER_GIT_MAX = 4
+POINTER_GIT_TIMEOUT = 5
+POINTER_FLAG = "claude-settings: {where} is on {state}, not main; global rules and hooks are that branch"
+POINTER_UNKNOWN = "claude-settings: the branch of {where} is unknown: its HEAD could not be read"
+
+
+def _pointer_git(folder: str, *args):
+    """Stdout of one `git rev-parse` in `folder`, or None when it fails or times out.
+
+    The git directory search stops at the folder's parent, so a plain folder inside another repo
+    never answers with that repo's HEAD.
+    """
+    import _nowindow  # loaded here: a call that reads no pointer starts no subprocess machinery
+    env = dict(os.environ)
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        env.pop(key, None)
+    env["GIT_CEILING_DIRECTORIES"] = os.path.dirname(os.path.abspath(folder))
+    try:
+        done = _nowindow.run(["git", "-C", folder, "rev-parse"] + list(args), capture_output=True,
+                             text=True, env=env, timeout=POINTER_GIT_TIMEOUT)
+    except Exception:
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def _plain(text: str) -> str:
+    return re.sub(r"\s+", " ", text)[:200]
+
+
+def pointer_line() -> str:
+    """One line when the pointer checkout is off main or unreadable, else ''. Silent with no `@` line."""
+    target = pointer_target()
+    if target is None:
+        return ""
+    where = _plain(target)
+    if not os.path.isdir(target) or not os.path.exists(os.path.join(target, ".git")):
+        return POINTER_UNKNOWN.format(where=where)
+    branch = _pointer_git(target, "--abbrev-ref", "HEAD")
+    if not branch:
+        return POINTER_UNKNOWN.format(where=where)
+    if branch == "main":
+        return ""
+    if branch != "HEAD":
+        return POINTER_FLAG.format(where=where, state=_plain(branch))
+    head = _pointer_git(target, "HEAD")
+    if not head:
+        return POINTER_UNKNOWN.format(where=where)
+    main_head = _pointer_git(target, "--verify", "-q", "refs/heads/main")
+    origin_head = _pointer_git(target, "--verify", "-q", "refs/remotes/origin/main")
+    if head in (main_head, origin_head):
+        return ""
+    return POINTER_FLAG.format(where=where, state="a detached HEAD")
+
+
+def _stop_pointer_line(payload) -> str:
+    """The pointer line for a Stop payload, '' for any other call. A fault reads as unknown, never clear."""
+    if payload.get("hook_event_name") != "Stop":
+        return ""
+    try:
+        return pointer_line()
+    except Exception:
+        return POINTER_UNKNOWN.format(where="the pointer checkout")
+
+
 def main() -> None:
     try:
         payload = json.load(sys.stdin)
@@ -743,18 +817,21 @@ def main() -> None:
         sys.exit(0)  # fail open on unreadable input
     if not isinstance(payload, dict):
         sys.exit(0)  # fail open on a payload that is not an object
+    flag = _stop_pointer_line(payload)
     try:
         fast_exit = unchanged(payload, _test_clock())
     except Exception:
         fast_exit = False  # a fault in the fast check runs the full check, never a silent exit
-    if fast_exit:
-        sys.exit(0)
-    try:
-        _load_guard()
-        guard._force_utf8_streams()
-        messages = sweep(payload, _test_clock())
-    except Exception:
-        sys.exit(0)  # fail open on a watch defect
+    messages = []
+    if not fast_exit:
+        try:
+            _load_guard()
+            guard._force_utf8_streams()
+            messages = sweep(payload, _test_clock())
+        except Exception:
+            messages = []  # fail open on a watch defect
+    if flag:
+        messages.append(flag)
     if messages:
         print(json.dumps({"systemMessage": " ".join(messages)}))
     sys.exit(0)
