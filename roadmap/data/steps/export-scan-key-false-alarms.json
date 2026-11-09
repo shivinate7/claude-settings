@@ -1,11 +1,11 @@
 {
   "title": "The export scan passes common words with long consonant runs, short acronyms and upper-case keys",
   "why": "After #1827 the export scan still refuses option keys with a run of 5 or more consonants (`strengths`, `monthly`, `rhythm`), vowel-less acronyms of 4 or more letters (`http`, `html`, `pkcs`), and upper-case or capitalised keys (`PAGE-LENGTH-LIMIT`) (lane export-scan-key-followups, 02:03 CST Nov 8). These are false alarms on everyday keys (rule verification-cry-wolf-guard-is-spent).",
-  "note": "Fix: pass these with a red case each, and keep a control where a random value (`kqzv_bxjw_tmrl`) still refuses. Starts after #1827 merges (same file). Queue fix (owner 13:20 CST Nov 7). Title and slug by triage. Filed 02:28 CST Nov 8.",
+  "note": "Fix: pass these with a red case each, and keep a control where a random value (`kqzv_bxjw_tmrl`) still refuses. Starts after #1827 merges (same file). Queue fix (owner 13:20 CST Nov 7). Title and slug by triage. Filed 02:28 CST Nov 8. Task D from the gmail run (owner's paste 20:03 CST Nov 8): branch scan-code-false-positives (75617cbda, no PR) narrows export_page.py patterns so code finds (a localStorage key name, minified React) pass. Hole the run itself names: its credential-name exemption also passes `sk-live-ab12`. Open: merge, narrow or drop; as it stands it opens a hole, so a lane narrows it with a red test for sk-live-style values before any review.",
   "phase": "now",
   "status": "todo",
   "order": 572,
   "owner": "triage",
   "lane": "",
-  "updatedAt": "2026-11-08T02:03:00-06:00"
+  "updatedAt": "2026-11-08T20:04:00-06:00"
 }
