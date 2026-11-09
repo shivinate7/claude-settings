@@ -13,9 +13,12 @@ No owner ruling yet. The coordinator asked for this guard rule after the inciden
 - The remedy is `verdict <cmd>` with nothing after it (decision verdict-pipe-refused refuses a pipe out of it). It keeps the full log and prints the verdict itself.
 - The rule reads the call at start, so a foreground `ci-job` the harness later moves to the background is not checked.
 - The roster is named, as built:
-  - `merge --lane-lint` and `merge --review-record`, in these spellings only: `merge`, `merge.cmd`, and `merge/merge.py` or `merge/launch.py` run by `python`, `python3` or `py` (`interpreter_only` in `hooks/guard_stream.py`). `uv run python merge/merge.py` and `python3.11 merge/merge.py` pass on this head; follow-up PR #1717 (check-tail-wrapper-forms) adds `uv run` and versioned pythons. A command that only names the script, such as `grep x merge/merge.py`, is not the check.
-  - `ci-job`, in a call with `run_in_background` only. This is deliberate: every `ci-job` run prints one verdict per step, and a pipe into `tail` or `head` cuts them.
-- A call through `verdict`, including `python3 .../verdict`, is not a check-tail refusal, because a pipe after `verdict` is refused first by decision verdict-pipe-refused. So `verdict <cmd>` with nothing after it passes. A file read back later, and every other command piped into `tail`, pass.
+  - `merge --lane-lint` and `merge --review-record`, in these spellings: `merge`, `merge.cmd`, and `merge/merge.py` or `merge/launch.py` run by `python`, any `python3.N`, `pythonw` or `py` (the roster read in `hooks/guard_stream.py`). Only the interpreter's script operand counts: its first word that is no flag, with `-W` and `-X` taking a value. `-m <module>` and `-c <code>` run no script, so `python3 -m pytest -k bin/ci-job` and `grep x merge/merge.py` are not the check.
+  - A `uv run` ahead of any of these is read through, with the `uv` and `uv run` flags that take a value (`uv run --help`) and the global flags before `run`. So `uv run -w pytest merge --lane-lint 7`, `uv --quiet run merge --lane-lint 7`, `uv run python merge/merge.py --lane-lint 7` and `uv run merge/merge.py --lane-lint 7` are refused. The `.py` operand `uv run` runs with no interpreter word is read as the script, by the same reader as an interpreter's operand. The narrated rule (`live-stream`) reads through `uv run merge/merge.py` the same way, but not through `uv run merge`.
+  - `ci-job`, in the background only, as the bullet above says. This is deliberate: every `ci-job` run prints one verdict per step, and a pipe into `tail` or `head` cuts them. An interpreter whose script operand ends in `bin/ci-job`, such as `python3 bin/ci-job checks --lint`, counts as `ci-job`.
+- A call through `verdict`, including `python3 .../verdict`, is not a check-tail refusal, because a pipe after `verdict` is refused first by decision verdict-pipe-refused. So `verdict <cmd>` with nothing after it passes, behind any wrapper or `uv run`. A file read back later, and every other command piped into `tail`, pass.
+
+Step `check-tail-wrapper-forms` added the `uv run`, `python3.N` and `bin/ci-job` forms, at the coordinator's request (2026-11-07 18:09 CST).
 
 ## The incident
 
@@ -30,9 +33,13 @@ A rule on every `| tail` would refuse `make check 2>&1 | tail -40` and many othe
 
 The rule stops a mistake Claude made in normal work (`guard-guards-mistakes-only`, guards stop Claude's mistakes, not an attacker). It reads no form that only an attacker would write.
 
+## What check-tail reads
+
+For an interpreter, check-tail reads the script operand only: the first word that is no flag. `grep -n x merge/merge.py` and `python3 -m pytest -k merge/merge.py` run no roster script, so they pass. An unquoted `$(` or backtick substitution splits into several words. So the operand reads on to the word that closes it. The roster tail is judged on the joined word (`_whole_word` in `hooks/guard_stream.py`).
+
 ## Known gaps
 
-Each gap is one line in `docs/debts/notes.md`, under this decision. The lines are `check-tail-pipe-at-line-end`, `check-tail-no-nested-read`, `check-tail-powershell-select` and `check-tail-trailing-amp`. No incident has shown any of them.
+Each gap is one line in `docs/debts/notes.md`, under this decision. The lines are `check-tail-pipe-at-line-end`, `check-tail-no-nested-read`, `check-tail-powershell-select`, `check-tail-uv-flag-value`, `check-tail-trailing-amp` and `narrated-tail-no-uv`. No incident has shown any of them.
 
 Why: a merge or lane verdict is the one line the orchestrator needs. A pipe into a truncating filter hides it, and the lane must run the check again.
 
