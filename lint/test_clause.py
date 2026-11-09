@@ -13,16 +13,35 @@ The contract these cases pin (the builder implements it):
 
 Sentences marked "constructed" are not in test_report_guard_cannot.py. The others are from it.
 """
+import ast
 import importlib.util
 import os
 import re
 import sys
+import types
 import unittest
 
 import _clause as clause
 import report_guard
 
 REPORT_GUARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "report_guard.py")
+CLAUSE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_clause.py")
+
+
+def clause_with(name, value):
+    """A fresh module built from lint/_clause.py with its top-level `name` set to `value`, so every list built from `name`
+    is built again. The source is parsed and its one assignment swapped, so the shared _clause module is not touched."""
+    with open(CLAUSE_PATH, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), CLAUSE_PATH)
+    assigns = [node for node in tree.body if isinstance(node, ast.Assign)
+               and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)]
+    if len(assigns) != 1:
+        raise AssertionError("scope: _clause.py assigns %s %d times, not once" % (name, len(assigns)))
+    assigns[0].value = ast.parse(repr(value), mode="eval").body
+    ast.fix_missing_locations(tree)
+    probe = types.ModuleType("_clause_probe")
+    exec(compile(tree, CLAUSE_PATH, "exec"), probe.__dict__)
+    return probe
 
 
 def none(text):
@@ -39,6 +58,25 @@ def code_mask(text):
 
 def parse(sentence):
     return clause.clauses(sentence, none(sentence))
+
+
+# A regex-like string holds a group, a word boundary or a space class. Such a string names the writer when it holds a writer
+# lead-in (I or we as the subject) or a subject word (here, the cloud, this session, there).
+REGEX_MARKS = ("(?:", "\\b", "\\s")
+WRITER_WORDS = re.compile(r"\bI\|we\b|\bwe\|I\b|\b(?:here|cloud|session|there)\b", re.I)
+
+
+def writer_words(source):
+    """(scanned, hits): how many regex-like string constants `source` holds, and [(line, text)] of those that name the
+    writer (WRITER_WORDS). The parser reads the source, so a comment is no constant and a string is read whole."""
+    scanned, hits = 0, []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and any(
+                mark in node.value for mark in REGEX_MARKS):
+            scanned += 1
+            if WRITER_WORDS.search(node.value):
+                hits.append((node.lineno, node.value))
+    return scanned, hits
 
 
 def calls_of(fn):
@@ -317,10 +355,15 @@ class LexiconTests(unittest.TestCase):
         self.assertEqual(set(clause.ADVERBS), words, "ADVERBS")
 
     def test_writer_pattern_is_built_from_the_one_adverb_pattern(self):
-        # Catches: the check's writer pattern built from its own adverb list rather than from ADVERB_PATTERN, so an -ly
-        # adverb outside the list ("temporarily") is not written by the writer.
-        self.assertIn(clause.ADVERB_PATTERN, report_guard.CANNOT_WRITER_RE.pattern,
+        # Catches: the check's writer pattern built from its own adverb list, or as a literal copy of ADVERB_PATTERN, so an
+        # -ly adverb outside the list ("temporarily") is not written by the writer. A literal copy holds the same text, so the
+        # probe swaps ADVERB_PATTERN for a sentinel and reads the sentinel in the built pattern.
+        self.assertIn(clause.ADVERB_PATTERN, clause.WRITER_BEFORE_RE.pattern,
                       "the writer pattern is not built from ADVERB_PATTERN")
+        probe = clause_with("ADVERB_PATTERN", "zqxvadv")
+        self.assertEqual(probe.ADVERB_PATTERN, "zqxvadv", "scope: the probe does not read the sentinel")
+        self.assertIn("zqxvadv", probe.WRITER_BEFORE_RE.pattern,
+                      "WRITER_BEFORE_RE is a copy of the adverb pattern, not built from ADVERB_PATTERN")
 
     def fresh_report_guard(self, name, words):
         """A fresh load of lint/report_guard.py while _clause.<name> holds `words`. The probe is not in sys.modules, so the
@@ -439,6 +482,68 @@ class LinearTests(unittest.TestCase):
         self.assertGreater(small_calls, 0, "the probe counted no calls")
         ratio = work(big) / small_calls
         self.assertLess(ratio, 6, "work grew %.1fx for 4x the clauses; linear is near 4x, quadratic near 16x" % ratio)
+
+
+class DerivationTests(unittest.TestCase):
+    # The lists below are built from one home each. A literal copy of a list keeps the value pins in LexiconTests green,
+    # because the copy holds the same words, so each case swaps the source list for a sentinel and reads the built list.
+
+    def test_cannot_forms_are_derived_from_cant_forms(self):
+        # Catches: CANNOT_FORMS held as a literal copy of the can't forms, so a form changed in CANT_FORMS (the list the
+        # hand-off cite reads) does not reach the claim check. test_cannot_forms_begins_with_the_cant_forms stays green on it.
+        probe = clause_with("CANT_FORMS", ("zqxvcant",))
+        self.assertEqual(probe.CANT_FORMS, ("zqxvcant",), "scope: the probe does not read the sentinel list")
+        self.assertIn("zqxvcant", probe.CANNOT_FORMS, "CANNOT_FORMS is a copy of the can't forms, not built from CANT_FORMS")
+
+    def test_verbs_are_derived_from_be_nt_forms(self):
+        # Catches: VERBS held as a literal copy of the be-forms with n't, so a form changed in _BE_NT_FORMS does not reach
+        # the verbs that a reason reads (is_reason).
+        probe = clause_with("_BE_NT_FORMS", ("zqxvbe",))
+        self.assertEqual(probe._BE_NT_FORMS, ("zqxvbe",), "scope: the probe does not read the sentinel list")
+        self.assertIn("zqxvbe", probe.VERBS, "VERBS is a copy of the be-forms with n't, not built from _BE_NT_FORMS")
+
+    def test_cannot_forms_be_forms_are_derived_from_be_nt_forms(self):
+        # Catches: the be-forms of CANNOT_FORMS ("wasn't able to" and its kin) held as a literal copy of the be-forms with
+        # n't, so a form changed in _BE_NT_FORMS does not reach the claim check.
+        probe = clause_with("_BE_NT_FORMS", ("zqxvbe",))
+        self.assertIn("zqxvbe able to", probe.CANNOT_FORMS,
+                      "CANNOT_FORMS holds a copy of the be-forms with n't, not the forms built from _BE_NT_FORMS")
+
+    def test_writer_scan_reads_a_pattern_and_no_comment(self):
+        # Control for the one-home pin below: a pattern that names the writer is a hit, and the same words in a comment or in
+        # a plain string are not. The parser reads the constants, so a comment and a lone quote move nothing.
+        source = r'''BAD = r"\b(?:I|we)\b"  # a comment that names this session
+OK = r"\bdone\b"  # the comment names (?:I|we) too
+TEXT = "it's a plain string, not a pattern: this session"
+'''
+        scanned, hits = writer_words(source)
+        self.assertEqual(scanned, 2, "scope: the scan did not read the two pattern constants")
+        self.assertEqual([line for line, _ in hits], [1], "the scan read a comment or a plain string, or missed the pattern")
+
+    def test_report_guard_holds_no_writer_lead_in_or_subject_words_of_its_own(self):
+        # Catches: a writer lead-in or a list of subject words kept in report_guard beside the one in _clause, so the two read
+        # the writer apart: CANNOT_WRITER_RE's (?:I|we) against _WRITER_START, and CANNOT_FROM_HERE_RE's here, the cloud and
+        # this session against _OWN_RE. The one home is _clause.py, and report_guard imports it.
+        with open(REPORT_GUARD, encoding="utf-8") as handle:
+            scanned, hits = writer_words(handle.read())
+        self.assertGreater(scanned, 0, "scope: the scan read no regex-like constant of report_guard.py")
+        with open(CLAUSE_PATH, encoding="utf-8") as handle:
+            _, home_hits = writer_words(handle.read())
+        self.assertTrue(home_hits, "control: the scan finds no writer word in _clause.py, the one home")
+        self.assertEqual(hits, [], "report_guard holds a writer lead-in or subject words of its own: %r" % (hits,))
+
+    def test_lead_in_tuples_feed_both_lead_in_regexes(self):
+        # Catches: _WRITER_START keeping its own lead-in list, short of SUBORDINATORS, so a subordinator that _LEAD_RE skips
+        # ("since", "as") is no lead-in for the writer's subject. A sentinel swapped into one lead-in tuple shows in both.
+        # JOINERS and REASON_LINKS already reach both regexes, so those subtests are the controls beside SUBORDINATORS.
+        self.assertNotIn("zqxvlead", clause._LEAD_RE.pattern, "control: the shared _clause reads the sentinel in _LEAD_RE")
+        self.assertNotIn("zqxvlead", clause._WRITER_START.pattern, "control: the shared _clause reads the sentinel")
+        for name in ("JOINERS", "REASON_LINKS", "SUBORDINATORS"):
+            with self.subTest(name=name):
+                probe = clause_with(name, ("zqxvlead",))
+                self.assertEqual(getattr(probe, name), ("zqxvlead",), "scope: the probe does not read the sentinel %s" % name)
+                self.assertIn("zqxvlead", probe._LEAD_RE.pattern, "_LEAD_RE does not read %s" % name)
+                self.assertIn("zqxvlead", probe._WRITER_START.pattern, "_WRITER_START does not read %s" % name)
 
 
 if __name__ == "__main__":
