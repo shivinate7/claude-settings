@@ -508,6 +508,7 @@ GHBATCHBEHIND = os.path.join(ROOT, "ghbatchbehind")  # the same as GHBATCHCONTAI
 GHBATCHDRAFT = os.path.join(ROOT, "ghbatchdraft")    # the same as GHBATCH, but pull request 2 is a draft: CI skips a draft, so it never blocks
 GHBATCHBASE = os.path.join(ROOT, "ghbatchbase")      # the same as GHBATCH, but pull request 2 is on the base `release`, not main
 GHBATCHPAGE2 = os.path.join(ROOT, "ghbatchpage2")    # the same as GHBATCH, but the open list is two pages long and pull request 2 is on page two
+GHBATCHCMPERR = os.path.join(ROOT, "ghbatchcmperr")  # the same as GHBATCH, but the containment read of pull request 2's head fails (a server error)
 GHPINNED = os.path.join(ROOT, "ghpinned")        # the same, with the protection naming `gate`: STAMPREPO pins `checks`, and only the pin counts
 GHNOPROT = os.path.join(ROOT, "ghnoprot")        # no branch protection: pull request 2's pending check counts, whatever its name
 GHNOPROTDONE = os.path.join(ROOT, "ghnoprotdone")  # the same, with pull request 2's check passed
@@ -1357,6 +1358,7 @@ def build_fixtures():
     _filler = [{"number": n, "head": "filler-%d" % n, "draft": False, "checks": [{"name": "checks", "bucket": "pass", "link": ""}]}
                for n in (3, 4)]
     make_fake_gh(GHBATCHPAGE2, "main", page_cap=2, others=_filler + batch_other(("checks", "pending")))
+    make_fake_gh(GHBATCHCMPERR, "main", others=batch_other(("checks", "pending")), compares={"abc1234...pr-two-head": "server"})
     # the guard's required names: a pinned list, or the branch protection (none, failed, or a list that is not pinned)
     make_fake_gh(GHPINNED, "main", others=batch_other(("checks", "pass"), ("gate", "pending")), required=["gate"])
     make_fake_gh(GHNOPROT, "main", others=batch_other(("sync", "pending")), protection="absent")
@@ -10197,6 +10199,18 @@ sh("merge-route: git push origin main with a busy pr that is a draft still asks"
    cwd=NOGIT, env_path=GHBATCHDRAFT + os.pathsep + PY_PATH)
 sh("merge-route: git push origin main with a busy pr on another base still asks", VCS + " push origin main", "ask", PUSH_MAIN_RULE,
    cwd=NOGIT, env_path=GHBATCHBASE + os.pathsep + PY_PATH)
+# A push to main whose containment read fails is unknown, and unknown is red: the busy pull request refuses it.
+sh("merge-route: git push origin abc1234:refs/heads/main is refused when the containment read fails, unknown is red",
+   VCS + " push origin abc1234:refs/heads/main", "deny", "merge-checks", carries=("#2", "override"), lacks=ROUTE_LACKS,
+   cwd=NOGIT, env_path=GHBATCHCMPERR + os.pathsep + PY_PATH)
+# Limits (decision no-merge-during-batch-ci): a forced, --all or mirror push to main with a busy pull request is not denied. Each row
+# records the verdict the guard gives now, so a change to it shows here.
+sh("merge-route: limit: a forced push to main with a busy pr is asked, not denied", VCS + " push --force origin main", "ask",
+   "force-push", cwd=NOGIT, env_path=ROUTE_ON)
+sh("merge-route: limit: a push of all branches with a busy pr is asked, not denied", VCS + " push --all origin", "ask",
+   "push-main", cwd=NOGIT, env_path=ROUTE_ON)
+sh("merge-route: limit: a mirror push with a busy pr is asked, not denied", VCS + " push --mirror origin", "ask",
+   "force-push", cwd=NOGIT, env_path=ROUTE_ON)
 TEMP_DIR = None  # back to the system temp for the sections below
 
 _BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
@@ -10763,7 +10777,8 @@ def record_push_cost_case():
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal destination
-    (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The conflict-markers push check
+    (`HEAD:<branch>`) adds no read. A push to main (`origin main`, `HEAD:main`) reads its pushed head (one rev-parse)
+    and its destination (a remote and a config read), because the batch brake judges it; the rows pin that count. The conflict-markers push check
     (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
     order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
     finds the merge base itself). A push with a tracking ref reads one base. A push with no tracking ref
@@ -10804,8 +10819,8 @@ def record_push_cost_case():
         ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1, "diff": 1}),
         ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1}),
         ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1}),
-        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "diff": 1}),
-        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "diff": 1}),
+        ("a push to main, origin main", "push origin main", {"rev-parse": 2, "config": 1, "remote": 1, "diff": 1}),
+        ("a push to main, HEAD:main", "push origin HEAD:main", {"rev-parse": 2, "config": 1, "remote": 1, "diff": 1}),
         ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1, "diff": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
          {"rev-parse": 2, "symbolic-ref": 1, "diff": 3}),
@@ -15337,22 +15352,43 @@ def archive_override_case():
     return ok, why or "refused before the override, lifted under it"
 
 
-def archive_matcher_case():
-    """A guard matcher in settings.json covers archive_session, so the guard sees the call at all."""
+def guard_matchers():
+    """The PreToolUse matchers of the settings.json groups that run guard.py: the one read of that file for these checks."""
     with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
         entries = json.load(handle)["hooks"]["PreToolUse"]
-    matchers = [entry.get("matcher", "") for entry in entries
-                if any("guard.py" in hook.get("command", "") for hook in entry.get("hooks", []))]
+    return [entry.get("matcher", "") for entry in entries
+            if any("guard.py" in hook.get("command", "") for hook in entry.get("hooks", []))]
+
+
+def archive_matcher_case():
+    """A guard matcher in settings.json covers archive_session, so the guard sees the call at all."""
+    matchers = guard_matchers()
     if any(re.fullmatch(matcher, ARCHIVE_TOOL) for matcher in matchers):
         return True, "a guard matcher covers archive_session"
     return False, "no guard matcher covers archive_session: %r" % (matchers,)
 
 
+# Each MCP merge tool that the guard judges (guard.py's MERGE_TOOLS) must reach the guard through a matcher in settings.json.
+# Without one, the call never reaches merge-checks in a session, and the guard's tests, which call it directly, cannot see that.
+MERGE_MATCHER_TOOLS = ("mcp__github__merge_pull_request", "mcp__github__enable_pr_auto_merge")
+
+
+def merge_matcher_case():
+    """A guard matcher in settings.json covers each MCP merge tool, so the guard sees the call at all."""
+    matchers = guard_matchers()
+    missing = [tool for tool in MERGE_MATCHER_TOOLS if not any(re.fullmatch(matcher, tool) for matcher in matchers)]
+    if missing:
+        return False, "no guard matcher covers %s: %r" % (", ".join(missing), matchers)
+    return True, "a guard matcher covers both MCP merge tools"
+
+
 FIXTURELESS_CHECKS.add(archive_matcher_case)
+FIXTURELESS_CHECKS.add(merge_matcher_case)
 LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an owner override lifts the archive refusal",
                          archive_override_case))
 LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a settings.json matcher routes archive_session to the guard",
                          archive_matcher_case))
+LOG_CHECKS_EXTRA.append(("merge-route: a settings.json matcher routes each MCP merge tool to the guard", merge_matcher_case))
 
 
 # The cost of lane-closes-after-records, pinned: one archive of a lane makes one gh call, a non-lane archive makes
