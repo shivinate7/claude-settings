@@ -153,7 +153,8 @@ class CiJobStub:
         return [c for c in calls if "--plan" not in c["argv"]]
 
 
-class LaneLint(CiJobStub, tm.CloudSession):
+class LaneLintFixture(CiJobStub, tm.CloudSession):
+    """The lane-lint fixture: the stub ci-job, the run in the lane checkout, and the lint's calls. No test lives here."""
     @classmethod
     def setUpClass(cls):
         unittest.TestCase.setUpClass()  # not CloudSession's: it would make a second run folder
@@ -175,6 +176,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
             self.fail("argparse refused the command line: " + last)
         return rc, out + err
 
+class LaneLint(LaneLintFixture):
     def lint_run(self, *argv, base="main", head=None, cloud=False):
         """Run merge in the lane checkout. -> (rc, stdout and stderr together). The lint must have run once, as
         `checks --lint --base origin/<base>`, in a detached tree at the head, and that tree must be gone afterwards."""
@@ -880,6 +882,48 @@ class RunFolderSweep(unittest.TestCase):
         self.assertFalse(os.path.exists(old), "the sweep kept a run folder two days old")
         self.assertTrue(os.path.isdir(new), "the sweep removed a run folder made now")
         self.assertTrue(os.path.isdir(own))
+
+
+class LaneLintRepoDir(tm.RepoDirRuns, LaneLintFixture):
+    """`merge --lane-lint` with -C PATH or --repo-dir PATH lints the named checkout's pull request. Its worktree is cut from that checkout at
+    its head, and the pull request is read through a host in that checkout. The stub logs the head it linted, so a case reads which head that was."""
+
+    def setUp(self):
+        super().setUp()
+        self.b_co, self.b_other = tm.second_checkout(os.path.join(self.t, "mailaudit"))
+        self.assertNotEqual(self.head("feat"), self.b_feat(), "fixture: both checkouts' feat heads are the same")
+
+    def b_feat(self):
+        return tm.sh(self.b_co, "git", "ls-remote", "origin", "refs/heads/feat").split("\t")[0]
+
+    def test_without_the_flag_the_lint_cuts_its_worktree_from_the_process_directory(self):
+        """A control: with no flag, the process directory is the checkout, and its head is the one linted."""
+        self.use_ci_job(PASSING, 0)
+        if os.path.exists(self.log):
+            os.remove(self.log)
+        rc, out, seen = self.run_from(self.b_co, ["--lane-lint", "7"])
+        self.assertEqual(rc, 0, out)
+        self.assertEqual([c["head"] for c in self.lint_calls()], [self.b_feat()], "the lint did not run at the process directory's head")
+
+    def test_the_lint_cuts_its_worktree_from_the_named_checkout_at_its_head(self):
+        self.use_ci_job(PASSING, 0)
+        for argv in self.spellings("--lane-lint", "7"):
+            with self.subTest(spelling=argv[0]):
+                if os.path.exists(self.log):
+                    os.remove(self.log)
+                rc, out, seen = self.run_from(self.co, argv)
+                self.assertEqual(rc, 0, out)
+                self.assertEqual([c["head"] for c in self.lint_calls()], [self.b_feat()],
+                                 "the lint did not run at the named checkout's pull request head")
+
+    def test_the_lint_reads_the_pull_request_through_a_host_in_the_named_checkout(self):
+        self.use_ci_job(PASSING, 0)
+        for argv in self.spellings("--lane-lint", "7"):
+            with self.subTest(spelling=argv[0]):
+                rc, out, seen = self.run_from(self.co, argv, tree=True)  # the read comes before the worktree: the stop ends the run there
+                self.assertTrue(seen["hosts"], "the lane lint built no host, so it did not read the named checkout: " + out)
+                cwd = seen["hosts"][0].built_with.get("cwd")
+                self.assertEqual(cwd, self.b_co, "the lane lint's pull request read ran in %r, not the named checkout" % (cwd,))
 
 
 if __name__ == "__main__":
