@@ -52,6 +52,10 @@ split you propose. Never review your own work. The orchestrator sends a reviewer
 Prove your change once: show the test-author's new cases green on your code. Run only the
 suites your change touches. Never run the full suites locally. When your lane changes a file a
 mutation test targets, run that mutation test once through `verdict` before pushing.
+While the bandaid stands, shard a long suite with the no-slash form in a worktree, for example
+`GUARD_SHARD=1-3 python3 ~/.claude/bin/verdict python3 hooks/test_guard.py`. The harness refuses
+`VAR=i/n cmd` in a worktree, and CI keeps `i/n`. MERGE_SHARD takes only `i/n`, so
+merge/test_merge.py has no worktree form yet.
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
 When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
