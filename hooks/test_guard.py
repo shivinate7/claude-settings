@@ -475,6 +475,7 @@ SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktr
 SUBJDIRTY = os.path.join(ROOT, "subjdirty")  # a real checkout with real uncommitted work
 SUBJSTASH = os.path.join(ROOT, "subjstash")  # a clean tree carrying one real stash entry
 SUBJSTASHWT = os.path.join(ROOT, "subjstashlane")  # a linked worktree of it: same stack
+SUBJSTASHDIRTY = os.path.join(ROOT, "subjstashdirty")  # a dirty checkout carrying one real stash entry
 SUBJSTAGED = os.path.join(ROOT, "subjstaged")  # a real checkout: a staged edit, a staged new file
 GITBLIND = os.path.join(ROOT, "gitblind")  # a git that answers the repo test and no status read
 # A repository under a scratchpad named after one session. ROOT already sits under the system
@@ -1572,8 +1573,8 @@ def _build_gitmain():
 
 
 def _build_subject():
-    """The subject-read repos: SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT and
-    SUBJSTAGED."""
+    """The subject-read repos: SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT,
+    SUBJSTASHDIRTY and SUBJSTAGED."""
     # THE SUBJECT READ. Each arm gets both sides, built with real state: a real clean tree, a
     # real uncommitted edit, a real untracked file, a real one-entry stash stack.
     make_repo(SUBJCLEAN, {"f.txt": "base\n", "keep.txt": "base\n"})
@@ -1602,6 +1603,16 @@ def _build_subject():
     # worktree sees the same one-entry stack, and a drop there destroys the primary's entry.
     run_vcs(SUBJSTASH, "worktree", "add", "-q", SUBJSTASHWT, "-b", "stashlane")
     _require_stash(SUBJSTASHWT, 1)
+
+    # A DIRTY checkout that also carries one real stash entry, so `stash create` is judged where
+    # local edits and a stack entry exist together. Its untracked file is made after the push.
+    make_repo(SUBJSTASHDIRTY, {"f.txt": "base\n", "keep.txt": "base\n"})
+    write(os.path.join(SUBJSTASHDIRTY, "f.txt"), "to be stashed\n")
+    run_vcs(SUBJSTASHDIRTY, *IDENT, "stash", "push", "-m", "cases")
+    _require_stash(SUBJSTASHDIRTY, 1)
+    write(os.path.join(SUBJSTASHDIRTY, "f.txt"), "uncommitted\n")
+    write(os.path.join(SUBJSTASHDIRTY, "new.txt"), "untracked\n")
+    _require_dirty(SUBJSTASHDIRTY, "f.txt", "new.txt", "keep.txt")
 
     # A STAGED edit to a tracked file and a STAGED new file: the state `reset --merge HEAD` reverts
     # and deletes. The tree is dirty, and its work is all in the index.
@@ -2282,8 +2293,8 @@ lazy_fixture([CTXREPO], _build_ctxrepo)
 lazy_fixture([CURREPO], _build_currepo)
 lazy_fixture([GHDEV], _build_ghdev)
 lazy_fixture([GITMAIN, GITWT, AGENTWT, FARWT, SYMWT, DECOYMAIN], _build_gitmain)
-lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT, SUBJSTAGED],
-             _build_subject)
+lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT, SUBJSTASHDIRTY,
+              SUBJSTAGED], _build_subject)
 lazy_fixture([PRIVREPO], _build_privrepo)
 lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, PTRNOORIGIN,
               PTRNOORIGINCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
@@ -2611,15 +2622,15 @@ sh("stash help pin: stash --help x reads as a push, still denies",
 sh("subject: dropping an empty stash stack destroys nothing", VCS + " stash drop", "allow",
    cwd=SUBJDIRTY)
 sh("subject: dropping a real stash entry still denies", VCS + " stash drop", "deny",
-   "shared-tree", cwd=SUBJSTASH)
+   "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
 sh("subject: dropping a real stash entry from a worktree still denies, the stack is clone-wide",
    VCS + " stash drop", "deny", "shared-tree", cwd=SUBJSTASHWT)
 sh("subject: clearing an empty stash stack destroys nothing", VCS + " stash clear", "allow",
    cwd=SUBJDIRTY)
 sh("subject: clearing a stack holding a real entry still denies", VCS + " stash clear", "deny",
-   "shared-tree", cwd=SUBJSTASH)
+   "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
 sh("subject: popping a real entry from a CLEAN checkout still denies", VCS + " stash pop",
-   "deny", "shared-tree", cwd=SUBJSTASH)
+   "deny", "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
 sh("subject: popping a real entry from a worktree still denies, the stack is clone-wide",
    VCS + " stash pop", "deny", "shared-tree", cwd=SUBJSTASHWT)
 sh("subject: applying a real entry from a CLEAN checkout still denies", VCS + " stash apply",
@@ -2638,6 +2649,26 @@ sh("subject: show reads the entry without taking it", VCS + " stash show stash@{
    cwd=SUBJSTASH)
 sh("subject: a hard reset in the tree that holds the stash takes nothing",
    VCS + " reset --hard HEAD", "allow", cwd=SUBJSTASH)
+# `git stash create` writes a stash commit object and prints its hash. It adds no entry, changes no
+# ref, index or working tree, and loses no work, so it is a read even over a real stack entry. The
+# rows below pin that, with and without a message argument. The SUBJDIRTY row runs over an empty
+# stack in a dirty tree, which pins that a dirty tree alone does not turn `create` into a write.
+sh("stash create: over a real entry in a dirty checkout takes nothing", VCS + " stash create",
+   "allow", cwd=SUBJSTASHDIRTY)
+sh("stash create: a message argument over a real entry takes nothing",
+   VCS + " stash create lane", "allow", cwd=SUBJSTASHDIRTY)
+sh("stash create: captured into a variable over a real entry takes nothing",
+   "WORK=$(" + VCS + " stash create)", "allow", cwd=SUBJSTASHDIRTY)
+sh("stash create: over a real entry in a clean checkout takes nothing", VCS + " stash create",
+   "allow", cwd=SUBJSTASH)
+sh("stash create: over a real entry from a worktree takes nothing, the stack is clone-wide",
+   VCS + " stash create", "allow", cwd=SUBJSTASHWT)
+sh("stash create: over an empty stack in a dirty checkout takes nothing", VCS + " stash create",
+   "allow", cwd=SUBJDIRTY)
+# `store` writes the stack's own ref, so it stays a stack action and keeps its deny.
+sh("stash store: writes the stack ref over a real entry, still denies",
+   VCS + " stash store -m lane HEAD", "deny", "shared-tree", cwd=SUBJSTASH,
+   carries=STACK_FRAGMENT)
 # `_run_dir` cases: the cwd is SUBJDIRTY (real, dirty) and the command only ATTACHES or MENTIONS SUBJCLEAN, so both deny.
 sh("run-dir bypass: an attached `-C<path>` is not a spelling git accepts, so it names no tree",
    VCS + " -C" + SUBJCLEAN + " status; " + VCS + " reset --hard HEAD",
@@ -25791,6 +25822,14 @@ sh("other-checkout: a git -C log into a separate clone of the same repo is allow
    VCS + " -C " + slash(XCL_SEP) + " log --oneline -1", "allow", cwd=XCL_PRIMARY)
 sh("other-checkout: a git -C show HEAD into a separate clone of the same repo is allowed",
    VCS + " -C " + slash(XCL_SEP) + " show HEAD", "allow", cwd=XCL_PRIMARY)
+# `git stash create` writes a stash commit object and takes no entry, so it is a read through `git -C`
+# as well. The clone's stack is judged as its own: a pop and a drop stay refused.
+sh("other-checkout: a git -C stash create into a separate clone of the same repo is allowed",
+   VCS + " -C " + slash(XCL_SEP) + " stash create", "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a git -C stash pop into a separate clone of the same repo is refused",
+   VCS + " -C " + slash(XCL_SEP) + " stash pop", "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a git -C stash drop into a separate clone of the same repo is refused",
+   VCS + " -C " + slash(XCL_SEP) + " stash drop", "deny", "other-checkout", cwd=XCL_PRIMARY)
 sh("other-checkout: a git -C commit into a clone of a different repo is allowed",
    VCS + " -C " + slash(XCL_DIFF) + " commit -m x", "allow", cwd=XCL_PRIMARY)
 sh("other-checkout: a stranded cwd with CLAUDE_PROJECT_DIR unset takes a git commit",
@@ -26599,6 +26638,109 @@ LOG_CHECKS_EXTRA.append(("session-home: a write to the lost home path is refused
 LOG_CHECKS_EXTRA.append(("session-home: while lost, git verbs that change the primary's files or branch are "
                          "refused; reads, fetch, branch, worktree add and a live -C commit pass",
                          session_home_git_verbs_case))
+
+
+# sh_lost_lane sets up the state the stash cases below judge: a primary whose session has lost its
+# worktree. The session's lane call writes its session record naming the lane, then the lane and its
+# branch are removed, so the record names a folder that is gone. The session-home reader judges a stash
+# call in that primary by its action word. `create` reads the tree and index and writes an unreachable
+# commit with no entry, so it is allowed. `pop` and `drop` take or destroy an entry, so they stay refused.
+def sh_lost_lane(name):
+    """A primary whose session has lost its worktree. The session's lane call wrote its record, then
+    the harness removed the lane and its branch. Returns (primary, session, lane, recorded): `recorded`
+    is False when the lane call wrote no record naming the lane."""
+    primary = sh_new_primary(name)
+    lane, branch = sh_add_lane(primary, "lane-" + name)
+    session = sh_session()
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    recorded = sh_holds(primary, session, lane)
+    sh_lose_lane(primary, lane, branch)
+    return primary, session, lane, recorded
+
+
+def session_home_stash_create_case():
+    """Rule session-home: `git stash create` in the primary checkout of a session whose worktree is gone
+    is allowed, with a real entry on the stack. It reads the stack and takes no entry."""
+    primary, session, lane, recorded = sh_lost_lane("stashcreate")
+    if not recorded:
+        return False, "the lane call wrote no session record naming the lane"
+    write(os.path.join(primary, "src", "app.py"), "print(2)\n")
+    if run_vcs(primary, *IDENT, "stash", "push", "-m", "cases").returncode != 0:
+        return False, "fixture setup failed: the stash push in the primary"
+    command = VCS + " stash create"
+    got, reason = _decide_full("Bash", primary, session=session, command=command)
+    if got != "allow":
+        return False, "%s: want allow, got %s (%s)" % (command, got, reason[:120])
+    return True, "git stash create in the primary of a lost session is allowed"
+
+
+def session_home_stash_take_case():
+    """Rule session-home: while the record is lost, `git stash pop` and `git stash drop` in the primary
+    checkout are refused, naming session-home and EnterWorktree. A take and a drop are the stack's own
+    acts, so the create allowance does not reach them."""
+    primary, session, lane, recorded = sh_lost_lane("stashtake")
+    if not recorded:
+        return False, "the lane call wrote no session record naming the lane"
+    problems = []
+    for verb in ("pop", "drop"):
+        command = VCS + " stash " + verb
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        problems += sh_refusal_problems(command, got, reason, primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "git stash pop and drop in the primary of a lost session stay refused, naming session-home"
+
+
+def session_home_stash_agent_case():
+    """Rule session-home: an agent's `git stash create` from the primary of a lost session is allowed.
+    The rule judges a top-level call only, so the agent's call is not refused by it."""
+    primary, session, lane, recorded = sh_lost_lane("stashagent")
+    if not recorded:
+        return False, "the lane call wrote no session record naming the lane"
+    command = VCS + " stash create"
+    got, reason = _decide_full("Bash", primary, agent_id=SH_AGENT, session=session, command=command)
+    if got != "allow":
+        return False, "%s from an agent: want allow, got %s (%s)" % (command, got, reason[:120])
+    return True, "an agent's git stash create from the primary of a lost session is allowed"
+
+
+def session_home_stash_quiet_pop_case():
+    """Rule session-home: `git stash -q pop` in the primary of a lost session stays refused. The reader
+    skips the -q option and reads `pop` as the action, so the option does not hide the take."""
+    primary, session, lane, recorded = sh_lost_lane("stashquiet")
+    if not recorded:
+        return False, "the lane call wrote no session record naming the lane"
+    command = VCS + " stash -q pop"
+    got, reason = _decide_full("Bash", primary, session=session, command=command)
+    problems = sh_refusal_problems(command, got, reason, primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "git stash -q pop in the primary of a lost session stays refused, naming session-home"
+
+
+def session_home_stash_help_case():
+    """Rule session-home: a sole `git stash -h` in the primary of a lost session is allowed. The help
+    flag prints usage and reads nothing, so the call is a read."""
+    primary, session, lane, recorded = sh_lost_lane("stashhelp")
+    if not recorded:
+        return False, "the lane call wrote no session record naming the lane"
+    command = VCS + " stash -h"
+    got, reason = _decide_full("Bash", primary, session=session, command=command)
+    if got != "allow":
+        return False, "%s: want allow, got %s (%s)" % (command, got, reason[:120])
+    return True, "git stash -h in the primary of a lost session is allowed"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: git stash create from the primary of a lost session is allowed",
+                         session_home_stash_create_case))
+LOG_CHECKS_EXTRA.append(("session-home: git stash pop and drop in the primary of a lost session stay refused, "
+                         "naming session-home and EnterWorktree", session_home_stash_take_case))
+LOG_CHECKS_EXTRA.append(("session-home: an agent's git stash create from the primary of a lost session is "
+                         "allowed; the rule judges top-level calls only", session_home_stash_agent_case))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, git stash -q pop in the primary is refused, naming "
+                         "session-home and EnterWorktree", session_home_stash_quiet_pop_case))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, git stash -h in the primary is allowed as a read",
+                         session_home_stash_help_case))
 
 
 def session_home_clean_refuses_case():
