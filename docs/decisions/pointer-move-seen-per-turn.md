@@ -30,14 +30,6 @@ Per rule `outcomes-mechanize-rules`:
 - No file written. No new process or timer. The read runs inside the Stop hook already running.
 - The test row `row_cost_stop_read_count` pins the call count.
 
-## Mirror refresh
-
-`mirror_refresh` in install.sh warns "local commits on main" only when main holds a commit the ref lacks.
-
-It tests that with `merge-base --is-ancestor`, against a fetch that keeps history from a day before main's tip (`--shallow-since`).
-
-An undecided result from that check, any exit other than 0 or 1, warns unknown and keeps the clone. So does a failed fetch while main differs from the recorded sha.
-
 Kind: process
 Home: rule:outcomes-mechanize-rules
 Home: hooks/config_watch.py
