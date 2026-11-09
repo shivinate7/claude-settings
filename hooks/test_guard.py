@@ -3819,6 +3819,14 @@ hm_deny("a PowerShell call with -C and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, tool="PowerShell", cwd=NOGIT)
 hm_deny("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
 hm_deny("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
+# A case arm that cds into a non-temp primary leaves that folder in place after `esac`, so a tree added after the
+# `esac` is judged from the folder the case head had. The control has the same cd and add with no case in between.
+hm_deny("a case arm cds into a non-temp primary, then esac; then a tree outside the home folder is refused",
+        "case x in a) cd " + HMIN + " ;; esac; " + HMADD + "../wt1", cwd=NOGIT)
+hm_deny("the same case, with the esac and the tree on separate lines, is refused",
+        "case x in a) cd " + HMIN + " ;; esac\n" + HMADD + "../wt1", cwd=NOGIT)
+hm_deny("control: a cd into a non-temp primary, then ; a tree outside the home folder with no case, is refused",
+        "cd " + HMIN + "; " + HMADD + "../wt1", cwd=NOGIT)
 
 # ALLOW. Nothing here is the act, or the act lands in the home folder, or the repo is a throwaway.
 hm_allow("an absolute path under the primary's home folder passes",
@@ -13034,6 +13042,21 @@ sh("frozen shell: the same ;& case with the second arm's cd on its own line, fro
    "[case arm fall-through control]",
    "case x in\na) echo hi\n;&\nb)\ncd " + slash(CFG) + "\n;;\nesac; sed -i s/a/b/ settings.json", "deny",
    "frozen-path", cwd=NOGIT)
+# A cd in an arm that falls through with `;&`, or tests on with `;;&`, still runs in the arm after it: `;&` runs that
+# arm's body without a test, and `;;&` runs it when its pattern matches. Each form is one row on one line and one row
+# with the arms on later lines.
+sh("frozen shell: a case arm that cds into the config folder and falls through with ;& into arm b, which runs sed -i "
+   "on settings.json, from outside, denies [case arm ;& fall-through one line red]",
+   "case x in a) cd " + slash(CFG) + " ;& b) sed -i s/a/b/ settings.json ;; esac", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: the same ;& fall-through with the arms on later lines, from outside, denies "
+   "[case arm ;& fall-through later lines red]",
+   "case x in\na) cd " + slash(CFG) + " ;&\nb) sed -i s/a/b/ settings.json ;;\nesac", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a case arm that cds into the config folder and tests on with ;;& into arm b, which runs sed -i on "
+   "settings.json, from outside, denies [case arm ;;& test-on one line red]",
+   "case x in a) cd " + slash(CFG) + " ;;& b) sed -i s/a/b/ settings.json ;; esac", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: the same ;;& test-on with the arms on later lines, from outside, denies "
+   "[case arm ;;& test-on later lines red]",
+   "case x in\na) cd " + slash(CFG) + " ;;&\nb) sed -i s/a/b/ settings.json ;;\nesac", "deny", "frozen-path", cwd=NOGIT)
 # The two controls that keep today's verdict: the pattern alone on its line, and the pattern on the header line.
 sh("frozen shell: a case with the pattern alone on its line, a cd into the config folder, then esac and sed -i on "
    "settings.json, from outside, denies [pattern alone control]",
