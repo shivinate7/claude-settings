@@ -1060,7 +1060,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
                          "the PASS line does not name the killed, survived and unknown counts: " + text)
         self.assert_one_mutation_test_run(head)
 
-    def test_mutation_test_untouched_lane_never_starts_the_run(self):  # the control: green on main
+    def test_mutation_test_untouched_lane_never_starts_the_run(self):  # the control: a lane whose diff holds no mutation test file never starts its run
         body, script = real_mutate_job()
         self.use_ci_job(PASSING, 0)
         self.push_main({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0))})
