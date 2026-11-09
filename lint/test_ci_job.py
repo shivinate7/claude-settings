@@ -11,8 +11,9 @@ StepMaps reads a step's with: and env: values: a block scalar as its lines, an i
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
 Lint mode: a --lint run that picks no lint step is unknown, exit 2; a lint step that a pull-request run would run reads
 unknown when it is skipped; a lint step that runs only off a pull request reads skipped, and the run still exits 0.
-HeavyBrake: in a cloud session (CLAUDE_CODE_REMOTE=true) a second heavy run is refused while one holds the lock, and the
-lock frees at the holder's death; --plan is never refused; with the variable unset nothing locks.
+HeavyBrake: in a cloud session (CLAUDE_CODE_REMOTE=true) a second heavy run is refused while one holds the lock, and a
+killed run's lock stays held while its orphaned step runs, then frees once that step ends. --plan is never refused; with the
+variable unset nothing locks.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -1789,6 +1790,56 @@ class HeavyBrake(Job):
                         found.append(name)
         return found
 
+    def kill_holder_while_its_step_runs(self):
+        """Start a holder, SIGKILL its run while its step runs on, then start a second run. The orphaned step's process group is
+        checked alive before the second run starts, so what the second run finds is about a live step. -> the holder, and the
+        second run's (rc, verdict lines, output)."""
+        up = os.path.join(self.root, "up.fifo")
+        os.mkfifo(up)
+        reader = os.open(up, os.O_RDONLY | os.O_NONBLOCK)  # the test's end: the step's write to it does not wait
+        self.addCleanup(os.close, reader)
+        holder = self.start("holder", self.SIGNALLED)
+        ready, _, _ = select.select([reader], [], [], 60)
+        self.assertTrue(ready, "the holder's step did not start within 60 s")
+        os.kill(holder.pid, signal.SIGKILL)  # the run alone dies: its step is left running in the run's process group
+        holder.wait()
+        try:
+            os.killpg(holder.pid, 0)  # precondition: a member of that group still runs, so the probe reads a live step
+        except ProcessLookupError:
+            self.fail("precondition: the killed run's step had already ended, so the probe proves nothing")
+        rc, lines, out = self.run_to_end("second", self.QUICK)
+        return holder, rc, lines, out
+
+    def pidfds_of_group(self, pgid):
+        """A pidfd for each process of group pgid that has not exited (Linux, through /proc). Each reads readable once its
+        process exits, a zombie included, so the test sees the exit without a clock."""
+        fds = []
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                with open("/proc/%s/stat" % entry, encoding="utf-8") as f:
+                    fields = f.read().rsplit(")", 1)[1].split()  # after the command name: state, parent pid, group id
+            except OSError:
+                continue  # it exited while it was read
+            if int(fields[2]) == pgid and fields[0] != "Z":
+                try:
+                    fd = os.pidfd_open(int(entry))
+                except ProcessLookupError:
+                    continue  # it exited after the read
+                self.addCleanup(os.close, fd)
+                fds.append(fd)
+        return fds
+
+    def wait_all_exited(self, fds):
+        """Block until every pidfd in fds reads readable: each process it names has exited."""
+        pending = list(fds)
+        while pending:
+            ready, _, _ = select.select(pending, [], [], 60)  # the bound only ends a case that would never finish
+            if not ready:
+                self.fail("a process of the killed holder's step was still running 60 s after its gate opened")
+            pending = [fd for fd in pending if fd not in ready]
+
     def test_a_heavy_run_is_refused_while_another_holds_the_lock(self):
         holder = self.start("holder", self.SLOW)
         self.wait_started(holder)
@@ -1820,15 +1871,19 @@ class HeavyBrake(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the run after the holder ended was refused or failed: %s" % out)
         self.assertTrue(os.path.exists(os.path.join(self.root, "quick-ran.txt")), out)
 
-    def test_a_killed_holder_frees_the_lock(self):
-        holder = self.start("holder", self.SLOW)
-        self.wait_started(holder)
-        rc, lines, out = self.run_to_end("waiter", self.QUICK)
-        self.assertEqual(self.verdicts(lines), ["unknown"], "the second run was not refused while the holder ran: %s" % out)
-        os.kill(holder.pid, signal.SIGKILL)  # the holder alone: its step is left running, and cleanup ends it
-        holder.wait()
+    @unittest.skipUnless(os.path.isdir("/proc") and hasattr(os, "pidfd_open"), "the step's exit is read from /proc and a pidfd: Linux only")
+    def test_a_killed_holders_lock_frees_once_its_step_ends(self):  # coordinator, 2026-11-09 14:39 CST, F3 a
+        """The claim: the lock frees when the orphaned step of a killed holder ends. The refusal while that step runs is asserted
+        here only as the precondition, so a lock that was never held cannot read as freed. F3's case
+        (test_a_killed_run_keeps_the_lock_while_its_step_still_runs) owns that refusal as its own claim."""
+        holder, rc, lines, out = self.kill_holder_while_its_step_runs()
+        self.assertEqual(self.verdicts(lines), ["unknown"], "precondition: the second run was not refused while the killed holder's step ran, so the lock freed with the holder: %s" % out)
+        pending = self.pidfds_of_group(holder.pid)  # taken before the release, while the step's processes are alive
+        self.assertTrue(pending, "precondition: the killed holder's process group had no process left to watch")
+        self.release()
+        self.wait_all_exited(pending)
         rc, lines, out = self.run_to_end("third", self.QUICK)
-        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the run after the holder was killed was refused or failed: %s" % out)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the lock did not free once the killed holder's step ended, so the next run was refused or failed: %s" % out)
 
     def test_with_the_variable_unset_parallel_runs_both_run(self):
         self.assert_parallel_runs_both_run(remote=None)
@@ -1916,20 +1971,7 @@ class HeavyBrake(Job):
     def test_a_killed_run_keeps_the_lock_while_its_step_still_runs(self):
         """Probe for the lock's life: SIGKILL ends the run's ci-job alone, and its step runs on in the run's process group. A
         second heavy run must still be refused while that step runs; the case fails when the lock freed with its holder."""
-        up = os.path.join(self.root, "up.fifo")
-        os.mkfifo(up)
-        reader = os.open(up, os.O_RDONLY | os.O_NONBLOCK)  # the test's end: the step's write to it does not wait
-        self.addCleanup(os.close, reader)
-        holder = self.start("holder", self.SIGNALLED)
-        ready, _, _ = select.select([reader], [], [], 60)
-        self.assertTrue(ready, "the holder's step did not start within 60 s")
-        os.kill(holder.pid, signal.SIGKILL)  # the run alone dies: its step is left running in the run's process group
-        holder.wait()
-        try:
-            os.killpg(holder.pid, 0)  # precondition: a member of that group still runs, so the probe reads a live step
-        except ProcessLookupError:
-            self.fail("precondition: the killed run's step had already ended, so the probe proves nothing")
-        rc, lines, out = self.run_to_end("second", self.QUICK)
+        _, rc, lines, out = self.kill_holder_while_its_step_runs()
         self.assertEqual(self.verdicts(lines), ["unknown"], "a second heavy run started while the killed run's step still ran: the lock freed with its holder: %s" % out)
         self.assertEqual(rc, 2, out)
 
