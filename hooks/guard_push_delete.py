@@ -9,11 +9,12 @@ import re
 import stat
 
 import guard_core
+from guard_env import _substitutions
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
     _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
-    _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
-    is_powershell, norm, resolve_command, segment_tokens, split_segments,
+    _strip_heredoc_bodies_unconditionally, strip_heredoc_bodies, bare_words, basename, command_indexes, inner_commands,
+    is_powershell, norm, resolve_command, segment_tokens, split_segments, PowerShellScript,
 )
 from shared_names import MACHINE_TAGS, TASK_NOTIFICATION_TAG
 
@@ -859,14 +860,14 @@ _SHELL_TOOLS = ("Bash", "PowerShell")
 _REVIEW_RECORD_MARKS = ('"Agent"', _CREATE_PR_TOOL, _COMMENT_TOOL, TASK_NOTIFICATION_TAG, "agent-message",
                         "gh pr create", "gh pr comment", "gh api")
 _RESULT_IDS = re.compile(r'"tool_use_id":\s*"([^"]+)"')
-_GH_PR_CREATE = re.compile(r"\bgh\s+pr\s+create\b")
 _GH_POST = re.compile(r"\bgh\s+(?:pr\s+comment\b|api\b[^\n]*/comments)")
 _GH_HEAD = re.compile(r"(?:--head|-H)[ =]+[\"']?([^\s\"']+)")
 _PR_URL = re.compile(r"/pull/(\d+)")
 # The Done line, markdown leads and indent allowed. The verdict word is checked against the merge tool's own
 # constants (REVIEW_VERDICTS), so none is named here.
 _DONE_LABEL = re.compile(r"[\s>*#_-]*Done\b[\s*_:]*")
-_VERDICT_LINE = re.compile(r"[\s>*#_-]*([A-Z]+), (round \d+ of \d+|fix check), [\w.-]+[\s*_]*")
+# A backtick may wrap the line, and `**` may wrap the verdict word or the whole line.
+_VERDICT_LINE = re.compile(r"[\s>*#_`-]*([A-Z]+)\**, (round \d+ of \d+|fix check), [\w.-]+[\s*_`]*")
 # A Done label line that holds its verdict in a word order the ruled line does not use: a round or fix check
 # marker in any case, and a verdict word among its all-capitals words, as in `Done: Round N reviewer haiku FAIL`.
 _LABEL_ROUND = re.compile(r"\bround (\d+)\b|\b(fix check)\b", re.I)
@@ -878,6 +879,37 @@ _NOTICE = re.compile(r"<tool-use-id>\s*([^<\s]+)\s*</tool-use-id>.*?<result>(.*?
 _HANDBACK = re.compile(r'<agent-message from="([^"]+)">(.*?)</agent-message>', re.S)
 _AGENT_ID = re.compile(r"agentId:\s*(\S+)")
 _HAND_FRAMES = tuple(tag for tag in MACHINE_TAGS if "<agent-message" in tag)
+
+
+def _gh_pr_create_segment(command: str, tool: str, depth: int = 0) -> str:
+    """The segment of `command` that runs `gh pr create`, else ''. It reads the way the push path does: `strip_heredoc_bodies`
+    (hooks/guard_core.py, the one home) is read first: a `gh pr create` in the text it returns counts, and one it
+    removes does not. Each segment is tokenized (so a quoted mention and a `#` comment run
+    nothing), each command word of a segment is resolved, and the script a shell or runner gets is read again. A
+    PowerShell call is read with PowerShell's rules."""
+    text = strip_heredoc_bodies(command)
+    if tool == "PowerShell":
+        text = PowerShellScript(text)
+    for segment in split_segments(text):
+        tokens = segment_tokens(segment)
+        if not tokens:
+            continue
+        for at in command_indexes(tokens):
+            if basename(tokens[at]) in ("gh", "gh.exe") and tokens[at + 1:at + 3] == ["pr", "create"]:
+                return segment
+        if depth < 3:
+            for inner in inner_commands(tokens):
+                found = _gh_pr_create_segment(inner, tool, depth + 1)
+                if found:
+                    return found
+            # `_substitutions` (hooks/guard_env.py, the one home) cuts each `$(...)`, backtick pair and
+            # process substitution met outside single quotes, so an assigned or double-quoted one is read as a
+            # command. A single-quoted one is text and is not cut. The last text is the segment itself.
+            for inner, _in_message in _substitutions(segment, powershell=tool == "PowerShell")[0][:-1]:
+                found = _gh_pr_create_segment(inner, tool, depth + 1)
+                if found:
+                    return found
+    return ""
 
 
 def _blocks_text(content) -> str:
@@ -1063,8 +1095,9 @@ def _transcript_events(path: str):
                         pr_heads[block.get("id")] = given["head"].rpartition(":")[2]   # a fork's `owner:branch`
                     elif name == _COMMENT_TOOL and isinstance(given.get("body"), str):
                         posts[block.get("id")] = (given["body"], False)
-                    elif name in _SHELL_TOOLS and _GH_PR_CREATE.search(command):
-                        head = _GH_HEAD.search(command)
+                    elif name in _SHELL_TOOLS and "create" in command and (
+                            created := _gh_pr_create_segment(command, name)):
+                        head = _GH_HEAD.search(created)
                         pr_heads[block.get("id")] = head.group(1).rpartition(":")[2] if head else None
                         calls[block.get("id")] = _CREATE_PR_TOOL
                     elif name in _SHELL_TOOLS and _GH_POST.search(command):

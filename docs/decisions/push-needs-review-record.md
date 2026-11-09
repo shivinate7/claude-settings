@@ -5,8 +5,8 @@
 A shell `git push` is refused while a reviewer or design-reviewer report has no posted review record. Coordinator, 2026-11-07 14:38 CST and 14:53 CST. Source: the brief. Process-only.
 
 - The refusal reads the session's own transcript (`transcript_path`), also when `agent_id` is set. It never reads an agent's own file (`subagents/agent-<id>.jsonl`).
-- It needs a PR known to the session: a successful `mcp__github__create_pull_request` call, a successful Bash `gh pr create`, or a posted record.
-- A report is a Done line: `PASS|FAIL|PARTIAL, round N of 3, <model>`, or `PASS|FAIL, fix check, <model>`. Indents and markdown leads are allowed. A finding line never counts, and nor does any line inside a ``` fence.
+- It needs a PR known to the session: a successful `mcp__github__create_pull_request` call, a successful Bash or PowerShell `gh pr create`, or a posted record. A shell call counts only when `gh pr create` is a command it runs. The command is read with the push path's own parsers (heredoc bodies dropped, `split_segments`, `segment_tokens`, `command_indexes`, `inner_commands`). A mention in a `grep` or `echo`, in a `#` comment, or in a data heredoc body opens no PR. A heredoc whose header runs a command first (`python3 -c ... && cat <<'EOF' > f`) still counts: note `push-record-heredoc-header-false-alarm`.
+- A report is a Done line: `PASS|FAIL|PARTIAL, round N of 3, <model>`, or `PASS|FAIL, fix check, <model>`. Indents, markdown leads, a wrapping pair of backticks, and `**` around the verdict word or the whole line are allowed. A finding line never counts, and nor does any line inside a ``` fence.
 - The verdict is read in three shapes (coordinator, 2026-11-08 16:25 CST, review round 1). One is the ruled line under a `Done` label. One is the same line on the label's own line (`Done: FAIL, round 1 of 3, <model>`). One is a label line that holds a round or fix-check marker, in any case, and a verdict word in any order (`Done: Round 1 reviewer haiku FAIL`). On that label line the verdict word is the first all-capitals word that is PASS, FAIL or PARTIAL (the merge tool's `REVIEW_VERDICTS`); another all-capitals word is never taken (`Done: HEAD round 1 FAIL` reads FAIL). A label line with other text and no verdict (`Done: see below`) leaves the ruled line under it as the Done line.
 - A report read before any PR is known is held by its sha candidates (lane ruling, 2026-11-08, refining the coordinator's 16:25 CST ruling). A candidate is a hex word of 7-40 characters in the report text above its `agentId:` trailer; a word of 7-39 characters needs a digit and a letter. The first 8 distinct candidates are read. Each is read in the push's checkout, and counts only if all three hold:
   - it resolves to a commit (`git rev-parse --verify`);
@@ -44,6 +44,8 @@ The cases are in `hooks/test_guard.py`, section 5f-2 (family `push-needs-review-
 | Done line with a bold lead, 1500 later reads, a push from the PowerShell tool, a builder push whose parent file holds the report | deny |
 | A report whose record holds another role, another verdict, another round number, or a Fix check line for a round report | deny |
 | A PR opened by a Bash `gh pr create`, then an unrecorded report | deny |
+| A command that only names `gh pr create` (grep, echo, `#` comment, heredoc body), then an unrecorded report | allow |
+| A Done line in backticks, or with a bold verdict word, and no record | deny |
 | A record post that returned an error, or a comment that is no record | deny |
 | An unrecorded report, then a later report whose record holds only its own line | deny |
 | The PR known only from a posted record, then a later unrecorded report | deny |
@@ -90,6 +92,8 @@ The cost case `a push reads git for a held report only when one is held` pins ze
 - A PR opened by another session reads as no PR, because the session's own transcript shows no call that opened it.
 - A design-reviewer fix check is not read. A record holds a Fix check line for the reviewer only.
 - A fork's `head` of the form `owner:branch` is read as `branch`.
+- A `gh pr create` that a script file runs is not read as a PR opening (a file is never opened).
+- A delete push of a fix-checked PR's head branch is denied too. Filed as a note: rare, and the cloud refuses branch deletes anyway.
 - A Bash record post whose command does not hold the record text (a body read from a file) is not a record.
 - A destination the guard cannot resolve never matches a known head, so that push passes.
 - A transcript that cannot be read, or a merge module that cannot load, passes (fail open).
