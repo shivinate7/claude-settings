@@ -402,6 +402,20 @@ def lost_lines(cwd, m, refs=()):
     return found
 
 
+def unrestored(cwd, h, found):
+    """lost_lines items less each line that head h holds again in the same path, at least as often as the parent held it."""
+    blobs, out = Blobs(cwd), []
+    try:
+        for path, p, lines in found:
+            in_p, at_h = counts(blobs.get(p, path)), counts(blobs.get(h, path))  # "" for a path the head lacks: nothing restored
+            left = [l for l in lines if at_h.get(l, 0) < in_p.get(l, 0)]
+            if left:
+                out.append((path, p, left))
+    finally:
+        blobs.close()
+    return out
+
+
 def lost_in_parent(cwd, m, p, bases, refs, blobs):
     """lost_lines for one parent p of merge m; blobs reads every file text."""
     found = []
@@ -715,7 +729,7 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     items, octopus = [], []
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
         try:
-            items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
+            items += [(x[0], fmt_lost(m, *x)) for x in unrestored(cwd, h, lost_lines(cwd, m, refs))]
         except Octopus as e:  # the other reads still run: their findings must not hide behind this one
             octopus.append(str(e))
     items += revived_notes(cwd, upstream, h)
