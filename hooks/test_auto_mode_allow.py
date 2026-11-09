@@ -27,7 +27,8 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
   relayed-grant-read-from-page).
 - One "Relayed Merge Yes:" entry quotes the merge command derived from merge/cloud_allow.json's
-  one `--confirm` merge rule. Its Covers text names the coordinator that relays (cs-build:coordinator),
+  one `--confirm` merge rule with the head flag read from merge/merge.py's argparse.
+  Its Covers text names the coordinator that relays (cs-build:coordinator),
   the batch runner that merges (cs-build:batch-runner), and the pull request the relay names. Its
   Never covers names each act in RELAYED_MERGE_REFUSED, the reason flags, and a session not tagged
   cs-build:batch-runner (decision `auto-mode-owner-acts`).
@@ -39,6 +40,7 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
+import ast
 import json
 import os
 import re
@@ -47,6 +49,7 @@ import unittest
 
 HOOKS = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HOOKS)
+MERGE_PY = os.path.join(REPO_ROOT, "merge", "merge.py")
 sys.path.insert(0, HOOKS)
 
 import guard_branch_worktree  # noqa: E402
@@ -159,6 +162,18 @@ def merge_command():
     return rules[0][len("Bash("):-1].replace("*", "<pr>")
 
 
+def head_flag():
+    """The option string of merge.py's argparse flag typed head_arg (the sha a relay names), or None when there is not exactly one.
+    Read from the parser's own add_argument calls, so a renamed flag moves the derived command with it."""
+    with open(MERGE_PY, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    flags = [node.args[0].value for node in ast.walk(tree)
+             if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "add_argument"
+             and node.args and isinstance(node.args[0], ast.Constant)
+             and any(k.arg == "type" and isinstance(k.value, ast.Name) and k.value.id == "head_arg" for k in node.keywords)]
+    return flags[0] if len(flags) == 1 else None
+
+
 def allow_entry(prefix):
     """The one autoMode.allow entry starting with prefix, or None when there is not exactly one."""
     hits = [e for e in auto_mode().get("allow", []) if e.startswith(prefix)]
@@ -252,10 +267,11 @@ class RelayedMergeYesIsAllowed(unittest.TestCase):
 
     def test_entry_quotes_the_merge_command(self):
         entry = self.relayed_merge_entry()
-        command = merge_command()
+        command, flag = merge_command(), head_flag()
         self.assertIsNotNone(command, "merge/cloud_allow.json must hold exactly one --confirm merge rule")
-        self.assertIn("`%s`" % command, bounds_text(entry),
-                      "Covers text must quote the merge command in backticks")
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
+        self.assertIn("`%s %s <sha>`" % (command, flag), bounds_text(entry),
+                      "Covers text must quote the merge command with the head flag and <sha> for the relayed head")
 
     def test_covers_names_the_coordinator_tag(self):
         entry = self.relayed_merge_entry()
@@ -289,6 +305,20 @@ class RelayedMergeYesIsAllowed(unittest.TestCase):
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Merge Yes entry")
         missing = unnamed_terms(clause, REASON_FLAGS_REFUSED)
         self.assertFalse(missing, "Never covers does not name the reason flags %r" % missing)
+
+    def test_never_covers_names_a_head_the_relay_did_not_name(self):
+        clause = never_covers(self.relayed_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Merge Yes entry")
+        self.assertIn("a head the relay did not name", clause,
+                      "Never covers does not name a head the relay did not name")
+
+    def test_never_covers_names_a_merge_with_no_head_flag(self):
+        clause = never_covers(self.relayed_merge_entry())
+        flag = head_flag()
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Merge Yes entry")
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
+        self.assertIn("a merge with no `%s`" % flag, clause,
+                      "Never covers does not name a merge with no `%s`" % flag)
 
 
 class BatchRunnerMergeIsAllowed(unittest.TestCase):
