@@ -17,8 +17,9 @@ Two causes, told apart by one experiment: set `overflow-wrap: break-word` on the
 
 - Cause A, the box has room but the track shrinks the press. `overflow-wrap: anywhere` makes each letter a break chance, so the
   min-content of a label is one letter. A track or flex item with a 0 minimum (`minmax(0, max-content)`, `min-width: 0`) then
-  draws a press narrower than its own word. Example: Dismiss at 220 wide, 300%, and Send answers at 180, 200%. `break-word`
-  alone fixes these.
+  draws a press narrower than its own word. Example: Dismiss at 220 wide, 300%, and Send answers at 180, 200%. The mockup's
+  `break-word` fixed these. On the built page both still break, because the word is wider than the press's content box (the
+  press keeps 35 px of padding). Review round 2 measured this.
 - Cause B, one word is wider than its whole box at the reader's size. Example: at 180 wide, 300%, the ask list is 148 px and
   "Answered" at 42 px is about 190 px. No wrap rule fixes this: the word breaks, is clipped, or scrolls the page.
   `break-word` alone turns these into clipped labels (Send: "Sen" over "answe") or a page scroll (Dismiss and Send ask, 31 px).
@@ -81,7 +82,7 @@ never scroll sideways. The design below is kept so a later grant can build it.
   the reader's setting up to what the box holds: at 180 wide, 300%, the Ask section reads at 19.3 px, never under 16 px.
 - Loss: the text in these three sections stops short of the reader's size where the window is too narrow for one word at that
   size. A reader at 300% on a 180 px window gets 16 px (parked block), 19.3 px (Ask section) and 28.6 px (send bar), not 45 to 48 px. Prose in these sections shrinks with the labels.
-- Pick: yes. Departs from: a11y.md "Text size" (web text grows with the browser's default font size) for these three sections at
+- Pick: no, not built (ruling above). Departs from: a11y.md "Text size" (web text grows with the browser's default font size) for these three sections at
   180 to 340 px windows; the cap never takes text under the default size. Not blocking.
 - Option "Whole words at the reader's size" (`#o=wrap`): §2 and §5 only. Gain: text keeps the reader's size. Loss: at 180 and 200,
   300%, Dismiss, Send ask and Unpark run past their box and the page scrolls sideways (31 to 99 px). The row date still breaks

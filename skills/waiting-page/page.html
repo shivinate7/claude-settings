@@ -266,7 +266,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
 .btn.alt { background: transparent; color: var(--acc); }
 /* A text-only press whose one word may be wider than its box. The label sits in one track that may shrink to nothing, so the press never runs past its box
-   and a word wider than the box breaks inside (overflow-wrap: break-word, set here and in the @container askf block below), where a flex press would keep the word whole and run on. */
+   and a word wider than the box breaks inside (overflow-wrap: break-word, set on each of these presses by the rules below), where a flex press would keep the word whole and run on. */
 :is(.btn.send, .btn.rx, .btn.askgo:not(.fixw), .btn.askadd, .replyend .endrow > .btn:not(.fixw), .alts > .btn) { display: inline-grid; grid-template-columns: minmax(0, max-content); }
 .btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
 .btn.dash { border: 1.5px dashed var(--faint); background: transparent; color: var(--muted); font-weight: 500; }
