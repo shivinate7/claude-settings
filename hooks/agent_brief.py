@@ -27,7 +27,7 @@ COMMON = [
 READ_ONLY = {"reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer"}
 
 SCOPE = {
-    "builder": "Scope: builder. Never edit tests or test config. Add mutants to hooks/mutate_guard.py when the brief asks. Report a test change you need.",
+    "builder": "Scope: builder. Never edit tests or test config. A mutant goes to a test-author. Report a test change you need.",
     "test-author": "Scope: test-author. Edit tests and test config only. Never edit product code.",
     "reviewer": "Scope: reviewer. Never edit, write, stage, commit, or push. Read and run checks only.",
     "Explore": "Scope: Explore. Never edit. Read and search only.",

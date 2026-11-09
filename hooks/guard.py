@@ -1549,8 +1549,9 @@ XCODE_TEST_DIR = re.compile(r"^[A-Z]\w*Tests$")
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}
 # Dependency lists only a test-author owns. A builder may add a dev dependency.
 AUTHOR_BASENAMES = {"requirements-dev.txt"}
-# The three mutation tests are test code for a test-author, named one by one so a later product
-# mutate_*.py stays a builder's. A builder keeps editing them: they are not test paths. Case folds as in `is_test_rel`.
+# The three mutation tests are test code: a builder may not edit them and a test-author may (owner ruling
+# 447 a, 17:19 CST Nov 8: mutants are test content). Named one by one so a later product mutate_*.py stays a
+# builder's. Case folds as in `is_test_rel`.
 AUTHOR_MUTATION_TESTS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
 MUTATION_TEST_NAMES = {name.rsplit("/", 1)[-1] for name in AUTHOR_MUTATION_TESTS}
 TEST_CONFIG = re.compile(
@@ -1637,12 +1638,22 @@ def is_test_config_rel(rel: str) -> bool:
     return bool(TEST_CONFIG.match(basename(rel)))
 
 
+def is_mutation_test_rel(rel: str) -> bool:
+    """True when a repository-relative path is one of the three mutation tests (`AUTHOR_MUTATION_TESTS`)."""
+    return norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS
+
+
+def is_builder_test_rel(rel: str) -> bool:
+    """A path a builder may not change: a test path, or a mutation test."""
+    return is_test_rel(rel) or is_mutation_test_rel(rel)
+
+
 def author_path_ok(rel: str) -> bool:
     """A test-author may change a test path, test config, or a dev dependency list. `package.json`
     and `pyproject.toml` pass here and are read by content in `role_offences`. A workflow does not pass
     here: its whole test-run steps pass in `role_write_hit` and `role_offences` (`workflow_test_steps_only`)."""
     return (is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES
-            or norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS)
+            or is_mutation_test_rel(rel))
 
 
 # ---- workflow files (decision builders-cannot-edit-tests). The test-author check and the builder check are two
@@ -1821,7 +1832,7 @@ WORKFLOW_RUN_BLOCK = re.compile(r"^(\s*)(?:-\s+)?run:\s*[|>][+-]?\s*$")
 
 
 def workflow_runs_test(path: str) -> bool:
-    """A run of this path is a test run: a test path, or a mutation test (not a test path for edit ownership).
+    """A run of this path is a test run: a test path, or a mutation test (also a test path for edit ownership).
     A mutation test counts by file name, so `cd hooks && python3 mutate_guard.py` and a `working-directory`
     step are runs too."""
     return is_test_rel(path) or basename(norm(path).lower()) in MUTATION_TEST_NAMES
@@ -2038,7 +2049,7 @@ def builder_test_path(path: str, cwd: str) -> bool:
     if (repo_rel(os.path.join(where or "", "x"), where, outside=False) is not None
             and repo_rel(path, where, outside=False) is None):
         return False
-    return is_test_rel(rel)
+    return is_builder_test_rel(rel)
 
 
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
@@ -2320,7 +2331,7 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
         elif role == DESIGNER_ROLE:
             bad = not all(designer_path_ok(n) for n in names)
         else:
-            bad = any(is_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
+            bad = any(is_builder_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
                 text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines())) or (
                 is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel), text_at(root, new, rel)))
         if bad:
