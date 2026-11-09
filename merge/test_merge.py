@@ -13513,7 +13513,7 @@ class ReviewFixBase(ReviewEnv):
         self.assert_refused(rc, out, err)
 
     def test_a_newest_earlier_record_hand_edited_after_posting_refuses_the_base(self):
-        # Ruling (orchestrator, 2026-11-08 17:38 CST): the newest record decides, and a hand-edited record is not a record. The write path reads the
+        # The newest record decides, and a hand-edited record is not a record (decision pr-review-record). The write path reads the
         # same comments, so an edited newest record names no reviewed head for the fix diff. The older record below it has the same head and would
         # pass, so a fallback to it is refused as well.
         older = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_BEFORE)
@@ -13822,8 +13822,8 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
 
-    # Ruling (coordinator, 2026-11-08 16:52 CST): a review record whose updated_at differs from its created_at was hand-edited. It is not
-    # counted as a record, and the list names it hand-edited. The comments are already read, so the rule adds no gh read.
+    # A review record whose updated_at differs from its created_at was hand-edited (decision pr-review-record). It is not counted as a
+    # record, and the list names it hand-edited. The comments are already read, so the rule adds no gh read.
     def test_an_edited_record_is_not_counted_as_a_record(self):
         edited = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [edited])
@@ -13883,7 +13883,7 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(repeated, [], "the edited record's run reads a route more than once")
 
     def test_an_older_unedited_record_under_an_edited_record_reads_bad(self):
-        # Ruling (orchestrator, 2026-11-08 17:38 CST): the newest record decides. A newest record that was hand-edited reads bad, and an older
+        # The newest record decides (decision pr-review-record). A newest record that was hand-edited reads bad, and an older
         # unedited record below it does not count. The edited text is unknown, so a fallback could pass on an older verdict. The older record
         # here passes, so a fallback would read the pull request done.
         older = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE)
@@ -15459,17 +15459,16 @@ class ReviewCutover(ReviewEnv):
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "the unstamped record created before the cutover is not done")
 
     def test_edited_record_after_the_cutover_is_hand_edited_and_not_counted(self):
-        # Ruling (coordinator, 2026-11-08 16:52 CST): an edited review record is hand-edited and is not counted, cutover or no cutover.
-        # The comment was created before the cutover and its body was edited after it, with no stamp. The list names it hand-edited and
-        # reads it neither done nor bad.
+        # The comment was created before the cutover and its body was edited after it, with no stamp. The newest record decides, and a
+        # hand-edited newest record reads bad, named hand-edited (decision pr-review-record).
         comment = review_comment(1, 7, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
         with cutover_at(REVIEW_CUTOVER):
             host = PullsHost([batch_pull(7, REVIEW_HEAD)], {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}, comments=[comment])
             rc, out, err = self.run_args("--reviewed", host=host)
         self.assertEqual(rc, 0, out + err)
-        self.assertRegex(out, r"#7\b", "pull request 7 is not named in the output:\n" + out)
-        self.assertNotRegex(out, r"(?m)^#7 .* (done|bad): ", "an edited record was counted as a record:\n" + out)
-        self.assertIn("hand-edited", out, "the edited record is not named hand-edited:\n" + out)
+        line = list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: ", "the lone hand-edited newest record did not read bad:\n" + out)
+        self.assertIn("hand-edited", line, "the hand-edited newest record is not named hand-edited on pull request 7's line:\n" + out)
 
     def test_an_unstamped_record_created_after_the_cutover_reads_bad(self):
         rec = parse_at(self, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_AFTER, cutover=REVIEW_CUTOVER)
