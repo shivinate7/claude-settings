@@ -590,6 +590,126 @@ class CodeNameTests(Fixture):
         self.green("hooks/x.py", 'D = "subagents"\n')
 
 
+class UncommittedTests(Fixture):
+    """The check judges the tree as it will be pushed: committed changes, staged and unstaged edits, and each
+    untracked file in a folder that already holds tracked files. A root file, a file in a new top-level folder
+    and an ignored file are not part of the change. Each case checks the file's git state before the check runs,
+    so a green case cannot pass because its file was never written."""
+
+    IGNORE = "__pycache__/\n"  # the check imports its modules, so each run writes bytecode into lint/ and hooks/
+
+    def setUp(self):
+        super().setUp()
+        self.put("GLOSSARY.md", HEAD + ROWS + CodeNameTests.EXTRA)
+        self.put(".gitignore", self.IGNORE)
+        self.put("docs/debts/README.md", "# Debts\n")
+
+    def porcelain(self):
+        """The git status entries, `XY path`, untracked files listed one by one. NUL-separated: no quoting."""
+        r = subprocess.run(["git", "status", "--porcelain", "-z", "--untracked-files=all"], cwd=self.tree,
+                           capture_output=True, encoding="utf-8", check=True)
+        return [e for e in r.stdout.split("\0") if e]
+
+    def assertState(self, entry):
+        """Assert the fixture is in the state a case names: git status holds `entry`."""
+        self.assertIn(entry, self.porcelain(), "fixture state: git status has no '%s'" % entry)
+
+    def test_untracked_record_with_avoided_word_fails(self):
+        self.base_repo()
+        self.put("docs/debts/new-debt.md", "Fix in `block-the-act-early`.\n")
+        self.assertState("?? docs/debts/new-debt.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "an untracked record's avoided word passed\n" + out)
+        self.assertIn("docs/debts/new-debt.md:1", out, "the untracked record's line was not read\n" + out)
+
+    def test_untracked_file_with_a_space_in_its_name_is_read(self):
+        self.base_repo()
+        self.put("docs/debts/new debt.md", "Fix in `block-the-act-early`.\n")
+        self.assertState("?? docs/debts/new debt.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "an untracked file with a space in its name passed\n" + out)
+        self.assertIn("docs/debts/new debt.md:1", out, "the spaced file's line was not read\n" + out)
+
+    def test_unstaged_edit_with_avoided_word_fails(self):
+        self.put("hooks/x.py", "x = 1\n")
+        self.base_repo()
+        self.put("hooks/x.py", "x = 1\nbundle = 2\n")
+        self.assertState(" M hooks/x.py")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "an unstaged edit's added line passed\n" + out)
+        self.assertIn("hooks/x.py:2", out, "the unstaged edit's line was not read\n" + out)
+
+    def test_staged_add_with_avoided_word_fails(self):
+        self.base_repo()
+        self.put("hooks/y.py", "bundle = 1\n")
+        self.git("add", "hooks/y.py")
+        self.assertState("A  hooks/y.py")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "a staged add's line passed\n" + out)
+        self.assertIn("hooks/y.py:1", out, "the staged add's line was not read\n" + out)
+
+    def test_untracked_scratch_file_at_the_root_passes(self):
+        self.base_repo()
+        self.put("scratch-notes.md", "Try `block-the-act-early` here.\n")
+        self.assertState("?? scratch-notes.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "a root scratch file counted as the change\n" + out)
+
+    def test_untracked_file_that_gitignore_names_passes(self):
+        self.put(".gitignore", self.IGNORE + "*.draft.md\n")
+        self.base_repo()
+        self.put("docs/new-debt.draft.md", "Fix in `block-the-act-early`.\n")
+        r = subprocess.run(["git", "check-ignore", "-q", "docs/new-debt.draft.md"], cwd=self.tree)
+        self.assertEqual(r.returncode, 0, "fixture state: the file is not ignored")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "an ignored file counted as the change\n" + out)
+
+    def test_untracked_file_in_a_new_top_level_folder_passes(self):
+        self.base_repo()
+        self.put("newtop/notes.md", "Try `block-the-act-early` here.\n")
+        self.assertState("?? newtop/notes.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "a file in a new top-level folder counted as the change\n" + out)
+
+    def test_avoided_word_on_a_line_the_base_already_has_passes(self):
+        self.put("hooks/x.py", "def bundle_old():\n    pass\n")
+        self.base_repo()
+        self.put("hooks/x.py", "def bundle_old():\n    pass\n\n\ndef fine():\n    pass\n")
+        self.assertState(" M hooks/x.py")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "an unchanged line of an uncommitted file was read\n" + out)
+
+    def test_clean_work_tree_after_the_base_passes(self):
+        self.base_repo()
+        self.assertEqual(self.porcelain(), [], "fixture state: the work tree is not clean")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("UNKNOWN", out)
+
+    def test_committed_avoided_word_still_fails_beside_a_clean_untracked_file(self):
+        self.base_repo()
+        self.put("docs/debts/new-debt.md", "Fix in `block-the-act-early`.\n")
+        self.commit()
+        self.put("docs/debts/clean.md", "Fine.\n")
+        self.assertState("?? docs/debts/clean.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "a committed avoided word passed\n" + out)
+        self.assertIn("docs/debts/new-debt.md:1", out, "the committed line was not read\n" + out)
+
+    def test_uncommitted_delete_and_rename_do_not_crash(self):
+        self.put("hooks/gone.py", "x = 1\n")
+        self.put("docs/old.md", "same text\n" * 20)
+        self.base_repo()
+        os.remove(os.path.join(self.tree, "hooks", "gone.py"))
+        os.rename(os.path.join(self.tree, "docs", "old.md"), os.path.join(self.tree, "docs", "renamed.md"))
+        self.assertState(" D hooks/gone.py")
+        self.assertState("?? docs/renamed.md")
+        code, out = self.run_check(ci=True)
+        self.assertEqual(code, 0, "an uncommitted delete or rename failed the check\n" + out)
+        self.assertNotIn("Traceback", out)
+        self.assertNotIn("UNKNOWN", out)
+
+
 def load_check():
     """The check module, loaded from MODULE, so a case reads the real table through the check's own rows()."""
     spec = importlib.util.spec_from_file_location("check_glossary_under_test", MODULE)
