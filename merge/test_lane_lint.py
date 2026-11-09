@@ -9,6 +9,10 @@ fixture come from merge/test_merge.py: a case extends that fixture, it does not 
 (class ReadyChecks) runs the same stub, through CiJobStub.
 The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
 BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four CI step runs, 0.5 s measured (3 runs of 2 cases). Its two lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
+MutateRun runs the mutate step of checks-mutate-guard after the lint, on a lane whose diff touches hooks/mutate_*.py (a .mjs counts). Each case
+is one lane lint: the lane commits a logging stub as the file the head's mutate command runs, and timed_lint fakes the wall clock, so no case
+waits on real minutes. Cost per case: one stub ci-job start, one head worktree, and one mutate stub start where the step runs (the untouched
+control starts none). Measured: about 0.1 s per case (the suite took 8.6 s before these cases and 10.1 s with them, one run each).
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -22,6 +26,7 @@ import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importi
 import merge  # noqa: E402
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
+import mutate_shared  # noqa: E402  the one home of a mutate run's report (hooks/mutate_shared.py format_report)
 
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(shutil.rmtree, RUN_FOLDER, True)
@@ -197,6 +202,108 @@ class IntermediateHeadHost(LagHost):
         return info
 
 
+MUTATE_JOB = "checks-mutate-guard"  # checks.yml's job: the lane lint reads its cap and its command from the head's checks.yml
+MUTATE_STEP = "Guard mutation test"  # the step of that job whose run: line is the mutate command
+WORKFLOW_REL = ".github/workflows/checks.yml"
+MUTATE_LOG = "mutate-calls.jsonl"  # one line per start of a mutate stub, in this case's folder
+MUTATE_STUB = '''import json, os, subprocess, sys
+LOG, OUT, ERR, RC = __LOG__, __OUT__, __ERR__, __RC__
+def git(*args):
+    return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
+with open(LOG, "a", encoding="utf-8") as f:
+    print(json.dumps({"argv": sys.argv, "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"),
+                      "detached": subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0}), file=f)
+sys.stdout.write(OUT)
+sys.stderr.write(ERR)
+sys.exit(RC)
+'''
+
+
+def mutate_script(log, out="", err="", rc=0):
+    """The file a lane commits as the mutate command's script: it logs its start to `log`, prints `out` and `err`, and exits `rc`."""
+    return MUTATE_STUB.replace("__LOG__", repr(log)).replace("__OUT__", repr(out)).replace("__ERR__", repr(err)).replace("__RC__", repr(rc))
+
+
+def mutate_report(made, killed, crashed, survived):
+    """The per-file table a mutate run prints, from hooks/mutate_shared.py's format_report (the one home of that format). Its crashed
+    column counts the mutants a run could not read (a crash or a timeout); the lint calls those unknown."""
+    row = {"file": "hooks/guard.py", "status": "OK", "reason": "", "made": made, "killed": killed, "crashed": crashed,
+           "survived": survived, "rate": killed / made, "silent": [], "unusable": {}, "unloaded": []}
+    return mutate_shared.format_report([row]) + "\n"
+
+
+def mutate_run(args):
+    """True when a sh call starts a mutate script: a program run on a `mutate_*` .py or .mjs file. A git call never is."""
+    names = [os.path.basename(str(a)) for a in args]
+    return names[0] != "git" and any(n.startswith("mutate_") and n.endswith((".py", ".mjs")) for n in names)
+
+
+def real_mutate_job():
+    """-> (body, script) of checks-mutate-guard in checks.yml, read at test time: the job's text after its `  name:` line, and the script
+    of its MUTATE_STEP run: line (the second word of that command). No value here is copied from checks.yml."""
+    with open(CHECKS_YML, encoding="utf-8") as f:
+        body = job_block(f.read(), MUTATE_JOB)
+    if body is None:
+        raise AssertionError("checks.yml has no job %s" % MUTATE_JOB)
+    step = next((st for st in step_blocks(body) if step_key(st, "name") == MUTATE_STEP), None)
+    if step is None:
+        raise AssertionError("job %s of checks.yml has no step %r" % (MUTATE_JOB, MUTATE_STEP))
+    return body, shlex.split(run_body(step).strip())[1]
+
+
+def job_cap(body):
+    """The job's own timeout-minutes. Its keys sit at four spaces; a step's cap sits deeper."""
+    m = re.search(r"^    timeout-minutes:[ \t]*(\d+)", body, re.M)
+    if m is None:
+        raise AssertionError("job %s has no timeout-minutes of its own" % MUTATE_JOB)
+    return int(m.group(1))
+
+
+def with_edit(body, pattern, replacement):
+    """The job body with `pattern` replaced. The pattern must match exactly once, so an edit that finds nothing fails here."""
+    edited, count = re.subn(pattern, replacement, body, flags=re.M)
+    if count != 1:
+        raise AssertionError("the job body matches %r %d times, want once" % (pattern, count))
+    return edited
+
+
+def workflow_of(body):
+    """A checks.yml of one job, MUTATE_JOB, with `body`."""
+    return "name: checks\non: pull_request\njobs:\n  %s:%s" % (MUTATE_JOB, body)
+
+
+def wall_time_shown(text, seconds):
+    """True when `text` shows `seconds` of wall time in one of the forms a lint line may use: seconds, m:ss, `m min s s`, or minutes to one or two decimals."""
+    m, s = divmod(int(seconds), 60)
+    forms = (rf"\b{int(seconds)}\s*s(?:ec(?:onds?)?)?\b", rf"\b{m}:{s:02d}\b", rf"\b{m}\s*min(?:utes?)?\s*{s}\s*s\b",
+             rf"\b{seconds / 60:.1f}\s*min", rf"\b{seconds / 60:.2f}\s*min")
+    return any(re.search(form, text) for form in forms)
+
+
+def counts_missing(text, counts):
+    """None when each label of `counts` ({label: number}) sits beside its number on a line of `text`, as `killed 24`, `24 killed` or
+    `killed: 24`, else the first (label, number) that does not. A number on the same line but beside another label does not count."""
+    lines = text.splitlines()
+    for label, number in counts.items():
+        beside = (rf"\b{label}\b[^\d\n]{{0,3}}\b{number}\b", rf"\b{number}\b[^\d\n]{{0,3}}\b{label}\b")
+        if not any(re.search(form, ln, re.I) for ln in lines for form in beside):
+            return label, number
+    return None
+
+
+class WallClock:
+    """The wall clock of one lint run: time.time, time.monotonic and time.perf_counter read it. It starts at the real time and moves only by advance()."""
+
+    def __init__(self):
+        self.t = time.time()  # read before timed_lint patches the clock, so the fake starts at the real time
+
+    def now(self):
+        return self.t
+
+    def advance(self, seconds):
+        self.t += seconds
+
+
 class LaneLint(CiJobStub, tm.CloudSession):
     @classmethod
     def setUpClass(cls):
@@ -208,6 +315,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
             super().setUp()
         self.lock = NoLock()
         self.init_stub()
+        self.mutate_log = os.path.join(self.t, MUTATE_LOG)
 
     def run_lane(self, *argv, cloud=False):
         """-> (rc, stdout and stderr together) of merge in the lane checkout. A refused command line fails the case with its reason."""
@@ -640,6 +748,167 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
+
+    # MutateRun: the mutate step after the lint. A case's lane commits its own stub as the head's mutate script; timed_lint fakes the clock.
+
+    def push_lane(self, files, from_main=False):
+        """The lane's push: one commit of `files` (path -> text) on feat, pushed from the second clone. The commit sits on origin/feat, or on
+        origin/main when `from_main`, so the lane's diff holds only `files`. -> the pushed head."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main" if from_main else "origin/feat")
+        for rel, text in files.items():
+            tm.put(os.path.join(o, rel), text)
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", "lane: " + ", ".join(sorted(files)))
+        tm.sh(o, "git", "push", "-q", "-f", "origin", "feat")
+        return tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def push_main(self, files):
+        """One commit of `files` on main, pushed from the second clone: the base the lane is linted against."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        for rel, text in files.items():
+            tm.put(os.path.join(o, rel), text)
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", "main: " + ", ".join(sorted(files)))
+        tm.sh(o, "git", "push", "-q", "origin", "main")
+
+    def timed_lint(self, seconds, *argv):
+        """Run merge in the lane checkout with the wall clock faked: each mutate run returns `seconds` after it starts, and no real time passes.
+        The mutate log is cleared first. -> (rc, stdout and stderr together)."""
+        if os.path.exists(self.mutate_log):
+            os.remove(self.mutate_log)
+        real_sh, clock = merge.sh, WallClock()
+
+        def sh_timed(args, *rest, **kwargs):
+            result = real_sh(args, *rest, **kwargs)
+            if mutate_run(args):
+                clock.advance(seconds)  # the run took `seconds`: the clock reads that much later at its end
+            return result
+
+        with unittest.mock.patch.object(merge, "sh", sh_timed), unittest.mock.patch("time.time", clock.now), \
+                unittest.mock.patch("time.monotonic", clock.now), unittest.mock.patch("time.perf_counter", clock.now):
+            return self.run_lane(*argv)
+
+    def mutate_calls(self):
+        """The mutate stubs' starts, oldest first: empty when none ran."""
+        if not os.path.exists(self.mutate_log):
+            return []
+        with open(self.mutate_log, encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
+
+    def assert_one_mutate_run(self, head):
+        """The mutate command ran once, in a detached tree at `head`, and both trees are gone afterwards."""
+        calls = self.mutate_calls()
+        self.assertEqual(len(calls), 1, "the mutate run started %d times, want once" % len(calls))
+        call = calls[0]
+        self.assertEqual(call["head"], head, "the mutate run ran on a head other than the PR head")
+        self.assertTrue(call["detached"], "the mutate run ran on a branch, not a detached tree")
+        self.assertNotEqual(call["cwd"], os.path.realpath(self.co), "the mutate run ran in the lane checkout")
+        self.assertFalse(os.path.exists(call["cwd"]), "the mutate tree is still on disk")
+        self.assertFalse(tm.tree_listed(self.co, call["cwd"]), "git still lists the mutate tree")
+        self.assertEqual(self.worktrees(), 1, "a worktree is still listed after the lint")
+
+    def test_a_touched_harness_whose_run_reads_670_of_694_unknown_fails_and_names_the_counts_and_time(self):
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        head = self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 24, 670, 0)), WORKFLOW_REL: workflow_of(body)})
+        rc, text = self.timed_lint(1100, "--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint passed a touched harness whose mutate run read 670 of 694 mutants unknown: " + text)
+        self.assertEqual(counts_missing(text, {"killed": 24, "survived": 0, "unknown": 670}), None,
+                         "the FAIL output does not name the killed, survived and unknown counts: " + text)
+        self.assertTrue(wall_time_shown(text, 1100), "the FAIL output does not name the wall time of the mutate run: " + text)
+        self.assert_one_mutate_run(head)
+
+    def test_a_touched_harness_with_a_clean_run_passes_and_its_pass_line_shows_the_wall_time_and_counts(self):
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        head = self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
+        rc, text = self.timed_lint(437, "--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        lines = pass_lines(text)
+        self.assertEqual(len(lines), 1, text)
+        self.assertTrue(wall_time_shown(lines[0], 437), "the PASS line shows no wall time of the mutate run: " + text)
+        self.assertEqual(counts_missing(lines[0], {"killed": 694, "survived": 0, "unknown": 0}), None,
+                         "the PASS line does not name the killed, survived and unknown counts: " + text)
+        self.assert_one_mutate_run(head)
+
+    def test_a_lane_whose_diff_holds_no_harness_file_never_starts_the_mutate_run(self):  # the control: green on main
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        self.push_main({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0))})
+        self.push_lane({"hooks/guard.py": "GUARD = 1\n", WORKFLOW_REL: workflow_of(body)}, from_main=True)
+        rc, text = self.timed_lint(437, "--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once on an untouched lane: " + text)
+        self.assertEqual(self.mutate_calls(), [], "the mutate run started on a lane whose diff holds no mutation harness file: " + text)
+
+    def test_a_run_over_the_cap_read_from_checks_yml_fails_the_lint(self):
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        head = self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
+        seconds = (job_cap(body) + 1) * 60  # one minute past the cap the head's checks.yml gives
+        rc, text = self.timed_lint(seconds, "--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint passed a mutate run of %d s, over the %d-minute cap of checks.yml: %s" % (seconds, job_cap(body), text))
+        self.assertTrue(wall_time_shown(text, seconds), "the FAIL output does not name the wall time of the run: " + text)
+        self.assert_one_mutate_run(head)
+
+    def test_the_cap_is_read_from_the_head_checks_yml(self):
+        body, script = real_mutate_job()
+        cap = job_cap(body)
+        self.use_ci_job(PASSING, 0)
+        clean = mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0))
+        self.push_lane({script: clean, WORKFLOW_REL: workflow_of(with_edit(body, r"^    timeout-minutes: \d+", "    timeout-minutes: 3"))})
+        rc, text = self.timed_lint(300, "--lane-lint", "7")  # 5 min against the 3-min cap the head's checks.yml now names
+        self.assertEqual(rc, 1, "the lint passed a 5-min run against the 3-min cap at its head's checks.yml: " + text)
+        self.push_lane({script: clean, WORKFLOW_REL: workflow_of(body)})  # the real file again: the same 5-min run is under its cap
+        rc, text = self.timed_lint(300, "--lane-lint", "7")
+        self.assertEqual(rc, 0, "the lint refused a 5-min run under the %d-min cap at its head's checks.yml: %s" % (cap, text))
+
+    def test_the_command_is_read_from_the_head_checks_yml(self):
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        alt = "hooks/mutate_alt.py"
+        clean = mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0))
+        head = self.push_lane({script: clean, alt: clean,
+                               WORKFLOW_REL: workflow_of(with_edit(body, r"run: python3 hooks/mutate_guard\.py", "run: python3 " + alt))})
+        rc, text = self.timed_lint(437, "--lane-lint", "7")
+        self.assertEqual([c["argv"][0] for c in self.mutate_calls()], [alt],
+                         "the mutate runs were not the one command checks.yml gives at the head: " + text)
+        self.assertEqual(rc, 0, text)
+        self.assert_one_mutate_run(head)
+
+    def test_a_crashed_mutate_run_with_no_report_fails_the_lint(self):
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        trace = 'Traceback (most recent call last):\n  File "hooks/mutate_guard.py", line 9, in <module>\nRuntimeError: boom\n'
+        head = self.push_lane({script: mutate_script(self.mutate_log, err=trace, rc=1), WORKFLOW_REL: workflow_of(body)})
+        rc, text = self.timed_lint(60, "--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint passed a mutate run that crashed with no report: " + text)
+        self.assertEqual(pass_lines(text), [], "the crashed mutate run printed a PASS line: " + text)
+        self.assert_one_mutate_run(head)
+
+    def test_a_mutate_run_that_prints_no_report_is_not_a_pass(self):  # the empty state: exit 0 and no counts to read
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        head = self.push_lane({script: mutate_script(self.mutate_log, out="", rc=0), WORKFLOW_REL: workflow_of(body)})
+        rc, text = self.timed_lint(437, "--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "the lint passed a mutate run that printed no report, so it read no count: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed a PASS line for a mutate run with no report: " + text)
+        self.assert_one_mutate_run(head)
+
+    def test_a_touched_mjs_harness_starts_the_mutate_run(self):
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        self.push_main({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0))})
+        head = self.push_lane({"hooks/mutate_js.mjs": "export const stub = 1;\n", WORKFLOW_REL: workflow_of(body)}, from_main=True)
+        rc, text = self.timed_lint(437, "--lane-lint", "7")
+        self.assertTrue(self.mutate_calls(), "a lane touching hooks/mutate_js.mjs did not start the mutate run: " + text)
+        self.assertEqual(rc, 0, text)
+        self.assert_one_mutate_run(head)
 
 
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
