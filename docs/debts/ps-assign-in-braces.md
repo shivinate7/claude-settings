@@ -1,6 +1,6 @@
-# The resolver misses a PowerShell assignment inside a block
+# The resolver misses a PowerShell assignment inside braces
 
-**What.** A PowerShell assignment inside a block is not read, so a write to a frozen path `T` through that variable is allowed. The old resolver refused each form below (review round 3 of lane resolve-vars-quote-split, 2026-11-09 CST). Claude writes blocks like these in normal PowerShell work.
+**What.** A PowerShell assignment inside braces is not read, so a write to a frozen path `T` through that variable is allowed. The old resolver refused each form below (review round 3 of lane resolve-vars-quote-split, 2026-11-09 CST). Claude writes braces like these in normal PowerShell work.
 
 - `try { $p='T'; Set-Content $p x } catch {}`
 - `@('a') | ForEach-Object { $p='T'; Set-Content $p x }`
