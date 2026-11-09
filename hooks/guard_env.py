@@ -970,8 +970,13 @@ def _shell_string_prints(text: str, depth: int = 0) -> bool:
             texts, too_deep = _substitutions(segment)
             if too_deep:
                 return True
-            for body, _ in texts:
-                # Each text has its own substitutions cut to `x`, so a `$` in it is a variable.
+            for number, (body, in_message) in enumerate(texts):
+                # Each text has its own substitutions cut to `x`, so a `$` in it is a variable. The
+                # child shell runs each body, so a file name in one is read as `cat .env` reads it.
+                # The segment itself is last: its text is data to an `echo`. A body is an argument of
+                # the command around it, as in `env_refusal`.
+                if _env_flat(body, in_message or number == len(texts) - 1)[0]:
+                    return True
                 if _segments_print(body, depth):
                     return True
     return False
@@ -1260,7 +1265,8 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
     return False
 
 
-# A redirect of stdout. `2>` sends errors only; `&>` reaches here as `>` (`_env_parts`).
+# A redirect of stdout. `2>` sends errors only; `&>` reaches here as `>` (`_env_parts`). guard_core
+# `REDIRECT` is not used here: it matches `2>` too, and a find name test with `2>/dev/null` lists to the screen.
 ENV_STDOUT_REDIRECTS = (">", ">>", "1>", "1>>")
 
 
@@ -1272,9 +1278,8 @@ def _find_output_on_screen(words, piped: bool, pieces, ends, at: int) -> bool:
         return False
     while piped and ends[at] == "|":
         at += 1
-        parts = _env_parts(pieces[at]) if at < len(pieces) else []
-        if not parts:
-            return False
+        # A piece follows each `|` (`split_segments`), and `_env_parts` returns at least one part.
+        parts = _env_parts(pieces[at])
         stage, _, command = _env_words(parts[0])
         if command not in ENV_FIND_FILTERS or any(w in ENV_STDOUT_REDIRECTS for w in stage):
             return False
