@@ -81,8 +81,8 @@ questions of the critique under Input Needed, because a designer cannot chat.
 Deferred (owner, 2026-10-26): whether you run Claude Code's `/design` canvas yourself, or the owner
 runs it. Until the owner rules, draw HTML mockups only.
 
-Before you stop for any reason, commit your work to your own branch and push it. Before the final report, stop every Monitor and background task you
-started with `TaskStop`, and start none after it.
+Before you stop for any reason, commit your work. Push only to the branch the brief names, as `git push origin HEAD:<branch>`, never your worktree's own branch. A brief that names no branch is incomplete: commit, report that the brief lacks a branch, and push nothing. Your Done needs deep links, and they need the branch on origin. Before the final
+report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next. Under
