@@ -357,7 +357,7 @@ def _default_branch_extras(root):
                                  stdin=subprocess.DEVNULL, timeout=GIT_SHOW_TIMEOUT)
             if done.returncode == 0:
                 return _parse(done.stdout.decode("utf-8"), "%s:%s" % (ref, where)), "%s:%s" % (ref, where)
-        except (OSError, ValueError, subprocess.SubprocessError, LayoutError):
+        except (OSError, ValueError, subprocess.SubprocessError, LayoutError, ImportError):
             continue
     return None
 
