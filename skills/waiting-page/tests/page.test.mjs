@@ -3572,10 +3572,11 @@ for (const width of [180, 240]) for (const scheme of SCHEMES) {
 
 // ---------------------------------------------------------------- narrow word breaks: the parked block, the folded date, the Dismiss reason and the probe
 // Each claim is one test after its scope (the width, the text size and the element drawn), so a failure names one cause.
-// Reference pages: 390dd3f97 is the old page, and a case green on it is named "(control)". 30a2dd126 is the lane head before the date and
-// Dismiss-reason fixes. Red on 390dd3f97: the parked block's window case at 200% at 180 and 200 wide and at 300% at every width; its press case
-// at 150% at 180 wide, at 200% at 180 to 220 wide, and at 300% at every width; the Dismiss reason at 180 wide; and the probe. Red on 30a2dd126
-// only: the date line at 180 wide, which is a control against the old page. Green on 30a2dd126: the parked block, its presses and the probe.
+// Reference pages: the old page is the waiting page before this lane, and a case green on it is named "(control)". The mid page is the old
+// page plus the whole-word breaks and press tracks, before the date and Dismiss-reason fixes. Red on the old page: the parked block's window
+// case at 200% at 180 and 200 wide and at 300% at every width; its press case at 150% at 180 wide, at 200% at 180 to 220 wide, and at 300% at
+// every width; the Dismiss reason at 180 wide; and the probe. Red on the mid page only: the date line at 180 wide, which is a control
+// against the old page. Green on the mid page: the parked block, its presses and the probe.
 // The page's sideways scroll against its client width, in px: null when the page fits. The cause is named: the text run whose right edge sets the
 // scroll width (a run can pass its element's box, which no box shows), else the element sidewaysFault names.
 const sidewaysClaim = async (page) => {
@@ -3629,7 +3630,7 @@ const pressTextFault = (page) => page.evaluate(() => {
   }
   return faults.length ? faults.join("; ") : null;
 });
-// A control is a case green on the old page, 390dd3f97, measured at each root font size and width. At 300% the old page fails every width.
+// A control is a case green on the old page, measured at each root font size and width. At 300% the old page fails every width.
 const PARK_CONTROL = {
   window: (pct, width) => pct === 150 || (pct === 200 && width >= 220),
   press: (pct, width) => (pct === 150 && width >= 200) || (pct === 200 && width >= 240),
@@ -3657,7 +3658,7 @@ for (const pct of [150, 200, 300]) for (const width of [180, 200, 220, 240, 260]
 
 // The folded row's date line (.frow .fwhen) stays inside its card at 180, 220 and 390 wide, at 300% text: Dismiss, Restore, and a waiting reply's
 // Show answer. The text is read as runs, so a date that runs past its card counts even when its box does not. All six at 180 wide are red on
-// 30a2dd126, the lane head before the date fix, and green on 390dd3f97: controls against the old page.
+// the mid page (before the date fix), and green on the old page: controls against the old page.
 for (const [width, note] of [[180, " (control)"], [220, " (control)"], [390, " (control)"]]) for (const kind of Object.keys(FOLD_ROWS)) for (const scheme of SCHEMES) {
   test(`narrow word breaks, ${scheme}: folded answered row ${FOLD_ROWS[kind].label} at ${width} wide with the root font size tripled${note}: the date does not run past its card`, async (t) => {
     const page = await foldedRowPage(t, kind, width, scheme); if (!page) return;
