@@ -1565,18 +1565,36 @@ def _joined_substitutions(text: str) -> str:
     substitution as one word and its inner call is no word of its own. Only a word that starts a route or an endpoint (`repos/`,
     `/repos/`, a full URL to one, `$(`, a backtick) is joined: a body field that holds `$(` as text is left alone. The count reads
     the text, as `review_segments` does, so a quoted parenthesis is text."""
-    out, start = [], None
-    for index, char, quote in walk_quotes(text):
-        if not quote and char in " \t\r\n":
+    out, start, index = [], None, 0
+    for step, quote in _quote_steps(text):
+        if not quote and step in " \t\r\n":
             word = text[start:index] if start is not None else ""
             if _ROUTE_WORD_START.match(re.sub("['\"]", "", word)) and _open_substitutions(word):
                 out.append("\\ ")
+                index += 1
                 continue
             start = None
         elif start is None:
             start = index
-        out.append(char)
+        out.append(step)
+        index += len(step)
     return "".join(out)
+
+
+def _quote_steps(text: str):
+    """Yield (step, quote open before it) over `text`: the whole text each `walk_quotes` step spans, so an escaped pair such as
+    `\\"` or `\\$` is one step and neither half is lost."""
+    marks = [(index, quote) for index, _char, quote in walk_quotes(text)]
+    for at, (index, quote) in enumerate(marks):
+        yield text[index:marks[at + 1][0] if at + 1 < len(marks) else len(text)], quote
+
+
+def _double_quote_value(text: str) -> str:
+    """Return `text` with the backslash escapes bash spends inside a double-quoted word spent: `\\$` and a backslash before a backtick
+    are the bare character, so a GraphQL variable (`\\$id`) reads as the name the query holds. `\\"` and `\\\\` are left for the
+    tokenizer, which spends them the same way, and any other backslash stays, as bash keeps it. An escape in single quotes or
+    outside quotes is left as it stands."""
+    return "".join(step[1] if quote == '"' and step in ("\\$", "\\`") else step for step, quote in _quote_steps(text))
 
 
 def _graphql_string(text: str) -> str:
@@ -1850,7 +1868,7 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
         variable = tuple(name for name, part in (("number", selector), ("repo", repo)) if shell_expanded(part))
         texts, files, stdin = message_sources(args, "comment")
     elif rest[:1] == ["api"]:
-        rest = gh_call_of(_joined_substitutions(ansi_c_decoded(segment))) or rest
+        rest = gh_call_of(_double_quote_value(_joined_substitutions(ansi_c_decoded(segment)))) or rest
         if _is_graphql_endpoint(rest):
             query_texts, query_files, query_stdin = _graphql_query_sources(rest)
             file_queries, read, request_variables = _graphql_file_queries(rest, where, query_files)
