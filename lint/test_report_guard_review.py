@@ -461,8 +461,9 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertIsNone(out, out)
 
     def test_an_edited_comment_newer_than_the_newest_record_blocks_a_pass_claim(self):
-        # Catches: _newest_marked reading only the marked comments, so a comment newer than the record that was edited passes a PASS
-        # claim. A stripped record and an edited comment look the same to the tool, so the edit blocks the claim (decision pr-review-record).
+        # Catches: the newest-record read (merge/merge.py review_newest, through _newest_record) reading only the marked comments,
+        # so a comment newer than the record that was edited passes a PASS claim. A stripped record and an edited comment look the
+        # same to the tool, so the edit blocks the claim (decision pr-review-record).
         lgtm = {"body": "LGTM", "created_at": AFTER, "updated_at": EDIT_LATE}
         self.serve(comments=[{"body": record(), "created_at": BEFORE}, lgtm])
         out = self.stop(self.lane_turn(report(CLAIM)))
