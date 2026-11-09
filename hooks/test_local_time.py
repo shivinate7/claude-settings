@@ -24,7 +24,8 @@ Contract the builder codes against:
     the grant in this process and stand in decision_watch.invoke_model, so no model runs. The opus_scope_*
     and opus_list_* cases call override.grant_opus_ask directly, with the judge and the scope read stood in.
     The override_ask_* cases run the plain override route through local_time.grant_override, with the plain
-    override judge (call_judge.override_ask) stood in by a JudgeRecorder.
+    override judge (call_judge.override_ask) stood in by a JudgeRecorder. The override_ask_judge_kill case runs
+    main() instead, so the inbox capture before the grant is checked too.
 
 Set LOCAL_TIME_UNDER_TEST to test another file.
 
@@ -318,8 +319,20 @@ def ov_cfg():
     return tempfile.mkdtemp(prefix="cfg_", dir=ROOT)
 
 
-def ov_type(cfg, prompt, session=OV_SESSION):
-    """The owner types `prompt`. Returns the finished child, or None when it timed out."""
+# A child that runs the hook with the named modules missing: sys.modules holds None for each, so an import of one raises
+# ImportError, as it does on a machine without the file. The hook still runs as __main__, as Claude Code runs it.
+HIDE_DRIVER = ("import runpy, sys\n"
+               "hooks, hook, hidden = sys.argv[1], sys.argv[2], sys.argv[3:]\n"
+               "sys.path.insert(0, hooks)\n"
+               "for name in hidden:\n"
+               "    sys.modules[name] = None\n"
+               "sys.argv = [hook]\n"
+               "runpy.run_path(hook, run_name='__main__')\n")
+
+
+def ov_type(cfg, prompt, session=OV_SESSION, hide=()):
+    """The owner types `prompt`. Returns the finished child, or None when it timed out. `hide` names modules the child
+    cannot import."""
     env = dict(os.environ)
     for name in ("PYTHONUTF8", "PYTHONIOENCODING"):
         env.pop(name, None)
@@ -332,9 +345,11 @@ def ov_type(cfg, prompt, session=OV_SESSION):
     env["PATH"] = NO_MODEL_PATH
     payload = json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": session,
                           "prompt": prompt, "cwd": HERE})
+    command = [sys.executable, MODULE_PATH]
+    if hide:
+        command = [sys.executable, "-c", HIDE_DRIVER, os.path.dirname(MODULE_PATH), MODULE_PATH] + list(hide)
     try:
-        return subprocess.run([sys.executable, MODULE_PATH], input=payload, capture_output=True,
-                              text=True, env=env, timeout=30)
+        return subprocess.run(command, input=payload, capture_output=True, text=True, env=env, timeout=30)
     except subprocess.TimeoutExpired:
         return None
 
@@ -457,6 +472,19 @@ def case_override_off():
           and not ov_pass_files(cfg), "rc=%s files %r" % (proc and proc.returncode, ov_pass_files(cfg)))
 
 
+def case_override_off_with_a_full_stop_is_a_reason():
+    # `override off.` is not the whole word `off`, so it is a reason: main's one-act override, which replaces a timed one.
+    cfg = ov_cfg()
+    ov_type(cfg, "override 2h")
+    before = ov_pass(cfg)
+    ov_type(cfg, "override off.")
+    after = ov_pass(cfg)
+    check("override: `override 2h` is a 2-hour override before `override off.`",
+          ends_after(before, "timed", timedelta(hours=2)), "before %r; files %r" % (before, ov_pass_files(cfg)))
+    check("override: `override off.` after a 2-hour override is main's one-act override, which replaces it",
+          ends_after(after, "once", OV_ONCE), "before %r, after %r; files %r" % (before, after, ov_pass_files(cfg)))
+
+
 # A prompt that starts with the word `override` is a one-act override, and the rest is the reason. The
 # reason goes to guard.log on ONE line: the log is one record per line, tab-separated, so a newline
 # or a tab in the owner's text is folded to a space. The log line may be built any way; the cases only
@@ -475,6 +503,8 @@ OV_WORDS = [
     ("a newline and a tab in the reason fold to one log line",
      "override: use opus\nfor the review agent\twith a tab", "use opus for the review agent with a tab"),
     ("a lone quote in the reason", "override: don't ask twice", "don't ask twice"),
+    ("a whole word `off` near the start of the reason is a reason word", "override: kick off the nightly build",
+     "kick off the nightly build"),
 ]
 
 
@@ -629,6 +659,20 @@ def case_override_fail_open():
                                          proc and proc.stderr[-120:]))
 
 
+def case_override_capture_failure_keeps_the_grant():
+    # capture() raises when its helper is missing: _session_base imports precompact_handoff. A capture that raises must
+    # not stop the owner's keyword grant. The precondition check proves the child failed on that import, not elsewhere.
+    cfg = ov_cfg()
+    proc = ov_type(cfg, "override 15m", hide=("precompact_handoff",))
+    stderr = proc.stderr if proc else ""
+    check("override: with precompact_handoff missing, the capture fails on that import (precondition)",
+          "precompact_handoff" in stderr, "stderr %r" % stderr.strip()[-160:])
+    got = ov_pass(cfg)
+    check("override: with precompact_handoff missing, `override 15m` still grants a 15-minute override",
+          proc is not None and proc.returncode == 0 and ends_after(got, "timed", timedelta(minutes=15)),
+          "rc=%s; got %r; files %r" % (proc and proc.returncode, got, ov_files(cfg)))
+
+
 # OPUS BY PLAIN WORDS (decision owner-override, the Opus word). The owner's own prompt can grant Opus without the
 # keyword form, as in `send opus judges`. One model call judges such a prompt: call_judge.opus_ask calls
 # decision_watch.invoke_model. These cases run the grant in this process and replace invoke_model with JudgeStub,
@@ -685,6 +729,31 @@ def remote_env(value):
             os.environ[REMOTE_ENV] = saved
 
 
+@contextlib.contextmanager
+def stdin_bytes(raw):
+    """sys.stdin is a text stream over `raw`, so sys.stdin.buffer.read() returns the payload, as a hook's stdin does."""
+    saved = sys.stdin
+    sys.stdin = io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8")
+    try:
+        yield
+    finally:
+        sys.stdin = saved
+
+
+@contextlib.contextmanager
+def local_now(at):
+    """LOCAL_TIME_NOW is `at` inside the block, the clock the whole hook reads, then its old value comes back."""
+    saved = os.environ.get("LOCAL_TIME_NOW")
+    os.environ["LOCAL_TIME_NOW"] = at.isoformat()
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop("LOCAL_TIME_NOW", None)
+        else:
+            os.environ["LOCAL_TIME_NOW"] = saved
+
+
 class JudgeStub:
     """Stands in for decision_watch.invoke_model, the one model caller. It answers (answer, error) and records
     each call as (prompt, keyword arguments)."""
@@ -698,14 +767,16 @@ class JudgeStub:
 
 
 def opus_type(prompt, answer=None, error=None, at=OV_NOW, transcript=None, remote=None, extra=None, cfg=None,
-              override=None, drop_judge=False):
+              override=None, drop_judge=False, via_main=False):
     """The owner types `prompt` into the prompt hook's grant, with the model stood in. Returns (config dir, judge
     calls, stdout, stderr). The grant's files and guard.log land in the config dir, a new one unless `cfg` names it.
     `transcript` is the payload's transcript_path (no key when None). `remote` is CLAUDE_CODE_REMOTE_SESSION_ID for
     the grant (unset when None). `extra` holds more keys of the hook payload, such as `source`, merged in as given
     (none when None). `override` stands in for the plain override judge, call_judge.override_ask, for the grant only:
     a JudgeRecorder, or a judge that answers no when None. `drop_judge` removes that name instead, so the import of
-    call_judge.override_ask fails. The real name, when the module has one, comes back after."""
+    call_judge.override_ask fails. The real name, when the module has one, comes back after. `via_main` runs the whole
+    hook, main(), with the payload on stdin, so the capture before the grant runs too. A kill that the judge raises
+    leaves this function by raising it, with no return value."""
     _, decision_watch = hooks_modules()
     call_judge = call_judge_module()
     cfg = cfg or ov_cfg()
@@ -728,7 +799,11 @@ def opus_type(prompt, answer=None, error=None, at=OV_NOW, transcript=None, remot
             call_judge.override_ask = override if override is not None else JudgeRecorder(False)
         with config_dir_env(cfg), remote_env(remote), contextlib.redirect_stdout(out), \
                 contextlib.redirect_stderr(err):
-            local_time_under_test().grant_override(raw, at)
+            if via_main:
+                with stdin_bytes(raw), local_now(at):
+                    local_time_under_test().main([])
+            else:
+                local_time_under_test().grant_override(raw, at)
     finally:
         decision_watch.invoke_model = real_invoke
         if had_judge:
@@ -2408,6 +2483,87 @@ def case_override_ask_plain_one_act_logs_its_words_once():
     check("override ask: a plain timed ask, `%s`, logs none" % timed, ov_log(cfg) == [], "log %r" % (ov_log(cfg),))
 
 
+# A first-word `override` whose reason holds the whole word `off` grants main's one-act override, on the keyword route
+# and on the plain route. `off` in a reason is a reason word: only the whole prompt `override off` ends an override.
+OV_REASON_OFF = (
+    ("`override that off`", "override that off"),
+    ("`override it off please`", "override it off please"),
+    ("`override it off, please`, a mark after off", "override it off, please"),
+    ("`override that OFF`, the word in capitals", "override that OFF"),
+    ("`override that off for 15 minutes`, a length in the reason", "override that off for 15 minutes"),
+)
+# The controls: `off` inside a longer word, or past the window, grants the same once. `offload` and `payoff` hold `off`
+# inside a longer word.
+OV_REASON_OFF_ONCE = (
+    ("`override: offload the cache`, `off` inside a longer word", "override: offload the cache"),
+    ("`override: the payoff script is stuck`, `off` at the end of a longer word",
+     "override: the payoff script is stuck"),
+    ("`override the payoff script is stuck, turn it off later`, `off` past the window",
+     "override the payoff script is stuck, turn it off later"),
+)
+
+
+def case_override_ask_off_in_the_reason_grants_once():
+    for name, prompt in OV_REASON_OFF:
+        ask_no_grant(name, prompt, {"once"})
+    for name, prompt in OV_REASON_OFF_ONCE:
+        ask_no_grant(name, prompt, {"once"})
+    # The plain route's control: a length and no whole word `off`, so the judge says yes and the timed override is granted.
+    ask_grants("`override: the payoff script is stuck for 15 minutes`, a length and no whole word off",
+               "override: the payoff script is stuck for 15 minutes", "timed", timedelta(minutes=15))
+
+
+def inbox_text(cfg, session=OV_SESSION):
+    """(True, the text of the session's inbox file under `cfg`, or None when there is no file). The file is read at the
+    path the hook writes (inbox_paths) only when that path lies under `cfg`: (False, None) otherwise, so the case never
+    reads a file it did not make."""
+    with config_dir_env(cfg):
+        path = local_time_under_test().inbox_paths(session)[0]
+    if path is None or not os.path.abspath(path).startswith(os.path.abspath(cfg) + os.sep):
+        return False, None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return True, handle.read()
+    except OSError:
+        return True, None
+
+
+def owner_prompt_in_inbox(prompt, judge):
+    """The owner types `prompt` into the whole hook, main(), with the plain override judge stood in by `judge`. Returns
+    (config dir, the kill main() let out or None, (inside, inbox text)). A KeyboardInterrupt or a SystemExit is not an
+    Exception, so main() lets it out. The case reads what the kill left."""
+    cfg = ov_cfg()
+    kill = None
+    try:
+        opus_type(prompt, override=judge, cfg=cfg, via_main=True)
+    except (KeyboardInterrupt, SystemExit) as exc:
+        kill = exc
+    return cfg, kill, inbox_text(cfg)
+
+
+def case_override_ask_judge_kill_keeps_the_inbox_capture():
+    # A prompt-hook timeout reaches the hook as a KeyboardInterrupt or a SystemExit. The owner's prompt is saved to the
+    # inbox before the grant runs (decision owner-feedback-inbox), so such a kill loses nothing. The control is a judge
+    # that answers no: the prompt is saved there too. The full-size prompt reaches the long-text state.
+    full = "yes override that. " + "the review notes are long. " * 800
+    prompts = (("`yes override that`", "yes override that"), ("a full-size prompt", full))
+    judges = (("the judge raises KeyboardInterrupt", lambda: JudgeRecorder(True, error=KeyboardInterrupt)),
+              ("the judge raises SystemExit", lambda: JudgeRecorder(True, error=SystemExit)),
+              ("the judge answers no", lambda: JudgeRecorder(False)))
+    for judge_name, make_judge in judges:
+        for name, prompt in prompts:
+            judge = make_judge()
+            cfg, kill, (inside, text) = owner_prompt_in_inbox(prompt, judge)
+            label = "override ask: %s on %s" % (judge_name, name)
+            check("%s: the judge is asked once" % label, len(judge.texts) == 1,
+                  "judge calls %d; kill %r" % (len(judge.texts), kill))
+            check("%s: the inbox path is under the case's config dir" % label, inside,
+                  "the hook wrote its inbox outside %s" % cfg)
+            check("%s: the owner's prompt is in the inbox" % label,
+                  text is not None and prompt in text,
+                  "inbox %r" % (text[-120:] if text else text))
+
+
 def main():
     try:
         case_table_in_process()
@@ -2421,6 +2577,7 @@ def main():
         case_override_grants()
         case_override_context_line()
         case_override_off()
+        case_override_off_with_a_full_stop_is_a_reason()
         case_opus_context_line()
         case_override_takes_words()
         case_override_reason_goes_through_the_log_writer()
@@ -2429,6 +2586,7 @@ def main():
         case_override_corrupt_file_replaced()
         case_override_session_id_stays_inside()
         case_override_fail_open()
+        case_override_capture_failure_keeps_the_grant()
         case_opus_ask_judge_approved_lifts_every_role()
         case_opus_ask_judge_refusal_grants_nothing()
         case_opus_ask_keyword_forms_never_ask_the_judge()
@@ -2514,6 +2672,8 @@ def main():
         case_override_ask_bare_number_reads_the_raw_first_word()
         case_override_ask_judge_import_failure_keeps_main_result()
         case_override_ask_plain_one_act_logs_its_words_once()
+        case_override_ask_off_in_the_reason_grants_once()
+        case_override_ask_judge_kill_keeps_the_inbox_capture()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:
