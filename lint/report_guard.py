@@ -170,33 +170,51 @@ import layout  # noqa: E402
 import _clause  # noqa: E402
 
 HOOKS_DIR = os.path.join(HERE, "..", "hooks")
-_STAMP = re.compile(r'^INSTALL_ID = "([^"]+)"', re.MULTILINE)
-
-
-_hooks_dirs_found = None
+_STAMP = re.compile(rb'^INSTALL_ID = "([^"]+)"', re.MULTILINE)
+# The stamp sits near byte 30000 of the 320 KB hooks/guard.py; the cap leaves room for the file to grow.
+_STAMP_HEAD_BYTES = 64 * 1024
 
 
 def hooks_dirs():
     """The hooks folders to import helpers from, first to last. The installer stamps hooks/guard.py with
-    `INSTALL_ID = "<id>"` and writes the same set into hooks/guard.d/<id>/ (install.sh land_guard_set), so a stamp with
-    that folder present puts the stamped copy before the flat one, as hooks/guard.py does for its own modules. No
-    stamp (the repo copy), an unreadable file or no folder gives the flat folder alone. The stamp is read with a
-    regex, never an import. The answer is read once per process: hooks/guard.py is large, and an install lands
-    between processes."""
-    global _hooks_dirs_found
-    if _hooks_dirs_found is None:
-        _hooks_dirs_found = _find_hooks_dirs()
-    return list(_hooks_dirs_found)
+    `INSTALL_ID = "<id>"` and lands guard.py, the guard_*.py files, shared_names, git_reads, question_form, own_session
+    and precompact_handoff in hooks/guard.d/<id>/ (install.sh land_guard_set). A stamp with that folder present puts it
+    before the flat one. A module the folder lacks falls through to the flat one. No stamp (the repo copy), an
+    unreadable file or no folder gives the flat folder alone.
+
+    The stamp is matched in the first 64 KB of bytes, never an import and never a strict decode, so a stray non-UTF-8
+    byte in guard.py cannot stop this module importing. question_form imports this module a second time (a fresh
+    module, so no module global survives), and an install lands between processes, not inside one. So an import
+    (not a run as the script, which is a new hook process) that finds shared_names already loaded from the flat
+    folder or a guard.d folder takes that folder as the answer and skips the 64 KB read."""
+    loaded = _loaded_hooks_dir() if __name__ != "__main__" else None
+    if loaded is not None:
+        return loaded
+    return _find_hooks_dirs()
+
+
+def _loaded_hooks_dir():
+    """The answer a shared_names already in sys.modules gives: its own folder, or None when it came from elsewhere."""
+    origin = getattr(sys.modules.get("shared_names"), "__file__", None)
+    if not origin:
+        return None
+    folder = os.path.dirname(os.path.realpath(origin))
+    flat = os.path.realpath(HOOKS_DIR)
+    if folder == flat:
+        return [flat]
+    if os.path.dirname(os.path.dirname(folder)) == flat and os.path.basename(os.path.dirname(folder)) == "guard.d":
+        return [folder, flat]
+    return None
 
 
 def _find_hooks_dirs():
     try:
-        with open(os.path.join(HOOKS_DIR, "guard.py"), encoding="utf-8") as handle:
-            stamp = _STAMP.search(handle.read())
+        with open(os.path.join(HOOKS_DIR, "guard.py"), "rb") as handle:
+            stamp = _STAMP.search(handle.read(_STAMP_HEAD_BYTES))
     except OSError:
         stamp = None
     if stamp:
-        folder = os.path.join(HOOKS_DIR, "guard.d", stamp.group(1))
+        folder = os.path.join(HOOKS_DIR, "guard.d", stamp.group(1).decode("ascii", "replace"))
         if os.path.isdir(folder):
             return [folder, HOOKS_DIR]
     return [HOOKS_DIR]
