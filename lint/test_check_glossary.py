@@ -788,6 +788,72 @@ class UncommittedTests(Fixture):
         starts = self.git_starts()
         self.assertLessEqual(starts, 4, "the check started %d git processes with no arguments; the budget is 4" % starts)
 
+    def test_clean_symlink_to_file_type_change_is_read_without_unknown_in_ci(self):
+        try:
+            os.symlink("handoff.md", os.path.join(self.tree, "docs", "link.md"))
+        except (OSError, NotImplementedError):
+            self.skipTest("the file system refuses symlinks")
+        self.base_repo()
+        os.remove(os.path.join(self.tree, "docs", "link.md"))
+        self.put("docs/link.md", "Fine.\n")
+        self.assertState(" T docs/link.md")
+        code, out = self.run_check(ci=True)
+        self.assertNotIn("UNKNOWN", out, "a clean symlink-to-file type change printed UNKNOWN\n" + out)
+        self.assertEqual(code, 0, "a clean symlink-to-file type change failed in CI\n" + out)
+
+    def test_clean_file_to_symlink_type_change_is_read_without_unknown_in_ci(self):
+        self.put("docs/plain.md", "Fine.\n")
+        self.base_repo()
+        os.remove(os.path.join(self.tree, "docs", "plain.md"))
+        try:
+            os.symlink("handoff.md", os.path.join(self.tree, "docs", "plain.md"))
+        except (OSError, NotImplementedError):
+            self.skipTest("the file system refuses symlinks")
+        self.assertState(" T docs/plain.md")
+        code, out = self.run_check(ci=True)
+        self.assertNotIn("UNKNOWN", out, "a clean file-to-symlink type change printed UNKNOWN\n" + out)
+        self.assertEqual(code, 0, "a clean file-to-symlink type change failed in CI\n" + out)
+
+    def test_committed_bad_word_then_fixed_in_the_work_tree_fails(self):
+        self.base_repo()
+        self.put("docs/debts/x.md", "Fix in `block-the-act-early`.\n")
+        self.commit()
+        self.put("docs/debts/x.md", "Fine.\n")
+        self.assertState(" M docs/debts/x.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "a committed avoided slug passed once fixed in the work tree\n" + out)
+        self.assertIn("docs/debts/x.md:1", out, "the committed version's line was not read\n" + out)
+
+    def test_committed_bad_word_then_deleted_from_the_work_tree_fails(self):
+        self.base_repo()
+        self.put("docs/debts/x.md", "Fix in `block-the-act-early`.\n")
+        self.commit()
+        os.remove(os.path.join(self.tree, "docs", "debts", "x.md"))
+        self.assertState(" D docs/debts/x.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "a committed avoided slug passed once its file was deleted\n" + out)
+        self.assertIn("docs/debts/x.md:1", out, "the committed version's line was not read\n" + out)
+
+    def test_untracked_file_with_a_nul_and_invalid_utf8_is_skipped_quietly(self):
+        """binary(): a NUL in the first 8 KB and no byte-order mark makes the file binary, so it is skipped."""
+        self.base_repo()
+        with open(os.path.join(self.tree, "docs", "debts", "blob.md"), "wb") as f:
+            f.write(b"\x00\xff\x80 binary head\n" + "Fix in `block-the-act-early`.\n".encode("utf-8"))
+        self.assertState("?? docs/debts/blob.md")
+        code, out = self.run_check(ci=True)
+        self.assertEqual(code, 0, "a binary untracked file failed the check\n" + out)
+        self.assertNotIn("UNKNOWN", out, "a binary untracked file printed UNKNOWN\n" + out)
+
+    def test_untracked_utf8_file_with_a_nul_is_still_read(self):
+        """binary(): a file that decodes as UTF-8 is read even with a NUL in it."""
+        self.base_repo()
+        with open(os.path.join(self.tree, "docs", "debts", "nul.md"), "wb") as f:
+            f.write(b"Fix in `block-the-act-early`.\n\x00\n")
+        self.assertState("?? docs/debts/nul.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "a UTF-8 untracked file with a NUL passed unread\n" + out)
+        self.assertIn("docs/debts/nul.md:1", out, "the NUL file's line was not read\n" + out)
+
 
 def load_check():
     """The check module, loaded from MODULE, so a case reads the real table through the check's own rows()."""
