@@ -2867,7 +2867,7 @@ REPORT_TARGETS = [
 # families that reach its module, since the whole file takes minutes. A guard module is a row, REPORT_GOLD's file, or in
 # GUARD_MODULE_EXEMPT (a test checks this).
 GUARD_MODULE_FAMILIES = {
-    "hooks/guard_kill.py": ["kill"],
+    "hooks/guard_kill.py": ["kill", "git-env"],
     "hooks/guard_env.py": ["env", "git-env"],
     "hooks/guard_frozen.py": ["frozen"],
     "hooks/guard_pointer.py": ["pointer"],
