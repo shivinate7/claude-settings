@@ -197,7 +197,7 @@ def _pipeline_hit(stages, find_stage, any_filter: bool = False, list_amp: bool =
     followed by a filter that cuts what the agent reads. The one walk for the narrated rule and the
     check rule. Without `any_filter` (the narrated rule) the filter is `tail` or `head`: a `tee` between
     them does not end the reach, and a `tee` with no `tail` or `head` after it is not a hit. `any_filter`
-    (the check rule, coordinator ruling 2026-11-08 07:16 CST) widens the reach to every later stage but a
+    (the check rule, decision `background-check-through-verdict`) widens the reach to every later stage but a
     file writer (`tee`, `tee.exe`, `Tee-Object`, `Out-File`), since `sed -n`, `grep -m1` and `awk` cut
     what the agent reads as `tail` does. There a lone `tee` is no hit, and `tail` or `head` still counts."""
     for first, segment in enumerate(stages):
