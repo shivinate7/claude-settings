@@ -479,6 +479,7 @@ SUBJSTASHWT = os.path.join(ROOT, "subjstashlane")  # a linked worktree of it: sa
 SUBJSTASHDIRTY = os.path.join(ROOT, "subjstashdirty")  # a dirty checkout carrying one real stash entry
 SUBJSTAGED = os.path.join(ROOT, "subjstaged")  # a real checkout: a staged edit, a staged new file
 GITBLIND = os.path.join(ROOT, "gitblind")  # a git that answers the repo test and no status read
+NOGIT_PATH = os.path.join(ROOT, "nogitpath")  # an empty folder on PATH: no git runs at all
 # A repository under a scratchpad named after one session. ROOT already sits under the system
 # temporary directory, which is the other half of the path test.
 FAKE_SESSION = "5b9f6a3d-0000-4000-8000-000000000000"
@@ -1549,8 +1550,18 @@ def _build_gitmain():
     # The last-bullets cases name README.md as a restore operand. It is tracked and modified in
     # every tree, so each one is a real subject.
     write(os.path.join(GITMAIN, "README.md"), "base\n")
+    # The bare-checkout cases name an extensionless root file, Makefile, and one under a folder,
+    # tools/runner. LICENSE is never modified: it is the clean-path control.
+    write(os.path.join(GITMAIN, "Makefile"), "base\n")
+    write(os.path.join(GITMAIN, "tools", "runner"), "base\n")
+    write(os.path.join(GITMAIN, "LICENSE"), "base\n")
+    # The gate rows below name two more root files, both extensionless: hotfix, which is also a
+    # branch, and staged-note, which is staged in the shared checkout only.
+    write(os.path.join(GITMAIN, "hotfix"), "base\n")
+    write(os.path.join(GITMAIN, "staged-note"), "base\n")
     run_vcs(GITMAIN, "add", "-A")
     run_vcs(GITMAIN, *IDENT, "commit", "-q", "-m", "files")
+    run_vcs(GITMAIN, "branch", "hotfix")
     run_vcs(GITMAIN, "worktree", "add", "-q", GITWT, "-b", "lane")
     # AGENTWT: a real linked worktree whose path sits under GITMAIN's own .claude/worktrees/.
     # FARWT: a real linked worktree elsewhere, at a path that merely contains the word
@@ -1569,13 +1580,24 @@ def _build_gitmain():
         write(os.path.join(_tree, "b.txt"), "uncommitted\n")
         write(os.path.join(_tree, "hooks", "guard.py"), "uncommitted\n")
         write(os.path.join(_tree, "README.md"), "uncommitted\n")
+        write(os.path.join(_tree, "Makefile"), "uncommitted\n")
+        write(os.path.join(_tree, "tools", "runner"), "uncommitted\n")
         _require_dirty(_tree, "f.txt", "new.txt", "keep.txt")
+        _require_dirty(_tree, "Makefile", "new.txt", "LICENSE")
         for _name in ("fixtures/a.json", "fixtures/media-players.json", "src/app.py",
-                      "a.txt", "b.txt", "hooks/guard.py", "README.md"):
+                      "a.txt", "b.txt", "hooks/guard.py", "README.md", "Makefile",
+                      "tools/runner"):
             if not any(line[:2].strip() == "M" and line[3:].strip() == _name
                        for line in _porcelain(_tree)):
                 sys.exit("fixture setup failed in build_fixtures: %r is not modified in %r"
                          % (_name, _tree))
+    # The gate rows, in the shared checkout only. hotfix is a dirty tracked file that is also a
+    # branch. staged-note is staged, and the tree holds the same text, so no change is left
+    # unstaged. scratch is an untracked file with no extension, so it is no tracked change.
+    write(os.path.join(GITMAIN, "hotfix"), "uncommitted\n")
+    write(os.path.join(GITMAIN, "staged-note"), "staged\n")
+    run_vcs(GITMAIN, "add", "staged-note")
+    write(os.path.join(GITMAIN, "scratch"), "untracked\n")
     # DECOYMAIN: an ordinary MAIN checkout whose own folder happens to be nested under a path
     # spelled ".claude/worktrees/<name>". It is not a linked worktree of anything, so the
     # coincidence in its path must not earn it the agent-owned allowance.
@@ -2994,6 +3016,75 @@ sh("per-file deny: a double-quoted path in the shared checkout", VCS + ' restore
 # never reads it, and a worktree keeps whatever it does now. This case must pass before and after.
 sh("per-file branch switch: checkout main in a worktree keeps today's answer",
    VCS + " checkout main", "allow", cwd=GITWT)
+
+# BARE CHECKOUT OF AN EXTENSIONLESS FILE. With no `--`, git reads one operand as a path when no
+# branch has that name. checkout_names_a_path reads a single operand as a path only when it has an
+# extension, a leading ./, a backslash or a trailing slash, or when it is a folder. So `checkout
+# Makefile` and `checkout tools/runner` were never judged. Both are modified in the shared checkout
+# and in the hand-made worktree. LICENSE stays clean. Rows marked (pin) pass on main today.
+sh("per-file bare: checkout of an extensionless file in the shared checkout denies",
+   VCS + " checkout Makefile", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file bare: checkout of a folder's extensionless file in the shared checkout denies",
+   VCS + " checkout tools/runner", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file bare: checkout -- of an extensionless file in the shared checkout denies (pin)",
+   VCS + " checkout -- Makefile", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file bare: restore of an extensionless file in the shared checkout denies (pin)",
+   VCS + " restore Makefile", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file bare: restore of a folder's extensionless file in the shared checkout denies (pin)",
+   VCS + " restore tools/runner", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file bare: checkout of a clean extensionless file in the shared checkout allows",
+   VCS + " checkout LICENSE", "allow", cwd=GITMAIN)
+sh("per-file bare: restore of a clean extensionless file in the shared checkout allows",
+   VCS + " restore LICENSE", "allow", cwd=GITMAIN)
+sh("per-file bare: checkout of an extensionless file in a hand-made worktree allows",
+   VCS + " checkout Makefile", "allow", cwd=GITWT)
+sh("per-file bare: restore of an extensionless file in a hand-made worktree allows",
+   VCS + " restore Makefile", "allow", cwd=GITWT)
+sh("per-file bare: checkout of a branch name in the shared checkout keeps today's answer",
+   VCS + " checkout agent-x-branch", "allow", cwd=GITMAIN)
+
+# THE GATES IN lone_operand_is_dirty_file (guard_shared_tree.py). A lone name reads as a path only
+# when it exists, is no revision, and has a tracked change. The first row pins the status gate: an
+# untracked file is no tracked change. The second pins the revision gate. The last two pin the
+# subfolder form and a staged entry.
+sh("per-file bare: checkout of an untracked extensionless file in the shared checkout allows",
+   VCS + " checkout scratch", "allow", cwd=GITMAIN)
+# A dirty file whose name is also a branch. Git reads a name that is both a branch and a file as
+# the branch: it switches and keeps the file. The guard allows it, as main does.
+sh("per-file bare: checkout of a dirty file that is also a branch in the shared checkout allows",
+   VCS + " checkout hotfix", "allow", cwd=GITMAIN)
+# A relative path from a subfolder. Git reads `runner` against tools/, so it discards tools/runner.
+sh("per-file bare: checkout of a dirty file named from a subfolder in the shared checkout denies",
+   "cd tools && " + VCS + " checkout runner", "deny", "shared-tree", cwd=GITMAIN)
+# A staged-only change. Git keeps it ("Updated 0 paths"), since the tree holds the staged text.
+# The guard reads the staged entry as a dirty file and denies. This pins that choice.
+sh("per-file bare: checkout of a staged-only file in the shared checkout denies "
+   "(pin: staged counts as dirty, though git keeps it)",
+   VCS + " checkout staged-note", "deny", "shared-tree", cwd=GITMAIN)
+
+# AN UNREADABLE LONE OPERAND (guard_shared_tree.lone_operand_is_dirty_file). A bare `checkout Makefile`
+# is judged as a path only when git can say what the name is and what its status is. When a read gets
+# no answer, the call is allowed (the verdict stays silent) and logged once as `noted`/`subject-unread`.
+# The two reads fail in different places, so each branch has its own case: no git at all (the revision
+# read gets no answer), and a git that answers the repo test only (the revision read fails, then the
+# status read gets no answer). The checks register with LOG_CHECKS_EXTRA below, where that list exists.
+UNREAD_NOGIT_LABEL = ("per-file bare log: a bare checkout of a dirty file with no git on PATH is allowed "
+                      "and logged once as subject-unread")
+UNREAD_STATUS_LABEL = ("per-file bare log: a bare checkout of a dirty file whose status git cannot read "
+                       "is allowed and logged once as subject-unread")
+
+
+def unread_lone_operand_no_git_case():
+    """No git on PATH: the revision read gets no answer, so the lone operand is allowed and logged once."""
+    os.makedirs(NOGIT_PATH, exist_ok=True)
+    return subject_unread_log_case(VCS + " checkout Makefile", cwd=GITMAIN, search_path=NOGIT_PATH,
+                                   needle="checkout Makefile")
+
+
+def unread_lone_operand_status_case():
+    """A git that answers the repo test only: the revision read fails, the status read gets no answer."""
+    return subject_unread_log_case(VCS + " checkout Makefile", cwd=GITMAIN, search_path=GITBLIND,
+                                   needle="checkout Makefile")
 
 # THE DISCARD FORMS THAT JOIN THE RULE (decision agent-worktree-discard-is-noted, "These discard forms
 # join the rule"). A linked worktree keeps the ask for each one: the lane's own change is not a
@@ -16156,6 +16247,12 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The two unreadable-lone-operand checks. Their cases and labels sit in the shared-tree block, which runs
+# before LOG_CHECKS_EXTRA exists, so they register here and their family is set by hand, as above.
+LOG_CHECKS_EXTRA.append((UNREAD_NOGIT_LABEL, unread_lone_operand_no_git_case))
+LOG_FAMILY[UNREAD_NOGIT_LABEL] = "shared-tree"
+LOG_CHECKS_EXTRA.append((UNREAD_STATUS_LABEL, unread_lone_operand_status_case))
+LOG_FAMILY[UNREAD_STATUS_LABEL] = "shared-tree"
 # The wait-until remedy checks are defined beside the wait-until cases. They are log checks, so they are
 # registered here, where LOG_CHECKS_EXTRA is defined, and their family is set by hand.
 for _constant in REMEDY_CONSTANTS:
@@ -21261,17 +21358,19 @@ def crash_log_case():
     return True, "allowed, and one crash line logged"
 
 
-def subject_unread_log_case(command=None, expect_note=True):
+def subject_unread_log_case(command=None, expect_note=True, cwd=SUBJDIRTY, search_path=GITBLIND, needle=None):
     """A subject the guard could not read is allowed, and logged as `noted`/`subject-unread`.
 
     The line must be DISTINCT from a refusal line, so a reader can tell "I could not confirm
-    this" from "this destroys something". The case drives a real dirty repository with a blind
-    `git` on PATH, and it also checks the allow stays silent on stdout.
+    this" from "this destroys something". The case drives a real dirty repository (`cwd`) with
+    `search_path` as the whole PATH, by default a blind `git`, and it also checks the allow stays silent
+    on stdout. `needle` is the text the logged command must carry: `worktree remove` when a command
+    is given, else `reset`, unless it names another.
     """
     if os.name == "nt":
         return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
-    materialize(GITBLIND)  # lint calls this directly, with no run loop to build what it names
-    materialize(SUBJDIRTY)
+    materialize(search_path)  # lint calls this directly, with no run loop to build what it names
+    materialize(cwd)
     folder = os.path.join(ROOT, "unreadlog")
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, "guard.log")
@@ -21280,13 +21379,13 @@ def subject_unread_log_case(command=None, expect_note=True):
     env = dict(os.environ)
     env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
-    env["PATH"] = GITBLIND
+    env["PATH"] = search_path
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     result = subprocess.run(
         [sys.executable, GUARD],
         input=json.dumps({"tool_name": "Bash",
                           "tool_input": {"command": command or VCS + " reset --hard HEAD"},
-                          "cwd": SUBJDIRTY}),
+                          "cwd": cwd}),
         capture_output=True, text=True, env=env, timeout=60,
     )
     if result.stdout.strip():
@@ -21304,7 +21403,8 @@ def subject_unread_log_case(command=None, expect_note=True):
     fields = lines[0].split("\t")
     if len(fields) != 6 or fields[2] != "noted" or fields[3] != "subject-unread":
         return False, "line does not read noted/subject-unread: %r" % lines[0]
-    if ("worktree remove" if command else "reset") not in fields[4]:
+    want = needle or ("worktree remove" if command else "reset")
+    if want not in fields[4]:
         return False, "the line does not carry the matched command: %r" % fields[4]
     return True, "one noted/subject-unread line, distinct from a refusal"
 
