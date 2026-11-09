@@ -161,10 +161,22 @@ def crash_reason(config_dir):
             lines = handle.read().splitlines()
     except OSError:
         return None
+    if not lines:
+        return None
+    # lint/guard_log_report.py is the one reader of guard.log lines. Without it a crash would read as an
+    # allow, so a failed import ends the probe with verdict unknown.
+    sys.dont_write_bytecode = True  # the import must not write __pycache__ beside lint/
+    lint_dir = os.path.join(HERE, "..", "lint")
+    if lint_dir not in sys.path:
+        sys.path.insert(0, lint_dir)
+    try:
+        import guard_log_report
+    except Exception as exc:
+        raise BadInput("cannot read the guard log (%s), verdict unknown" % exc)
     for line in lines:
-        fields = line.split("\t")
-        if len(fields) >= 5 and fields[3] == "guard-crash":
-            return fields[4]
+        row = guard_log_report.parse_line(line)
+        if row is not None and row.rule == "guard-crash":
+            return row.matched
     return None
 
 
