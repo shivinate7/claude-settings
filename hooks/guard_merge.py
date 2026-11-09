@@ -19,7 +19,7 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    push_destinations, push_refspecs, push_target, push_text,
+    DEFAULT_BRANCH_FALLBACK, push_destinations, push_refspecs, push_target, push_text,
 )
 
 
@@ -95,7 +95,7 @@ def gh_call_of(segment: str):
 
 
 # ---- a merge made outside the merge tool
-MERGE_TOOLS = ("mcp__github__merge_pull_request",)
+MERGE_TOOLS = ("mcp__github__merge_pull_request", "mcp__github__enable_pr_auto_merge")  # auto-merge is judged like a merge (see merge_call_of)
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
 # Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector, 1 more run-list read when the check runs link more than one run; a settled head adds the
@@ -109,14 +109,55 @@ MERGE_READ_TIMEOUT = 25
 MERGE_TOOL_REL = os.path.join("merge", "merge.py")
 
 
+# `gh api` flags that take a value (the next token is data, never the endpoint).
+GH_API_VALUE_FLAGS = {"-H", "--header", "-f", "--raw-field", "-F", "--field", "-q", "--jq", "-t", "--template",
+                      "--input", "--hostname", "--cache", "-p", "--preview"}
+GH_API_MERGE_PATH = re.compile(r"/?(?:repos/([^/{}\s]+/[^/{}\s]+)/)?pulls/(\d+)/merge/?(?:\?.*)?")
+
+
+def api_merge_call_of(rest):
+    """Return (selector, repo) for an `api` call with an explicit PUT to a pull request's `/merge` endpoint, else None.
+    A GET merges nothing. A POST (gh's default once a field is given) merges nothing. Another endpoint merges nothing.
+    The repo comes from the endpoint path, else from the root repo flag.
+    """
+    method, endpoint, repo, index, args = "", "", "", 0, rest[1:]
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg in ("-X", "--method"):
+            method = args[index] if index < len(args) else ""
+            index += 1
+        elif arg.startswith("--method="):
+            method = arg[len("--method="):]
+        elif arg.startswith("-X") and not arg.startswith("--"):
+            method = arg[2:]
+        elif arg in ("-R", "--repo"):
+            repo = args[index] if index < len(args) else ""
+            index += 1
+        elif arg.startswith("--repo="):
+            repo = arg[len("--repo="):]
+        elif arg in GH_API_VALUE_FLAGS:
+            index += 1
+        elif arg.startswith("-"):
+            continue
+        elif not endpoint:
+            endpoint = arg
+    found = GH_API_MERGE_PATH.fullmatch(endpoint)
+    if method.upper() != "PUT" or not found:
+        return None
+    return found.group(2), found.group(1) or repo
+
+
 def merge_call_of(segment: str):
-    """Return (selector, repo) for a `gh pr merge` segment, else None.
+    """Return (selector, repo) for a `gh pr merge` segment, else None. A `gh api` PUT to a merge endpoint counts too.
 
     `selector` is the first positional word, '' for the current branch's pull request. `--auto` is
     judged like any merge: GitHub's auto-merge waits only on REQUIRED checks, and a base with none
     merges at once.
     """
     rest = gh_call_of(segment)
+    if rest is not None and rest[:1] == ["api"]:
+        return api_merge_call_of(rest)
     if rest is None or rest[:2] != ["pr", "merge"]:
         return None
     selector, repo = "", ""
@@ -190,10 +231,11 @@ def has_workflows(where: str) -> bool:
         return True
 
 
-def merge_check(selector, repo: str, where: str):
+def merge_check(selector, repo: str, where: str, landing=None):
     """Return (verdict, detail) for the head of the named pull request: green, pending, red,
     batch (another ready PR on the base has a workflow run or a required check pending), or unknown. One read, no
-    wait, run in `where` so `gh` names the repo the command names."""
+    wait, run in `where` so `gh` names the repo the command names. `landing` is (base, head sha) for a push that
+    writes the base with no pull request: only the batch read runs, and the verdict is green, batch or unknown."""
     module = merge_module()
     if module is None:
         return "unknown", "the merge tool's check reader could not be loaded"
@@ -203,6 +245,8 @@ def merge_check(selector, repo: str, where: str):
     except Exception as e:
         return "unknown", str(e)
     host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)
+    if landing is not None:
+        return host.batch_read(landing[0], landing[1], batch_ignore=ignore)
     # The ignore list reaches only the batch read: this head counts every check, so an ignored red check on it still refuses.
     return host.head_read(selector, nothing_is_green=not has_workflows(where), batch_ignore=ignore)
 
@@ -215,12 +259,46 @@ MERGE_CHECK_REASON = (
 )
 
 
-# The merge tool refuses this case too, so the remedy is to wait, never to run another merge.
+# Every route that lands a head on the base reads this: a merge call, an auto-merge, a raw API merge and a push to main.
+# The merge tool refuses the merge case too, so the remedy is to wait. It names no act, because the same text
+# answers each route and Claude would copy a named act as the way round (git-remedy-never-names-target).
 MERGE_BATCH_REASON = (
     "Rule (Git, git-no-merge-during-batch-ci): another ready PR's CI runs on this base, and its head "
-    "does not contain this head: %s. A merge now moves the base that run tests. Remedy: wait for that run to end. Its run's end, or its "
-    "CI-done comment on a red run, wakes the session that watches that PR. Then merge."
+    "does not contain this head: %s. Landing this head on the base now moves the base that run tests. "
+    "Remedy: wait for that run to end. Its run's end, or its CI-done comment on a red run, wakes the "
+    "session that watches that PR."
 )
+
+
+def push_head(source: str, where: str) -> str:
+    """The commit sha a pushed refspec source names, read by git in `where`. A hex word git cannot resolve is
+    kept as written (GitHub's compare takes a short sha). Anything else unreadable is '', a head no busy PR
+    contains."""
+    if where and source:
+        done = _git(where, "rev-parse", "--verify", "--quiet", source + "^{commit}")
+        if done is not None and done.returncode == 0 and done.stdout.strip():
+            return done.stdout.strip()
+    return source if re.fullmatch(r"[0-9a-fA-F]{7,40}", source) else ""
+
+
+def push_batch_hit(args, where: str, overrides=None) -> str:
+    """The busy pull requests, as text, for a non-forced `git push` that writes main or master, else ''.
+    A pull request is busy when it is ready, its CI runs, and its head does not hold the pushed head
+    (decision no-merge-during-batch-ci). A read that could not run gives '', so the push still asks.
+    One batch read per refspec that writes the default branch. `--all` and a mirror name no refspec: not read."""
+    found = push_refspecs(args)
+    if found is None:
+        return ""
+    specs = found[1] or [""]
+    for spec, dest in zip(specs, push_destinations(args, where, overrides)):
+        if dest not in DEFAULT_BRANCH_FALLBACK:
+            continue
+        source, colon, target = spec.lstrip("+").partition(":")
+        head = push_head((source if colon else spec) or "HEAD", where)
+        verdict, detail = merge_check("", "", where, landing=(dest, head))
+        if verdict == "batch":
+            return detail
+    return ""
 
 
 def merge_check_reason(verdict: str, detail: str) -> str:
