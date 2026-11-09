@@ -10076,7 +10076,60 @@ sh("hook-bypass: PowerShell, core.hooksPath on the command, denies",
 sh("hook-bypass: control, PowerShell commit with no hooks key, allows",
    VCS + " commit -m x", "allow", tool="PowerShell", cwd=GITMAIN)
 
-# (8) False alarms. Each names a bypass flag or key as text, or reads the key, and is allowed: no hook is skipped.
+# (8) A bypass wrapped in another command: a shell, eval, env -S, xargs or timeout. The guard reads the command the
+# wrapper runs, not only the first word, so each wrapped bypass denies. The controls wrap a commit with no bypass,
+# or text that names one, and allow.
+sh("hook-bypass: --no-verify in a bash -c string, denies",
+   'bash -c "' + VCS + ' commit --no-verify -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: -n in an sh -c string, denies",
+   "sh -c '" + VCS + " commit -n -m x'", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify in an eval string, denies",
+   'eval "' + VCS + ' commit --no-verify -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify in an env -S string, denies",
+   'env -S "' + VCS + ' commit --no-verify -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: core.hooksPath in a bash -c string, denies",
+   'bash -c "' + VCS + ' -c core.hooksPath=/dev/null commit -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify fed to xargs, denies",
+   "echo --no-verify | xargs " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify after timeout 5, denies",
+   "timeout 5 " + VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, a bash -c string with a commit and no bypass, allows",
+   'bash -c "' + VCS + ' commit -m x"', "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a bash -c echo that names a bypass is text, allows",
+   "bash -c 'echo " + VCS + " commit --no-verify'", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a sh -c string with a push -n dry run, allows",
+   'sh -c "' + VCS + ' push -n"', "allow", cwd=GITMAIN)
+
+# (8b) A config write that turns hooks off, with a commit, merge or push after it in the same command, is denied.
+# DECIDED: a config write with nothing after it in the command is allowed. It sets a value and skips no hook; the
+# case below pins that. The controls read the key, unset it, set another key, or name the write in text.
+sh("hook-bypass: config core.hooksPath set, then a commit in the same command, denies",
+   VCS + " config core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --local core.hooksPath set, then a commit, denies",
+   VCS + " config --local core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --worktree core.hooksPath set, then a commit, denies",
+   VCS + " config --worktree core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --global core.hooksPath set, then a commit, denies",
+   VCS + " config --global core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --add core.hooksPath, then a push after a semicolon, denies",
+   VCS + " config --add core.hooksPath x; " + VCS + " push", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config core.hookspath set with -C, then a merge, denies (key case-blind)",
+   VCS + " -C " + slash(GITMAIN) + " config core.hookspath x && " + VCS + " merge y", "deny", HOOK_BYPASS,
+   cwd=GITMAIN)
+sh("hook-bypass: control, a config read of core.hooksPath, allows",
+   VCS + " config core.hooksPath", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a config --get of core.hooksPath, then a commit, allows",
+   VCS + " config --get core.hooksPath && " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a config --unset of core.hooksPath, allows",
+   VCS + " config --unset core.hooksPath", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a config write of user.name, then a commit, allows",
+   VCS + " config user.name x && " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a quoted mention of the config write, then a commit, allows",
+   'echo "git config core.hooksPath /dev/null" && ' + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a config write with no commit, merge or push after it, allows",
+   VCS + " config core.hooksPath /dev/null", "allow", cwd=GITMAIN)
+
+# (9) False alarms. Each names a bypass flag or key as text, or reads the key, and is allowed: no hook is skipped.
 sh("hook-bypass allow: push -n is --dry-run, not a bypass",
    VCS + " push -n origin feature/x", "allow", cwd=GITMAIN)
 sh("hook-bypass allow: merge -n is --no-stat, not a bypass",
