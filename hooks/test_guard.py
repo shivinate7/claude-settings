@@ -6669,6 +6669,22 @@ for _label, _trigger, _rule, _lacks in (
 ):
     add("wait-pid: the remedy of %s names the helper" % _label, "deny", _rule, cwd=NOGIT,
         carries=(WAIT_PID,), lacks=_lacks, command=_trigger)
+# The three triggers, each reaching one waiter-family remedy by its own rule. The bin-path cases of wait-pid
+# and of wait-until both loop over them.
+REMEDY_TRIGGERS = (
+        ("a followed stream", "tail -f app.log", "live-stream"),
+        ("a pause", "sleep 30", "waiter"),
+        ("a loop whose condition polls a pattern", "while ! pgrep -f server; do sleep 1; done", "waiter"),
+)
+# A bare `wait-pid` is not on PATH in an agent worktree, so each remedy names the helper by its bin path.
+for _label, _trigger, _rule in REMEDY_TRIGGERS:
+    sh("wait-pid: the remedy of %s names the helper by its bin path" % _label, _trigger, "deny", _rule,
+       cwd=NOGIT, carries=("bin/wait-pid",))
+# The path forms a remedy may name are allowed, in the foreground and under run_in_background.
+for _command in ("~/.claude/bin/wait-pid 12345", "bin/wait-pid 12345"):
+    sh("wait-pid: %s is allowed in the foreground" % _command, _command, "allow", cwd=NOGIT)
+    add("wait-pid: %s is allowed under run_in_background" % _command, "allow", cwd=NOGIT,
+        command=_command, run_in_background=True)
 
 # Reads stay allowed, in the foreground and under run_in_background. `gh pr checks <n>` without
 # `--watch` is allowed on main, and stays so.
@@ -6858,9 +6874,11 @@ add("wait-until: a clock loop on a read with +%FT%TZ is allowed under run_in_bac
 add("wait-until: a clock loop on a read with +%FT%T and no -u is allowed under run_in_background", "allow", cwd=NOGIT,
     command=r'until [ "$(date +%FT%T)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
 
-# The remedy of a pause names the time form in backticks; the remedy check below reads those forms.
-sh("wait-until: the remedy of a pause names the time form", "sleep 30", "deny", "waiter", cwd=NOGIT,
-   carries=("`wait-until",))
+# Each waiter-family remedy names the helper by its bin path in backticks, since a bare `wait-until` is not on
+# PATH in a session. The remedy check below reads those forms.
+for _label, _trigger, _rule in REMEDY_TRIGGERS:
+    sh("wait-until: the remedy of %s names the helper by its bin path" % _label, _trigger, "deny", _rule,
+       cwd=NOGIT, carries=("`bin/wait-until",))
 
 # The helper is never refused, in the foreground or under run_in_background. Nothing judges it yet, so these
 # pin that a waiter rule never refuses the one allowed form. A command after the helper is allowed too.
@@ -8257,6 +8275,217 @@ sh("false alarm: --force in a heredoc body",
    "cat <<'EOF'\n" + VCS + " push --force\nEOF", "allow", cwd=PUSHFEAT)
 sh("false alarm: a lease to main-fix", VCS + " push --force-with-lease --force-if-includes origin HEAD:main-fix",
    "allow", cwd=PUSHMAIN)
+# A `git push` inside a python3 -c argument whose quotes are escaped. The `+1` is printed, not pushed, but
+# the push reader takes it as a `+` refspec. The two controls pin the plain push and a real force in the same shape.
+sh("false alarm: a python -c that prints +1 after a plain push allows, escaped quotes",
+   r'python3 -c "import os; os.system(\"' + VCS + r' push origin HEAD:x\"); print(\"+1\")"',
+   "allow", cwd=PUSHFEAT)
+sh("python -c escaped plain push allows (control)",
+   r'python3 -c "import os; os.system(\"' + VCS + r' push origin HEAD:x\")"', "allow", cwd=PUSHFEAT)
+sh("python -c escaped forced push still denies (control)",
+   r'python3 -c "import os; os.system(\"' + VCS + r' push -f origin x\")"', "deny", "force-push",
+   cwd=PUSHFEAT, carries=REMEDY)
+# PRINTED, NOT RUN. A forced push quoted inside a print or an echo is text the interpreter shows, so each
+# allows. The nested reader splits on the escaped quotes and takes the printed text as a command. The
+# control pins a forced push to main that bash -c runs: it asks on the head and on main.
+# MUTATE_ONLY="nested quote" runs these cases alone.
+sh("push: nested quote, python -c prints a forced push, allows",
+   r'python3 -c "print(\"' + VCS + r' push -f\")"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote, echo quotes a forced push in a sentence, allows",
+   r'echo "run \"' + VCS + r' push --force\" later"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote, python -c prints a sentence naming a forced push, allows",
+   r'python3 -c "print(\"use ' + VCS + r' push --force\")"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote control, bash -c runs a forced push to main, still asks",
+   'bash -c "' + VCS + ' push -f origin main"', "ask", "force-push", cwd=PUSHFEAT)
+# RUN, NOT PRINTED. An escaped-quote pair that a call runs is a command, whatever the call is named: a
+# module alias, a from-import, a shlex.split argument, a variable. Each denies on a forced push.
+sh("push: nested quote, subprocess.run takes a shlex.split of a forced push, denies",
+   r'python3 -c "import subprocess; subprocess.run(shlex.split(\"' + VCS + r' push -f origin x\"))"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote, an aliased subprocess call runs a forced push, denies",
+   r'python3 -c "import subprocess as sp; sp.run(\"' + VCS + r' push -f origin x\", shell=True)"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote, a from-import check_call runs a forced push, denies",
+   r'python3 -c "from subprocess import check_call; check_call(\"' + VCS + r' push -f origin x\", shell=True)"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote, a variable holding a forced push that os.system runs, denies",
+   r'python3 -c "cmd=\"' + VCS + r' push -f origin x\"; import os; os.system(cmd)"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# RUN PINS. Each of these runs its string argument and denies today. The first three calls are named by the
+# runner list, so a list cut to os.system alone turns each one red. The bash -c eval pin is held by the
+# script reader in guard_core, which no runner cut reaches.
+sh("push: nested quote pin, subprocess.run with shell=True runs a forced push, denies",
+   r'python3 -c "import subprocess; subprocess.run(\"' + VCS + r' push -f origin x\", shell=True)"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote pin, Popen with shell=True runs a forced push, denies",
+   r'python3 -c "from subprocess import Popen; Popen(\"' + VCS + r' push -f origin x\", shell=True)"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote pin, os.popen runs a forced push, denies",
+   r'python3 -c "import os; os.popen(\"' + VCS + r' push -f origin x\")"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote pin, bash -c eval runs a forced push, denies",
+   r'bash -c "eval \"' + VCS + r' push -f origin x\""', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# PRINTED ALLOWS, by printer name. printf and console.log print their string, so each allows, even inside
+# bash -c or node -e.
+sh("push: nested quote, bash -c printf prints a forced push, allows",
+   r'bash -c "printf \"%s\" \"' + VCS + r' push -f\""', "allow", cwd=PUSHFEAT)
+sh("push: nested quote, node -e console.log prints a forced push, allows",
+   r'node -e "console.log(\"' + VCS + r' push -f\")"', "allow", cwd=PUSHFEAT)
+# NAME PINS. Each case goes red on a scratch guard with the name it pins removed, except System.out.print*,
+# which print\w* also matches. ruby and perl are read only by INTERPRETER_RUNNER, and `system` also matches
+# CALL_RUNNER, so their pins use `spawn` and `readpipe`. No pin names deno: SCRIPT_RUNNER's `eval` and
+# INTERPRETER_RUNNER's deno alternative both read `deno eval`, so removing one changes no deno case's verdict.
+sh("push: nested quote runner pin, ruby -e spawns a forced push, denies",
+   r'ruby -e "spawn(\"' + VCS + r' push -f origin x\")"', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote runner pin, perl -e readpipe runs a forced push, denies",
+   r'perl -e "readpipe(\"' + VCS + r' push -f origin x\")"', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote printer pin, ruby -e puts prints a forced push, allows",
+   r'ruby -e "puts(\"' + VCS + r' push -f origin x\")"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote printer pin, perl -e say prints a forced push, allows",
+   r'perl -e "say(\"' + VCS + r' push -f origin x\")"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote printer pin, python -c logger.info prints a forced push, allows",
+   r'python3 -c "import logging; logger = logging.getLogger(); logger.info(\"' + VCS + r' push -f origin x\")"',
+   "allow", cwd=PUSHFEAT)
+sh("push: nested quote printer pin, bash -c System.out.println prints a forced push, allows",
+   r'bash -c "System.out.println(\"' + VCS + r' push -f origin x\")"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote printer pin, bash -c Write-Host prints a forced push, allows",
+   r'bash -c "Write-Host (\"' + VCS + r' push -f origin x\")"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote printer pin, bash -c Write-Output prints a forced push, allows",
+   r'bash -c "Write-Output (\"' + VCS + r' push -f origin x\")"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote printer pin, bash -c sudo echo prints a forced push, allows",
+   r'bash -c "sudo echo \"' + VCS + r' push -f origin x\""', "allow", cwd=PUSHFEAT)
+sh("push: nested quote printer pin, bash -c command printf prints a forced push, allows",
+   r'bash -c "command printf \"%s\" \"' + VCS + r' push -f origin x\""', "allow", cwd=PUSHFEAT)
+# GAPS. php -r runs its string as a script, and a Deno.Command call names git as an argument. Each one
+# denies: php -r is an INTERPRETER_RUNNER runner, and the pairs of an argv call join into one command line.
+sh("push: nested quote gap, php -r shell_exec runs a forced push, denies",
+   r'php -r "shell_exec(\"' + VCS + r' push -f origin x\")"', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote gap, deno eval spawns git through Deno.Command, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"-f\", \"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# ARGV CALLS. A Deno.Command call names its program and its arguments as separate strings, and the pairs
+# of one call are joined into one command line. The join keeps each argument's bounds: a quoted "my repo"
+# is one argument, so -C takes that whole path and push is the subcommand.
+sh("push: argv call, -C takes a quoted path with a space, then a forced push, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"-C\", \"my repo\", \"push\", \"-f\", '
+   r'\"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: argv call, -c takes a quoted value with a space, then a forced push, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"-c\", \"user.name=A B\", \"push\", \"-f\", '
+   r'\"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# The Deno permission flags come after `eval` here, before the script. No runner pattern reads a script
+# after them.
+sh("push: deno eval --allow-run after eval, argv forced push, denies",
+   r'deno eval --allow-run "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"-f\", \"origin\", '
+   r'\"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval -A after eval, argv forced push, denies",
+   r'deno eval -A "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"-f\", \"origin\", '
+   r'\"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval --allow-all after eval, argv forced push, denies",
+   r'deno eval --allow-all "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"-f\", \"origin\", '
+   r'\"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# The program is rg, so git and push are its search arguments, not a git call.
+sh("push: argv call runs rg with git and push as arguments, allows",
+   r'deno eval "new Deno.Command(\"rg\", {args: [\"' + VCS + r'\", \"push\", \".\"]}).outputSync()"',
+   "allow", cwd=PUSHFEAT)
+# Two calls: a git status, then an echo that prints push -f. Each call is its own command line.
+sh("push: argv calls run git status then echo push -f, allows",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"status\"]}).outputSync(); '
+   r'new Deno.Command(\"echo\", {args: [\"push\", \"-f\"]}).outputSync()"',
+   "allow", cwd=PUSHFEAT)
+# Scanner shapes on the argv path. An argument is string text, so a comment opener, a lone quote or a
+# template literal inside one does not hide the forced push that follows it. Each one denies.
+sh("push: argv call, // in a push argument with a space, then -f, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"// a\", \"-f\", \"origin\", '
+   r'\"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: argv call, /* in a push argument with a space, then -f, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"/* a\", \"-f\", \"origin\", '
+   r'\"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: argv call, # in a push argument with a space, then -f, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"# not\", \"-f\", \"origin\", '
+   r'\"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: argv call, a lone quote in a push argument with a space, then -f, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"it' + "'" + r's a\", \"-f\", '
+   r'\"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: a multi-line template literal before an argv forced push, denies",
+   'deno eval "const s = `line one\nline two`; new Deno.Command(\\"' + VCS + r'\", '
+   r'{args: [\"push\", \"-f\", \"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# DENO SCRIPT, PLAIN AND ARGV. A deno eval script that spawns a forced push denies, and the argv call
+# that runs the same push through a shell denies with the same reason. `bash -c` and `sh -c` take the next
+# argument as their script, so each argv form below runs the forced push.
+sh("push: deno eval spawns a forced push by its plain script, denies",
+   r'deno eval "spawn(\"' + VCS + r' push -f origin x\")"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval -A runs bash -c with a forced push in an argv call, denies",
+   r'deno eval -A "new Deno.Command(\"bash\", {args: [\"-c\", \"' + VCS + r' push -f origin x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval -A runs sh -c with a forced push in an argv call, denies",
+   r'deno eval -A "new Deno.Command(\"sh\", {args: [\"-c\", \"' + VCS + r' push -f origin x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval -A runs bash -c with a forced push and a cwd after the args, denies",
+   r'deno eval -A "new Deno.Command(\"bash\", {args: [\"-c\", \"' + VCS + r' push -f origin x\"], '
+   r'cwd: \"/tmp\"}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval with no -A runs bash -c with a forced push, denies",
+   r'deno eval "new Deno.Command(\"bash\", {args: [\"-c\", \"' + VCS + r' push -f origin x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# DENO FLAG VALUES. A deno eval flag that takes a value, such as `--ext ts`, `--config x.json`,
+# `--seed 1` or `--cert a.pem`, puts a bare word between the flag and the script. Each form runs the
+# forced push, so each denies.
+sh("push: deno eval --ext ts before an argv forced push, denies",
+   r'deno eval --ext ts "new Deno.Command(\"' + VCS + r'\", '
+   r'{args: [\"push\", \"-f\", \"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval --config x.json before an argv forced push, denies",
+   r'deno eval --config x.json "new Deno.Command(\"' + VCS + r'\", '
+   r'{args: [\"push\", \"-f\", \"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval --seed 1 before an argv forced push, denies",
+   r'deno eval --seed 1 "new Deno.Command(\"' + VCS + r'\", '
+   r'{args: [\"push\", \"-f\", \"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval --cert a.pem before an argv forced push, denies",
+   r'deno eval --cert a.pem "new Deno.Command(\"' + VCS + r'\", '
+   r'{args: [\"push\", \"-f\", \"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# EMPTY AND APOSTROPHE ARGUMENTS. An empty argument is a word of its own, and an argument with an
+# apostrophe is string text, so neither one hides the forced push that follows it. Each denies.
+sh("push: argv call, empty arguments around a forced push, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", '
+   r'{args: [\"push\", \"\", \"-f\", \"\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: argv call, apostrophes in two arguments around a forced push, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"it' + "'" + r's\", \"-f\", '
+   r'\"can' + "'" + r't\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# A bash -c that runs git status is no push, so it allows.
+sh("push: argv call runs bash -c git status, allows",
+   r'deno eval "new Deno.Command(\"bash\", {args: [\"-c\", \"' + VCS + r' status\"]}).outputSync()"',
+   "allow", cwd=PUSHFEAT)
+# The push text reader's scanner shapes. A comment opener or a multi-line string inside quotes is text, so
+# each is an allow control, green today. A lone quote in text opens no string that hides a push: nothing
+# after an unterminated quote runs, so the push-looking text after `it's #` is not a live push.
+sh("push text: a # inside a quoted push argument allows", VCS + ' push origin HEAD:x "# not --force"',
+   "allow", cwd=PUSHFEAT)
+sh("push text: a // inside a quoted push argument allows",
+   VCS + ' push origin HEAD:x "https://example.com --force"', "allow", cwd=PUSHFEAT)
+sh("push text: a /* inside a quoted push argument allows", VCS + ' push origin HEAD:x "/* --force"',
+   "allow", cwd=PUSHFEAT)
+sh("push text: a multi-line commit message naming a force push allows",
+   VCS + ' commit -m "fix\n' + VCS + ' push --force"', "allow", cwd=PUSHFEAT)
+sh("push text: a multi-line echo with a # line naming a force push allows",
+   'echo "a\n# ' + VCS + ' push --force\nb"', "allow", cwd=PUSHFEAT)
+sh("false alarm: a lone quote in text before a # comment naming a force push allows",
+   "echo it's # " + VCS + " push --force", "allow", cwd=PUSHFEAT)
 sh("push: a force push inside a loop's do-block still counts",
    "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY)
@@ -29499,30 +29728,35 @@ def tick_safe_mean(run_once, cap):
     return True, total / runs, ""
 
 
-def rm_var_batch(cmd, must):
-    """Return tick_safe_mean of judging cmd. Every run must be a deny whose reason holds `must`.
+def rm_var_batch(cmd, must, cwd=NOGIT, want="deny", cap=RM_VAR_BATCH_CAP):
+    """Return tick_safe_mean of judging cmd in cwd. Every run must give `want` with a reason holding `must`.
 
-    The reason is the rule name, so an empty `must` checks the deny alone.
+    The reason is the rule name, so an empty `must` checks the verdict alone. `cap` bounds the runs.
     """
     def run_once():
-        got, reason, took = judge_in_process(cmd, NOGIT)
-        if got != "deny" or must not in reason:
-            return False, 0.0, "judged %s, not the rm-var refusal" % got
+        got, reason, took = judge_in_process(cmd, cwd)
+        if got != want or must not in reason:
+            return False, 0.0, "judged %s, not the expected %s" % (got, want)
         return True, took, ""
-    return tick_safe_mean(run_once, RM_VAR_BATCH_CAP)
+    return tick_safe_mean(run_once, cap)
 
 
-def rm_var_ratio(make, small_n, big_n, must="rm-var-unguarded"):
-    """Return (ok, text) for make(big_n) against make(small_n) scaled by big_n / small_n."""
+def rm_var_ratio(make, small_n, big_n, must="rm-var-unguarded", cwd=NOGIT, want="deny",
+                 cap=RM_VAR_BATCH_CAP):
+    """Return (ok, text) for make(big_n) against make(small_n) scaled by big_n / small_n, judged in cwd.
+
+    Every run must give the verdict `want`, so a case whose command is an allow passes want="allow".
+    `cap` bounds the runs in each small batch.
+    """
     small, big = [], []
     for _ in range(RM_VAR_REPEATS):
-        ok, mean, text = rm_var_batch(make(small_n), must)
+        ok, mean, text = rm_var_batch(make(small_n), must, cwd, want, cap)
         if not ok:
             return False, "small n=%d: %s" % (small_n, text)
         small.append(mean)
-        got, reason, took = judge_in_process(make(big_n), NOGIT)
-        if got != "deny" or must not in reason:
-            return False, "big n=%d judged %s, not the rm-var refusal" % (big_n, got)
+        got, reason, took = judge_in_process(make(big_n), cwd)
+        if got != want or must not in reason:
+            return False, "big n=%d judged %s, not the expected %s" % (big_n, got, want)
         big.append(took)
     size = big_n / small_n
     base = sum(small) / len(small)   # each batch mean is positive: it spans RM_VAR_FLOOR
@@ -29576,6 +29810,39 @@ def rm_var_wide_case():
 
 LOG_CHECKS_EXTRA.append(("rm-var: 4000 assignments and 4000 targets with pwd scale linearly in CPU",
                          rm_var_wide_case))
+
+
+# The argv join reads each gap between quote pairs with ARGV_GAP. A run of spaces that ends in a
+# non-gap character backtracks as the square of its length. The push is forced at both sizes, so the
+# verdict stays deny and only the CPU ratio can fail. The label names no rm-var, so the family is set
+# to push-delete for this one append and restored after it.
+def argv_gap_cmd(n):
+    return ('deno eval "new Deno.Command(\\"' + VCS + '\\", {args: [\\"push\\", \\"-f\\"' + " " * n
+            + 'x, \\"origin\\", \\"x\\"]}).outputSync()"')
+
+
+def argv_gap_case():
+    return rm_var_ratio(argv_gap_cmd, 6000, 48000, must="", cwd=PUSHFEAT)
+
+
+# A run of deno eval flags before a nested quote. Each `--a` has two parses in the flag pattern, one with
+# `--` and one with `-`, so a failed match tries every split and its CPU doubles per flag. The command
+# names no push, so it allows, and the ratio compares allow runs. The small side is 14 flags, about 4 ms a
+# judge, so the default cap of 100 runs ends short of RM_VAR_FLOOR. The cap here is 1000.
+def argv_flag_gap_cmd(n):
+    return "deno eval " + "--a " * n + 'x "a \\"b\\""'
+
+
+def argv_flag_gap_case():
+    return rm_var_ratio(argv_flag_gap_cmd, 14, 20, must="", cwd=PUSHFEAT, want="allow", cap=1000)
+
+
+_section_family = FAMILY
+FAMILY = "push-delete"
+LOG_CHECKS_EXTRA.append(("push: a failing ARGV_GAP over 48000 spaces stays linear in CPU", argv_gap_case))
+LOG_CHECKS_EXTRA.append(("push: a run of deno eval flags before a nested quote stays linear in CPU",
+                         argv_flag_gap_case))
+FAMILY = _section_family
 
 
 # Judge's CPU time (1 s), not wall-clock (flaky on macOS runners), bounds a run of apostrophes; a 30 s kill guard stops a hang.

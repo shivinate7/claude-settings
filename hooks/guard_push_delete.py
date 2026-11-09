@@ -12,7 +12,7 @@ from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
     _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
     _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
-    is_powershell, norm, resolve_command, segment_tokens, split_segments,
+    inline_script, is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
 
 
@@ -121,9 +121,170 @@ def push_target(segment: str, cmd: str, cwd: str):
     return where, overrides
 
 
+def _span_end(text: str, start: int, escapes: bool) -> int:
+    """The index of the quote that closes the one at `start`, or -1 when none does. Inside double
+    quotes (and `$'..'`) a backslash escapes the next character, so `\\"` closes nothing."""
+    quote, index = text[start], start + 1
+    while index < len(text):
+        if escapes and text[index] == "\\":
+            index += 2
+        elif text[index] == quote:
+            return index
+        else:
+            index += 1
+    return -1
+
+
+# The outer call hands its quoted script to a shell that runs it: `bash -c "..."`, `eval "..."`,
+# `ssh host "..."`.
+SCRIPT_RUNNER = re.compile(
+    r"(?:^|[\s;&|(])(?:(?:(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*-\w*c)|eval|ssh(?:\s+[^\s;&|]+)*)\s*$")
+# ... or to an interpreter that runs it: `python3 -c "..."`, `node -e "..."`, `perl -e "..."`,
+# `php -r "..."`, `deno eval -A "..."`. Deno's flags sit between `eval` and the script: `-A`,
+# `--allow-run=git`, and a flag with its value as the next word (`--ext ts`, `--config x.json`);
+# SCRIPT_RUNNER's `eval` reads only the bare `deno eval`. A flag starts with `-` and a value word
+# never does, so each word has one parse and a failed match stays linear.
+INTERPRETER_RUNNER = re.compile(
+    r"(?:^|[\s;&|(])(?:(?:python[\d.]*|node(?:js)?|ruby|perl|php|deno)\s+(?:-\w+\s+)*-\w*[ce]"
+    r"|php\s+(?:-\w+\s+)*-\w*r"
+    r"|deno\s+(?:-\w+\s+)*eval(?:\s+-{1,2}\w[\w-]*(?:=\S*)?(?:\s+[^\s\"'-]\S*)?)*)\s*$")
+# An argv call: `new Deno.Command("git", {args: ["push", "-f"]})` names its program and its
+# arguments as separate strings, so the pairs of one call are read as one command line.
+ARGV_CALL = re.compile(r"\bDeno\.Command\s*\(\s*$")
+# The text between two strings of one argv call. Each part starts with its own character, so a
+# failed fullmatch takes linear time.
+ARGV_GAP = re.compile(r"[\s,]*(?:\{\s*args\s*:\s*\[[\s,]*)?")
+# One argument as one shell word: each character the shell or shlex splits on is
+# backslash-escaped, so an argument with a space stays one word. The word holds no quote:
+# PUSH_QUOTED reads raw quotes and ignores backslashes, so a quote here could pair with a
+# quote in a neighbouring word and blank the words between.
+ARGV_UNSAFE = re.compile(r"[^\w@%+=:,./-]")
+# Inside a script, a call that runs its string argument as a command, even inside a print.
+CALL_RUNNER = re.compile(
+    r"(?:\bos\.(?:system|popen|exec\w*|spawn\w*)|\bsubprocess\.\w+|\bPopen|\bexec\w*|\bsystem|\bpopen)"
+    r"\s*\(\s*\[?\s*$")
+# The printers: the one place that names the calls and commands that show their string and run
+# nothing. A pair inside a runner script is a command unless a printer holds it.
+PRINT_CALL = re.compile(
+    r"\b(?:print\w*|console\.\w+|puts|say|logger\.\w+|System\.out\.print\w*|Write-(?:Host|Output))\s*\(")
+PRINT_COMMAND = re.compile(r"^[\s\"'(]*(?:(?:sudo|command|builtin)\s+)?(?:echo|printf|print|puts)\b")
+
+
+def _argv_word(arg: str) -> str:
+    """One argument as one word of a command line (see ARGV_UNSAFE). Its quote characters are
+    dropped, as _push_parse drops them from every push argument. An argument left empty is an
+    escaped space, since the shell has no empty word without quotes. This is a bandaid: the push
+    reader sees a one-space word, which keeps its place, so the words after it keep theirs."""
+    arg = arg.replace("'", "").replace('"', "")
+    escaped = ARGV_UNSAFE.sub(lambda m: "\\ " if m.group() == "\n" else "\\" + m.group(), arg)
+    return escaped or "\\ "
+
+
+def _printed(script: str) -> bool:
+    """True when the script text ahead of an escaped quote sits in a printer: its statement
+    (cut at `;`, `&`, `|` or a newline) starts with a printer command such as `echo` or
+    `printf`, or holds a print call that is still open."""
+    stmt = re.split(r"[;&|\n]", script)[-1]
+    return PRINT_COMMAND.search(stmt) is not None or PRINT_CALL.search(stmt) is not None
+
+
+def _nested_commands(span: str, before: str = "") -> str:
+    """A double-quoted span that holds escaped quotes is a script handed to an interpreter
+    (`python3 -c "os.system(\\"git push\\")"`). In a runner script (`bash -c`, `eval`, `ssh`,
+    `python -c`, `node -e`) each escaped-quote pair is a command unless a printer holds it
+    (`print`, `echo`, `printf`, `console.log`: see PRINT_CALL and PRINT_COMMAND). The call may
+    be named any way: an alias, a from-import, `shlex.split`, a variable. A CALL_RUNNER call runs
+    its pair even inside a print. Outside a runner script only a CALL_RUNNER pair is read
+    (`before` is the segment text ahead of the span). Give each command its own line, so the
+    words that follow it in the script (`print(\\"+1\\")`) are not its arguments."""
+    lines, piece, inner, run, index = ["\n"], [], False, False, 1
+    words, argv, closed = [], False, 0
+    script = (SCRIPT_RUNNER.search(before) or INTERPRETER_RUNNER.search(before)) is not None
+    body = span[:-1]
+
+    def emit():
+        nonlocal words
+        if words:
+            # A shell's `-c` argument is a script, read as a runner line of its own.
+            shell = inline_script(words)
+            lines.append(shell + "\n" if shell else " ".join(map(_argv_word, words)) + "\n")
+            words = []
+
+    while index < len(body):
+        if body.startswith('\\"', index):
+            if inner:
+                if run:
+                    # an argv call's pairs gather as words; any other pair is a line of its own
+                    (words if argv else lines).append("".join(piece) if argv else "".join(piece) + "\n")
+                piece = []
+                closed = index + 2
+            else:
+                ahead = body[:index]
+                if not (argv and ARGV_GAP.fullmatch(body[closed:index])):
+                    emit()
+                    run = CALL_RUNNER.search(ahead) is not None or (script and not _printed(ahead))
+                    argv = run and ARGV_CALL.search(ahead) is not None
+            inner = not inner
+            width = 2
+        else:
+            width = 2 if body[index] == "\\" else 1
+            if inner and run:
+                piece.append(body[index:index + width])
+        index += width
+    if inner and run:
+        (words if argv else lines).append("".join(piece) if argv else "".join(piece) + "\n")
+    emit()
+    return "".join(lines)
+
+
+def _push_scan(segment: str) -> str:
+    """The segment read the way the shell reads its quotes, comments and escapes, so what the
+    quote pattern sees is a whole span. A backslash pair is text (`it\\'s` opens no quote). A
+    `#` that starts a word is a comment to the line's end. A quote the shell leaves open hides
+    the rest of the line from it, so that rest, when it holds a space, is blanked. A
+    double-quoted span with escaped quotes is read by _nested_commands. PowerShell escapes
+    with a backtick, and a segment of it is left to the pattern."""
+    if is_powershell(segment):
+        return segment
+    out, index, length = [], 0, len(segment)
+    while index < length:
+        char = segment[index]
+        if char == "\\":
+            out.append(segment[index:index + 2])
+            index += 2
+        elif char == "#" and (index == 0 or segment[index - 1] in " \t\n;|&("):
+            while index < length and segment[index] != "\n":
+                index += 1
+        elif char in "'\"":
+            end = _span_end(segment, index, char == '"' or segment[index - 1:index] == "$")
+            if end < 0:
+                tail = segment[index + 1:]
+                out.append(" " if re.search(r"\s", tail) else char + tail)
+                index = length
+                continue
+            span = segment[index:end + 1]
+            out.append(_nested_commands(span, segment[:index])
+                       if char == '"' and '\\"' in span else span)
+            index = end + 1
+        else:
+            out.append(char)
+            index += 1
+    return "".join(out)
+
+
 def push_text(segment: str) -> str:
-    """The segment with quoted multi-word text blanked: a quoted `--force` is text, not a push."""
+    """The segment with quoted multi-word text blanked: a quoted `--force` is text, not a push.
+    A script handed to an interpreter in a string with escaped quotes keeps its commands, one
+    to a line; push_calls reads them line by line."""
+    segment = _push_scan(segment)
     return PUSH_QUOTED.sub(" ", segment)
+
+
+def push_calls(segment: str):
+    """(subcommand, arguments) of each `git` call in the live text of one segment: the one
+    reader of git calls for a push. Each line of push_text is its own command."""
+    for line in push_text(segment).split("\n"):
+        yield from guard_core.git_calls(line)
 
 
 def _push_parse(args):
