@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Fetches origin once per checkout first. On resume it says when the session's recorded worktree is gone. Names the clone to cd to when the checkout is a live pin of the claude-settings clone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, local main differs from origin/main, more than 50 agent worktrees exist, a freshness check or the fetch could not run, the repo's waiting page was last published from another version than main's, a standing grant file differs from origin/main's, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Fetches origin once per checkout first. On resume it says when the session's recorded worktree is gone. Names the clone to cd to when the checkout is a live pin of the claude-settings clone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, local main differs from origin/main, more than 50 agent worktrees exist, a freshness check or the fetch could not run, the repo's waiting page was last published from another version than main's, a standing grant file differs from origin/main's, the SessionEnd sweep is disarmed or unknown, or (cloud only) the live hooks were copied from a source behind origin/main. Prints the repo's caution level with its facts and acts, or says it is unknown.
 # Outside a git tree or when git is missing, prints only the tier line (cloud or own id). Always exits 0, nothing on stderr.
 
 input=$(cat 2>/dev/null)
@@ -270,6 +270,61 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
       printf 'claude-settings: cannot check %s against origin/main, the fetch did not run; freshness unknown\n' \
         "$d"
       fetch_mark_reported "$d"
+    fi
+  fi
+fi
+
+# Live-hooks lag, cloud only (a local install links its hooks into the clone and has no stamp). A cloud install writes
+# the full sha of its source to $config_dir/state/hooks-source-sha as its last step. Here that stamp is compared with
+# origin/main of the claude-settings clone ($d), and the line says how far the copied hooks and rulings lag. The clone
+# is read whether or not it is a cloudMirror: the local-main block above skips a mirror, since install.sh refreshes it,
+# but a mirror's hooks are exactly what can lag. The refresh hook runs in parallel with this one, so the first line of
+# a session may read the stamp from before that refresh lands.
+# No stamp: the source is unknown. Else the clone's fetch status decides: bounded_fetch runs the one fetch of the
+# checkout, or returns the status of the fetch another block already ran. A fetch that failed or could not run gives
+# "unread", never a count from a ref that may be stale. Cost: one file read of the stamp, then at most two git reads
+# (rev-parse of origin/main, rev-list --count) and, only when the stamp lags, one read of settings.json for the
+# refresh entry; the fetch is the block's own. No timer, no process left running, no file written.
+if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+  lag_stamp=$(head -n1 "$config_dir/state/hooks-source-sha" 2>/dev/null | tr -d '[:space:]')
+  case "$lag_stamp" in
+    *[!0-9a-f]*|"") lag_stamp="" ;;
+  esac
+  if [ -z "$lag_stamp" ]; then
+    printf 'claude-settings: live hooks source unknown; no install has stamped them\n'
+  elif [ -z "$d" ] || [ ! -e "$d/.git" ] || ! bounded_fetch "$d"; then
+    printf 'claude-settings: origin/main unread; lag unknown\n'
+    [ -n "$d" ] && fetch_mark_reported "$d"
+  else
+    lag_tip=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/main 2>/dev/null)
+    if [ -z "$lag_tip" ]; then
+      printf 'claude-settings: origin/main unread; lag unknown\n'
+    elif [ "$lag_stamp" != "$lag_tip" ]; then
+      lag_count=$(cd "$d" 2>/dev/null && git rev-list --count "$lag_stamp..$lag_tip" 2>/dev/null)
+      case "$lag_count" in
+        ""|*[!0-9]*) printf 'claude-settings: origin/main unread; lag unknown\n' ;;
+        *)
+          printf 'claude-settings: live hooks are from %s, %s commits behind origin/main; rulings since then are not in force.\n' \
+            "$(printf '%s' "$lag_stamp" | cut -c1-12)" "$lag_count"
+          # The refresh entry install.sh writes: its matcher is an anchored regex, empty or "*" or absent for every source.
+          lag_src="${source:-startup}"
+          lag_fires=0
+          if command -v jq >/dev/null 2>&1 && [ -f "$config_dir/settings.json" ] \
+             && [ "$(jq -r --arg s "$lag_src" '
+                  [(.hooks.SessionStart // [])[]
+                   | select(any(.hooks[]?; (.command // "") | (contains("install.sh") and contains("--cloud"))))
+                   | (.matcher // "") as $m
+                   | if $m == "" or $m == "*" then true else (try ($s | test("^(" + $m + ")$")) catch false) end]
+                  | any' "$config_dir/settings.json" 2>/dev/null)" = true ]; then
+            lag_fires=1
+          fi
+          if [ "$lag_fires" = 1 ]; then
+            printf 'claude-settings: a resume reinstalls the hooks from origin/main, and the next resume brings them current.\n'
+          else
+            printf 'claude-settings: this source does not reinstall; start a fresh session.\n'
+          fi
+          ;;
+      esac
     fi
   fi
 fi
