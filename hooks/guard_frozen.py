@@ -1047,6 +1047,7 @@ _JS_TWO = re.compile(
 _JS_BIND = re.compile(r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*")
 _JS_VALUE = re.compile(_JS_STR)
 _JS_JOIN_PIECE = re.compile(r"""\s*(?:'([^']*)'|"([^"]*)"|`([^`$]*)`|([A-Za-z_$][\w$]*))\s*$""")
+_JS_CWD = re.compile(r"process\s*\.\s*cwd\s*\(\s*\)")
 _JS_TEMP_STEP = re.compile(
     r"\s*(?:await\s+)?(?:(?:[A-Za-z_$][\w$]*\s*\.\s*)*(tmpdir|mkdtempSync|mkdtemp)\s*\("
     r"|path\s*\.\s*(?:join|resolve)\s*\(|([A-Za-z_$][\w$]*)(?![\w$]|\s*[.(]))")
@@ -1102,6 +1103,8 @@ def _js_hit(body: str, cwd: str, predicate, script: str = "") -> str:
     for match in _JS_BIND.finditer(body):
         if _js_temp_head(body, match.end(), env):
             values = [_PY_TEMP]
+        elif _JS_CWD.match(body, match.end()):
+            values = [""]   # the cwd itself, so a join from it reads repo-relative
         else:
             value = _JS_VALUE.match(body, match.end())
             values = _js_values(value.groups(), env) if value else []
