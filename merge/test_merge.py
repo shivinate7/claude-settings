@@ -15932,10 +15932,23 @@ class ReviewStampSince(unittest.TestCase):
     def test_a_subfolder_root_reads_the_same_cutover_as_the_repo_root(self):
         # merge/merge.py is a path from the repo root. `git -C <subfolder>` reads that path under the subfolder, finds no history, and
         # gives no cutover, so a guard run from a subfolder would read the cutover as none. The subfolder's answer must be the root's.
+        # The cache is keyed by the repo top. A subfolder call made while the cache holds the root's answer never runs git, so the subfolder
+        # call runs with the cache emptied, and the git calls it makes are counted.
         root = self.repo(salt_at=2)
         fn = review_fn(self, "review_stamp_since")
         self.assertEqual(fn(root, "main"), "2026-10-21T15:04:05Z", "fixture: the repo root's cutover is not the salt commit's time")
-        got = fn(os.path.join(root, "merge"), "main")
+        real, argvs = merge.sh, []
+
+        def counting(args, *a, **k):  # every git call goes through sh, the one seam
+            argvs.append(args)
+            return real(args, *a, **k)
+
+        with unittest.mock.patch.dict(merge._stamp_since, clear=True), unittest.mock.patch.object(merge, "sh", counting):
+            try:
+                got = fn(os.path.join(root, "merge"), "main")
+            except merge.Stop as stop:
+                self.fail("a subfolder root stopped instead of reading the repo top's history:\n" + str(stop))
+        self.assertTrue(any("log" in args for args in argvs), "the subfolder call ran no git log, so it read no history: %r" % (argvs,))
         self.assertEqual(got, "2026-10-21T15:04:05Z", "a subfolder root read the cutover as %r, not the repo root's" % (got,))
 
 
