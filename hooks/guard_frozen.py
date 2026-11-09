@@ -283,46 +283,274 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
-# sees only the word `$D`. One left-to-right pass in `_shell_write_hit` (it feeds the frozen and
-# project-config checks) keeps a table of simple assignments (`D=v`, `export A=1 D=v`, `declare`,
-# a PowerShell `$D = v`), and reads each `$D` or `${D}` as the value current at that point: the
-# last assignment wins, `unset D` clears it, a use before the assignment stays as written, and
-# single quotes do not expand. An unassigned variable stays unresolved and allowed. `$HOME` reads
-# as `~`: `os.path.expandvars` leaves it literal when HOME is unset (the Windows default), so a
-# literal `$HOME/.claude/...` target was allowed.
-# RESIDUAL GAP: a value from `$(...)`, backticks, `read`, `${D:-x}`, a loop variable, `eval`, or an
-# interpreter (`python -c`) is not resolved, nor is a variable set in a different tool call.
-# Fixing that needs a shell parser, not a regex.
-_VAR_TOKEN = re.compile(
-    r"""'[^']*'"""                                                    # single quotes: no expansion
-    r"""|(?<![\w$.\-/:])(?P<n>[A-Za-z_]\w*)=(?!=)(?P<v>"[^"]*"|'[^']*'|[^\s;&|"'`)}]*)"""
-    r"""|\$(?P<pn>[A-Za-z_]\w*)[ \t]*=(?!=)[ \t]*(?P<pv>"[^"]*"|'[^']*'|[^\s;&|"'`)}]*)"""
-    r"""|\bunset\s+(?P<u>\w+)"""
-    r"""|\$(?:(?P<x>[A-Za-z_]\w*)|\{(?P<y>[A-Za-z_]\w*)\})""")
+# sees only the word `$D`. `_resolve_vars` (called first by `_shell_write_hit`, which feeds the frozen
+# and project-config checks) reads the command once, left to right, as the shell reads it: it splits
+# the text into words and quoted spans, keeps a table of simple assignments, and reads each `$D` or
+# `${D}` as the value current at that point. The table holds `D=v` at a command's start (a value is
+# the whole shell word, so `WT="$BASE"/../lane` is one path), the arguments of `export`, `declare`,
+# `typeset`, `local` and `readonly` (`export A=1 D=v`), and a PowerShell `$D = v`. The last assignment
+# wins, `unset D` clears it, a use before the assignment stays as written, and single quotes do not
+# expand. An unassigned variable stays unresolved and allowed. `$HOME` reads as `~`:
+# `os.path.expandvars` leaves it literal when HOME is unset (the Windows default), so a literal
+# `$HOME/.claude/...` target was allowed.
+# Text is not code, and code is not text. An assignment inside double quotes or after a `#` comment
+# is text, and a lone apostrophe in double quotes opens no span, because quotes are read in pairs
+# from the left. An unmated quote is one ordinary character, so the text after it is still read
+# (fail closed: more variables resolve, never fewer). The body of `$(...)` or backticks is a command
+# even inside double quotes, and so is the argument of `eval "..."`. A prefix assignment
+# (`S=x cmd "$S"`) sets the variable for that one command: the command's own words and all later
+# text see the value from before it. A subshell `( ... )`, `$( ... )` or backtick pair gives its
+# assignments back where it ends.
+# RESIDUAL GAP: a value from `$(...)`, backticks, `read`, `${D:-x}`, a loop variable, `eval '...'`, or
+# an interpreter (`python -c`) is not resolved, nor is a variable set in a different tool call or in
+# a pipeline stage. Fixing that needs a shell parser, not this one pass.
+_WORD_STOP = frozenset(" \t\r\n;&|()`")
+_ASSIGN_WORD = re.compile(r"([A-Za-z_]\w*)(\+?)=")
+_VAR_USE = re.compile(r"\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})")
+_PS_NAME = re.compile(r"\$[A-Za-z_]\w*")
+_PS_EQUALS = re.compile(r"[ \t]*=(?!=)[ \t]*")
+# Words after which the next word is still a command's start (`{ D=x; }`, `then D=x`, `eval D=x`).
+_COMMAND_STARTERS = frozenset(("{", "!", "if", "then", "elif", "else", "do", "while", "until", "time", "eval"))
+_DECLARERS = frozenset(("export", "declare", "typeset", "local", "readonly"))
+_NEST_LIMIT = 20   # quotes nested in `$(...)` nested in quotes; deeper reads as plain text
+
+
+def _subst_end(text: str, j: int, depth: int) -> int:
+    """Index of the `)` that ends the `$(` body starting at `j`, or -1 when it has no mate."""
+    if depth > _NEST_LIMIT:
+        return -1
+    level, n = 1, len(text)
+    while j < n:
+        c = text[j]
+        if c == "\\":
+            j += 2
+            continue
+        if c == "'":
+            j = text.find("'", j + 1)
+            if j < 0:
+                return -1
+        elif c == '"':
+            j = _dq_end(text, j + 1, depth + 1)
+            if j < 0:
+                return -1
+        elif c == "(":
+            level += 1
+        elif c == ")":
+            level -= 1
+            if level == 0:
+                return j
+        j += 1
+    return -1
+
+
+def _dq_end(text: str, j: int, depth: int = 0) -> int:
+    """Index of the `"` that closes a double-quoted span whose text starts at `j`, or -1."""
+    n = len(text)
+    while j < n and text[j] != '"':
+        if text[j] == "\\":
+            j += 2
+        elif text[j] == "$" and text.startswith("(", j + 1):
+            end = _subst_end(text, j + 2, depth)
+            j = end + 1 if end >= 0 else j + 1
+        else:
+            j += 1
+    return j if j < n else -1
+
+
+def _read_word(cmd: str, i: int):
+    """(end, parts) of the shell word at `i`. `parts` are (kind, text): kind `p` plain, `d` the inside
+    of a double-quoted span, `s` the inside of a single-quoted span. Quotes are read in pairs; a quote
+    with no mate is an ordinary character."""
+    parts, plain, n = [], [], len(cmd)
+
+    def flush():
+        if plain:
+            parts.append(("p", "".join(plain)))
+            plain.clear()
+
+    while i < n and cmd[i] not in _WORD_STOP:
+        c = cmd[i]
+        if c == "\\" and i + 1 < n:
+            plain.append(cmd[i:i + 2])
+            i += 2
+            continue
+        if c == "'":
+            j = cmd.find("'", i + 1)
+            if j >= 0:
+                flush()
+                parts.append(("s", cmd[i + 1:j]))
+                i = j + 1
+                continue
+        elif c == '"':
+            j = _dq_end(cmd, i + 1)
+            if j >= 0:
+                flush()
+                parts.append(("d", cmd[i + 1:j]))
+                i = j + 1
+                continue
+        elif c == "$" and cmd.startswith("{", i + 1):
+            j = cmd.find("}", i + 2)
+            if j >= 0:
+                plain.append(cmd[i:j + 1])
+                i = j + 1
+                continue
+        plain.append(c)
+        i += 1
+    flush()
+    return i, parts
+
+
+def _expand(text: str, table: dict) -> str:
+    return _VAR_USE.sub(lambda m: table.get(m.group(1) or m.group(2), m.group(0)), text)
+
+
+def _dq_text(text: str, table: dict) -> str:
+    """Double-quoted text with each `$VAR` read. A `$(...)` or backtick body is a command, read on a copy
+    of the table so its assignments end with it."""
+    out, i, start, n = [], 0, 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "$" and text.startswith("(", i + 1):
+            end, skip = _subst_end(text, i + 2, 0), 2
+        elif c == "`":
+            end, skip = text.find("`", i + 1), 1
+        else:
+            i += 1
+            continue
+        if end < 0:
+            i += 1
+            continue
+        out.append(_expand(text[start:i], table))
+        out.append(text[i:i + skip] + _resolve_into(text[i + skip:end], dict(table))[0] + text[end])
+        i = start = end + 1
+    out.append(_expand(text[start:], table))
+    return "".join(out)
+
+
+def _rebuild(parts, table: dict, as_script: bool = False):
+    """(the word's text with each `$VAR` outside single quotes read as its value, the table after it).
+    `as_script` reads a double-quoted span as a command that runs here (`eval "D=x"`)."""
+    out = []
+    for kind, text in parts:
+        if kind == "s":
+            out.append("'" + text + "'")
+        elif kind == "d" and as_script:
+            text, table = _resolve_into(text, table)
+            out.append('"' + text + '"')
+        elif kind == "d":
+            out.append('"' + _dq_text(text, table) + '"')
+        else:
+            out.append(_expand(text, table))
+    return "".join(out), table
+
+
+def _value_of(parts, table: dict) -> str:
+    """The value a shell gives an assignment's word: quotes removed, `$VAR` read, escapes dropped."""
+    pieces = []
+    for kind, text in parts:
+        if kind == "s":
+            pieces.append(text)
+        elif kind == "d":
+            pieces.append(re.sub(r'\\(["\\$`])', r"\1", _expand(text, table)))
+        else:
+            pieces.append(re.sub(r"\\(.)", r"\1", _expand(text, table), flags=re.S))
+    return "".join(pieces)
+
+
+def _assign(table: dict, name: str, plus: str, parts, opens_group: bool) -> None:
+    """Set `name` in `table` to the value `parts` read as. A value that holds `$` or a backtick, or that is
+    cut by a `(` or backtick (an array, `$(...)`), is not known: the name forgets its old value too."""
+    value = _value_of(parts, table)
+    if "$" in value or "`" in value or opens_group:
+        table.pop(name, None)
+    elif plus:
+        if name in table:
+            table[name] += value
+    else:
+        table[name] = value
 
 
 def _resolve_vars(cmd: str) -> str:
     """Read each `$VAR` or `${VAR}` as the value assigned earlier in the command."""
-    table = {"HOME": "~"}
+    return _resolve_into(cmd, {"HOME": "~"})[0]
 
-    def use(m):
-        return table.get(m.group("x") or m.group("y"), m.group(0))
 
-    def step(m):
-        if m.group("u"):
-            table.pop(m.group("u"), None)
-        name, raw = (m.group("n"), m.group("v")) if m.group("n") else (m.group("pn"), m.group("pv"))
-        if name:
-            value = raw if raw.startswith("'") else _VAR_TOKEN.sub(step, raw)
-            value = value.strip("'\"")
-            if "$" in value or "`" in value:
-                table.pop(name, None)  # not resolvable: forget any older value too
-            else:
-                table[name] = value
-            return m.group(0)
-        return use(m) if (m.group("x") or m.group("y")) else m.group(0)
-
-    return _VAR_TOKEN.sub(step, cmd)
+def _resolve_into(cmd: str, table: dict):
+    """(`cmd` with each `$VAR` read, the table after it): `_resolve_vars` from a given table."""
+    out, stack = [], []   # stack: (table to restore where the group ends, glued to a `$`, closer)
+    n, i = len(cmd), 0
+    at_start, before, mode = True, None, ""   # before: the table from before this command's assignments
+    while i < n:
+        c = cmd[i]
+        if c in " \t\r":
+            out.append(c)
+            i += 1
+        elif c in ";&|\n":
+            out.append(c)
+            i += 1
+            at_start, before, mode = True, None, ""
+        elif c == "(" or (c == "`" and not (stack and stack[-1][2] == "`")):
+            stack.append((dict(table), c == "`" or cmd[i - 1:i] == "$", ")" if c == "(" else "`"))
+            out.append(c)
+            i += 1
+            at_start, before, mode = True, None, ""
+        elif c == ")" or c == "`":   # `)` ends the nearest `(`; a second backtick ends the open one
+            group = False
+            for level in range(len(stack) - 1, -1, -1):
+                if stack[level][2] == (")" if c == ")" else "`"):
+                    table, group, _closer = stack[level]
+                    del stack[level:]
+                    break
+            out.append(c)
+            i += 1
+            at_start, before, mode = not group, None, ""
+        elif c == "#":   # a comment: its text is read for uses and holds no assignment
+            j = cmd.find("\n", i)
+            j = n if j < 0 else j
+            out.append(_expand(cmd[i:j], table))
+            i = j
+        else:
+            end, parts = _read_word(cmd, i)
+            word = cmd[i:end]
+            head = _ASSIGN_WORD.match(parts[0][1]) if parts and parts[0][0] == "p" else None
+            if head and (at_start or mode == "declare"):
+                if at_start and before is None:
+                    before = dict(table)
+                rest = parts[0][1][head.end():]
+                _assign(table, head.group(1), head.group(2), ([("p", rest)] if rest else []) + parts[1:],
+                        cmd.startswith(("(", "`"), end))
+                out.append(word)
+                i = end
+                continue
+            if head is None and len(parts) == 1 and parts[0][0] == "p" and _PS_NAME.fullmatch(parts[0][1]):
+                eq = _PS_EQUALS.match(cmd, end)
+                if eq:   # PowerShell `$D = v`. A paren is no scope there, so every level keeps it.
+                    vend, vparts = _read_word(cmd, eq.end())
+                    for held in [table] + [saved for saved, _glued, _closer in stack]:
+                        _assign(held, parts[0][1][1:], "", vparts, cmd.startswith(("(", "`"), vend))
+                    out.append(cmd[i:vend])
+                    i = vend
+                    continue
+            if at_start:
+                if word in _COMMAND_STARTERS:
+                    mode = "eval" if word == "eval" else mode
+                    out.append(word)
+                    i = end
+                    continue
+                if before is not None:
+                    table, before = before, None   # a prefix assignment reaches only its own command
+                at_start = False
+                mode = ("declare" if word in _DECLARERS else "unset" if word == "unset"
+                        else mode if mode == "eval" else "")
+            elif mode == "unset" and re.fullmatch(r"\w+", word):
+                table.pop(word, None)
+            text, table = _rebuild(parts, table, mode == "eval")
+            out.append(text)
+            i = end
+    return "".join(out), table
 
 
 # DATA IS NOT A WRITE. A command that only names the cap key or a frozen path as text is not asked
