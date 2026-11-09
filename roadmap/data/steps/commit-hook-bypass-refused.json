@@ -1,0 +1,10 @@
+{
+  "title": "The guard refuses a git commit or push that skips git hooks",
+  "why": "Lane bg-tail-loses-verdict, 23:56 CST Nov 8: a test-author (haiku) made its first commit with `git -c core.hooksPath=/dev/null`, which skips every git hook. It amended with hooks on before pushing, so the pushed head ecc7be4d1 (#2156) went through hooks and no harm landed, but nothing refused the bypass. Main's hooks/*.py hold no refusal of `--no-verify` or `core.hooksPath` (triage grep 23:57 CST).",
+  "note": "Refuse `-c core.hooksPath=<anything>` and `--no-verify` / `-n` on git commit, merge and push. Exempt hooks/mutate_shared.py's own internal worktree add (it sets core.hooksPath for a throwaway tree). Red case first.",
+  "phase": "now",
+  "owner": "coordinator",
+  "status": "todo",
+  "order": 882,
+  "updatedAt": "2026-11-08T23:56:00-06:00"
+}

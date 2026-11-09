@@ -1,0 +1,10 @@
+{
+  "title": "Decide whether a cloud clone arms the main-ref reference-transaction hook",
+  "why": "Lane bg-tail-loses-verdict, 23:56 CST Nov 8: in cloud clones, `githooks/main-ref/install.sh --check` reports the reference-transaction hook is not armed. Open: can a cloud clone arm it, and should it?",
+  "note": "First read what the hook guards and how the cloud SessionStart install runs; compare step banchi-make-hooks-arms.",
+  "phase": "next",
+  "owner": "coordinator",
+  "status": "todo",
+  "order": 883,
+  "updatedAt": "2026-11-08T23:56:00-06:00"
+}
