@@ -3,6 +3,7 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import bisect
 import os
 import re
 import stat
@@ -11,8 +12,8 @@ import guard_core
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
     _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
-    _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
-    inline_script, is_powershell, norm, resolve_command, segment_tokens, split_segments,
+    _SHELLS, _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
+    is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
 
 
@@ -148,9 +149,6 @@ INTERPRETER_RUNNER = re.compile(
     r"(?:^|[\s;&|(])(?:(?:python[\d.]*|node(?:js)?|ruby|perl|php|deno)\s+(?:-\w+\s+)*-\w*[ce]"
     r"|php\s+(?:-\w+\s+)*-\w*r"
     r"|deno\s+(?:-\w+\s+)*eval(?:\s+-{1,2}\w[\w-]*(?:=\S*)?(?:\s+[^\s\"'-]\S*)?)*)\s*$")
-# An argv call: `new Deno.Command("git", {args: ["push", "-f"]})` names its program and its
-# arguments as separate strings, so the pairs of one call are read as one command line.
-ARGV_CALL = re.compile(r"\bDeno\.Command\s*\(\s*$")
 # The text between two strings of one argv call. Each part starts with its own character, so a
 # failed fullmatch takes linear time.
 ARGV_GAP = re.compile(r"[\s,]*(?:\{\s*args\s*:\s*\[[\s,]*)?")
@@ -159,15 +157,32 @@ ARGV_GAP = re.compile(r"[\s,]*(?:\{\s*args\s*:\s*\[[\s,]*)?")
 # PUSH_QUOTED reads raw quotes and ignores backslashes, so a quote here could pair with a
 # quote in a neighbouring word and blank the words between.
 ARGV_UNSAFE = re.compile(r"[^\w@%+=:,./-]")
-# Inside a script, a call that runs its string argument as a command, even inside a print.
-CALL_RUNNER = re.compile(
-    r"(?:\bos\.(?:system|popen|exec\w*|spawn\w*)|\bsubprocess\.\w+|\bPopen|\bexec\w*|\bsystem|\bpopen)"
-    r"\s*\(\s*\[?\s*$")
+# Inside a script, the names of a call that runs its string argument as a command, even inside a
+# print: the one list of run calls.
+RUN_NAME = (r"\bos\.(?:system|popen|exec\w*|spawn\w*)|\bsubprocess\.\w+|\bPopen|\bexec\w*|\bsystem|\bpopen"
+            r"|\bcheck_(?:output|call)|\bshell_exec|\bspawn\w*")
+RUN_NAME_END = re.compile(r"(?:" + RUN_NAME + r")$")
+RUN_CALL = r"(?:" + RUN_NAME + r")\s*\(\s*"
+CALL_RUNNER = re.compile(RUN_CALL + r"\[?\s*$")
+# An argv call: `new Deno.Command("git", {args: ["push", "-f"]})` and a run call with a list
+# (`subprocess.run(["git", "push", "-f"])`) name the program and its arguments as separate strings,
+# so the pairs of one call are read as one command line.
+ARGV_CALL = re.compile(r"\bDeno\.Command\s*\(\s*$|" + RUN_CALL + r"\[\s*$")
 # The printers: the one place that names the calls and commands that show their string and run
 # nothing. A pair inside a runner script is a command unless a printer holds it.
-PRINT_CALL = re.compile(
-    r"\b(?:print\w*|console\.\w+|puts|say|logger\.\w+|System\.out\.print\w*|Write-(?:Host|Output))\s*\(")
-PRINT_COMMAND = re.compile(r"^[\s\"'(]*(?:(?:sudo|command|builtin)\s+)?(?:echo|printf|print|puts)\b")
+PRINT_NAME = (r"print\w*|console\.\w+|puts|say|logger\.\w+|System\.out\.print\w*"
+              r"|sys\.std(?:out|err)\.write|Write-(?:Host|Output)")
+PRINT_CALL_NAME = re.compile(r"\b(?:" + PRINT_NAME + r")$")
+PRINT_COMMAND = re.compile(r"[\s\"'(]*(?:(?:sudo|command|builtin)\s+)?(?:echo|printf|print|puts)\b")
+# The call name that ends the text ahead of an open `(`. Words that take a `(` and call nothing
+# (`if (`, `return (`) are no call.
+CALL_NAME = re.compile(r"([\w.-]+)\s*$")
+NOT_A_CALL = {"if", "while", "for", "switch", "return", "and", "or", "not", "in", "is", "else", "elif",
+              "await", "yield", "do"}
+STATEMENT_END = re.compile(r"[;&|\n]")
+# What a pipe feeds: a shell, which runs the printed text as a script.
+PIPE_INTO_SHELL = re.compile(
+    r"\s*(?:(?:sudo|exec|env)\s+)?(?:[^\s|;&]*/)?(?:" + _SHELLS + r")(?![\w.-])")
 
 
 def _argv_word(arg: str) -> str:
@@ -180,56 +195,106 @@ def _argv_word(arg: str) -> str:
     return escaped or "\\ "
 
 
-def _printed(script: str) -> bool:
-    """True when the script text ahead of an escaped quote sits in a printer: its statement
-    (cut at `;`, `&`, `|` or a newline) starts with a printer command such as `echo` or
-    `printf`, or holds a print call that is still open."""
-    stmt = re.split(r"[;&|\n]", script)[-1]
-    return PRINT_COMMAND.search(stmt) is not None or PRINT_CALL.search(stmt) is not None
+class _Statement:
+    """The statement a script walk is in: where it starts and which calls are open in it. A pair is
+    held as printed text when a printer holds it: the statement starts with a printer command
+    (`echo`, `printf`), or an open call is a printer (`print(`, `console.log(`). Inside a printer a
+    pair runs only when a run call (RUN_NAME) sits between it and the printer (`echo shell_exec(`,
+    `print(check_output(`); any other call (`print(len(`, `echo json_encode(`) prints its result.
+    With no printer, every pair runs, whatever call holds it."""
+
+    def __init__(self, body: str):
+        self.body, self.start, self.calls, self.command = body, 0, [], None
+
+    def advance(self, index: int):
+        """Read the unquoted character at `index`: a statement end clears the state, a `(` opens a
+        call or a group, a `)` closes one."""
+        char = self.body[index]
+        if char in ";&|\n":
+            self.start, self.calls, self.command = index + 1, [], None
+        elif char == "(":
+            name = CALL_NAME.search(self.body, max(0, index - 48), index)
+            name = name.group(1) if name and name.group(1) not in NOT_A_CALL else ""
+            self.calls.append(name)
+        elif char == ")" and self.calls:
+            self.calls.pop()
+
+    def printed(self, index: int) -> bool:
+        # A run call named some other way (`sh = os.system; print(sh(...))`) reads as printed: only
+        # a writer who means to hide the call takes that shape.
+        for name in reversed(self.calls):
+            if RUN_NAME_END.search(name):
+                return False
+            if PRINT_CALL_NAME.search(name):
+                return True
+        if self.command is None:
+            self.command = PRINT_COMMAND.match(self.body, self.start, index) is not None
+        return self.command
 
 
-def _nested_commands(span: str, before: str = "") -> str:
-    """A double-quoted span that holds escaped quotes is a script handed to an interpreter
-    (`python3 -c "os.system(\\"git push\\")"`). In a runner script (`bash -c`, `eval`, `ssh`,
-    `python -c`, `node -e`) each escaped-quote pair is a command unless a printer holds it
-    (`print`, `echo`, `printf`, `console.log`: see PRINT_CALL and PRINT_COMMAND). The call may
-    be named any way: an alias, a from-import, `shlex.split`, a variable. A CALL_RUNNER call runs
-    its pair even inside a print. Outside a runner script only a CALL_RUNNER pair is read
-    (`before` is the segment text ahead of the span). Give each command its own line, so the
-    words that follow it in the script (`print(\\"+1\\")`) are not its arguments."""
+def _nested_commands(span: str, before: str = "", mark: str = '\\"') -> str:
+    """A quoted span that holds quote marks is a script handed to an interpreter
+    (`python3 -c "os.system(\\"git push\\")"`, `python3 -c 'os.system("git push")'`). `mark` is the
+    pair's quote as it sits in the span: `\\"` in a double-quoted span, `"` in a single-quoted one. In a
+    runner script (`bash -c`, `eval`, `ssh`, `python -c`, `node -e`) each pair is a command unless a
+    printer holds it (`print`, `echo`, `printf`, `console.log`: see _Statement). The call may be named
+    any way: an alias, a from-import, `shlex.split`, a variable. Printed text that a pipe feeds into a
+    shell (`echo \\"git push\\" | sh`) is a script and runs. A CALL_RUNNER call runs its pair even inside
+    a print. Outside a runner script only a CALL_RUNNER pair is read (`before` is the segment text
+    ahead of the span). Give each command its own line, so the words that follow it in the script
+    (`print(\\"+1\\")`) are not its arguments."""
     lines, piece, inner, run, index = ["\n"], [], False, False, 1
     words, argv, closed = [], False, 0
     script = (SCRIPT_RUNNER.search(before) or INTERPRETER_RUNNER.search(before)) is not None
     body = span[:-1]
+    statement = _Statement(body)
+    # Each statement end, found once: a pair is fed to a shell when its statement ends in a pipe to one.
+    ends = [match.start() for match in STATEMENT_END.finditer(body)] if script else []
+    mark_width = len(mark)
 
     def emit():
         nonlocal words
         if words:
-            # A shell's `-c` argument is a script, read as a runner line of its own.
-            shell = inline_script(words)
-            lines.append(shell + "\n" if shell else " ".join(map(_argv_word, words)) + "\n")
+            # A list whose program runs an element as a command line (`sh -c`, `ssh`, `su -c`,
+            # `watch`: inner_commands) hands that line on as it stands. Any other element is one word.
+            handed = inner_commands(words)
+            # A list of one string runs as a command line under shell=True, so it is read as one.
+            lines.append("".join(text + "\n" for text in handed) if handed else words[0] + "\n"
+                         if len(words) == 1 else " ".join(map(_argv_word, words)) + "\n")
             words = []
 
+    def piped_into_shell(close: int) -> bool:
+        """True when the statement of the pair that closes at `close` ends in a pipe into a shell."""
+        at = bisect.bisect_left(ends, close + mark_width)
+        return (at < len(ends) and body[ends[at]] == "|"
+                and PIPE_INTO_SHELL.match(body, ends[at] + 1) is not None)
+
     while index < len(body):
-        if body.startswith('\\"', index):
+        if body.startswith(mark, index):
             if inner:
                 if run:
                     # an argv call's pairs gather as words; any other pair is a line of its own
                     (words if argv else lines).append("".join(piece) if argv else "".join(piece) + "\n")
                 piece = []
-                closed = index + 2
+                closed = index + mark_width
             else:
-                ahead = body[:index]
+                ahead = body[max(0, index - 256):index]
                 if not (argv and ARGV_GAP.fullmatch(body[closed:index])):
                     emit()
-                    run = CALL_RUNNER.search(ahead) is not None or (script and not _printed(ahead))
+                    run = CALL_RUNNER.search(ahead) is not None
+                    if script and not run:
+                        close = body.find(mark, index + mark_width)
+                        run = not statement.printed(index) or (close >= 0 and piped_into_shell(close))
                     argv = run and ARGV_CALL.search(ahead) is not None
             inner = not inner
-            width = 2
+            width = mark_width
         else:
             width = 2 if body[index] == "\\" else 1
-            if inner and run:
-                piece.append(body[index:index + width])
+            if inner:
+                if run:
+                    piece.append(body[index:index + width])
+            elif width == 1:
+                statement.advance(index)
         index += width
     if inner and run:
         (words if argv else lines).append("".join(piece) if argv else "".join(piece) + "\n")
@@ -263,8 +328,23 @@ def _push_scan(segment: str) -> str:
                 index = length
                 continue
             span = segment[index:end + 1]
-            out.append(_nested_commands(span, segment[:index])
-                       if char == '"' and '\\"' in span else span)
+            ahead = segment[max(0, index - 512):index]
+            if char == '"' and '\\"' in span:
+                span = _nested_commands(span, segment[:index])
+            elif char == "'" and '"' in span and INTERPRETER_RUNNER.search(ahead):
+                # The runner's script sits in single quotes, so its own strings are plain pairs.
+                span = _nested_commands(span, ahead, '"')
+            elif char == '"' and ARGV_CALL.search(ahead[-256:]):
+                # An argv call on a heredoc line (see below): the rest of the line is the call's
+                # arguments, so its pairs join into one command line as in a deno eval script.
+                out.append(_nested_commands("'" + segment[max(0, index - 256):] + "'", "deno eval ", '"'))
+                break
+            elif char == '"' and CALL_RUNNER.search(ahead[-256:]):
+                # BANDAID: an interpreter heredoc body reaches this reader a line at a time, with
+                # no runner word ahead of it. A string handed to a call that runs it is a command
+                # wherever the call stands; no shell line has that shape.
+                span = "\n" + span[1:-1] + "\n"
+            out.append(span)
             index = end + 1
         else:
             out.append(char)
@@ -815,13 +895,16 @@ def _git_subcommands(words):
     return found
 
 
-def _command_hit(segment: str, names, judge, raw=None, by_word=False) -> str:
+def _command_hit(segment: str, names, judge, raw=None, by_word=False, flagged=False) -> str:
     """The first text `judge` returns for the arguments of a command named in `names`, in one parsed
     segment, else ''. The command word sits behind its wrappers or a
     subshell, or inside the script a shell, `eval` or `ssh` hands on. The one reader of these forms.
     A group's closing `)` is no part of the last argument. A segment shlex cannot parse is read as
     raw text with the pattern `raw`, when there is one. With `by_word`, `judge` also gets the
-    command word it judges."""
+    command word it judges. With `flagged`, `judge` is known to answer '' for arguments that hold no
+    word starting with `-` or `/`, so a command word with no such word after it is not judged: a
+    chain of command words (`echo rm rm rm ...`) then costs one pass, not one pass per word. This is a
+    bandaid: a chain with a flag at its end is still judged word by word."""
     tokens = segment_tokens(segment)
     if tokens is None:
         found = raw.search(segment) if raw else None
@@ -840,17 +923,19 @@ def _command_hit(segment: str, names, judge, raw=None, by_word=False) -> str:
                 if found:
                     return found
     words, bare = bare_words(segment)
+    last_flag = max((i for i, w in enumerate(words) if w[:1] in ("-", "/")), default=-1) if flagged else len(words)
     for at in sorted(bare - _git_subcommands(words)):
         opened = SUBST_OPEN.match(words[at])
         word = words[at][opened.end():] if opened else words[at]
+        if basename(word) not in names or at >= last_flag:
+            continue   # reading the group only for a named command keeps the loop linear in the words
         args = _in_group(words[at + 1:], bool(opened) and opened.group(1) == "`")
-        found = basename(word) in names and (
-            judge(args, basename(word)) if by_word else judge(args))
+        found = judge(args, basename(word)) if by_word else judge(args)
         if found:
             return found
     for script in inner_commands(tokens):
         for inner in split_segments(script):
-            found = _command_hit(inner, names, judge, raw, by_word)
+            found = _command_hit(inner, names, judge, raw, by_word, flagged)
             if found:
                 return found
     return ""
@@ -864,7 +949,7 @@ def _rm_wide_text(args) -> str:
 def rm_delete_hit(segment: str) -> str:
     """Return the matched text when one segment runs `rm -rf` at a root, a home, the working
     directory or a glob, else ''. A segment shlex cannot parse is read as raw text."""
-    return _command_hit(segment, ("rm",), _rm_wide_text, RM_RAW)
+    return _command_hit(segment, ("rm",), _rm_wide_text, RM_RAW, flagged=True)
 
 
 # ------------------------------------------------------------ `.`, a parent, the working folder
@@ -964,7 +1049,7 @@ def parent_delete_hit(segments, number: int, cwd: str):
     segment = segments[number]
     matched = _command_hit(
         segment, DELETE_WORDS, lambda args, word: _parent_delete_text(args, word, cwd, moved),
-        RM_PARENT_RAW, by_word=True)
+        RM_PARENT_RAW, by_word=True, flagged=True)
     if not matched:
         return "", ""
     if moved and REL_PARENT.fullmatch(_pwd_as_dot(matched.split()[-1].strip("'\""))):
@@ -1109,7 +1194,8 @@ def linked_nm_hit(segment: str, where: str) -> str:
             return "npm " + subcommand + " in a folder whose node_modules is a link"
         return ""
 
-    return _command_hit(segment, DELETE_WORDS, delete) or _command_hit(segment, ("npm", "npm.cmd"), install)
+    return (_command_hit(segment, DELETE_WORDS, delete, flagged=True)
+            or _command_hit(segment, ("npm", "npm.cmd"), install))
 
 
 LINKED_NM_REASON = (
