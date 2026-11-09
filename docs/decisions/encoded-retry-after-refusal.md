@@ -42,7 +42,7 @@ Mistake it stops: an agent met a refusal of a command, then sent the same comman
 
 Outcome protected: a refusal stays final, so the owner or the orchestrator decides the next step.
 
-False-alarm cost: an ordinary decode into a shell within ten minutes of an unrelated refusal in the same session is refused once, and the agent reports. An override lifts it. A guard.log deny from one agent brakes the orchestrator's own decode-and-run for ten minutes (accepted, the log names no agent). A decoded variable used as data in a shell's script, as `bash -c "./deploy.sh $PW"`, is refused too.
+False-alarm cost: an ordinary decode into a shell within ten minutes of an unrelated refusal in the same session is refused, and the agent reports. Each retry inside the window is refused again, so the block lasts until ten minutes pass with no refusal. An override lifts it. A guard.log deny from one agent brakes the orchestrator's own decode-and-run for ten minutes (accepted, the log names no agent). A decoded variable used as data in a shell's script, as `bash -c "./deploy.sh $PW"`, is refused too.
 
 Not read:
 
