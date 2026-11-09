@@ -87,3 +87,19 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   gives it: the hint on its own line, then Close (`.btn.rx`) at the start and Send reply at the end of one line. Under
   `12.5em`, where those two no longer fit side by side, Send reply takes its own line and Close the next. The Send bar, item
   cards and `.rfoot` (each is flex-wrap today).
+
+## 6. Round 2: what the first build got wrong, and the rule now
+
+- The Ask box rule (`askf (width <= 28.375em)`) applies to the Ask box only (`:where(.askform:not(.replyform))`). The reply form is an
+  `askf` container too, and has its own stacked arrangement from `26.75em` (its content in the 520 px window). At 530 and 546 wide
+  at the default text the reply form is wider than that, so Close sits left of Send reply on one line, as main draws it.
+- The Designs head's position reads `1/2` or `1 of 2` by the `dsh` container: its `30.5em` rule sets `--pos-short` on `#dPos`,
+  and the script reads that custom property. The window query is gone. The text is still set by script, because the tests read it as text.
+- A hidden sizer ("Dismissing…", "Restoring…") in the ask list clips on one line (`max-inline-size: 100%`), so it never sets a press's
+  height: the presses stay 44 px at 180 wide. Show answer takes 12 px of the row's end padding at 180 wide so it stays on one line
+  (a bandaid for that one width; at larger text it wraps inside the window).
+- The room under the page follows the send bar's real height (`--bar-h`, set from the bar by a `ResizeObserver`), never under 96 px,
+  so the bar covers no list element where it wraps and grows at 180 to 360 wide with text doubled or tripled.
+- At 180 to 320 wide with text doubled or tripled, no element sets the width of the Ask box or the list: `.asks-body`, `#askList` and
+  `.asks-head` have one `minmax(0, 1fr)` track, the Show dismissed toggle's words break inside it, the Questions heading wraps, and
+  the reply waiting line breaks anywhere.
