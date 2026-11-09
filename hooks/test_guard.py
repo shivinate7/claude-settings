@@ -10047,6 +10047,24 @@ sh("env-child: deny, sh -c set > out.txt writes the shell variables to a file, u
 sh("env-child: deny, sh -c printenv >> log appends the environment to a file, uv run",
    "uv run --env-file " + ENV + " sh -c 'printenv >> log'", "deny", "env-file", cwd=NOGIT)
 
+# A $( ) or backtick body in the child's shell string that reads the env file. The child shell runs the body,
+# so it reads the file as `cat .env` does, and each deny is one such body. The allows put a date and a
+# different file in the same substitution, so the deny turns on the read and not on the substitution.
+sh("env-child: deny, sh -c echo a double-quoted $(cat .env) reads the env file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo \"$(cat " + ENV + ")\"'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c printf a double-quoted $(cat .env) reads the env file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'printf %s \"$(cat " + ENV + ")\"'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c echo an unquoted $(cat .env) reads the env file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo $(cat " + ENV + ")'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c echo a backtick `cat .env` reads the env file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo `cat " + ENV + "`'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker run sh -c echo a double-quoted $(cat .env) reads the env file in img",
+   "docker run --env-file " + ENV + " img sh -c 'echo \"$(cat " + ENV + ")\"'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, sh -c echo a double-quoted $(date) runs date, the control for the read, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo \"$(date)\"'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c echo a double-quoted $(cat README.md) reads another file, the control, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo \"$(cat README.md)\"'", "allow", cwd=NOGIT)
+
 # A double-quoted substitution is expanded by the parent shell before uv runs, and the parent holds no
 # file value, so it prints HOME and nothing from the file. docker compose config prints service names
 # or nothing. perl -pe rewrites text in a file it reads and prints no variable.
@@ -10150,6 +10168,122 @@ sh("env-child: deny, a ruby code string whose second line is system env runs env
    "uv run --env-file " + ENV + " ruby -e 'puts 1\nsystem(\"env\")'", "deny", "env-file", cwd=NOGIT)
 sh("env-child: allow, ruby puts a double-quoted don't, a lone quote in text, uv run",
    "uv run --env-file " + ENV + " ruby -e 'puts \"don'\\''t\"'", "allow", cwd=NOGIT)
+
+# Script forms the reader judges: an awk program given by -e or --source, a ruby here-string, a ruby #{ENV} in
+# a string, and a value letter whose glued value holds a code letter. A value letter (perl -I, ruby -r) takes
+# the rest of its word, so a code letter in that value is no option. An awk -f program is a file the guard does
+# not read, so the word after it is data. Each name holds the words the MUTATE_ONLY fragment selects.
+sh("env-child form: deny, gawk --source names ENVIRON, uv run --env-file runs gawk",
+   "uv run --env-file " + ENV + " gawk --source 'BEGIN{print ENVIRON[\"X\"]}'", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, awk -e names ENVIRON, uv run --env-file runs awk",
+   "uv run --env-file " + ENV + " awk -e 'BEGIN{print ENVIRON[\"X\"]}'", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, a ruby here-string p ENV is code, uv run --env-file runs ruby",
+   "uv run --env-file " + ENV + " ruby <<< 'p ENV'", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, a ruby #{ENV} in a double-quoted string is code, uv run --env-file runs ruby",
+   "uv run --env-file " + ENV + " ruby -e 'puts \"#{ENV}\"'", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, perl -Iinclude glues an e to its value, the -e then prints %ENV",
+   "uv run --env-file " + ENV + " perl -Iinclude -e 'print %ENV'", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, ruby -rdate glues an e to its value, the -e then prints ENV",
+   "uv run --env-file " + ENV + " ruby -rdate -e 'p ENV'", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: allow, awk -f prog.awk reads no program, ENV.csv after it is data",
+   "uv run --env-file " + ENV + " awk -f prog.awk ENV.csv", "allow", cwd=NOGIT)
+sh("env-child form: deny, sh -c with an unquoted backslash in pr\\intenv is printenv, uv run",
+   "uv run --env-file " + ENV + " sh -c pr\\intenv", "deny", "env-file", cwd=NOGIT)
+
+# A path listing names the env file and reads none of it, so it is allowed. A find that runs cat on the
+# file reads it, so the -exec cat is the control that stays denied.
+sh("env-child form: allow, find -name with -print lists the env file name, reads no contents",
+   "find . -name '" + ENV + "' -print", "allow", cwd=NOGIT)
+sh("env-child form: allow, find -name lists the env file name, reads no contents",
+   "find . -name " + ENV, "allow", cwd=NOGIT)
+sh("env-child form: allow, ls -a lists the env file name, reads no contents",
+   "ls -a " + ENV, "allow", cwd=NOGIT)
+sh("env-child form: deny, find -exec cat reads the env file, the control for find -name",
+   "find . -name " + ENV + " -exec cat {} \\;", "deny", "env-file", cwd=NOGIT)
+
+# A find that lists the env file and feeds its names to a reader runs the reader on the file: xargs runs cat
+# or grep on each listed name, and a $(), a backtick or a <() hands the list to a reader the same way. Each
+# form is denied. A find that counts its names with wc -l reads none of them, so that pin is allowed.
+sh("env-child form: deny, find -name with -print piped to xargs cat reads each listed env file",
+   "find . -name " + ENV + " -print | xargs cat", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, find -name piped to xargs grep reads each listed env file",
+   "find . -name " + ENV + " | xargs grep KEY", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, find -print0 piped to xargs -0 cat reads each listed env file",
+   "find . -name " + ENV + " -print0 | xargs -0 cat", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, a dollar-paren substitution of find -name hands the env file to cat",
+   "cat $(find . -name " + ENV + ")", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, a backtick substitution of find -name hands the env file to cat",
+   "cat `find . -name " + ENV + "`", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, a double-quoted dollar-paren substitution of find -name hands the env file to cat",
+   'cat "$(find . -name ' + ENV + ')"', "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, a dollar-paren substitution of find -name hands the env file to source",
+   "source $(find . -name " + ENV + ")", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, a process substitution of find -name feeds the env file to xargs cat",
+   "xargs cat < <(find . -name " + ENV + ")", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: allow, find -name with -print piped to wc -l counts the env file name, reads no contents",
+   "find . -name " + ENV + " -print | wc -l", "allow", cwd=NOGIT)
+
+# A find pipe chain that ends in a reader, a while loop that cats each name, or a list file read back by $(cat)
+# reads each listed env file, so each is denied. Each mutant named here turns the case red: the find actions
+# cut to FIND_EXEC_ACTIONS (ENV_FIND_ACTIONS), the filters cut to ("wc",) (ENV_FIND_FILTERS), the name tests
+# cut to ("-name",) (ENV_FIND_NAME_TESTS).
+sh("env-child form: deny, find -name piped to sort then xargs cat reads each listed env file",
+   "find . -name " + ENV + " | sort | xargs cat", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, find -name -print piped to head then xargs cat reads each listed env file",
+   "find . -name " + ENV + " -print | head -1 | xargs cat", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, find -name piped to cut then xargs cat reads each listed env file",
+   "find . -name " + ENV + " | cut -d/ -f2 | xargs cat", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, find -name -print piped to sort then a while loop cat reads each listed env file",
+   "find . -name " + ENV + " -print | sort | while read f; do cat \"$f\"; done", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child form: deny, find -name written to a list file, then cat of the list, reads the env file",
+   "find . -name " + ENV + " > list && cat $(cat list)", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, find -name -print redirected to a list file writes the env file name to disk",
+   "find . -name " + ENV + " -print > list", "deny", "env-file", cwd=NOGIT)
+
+# Each find action that acts on a match is denied after a name test. The mutant that cuts ENV_FIND_ACTIONS to
+# FIND_EXEC_ACTIONS allows all five.
+for action in ("-delete", "-fprint out", "-fprint0 out", "-fprintf out '%p'", "-fls out"):
+    sh("env-child form: deny, find -name then " + action + " acts on the env file",
+       "find . -name " + ENV + " " + action, "deny", "env-file", cwd=NOGIT)
+
+# A find that lists names into a filter that runs no command is allowed. The mutant that cuts ENV_FIND_FILTERS to
+# ("wc",) denies all eight.
+for filt in ("sort", "uniq", "head -1", "tail -1", "cut -d/ -f2", "tr a b", "nl", "sort | head -1"):
+    sh("env-child form: allow, find -name piped to " + filt + " lists the env file name, reads no contents",
+       "find . -name " + ENV + " | " + filt, "allow", cwd=NOGIT)
+
+# Other name tests list the name too, so they are allowed. The mutant that cuts ENV_FIND_NAME_TESTS to ("-name",)
+# denies all three.
+for test in ("-iname " + ENV, "-path './" + ENV + "'", "-wholename './" + ENV + "'"):
+    sh("env-child form: allow, find " + test + " lists the env file name, reads no contents",
+       "find . " + test, "allow", cwd=NOGIT)
+
+# The env file as the start path is judged as a name word, so it is denied.
+sh("env-child form: deny, find with the env file as its start path refuses",
+   "find " + ENV + " -print", "deny", "env-file", cwd=NOGIT)
+
+# Pins for the find pipe stage and its output redirect. Dropping the stage-redirect clause of
+# _find_output_on_screen allows the list file the first deny names. Counting `2>` as stdout denies the
+# stderr redirect the first allow keeps. Counting a descriptor dup as stdout denies the `2>&1` pipe the
+# second allow keeps. A background filter passes detached-launch only with a pid captured (`echo $!`), so
+# the env layer judges it: a backgrounded filter whose list goes to the screen is allowed, and the cat
+# after it is the later stage that a removed branch would deny.
+sh("env-child form: deny, find -name piped to sort then a redirect writes the name list to a file",
+   "find . -name " + ENV + " | sort > list", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: allow, find -name with a 2> stderr redirect lists the env file name, reads no contents",
+   "find . -name " + ENV + " 2>/dev/null", "allow", cwd=NOGIT)
+sh("env-child form: allow, find -name -print with 2>&1 piped to sort lists the env file name, reads no contents",
+   "find . -name " + ENV + " -print 2>&1 | sort", "allow", cwd=NOGIT)
+# A trailing pipe is a shell syntax error, so the shell never runs it. Its empty stage is the command '', which
+# fails the filter check and is denied. No valid command reaches the `not parts` branch: a piece follows every
+# separator.
+sh("env-child form: deny, find -name with a trailing pipe and no stage after it refuses",
+   "find . -name " + ENV + " |", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: allow, find -name piped to sort in the background, pid captured, cat to tee, lists to the screen",
+   "find . -name " + ENV + " | sort & cat | tee out; echo $!", "allow", cwd=NOGIT)
+sh("env-child form: deny, find -name piped to sort in the background, then cat reads the env file, the control",
+   "find . -name " + ENV + " | sort & cat " + ENV + "; echo $!", "deny", "env-file", cwd=NOGIT)
 
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
