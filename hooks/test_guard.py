@@ -21440,6 +21440,9 @@ add("brief-claim: an empty brief is allowed", "allow", tool="Agent", prompt="", 
 BRIEF_DESTRUCTIVE = "brief-destructive-git"
 # A session id is 8 or more characters, so a short folder name would not read as a scratchpad (in_any_session_scratchpad).
 SCRATCH_REPO = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "repo")
+# A Windows spelling of SCRATCH_REPO, with a drive letter and backslashes. On Windows it is SCRATCH_REPO itself. Elsewhere
+# posix shlex reads it as no absolute path, the reading Git Bash gives the cd on Windows.
+WIN_SCRATCH_REPO = SCRATCH_REPO if os.name == "nt" else "C:" + SCRATCH_REPO.replace("/", "\\")
 from agent_brief import COMMON  # noqa: E402  the standing-rules text the SubagentStart hook gives every agent
 STANDING_LINE_ONE = "\n".join(text for _, text in COMMON[:2])   # the heading, then the first rule line
 STANDING_ALL = "\n".join(text for _, text in COMMON)
@@ -21530,6 +21533,11 @@ add("brief-destructive-git: git status is allowed", "allow",
     tool="Agent", prompt="Run `git status`.", subagent_type="builder", model="sonnet")
 add("brief-destructive-git: a reset --hard in a scratch repo under a session scratchpad is allowed", "allow",
     tool="Agent", prompt="Try it first: `git -C " + SCRATCH_REPO + " reset --hard`.",
+    subagent_type="builder", model="sonnet")
+# On Windows, Git Bash eats the backslashes, so the cd fails and the reset runs in the start folder: denied everywhere.
+add("brief-destructive-git: a cd into a backslash scratchpad path before a reset is denied on Windows", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Run `cd " + WIN_SCRATCH_REPO + "; git reset --hard origin/main` and re-apply your change.",
     subagent_type="builder", model="sonnet")
 add("brief-destructive-git: the brief's own allow paragraphs, as a test-author brief, are allowed", "allow",
     tool="Agent", prompt=BRIEF_ALLOW_PARAGRAPHS, subagent_type="test-author")
