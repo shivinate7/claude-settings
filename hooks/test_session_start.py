@@ -906,6 +906,19 @@ class SessionStartEnvFileTests(SessionStartAgentWorktreeNoticeTests):
         self.assert_stub_resolves("a run whose PATH holds the bin folder behind a system rm",
                                   name="rm", stub=bin_rm, path=path)
 
+    def test_i_an_env_file_in_a_missing_folder_is_left_alone_and_silent(self):
+        # The append cannot open a file whose folder is missing. The hook's group keeps that failure off stderr.
+        folder = os.path.join(self.root, "no such dir")
+        self.env_file = os.path.join(folder, "env.sh")
+        self.assertFalse(os.path.exists(folder), "fixture setup failed: the env file's folder exists before the run")
+        lines = self.run_hook(extra_env=self.hook_env())
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "the hook printed no checkout line: %r" % lines)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr when CLAUDE_ENV_FILE sits in a missing folder: %r"
+                         % self.last_stderr)
+        self.assertFalse(os.path.exists(folder), "the hook created the missing folder of CLAUDE_ENV_FILE")
+        self.assertFalse(os.path.exists(self.env_file), "the hook created CLAUDE_ENV_FILE in a missing folder")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
