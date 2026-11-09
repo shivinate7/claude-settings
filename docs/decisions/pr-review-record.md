@@ -33,6 +33,7 @@ CI: read live by merge --reviewed
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
 - The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. A fix check PASS counts as its round passing in any round when Guard or check is `no`. When Guard or check is `yes`, a fix check PASS before round 3 does not end review (item 402 a, owner, 2026-11-08 06:08 CST). After round 3, a PASS keeps the net value round 3 gave; with no round recorded it reads open.
+- A done record counts only with a lane-lint PASS comment by the repo's owner at the live head. Without one `--reviewed` prints `no lint`, `lint fail` or `lint unknown` for the PR and names `merge --lane-lint <pr>` (record `lanes-run-no-full-ci-job`).
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run.
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
@@ -62,6 +63,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 
 - `merge --reviewed` makes two list reads per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
+- The lane-lint comment (record `lanes-run-no-full-ci-job`) rides the same list read, so `--reviewed` makes no extra call for it. The batch runner's join adds one paged read of that list. `merge --lane-lint <pr>` adds one POST on a PASS.
 - Each ready PR that has a record adds three reads: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
 - `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
