@@ -1268,8 +1268,8 @@ def probes(calls):
 
 
 class CallBound(unittest.TestCase):
-    """branch_only ran one `git log -G` per lost line, up to OWN_LOOKUPS per file. A merge that drops
-    20 lines of one file must cost a fixed number of git calls, not one per line."""
+    """The check reads every lost line of a file in one `git log -p`, never one `git log -G` per line. A merge
+    that drops 20 lines of one file must cost a fixed number of git calls, not one per line."""
 
     def lost(self, lines, own=False):
         r, m = drop_merge(lines, own)
@@ -1306,6 +1306,145 @@ class Scanner(unittest.TestCase):
     def test_none_of_the_twenty_own_lines_is_flagged(self):
         r, _ = drop_merge(scanner_lines("o"), own=True)
         self.assertEqual(r.verdict(), [])
+
+
+# ------------------------------------------------ own lines past position 25
+
+
+OWN30 = ["own line %02d" % i for i in range(1, 31)]  # more than 25: a per-file cap of 25 would leave own lines unread
+MAIN30 = ["main line %02d" % i for i in range(1, 31)]
+TAIL = ["main tail %d" % i for i in range(1, 4)]  # lost after the 30 own lines, so past position 25 of the lost list
+
+
+def dropped_from_parent(r, m, n, lines):
+    """True when merge m's n-th parent holds `lines` in app.txt and m holds none of them."""
+    held = r.sh("show", "%s^%d:app.txt" % (m, n)).split("\n")
+    merged = r.sh("show", "%s:app.txt" % m).split("\n")
+    return all(l in held for l in lines) and not any(l in merged for l in lines)
+
+
+def mixed_merge():
+    """A merge that drops 30 own lines and 3 main lines of one file from its first parent, feat. feat adds the
+    own lines above `function Card`, then merges main, which adds TAIL below it. `other` branches from the base
+    and holds neither kind, so the merge base has none of them. -> (repo, merge sha)."""
+    card = "function Card() {}\n"
+    r = base_repo()
+    base = r.sh("rev-parse", "HEAD")
+    r.sh("checkout", "-q", "-b", "feat")
+    r.commit("feat adds own lines", app_txt=BODY + "".join(l + "\n" for l in OWN30) + card)
+    r.sh("checkout", "-q", "main")
+    r.commit("main adds the tail", app_txt=BODY + card + "".join(l + "\n" for l in TAIL))
+    r.push()
+    r.sh("checkout", "-q", "feat")
+    r.sh("merge", "-q", "--no-edit", "--no-ff", "main")
+    r.sh("checkout", "-q", "-b", "other", base)
+    r.commit("other", other_txt="other v2\n")
+    r.sh("checkout", "-q", "feat")
+    r.sh("merge", "-q", "--no-commit", "--no-ff", "other")
+    r.put("app.txt", BODY + card)
+    r.sh("add", "-A")
+    r.sh("commit", "-q", "-m", "Merge other, drop the lines")
+    return r, r.sh("rev-parse", "HEAD")
+
+
+class OwnLineCap(unittest.TestCase):
+    """branch_only_lines reads every lost line of one file as the branch's own or not, never a capped prefix.
+    A merge that drops more than 25 own lines of one file must not read as undone main work."""
+
+    def test_a_merge_that_drops_thirty_own_lines_of_one_file_reads_clean(self):
+        r, m = drop_merge(OWN30, own=True)
+        self.assertTrue(dropped_from_parent(r, m, 1, OWN30), "premise: the merge drops the 30 own lines from its first parent")
+        self.assertEqual(C.lost_lines(r.dir, m, ("origin/main",)), [], "own lines past position 25 read as lost")
+        self.assertEqual(r.verdict(), [], "own lines past position 25 read as lost")
+
+    def test_thirty_main_carried_lines_a_merge_drops_are_all_flagged(self):
+        r, m = drop_merge(MAIN30, own=False)
+        self.assertTrue(dropped_from_parent(r, m, 2, MAIN30), "premise: the merge drops the 30 main lines from its second parent")
+        flagged = [l for _, _, lines in C.lost_lines(r.dir, m, ("origin/main",)) for l in lines]
+        self.assertEqual(sorted(flagged), sorted(MAIN30), "main-carried lines past position 25 are not all flagged")
+        text = "\n".join(r.verdict())
+        for line in MAIN30:
+            self.assertIn(line, text, "main-carried line missing from the verdict")
+
+    def test_own_lines_past_the_cap_are_not_flagged_beside_main_lines_past_it(self):
+        r, m = mixed_merge()
+        self.assertGreater(len(OWN30), 25, "premise: the 30 own lines are more than the old 25-line cap")
+        before = r.sh("show", "%s^1:app.txt" % m).split("\n")
+        self.assertEqual([l for l in before if l in OWN30 or l in TAIL], OWN30 + TAIL, "premise: the first parent lists the own lines, then the 3 main lines")
+        self.assertTrue(dropped_from_parent(r, m, 1, OWN30 + TAIL), "premise: the merge drops all 33 lines from its first parent")
+        flagged = [l for _, _, lines in C.lost_lines(r.dir, m, ("origin/main",)) for l in lines]
+        self.assertEqual([l for l in flagged if l in OWN30], [], "own lines past position 25 reported as lost, beside the main lines")
+        self.assertEqual(sorted(flagged), sorted(TAIL), "the flagged lines are not exactly the 3 main lines past position 25")
+        text = "\n".join(r.verdict())
+        self.assertEqual([l for l in OWN30 if l in text], [], "the verdict names own lines past position 25")
+
+    def test_thirty_own_lines_cost_the_same_git_calls_as_five(self):
+        r30, m30 = drop_merge(OWN30, own=True)
+        _, c30 = git_calls(lambda: C.lost_lines(r30.dir, m30, ("origin/main",)))
+        r5, m5 = drop_merge(OWN30[:5], own=True)
+        _, c5 = git_calls(lambda: C.lost_lines(r5.dir, m5, ("origin/main",)))
+        self.assertLessEqual(len(c30) - len(c5), 3, "git calls: N=5 %d, N=30 %d, probes at N=30 %d" % (len(c5), len(c30), len(probes(c30))))
+        self.assertLessEqual(len(probes(c30)), 3, "probes at N=30: %d of %d git calls" % (len(probes(c30)), len(c30)))
+
+
+OWN1000 = ["own line %04d" % i for i in range(1, 1001)]  # far past any per-file cap of a realistic size
+SUB_NOTE = "own note: main tail 30"  # a branch-own line that holds "main tail 30" as a substring
+TAIL30 = ["main tail %02d" % i for i in range(1, 31)]
+
+
+def note_merge(kept):
+    """feat (the older commit) adds OWN30 and SUB_NOTE above `function Card`. main (the later commit) adds TAIL30
+    below it. feat merges main, then `other` (from the base, holding neither) is merged in, and the result keeps
+    the own lines and TAIL30[:kept], dropping SUB_NOTE and the rest of the tail. -> (repo, merge sha)."""
+    card = "function Card() {}\n"
+    r = base_repo()
+    base = r.sh("rev-parse", "HEAD")
+    r.sh("checkout", "-q", "-b", "feat")
+    r.commit("feat adds own lines and a note", date="2025-12-01T10:00:00", app_txt=BODY + "".join(l + "\n" for l in OWN30 + [SUB_NOTE]) + card)
+    r.sh("checkout", "-q", "main")
+    r.commit("main adds the tail", date="2025-12-02T10:00:00", app_txt=BODY + card + "".join(l + "\n" for l in TAIL30))
+    r.push()
+    r.sh("checkout", "-q", "feat")
+    r.sh("merge", "-q", "--no-edit", "--no-ff", "main")
+    r.sh("checkout", "-q", "-b", "other", base)
+    r.commit("other", other_txt="other v2\n")
+    r.sh("checkout", "-q", "feat")
+    r.sh("merge", "-q", "--no-commit", "--no-ff", "other")
+    r.put("app.txt", BODY + "".join(l + "\n" for l in OWN30) + card + "".join(l + "\n" for l in TAIL30[:kept]))
+    r.sh("add", "-A")
+    r.sh("commit", "-q", "-m", "Merge other, drop the note and the tail")
+    return r, r.sh("rev-parse", "HEAD")
+
+
+class OwnLineScale(unittest.TestCase):
+    """A per-file cap of any realistic size is far below 1000 lines. A merge that drops 1000 own lines of one
+    file reads clean, so a cap of any size goes red here."""
+
+    def test_a_merge_that_drops_a_thousand_own_lines_of_one_file_reads_clean(self):
+        r, m = drop_merge(OWN1000, own=True)
+        self.assertTrue(dropped_from_parent(r, m, 1, OWN1000), "premise: the merge drops the 1000 own lines from its first parent")
+        self.assertEqual(C.lost_lines(r.dir, m, ("origin/main",)), [], "own lines read as lost in a merge that drops 1000 of them")
+        self.assertEqual(r.verdict(), [], "the verdict flags own lines in a merge that drops 1000 of them")
+
+
+class OwnLineSubstring(unittest.TestCase):
+    """branch_only_lines finds a lost line's adding commit with `line in text`, a substring test over the changed
+    lines of each commit. A branch-own line that holds a main line as a substring is then taken for that main
+    line's adder, so the main line reads as own. The match must be whole lines."""
+
+    def test_a_main_line_an_own_line_holds_as_a_substring_is_flagged(self):
+        r, m = note_merge(29)
+        self.assertTrue(dropped_from_parent(r, m, 1, [SUB_NOTE, TAIL30[29]]), "premise: the merge drops the note and main tail 30 from its first parent")
+        flagged = [l for _, _, lines in C.lost_lines(r.dir, m, ("origin/main",)) for l in lines]
+        self.assertEqual(sorted(flagged), [TAIL30[29]], "main tail 30 reads as own: the own note holds its text as a substring")
+        self.assertTrue(r.verdict(), "the verdict reads clean though main tail 30 was dropped")
+
+    def test_five_main_lines_dropped_beside_the_note_are_all_flagged(self):
+        r, m = note_merge(25)
+        dropped = TAIL30[25:]  # main tail 26 to 30
+        self.assertTrue(dropped_from_parent(r, m, 1, [SUB_NOTE] + dropped), "premise: the merge drops the note and main tail 26 to 30 from its first parent")
+        flagged = [l for _, _, lines in C.lost_lines(r.dir, m, ("origin/main",)) for l in lines]
+        self.assertEqual(sorted(flagged), sorted(dropped), "a dropped main line reads as own: the own note holds its text as a substring")
 
 
 class NulLine(unittest.TestCase):
