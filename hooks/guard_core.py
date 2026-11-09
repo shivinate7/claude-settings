@@ -114,6 +114,14 @@ class PosixScript(str):
     PowerShell call. `split_segments` keeps the type on each segment, as for PowerShellScript."""
 
 
+# PowerShell reads each of these as the ASCII quote beside it: the double family
+# opens and ends a `"` string, the single family a `'` string. Bash reads them as ordinary characters.
+PS_DOUBLE_QUOTES = "\u201c\u201d\u201e"
+PS_SINGLE_QUOTES = "\u2018\u2019\u201a\u201b"
+PS_STRAIGHT_QUOTES = str.maketrans({**dict.fromkeys(map(ord, PS_DOUBLE_QUOTES), '"'),
+                                    **dict.fromkeys(map(ord, PS_SINGLE_QUOTES), "'")})
+
+
 def is_powershell(text) -> bool:
     """True when `text` is read with PowerShell's rules: the tool is PowerShell, or the text is a
     script that pwsh or `cmd /c` runs. A PosixScript never is."""
@@ -377,6 +385,7 @@ WRAPPER_VALUE_FLAGS.update({
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
     "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
+    "watch": {"-n", "--interval", "-q", "--equexit"},
 })
 # `timeout` and `python` unwrap only in their wrapper shape: `timeout [flags] DURATION cmd` (Windows
 # `timeout /t 5` is the waiter, not a wrapper) and `python bin/verdict cmd` (the repo's runner).
@@ -443,11 +452,19 @@ def segment_tokens(segment: str):
     source = ""
     if is_powershell(segment):
         segment = segment.replace("\\", "\\\\")
-        if "''" in segment or '""' in segment or "`" in segment:
-            segment = _powershell_values(segment)
-    elif "`" in segment:
-        source = segment   # bash text: shlex keeps its backtick substitutions as they stand
-    found = _segment_tokens(segment)
+        # A smart quote is a quote, so read the text with each as its ASCII twin. A text that then
+        # fails shlex (a lone `\u2019` in `don\u2019t` that PowerShell would read as a quote too) is read as it stands.
+        found = None
+        for text in dict.fromkeys((segment.translate(PS_STRAIGHT_QUOTES), segment)):
+            if "''" in text or '""' in text or "`" in text:
+                text = _powershell_values(text)
+            found = _segment_tokens(text)
+            if found is not None:
+                break
+    else:
+        if "`" in segment:
+            source = segment   # bash text: shlex keeps its backtick substitutions as they stand
+        found = _segment_tokens(segment)
     if found is None:
         return None
     tokens, quoted = found
@@ -684,7 +701,7 @@ _FED_SHELL = re.compile(
     r"(?:^|[;&|(`{])[ \t]*(?:(?:builtin|command)[ \t]+)?(?:eval|source|\.)[ \t]"
     r"[^;&|\n]*?(?:(?:\$\(|<\(|`)[^;&|)`]*?)?<<", re.M).search
 _SHELL_FIRST = _interpreter_header(_SHELLS)
-_INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node"
+_INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node|deno"
 _INTERPRETER_FIRST = _interpreter_header(_INTERPRETERS)
 
 
@@ -1054,7 +1071,7 @@ def shell_abs(path: str, base):
     return path
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1062,14 +1079,28 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
     back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
     is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
     where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
-    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe."""
+    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
+    `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
+    leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
+    worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
+    a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
+    fails closed on an untrusted `cd` keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
+    skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
         stack.extend([(where, prev)] * marks.count("("))
+        end = ends[at] if at < len(ends) else ""
         if at == number:
-            return where
+            return None if skipping else where
+        if skipping:
+            skipping = end in ("&&", "|")
+            for _ in range(marks.count(")")):
+                if stack:
+                    where, prev = stack.pop()
+                    skipping = False
+            continue
         tokens = segment_tokens(segment)
         move = _segment_cd_move(tokens) if tokens else None
         if move is not None and not is_powershell(segment) and "|" in (
@@ -1086,8 +1117,14 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
             elif any(mark in move for mark in "$%`"):
                 where = None
             else:
-                where = shell_abs(move or "~", where)
-                where = where if where and os.path.isdir(where) else None
+                target = shell_abs(move or "~", where)
+                if target and os.path.isdir(target):
+                    where = target
+                elif target and failed_cd_stays:
+                    skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
+                    old = prev   # a failed cd leaves the folder `cd -` goes back to alone
+                else:
+                    where = None
             prev = old
         for _ in range(marks.count(")")):
             if stack:
@@ -1613,6 +1650,9 @@ BUILDER_ROLE = "builder"
 AUTHOR_ROLE = "test-author"
 WRITER_ROLE = "record-writer"
 DESIGNER_ROLE = "designer"
+# The read-only Opus role that argues against a plan (decision plan-refuter). The one home of its name: the guard, the
+# brief hook and the tests import it, and none types it.
+REFUTER_ROLE = "refuter"
 
 
 def agent_role(payload) -> str:
@@ -1792,17 +1832,26 @@ def ssh_remote_script(tokens) -> str:
     return " ".join(tokens[index + 1:])   # tokens[index] is the host
 
 
+# The `find` actions that run a command on a match. `guard_env` builds its own find list on this.
+FIND_EXEC_ACTIONS = ("-exec", "-execdir", "-ok", "-okdir")
+
+
 def wrapped_commands(tokens, at: int):
     """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
     `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `unbuffer`,
-    `caffeinate`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as `sh -c`."""
+    `caffeinate`, `watch`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as
+    `sh -c`. `watch` joins its words with spaces and hands the line to `sh -c`, so its text is that
+    line."""
     word, rest = basename(tokens[at]), tokens[at + 1:]
+    if word == "watch":
+        index, _ = _wrapper_flags(word, rest, 0)
+        return [" ".join(rest[index:])] if rest[index:] else []
     if word == "kubectl" and "exec" in rest and "--" in rest:
         return [shlex.join(rest[rest.index("--") + 1:])]
     if word == "find":
         found = []
         for i, token in enumerate(rest):
-            if token in ("-exec", "-execdir", "-ok", "-okdir"):
+            if token in FIND_EXEC_ACTIONS:
                 end = next((j for j in range(i + 1, len(rest)) if rest[j] in (";", "+")), len(rest))
                 found.append(shlex.join(rest[i + 1:end]))
         return found
@@ -1827,7 +1876,7 @@ def wrapped_commands(tokens, at: int):
 def bare_words(segment: str):
     """(words, bare): one segment's shell words, dequoted, and the indexes of the words that hold
     no quote at all. A rule that reads a danger word at ANY bare position keeps main's breadth, so
-    a runner no reader names (`docker run`, `watch`, `uv run`) still shows its inner command, and
+    a runner no reader names (`docker run`, `uv run`) still shows its inner command, and
     quoted text (`echo 'tail -f x'`, a commit message) still reads as text. A search command's
     words are patterns and paths, never a command (ENV_PATTERN_COMMANDS): `grep -rn tail -F x`
     has no bare word."""
