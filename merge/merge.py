@@ -749,12 +749,13 @@ class GhLock(Lock):
 PUSHED_HEAD_WAIT = "GitHub to show the pushed head"
 PUSHED_HEAD_WAIT_MINUTES = 5  # --lane-lint's bound on that wait; a push shows on GitHub in seconds, so a head still missing after this is not lag
 
-def wait_pushed_head(host, n, info, end, progress=None):
+def wait_pushed_head(host, n, info, end, progress=None, want=None):
     """The one wait for GitHub to show a pushed head: read pull request `n` again until its head is no longer the one in `info` (the head
-    before the push), or `end` (a `host.now()` time) passes. -> the fresh info, or None at `end`. wait_checks and fetch_pr_head call it.
+    before the push), or `end` (a `host.now()` time) passes. With `want`, it ends only on that head, so a third head GitHub shows on the way
+    does not end it. -> the fresh info, or None at `end`. wait_checks and fetch_pr_head call it.
     With no `progress`, it prints one wait line."""
     stale, said = info["head"], False
-    while info["head"] == stale:
+    while (info["head"] != want) if want else (info["head"] == stale):
         if progress:
             progress(PUSHED_HEAD_WAIT)
         elif not said:
@@ -2496,21 +2497,23 @@ def refuse_bad_pr(info):
 
 def fetch_pr_head(root, info, base, host=None, n=None):
     """Fetch, and check that the head is the one gh named. -> `info`, or the fresh read of pull request `n` once GitHub showed the pushed head.
-    Raises Stop on a head that differs. With `host`, a head that lags origin waits, bounded, for GitHub to show it (wait_pushed_head);
-    with none, it refuses at once."""
+    Raises Stop on a head that differs. With `host`, a head that lags origin waits, bounded, for GitHub to show that head (wait_pushed_head),
+    and the base GitHub then shows must be the one read before the wait; with none, a lagging head refuses at once."""
     for ref in (base, info["branch"]):
         c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{ref}:refs/remotes/origin/{ref}")
         if c:
-            raise Stop(f"git fetch origin {ref} failed: {out}")
+            raise Stop(f"git fetch origin {ref} failed: {out} {UNKNOWN_CITE}")
     got = git(root, "rev-parse", f"refs/remotes/origin/{info['branch']}")[1]
     if got != info["head"] and host is not None:
         stale = info["head"]
-        info = wait_pushed_head(host, n, info, host.now() + PUSHED_HEAD_WAIT_MINUTES * 60)
+        info = wait_pushed_head(host, n, info, host.now() + PUSHED_HEAD_WAIT_MINUTES * 60, want=got)
         if info is None:
-            raise Stop(f"{got[:9]} is pushed to origin, but GitHub never showed it: after {PUSHED_HEAD_WAIT_MINUTES} minutes the pull request still reads {stale[:9]}. "
-                       "Run again. Nothing was claimed.")
+            raise Stop(f"{got[:9]} is pushed to origin, but GitHub never showed it: after {PUSHED_HEAD_WAIT_MINUTES} minutes the pull request still did not read it "
+                       f"(it first read {stale[:9]}). Run again. Nothing was claimed. {GREEN_CITE}")
+        if info["base"] != base:
+            raise Stop(f"the base of the pull request changed from {base} to {info['base']} during the wait {BASE_CITE}. Run again. Nothing was claimed.")
     if got != info["head"]:
-        raise Stop(f"{info['branch']} moved: gh says {info['head'][:9]}, origin holds {got[:9]}. Run again. Nothing was claimed.")
+        raise Stop(f"{info['branch']} moved: gh says {info['head'][:9]}, origin holds {got[:9]}. Run again. Nothing was claimed. {GREEN_CITE}")
     return info
 
 def open_worktree(root, info, base):
