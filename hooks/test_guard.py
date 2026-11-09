@@ -13055,6 +13055,16 @@ for _cmd in (_TYPE_D_OR_F_EXEC, _TYPE_D_PRUNE_OR_F_EXEC):
        "env-file", cwd=ENVWALK_HELD)
     sh("env: find -type d control, a folder with no env file, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_CLEAN)
 
+# Each -type d form below hands grep the env file at the top, so each is refused over ENVWALK_HELD. A change to the
+# find walk must keep each of them refused.
+_PIN_TYPE_NOT_D = "find . ! -type d -exec grep K {} +"
+_PIN_TYPE_D_LAST = "find . -exec grep K {} + -type d"
+_PIN_TYPE_D_OR_F_GREP_R = r"find . \( -type d -o -type f \) -exec grep -r K {} +"
+_PIN_TYPE_D_OR_F_XARGS = "find . -type d -o -type f | xargs grep K"
+for _cmd in (_PIN_TYPE_NOT_D, _PIN_TYPE_D_LAST, _PIN_TYPE_D_OR_F_GREP_R, _PIN_TYPE_D_OR_F_XARGS):
+    sh("env: find -type d pin, the top folder holds the env file, refused: " + _cmd, _cmd, "deny", "env-file",
+       cwd=ENVWALK_HELD)
+
 # A relative cd and an env -C reach the env file's folder through two steps the guard follows: cd src moves into
 # clean/src, and env -C ../../held reaches held, which holds the env file. ENVCD_ROOT is built with ENVPROJ_ROOT above.
 _CD_REL_ENV_CHDIR = "cd src && env -C ../../held grep -r K"
