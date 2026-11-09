@@ -4024,7 +4024,8 @@ FAMILY = "pointer-edit"
 # pointer is out of scope: a note only.
 #
 # The targets are plain fixture files, never the pointer's CLAUDE.md or anything under hooks/, lint/ or
-# agents/, which frozen-path already judges. TEMP_DIR is ROOT/tmp for this section, as in the
+# agents/. frozen-path judges those only for the config-dir spelling, or when the pointer is the live pin
+# or the main mirror, so these cases must not depend on it. TEMP_DIR is ROOT/tmp for this section, as in the
 # hand-made-worktree section below, so ROOT under the system temp is not read as temp.
 TEMP_DIR = os.path.join(ROOT, "tmp")
 PE_TARGET = os.path.join(PTRMAIN, "f.txt")                       # a tracked file of the pointer checkout
@@ -4058,7 +4059,9 @@ add("pointer-edit: Write into the pointer checkout from a directory that is no c
     "deny", "pointer-edit", tool="Write", cwd=NOGIT, config=PTRCFG, file_path=PE_TARGET,
     content="changed\n", carries="EnterWorktree")
 
-# THE PASSES. Each is green on main and must stay green: the rule's own exemptions, and the reads.
+# THE PASSES. Each pins a write or read the rule must let through: the pointer's own .git, a linked
+# worktree (nested or elsewhere), another checkout, the temp folder, a directory that is no checkout,
+# a stood-down rule, and the read tools. A refusal here would block a lane's own work.
 # The nested worktree's scope (its own git directory) is checked where the fixture is built.
 add("pointer-edit: Write into the pointer's own .git is not judged", "allow", tool="Write",
     cwd=PTRMAIN, config=PTRCFG, file_path=PE_GITDIR, content="probe\n")
