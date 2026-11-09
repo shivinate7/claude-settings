@@ -119,8 +119,8 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
 
 - The tab bar is one row that scrolls on its own. A tab is never wider than the bar (`.tabs` is a size container, each tab has
   `max-inline-size: 100cqw` and `overflow-wrap: anywhere`), so a label wraps inside its tab and never past the bar. A label breaks
-  mid-word at 180 to 190 wide at 150% text, 180 to 220 at 200% and 180 to 300 at 300% (a named limit, measured on the built page;
-  at 300% and 300 wide one letter sits alone). When the Designs sheet closes, `revealTab()` scrolls the selected tab fully into the bar, as a tab press does.
+  mid-word at 180 to 190 wide at 150% text, about 180 to 230 at 200% and about 180 to 310 at 300% (a named limit, measured on the built page;
+  a lone letter appears at 180 to 190 wide at 150% text, 190 to 220 at 200% and 180 to 260 at 300%). When the Designs sheet closes, `revealTab()` scrolls the selected tab fully into the bar, as a tab press does.
 - The Designs sheet's head wraps (`.dsh-head .in`, `flex-wrap: wrap`). The title's basis is 0 and its floor is 4em (`min-width: 4em`),
   so the row breaks where the buttons leave the title under 4em. The title keeps the first line, alone if no button fits beside it.
   Then the last buttons take a second line and Close sits at its end, inside the window. Prev and Next sit in one box (`.dnav`), so they
@@ -155,13 +155,15 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   40 at 250 and 42.5 at 260 (29 and 43.5 px uncapped). At the default text, 125% and 150% it never sets the size from 180 wide up (21.75 px
   at 150%, against a 22.5 px cap at 180). The page before this lane drew the word wider than its column at 180 to 225 wide doubled and
   180 to 290 wide tripled, and ran it past the window at 180 to 190 doubled and 180 to 260 tripled.
-- Departs from: the page before this lane (PR 2383's head) in seven places, as window widths in 10 px steps (5 px under 225). Folded rows with Dismiss or Restore take the phone
+- The failure line breaks inside "(permission|-denied)" at 180 wide at 100% text, 180 to 200 at 125%, 180 to 225 at 150%, 180 to 270 at
+  200% and 180 to 360 at 300%. PR 2383 broke it after the hyphen. The cause is the 88 px `.sline.dline` column at 180 wide at 100%.
+  A named limit; fix: step page-narrow-word-breaks.
+- Departs from: the page before this lane (PR 2383's head) in six places, as window widths in 10 px steps (5 px under 225). Folded rows with Dismiss or Restore take the phone
   arrangement at 530 to 670 at the default text, 650 to 830 and 970 to 1100 at 125%, and 770 to 960 and from 1040 up to 1920 at 150%.
   The Designs head takes a second row at 220 to 320 and 530 to 620 at the default text, 220 to 340 and 650 to 730 at 125%, and 220 to
   360 and 770 to 840 at 150%; its title is larger at every width at 125% and 150%. Its third row (Close alone) is new at 180 to 215
   at the default text, to 220 doubled and to 290 tripled. The position "1/2" is smaller than before at 180 to 230 wide tripled (35.5
-  to 47.5 px, not 48), where it takes the title's cap. The design caption (`.dcap`) is in rem, so it grows with the text (17.5 px at
-  125%, 28 px doubled, 42 px tripled; 14 px before). The bar status takes its own line at 180 to 205 at
+  to 47.5 px, not 48), where it takes the title's cap. The bar status takes its own line at 180 to 205 at
   the default text, 210 to 230 at 125% and 240 to 260 at 150% (it did before at 180 to 205 at 125% and 180 to 230 at 150%). The
   "Restored." line is smaller than its text at 180 to 205 doubled and 180 to 260 tripled, and spells "Re-stored." with a soft hyphen; at
-  the default text, 125% and 150% it does not move.
+  the default text and 125% it does not move. At 150% the line splits "Re-" and "stored." at 180 to 190 wide.
