@@ -3088,26 +3088,27 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
 
 
 def run_controls(sources, work: str, entries):
-    """Return {target: function} with one full-suite control per target that has a mutation to run here.
+    """Return {target: function} with one filtered control per target that has a mutation to run here.
 
-    A control is `run_suite(..., only=None)` on the unmutated layout, built by `lay_out` with an identity
-    mutation. It answers one question: does this layout pass its own suite? A layout that crashes (a missing
-    sibling module, a wrong path) fails every case whatever a mutant changed, and each FAIL line reads as a kill.
+    A control is `run_suite` on the unmutated layout, built by `lay_out` with an identity mutation and
+    filtered to one required case of that target's own mutations (`run_control`). It answers one question:
+    does this layout run its suite at all? A layout that crashes (a missing sibling module, a wrong path)
+    fails every case whatever a mutant changed, and each FAIL line reads as a kill; one that exits 0 having
+    run no case is the same crash seen from the other side.
     `mutate_shared.run_mutants` takes these functions as its `controls`: it runs them in the same pool as the
-    mutants, ahead of them, under MUTATE_JOBS, and makes every mutant of a red or raising target UNKNOWN
+    mutants, ahead of them, under MUTATE_JOBS, and makes every mutant of a red, empty or raising target UNKNOWN
     (`mutate_shared.control_verdict`). `work` is `main`'s folder, after `main` has laid the shared guard family,
     lint and guard reads in it.
 
-    Cost (rule outcomes-mechanize-rules): one extra full suite run and one temp tree per target per run, each
-    inside the job cap. A guard-suite target (guard, override, simlease) measured about 870 s alone beside the
-    other controls, so a run adds up to three such suites; the time added to the CI step is unmeasured. It
-    writes no log and starts no timer, thread or other long-lived process beyond the run's own pool."""
+    Cost (rule outcomes-mechanize-rules): one filtered suite run and one temp tree per target per run, inside
+    the job cap. A filtered run takes seconds, as a mutant's first stage does. It writes no log and starts no
+    timer, thread or other long-lived process beyond the run's own pool."""
     targets = []
     for entry in entries:
         _label, _old, _new, target, _required, only_on = mutation_parts(entry)
         if target not in targets and not mutate_shared.skip_reason(only_on):
             targets.append(target)
-    return {target: functools.partial(run_control, sources, work, target) for target in targets}
+    return {target: functools.partial(run_control, sources, work, target, entries) for target in targets}
 
 
 def control_name(target: str) -> str:
@@ -3115,14 +3116,25 @@ def control_name(target: str) -> str:
     return "clean layout of %s" % target
 
 
-def run_control(sources, work: str, target: str):
-    """Run the full suite once on the unmutated layout of `target`. Return run_suite's result tuple."""
+def control_case(target: str, entries) -> str:
+    """The required case fragment a target's control runs: the first one among its mutations that run here."""
+    for entry in entries:
+        _label, _old, _new, entry_target, required, only_on = mutation_parts(entry)
+        if entry_target == target and required and not mutate_shared.skip_reason(only_on):
+            return required
+    raise ValueError("no mutation of target %s has a required case to run here" % target)
+
+
+def run_control(sources, work: str, target: str, entries=None):
+    """Run one filtered case of `target`'s suite on the unmutated layout. Return run_suite's result tuple.
+    `entries` defaults to MUTATIONS."""
     _path, suite, variable, _stem = TARGETS[target]
     name = control_name(target)
+    only = control_case(target, MUTATIONS if entries is None else entries)
     copy_path = lay_out(sources, work, target, name, "", "")
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(name))
     os.makedirs(config_dir, exist_ok=True)
-    return run_suite(suite, variable, copy_path, config_dir, None)
+    return run_suite(suite, variable, copy_path, config_dir, only)
 
 
 def run_mutant(sources, work: str, entry):

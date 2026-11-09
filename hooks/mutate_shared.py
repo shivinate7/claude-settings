@@ -206,17 +206,21 @@ def print_saw(lines) -> None:
         print("            saw: ... and %d more" % (len(lines) - WRONG_CAUSE_LINES_SHOWN), flush=True)
 
 
-def control_verdict(code, red, seen=()):
+def control_verdict(code, red, seen=(), ran=None):
     """Judge one clean-layout control run. Return None when the suite is green on the unmutated layout,
     else (reason, lines): why every mutant of that target reads UNKNOWN, and the first lines the control saw.
 
     A mutant's FAIL lines prove a kill only when the same layout, unmutated, passes the suite. A layout that
     crashes (a missing sibling module, a wrong path) makes every case red whatever was mutated, and that
-    reads as a kill. Only the exit code decides: a crash leaves no FAIL line. Report mode's
-    `score_target` applies the same idea to its normalized clean source."""
-    if code == 0:
-        return None
-    return "clean layout red (exit %s)" % code, list(red) + list(seen)
+    reads as a kill. The exit code decides first: a crash leaves no FAIL line. A control that exits 0 but
+    ran no case (`ran` is an empty list) is the other crash signature: the suite never reached its cases, so
+    it proved nothing about the layout. `ran=None` means the caller has no case lines to read.
+    Report mode's `score_target` applies the same idea to its normalized clean source."""
+    if code != 0:
+        return "clean layout red (exit %s)" % code, list(red) + list(seen)
+    if ran is not None and not ran:
+        return "clean layout ran no case (exit 0)", list(seen)
+    return None
 
 
 def report_verdict(label: str, code, red, required: str, seen=()) -> str:
@@ -304,7 +308,7 @@ def run_mutants(entries, run_one, controls=None, control_of=None):
     key, and `control_of(entry)` names the key whose control judges that entry. The controls go into the same
     pool as the mutants, ahead of them, so they count in the job cap and no worker ever waits on one. Results
     are read in submission order, so every control's result is in hand before the first mutant's is read. A red
-    control, or one that raises, makes every mutant of its key read UNKNOWN. An entry whose key has no control
+    control, one that exits 0 with no case run, or one that raises, makes every mutant of its key read UNKNOWN. An entry whose key has no control
     raises KeyError: it never reads KILLED unchecked. A skipped entry has no control to ask for.
     """
     jobs = job_count()
@@ -334,8 +338,8 @@ def run_mutants(entries, run_one, controls=None, control_of=None):
             if isinstance(result, Exception):
                 verdicts[key] = ("clean layout raised %s: %s" % (type(result).__name__, result), [])
             else:
-                code, red, _ran, seen = result
-                verdicts[key] = control_verdict(code, red, seen)
+                code, red, ran, seen = result
+                verdicts[key] = control_verdict(code, red, seen, ran)
         for entry, (label, code, red, required, skip, *more) in zip(entries, results):
             if skip:
                 skipped += 1
