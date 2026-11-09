@@ -33531,6 +33531,17 @@ def hcs_handoff_read(tool_id):
     return hcs_tool(tool_id, "Read", {"file_path": HCS_HANDOFF})
 
 
+def hcs_result(tool_id, error=False, tool_use_result=None):
+    """The user line that answers call `tool_id`: an error result when `error`, else a good one. `tool_use_result`, when
+    given, is the record's toolUseResult (a failed local SendMessage carries success false there)."""
+    line = {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tool_id, "is_error": error,
+         "content": [{"type": "text", "text": "File does not exist." if error else "ok"}]}]}}
+    if tool_use_result is not None:
+        line["toolUseResult"] = tool_use_result
+    return json.dumps(line)
+
+
 # The transcript fixtures. "none" is an empty file: readable, with no evidence. "unreadable" is a folder.
 HCS_TX_LINES = {
     "none": [],
@@ -33557,7 +33568,36 @@ HCS_TX_LINES = {
     # Full-size: a boundary, 2000 unrelated reads, then the evidence for P1 at the end.
     "long": [HCS_BOUNDARY] + [hcs_read("L%d" % n, "lib/unrelated-%d.md" % n) for n in range(2000)]
             + [hcs_read("lz", "hooks/precompact_handoff.py")],
+    # Round 2, case 2: a Write or Edit of another file, or a git commit, that names a Source backs nothing. A read does.
+    "write_other": [hcs_tool("x1", "Write", {"file_path": HCS_WT + "/notes.md", "content": "The guard is hooks/guard.py."})],
+    "edit_other": [hcs_tool("x2", "Edit", {"file_path": HCS_WT + "/notes.md", "old_string": "TODO",
+                                           "new_string": "See hooks/guard.py."})],
+    "bash_commit": [hcs_tool("x3", "Bash", {"command": "git -C " + HCS_WT + " commit -m 'Tighten hooks/guard.py'"})],
+    "read_guard": [hcs_read("g1", "hooks/guard.py")],
+    "grep_guard": [hcs_tool("g2", "Grep", {"pattern": "handoff_stamp_hit", "path": HCS_WT + "/hooks/guard.py"})],
+    "glob_guard": [hcs_tool("g3", "Glob", {"pattern": "hooks/guard.py"})],
+    "bash_read_guard": [hcs_tool("g4", "Bash", {"command": "grep -n handoff_stamp_hit " + HCS_WT + "/hooks/guard.py"})],
+    # Round 2, case 3: a failed call backs nothing, and the same call with a good result does. A failure is an error
+    # result, or a toolUseResult that says success false (lint/_transcript.py failed_tool_use_ids reads both).
+    "failed_read": [hcs_read("f1", "hooks/precompact_handoff.py"), hcs_result("f1", error=True)],
+    "failed_flag": [hcs_read("f2", "hooks/precompact_handoff.py"), hcs_result("f2", tool_use_result={"success": False})],
+    "ok_read": [hcs_read("k1", "hooks/precompact_handoff.py"), hcs_result("k1")],
+    # Round 2, case 4: a send, or a write-named MCP tool, backs nothing, with the token or without it. A read-named one does.
+    "send_token": [hcs_tool("s1", "mcp__claude-code-remote__send_message", {"text": "P1 is in hooks/precompact_handoff.py."})],
+    "send_only": [hcs_tool("s2", "mcp__claude-code-remote__send_message", {"text": "Premises checked."})],
+    "review_token": [hcs_tool("r1", "mcp__github__pull_request_review_write",
+                              {"method": "create", "body": "Read hooks/precompact_handoff.py."})],
+    "review_only": [hcs_tool("r2", "mcp__github__pull_request_review_write", {"method": "create", "body": "Looks good."})],
+    "resolve_token": [hcs_tool("t1", "mcp__github__resolve_review_thread",
+                               {"threadId": "PRRT_1", "note": "hooks/precompact_handoff.py"})],
+    "resolve_only": [hcs_tool("t2", "mcp__github__resolve_review_thread", {"threadId": "PRRT_1"})],
+    "get_token": [hcs_tool("m1", "mcp__github__get_file_contents",
+                           {"owner": "org", "repo": "repo", "path": "hooks/precompact_handoff.py"})],
+    "get_only": [hcs_tool("m2", "mcp__github__get_file_contents", {"owner": "org", "repo": "repo", "path": "README.md"})],
 }
+# Round 2, case 3, full size: the same last call after 2000 unrelated reads, with an error result and with a good one.
+HCS_TX_LINES["long_failed"] = HCS_TX_LINES["long"] + [hcs_result("lz", error=True)]
+HCS_TX_LINES["long_ok"] = HCS_TX_LINES["long"] + [hcs_result("lz")]
 
 
 def hcs_tx(name):
@@ -33870,6 +33910,205 @@ LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a token-less Source with a quot
 # The cost check, last: its refusal and its allow each read the transcript once.
 LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: an allowed restamp writes no file and starts no process; a refusal writes its "
                          "guard.log line and reads the transcript once; an unchanged write reads no transcript", hcs_cost_check))
+
+
+# --- Round 2 cases (review round 1). Each is red on d739af7f8, except a control, which is green there on purpose: it
+# keeps a fix from over-refusing a restamp that the rule allows.
+HCS_SID_COLON = "4b8e1d62-0000-4000-8000-00000000c0a2"    # a handoff whose stamps are spelled `Checked: <value>`
+HCS_COLON = hs_handoff(HCS_CFG, HCS_SID_COLON)
+HCS_GUARD = ("P8", "read", "The guard refuses a restamp with no evidence", "hooks/guard.py:1176")
+HCS_T_GUARD = hcs_text(extra=(hcs_line(HCS_GUARD, HCS_NEW),))   # a new dated line whose Source names hooks/guard.py
+HCS_RELABEL_ROWS = tuple((pid, "ruling" if pid == "P1" else kind, statement, source)
+                         for pid, kind, statement, source in HCS_ROWS)
+HCS_DEMOTE_ROWS = tuple((pid, "read" if pid == "P6" else kind, statement, source)
+                        for pid, kind, statement, source in HCS_ROWS)
+HCS_T_RELABEL = hcs_text(rows=HCS_RELABEL_ROWS, new=("P1",))   # P1 was [read]; the write makes it [ruling] and restamps it
+HCS_T_DEMOTE = hcs_text(rows=HCS_DEMOTE_ROWS, new=("P6",))     # P6 was [ruling]; the write makes it [read] and restamps it
+
+
+def hcs_stamped(row, stamp):
+    """The premise line of `row` with `stamp` after its Source (the stamp's own period included), or none when `stamp`
+    is ""."""
+    pid, kind, statement, source = row
+    head = "- %s [%s] %s. Source: %s." % (pid, kind, statement, source)
+    return head + " " + stamp if stamp else head
+
+
+def hcs_p1_text(p1_stamp):
+    """A handoff whose P1 line ends in `p1_stamp`, with every other premise at the old stamp."""
+    return hs_text(premises=[hcs_stamped(row, p1_stamp) if row[0] == "P1" else hcs_line(row, HCS_OLD)
+                             for row in HCS_ROWS])
+
+
+HCS_T_SPELL_COLON = hcs_p1_text("Checked: %s." % HCS_NEW)
+HCS_T_SPELL_RE = hcs_p1_text("Re-checked %s." % HCS_NEW)
+HCS_T_ABSENT = hcs_p1_text("")                  # P1 loses its stamp
+HCS_T_EMPTY = hcs_p1_text("Checked .")          # P1's stamp has no value
+
+
+def hcs_colon_text(p1_value):
+    """A handoff whose every stamp is spelled `Checked: <value>`: P1 at `p1_value`, the rest at the old value."""
+    return hs_text(premises=[hcs_stamped(row, "Checked: %s." % (p1_value if row[0] == "P1" else HCS_OLD))
+                             for row in HCS_ROWS])
+
+
+HCS_COLON_OLD = hcs_colon_text(HCS_OLD)     # the handoff on disk for the colon session
+HCS_T_COLON_NEW = hcs_colon_text(HCS_NEW)   # the same, with P1 restamped in the same spelling
+
+
+def _build_hcs_colon():
+    write(HCS_COLON, HCS_COLON_OLD)
+
+
+lazy_fixture([HCS_COLON], _build_hcs_colon)
+
+
+def hcs_colon_scope():
+    """The colon handoff on disk is the handoff with every stamp spelled Checked: at the old value, so the twin's
+    refused write changes P1 alone. The twin branches on that spelling, so it asserts the fixture first (P7)."""
+    materialize(HCS_COLON)
+    with open(HCS_COLON, "r", encoding="utf-8") as handle:
+        disk = handle.read()
+    if disk != HCS_COLON_OLD:
+        return False, "the colon handoff on disk is not the handoff with every stamp spelled Checked: at the old value"
+    return True, "the colon handoff on disk holds every stamp spelled Checked: at the old value"
+
+
+def hcs_scoped(scope, twin):
+    """`twin`, run only once `scope` holds: a scope failure is the case's failure, named as the scope."""
+    def check():
+        ok, note = scope()
+        if not ok:
+            return False, note
+        return twin()
+    return check
+
+
+# Case 1: a stamp spelled other than `Checked <value>` counts. A new value under another spelling, or a stamp that is
+# absent or has no value after the write, is a change, and it is refused with no evidence.
+add("handoff-checked-stamp: a stamp spelled Checked: with a new value is refused with no evidence, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1",), lacks=("P2", "P3", "P4", "P5", "P7", "P9"),
+    file_path=HCS_HANDOFF, content=HCS_T_SPELL_COLON)
+add("handoff-checked-stamp: a stamp spelled Re-checked with a new value is refused with no evidence, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1",), lacks=("P2", "P3", "P4", "P5", "P7", "P9"),
+    file_path=HCS_HANDOFF, content=HCS_T_SPELL_RE)
+add("handoff-checked-stamp: a stamp present before and absent after is refused with no evidence, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1",), lacks=("P2", "P3", "P4", "P5", "P7", "P9"),
+    file_path=HCS_HANDOFF, content=HCS_T_ABSENT)
+add("handoff-checked-stamp: a stamp present before with no value after is refused with no evidence, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1",), lacks=("P2", "P3", "P4", "P5", "P7", "P9"),
+    file_path=HCS_HANDOFF, content=HCS_T_EMPTY)
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a stamp spelled Checked: with its value unchanged passes silently; with a new "
+                         "value it is refused with no evidence",
+                         hcs_scoped(hcs_colon_scope,
+                                    hcs_twin("a stamp spelled Checked:",
+                                             refused=hcs_write(HCS_T_COLON_NEW, transcript=hcs_tx("none"),
+                                                               session=HCS_SID_COLON),
+                                             allowed=hcs_write(HCS_COLON_OLD, transcript=hcs_tx("none"),
+                                                               session=HCS_SID_COLON)))))
+
+# Case 2: a Source's token backed only by a Write or Edit of another file, or by a non-read Bash call, backs nothing. The
+# controls: a Read, a Grep, a Glob and a Bash read of the token each back it.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a Write of another file that names a token-bearing Source backs no restamp; "
+                         "a Read of that Source does",
+                         hcs_twin("a Write of another file",
+                                  refused=hcs_write(HCS_T_GUARD, transcript=hcs_tx("write_other")),
+                                  allowed=hcs_write(HCS_T_GUARD, transcript=hcs_tx("read_guard")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: an Edit of another file that names a token-bearing Source backs no restamp; "
+                         "a Read of that Source does",
+                         hcs_twin("an Edit of another file",
+                                  refused=hcs_write(HCS_T_GUARD, transcript=hcs_tx("edit_other")),
+                                  allowed=hcs_write(HCS_T_GUARD, transcript=hcs_tx("read_guard")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a git commit that names a token-bearing Source backs no restamp; "
+                         "a Read of that Source does",
+                         hcs_twin("a git commit",
+                                  refused=hcs_write(HCS_T_GUARD, transcript=hcs_tx("bash_commit")),
+                                  allowed=hcs_write(HCS_T_GUARD, transcript=hcs_tx("read_guard")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a Grep of a token-bearing Source backs a restamp, passes silently",
+                         hcs_twin("a Grep",
+                                  refused=hcs_write(HCS_T_GUARD, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_GUARD, transcript=hcs_tx("grep_guard")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a Glob of a token-bearing Source backs a restamp, passes silently",
+                         hcs_twin("a Glob",
+                                  refused=hcs_write(HCS_T_GUARD, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_GUARD, transcript=hcs_tx("glob_guard")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a Bash read of a token-bearing Source backs a restamp, passes silently",
+                         hcs_twin("a Bash read",
+                                  refused=hcs_write(HCS_T_GUARD, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_GUARD, transcript=hcs_tx("bash_read_guard")))))
+
+# Case 3: a failed call backs nothing; the same call with a good result backs the premise. The full-size pair ends with
+# that call after 2000 unrelated reads.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a failed Read backs no restamp; the same Read with a good result does, "
+                         "passes silently",
+                         hcs_twin("a failed Read",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("failed_read")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("ok_read")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a Read whose toolUseResult says success false backs no restamp; the same "
+                         "Read with a good result does, passes silently",
+                         hcs_twin("a Read with success false",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("failed_flag")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("ok_read")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a failed Read after 2000 unrelated reads backs no restamp; the same Read "
+                         "with a good result does, passes silently",
+                         hcs_twin("a failed Read at full size",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("long_failed")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("long_ok")))))
+
+# Case 4: a send, and a write-named MCP tool, back nothing, with the token in their text or with a token-less Source. A
+# read-named MCP tool backs the token it holds, and a token-less Source.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a send_message whose text holds the Source backs no restamp; a Read of the "
+                         "Source does",
+                         hcs_twin("a send_message with the token",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("send_token")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("ok_read")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a send_message that is the only call for a token-less Source backs nothing; a "
+                         "read-named MCP tool does",
+                         hcs_twin("a send_message alone",
+                                  refused=hcs_write(HCS_T_P7, transcript=hcs_tx("send_only")),
+                                  allowed=hcs_write(HCS_T_P7, transcript=hcs_tx("get_only")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a pull_request_review_write whose input holds the Source backs no restamp; a "
+                         "Read of the Source does",
+                         hcs_twin("a review write with the token",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("review_token")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("ok_read")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a pull_request_review_write that is the only call for a token-less Source backs "
+                         "nothing; a read-named MCP tool does",
+                         hcs_twin("a review write alone",
+                                  refused=hcs_write(HCS_T_P7, transcript=hcs_tx("review_only")),
+                                  allowed=hcs_write(HCS_T_P7, transcript=hcs_tx("get_only")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a resolve_review_thread whose input holds the Source backs no restamp; a Read of "
+                         "the Source does",
+                         hcs_twin("a thread resolve with the token",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("resolve_token")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("ok_read")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a resolve_review_thread that is the only call for a token-less Source backs "
+                         "nothing; a read-named MCP tool does",
+                         hcs_twin("a thread resolve alone",
+                                  refused=hcs_write(HCS_T_P7, transcript=hcs_tx("resolve_only")),
+                                  allowed=hcs_write(HCS_T_P7, transcript=hcs_tx("get_only")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a read-named MCP tool whose input holds the Source backs a restamp, passes "
+                         "silently",
+                         hcs_twin("a read-named MCP tool with the token",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("get_token")))))
+
+# Note 6: the kind that judges a premise is its BEFORE kind. A premise relabelled to [ruling] with no evidence is refused;
+# a premise that was [ruling] before passes, even when the write relabels it.
+add("handoff-checked-stamp: a premise relabelled [ruling] in the same write, restamped with no evidence, is refused by its "
+    "before kind, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1",), lacks=("P2", "P3", "P4", "P5", "P7", "P9"),
+    file_path=HCS_HANDOFF, content=HCS_T_RELABEL)
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a premise that was [ruling] before and is relabelled [read] in the same write, "
+                         "restamped with no evidence, passes silently",
+                         hcs_twin("a ruling premise relabelled to read",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_DEMOTE, transcript=hcs_tx("none")))))
 
 
 # =========================================================================== the machine-load brake
