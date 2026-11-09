@@ -28,10 +28,10 @@ venv is built in a sibling temp folder and renamed into place, so a parallel run
 loser of the rename uses the winner's. Ordinary PIP_* env applies to the install. Env FLOOR_VERMIN_CMD (split like a
 shell line) replaces the venv and skips the bootstrap.
 
-Cost: first use is three process starts (venv create, its ensurepip child, pip install), about 15 MB under the
-temp folder, and network. Later runs reuse the cache, and each starts one `import vermin` probe. A cache whose
-probe fails is rebuilt. A cache folder that holds other files (neither `.ok` nor `pyvenv.cfg`) is refused, never
-deleted.
+Cost: first use is four process starts (venv create, its ensurepip child, pip install, the `import vermin`
+probe), about 15 MB under the temp folder, and network. Later runs reuse the cache: each starts one probe
+(`import vermin`) and writes nothing. A cache whose probe fails is rebuilt. A cache folder that holds other files
+(neither `.ok` nor `pyvenv.cfg`) is refused, never deleted.
 
 Exits 0 and prints nothing when clean. Exits 1 and prints one line per offending file for vermin (file and
 feature) and one line per union type (file:line). Exits 2, naming the cause, when vermin cannot run or be
