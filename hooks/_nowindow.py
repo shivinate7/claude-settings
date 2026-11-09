@@ -7,23 +7,41 @@ a raw call. hooks/test_nowindow.py pins this contract.
 
 Each wrapper is a drop-in for the `subprocess` function of the same name. On Windows it ORs
 CREATE_NO_WINDOW into the caller's `creationflags` and keeps every flag the caller passed. Elsewhere
-it adds nothing. The platform is read at call time, and the wrapper looks up `subprocess.<name>` at
-call time too, so a test patch on `subprocess.<name>` sees the call.
+it adds nothing. On Windows, when the caller gives no stdin and no input, the child inherits this process's
+stdin only when it is a pipe or a file. A console stdin, or one that cannot be read, becomes an empty stdin: a
+no-window child cannot use an inherited console stdin, and its own subprocess calls fail with WinError 6. The
+platform is read at call time, and the wrapper looks up `subprocess.<name>` at call time too, so a test patch
+on `subprocess.<name>` sees the call.
 
-Limit: on Windows a child with no redirected stdout and stderr, started with this flag, writes to a
-hidden console, so its output never reaches the caller's terminal. A site that must show a child's
-output on the caller's terminal carries a `# nowindow: <reason>` marker and calls `subprocess` itself.
+Limit: on Windows, when the wrapper sets stdin, Python hands the child the caller's own stdout and stderr
+when the caller redirects neither (subprocess fills all three standard handles once one is set). Where that
+output lands under the flag is unmeasured. A site that must show a child's output on the caller's terminal
+carries a `# nowindow: <reason>` marker and calls `subprocess` itself.
 """
 import os
+import stat
 import subprocess
 import sys
 
 CREATE_NO_WINDOW = 0x08000000  # subprocess has no such name on a non-Windows runner
 
 
+def _stdin_is_data():
+    """True when this process's stdin is a pipe or a file: data a child may read, valid with no console."""
+    try:
+        mode = os.fstat(0).st_mode
+    except (OSError, ValueError):
+        return False
+    return stat.S_ISFIFO(mode) or stat.S_ISREG(mode)
+
+
 def _flags(kwargs):
     if sys.platform == "win32" or os.name == "nt":
         kwargs["creationflags"] = kwargs.get("creationflags", 0) | CREATE_NO_WINDOW
+        if kwargs.get("stdin") is None and kwargs.get("input") is None and not _stdin_is_data():
+            # The child has no console, so an inherited console stdin is an invalid handle there, and its own
+            # subprocess calls fail with WinError 6. An empty stdin is valid. input= sets stdin itself.
+            kwargs["stdin"] = subprocess.DEVNULL
     return kwargs
 
 
@@ -44,4 +62,8 @@ def check_call(*args, **kwargs):
 
 
 def check_output(*args, **kwargs):
-    return subprocess.check_output(*args, **_flags(kwargs))
+    had_stdin = kwargs.get("stdin") is not None
+    kwargs = _flags(kwargs)
+    if not had_stdin and kwargs.get("stdin") is subprocess.DEVNULL and "input" in kwargs and kwargs["input"] is None:
+        del kwargs["input"]  # check_output turns input=None into "", which subprocess refuses beside _flags' stdin
+    return subprocess.check_output(*args, **kwargs)
