@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LINT = os.path.abspath(os.environ.get("LAYOUT_LINT_UNDER_TEST") or HERE)
@@ -526,9 +527,9 @@ class WaitingCopy(GitTree):
 
 class DefaultBranchPage(GitTree):
     """A checkout with no extras file reads the waiting page from the repo's default branch on origin: the branch
-    origin/HEAD names, else origin/main (skill waiting-page). Incident 2026-11-07: a worktree on the record branch had no
-    extras file, so the page read as unknown and its page checks did not run. The read is of the ref only: no checkout
-    moves and no fetch runs."""
+    origin/HEAD names, else origin/main (skill waiting-page). A worktree on the record branch can hold no extras file;
+    without this read its page would read as unknown and its page checks would not run. The read is of the ref only: no
+    checkout moves and no fetch runs."""
     URL_MAIN = "https://claude.ai/artifact/fromorigin"
     URL_LOCAL = "https://claude.ai/artifact/fromlocal"
     URL_TRUNK = "https://claude.ai/artifact/fromtrunk"
@@ -611,6 +612,42 @@ class DefaultBranchPage(GitTree):
         self.assertFalse(self.ref_exists("refs/remotes/origin/main"), "scope: the fixture has an origin/main")
         self.assertFalse(self.ref_exists("refs/remotes/origin/HEAD"), "scope: the fixture has an origin/HEAD")
         self.assertEqual(self.layout.waiting_page(self.tree), "unknown", "an origin with no default branch reads as unknown")
+
+    def hooks_unimportable(self):
+        """The hooks folder cannot be imported here: a None entry in sys.modules makes `import _nowindow` raise
+        ImportError, as a copy of lint/ with no hooks/ beside it does. patch.dict restores the entry at cleanup."""
+        patch = mock.patch.dict(sys.modules, {"_nowindow": None})
+        patch.start()
+        self.addCleanup(patch.stop)
+        try:
+            import _nowindow  # noqa: F401
+        except ImportError:
+            return
+        self.fail("scope: _nowindow still imports with hooks/ made unimportable")
+
+    def read_without_raising(self, read):
+        """The read's value on this checkout. A raise fails the assert and names the raise: the read never raises."""
+        try:
+            return read(self.tree)
+        except Exception as err:
+            self.fail("%s raised %s when hooks/ is unimportable; the read must return None or unknown"
+                      % (read.__name__, type(err).__name__))
+
+    def test_default_branch_read_without_hooks_returns_none(self):
+        self.record("refs/remotes/origin/main", {EXTRAS: self.registry(self.URL_MAIN)})
+        self.scope_checkout()
+        self.scope_origin("refs/remotes/origin/main")
+        self.hooks_unimportable()
+        self.assertIsNone(self.read_without_raising(self.layout._default_branch_extras),
+                          "the read cannot start git without the no-window helper, so it returns None")
+
+    def test_waiting_page_without_hooks_reads_unknown(self):
+        self.record("refs/remotes/origin/main", {EXTRAS: self.registry(self.URL_MAIN)})
+        self.scope_checkout()
+        self.scope_origin("refs/remotes/origin/main")
+        self.hooks_unimportable()
+        self.assertEqual(self.read_without_raising(self.layout.waiting_page), "unknown",
+                         "the read returns None without the no-window helper, so the page reads as unknown")
 
 
 class SetWaitingPage(Tree):

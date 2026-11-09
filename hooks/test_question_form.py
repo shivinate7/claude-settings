@@ -42,8 +42,8 @@ Interface the module must match (the lane's form contract):
   is open), or an update carrying `repo`, that names a repo other than the page's needs a session-shaped
   `checked_with`. A `checked_with` equal to the session id in `owner`, or to the writer's `session_id`, is refused.
   A `repo` that is not owner/name is refused with the format reason. `repo` is required on the set: a direct call
-  with page_repo None refuses a missing one, but item_hit does not judge it when the page repo is unknown (ruling of
-  2026-11-08 12:16 CST, option a). A str_replace on `repo` or `checked_with` is refused as this rule. An update that
+  with page_repo None refuses a missing one, but item_hit does not judge it when the page repo is unknown, since no
+  compare can run. A str_replace on `repo` or `checked_with` is refused as this rule. An update that
   carries `checked_with` without `repo` is refused, naming `repo`. item_hit and page_item_hit take the writer's
   session_id. guard.py passes the cloud session's record id (env CLAUDE_CODE_REMOTE_SESSION_ID read as session_<x>),
   never the payload's local UUID. The page repo is read from the checkout at cwd,
@@ -1849,7 +1849,7 @@ def test_task_str_replace_prose_label_mention_passes():
 
 
 def case_item_stray_field_refused_from_a_record_branch_checkout():
-    """The page checks run from a checkout on the record branch (incident 2026-11-07). Its extras file is on origin/main
+    """The page checks run from a checkout on the record branch. Its extras file is on origin/main
     only, and the page reads it from there (lint/layout.py waiting_page), so an item set with a stray top-level field is
     refused as item-field-rendered, as at the page's own checkout. Scope first: when the page url reads as unknown, no
     page check runs and the case stops at that one cause."""
@@ -2122,7 +2122,7 @@ def case_cross_repo_required_when_page_repo_unknown():
     repo (see the ruling below). The origin checkout pins the requirement end to end."""
     cross("(xv) no repo, page repo unknown", "set", ma144(repo=None), None, NO_REPO_FRAGMENTS)
     cross("(xv) empty repo, page repo unknown", "set", ma144(repo=""), None, NO_REPO_FRAGMENTS)
-    # Ruling 2026-11-08 12:16 CST, option a: with the page repo unknown, item_hit does not judge a missing repo.
+    # With the page repo unknown, item_hit does not judge a missing repo: no compare can run.
     at_page("(xv) no repo, a checkout with no origin passes", "set", ma144_write(repo=None), tcj.PAGE_REPO)
     at_page("(xv) no repo, at the page's checkout with an origin", "set", ma144_write(repo=None),
             tcj.origin_page_repo(), NO_REPO_FRAGMENTS)

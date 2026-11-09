@@ -176,10 +176,10 @@ def origin_page_repo():
     return repo
 
 
-# The record-branch checkout of incident 2026-11-07: a checkout on the record branch `roadmap` with no extras file, while
-# origin/main holds the page's extras file. lint/layout.py reads the page from origin/main when the checkout has none, so
-# the page checks run from here too. Built from plumbing and one branch switch. origin/main is a ref only (no local main
-# stays), as a fetch leaves it. The one home of this fixture.
+# The record-branch checkout: a checkout on the record branch `roadmap` with no extras file, while origin/main holds
+# the page's extras file. lint/layout.py reads the page from origin/main when the checkout has none, so the page checks
+# run from here too. Built from plumbing and one branch switch. origin/main is a ref only (no local main stays), as a
+# fetch leaves it. The one home of this fixture.
 RECORD_CHECKOUT = os.path.join(ROOT, "record-branch-checkout")
 
 
