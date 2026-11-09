@@ -657,6 +657,9 @@ PUSHSUBMAIN = os.path.join(ROOT, "pushsubmain")      # the clone whose git folde
 PUSHSUB = os.path.join(ROOT, "pushsub")              # a submodule-style checkout: .git is a file naming a git folder
 PUSHBADPACK = os.path.join(ROOT, "pushbadpack")      # packed-refs with a line that is no object id, beside lane/base
 BADPACK = {}                                         # the sha of origin/lane/base in PUSHBADPACK, set when it is built
+PUSHPREC = os.path.join(ROOT, "pushprec")            # origin/lane/base packed at A and loose at B (the loose one wins)
+PUSHRELMAIN = os.path.join(ROOT, "pushrelmain")      # the clone of PUSHRELWT, which names it by a relative gitdir
+PUSHRELWT = os.path.join(ROOT, "pushrelwt")          # a linked worktree whose .git file holds a relative gitdir
 # The rule ids the two new asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
@@ -2383,9 +2386,20 @@ def _build_pushref():
     with open(os.path.join(PUSHBADPACK, ".git", "packed-refs"), "a", encoding="utf-8") as handle:
         handle.write("not-a-sha refs/remotes/origin/junk\n")
 
+    # origin/lane/base is packed at commit A, then written loose at B: git reads the loose target.
+    _ref_repo(PUSHPREC)
+    run_vcs(PUSHPREC, "pack-refs", "--all", "--prune")
+    run_vcs(PUSHPREC, "update-ref", "refs/remotes/origin/lane/base", "HEAD")
+
+    # The linked worktree's .git file names its git folder by a path relative to the file's own folder.
+    _ref_repo(PUSHRELMAIN)
+    run_vcs(PUSHRELMAIN, "worktree", "add", "-q", "-b", "lane/rel", slash(PUSHRELWT),
+            "refs/remotes/origin/lane/base")
+    write(os.path.join(PUSHRELWT, ".git"), "gitdir: ../pushrelmain/.git/worktrees/pushrelwt\n")
+
 
 lazy_fixture([PUSHPACKED, PUSHPACKEDSUB, PUSHLINKMAIN, PUSHLINKWT, PUSHLOCK, PUSHREFTABLE, PUSHSYMREF,
-              PUSHBADREF, PUSHSUBMAIN, PUSHSUB, PUSHBADPACK], _build_pushref)
+              PUSHBADREF, PUSHSUBMAIN, PUSHSUB, PUSHBADPACK, PUSHPREC, PUSHRELMAIN, PUSHRELWT], _build_pushref)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
 lazy_fixture([LINKMAIN, LINKOUT, WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR,
@@ -7836,7 +7850,8 @@ REF_LOOSE = _ref_layout(PUSHLOCK, must=[".git/refs/remotes/origin/lane/base",
                                         ".git/refs/remotes/origin/lane/stale.lock",
                                         ".git/refs/remotes/origin/HEAD"],
                         absent=[".git/packed-refs"])
-REF_REFTABLE = _ref_layout(PUSHREFTABLE, must=[".git/reftable", ".git/refs/remotes/origin/lane/base"])
+REF_REFTABLE = _ref_layout(PUSHREFTABLE, must=[".git/reftable", ".git/refs/remotes/origin/lane/base",
+                                               ".git/refs/remotes/origin/HEAD"])
 REF_SYMREF = _ref_layout(PUSHSYMREF, must=[".git/refs/remotes/origin/alias"],
                          contains=[(".git/refs/remotes/origin/alias", "ref: refs/heads/lane-local")])
 REF_NEWBR = _ref_layout(PUSHNEWBR, must=[".git/refs/remotes/origin/lane/base"])
@@ -7844,6 +7859,9 @@ REF_BADREF = _ref_layout(PUSHBADREF, must=[".git/refs/remotes/origin/not-text", 
 REF_BADPACK = _ref_layout(PUSHBADPACK, must=[".git/packed-refs"],
                           contains=[(".git/packed-refs", "not-a-sha refs/remotes/origin/junk")])
 REF_SUBGIT = _ref_layout(PUSHSUB, must=[".git"], contains=[(".git", "gitdir: ")])
+REF_PREC = _ref_layout(PUSHPREC, must=[".git/packed-refs", ".git/refs/remotes/origin/lane/base"],
+                       contains=[(".git/packed-refs", "refs/remotes/origin/lane/base")])
+REF_RELGIT = _ref_layout(PUSHRELWT, must=[".git"], contains=[(".git", "gitdir: ../pushrelmain/")])
 
 PUSH_REF_CHECKS = (
     ("push-new-branch: ref reader, a remote branch packed in packed-refs is a tip, a new branch at it is judged",
@@ -7876,8 +7894,11 @@ PUSH_REF_CHECKS = (
     ("push-new-branch: ref reader, a reftable folder is judged on for-each-ref's tips",
      _ref_verdict_check(REF_REFTABLE, PUSHREFTABLE, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-rt"],
                         "skc-rt")),
-    ("push-new-branch: ref reader, for-each-ref's origin/HEAD is no branch, its sha is not judged",
-     _ref_verdict_check(REF_REFTABLE, PUSHREFTABLE, ["origin", "refs/remotes/origin/HEAD:refs/heads/skc-rt-head"], "")),
+    # origin/HEAD goes first: a reader that takes it as a tip judges that refspec and returns it, failing the want.
+    ("push-new-branch: ref reader, for-each-ref's origin/HEAD is no branch, the refspec beside it is judged",
+     _ref_verdict_check(REF_REFTABLE, PUSHREFTABLE,
+                        ["origin", "refs/remotes/origin/HEAD:refs/heads/skc-rt-head",
+                         "refs/remotes/origin/lane/base:refs/heads/skc-rt-base"], "skc-rt-base")),
     ("push-new-branch: ref reader, a symbolic ref under refs/remotes reads for-each-ref once",
      _ref_count_check(REF_SYMREF, PUSHSYMREF, ["origin", "refs/remotes/origin/alias:refs/heads/skc-alias-count"], 1)),
     ("push-new-branch: ref reader, a symbolic ref under refs/remotes resolves to its commit, judged",
@@ -7886,6 +7907,15 @@ PUSH_REF_CHECKS = (
     ("push-new-branch: ref reader, a loose ref that is not text goes to for-each-ref, the branch beside it is judged",
      _ref_verdict_check(REF_BADREF, PUSHBADREF, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-badref"],
                         "skc-badref")),
+    ("push-new-branch: ref reader, a loose ref that is not text goes to for-each-ref once, the one start",
+     _ref_count_check(REF_BADREF, PUSHBADREF, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-badref-count"],
+                      1)),
+    ("push-new-branch: ref reader, a loose ref and a packed ref of one name read the loose target, judged",
+     _ref_verdict_check(REF_PREC, PUSHPREC, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-prec"],
+                        "skc-prec")),
+    ("push-new-branch: ref reader, a .git file with a relative gitdir resolves against its checkout, judged",
+     _ref_verdict_check(REF_RELGIT, PUSHRELWT, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-rel"],
+                        "skc-rel")),
     # git refuses this packed-refs on every read, the reader's own rev-parse included, so only the start count shows
     # the arm: a line that is no object id hands the read to for-each-ref, one start.
     ("push-new-branch: ref reader, a packed-refs line that is no object id sends the read to for-each-ref once",
