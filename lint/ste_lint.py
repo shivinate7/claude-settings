@@ -420,7 +420,7 @@ def load_config(start: str) -> dict:
                 data = json.load(handle)
         else:
             try:
-                import tomllib
+                import tomllib  # novermin  3.11 module; the ImportError branch covers 3.9 (lint/check_python_floor.py)
             except ImportError:  # pragma: no cover - Python 3.10 and older
                 sys.stderr.write(
                     "ste-lint: %s needs Python 3.11 or later. The file is ignored.\n" % found)
@@ -445,8 +445,13 @@ def load_config(start: str) -> dict:
 NUL = "\x00"
 _PH_RE = re.compile(r"\x00\d+\x00+")
 
+# A code span opens with a whole run of backticks and closes with a run of the same length, so a
+# backtick inside a double-backtick span stays inside it. The (?<!`) before the opener keeps an
+# unclosed run from opening a shorter span mid-run. Used by the linter and the fixer.
+INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)")
+
 MASK_PATTERNS = [
-    re.compile(r"`[^`\n]*`"),                       # inline code
+    INLINE_CODE_RE,                                 # inline code
     re.compile(r"!\[[^\]]*\]\([^)]*\)"),            # image
     re.compile(r"\[([^\]]*)\]\([^)]*\)"),           # link: keep the label
     re.compile(r"<https?://[^>\s]+>"),              # autolink
@@ -1788,7 +1793,7 @@ _QUOTED = re.compile(r'(?<!\w)"[^"\n]+"(?!\w)|“[^”\n]*”')
 # Spans the fixer never reads: code, whole links and images (label and URL), URLs, e-mail
 # addresses, HTML tags, placeholders. A quote around one of them masks it all.
 _FIX_MASK = [
-    re.compile(r"`[^`\n]*`"),
+    INLINE_CODE_RE,
     re.compile(r"!?\[[^\[\]\n]*\]\((?:[^()\n]|\([^()\n]*\))*\)"),  # one level of ( ) in a URL
     re.compile(r"\[[^\[\]\n]*\]\[[^\[\]\n]*\]"),
     re.compile(r"<https?://[^<>\s]+>"),
