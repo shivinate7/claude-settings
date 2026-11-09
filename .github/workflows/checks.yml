@@ -1255,7 +1255,9 @@ jobs:
     # measured lane PR 1163 alone at 946 s locally (+236 s) and lane PR 1157 at 768 s (+58 s). If those add up and the
     # speed-ups carry over, the set nears 945 s locally, about 16 min. A cap-cut step has no upper bound, so 25 min is a stopgap
     # (ci-job-caps) until the split (debt mutate-guard-split); the next green run gives the figure.
-    timeout-minutes: 25
+    # Batch 68 run 42608474160 was cancelled at the 25 min cap with 616 of 694 mutants killed and none surviving, so the
+    # cap is 45, a stopgap until step mutate-guard-split (shards).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
