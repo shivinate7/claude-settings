@@ -473,11 +473,12 @@ def _brace_expand(word):
 
 
 def _expand_braces(words):
-    """The shell words with each comma brace list expanded, in place."""
+    """The shell words with each comma brace list expanded, in place. An empty alternative (`{path,}`) leaves no
+    word, as in bash, so no caller reads the first character of an empty word."""
     out = []
     for word in words:
         expanded = _brace_expand(word) if "{" in word else None
-        out.extend(expanded if expanded is not None else [word])
+        out.extend([part for part in expanded if part] if expanded is not None else [word])
     return out
 
 
@@ -533,7 +534,8 @@ def _loop_items(listed):
         count += 1 if expanded is None else len(expanded)
         if count > _LOOP_CAP:
             return None
-        items.append(word)
+        # Each alternative is its own item, so a body writer is read once per path, never once over several.
+        items.extend([part for part in expanded if part] if expanded is not None else [word])
     return items or None
 
 
