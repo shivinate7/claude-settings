@@ -3473,6 +3473,25 @@ for (const [set, note] of [[SHEET_RED, ""], [[430], " (control)"]]) for (const w
     assert.ok(s.l >= g.nav.l - 0.5 && s.r <= g.nav.r + 0.5, `the selected ${s.name} tab runs from ${Math.round(s.l)} to ${Math.round(s.r)} px, past the tab bar's ${Math.round(g.nav.l)} to ${Math.round(g.nav.r)} px, at ${width} wide`);
   });
 }
+// ---------------------------------------------------------------- showTab reveals the selected tab when Status is selected by script
+// A press by Playwright scrolls its tab into view first, which would hide a strip that never reveals its selected tab. So Status is selected
+// by script, as a click is: showTab must bring the selected tab into the strip by itself (revealTab). Red with revealTab's scroll removed.
+const selectTabByScript = (page, id) => page.evaluate((id) => document.getElementById(id).click(), id);
+// [width, root font size in percent]. At 240 and 430 the two tabs fit the strip with the revealing scroll removed too, so those are controls.
+const SHOW_TAB_RED = [[180, 100], [200, 100], [320, 200]];
+const SHOW_TAB_CONTROL = [[240, 100], [430, 100]];
+for (const [set, note] of [[SHOW_TAB_RED, ""], [SHOW_TAB_CONTROL, " (control)"]]) for (const [width, pct] of set) for (const scheme of SCHEMES) {
+  test(`tab list, ${scheme}: ${sizeWhere(width, pct)}, Status selected by script: the selected tab sits inside the tab bar${note}`, async (t) => {
+    const page = await tabSetPage(t, { width, pct, scheme, sel: "Questions" }); if (!page) return;
+    await selectTabByScript(page, "tabStatus");
+    await page.locator("#sPanel").waitFor({ state: "visible" });
+    assert.equal(await page.getAttribute("#tabStatus", "aria-selected"), "true", "Status is not the selected tab after the script press");
+    const g = await tabGeo(page);
+    const s = g.tabs.find((x) => x.sel);
+    assert.ok(s, "no shown tab is marked selected");
+    assert.ok(s.l >= g.nav.l - 0.5 && s.r <= g.nav.r + 0.5, `the selected ${s.name} tab runs from ${Math.round(s.l)} to ${Math.round(s.r)} px, past the tab bar's ${Math.round(g.nav.l)} to ${Math.round(g.nav.r)} px, at ${width} wide`);
+  });
+}
 // [width, root font size in percent]. On the old page the selected tab is wider than the strip at 180 doubled and at 180-240 tripled. At
 // 200-240 doubled it fits, so those are controls.
 const TAB_WIDE_RED = [[180, 200], [180, 300], [200, 300], [220, 300], [240, 300]];
@@ -7715,6 +7734,37 @@ test("a doing step that is not stalled still reads In progress in the Changes lo
   assert.equal(await row.count(), 1, "step d6 has no row in the Changes log");
   assert.equal(await row.locator('[role="img"]').getAttribute("aria-label"), "In progress", "the Changes log row of the doing step does not read In progress");
 });
+
+// ---------------------------------------------------------------- the Changes log rows keep their source order at every width and text size
+// The rows of the Changes log (#svDays .ev) draw top to bottom in the order the page holds them. A reflow that reorders them (an order rule,
+// or column-reverse on a day) puts a row above one the page holds before it. Twenty steps on four days fill a page of rows, so each case
+// reads a full page. Each case is one width and one text size, in both schemes.
+const CHANGES_WIDTHS = [180, 320, 768];
+const CHANGES_SIZES = [100, 200];
+const changesSteps = () => {
+  const rows = [["c1", "cleanup", 1, "doing"], ...Array.from({ length: 19 }, (_, i) => ["s" + (i + 1), "cleanup", i + 2, i % 3 ? "todo" : "done"])];
+  const steps = stepsOf(rows);
+  rows.forEach(([id], i) => { steps[id].updatedAt = `2026-10-${String(26 - Math.floor(i / 5)).padStart(2, "0")}T${String(9 + (i % 5)).padStart(2, "0")}:00:00Z`; });
+  return steps;
+};
+// The Changes log rows in the page's order: each row's step id and its top edge in px.
+const changesRows = (page) => page.locator("#svDays .ev").evaluateAll((rows) => rows.map((r) => ({
+  id: r.querySelector("button[data-go]")?.getAttribute("data-go") ?? "", top: r.getBoundingClientRect().top,
+})));
+for (const width of CHANGES_WIDTHS) for (const pct of CHANGES_SIZES) for (const scheme of SCHEMES) {
+  test(`Changes log, ${scheme}: ${sizeWhere(width, pct)}: the rows draw in the page's order`, async (t) => {
+    const page = await open(t, { pageHtml: phasePage(changesSteps()), viewport: { width, height: 900 }, scheme }); if (!page) return;
+    if (pct > 100) await zoomText(page, pct + "%");
+    await openStatus(page);
+    await page.click("#vt-log"); // the Changes view is hidden until its tab is pressed, and a hidden row has no box to read
+    await page.locator("#v-log").waitFor({ state: "visible" });
+    const rows = await changesRows(page);
+    assert.ok(rows.length >= 5, `the Changes log draws ${rows.length} rows, not a page of them, ${sizeWhere(width, pct)}`);
+    for (let i = 1; i < rows.length; i++) {
+      assert.ok(rows[i].top >= rows[i - 1].top, `row ${rows[i].id} draws at ${Math.round(rows[i].top)} px, above row ${rows[i - 1].id} at ${Math.round(rows[i - 1].top)} px, though the page holds ${rows[i - 1].id} first, ${sizeWhere(width, pct)}`);
+    }
+  });
+}
 
 // A paused step keeps status active, as a stalled one does. The count, the Latest changes feed and the Changes log never read it In progress.
 const PAUSED_STALL = { why: "", steps: [], paused: ["a3"], badPause: [], items: [], ...NO_ITEMS };
