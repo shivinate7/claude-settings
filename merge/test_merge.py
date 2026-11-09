@@ -15721,12 +15721,29 @@ class ReviewStampSince(unittest.TestCase):
     )
 
     def tool_read_stop(self, root):
-        """-> the message of the Stop that review_stamp_since raises for `root` when the merge tool's checkout gives no cutover. A read that does not stop fails here."""
+        """-> the message of the Stop that review_stamp_since raises for `root` when the merge tool's checkout gives no cutover. A read that does not stop fails here,
+        and so does one that raises ImportError instead: a failed import must not replace the Stop."""
         try:
             got = review_fn(self, "review_stamp_since")(root, "main")
         except merge.Stop as stop:
             return str(stop)
+        except ImportError as e:
+            self.fail("review_stamp_since raised %r, not the Stop that names the failed tool read" % (e,))
         self.fail("review_stamp_since returned %r while the merge tool's checkout gives no cutover, instead of stopping" % (got,))
+
+    def failed_tool_read(self, launch_imports):
+        """-> (the message of the Stop that review_stamp_since raises when the merge tool's checkout is not a repository, the source checkout that MERGE_TOOL_SOURCE
+        names). `launch_imports` False makes `launch` unimportable, as a broken launch.py would be. The source is not the tool, so the note would name it."""
+        root = self.repo(salt_at=None)
+        source = os.path.realpath(tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder()))
+        self.addCleanup(shutil.rmtree, source, True)
+        launch_patch = contextlib.nullcontext() if launch_imports else unittest.mock.patch.dict(sys.modules, {"launch": None})
+        with self.tool_checkout(repo=False), launch_patch, unittest.mock.patch.dict(os.environ, {"MERGE_TOOL_SOURCE": source}):
+            if not launch_imports:
+                with self.assertRaises(ImportError):  # the premise of the case: the note's import of `launch` fails
+                    __import__("launch")
+            message = self.tool_read_stop(root)
+        return message, source
 
     def safe_path_read(self, pythonpath=None):
         """-> the outcome of the merge tool's stamp read in a child run under PYTHONSAFEPATH=1: {"raised": the class name of what it raised, "message": its text}.
@@ -15781,6 +15798,20 @@ class ReviewStampSince(unittest.TestCase):
                 message = self.tool_read_stop(root)
         self.assertIn("lacks the review stamp salt", message, "the Stop is not the tool checkout's salt Stop, so the note check proves nothing:\n" + message)
         self.assertIn("a temporary copy of " + source, message, "a Stop whose source is another checkout names no temporary copy of it, so the three cases above prove nothing:\n" + message)
+
+    def test_a_failed_launch_import_leaves_the_tool_read_stop_standing(self):
+        # tool_source_env reads launch.py's variable before the try that raises the tool-read Stop. A launch.py that cannot be imported leaves the
+        # note off, and the Stop stands: it names the failed read, and no note comes from the failed import.
+        message, _ = self.failed_tool_read(launch_imports=False)
+        self.assertIn("could not read the merge tool's source checkout", message, "the Stop does not name the failed tool read:\n" + message)
+        self.assertNotIn("temporary copy", message, "a failed launch import still added the temporary copy note:\n" + message)
+
+    def test_a_launch_import_that_works_names_the_source_checkout_in_the_tool_read_stop(self):
+        # The control for the case above: the same failed tool read, with launch.py importable, names the checkout MERGE_TOOL_SOURCE holds.
+        message, source = self.failed_tool_read(launch_imports=True)
+        self.assertIn("could not read the merge tool's source checkout", message, "the Stop does not name the failed tool read:\n" + message)
+        self.assertIn("a temporary copy of " + source, message, "the Stop does not name the source checkout MERGE_TOOL_SOURCE holds:\n" + message)
+        self.assertIn("repair " + source, message, "the Stop does not say to repair the source checkout:\n" + message)
 
     def test_two_roots_in_one_process_read_the_tool_checkout_once(self):
         # The tool checkout's cutover is cached for the process. Two roots with no salt commit each need it, and the tool's git log runs once.
