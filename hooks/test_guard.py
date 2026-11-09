@@ -6974,6 +6974,12 @@ sh("silent-write [cdvar-unread]: [ -d <missing> ] && R=<throwaway>, cd \"$R\", t
    + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)
 sh("silent-write [cdvar-unread]: control: R=<throwaway> && cd \"$R\", then a discarded commit, is allowed",
    "R=" + TSLASH + " && cd \"$R\" && " + VCS + " commit -m x >/dev/null 2>&1", "allow", cwd=GITMAIN)
+# A `ls <missing> &&` may fail, so the cd after it may not run and the commit's folder is unknown: the
+# discarded commit is refused. Red on 49ef79340, which reads the cd as run and allows the commit; the tests
+# branch's own product denies it, as the row expects.
+sh("silent-write [cdvar-unread]: R=<throwaway>; ls <missing> && cd \"$R\", then a discarded commit from the real checkout, is refused",
+   "R=" + TSLASH + "; ls " + slash(os.path.join(ROOT, "no-such-folder")) + " && cd \"$R\"; " + VCS
+   + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)
 sh("silent-write throwaway: --git-dir names the throwaway repo, and it is judged there",
    VCS + " --git-dir=" + TSLASH + "/.git commit -m x >/dev/null", "allow", cwd=GITMAIN)
 sh("silent-write throwaway: a discarded pipe tail in a throwaway repo",

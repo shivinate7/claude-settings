@@ -191,6 +191,26 @@ case("a mkdir that fails, mkdir <dir>/x/y && R=<B>, then cd \"$R\": the assignme
 case("control: true && R=<B>, then cd \"$R\": either answer, the assignment may run",
      'true && R=%s; cd "$R" && git status' % OTHER, "git status", (OTHER, None))
 
+# --- A cd after an `&&` whose left side may fail is not known to run: the shell may stay where it was, so the
+# folder the next command runs in is None. Red on 49ef79340, which reads the cd's variable as run; the
+# controls are green there. The literal twin (`ls <missing> &&`, a newline, `cd <A>`) reads A on main and on
+# 49ef79340 alike. That is a known gap, not red here: the right answer is None, so the row takes A or None
+# and does not pin A as the only answer.
+case("R=<A>; ls <missing> && cd \"$R\": the cd may not run, so the next command reads None, not A",
+     'R=%s; ls %s && cd "$R"; git status' % (TARGET, MISSING), "git status", None)
+case("R=<A>; test -d <missing> && cd \"$R\": the cd may not run, so the next command reads None, not A",
+     'R=%s; test -d %s && cd "$R"; git status' % (TARGET, MISSING), "git status", None)
+case("R=<A>; false && cd \"$R\": the cd does not run, so the next command reads None, not A",
+     'R=%s; false && cd "$R"; git status' % TARGET, "git status", None)
+case("ls <missing> &&, a newline, R=<B>, cd \"$R\": the R=<B> may not run, so the cd reads None, not B",
+     'ls %s &&\nR=%s\ncd "$R"\ngit status' % (MISSING, OTHER), "git status", None)
+case("ls <missing> &&, a newline, cd <A>: the literal twin, the cd may not run: None, or A as main reads it",
+     'ls %s &&\ncd %s\ngit status' % (MISSING, TARGET), "git status", (TARGET, None))
+case("control: R=<A> && cd \"$R\"; the and-chain assignment runs, so the cd reads A",
+     'R=%s && cd "$R"; git status' % TARGET, "git status", TARGET)
+case("control: R=<A>, a newline, then cd \"$R\" reads A",
+     'R=%s\ncd "$R"\ngit status' % TARGET, "git status", TARGET)
+
 # --- A paren group inside a segment does not undo that segment's own clear. A group that balances inside
 # the segment (`$(...)`, `<(...)`, `((...))`, `$((...))`) is not a subshell, so the variable it clears stays
 # cleared. Red on 5b6135cbf, which restores the value from before the segment. The subshell rows are controls.
