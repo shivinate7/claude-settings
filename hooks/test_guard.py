@@ -1718,6 +1718,10 @@ def _build_pointer():
     write(os.path.join(PTRBADCFG, "CLAUDE.md"), "rules with no pointer line\n")
     write(os.path.join(PTRGONECFG, "CLAUDE.md"),
           "@" + slash(os.path.join(ROOT, "nosuchcheckout")) + "/CLAUDE.md\n")
+    # Scope before subject: the stand-down cases need the directory PTRGONECFG names to be absent.
+    if os.path.exists(os.path.join(ROOT, "nosuchcheckout")):
+        sys.exit("fixture setup failed: the directory the gone-pointer rules name exists: %r"
+                 % os.path.join(ROOT, "nosuchcheckout"))
     os.makedirs(PTRNOCFG, exist_ok=True)
 
     make_blind_git(GITBLIND)
@@ -4015,8 +4019,9 @@ FAMILY = "pointer-edit"
 #
 # The rule reads the TARGET path, never the cwd. Its passes are the pointer's own `.git`, a linked
 # worktree of the same clone (nested under the pointer, or elsewhere), and any target outside the
-# pointer. A rules file that is missing, unreadable or names no pointer stands the rule down. Read and
-# Grep are never judged. A shell write into the pointer is out of scope: a note only.
+# pointer. A rules file that is missing, unreadable or names no pointer stands the rule down. Read,
+# Grep, Artifact and ArtifactData are never judged: the gate is WRITE_TOOLS. A shell write into the
+# pointer is out of scope: a note only.
 #
 # The targets are plain fixture files, never the pointer's CLAUDE.md or anything under hooks/, lint/ or
 # agents/, which frozen-path already judges. TEMP_DIR is ROOT/tmp for this section, as in the
@@ -4027,6 +4032,9 @@ PE_NEW = os.path.join(PTRMAIN, "docs", "brand-new.md")           # a file the po
 PE_NOTEBOOK = os.path.join(PTRMAIN, "docs", "scratch.ipynb")     # a notebook path in the pointer
 PE_TEMP = os.path.join(TEMP_DIR, "probe.txt")                    # a file in the guard's temp folder
 PE_GITDIR = os.path.join(PTRMAIN, ".git", "pointer-edit-probe")  # inside the pointer's own .git
+# Under the directory PTRGONECFG names, which the fixture never creates. Its stand-down is the only
+# thing that passes this write: with the directory taken as the pointer, the target is inside it.
+PE_GONE_TARGET = os.path.join(ROOT, "nosuchcheckout", "f.txt")
 
 # THE DENY CASES. Each names the pointer itself as cwd, except the last, from a directory that is no
 # checkout, which proves the TARGET decides. Each reason must carry the EnterWorktree tool. Each stand-
@@ -4067,13 +4075,19 @@ add("pointer-edit: Write into a directory that is no checkout is allowed", "allo
 add("pointer-edit: a rules file with no pointer line stands the rule down", "allow", tool="Write",
     cwd=PTRMAIN, config=PTRBADCFG, file_path=PE_TARGET, content="changed\n")
 add("pointer-edit: a pointer naming a directory that is gone stands the rule down", "allow",
-    tool="Write", cwd=PTRMAIN, config=PTRGONECFG, file_path=PE_TARGET, content="changed\n")
+    tool="Write", cwd=PTRMAIN, config=PTRGONECFG, file_path=PE_GONE_TARGET, content="changed\n")
 add("pointer-edit: no global rules file at all stands the rule down", "allow", tool="Write",
     cwd=PTRMAIN, config=PTRNOCFG, file_path=PE_TARGET, content="changed\n")
 add("pointer-edit: Read of a file in the pointer checkout is never judged", "allow", tool="Read",
     cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET)
 add("pointer-edit: Grep under the pointer checkout is never judged", "allow", tool="Grep",
     cwd=PTRMAIN, config=PTRCFG, pattern="base", path=PTRMAIN)
+# The gate is WRITE_TOOLS. Artifact and ArtifactData reach the guard with a file_path too, so they
+# must be named here: a gate dropped to every tool would refuse them, and these cases go red.
+add("pointer-edit: Artifact with a pointer file as file_path is not a write and is allowed", "allow",
+    tool="Artifact", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET)
+add("pointer-edit: ArtifactData with a pointer file as file_path is not a write and is allowed", "allow",
+    tool="ArtifactData", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET)
 
 TEMP_DIR = None   # back to the system temp for the sections below
 
