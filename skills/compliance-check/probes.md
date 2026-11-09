@@ -77,9 +77,9 @@ The probe reads tracked files only, so an untracked folder is not there.
 
 | Item | Pass when |
 | --- | --- |
-| screens named | `.claude/shoot.json` lists its routes, and `bin/shoot` would accept the file |
+| screens named | `.claude/shoot.json` lists its routes, and `shoot` would accept the file |
 | sizes named, themes named | `shoot.json` names them, or takes shoot's default (1440, 820 and 390; light and dark), the house sizes |
-| screenshot command | `shoot.json` exists, so the shared `bin/shoot` runs (decision shoot-is-one-shared-command, one shared screenshot command). The repo's own command is `partial` |
+| screenshot command | `shoot.json` exists, so the shared `shoot` runs (decision shoot-is-one-shared-command, one shared screenshot command). The repo's own command is `partial` |
 | token file | one token source (`tokens.*`, `design-tokens.*`). A test file, and a file that says it is generated, do not count |
 | ui copy | never graded: the known STE gap in the Output row |
 
@@ -102,7 +102,7 @@ Comments do not count. Exit 0: in shape or n/a. Exit 1: a gap or a partial.
 | ci checks | a pull-request workflow runs the package tests (when a package exists) and compiles the app. `xcodebuild -showsdks`, `-list`, `-showBuildSettings`, `-help` and `-version` compile nothing |
 | slow tests | no workflow runs `make ui-test`, `make native-check`, `sim-test` or an `xcodebuild test` that covers a UI-test bundle (`-only-testing:`, or the scheme's test targets). A run the probe cannot resolve is a gap. UI tests run once per batch on the Mac |
 | test diagnostics | each `xcodebuild test` or `test-without-building` run in a workflow, the Makefile or a tracked `*.sh` sets `-collect-test-diagnostics never`, so a failed test starts no `simctl diagnose` of up to 10 minutes. `sim-test` adds it; `build-for-testing` is no run. Named incident, landed 2026-10-29: Restyle and Duo each patched it alone |
-| account ids | no `DEVELOPMENT_TEAM` in a project file, Makefile or workflow. An account key of `bin/ios-ship` in `tools/ios-ship.json` is an allowed override: `partial` |
+| account ids | no `DEVELOPMENT_TEAM` in a project file, Makefile or workflow. An account key of `ios-ship` in `tools/ios-ship.json` is an allowed override: `partial` |
 
 The lowest iOS, the tokens and the test style are read by hand in a repo visit.
 

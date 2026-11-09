@@ -52,7 +52,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `self-repository` audit. It flags each local `uses: ./...` call, an action such as `./actions/a`
    too, not only a workflow. A floating version once turned a PR red.
    Pins of claude-settings' `ste-lint` and `zizmor` actions follow the session's tools (decision
-   `action-pins-follow-sessions`). `bin/ste-changed` reads those pins. It prints drift and exits 3. The
+   `action-pins-follow-sessions`). `ste-changed` reads those pins. It prints drift and exits 3. The
    session then moves the pin in a lane of its own. No bot and no schedule moves it. That tool reads
    only the `ste-lint` and `zizmor` pins. Other claude-settings pins can drift unseen.
    Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
@@ -62,7 +62,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
    each lane head before the join. A red lane does not join. Before it marks the integration PR
    ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration branch>` on the batch
-   head. A FAIL keeps it a draft. A hand list of checks never stands in for that run: `bin/ci-job`
+   head. A FAIL keeps it a draft. A hand list of checks never stands in for that run: `ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
@@ -77,7 +77,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    A lane that is red on form (record format, version bump, lint), not on a behaviour test, is fixed
    and re-merged instead. Do that for a fix of a few lines in its own files, and only for its
    first such fix in this batch. A second red drops the lane.
-   A lint red that `bin/ste-changed` passes, while it blames an old `ste-lint` pin, is not a strike
+   A lint red that `ste-changed` passes, while it blames an old `ste-lint` pin, is not a strike
    (decision `action-pins-follow-sessions`, CI pins follow the session's tools). The session moves
    that pin to claude-settings main in a lane of its own, with no question. That lane's reviewer
    checks only that it changes pin lines alone, to a main commit that descends from the old pin.

@@ -29,7 +29,7 @@ after round 1 gets a second design read (decision `design-agents`).
 1. **List the changed pages.** Name each changed page and route. Capture a screenshot of each
    one at every size and theme it ships in. Use a headless or isolated browser
    (`verification-browser-login-only-needed`, `verification-announce-own-screen`). For a text-only change,
-   also capture the same screens on main at every size and theme. `bin/shoot` also writes
+   also capture the same screens on main at every size and theme. `shoot` also writes
    each rendered page as `.html`. Run `python3 ~/.claude/lint/label_once.py` on those files, and
    give its hits to Reviewer A and the design reviewer (`ux-label-once`, a label shows once).
 2. **Spawn two blind reviewers.** Each brief names only the changed pages, routes and

@@ -184,7 +184,7 @@ Pins of claude-settings' `ste-lint` and `zizmor` actions follow the session's to
 the tool that reads the pins. It exits 3 when a pin lags:
 
 ```sh
-bin/ste-changed origin/main
+ste-changed origin/main
 ```
 
 Move the pin in a lane of its own (decision `action-pins-follow-sessions`, pins follow the session's
