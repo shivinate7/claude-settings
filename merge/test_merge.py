@@ -13289,6 +13289,8 @@ class ReviewFixBase(ReviewEnv):
         self.assertEqual(rc, 2, "the fix check was not refused:\n" + out + err)
         self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
         self.assertNotIn("Traceback", err)
+        # the tool's own reason, the words the spawn guard's refusal carries too (FixCheckRefusal pins the rule itself)
+        self.assertIn(FIX_CHAIN_REASON, err, "the refused fix check did not print the tool's reason:\n" + err)
 
     def test_a_base_equal_to_the_newest_earlier_record_head_prints_the_record(self):
         # control: the fix diff starts from the head the newest earlier record reviewed, and that record has no fix line
@@ -13341,6 +13343,70 @@ class ReviewFixBase(ReviewEnv):
         malformed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus"))
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
         self.assert_refused(rc, out, err)
+
+# The tool's reason for a refused fix check chain, as --fix-check prints it (the sentence after `merge: --fix-check: `). The guard's spawn
+# refusal carries the same words (hooks/test_guard.py, the fix check chain cases), so both files pin one sentence, not two.
+FIX_CHAIN_REASON = ("the reviewed head must be the Head of the newest earlier review record on this pull request, "
+                    "and that record must have no Fix check line")
+
+
+class FixCheckRefusal(unittest.TestCase):
+    """merge.fix_check_refusal and merge.pr_review_chain (lane fix-check-render-first): the one rule a fix check's reviewed head must pass, which the
+    tool's --fix-check path and the spawn guard both call. "" when eligible; else the reason the tool prints. A reviewed head equal to the live head is
+    refused too, because its fix diff is empty. Each refusal is its own case, so a failure names one cause."""
+
+    EARLIER = "1e" * 20  # a head an earlier record reviewed, and that is not the newest record's
+    OTHER = "2e" * 20  # a head no record reviewed
+    NEWEST = REVIEW_OLD_HEAD  # the head of the newest earlier record
+    LIVE = REVIEW_HEAD  # the pull request's live head
+
+    def rec(self, head, fix=None):
+        """One parsed record at `head`, as parse_review reads it; `fix` is a tuple of fix check lines."""
+        return parse_text(self, record_text(head=head, rounds=REVIEW_PASS, fix=fix or ()))
+
+    def refusal(self, records, reviewed, live=LIVE):
+        return review_fn(self, "fix_check_refusal")(records, reviewed, live)
+
+    def test_an_eligible_chain_is_allowed(self):
+        self.assertEqual(self.refusal([self.rec(self.NEWEST)], self.NEWEST), "", "a fix check from the newest earlier record's head was refused")
+
+    def test_an_older_fix_line_does_not_block_a_newer_record_without_one(self):
+        records = [self.rec(self.EARLIER, fix=(fix_check_line(head=self.OTHER),)), self.rec(self.NEWEST)]
+        self.assertEqual(self.refusal(records, self.NEWEST), "", "only the newest earlier record decides, yet the fix check was refused")
+
+    def test_a_newest_record_with_a_fix_line_is_refused(self):
+        records = [self.rec(self.NEWEST, fix=(fix_check_line(head=self.EARLIER),))]
+        self.assertIn(FIX_CHAIN_REASON, self.refusal(records, self.NEWEST), "a fix check after a fix check was not refused with the tool's reason")
+
+    def test_a_head_that_is_not_the_newest_records_head_is_refused(self):
+        records = [self.rec(self.EARLIER), self.rec(self.NEWEST)]
+        for reviewed in (self.EARLIER, self.OTHER):
+            with self.subTest(reviewed=reviewed):
+                self.assertIn(FIX_CHAIN_REASON, self.refusal(records, reviewed), "a head that only an older record reviewed was not refused")
+
+    def test_no_earlier_record_is_refused(self):
+        self.assertIn(FIX_CHAIN_REASON, self.refusal([], self.NEWEST), "a fix check with no earlier record on the pull request was not refused")
+
+    def test_a_malformed_newest_record_is_refused(self):
+        self.assertIn(FIX_CHAIN_REASON, self.refusal([self.rec(self.NEWEST), None], self.NEWEST), "a malformed newest record did not refuse its head")
+
+    def test_a_reviewed_head_equal_to_the_live_head_is_refused_as_an_empty_fix_diff(self):
+        self.assertIn("the fix diff is empty", self.refusal([self.rec(self.LIVE)], self.LIVE), "a fix diff from the live head was not refused as empty")
+
+    def test_the_chain_reader_returns_the_pull_requests_records_oldest_first_with_the_live_head(self):
+        mine_old = review_comment(1, 7, record_text(head=self.EARLIER, rounds=REVIEW_PASS))
+        other = review_comment(2, 8, record_text(n=8, head=self.OTHER, rounds=REVIEW_PASS))
+        mine_new = review_comment(3, 7, record_text(head=self.NEWEST, rounds=REVIEW_PASS))
+        host = PullsHost([batch_pull(7, self.LIVE)], {}, comments=(mine_old, other, mine_new))
+        records, live = review_fn(self, "pr_review_chain")(7, host)
+        self.assertEqual(live, self.LIVE, "the chain's live head is not the pull request's head")
+        self.assertEqual([r and r["head"] for r in records], [self.EARLIER, self.NEWEST], "the chain is not this pull request's records, oldest first")
+
+    def test_a_failed_comments_read_raises_instead_of_an_empty_chain(self):
+        host = PullsHost([batch_pull(7, self.LIVE)], {}, comments_error="reading issue comments from GitHub failed")
+        with self.assertRaises(merge.Stop, msg="a failed comments read gave back a chain"):
+            review_fn(self, "pr_review_chain")(7, host)
+
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
