@@ -2549,14 +2549,14 @@ def review_record_problem(hook, text):
         if rec is None and body is not None and placed is None:
             cause = REVIEW_UNPARSED_CI if _text_after_ci_line(body, merge_mod) else ""
             if cutover_known and not cutover and not any(line.startswith("Stamp: ") for line in body.splitlines()):
-                cause = REVIEW_NO_STAMP  # decision `pr-review-record`, "The cutover": with no cutover an old unstamped record is refused, naming the Stamp line; a failed cutover read is no cutover
+                cause = REVIEW_NO_STAMP  # decision `pr-review-record`, "The cutover": with no cutover an old unstamped record is refused, naming the Stamp line; a failed cutover read is an unknown cutover, never none, so it never names the Stamp line
             reasons.append(REVIEW_UNPARSED % (n, cause, n, n))
         else:
             rec = rec or placed
             if not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
                 newest = merge_mod.review_newest(comments)[0]  # an edited record is untrusted, so _newest_record gave no body; the Stamp cause still reads from it
                 unstamped = (cutover_known and not cutover and newest is not None
-                             and not any(line.startswith("Stamp: ") for line in (newest.get("body") or "").splitlines()))  # a failed cutover read is no cutover
+                             and not any(line.startswith("Stamp: ") for line in (newest.get("body") or "").splitlines()))  # a failed cutover read is an unknown cutover, never none (cutover_known)
                 reasons.append(REVIEW_NO_RECORD % (n, n, n) + (REVIEW_NO_STAMP if unstamped else ""))
     return " ".join(reasons), " ".join(notes)
 
