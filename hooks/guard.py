@@ -5474,8 +5474,12 @@ def scratchpad_command_words(tokens):
     for at, token in enumerate(tokens):
         opened = SUBST_OPEN.match(token) if at not in quoted else None
         if opened:
-            views.append(([token[opened.end():]] + tokens[at + 1:], opened.group(1) == "`"))
-            if opened.start(1) > 0:
+            tick = opened.group(1) == "`"
+            inside = [token[opened.end():]]
+            views.append((inside + tokens[at + 1:], tick))
+            # The next word is the assignment's own value only while the group stays open; a group that closes
+            # in this token (`A=$(date)`) hands the next word to the shell as the command.
+            if opened.start(1) > 0 and _in_group(inside, tick) == inside:
                 after_assignment.add(at + 1)
     for number, (view, tick) in enumerate(views):
         for start in command_indexes(view):
