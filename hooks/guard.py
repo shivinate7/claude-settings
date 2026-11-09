@@ -4290,9 +4290,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 1c1. A git commit, merge or push that skips the git hooks. Placed after silent-write, so a
     # silenced commit is caught on that defect first. `texts` reads a command substitution as its own command.
-    hit = hook_bypass_hit(texts)
-    if hit:
-        matched, verb, what = hit
+    bypass = hook_bypass_hit(texts)
+    if bypass:
+        matched, verb, what = bypass
         refuse(tool, "deny", "hook-bypass", HOOK_BYPASS_REASON.format(verb=verb, what=what), matched)
 
     # 1c2. A worktree made by hand, outside the tool's own folder.
