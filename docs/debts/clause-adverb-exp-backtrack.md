@@ -1,0 +1,6 @@
+# The clause parser's adverb run backtracks exponentially
+
+- **What.** On PR #2058 (branch cannot-claim-follow-up-4; main does not have this code yet), `ADVERB_PATTERN` in `lint/_clause.py` lists adverbs ending in -ly (really, simply, actually, currently, directly, unfortunately), and `[a-z]{3,}ly` in the same alternation matches them too. So `_OWN_RE`, `_WAS_RE` and `CANNOT_RE` backtrack exponentially. Probe: "I am not " + "really " * 22 + "x" takes 8.4 s on that head and 0.000 s on main, about 4x per two more words. The hook timeout is 80 s, and what a timed-out Stop hook does is unmeasured. No natural reply has 25 such adverbs in a row. The line "The module runs in linear time" in `docs/decisions/checks-share-the-clause-parser.md` is false. `LinearTests` in `lint/test_clause.py` counts only sentences and clauses. Found by PR #2058 round 3 review, 2026-11-08.
+- **Where.** `lint/_clause.py`: `ADVERB_PATTERN`, read by `_OWN_RE` and `_WAS_RE`. `lint/report_guard.py`: `CANNOT_RE`.
+- **Decision.** `claims-carry-backing` (a definitive prose claim carries its backing or a route row).
+- **Retire.** Drop the -ly words from the explicit list. Add a timing pin for the adverb run: a test in `lint/test_clause.py`, red on the current code first, times "I am not " + "really " * 22 + "x" and expects linear growth.
