@@ -12665,6 +12665,8 @@ REVIEW_CUTOVER_PAST = "2000-01-01T00:00:00Z"  # a cutover before every record: t
 REVIEW_CUTOVER = "2026-10-20T00:00:00Z"  # records created before it may be unstamped
 REVIEW_BEFORE = "2026-10-02T00:00:00Z"  # a comment created before REVIEW_CUTOVER
 REVIEW_AFTER = "2026-11-01T00:00:00Z"  # a comment created after REVIEW_CUTOVER
+REVIEW_EDIT_EARLY = "2026-10-05T00:00:00Z"  # an edit made after REVIEW_BEFORE and before REVIEW_AFTER
+REVIEW_EDIT_LATE = "2026-11-02T00:00:00Z"  # an edit made after REVIEW_AFTER
 
 def cutover_at(value):
     """review_stamp_since answers `value` for the case. create=True: the name is new, and a build without it still runs the case."""
@@ -13522,6 +13524,31 @@ class ReviewFixBase(ReviewEnv):
         self.assert_refused(rc, out, err)
         self.assertIn("hand-edited", err, "the refused fix check does not name the hand-edited record:\n" + err)
 
+    def test_an_edited_comment_newer_than_the_base_record_refuses_the_fix_check(self):
+        # A comment newer than the newest record that was edited makes the pull request read bad (decision pr-review-record). The fix
+        # check starts from that record, so an edited comment above it refuses the check: the tool cannot tell a stripped record from an
+        # edited comment.
+        record = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        lgtm = review_comment(2, 7, "LGTM", created=REVIEW_AFTER, updated=REVIEW_EDIT_LATE)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(record, lgtm))
+        self.assert_refused(rc, out, err)
+
+    def test_an_edited_comment_older_than_the_base_record_does_not_refuse_the_fix_check(self):
+        # The control: an edited comment below the newest record does not count, so the fix check passes from that record.
+        lgtm = review_comment(1, 7, "LGTM", created=REVIEW_BEFORE, updated=REVIEW_EDIT_EARLY)
+        record = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_AFTER)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(lgtm, record))
+        self.assertEqual(rc, 0, "an edited comment below the newest record refused the fix check:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
+    def test_an_unedited_comment_newer_than_the_base_record_does_not_refuse_the_fix_check(self):
+        # The control: the same newer comment, never edited, is no edit, so the fix check still passes from the newest record.
+        record = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        lgtm = review_comment(2, 7, "LGTM", created=REVIEW_AFTER)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(record, lgtm))
+        self.assertEqual(rc, 0, "an unedited comment above the base record refused the fix check:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
 class ReviewLaneLint(ReviewEnv):
     """`merge <pr> --review-record` prints a record whose newest round, or whose fix check, is PASS only when `merge --lane-lint` passes on that
     head. The incident: a pull request was handed off with its lint red and no CI run. lane_lint is stubbed, so the lint verdict is the case's:
@@ -13915,6 +13942,32 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "the older unedited record is not done under an unedited comment with no marker")
+
+    def test_an_edited_comment_newer_than_the_newest_record_reads_bad(self):
+        # A comment newer than the newest record that was edited makes the pull request read bad, and the line names it hand-edited
+        # (decision pr-review-record). The tool cannot tell a stripped record from an edited comment, so the edit is the sign.
+        record = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        lgtm = review_comment(2, 7, "LGTM", created=REVIEW_AFTER, updated=REVIEW_EDIT_LATE)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [record, lgtm])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(out, rf"(?m)^#7 feat7 {REVIEW_HEAD[:9]} bad: ", "an edited comment newer than the newest record did not read bad:\n" + out)
+        self.assertIn("hand-edited", out, "the edited comment newer than the newest record is not named hand-edited:\n" + out)
+
+    def test_an_edited_comment_older_than_the_newest_record_leaves_it_done(self):
+        # The control: an edited comment below the newest record does not count, so the record still reads done.
+        lgtm = review_comment(1, 7, "LGTM", created=REVIEW_BEFORE, updated=REVIEW_EDIT_EARLY)
+        record = review_comment(2, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_AFTER)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [lgtm, record])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "an edited comment below the newest record changed its reading")
+
+    def test_an_unedited_comment_newer_than_the_newest_record_leaves_it_done(self):
+        # The control: the same newer comment, never edited, is no edit, so the record still reads done.
+        record = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        lgtm = review_comment(2, 7, "LGTM", created=REVIEW_AFTER)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [record, lgtm])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "an unedited comment newer than the newest record changed its reading")
 
     def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
         # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection

@@ -187,6 +187,8 @@ def unstamped(text):
 BEFORE = "2026-10-02T00:00:00Z"   # a comment created before the cutover
 AFTER = "2026-11-01T00:00:00Z"    # a comment created after the cutover
 CUTOVER = "2026-10-21T15:04:05Z"  # the committer time of the commit that adds the salt line
+EDIT_EARLY = "2026-10-05T00:00:00Z"  # an edit made after BEFORE and before AFTER
+EDIT_LATE = "2026-11-02T00:00:00Z"  # an edit made after AFTER
 CUTOVER_GIT_DATE = "2026-10-21 15:04:05 +0000"
 PRE_SALT_SOURCE = "def f():\n    return 1\n"
 SALT_SOURCE = 'REVIEW_STAMP_SALT = "claude-settings review record stamp v1"\n' + "def f():\n    return 2\n"
@@ -425,6 +427,33 @@ class ReviewRecordTests(unittest.TestCase):
     def test_an_unedited_newest_record_satisfies_a_pass_claim(self):
         # The control: the same body, with updated_at equal to created_at, is no edit, and it satisfies the claim on two reads.
         self.serve(comments=[{"body": record(), "created_at": BEFORE, "updated_at": BEFORE}])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_two_rest_reads()
+        self.assertIsNone(out, out)
+
+    def test_an_edited_comment_newer_than_the_newest_record_blocks_a_pass_claim(self):
+        # Catches: _newest_marked reading only the marked comments, so a comment newer than the record that was edited passes a PASS
+        # claim. A stripped record and an edited comment look the same to the tool, so the edit blocks the claim (decision pr-review-record).
+        lgtm = {"body": "LGTM", "created_at": AFTER, "updated_at": EDIT_LATE}
+        self.serve(comments=[{"body": record(), "created_at": BEFORE}, lgtm])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assertIsNotNone(out, "a PASS claim passed with an edited comment newer than the newest record")
+        self.assert_blocked(out)
+        self.assertIn("PR #12", out["reason"], out)
+
+    def test_an_unedited_comment_newer_than_the_newest_record_satisfies_a_pass_claim(self):
+        # The control: the same comment, never edited, is no edit, so the record it follows still satisfies the claim.
+        lgtm = {"body": "LGTM", "created_at": AFTER, "updated_at": AFTER}
+        self.serve(comments=[{"body": record(), "created_at": BEFORE}, lgtm])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_two_rest_reads()
+        self.assertIsNone(out, out)
+
+    def test_an_edited_comment_older_than_the_newest_record_satisfies_a_pass_claim(self):
+        # The control: an edited comment below the newest record does not count, so the record satisfies the claim.
+        lgtm = {"body": "LGTM", "created_at": BEFORE, "updated_at": EDIT_EARLY}
+        self.serve(comments=[lgtm, {"body": record(), "created_at": AFTER}])
         out = self.stop(self.lane_turn(report(CLAIM)))
         self.assert_two_rest_reads()
         self.assertIsNone(out, out)
