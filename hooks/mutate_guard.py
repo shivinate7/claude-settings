@@ -2523,11 +2523,15 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
-    # records-page: a commit of MERGE_HEAD's page is allowed only for a past base tip, and only for its exact page.
+    # records-page: a commit of MERGE_HEAD's page is allowed only for a commit on origin/<base>'s first-parent line.
     ("records-page: MERGE_HEAD is not read against origin/<base>, so another branch's page is allowed",
-     '    return done.stdout.strip() if past is not None and past.returncode == 0 else ""',
-     '    return done.stdout.strip()',
+     '    return ids[1] if line is not None and line.returncode == 0 and ids[0] in line.stdout.split() else ""',
+     '    return ids[1]',
      "guard", "a test-author commit of a non-base merge's page, the feature branch's, origin/main moved on"),
+    ("records-page: the line is not first-parent only, so a branch merged into the base is allowed",
+     '"rev-list", "--first-parent", origin)',
+     '"rev-list", origin)',
+     "guard", "off its first-parent line"),
     ("records-page: the page is not compared with MERGE_HEAD's, so a rebuilt page is allowed",
      '            if not page_id or page_id != _merge_head_page(top, base):',
      '            if not page_id or not _merge_head_page(top, base):',

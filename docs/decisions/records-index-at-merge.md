@@ -39,17 +39,19 @@ it can see.
 
 A merge commit of a past base tip is allowed too. A lane merges the base, takes the page the merge brought,
 and the base then moves on, so that page is no longer the base's. The guard allows the commit when the page it
-would hold has the exact blob id of the page at MERGE_HEAD, and MERGE_HEAD is an ancestor of origin/<base>
-(a past base tip, never another lane's branch). A rebuilt page, a page of a merge of another branch, a page
-and a page taken after `merge --quit` all stay refused. The guard runs before the chain, so it reads the
-page as it stands at the hook.
-Cost: two more git reads, `rev-parse -q --verify MERGE_HEAD:docs/records.md` and
-`merge-base --is-ancestor MERGE_HEAD origin/<base>`. They run only on a commit the guard would otherwise
-refuse, so an allowed commit and a commit with no records page make the reads they made before. No file, no
-timer, no new process beyond those two git calls. Measure: 13 cases of the `records-page` family pin it
-(`hooks/test_guard.py`); how often a real lane hits it is unmeasured. A chained
-`git show MERGE_HEAD:docs/records.md > docs/records.md && git add && git commit` is still refused: the guard
-reads the tree before the chain runs.
+would hold has the exact blob id of the page at MERGE_HEAD, and MERGE_HEAD is a commit on origin/<base>'s
+first-parent line (a past base tip). A commit in the base's history off that line, such as a lane branch
+already merged into the base, is refused. A rebuilt page, a page of a merge of any commit off that line, a
+page taken after `merge --quit`, and a failed read are refused. The guard runs before the chain, so it reads
+the page as it stands at the hook.
+Cost: two more git reads, `rev-parse MERGE_HEAD MERGE_HEAD:docs/records.md` and
+`rev-list --first-parent origin/<base>`. They run only on a commit the guard would otherwise refuse, so an
+allowed commit and a commit with no records page make the reads they made before. The rev-list prints one id
+per base tip, under the 10 s read limit, and a timeout is a refusal. No file, no
+timer, no new process beyond those two git calls. Measure: the `records-page` family has 84 cases, 15 of
+them on this allowance (`hooks/test_guard.py`); how often a real lane hits it is unmeasured. A chain that rewrites the
+page before its commit is judged on the page as it stands at the hook, not the page the chain leaves. A chain
+that takes MERGE_HEAD's page into a tree that does not hold it yet is refused; split calls pass.
 
 The heal stops when the generator writes no page for a conflicted page. The merge runs only the records
 mode of the generator (`--records-only`). A broken generator import prints one line. The heal-wait stop
