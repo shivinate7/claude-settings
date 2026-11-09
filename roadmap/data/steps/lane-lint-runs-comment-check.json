@@ -1,11 +1,11 @@
 {
   "title": "Lane lint runs every check the checks job runs on the lane's changed files",
   "why": "Coordinator 21:13 CST Nov 8: batch 67 (now #2369, batch-67c, 29 lanes) dropped #1572 for narration comments that the checks job caught (lint/check_comment_narration.py), not the lane lint. A lane red like this must be caught before the batch.",
-  "note": "Triage read of main 21:13 CST: lane lint already lists this check. bin/ci-job is_lint() takes a step whose run lines match LINT_CMD, and `python3 lint/check_comment_narration.py --base \"origin/$BASE_REF\"` matches; its `if: github.event_name == 'pull_request'` reads true when pr is set. So the likely cause is that #1572's lane skipped `merge --lane-lint`, or ran it on an older head. First step: read #1572's lane report or ledger for a lane-lint run at its final head. If it ran there and passed, the gap is in ci-job; else the fix is a guard that refuses a lane's hand-off without a lane-lint pass at its head (compare step lane-lint-before-push). 21:14 CST: doing, lane session_013NEJKz3Pbvh8FJVoT2ydk8; it reports the cause first.",
+  "note": "Triage read of main 21:13 CST: lane lint already lists this check. bin/ci-job is_lint() takes a step whose run lines match LINT_CMD, and `python3 lint/check_comment_narration.py --base \"origin/$BASE_REF\"` matches; its `if: github.event_name == 'pull_request'` reads true when pr is set. So the likely cause is that #1572's lane skipped `merge --lane-lint`, or ran it on an older head. First step: read #1572's lane report or ledger for a lane-lint run at its final head. If it ran there and passed, the gap is in ci-job; else the fix is a guard that refuses a lane's hand-off without a lane-lint pass at its head (compare step lane-lint-before-push). 21:14 CST: doing, lane session_013NEJKz3Pbvh8FJVoT2ydk8; it reports the cause first. PR #2382 makes `merge --lane-lint` post a PR comment. Owner page item 457 lane-lint-allow-reason: may the lane edit the \"Merge Tool Read Checks\" reason text in settings.json (22:51 CST Nov 8)? The answer goes to the lane.",
   "phase": "now",
   "owner": "coordinator",
   "status": "doing",
   "order": 868,
-  "updatedAt": "2026-11-08T21:14:00-06:00",
+  "updatedAt": "2026-11-08T22:50:00-06:00",
   "lane": "session_013NEJKz3Pbvh8FJVoT2ydk8"
 }
