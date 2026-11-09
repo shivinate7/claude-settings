@@ -12885,6 +12885,8 @@ REVIEW_CUTOVER_PAST = "2000-01-01T00:00:00Z"  # a cutover before every record: t
 REVIEW_CUTOVER = "2026-10-20T00:00:00Z"  # records created before it may be unstamped
 REVIEW_BEFORE = "2026-10-02T00:00:00Z"  # a comment created before REVIEW_CUTOVER
 REVIEW_AFTER = "2026-11-01T00:00:00Z"  # a comment created after REVIEW_CUTOVER
+REVIEW_EDIT_EARLY = "2026-10-05T00:00:00Z"  # an edit made after REVIEW_BEFORE and before REVIEW_AFTER
+REVIEW_EDIT_LATE = "2026-11-02T00:00:00Z"  # an edit made after REVIEW_AFTER
 
 def cutover_at(value):
     """review_stamp_since answers `value` for the case. create=True: the name is new, and a build without it still runs the case."""
@@ -12931,11 +12933,18 @@ def posted_body(test, out):
     test.assertTrue(ends, "the printed record has no CI line:\n" + out)
     return "\n".join(lines[start:ends[0] + 1]) + "\n"
 
+NO_UPDATED_AT = object()  # review_comment's `updated` for a comment with no updated_at key
+NULL_UPDATED_AT = object()  # review_comment's `updated` for a comment whose updated_at is null
+
 def review_comment(cid, number, body, created="2026-10-02T00:00:00Z", updated=None):
     """A comment on issue or pull request `number`, as the repo-wide comment list gives it. GitHub keeps created_at when a comment is
-    edited and sets updated_at to the edit's time; `updated` is that time, and without it the comment was never edited."""
-    return {"id": cid, "created_at": created, "updated_at": updated or created,
-            "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
+    edited and sets updated_at to the edit's time; `updated` is that time, and without it the comment was never edited. The two sentinels
+    give the shapes a comment with no edit time can take."""
+    comment = {"id": cid, "created_at": created, "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
+    if updated is NO_UPDATED_AT:
+        return comment
+    comment["updated_at"] = None if updated is NULL_UPDATED_AT else (updated or created)
+    return comment
 
 def list_line(test, out, n):
     """The one `merge --reviewed` line for pull request n."""
@@ -13663,6 +13672,41 @@ class ReviewFixBase(ReviewEnv):
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(typed))
         self.assert_refused(rc, out, err)
 
+    def test_a_newest_earlier_record_hand_edited_after_posting_refuses_the_base(self):
+        # The newest record decides, and a hand-edited record is not a record (decision pr-review-record). The write path reads the
+        # same comments, so an edited newest record names no reviewed head for the fix diff. The older record below it has the same head and would
+        # pass, so a fallback to it is refused as well.
+        older = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        edited = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, edited))
+        self.assert_refused(rc, out, err)
+        self.assertIn("hand-edited", err, "the refused fix check does not name the hand-edited record:\n" + err)
+
+    def test_an_edited_comment_newer_than_the_base_record_refuses_the_fix_check(self):
+        # A comment newer than the newest record that was edited makes the pull request read bad (decision pr-review-record). The fix
+        # check starts from that record, so an edited comment above it refuses the check: the tool cannot tell a stripped record from an
+        # edited comment.
+        record = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        lgtm = review_comment(2, 7, "LGTM", created=REVIEW_AFTER, updated=REVIEW_EDIT_LATE)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(record, lgtm))
+        self.assert_refused(rc, out, err)
+
+    def test_an_edited_comment_older_than_the_base_record_does_not_refuse_the_fix_check(self):
+        # The control: an edited comment below the newest record does not count, so the fix check passes from that record.
+        lgtm = review_comment(1, 7, "LGTM", created=REVIEW_BEFORE, updated=REVIEW_EDIT_EARLY)
+        record = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_AFTER)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(lgtm, record))
+        self.assertEqual(rc, 0, "an edited comment below the newest record refused the fix check:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
+    def test_an_unedited_comment_newer_than_the_base_record_does_not_refuse_the_fix_check(self):
+        # The control: the same newer comment, never edited, is no edit, so the fix check still passes from the newest record.
+        record = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        lgtm = review_comment(2, 7, "LGTM", created=REVIEW_AFTER)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(record, lgtm))
+        self.assertEqual(rc, 0, "an unedited comment above the base record refused the fix check:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
 class ReviewLaneLint(ReviewEnv):
     """`merge <pr> --review-record` prints a record whose newest round, or whose fix check, is PASS only when `merge --lane-lint` passes on that
     head. The incident: a pull request was given to the batch runner with its lint red and no CI run. lane_lint is stubbed, so the lint verdict is the case's:
@@ -13876,6 +13920,15 @@ class ReviewedList(ReviewEnv):
         rc, out, err = self.run_args("--reviewed", host=host)
         return host, rc, out, err
 
+    def test_review_comments_finds_a_marker_line_with_trailing_spaces(self):
+        # the marker is the record's first line; the MCP tool may add spaces to it, and review_marked reads the line with its spaces taken out
+        text = record_text(rounds=REVIEW_PASS)
+        lines = text.splitlines()
+        spaced = "\n".join([lines[0] + "  "] + lines[1:]) + "\n"
+        host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=[review_comment(1, 7, spaced, created="2026-10-02T00:00:00Z")])
+        self.assertEqual(host.review_comments("2026-10-01T00:00:00Z"), {7: [(spaced, "2026-10-02T00:00:00Z", False)]},
+                         "review_comments dropped a record whose marker line has trailing spaces")
+
     def test_the_newest_record_decides_the_line(self):
         comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), review_comment(2, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
@@ -13954,22 +14007,134 @@ class ReviewedList(ReviewEnv):
         a, b, c = record_text(rounds=REVIEW_PASS), record_text(n=8, rounds=REVIEW_PASS), record_text(rounds=REVIEW_FAILED_THREE)
         host = PullsHost([batch_pull(7, REVIEW_HEAD), batch_pull(8, REVIEW_OLD_HEAD)], {},
                          comments=[review_comment(1, 7, a, created="2026-10-02T00:00:00Z"), review_comment(2, 8, b, created="2026-10-03T00:00:00Z"),
-                                   review_comment(3, 7, c, created="2026-10-04T00:00:00Z")])
+                                   review_comment(3, 7, c, created="2026-10-04T00:00:00Z", updated="2026-10-05T00:00:00Z")])
         self.assertEqual(host.review_comments("2026-10-01T00:00:00Z"),
-                         {7: [("2026-10-02T00:00:00Z", a), ("2026-10-04T00:00:00Z", c)], 8: [("2026-10-03T00:00:00Z", b)]},
-                         "review_comments gives (created_at, body) pairs per pull request, oldest first")
+                         {7: [(a, "2026-10-02T00:00:00Z", False), (c, "2026-10-05T00:00:00Z", True)], 8: [(b, "2026-10-03T00:00:00Z", False)]},
+                         "review_comments gives (body, time, edited) triples per pull request, oldest first; time is updated_at, else created_at; "
+                         "edited is True when updated_at differs from created_at")
         reads = [f for rel, f in host.list_calls if rel == "issues/comments"]
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
 
-    def test_review_comments_finds_a_marker_line_with_trailing_spaces(self):
-        # the marker is the record's first line; the MCP tool may add spaces to it, and review_marked reads the line with its spaces taken out
-        text = record_text(rounds=REVIEW_PASS)
-        lines = text.splitlines()
-        spaced = "\n".join([lines[0] + "  "] + lines[1:]) + "\n"
-        host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=[review_comment(1, 7, spaced, created="2026-10-02T00:00:00Z")])
-        self.assertEqual(host.review_comments("2026-10-01T00:00:00Z"), {7: [("2026-10-02T00:00:00Z", spaced)]},
-                         "review_comments dropped a record whose marker line has trailing spaces")
+    # A review record whose updated_at differs from its created_at was hand-edited (decision pr-review-record). It is not counted as a
+    # record, and the list names it hand-edited. The comments are already read, so the rule adds no gh read.
+    def test_an_edited_record_is_not_counted_as_a_record(self):
+        edited = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [edited])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(out, r"(?m)^(#7 |no record: .*#7\b)", "pull request 7 is not named in the output:\n" + out)
+        self.assertNotRegex(out, r"(?m)^#7 .* done: ", "an edited record was counted as a record:\n" + out)
+
+    def test_an_edited_record_is_named_as_hand_edited(self):
+        edited = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [edited])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(out, r"(?m)^(#7 |no record: .*#7\b)", "pull request 7 is not named in the output:\n" + out)
+        self.assertIn("hand-edited", out, "the edited record is not named hand-edited:\n" + out)
+
+    def test_an_edited_record_flags_its_own_pull_request_only(self):
+        # Full size: pull request 7 has an older record that failed and a newer one that was edited; pull request 8 has one unedited record.
+        older = record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))
+        newer = record_text(rounds=REVIEW_PASS)
+        comments = [review_comment(1, 7, older, created=REVIEW_BEFORE),
+                    review_comment(2, 7, newer, created=REVIEW_BEFORE, updated=REVIEW_AFTER),
+                    review_comment(3, 8, record_text(n=8, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_BEFORE)]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD), batch_pull(8, REVIEW_OLD_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 8), rf"^#8 feat8 {REVIEW_OLD_HEAD[:9]} done: ", "the unedited record on pull request 8 is not done")
+        self.assertRegex(out, r"#7\b", "pull request 7 is not named in the output:\n" + out)
+        self.assertNotRegex(out, r"(?m)^#7 .* done: ", "the edited record on pull request 7 was counted as a record:\n" + out)
+        self.assertIn("hand-edited", out, "the edited record on pull request 7 is not named hand-edited:\n" + out)
+
+    def test_an_unedited_record_still_counts(self):
+        # The control: updated_at equal to created_at is an unedited record, and it is counted.
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS))])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+        self.assertNotIn("hand-edited", out)
+
+    def test_a_record_with_no_updated_at_still_counts(self):
+        # The control: review_comments reads a comment with no updated_at, or a null one, at its created_at, as it does today. Neither is an edit.
+        for label, updated in (("no updated_at key", NO_UPDATED_AT), ("updated_at null", NULL_UPDATED_AT)):
+            with self.subTest(label):
+                host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS), updated=updated)])
+                self.assertEqual(rc, 0, out + err)
+                self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", label + ": the record is not counted")
+                self.assertNotIn("hand-edited", out, label + ": the record is named hand-edited")
+
+    def test_an_edited_record_adds_no_gh_read(self):
+        # The control: the edited record's run reads no route its unedited twin does not, and reads the comments once.
+        runs = {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}
+        edited = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
+        twin = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        host_e, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [edited], runs, count_gh=True)
+        host_t, _rc, _out, _err = self.listing([batch_pull(7, REVIEW_HEAD)], [twin], runs, count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host_e.gh_calls.count("issues/comments"), 1, "the comments are read more than once:\n" + str(host_e.gh_calls))
+        extra = sorted(set(host_e.gh_calls) - set(host_t.gh_calls))
+        self.assertEqual(extra, [], "the edited record's run reads routes its unedited twin does not")
+        repeated = sorted({rel for rel in host_e.gh_calls if host_e.gh_calls.count(rel) > 1})
+        self.assertEqual(repeated, [], "the edited record's run reads a route more than once")
+
+    def test_an_older_unedited_record_under_an_edited_record_reads_bad(self):
+        # The newest record decides (decision pr-review-record). A newest record that was hand-edited reads bad, and an older
+        # unedited record below it does not count. The edited text is unknown, so a fallback could pass on an older verdict. The older record
+        # here passes, so a fallback would read the pull request done.
+        older = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        edited = review_comment(2, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [older, edited])
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: ", "the older unedited record counted under the hand-edited newest record")
+        self.assertIn("hand-edited", line, "the hand-edited newest record is not named hand-edited on pull request 7's line:\n" + out)
+
+    def test_an_older_unedited_pass_does_not_read_done_under_a_newer_edited_comment_whose_marker_is_gone(self):
+        # The newest record decides (decision pr-review-record). A newer comment that was a record, and was then edited so that its marker
+        # line is gone, is not a record to review_comments. Left there, the older unedited record is the newest one it sees, and it reads
+        # done. The edit marks the newer comment hand-edited, so the pull request must not read done.
+        stripped = record_text(rounds=REVIEW_PASS).split("\n", 1)[1]  # the marker line taken out, the rest of the record kept
+        self.assertFalse(merge.review_marked(stripped), "fixture: the body with its marker line taken out still reads as a record")
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE),
+                    review_comment(2, 7, stripped, created=REVIEW_BEFORE, updated=REVIEW_AFTER)]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(out, r"(?m)^(#7 |no record: .*#7\b)", "pull request 7 is not named in the output:\n" + out)
+        self.assertNotRegex(out, r"(?m)^#7 .* done: ", "the older unedited record read done under a newer edited comment whose marker is gone:\n" + out)
+
+    def test_an_unedited_comment_with_no_marker_leaves_the_older_record_done(self):
+        # The control for the case above: the same newer comment, never edited, is no record, so the older record still reads done.
+        stripped = record_text(rounds=REVIEW_PASS).split("\n", 1)[1]
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE),
+                    review_comment(2, 7, stripped, created=REVIEW_BEFORE)]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "the older unedited record is not done under an unedited comment with no marker")
+
+    def test_an_edited_comment_newer_than_the_newest_record_reads_bad(self):
+        # A comment newer than the newest record that was edited makes the pull request read bad, and the line names it hand-edited
+        # (decision pr-review-record). The tool cannot tell a stripped record from an edited comment, so the edit is the sign.
+        record = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        lgtm = review_comment(2, 7, "LGTM", created=REVIEW_AFTER, updated=REVIEW_EDIT_LATE)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [record, lgtm])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(out, rf"(?m)^#7 feat7 {REVIEW_HEAD[:9]} bad: ", "an edited comment newer than the newest record did not read bad:\n" + out)
+        self.assertIn("hand-edited", out, "the edited comment newer than the newest record is not named hand-edited:\n" + out)
+
+    def test_an_edited_comment_older_than_the_newest_record_leaves_it_done(self):
+        # The control: an edited comment below the newest record does not count, so the record still reads done.
+        lgtm = review_comment(1, 7, "LGTM", created=REVIEW_BEFORE, updated=REVIEW_EDIT_EARLY)
+        record = review_comment(2, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_AFTER)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [lgtm, record])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "an edited comment below the newest record changed its reading")
+
+    def test_an_unedited_comment_newer_than_the_newest_record_leaves_it_done(self):
+        # The control: the same newer comment, never edited, is no edit, so the record still reads done.
+        record = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        lgtm = review_comment(2, 7, "LGTM", created=REVIEW_AFTER)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [record, lgtm])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "an unedited comment newer than the newest record changed its reading")
 
     def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
         # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection
@@ -14649,13 +14814,14 @@ class ReviewedRootRepoReads(ReviewEnv):
         self.assertEqual(len(reads), count, "%s made %d repo-record reads, by caller: %r" % (form, len(reads), reads))
 
     def test_a_root_with_origin_head_set_pins_its_repo_record_reads(self):
-        # Pinned: two reads. root_host's full_name read, and the cutover's default-branch read in review_stamp_since. The decision names one.
+        # Pinned: two reads. root_host's full_name read, and the cutover's default-branch read in review_stamp_since. The decision's
+        # cost paragraph names two for --root with origin/HEAD set.
         self.fixture(self.alpha, origin_head=True)
         result, reads, pulls = self.counted(self.root_run)
         self.assert_reads(result, reads, pulls, 2, "--reviewed --root with origin/HEAD set")
 
     def test_a_root_with_origin_head_missing_pins_its_repo_record_reads(self):
-        # Pinned: three reads. The fallback in default_branch (merge.py:3478) and the cutover's default-branch read both ask gh, so the
+        # Pinned: three reads. The fallback in default_branch and the cutover's default-branch read both ask gh, so the
         # default branch is read twice, then root_host's full_name read.
         self.fixture(self.alpha, origin_head=False)
         result, reads, pulls = self.counted(self.root_run)
@@ -15625,16 +15791,17 @@ class ReviewCutover(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "the unstamped record created before the cutover is not done")
 
-    def test_reviewed_reads_an_unstamped_record_edited_after_the_cutover_as_bad(self):
-        # The comment was created before the cutover and its body was edited after it, with no stamp. The cutover reads the
-        # comment's time, so the edit must be read by its updated time. It reads bad, not done.
+    def test_edited_record_after_the_cutover_is_hand_edited_and_not_counted(self):
+        # The comment was created before the cutover and its body was edited after it, with no stamp. The newest record decides, and a
+        # hand-edited newest record reads bad, named hand-edited (decision pr-review-record).
         comment = review_comment(1, 7, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
         with cutover_at(REVIEW_CUTOVER):
             host = PullsHost([batch_pull(7, REVIEW_HEAD)], {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}, comments=[comment])
             rc, out, err = self.run_args("--reviewed", host=host)
         self.assertEqual(rc, 0, out + err)
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: ",
-                         "an unstamped body edited after the cutover reads done, not bad:\n" + out)
+        line = list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: ", "the lone hand-edited newest record did not read bad:\n" + out)
+        self.assertIn("hand-edited", line, "the hand-edited newest record is not named hand-edited on pull request 7's line:\n" + out)
 
     def test_an_unstamped_record_created_after_the_cutover_reads_bad(self):
         rec = parse_at(self, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_AFTER, cutover=REVIEW_CUTOVER)
@@ -15728,14 +15895,317 @@ class ReviewStampSince(unittest.TestCase):
         subprocess.run(["git", "-C", root, "update-ref", f"refs/remotes/origin/{branch}", "HEAD"], check=True, capture_output=True)
         return root
 
+    def tool_checkout(self, salt_at=2, depth=None, repo=True):
+        """-> a patch that points merge.__file__ at a temp checkout of the merge tool, so tool_stamp_since reads that checkout's salt commit.
+        Its committer time is 2026-10-21T15:04:05Z when the salt is at commit 2. `salt_at` None gives a checkout with no salt commit. `depth` makes
+        a shallow clone of that history, whose boundary is the commit `depth` cuts. `repo=False` gives a folder with no git repository, so the read
+        fails. A case starts the patch with `with`, and reads the checkout's path with tool_root()."""
+        if not repo:
+            tool = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
+            self.addCleanup(shutil.rmtree, tool, True)
+            os.makedirs(os.path.join(tool, "merge"))
+        else:
+            tool = self.repo(salt_at=salt_at, branch="fixture")
+            if depth is not None:
+                tool = self.shallow_origin(tool, depth)
+        return unittest.mock.patch.object(merge, "__file__", os.path.join(tool, "merge", "merge.py"))
+
+    @staticmethod
+    def tool_root():
+        """-> the checkout the patched merge.__file__ names: the parent of its merge folder, as tool_stamp_since finds it."""
+        return os.path.dirname(os.path.dirname(os.path.abspath(merge.__file__)))
+
+    def test_a_repo_with_no_merge_py_reads_the_tool_source_cutover(self):
+        # The cutover is the committer time of the salt commit in the checkout that holds merge.py: the tool's own source, found from merge.__file__
+        # as merge.py finds its other paths. The caller here has no merge/merge.py, so its history holds no salt commit. The read gave None, and
+        # every unstamped record then read as done, whatever its date. A record created before the cutover still reads as done.
+        caller = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
+        self.addCleanup(shutil.rmtree, caller, True)
+        subprocess.run(["git", "-C", caller, "init", "-q"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", caller, "symbolic-ref", "HEAD", "refs/heads/fixture"], check=True, capture_output=True)
+        self.git_at(caller, "2026-10-20 10:00:00 +0000", "commit", "-q", "--allow-empty", "-m", "no merge.py here")
+        subprocess.run(["git", "-C", caller, "update-ref", "refs/remotes/origin/fixture", "HEAD"], check=True, capture_output=True)
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"):
+            with self.tool_checkout():
+                try:
+                    cutover = review_fn(self, "review_stamp_since")(caller, "fixture")
+                except merge.Stop as stop:
+                    self.fail("review_stamp_since stopped on a repo with no merge.py, instead of reading the tool source's cutover:\n" + str(stop))
+        before = parse_at(self, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_BEFORE, cutover=cutover)
+        self.assertEqual(review_fn(self, "review_state")(before, REVIEW_HEAD)[0], "done", "a record created before the cutover no longer reads as done")
+        self.assertEqual(cutover, "2026-10-21T15:04:05Z", "the cutover of a repo with no merge.py is %r, not the committer time of the tool source's salt commit" % (cutover,))
+        after = parse_at(self, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_AFTER, cutover=cutover)
+        state, why = review_fn(self, "review_state")(after, REVIEW_HEAD)
+        self.assertEqual(state, "bad", "an unstamped record created after the cutover reads %s in a repo with no merge.py: %s" % (state, why))
+
+    def test_a_repo_whose_merge_py_has_no_salt_reads_an_unstamped_record_after_the_tool_cutover_as_bad(self):
+        # coordinator item 386 (2026-11-08 12:51 CST): the caller's merge/merge.py has history and no salt, so the merge tool's checkout gives the cutover
+        root = self.repo(salt_at=None, branch="fixture")
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"), self.tool_checkout():
+            cutover = review_fn(self, "review_stamp_since")(root, "fixture")
+        self.assertEqual(cutover, "2026-10-21T15:04:05Z", "a repo whose merge/merge.py has no salt gave cutover %r, not the tool checkout's" % (cutover,))
+        after = parse_at(self, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_AFTER, cutover=cutover)
+        state, why = review_fn(self, "review_state")(after, REVIEW_HEAD)
+        self.assertEqual(state, "bad", "an unstamped record created after the tool cutover reads %s: %s" % (state, why))
+
+    def test_a_tool_checkout_whose_git_read_fails_stops_naming_the_checkout(self):
+        # The tool checkout is not a git repository, so its read fails and the cutover is unknown. The read stops naming that checkout. It never
+        # returns None, which would read every unstamped record as old.
+        root = self.repo(salt_at=None, branch="fixture")
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"), self.tool_checkout(repo=False):
+            tool = self.tool_root()
+            try:
+                got = review_fn(self, "review_stamp_since")(root, "fixture")
+            except merge.Stop as stop:
+                self.assertIn(tool, str(stop), "the Stop does not name the merge tool's checkout:\n" + str(stop))
+            else:
+                self.fail("review_stamp_since returned %r while the merge tool's checkout is not a repository, instead of stopping" % (got,))
+
+    def test_a_shallow_tool_checkout_whose_boundary_is_the_salt_commit_stops_naming_the_checkout(self):
+        # A depth-2 tool checkout cuts the history under its salt commit: that commit is the boundary, so its first salt commit is unknown. The
+        # Stop names the checkout the read ran in, not HEAD, the ref it read.
+        root = self.repo(salt_at=None, branch="fixture")
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"), self.tool_checkout(depth=2):
+            tool = self.tool_root()
+            self.assertEqual(sh(tool, "git", "rev-parse", "--is-shallow-repository"), "true", "the merge tool's checkout is not shallow")
+            self.assertIn("REVIEW_STAMP_SALT =", sh(tool, "git", "show", "HEAD~1:merge/merge.py"), "the merge tool's checkout boundary is not the salt commit")
+            try:
+                got = review_fn(self, "review_stamp_since")(root, "fixture")
+            except merge.Stop as stop:
+                self.assertIn(tool, str(stop), "the Stop does not name the merge tool's checkout:\n" + str(stop))
+            else:
+                self.fail("review_stamp_since read a shallow merge tool's checkout as full history and returned %r instead of stopping" % (got,))
+
+    def test_a_tool_checkout_with_no_salt_commit_stops_saying_it_lacks_the_salt(self):
+        # The tool checkout's HEAD has no salt commit, so the cutover is unknown. The read stops and says the checkout lacks the stamp salt. It
+        # never returns None, which would read every unstamped record as old.
+        root = self.repo(salt_at=None, branch="fixture")
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"), self.tool_checkout(salt_at=None):
+            tool = self.tool_root()
+            try:
+                got = review_fn(self, "review_stamp_since")(root, "fixture")
+            except merge.Stop as stop:
+                self.assertIn(tool, str(stop), "the Stop does not name the merge tool's checkout:\n" + str(stop))
+                self.assertIn("salt", str(stop), "the Stop does not say the merge tool's checkout lacks the stamp salt:\n" + str(stop))
+            else:
+                self.fail("review_stamp_since returned %r while the merge tool's checkout has no salt commit, instead of stopping" % (got,))
+
+    def test_a_tool_read_stop_names_the_source_checkout_and_says_to_repair_it(self):
+        # launch.py runs merge.py from a temporary worktree that it removes when the run ends, so a Stop that names only that copy names no
+        # folder left to repair. launch.py passes the checkout it started from in MERGE_TOOL_SOURCE, and the tool-read Stop names that one.
+        root = self.repo(salt_at=None, branch="fixture")
+        source = os.path.realpath(tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder()))  # the checkout launch.py started from
+        self.addCleanup(shutil.rmtree, source, True)
+        env = unittest.mock.patch.dict(os.environ, {"MERGE_TOOL_SOURCE": source})
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"), self.tool_checkout(salt_at=None), env:
+            tool = self.tool_root()
+            try:
+                got = review_fn(self, "review_stamp_since")(root, "fixture")
+            except merge.Stop as stop:
+                self.assertIn("lacks the review stamp salt", str(stop), "the Stop is not the tool checkout's salt Stop, so the naming checks below prove nothing:\n" + str(stop))
+                self.assertIn(source, str(stop), "the Stop does not name the source checkout launch.py started from:\n" + str(stop))
+                self.assertIn("repair " + source, str(stop), "the Stop does not say to repair the source checkout:\n" + str(stop))
+                self.assertNotIn("repair " + tool, str(stop), "the Stop says to repair the temporary copy, which is gone once the run ends:\n" + str(stop))
+            else:
+                self.fail("review_stamp_since returned %r while the merge tool's checkout has no salt commit, instead of stopping" % (got,))
+
+    # A child run of merge.py's code, with `__file__` naming the tool checkout (argv[2]) and merge.py read from argv[1]. It prints the outcome of the
+    # tool's stamp read as JSON. exec gives merge.py's code the sys.path of this child, which is what `python merge/merge.py` gets.
+    SAFE_PATH_CHILD = (
+        "import json, sys\n"
+        "real, tool_py = sys.argv[1], sys.argv[2]\n"
+        "g = {'__name__': 'merge_under_test', '__file__': real}\n"
+        "with open(real, encoding='utf-8') as f:\n"
+        "    exec(compile(f.read(), real, 'exec'), g)\n"
+        "g['__file__'] = tool_py  # tool_stamp_since names the tool checkout from __file__, read at call time\n"
+        "try:\n"
+        "    g['tool_stamp_since']()\n"
+        "    out = {'raised': 'returned', 'message': ''}\n"
+        "except BaseException as e:\n"
+        "    out = {'raised': type(e).__name__, 'message': str(e)}\n"
+        "print(json.dumps(out))\n"
+    )
+
+    def tool_read_stop(self, root):
+        """-> the message of the Stop that review_stamp_since raises for `root` when the merge tool's checkout gives no cutover. A read that does not stop fails here,
+        and so does one that raises any other exception instead: a failed import must not replace the Stop."""
+        stamp_since = review_fn(self, "review_stamp_since")
+        try:
+            got = stamp_since(root, "main")
+        except merge.Stop as stop:
+            return str(stop)
+        except Exception as e:
+            self.fail("review_stamp_since raised %s, not the Stop that names the failed tool read: %s" % (type(e).__name__, e))
+        self.fail("review_stamp_since returned %r while the merge tool's checkout gives no cutover, instead of stopping" % (got,))
+
+    def failed_tool_read(self, launch_imports):
+        """-> (the message of the Stop that review_stamp_since raises when the merge tool's checkout is not a repository, the source checkout that MERGE_TOOL_SOURCE
+        names). `launch_imports` False makes `launch` unimportable, as a broken launch.py would be. The source is not the tool, so the note would name it."""
+        root = self.repo(salt_at=None)
+        source = os.path.realpath(tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder()))
+        self.addCleanup(shutil.rmtree, source, True)
+        launch_patch = contextlib.nullcontext() if launch_imports else unittest.mock.patch.dict(sys.modules, {"launch": None})
+        with self.tool_checkout(repo=False), launch_patch, unittest.mock.patch.dict(os.environ, {"MERGE_TOOL_SOURCE": source}):
+            if not launch_imports:
+                with self.assertRaises(ImportError):  # the premise of the case: the note's import of `launch` fails
+                    __import__("launch")
+            message = self.tool_read_stop(root)
+        return message, source
+
+    @contextlib.contextmanager
+    def broken_launch(self):
+        """A context in which `import launch` raises SyntaxError. A scratch folder in this run's folder holds a launch.py that does not compile, and
+        merge.MERGE_DIR and sys.path name that folder first, so the real merge/launch.py is never read or changed. sys.path and sys.modules are restored on exit."""
+        folder = os.path.realpath(tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder()))
+        self.addCleanup(shutil.rmtree, folder, True)
+        with open(os.path.join(folder, "launch.py"), "w", encoding="utf-8") as f:
+            f.write('TOOL_SOURCE_ENV = "MERGE_TOOL_SOURCE"\ndef (:\n')
+        with unittest.mock.patch.object(merge, "MERGE_DIR", folder), unittest.mock.patch.object(sys, "path", [folder, *sys.path]), \
+                unittest.mock.patch.dict(sys.modules):
+            sys.modules.pop("launch", None)  # an earlier case may have cached the real launch
+            with self.assertRaises(SyntaxError):  # the premise: the import of launch is the SyntaxError
+                __import__("launch")
+            yield
+
+    def safe_path_read(self, pythonpath=None):
+        """-> (the outcome of the merge tool's stamp read in a child run under PYTHONSAFEPATH=1: {"raised": the class name of what it raised, "message": its text},
+        the checkout MERGE_TOOL_SOURCE names in that run, as launch.py sets it). `pythonpath`, when given, is the only path that holds merge/. The tool checkout
+        has no salt commit, so the read stops."""
+        tool = self.repo(salt_at=None, branch="fixture")
+        cwd = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
+        self.addCleanup(shutil.rmtree, cwd, True)
+        source = os.path.realpath(tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder()))  # the checkout launch.py started from
+        self.addCleanup(shutil.rmtree, source, True)
+        env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONSAFEPATH", "MERGE_TOOL_SOURCE")}
+        env["PYTHONSAFEPATH"] = "1"
+        env["MERGE_TOOL_SOURCE"] = source
+        if pythonpath is not None:
+            env["PYTHONPATH"] = pythonpath
+        r = subprocess.run([sys.executable, "-c", self.SAFE_PATH_CHILD, os.path.join(HERE, "merge.py"), os.path.join(tool, "merge", "merge.py")],
+                           cwd=cwd, env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, "the child run of the merge tool's stamp read failed:\n" + r.stderr)
+        return json.loads(r.stdout.strip().splitlines()[-1]), source
+
+    def test_a_tool_stop_with_no_salt_adds_no_temporary_copy_note_when_the_source_is_the_tool(self):
+        # launch.py passes the checkout it started from. When that is the tool checkout itself, no temporary copy ran, so the Stop adds no note.
+        root = self.repo(salt_at=None)
+        with self.tool_checkout(salt_at=None):
+            tool = os.path.realpath(self.tool_root())
+            with unittest.mock.patch.dict(os.environ, {"MERGE_TOOL_SOURCE": tool}):
+                message = self.tool_read_stop(root)
+        self.assertIn("lacks the review stamp salt", message, "the Stop is not the tool checkout's salt Stop, so the note check proves nothing:\n" + message)
+        self.assertNotIn("temporary copy", message, "a Stop whose source is the tool checkout names a temporary copy of it:\n" + message)
+
+    def test_a_tool_stop_for_a_failed_git_read_adds_no_temporary_copy_note_when_the_source_is_the_tool(self):
+        root = self.repo(salt_at=None)
+        with self.tool_checkout(repo=False):
+            tool = os.path.realpath(self.tool_root())
+            with unittest.mock.patch.dict(os.environ, {"MERGE_TOOL_SOURCE": tool}):
+                message = self.tool_read_stop(root)
+        self.assertIn("could not read the merge tool's source checkout", message, "the Stop is not the tool checkout's git-read Stop, so the note check proves nothing:\n" + message)
+        self.assertNotIn("temporary copy", message, "a git-read Stop whose source is the tool checkout names a temporary copy of it:\n" + message)
+
+    def test_a_shallow_tool_stop_adds_no_temporary_copy_note_when_the_source_is_the_tool(self):
+        root = self.repo(salt_at=None)
+        with self.tool_checkout(depth=2):
+            tool = os.path.realpath(self.tool_root())
+            with unittest.mock.patch.dict(os.environ, {"MERGE_TOOL_SOURCE": tool}):
+                message = self.tool_read_stop(root)
+        self.assertIn("is a shallow history", message, "the Stop is not the tool checkout's shallow Stop, so the note check proves nothing:\n" + message)
+        self.assertNotIn("temporary copy", message, "a shallow Stop whose source is the tool checkout names a temporary copy of it:\n" + message)
+
+    def test_a_tool_stop_whose_source_is_another_checkout_names_it_as_a_temporary_copy(self):
+        # The control for the three cases above: the same no-salt Stop, with a source other than the tool, does get the note.
+        root = self.repo(salt_at=None)
+        source = os.path.realpath(tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder()))
+        self.addCleanup(shutil.rmtree, source, True)
+        with self.tool_checkout(salt_at=None):
+            with unittest.mock.patch.dict(os.environ, {"MERGE_TOOL_SOURCE": source}):
+                message = self.tool_read_stop(root)
+        self.assertIn("lacks the review stamp salt", message, "the Stop is not the tool checkout's salt Stop, so the note check proves nothing:\n" + message)
+        self.assertIn("a temporary copy of " + source, message, "a Stop whose source is another checkout names no temporary copy of it, so the three cases above prove nothing:\n" + message)
+
+    def test_a_failed_launch_import_leaves_the_tool_read_stop_standing(self):
+        # A failed tool read builds its note through tool_source_env, under a broad guard, so the Stop stands when launch.py cannot be imported.
+        # The test checks that the Stop names the failed read, and that no note comes from the failed import.
+        message, _ = self.failed_tool_read(launch_imports=False)
+        self.assertIn("could not read the merge tool's source checkout", message, "the Stop does not name the failed tool read:\n" + message)
+        self.assertNotIn("temporary copy", message, "a failed launch import still added the temporary copy note:\n" + message)
+
+    def test_a_launch_import_that_works_names_the_source_checkout_in_the_tool_read_stop(self):
+        # The control for the case above: the same failed tool read, with launch.py importable, names the checkout MERGE_TOOL_SOURCE holds.
+        message, source = self.failed_tool_read(launch_imports=True)
+        self.assertIn("could not read the merge tool's source checkout", message, "the Stop does not name the failed tool read:\n" + message)
+        self.assertIn("a temporary copy of " + source, message, "the Stop does not name the source checkout MERGE_TOOL_SOURCE holds:\n" + message)
+        self.assertIn("repair " + source, message, "the Stop does not say to repair the source checkout:\n" + message)
+
+    def test_a_successful_tool_read_with_a_broken_launch_returns_the_cutover(self):
+        # A successful read never imports launch: only a failed read's note needs it. So a launch.py that does not compile cannot fail this read.
+        # The control is test_without_a_salt_commit_the_cutover_is_the_tool_checkouts: the same read with launch importable.
+        stamp_since = review_fn(self, "tool_stamp_since")
+        with self.tool_checkout(), self.broken_launch():
+            tool = self.tool_root()
+            self.assertIn("REVIEW_STAMP_SALT =", sh(tool, "git", "show", "HEAD:merge/merge.py"), "the merge tool's checkout does not hold the salt commit")
+            try:
+                cutover = stamp_since()
+            except Exception as e:
+                self.fail("tool_stamp_since raised %s on a read that needs no note, instead of the cutover, because launch.py does not compile: %s" % (type(e).__name__, e))
+        self.assertEqual(cutover, "2026-10-21T15:04:05Z", "tool_stamp_since gave %r, not the cutover of the tool checkout's salt commit" % (cutover,))
+
+    def test_a_failed_tool_read_with_a_broken_launch_stops_naming_the_checkout(self):
+        # A launch.py that does not compile must not replace the Stop of a failed tool read. The control is
+        # test_a_tool_checkout_whose_git_read_fails_stops_naming_the_checkout: the same read with no broken launch.
+        root = self.repo(salt_at=None)
+        with self.tool_checkout(repo=False), self.broken_launch():
+            tool = self.tool_root()
+            message = self.tool_read_stop(root)
+        self.assertIn("could not read the merge tool's source checkout", message, "the Stop is not the failed tool read:\n" + message)
+        self.assertIn(tool, message, "the Stop does not name the merge tool's checkout:\n" + message)
+
+    def test_two_roots_in_one_process_read_the_tool_checkout_once(self):
+        # The tool checkout's cutover is cached for the process. Two roots with no salt commit each need it, and the tool's git log runs once.
+        roots = [self.repo(salt_at=None), self.repo(salt_at=None)]
+        reads, real = [], merge.git
+        with self.tool_checkout():
+            tool = os.path.realpath(self.tool_root())
+
+            def counting_git(cwd, *args, **kwargs):
+                if args[:1] == ("log",) and os.path.realpath(cwd) == tool:
+                    reads.append(args)
+                return real(cwd, *args, **kwargs)
+
+            with unittest.mock.patch.object(merge, "git", counting_git):
+                cutovers = [review_fn(self, "review_stamp_since")(root, "main") for root in roots]
+        self.assertEqual(cutovers, ["2026-10-21T15:04:05Z"] * 2, "the two roots did not both take the tool checkout's cutover: %r" % (cutovers,))
+        self.assertEqual(len(reads), 1, "the merge tool's checkout was read %d times in one process, not once: %r" % (len(reads), reads))
+
+    def test_a_tool_stamp_read_under_pythonsafepath_raises_stop_not_module_not_found(self):
+        # PYTHONSAFEPATH=1 keeps merge/ off sys.path, and tool_source_env imports `launch` by its bare name. The read puts merge/ on sys.path
+        # itself, so the import works and the Stop names the checkout MERGE_TOOL_SOURCE holds. Without that, the import fails quietly.
+        outcome, source = self.safe_path_read()
+        self.assertEqual(outcome["raised"], "Stop", "under PYTHONSAFEPATH=1 the merge tool's stamp read raised %s instead of Stop: %s" % (outcome["raised"], outcome["message"]))
+        self.assertIn("lacks the review stamp salt", outcome["message"], "the Stop is not the tool checkout's salt Stop:\n" + outcome["message"])
+        self.assertIn("a temporary copy of " + source, outcome["message"],
+                      "under PYTHONSAFEPATH=1 with no PYTHONPATH the Stop does not name the checkout MERGE_TOOL_SOURCE holds, so launch was not imported:\n" + outcome["message"])
+
+    def test_the_same_tool_stamp_read_under_pythonsafepath_raises_stop_when_merge_is_on_the_path(self):
+        # The control for the case above: with merge/ on PYTHONPATH, `launch` imports under PYTHONSAFEPATH=1, and the same read names the same checkout.
+        outcome, source = self.safe_path_read(pythonpath=HERE)
+        self.assertEqual(outcome["raised"], "Stop", "with merge/ on PYTHONPATH and PYTHONSAFEPATH=1 the merge tool's stamp read raised %s instead of Stop: %s" % (outcome["raised"], outcome["message"]))
+        self.assertIn("a temporary copy of " + source, outcome["message"],
+                      "with merge/ on PYTHONPATH and PYTHONSAFEPATH=1 the Stop names no checkout that MERGE_TOOL_SOURCE holds:\n" + outcome["message"])
+
     def test_the_cutover_is_the_committer_time_of_the_first_salt_commit(self):
         root = self.repo(salt_at=2)
         self.assertEqual(review_fn(self, "review_stamp_since")(root, "main"), "2026-10-21T15:04:05Z",
                          "review_stamp_since is not the committer time of the commit that adds the salt line")
 
-    def test_without_a_salt_commit_the_cutover_is_none(self):
+    def test_without_a_salt_commit_the_cutover_is_the_tool_checkouts(self):
+        # coordinator item 386 (2026-11-08 12:51 CST): with no salt commit the merge tool's checkout gives the cutover, whatever the history touched
         root = self.repo(salt_at=None)
-        self.assertIsNone(review_fn(self, "review_stamp_since")(root, "main"), "a history with no salt commit gave a cutover")
+        with self.tool_checkout():
+            cutover = review_fn(self, "review_stamp_since")(root, "main")
+        self.assertEqual(cutover, "2026-10-21T15:04:05Z", "a history with no salt commit gave cutover %r, not the tool checkout's" % (cutover,))
 
     def test_a_fix_check_run_asks_for_the_default_branch_once(self):
         # --fix-check runs fetch_default_branch, then review_stamp_since. Both read the default branch through default_branch_once, so
@@ -16127,9 +16597,15 @@ class ReviewStampSince(unittest.TestCase):
         sh(root, "git", "update-ref", "refs/remotes/origin/trunk", sh(root, "git", "rev-parse", "HEAD~2"))
         self.assertNotIn("REVIEW_STAMP_SALT =", sh(root, "git", "show", "origin/trunk:merge/merge.py"), "fixture: origin/trunk holds the salt line")
         fn = review_fn(self, "review_stamp_since")
-        self.assertEqual(fn(root, "main", default="main"), "2026-10-21T15:04:05Z", "fixture: main's cutover is not the salt commit's time")
-        got = fn(root, "main", default="trunk")
-        self.assertIsNone(got, "the call with default trunk returned %r, the answer cached for main, not trunk's none" % (got,))
+        main = fn(root, "main", default="main")
+        self.assertEqual(main, "2026-10-21T15:04:05Z", "fixture: main's cutover is not the salt commit's time")
+        # The tool checkout's salt is at commit 3, so its cutover differs from main's. The trunk call must return the tool's cutover.
+        with self.tool_checkout(salt_at=3):
+            tool = merge.tool_stamp_since()
+            self.assertNotEqual(tool, main, "fixture: the merge tool checkout's cutover is main's, so the two reads cannot be told apart")
+            got = fn(root, "main", default="trunk")
+        self.assertEqual(got, tool, "the call with default trunk returned %r, not the merge tool checkout's cutover %r" % (got, tool))
+        self.assertNotEqual(got, main, "the call with default trunk returned main's cached cutover %r" % (got,))
 
     def test_a_subfolder_root_reads_the_same_cutover_as_the_repo_root(self):
         # merge/merge.py is a path from the repo root. `git -C <subfolder>` reads that path under the subfolder, finds no history, and

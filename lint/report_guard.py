@@ -145,7 +145,7 @@ that holds `round <N>` or `reviewer` and a capital PASS or PASSED claims a PASS,
 "did not PASS") claims nothing, nor does a PASS whose clause places it in the past ("was before the fix", "went stale"). Clauses split on `,`, `;` and `--`; a
 history word in another clause hides no claim. The line claims it for each PR it names, as
 `#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
-the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
+the review marker (merge/merge.py review_newest: an edited newest record, or an edited comment after it, reads as no record), read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
 PR on its line is refused and asks for the PR. The remedy names the act (`merge <pr> --review-record ...`, then post the
 record) and never the live head. A newest record that exists but does not parse is refused in its own words (PR named, "does not parse", the same
 remedy as a missing record, with the post as a new comment), not as a missing record; it names the CI line as the cause only when text follows that line before the first `---` line. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
@@ -2508,11 +2508,13 @@ def _newest_marked(comments, merge_mod):
 
 def _newest_record(n, comments, merge_mod, cutover=None):
     """(parsed record, body) of the newest review record comment of `comments` (oldest first). No marked comment is
-    (None, None); a marked comment that does not parse is (None, its body), so the caller needs no second read. With a `cutover`
-    (merge's review_stamp_since), the comment's last edit time (updated_at, else created_at) goes to parse_review, so an unstamped
-    record from before the cutover reads as merge --reviewed reads it. With no cutover, the Stamp line is required."""
-    newest = _newest_marked(comments, merge_mod)
-    if newest is None:
+    (None, None); a marked comment that does not parse is (None, its body), so the caller needs no second read. (None, None) as well when
+    merge's review_newest says the record cannot be trusted: the newest record, or a comment after it, was edited, so a PASS claim reads as
+    merge --reviewed reads it, bad. With a `cutover` (merge's review_stamp_since), the comment's last edit time (updated_at, else
+    created_at) goes to parse_review, so an unstamped record from before the cutover reads as merge --reviewed reads it. With no cutover,
+    the Stamp line is required."""
+    newest, why = merge_mod.review_newest(comments)
+    if newest is None or why:
         return None, None
     body = newest.get("body") or ""
     edited = (newest.get("updated_at") or newest.get("created_at")) if cutover else None
@@ -2597,12 +2599,15 @@ def review_record_problem(hook, text):
         if rec is None and body is not None and placed is None:
             cause = REVIEW_UNPARSED_CI if _text_after_ci_line(body, merge_mod) else ""
             if cutover_known and not cutover and not any(line.startswith("Stamp: ") for line in body.splitlines()):
-                cause = REVIEW_NO_STAMP  # decision `pr-review-record`, "The cutover": with no cutover an old unstamped record is refused, naming the Stamp line; a failed cutover read is no cutover
+                cause = REVIEW_NO_STAMP  # decision `pr-review-record`, "The cutover": with no cutover an old unstamped record is refused, naming the Stamp line; a failed cutover read is an unknown cutover, never none, so it never names the Stamp line
             reasons.append(REVIEW_UNPARSED % (n, cause, n, n))
         else:
             rec = rec or placed
             if not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
-                reasons.append(REVIEW_NO_RECORD % (n, n, n))
+                newest = merge_mod.review_newest(comments)[0]  # an edited record is untrusted, so _newest_record gave no body; the Stamp cause still reads from it
+                unstamped = (cutover_known and not cutover and newest is not None
+                             and not any(line.startswith("Stamp: ") for line in (newest.get("body") or "").splitlines()))  # a failed cutover read is an unknown cutover, never none (cutover_known)
+                reasons.append(REVIEW_NO_RECORD % (n, n, n) + (REVIEW_NO_STAMP if unstamped else ""))
     return " ".join(reasons), " ".join(notes)
 
 
