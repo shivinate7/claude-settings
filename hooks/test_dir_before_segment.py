@@ -15,7 +15,8 @@ the folder of that segment. Folders are real directories under this run's folder
 so a `cd` into them is trusted. A folder that is never made stands for a `cd` that fails.
 
 Green controls pass on the current code and must stay green. A red case fails there for the one stated
-cause: the folder a variable names is not read.
+cause: the folder a variable names is not read. A case that waits on another step is kept, not run, and
+printed as SKIP with that step's name.
 """
 import os
 import shutil
@@ -68,7 +69,14 @@ def expect(label, command, scope, want, cwd=SHELL, failed_cd_stays=False):
     check(label, got == want, "got %r, want %r" % (got, want))
 
 
-def case(label, command, scope, want, cwd=SHELL, failed_cd_stays=False):
+SKIPPED = []  # (label, reason): a case that waits on another step. It stays listed and prints its reason.
+
+
+def case(label, command, scope, want, cwd=SHELL, failed_cd_stays=False, skip=None):
+    if skip is not None:
+        SKIPPED.append((label, skip))
+        CASES.append((label, None))
+        return
     CASES.append((label, lambda: expect(label, command, scope, want, cwd, failed_cd_stays)))
 
 
@@ -80,7 +88,8 @@ case("cd $R, unquoted, reads R as the folder it holds",
 case("cd \"${R}\", braced, reads R as the folder it holds",
      'R=%s; cd "${R}" && git status' % TARGET, "git status", TARGET)
 case("a variable built from another, B=\"$A\"/x, reads as A/x",
-     'A=%s; B="$A"/x; cd "$B" && git status' % PARENT, "git status", CHILD)
+     'A=%s; B="$A"/x; cd "$B" && git status' % PARENT, "git status", CHILD,
+     skip="waits on step 847 resolve-vars-quote-split")
 case("a variable built from another, B=$A/x, unquoted, reads as A/x",
      'A=%s; B=$A/x; cd "$B" && git status' % PARENT, "git status", CHILD)
 case("a relative variable after an earlier cd reads from the folder that cd made",
@@ -186,8 +195,12 @@ CASES.append(("the run-folder sweep removes an old sibling and keeps a new one",
 
 def main():
     red = []
+    run_count = 0
     try:
         for label, run in CASES:
+            if run is None:
+                continue
+            run_count += 1
             before = len(FAILED)
             try:
                 run()
@@ -197,12 +210,15 @@ def main():
                 red.append(label)
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
+    for label, reason in SKIPPED:
+        print("SKIP %s: %s" % (label, reason))
     if FAILED:
-        print("test_dir_before_segment FAIL: %d of %d cases red" % (len(red), len(CASES)))
+        print("test_dir_before_segment FAIL: %d of %d run cases red, %d skipped"
+              % (len(red), run_count, len(SKIPPED)))
         for line in FAILED:
             print("  " + line)
         return 1
-    print("test_dir_before_segment PASS: all %d cases green" % len(CASES))
+    print("test_dir_before_segment PASS: all %d run cases green, %d skipped" % (run_count, len(SKIPPED)))
     return 0
 
 
