@@ -3350,8 +3350,8 @@ for (const [width, zoom, label] of TAB_WIDTHS) for (const scheme of SCHEMES) {
 // selectable tab selected. Each claim is one test, so a failure names one cause.
 const TAB_SIZES = [180, 240, 320, 430, 480, 520];
 // Opens the tab set, then checks its scope: the Designs tab is shown only with designs, and the tab that should be selected is.
-async function tabSetPage(t, { width, zoom, pct = 100, designs, scheme, sel }) {
-  const items = designs ? [mk("with-design", 1, { designs: [{ slug: "s1", label: "Option a" }, { slug: "s2", label: "Option b" }] }), mk("other", 2)] : undefined;
+async function tabSetPage(t, { width, zoom, pct = 100, designs, scheme, sel, label = "Option a" }) {
+  const items = designs ? [mk("with-design", 1, { designs: [{ slug: "s1", label }, { slug: "s2", label: "Option b" }] }), mk("other", 2)] : undefined;
   const page = await open(t, { items, designData: DESIGNS, viewport: { width, height: 900 }, scheme }); if (!page) return null;
   if (zoom) await zoomText(page);
   if (pct > 100) await zoomText(page, pct + "%");
@@ -3508,6 +3508,25 @@ for (const width of [180, 200, 220, 240]) for (const wide of [false, true]) for 
     const vw = await page.evaluate(() => window.innerWidth);
     assert.ok(b, "the Designs sheet's Close has no box");
     assert.ok(b.x >= -0.5 && b.x + b.width <= vw + 0.5, `the Designs sheet's Close runs from ${Math.round(b.x)} to ${Math.round(b.x + b.width)} px in a ${vw} px window, ${where}`);
+  });
+}
+
+// The caption at 300% text is no larger than the Designs title, 180 to 260 wide. The caption shows only while the head cuts the title, so the
+// label is long enough to be cut at each width here. With .dcap at .875rem (42 px) the caption is larger than the title at 180 and 200 wide,
+// where the title is 35.5 and 40.3 px. At 220 to 260 the title is 45 to 51 px, so those widths are controls.
+const CAP_LABEL = "Layout A, the phone pick";
+const CAP_RED_300 = [180, 200];
+const CAP_CONTROL_300 = [220, 240, 260];
+for (const [set, note] of [[CAP_RED_300, ""], [CAP_CONTROL_300, " (control)"]]) for (const width of set) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, 300);
+  test(`Designs sheet, ${scheme}: ${where}: the caption is no larger than the title${note}`, async (t) => {
+    const page = await tabSetPage(t, { width, pct: 300, designs: true, scheme, sel: "Questions", label: CAP_LABEL }); if (!page) return;
+    await openDesigns(page);
+    // Scope: the caption is on screen only while the head cuts the title, so its size is read with the caption shown.
+    const shown = await page.waitForFunction(() => document.getElementById("dCap").classList.contains("on"), null, { timeout: 3000 }).then(() => true, () => false);
+    assert.ok(shown, `the caption is not shown, so the head does not cut the title, ${where}`);
+    const g = await page.evaluate(() => ({ cap: parseFloat(getComputedStyle(document.getElementById("dCap")).fontSize), title: parseFloat(getComputedStyle(document.getElementById("dTitle")).fontSize) }));
+    assert.ok(g.cap <= g.title + 0.5, `the caption is ${g.cap} px and the title ${g.title} px at 300% text, so the caption is larger, ${where}`);
   });
 }
 
