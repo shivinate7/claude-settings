@@ -16121,8 +16121,8 @@ class ReviewStampSince(unittest.TestCase):
             self.fail("shallow_boundary read a folder with no .git as full history and returned %r instead of stopping" % (got,))
 
     def test_two_default_branches_on_one_root_and_base_each_get_their_own_cutover(self):
-        # The cache is keyed by (repo top, base, default branch) and holds the first answer. A second call with another default branch must read that branch.
-        # origin/trunk here is commit 1, which has no salt line, so its cutover is none. main's is the salt commit's committer time.
+        # The cache key is (repo top, base, default branch). origin/trunk has no salt line, so its read falls back to the merge tool's
+        # checkout. A key without the default branch would return main's cached cutover to the trunk call instead.
         root = self.repo(salt_at=2)
         sh(root, "git", "update-ref", "refs/remotes/origin/trunk", sh(root, "git", "rev-parse", "HEAD~2"))
         self.assertNotIn("REVIEW_STAMP_SALT =", sh(root, "git", "show", "origin/trunk:merge/merge.py"), "fixture: origin/trunk holds the salt line")
