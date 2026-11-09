@@ -485,7 +485,7 @@ fi
 
 # Patch the platform's Stop-hook script ($config_dir/stop-hook-git-check.sh, written by the platform before this
 # hook runs) so its unpushed-commits nudge skips a branch whose head origin/main already holds. Granted by the
-# owner, page item 464 b, 2026-11-09 13:09 CST, for this one patch (decision lanes-start-in-tool-worktrees).
+# owner, page item 464 b, for this one patch (decision lanes-start-in-tool-worktrees).
 # The nudge recreated a deleted branch as a copy of main. A squash-merged branch is not an ancestor of origin/main,
 # so it is not skipped; this repo merges with merge commits.
 # Cost: one file read per session start, one write only when patching (a temp file in the same folder, then mv),
