@@ -1,0 +1,10 @@
+{
+  "title": "In a cloud session, wait-pid and wait-until run by bare name, because ~/.claude/bin is on PATH",
+  "phase": "now",
+  "status": "ready",
+  "order": 927,
+  "owner": "coordinator",
+  "why": "Batch runner 8, 14:57 CST Nov 9 (via the coordinator): the waiter rule's remedy prints `wait-pid PID`, but in a cloud session it gave \"command not found\", so a background waiter failed silently.",
+  "note": "PR #2351 (lane nfp-wait-tools-path, in batch 70) covers it: env_path_line in hooks/session_start.sh puts ~/.claude/bin first on PATH through CLAUDE_ENV_FILE at session start. Done when #2351 merges.",
+  "updatedAt": "2026-11-09T15:00:00-06:00"
+}
