@@ -17,7 +17,7 @@
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
-                          print the review record for the head SHA that was reviewed. Stops (exit 1) when the PR's live head is another
+                          print the review record for the head SHA that was reviewed. It refuses a Kind or Guard that the diff contradicts. Stops (exit 1) when the PR's live head is another
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
@@ -78,6 +78,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 
 class Stop(Exception):
@@ -127,6 +128,10 @@ UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not r
 # The two role cites name no tier: a lane must not learn which tier may claim a merge.
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
+# The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the hooks, as folder prefixes. GUARD_FILES match a whole path.
+# It reads RULE_DIRS, never a copy.
+GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
+GUARD_FILES = ("settings.json",)
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 
@@ -881,7 +886,7 @@ class Host:
         return hits[0]
 
     def pr(self, n):
-        """-> {head, branch, base, state, mergeable, merge_state, draft, body, created}"""
+        """-> {head, branch, base, state, mergeable, merge_state, draft, body, created, changed_files}"""
         c, out = self.api(f"pulls/{self.pr_number(n)}")
         if c:
             raise Stop("reading the pull request failed: " + out)
@@ -890,7 +895,8 @@ class Host:
         return {"head": d["head"]["sha"], "branch": d["head"]["ref"], "base": d["base"]["ref"],
                 "state": "MERGED" if d.get("merged") else d["state"].upper(),
                 "mergeable": self.MERGEABLE[d.get("mergeable")], "merge_state": (d.get("mergeable_state") or "unknown").upper(),
-                "draft": bool(d.get("draft")), "body": d.get("body") or "", "created": d.get("created_at")}
+                "draft": bool(d.get("draft")), "body": d.get("body") or "", "created": d.get("created_at"),
+                "changed_files": d.get("changed_files")}  # only --review-record reads the count; pr_files stops on a missing one
 
     def cited_run(self, url):
         """-> (conclusion, head sha) of the workflow run at `url`, one read. A failed read is a Stop, never a green run."""
@@ -915,6 +921,22 @@ class Host:
             if m and body.splitlines()[:1] == [REVIEW_MARKER]:
                 found.setdefault(int(m.group(1)), []).append(body)
         return found
+
+    def pr_files(self, n, changed):
+        """-> [(path, status, additions)] of the pull request's changed files, one paged read of pulls/<n>/files; a missing additions counts 0. A rename also gives its old path as removed, with 0.
+        A failed read is a Stop, never an empty list, which would read as a clean diff. So is a list shorter than `changed`, the pull request's
+        changed_files count: GitHub lists at most 3000 files, and a diff not read in full cannot clear a guard."""
+        out, entries = [], 0
+        for f in self.pages(f"pulls/{n}/files"):
+            entries += 1
+            out.append((f["filename"], f["status"], int(f.get("additions") or 0)))
+            if f.get("previous_filename"):
+                out.append((f["previous_filename"], "removed", 0))
+        if not isinstance(changed, int):
+            raise Stop("the pull request read gave no changed-file count, so the diff cannot be checked in full. " + REVIEW_CITE)
+        if entries < changed:
+            raise Stop(f"the pull request reports {changed} changed files, but {entries} were read (GitHub lists at most 3000), so the diff cannot be checked in full. " + REVIEW_CITE)
+        return out
 
     def open_heads(self):
         """-> {head branch name: (head sha, PR base)} of the open pull requests, every page. A failed read raises Stop: never an empty set,
@@ -3557,6 +3579,20 @@ def write_merge_role(tier):
             tmp.unlink()
         raise Stop(f"cannot write the merge role to {path} {ROLE_CITE}: {e}.")
 
+def guard_hits(paths):
+    """-> the sorted paths that start with a GUARD_PATHS entry or equal a GUARD_FILES entry, less each test path: a test file alone is no
+    guard change (decision hold-unsafe-after-round-3). hooks/guard.py is_test_rel is the one home of what a test path is."""
+    import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the review record needs it
+    return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in GUARD_FILES) and not hook_guard.is_test_rel(p))
+
+def kind_misfits(kind, files):
+    """-> the sorted paths that break the kind, over (path, status, additions) triples. docs-only: a path not ending .md. delete-only: a path that adds lines or is new (added, renamed, copied)."""
+    if kind == "docs-only":
+        return sorted(p for p, _, _ in files if not p.endswith(".md"))
+    if kind == "delete-only":
+        return sorted(p for p, st, add in files if add > 0 or st in ("added", "renamed", "copied"))
+    return []
+
 IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build.py"  # the one home of the idle-lane rules
 
 def idle_lanes(live):
@@ -3696,6 +3732,13 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
             if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
+            files = h.pr_files(a.pr, info["changed_files"])
+            hits = guard_hits([p for p, _, _ in files])
+            if a.guard == "no" and hits:
+                raise Stop("Guard or check: the diff changes " + ", ".join(hits) + ", so --guard no is false. Write the record with --guard yes. " + REVIEW_CITE)
+            misfits = kind_misfits(a.kind, files)
+            if misfits:
+                raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
                 earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
                 last = earlier[-1] if earlier else None
