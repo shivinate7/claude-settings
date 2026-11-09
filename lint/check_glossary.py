@@ -31,7 +31,9 @@ A "not" name written `word (this sense)` retires one sense of an everyday word (
 it is read in paths, anchors and slugs, never in identifiers, strings or hook messages, where code
 may use the other sense. Any other parenthesised tag on a "not" name fails. Claude Code's own names
 stay (PLATFORM_NAMES, PLATFORM_PREFIXES). A path or a line that already exists on the base is not
-checked or renamed.
+checked or renamed. The change is read from the merge base to the work tree: committed, staged and unstaged
+edits, and each untracked file that is new on the base, in a top-level folder where the base holds files. An
+untracked file that is not text (a NUL byte, no UTF-16 mark) is skipped; one that will not decode as text is UNKNOWN.
 
     python3 lint/check_glossary.py [file ...]
         # files given: check those paths and read each whole, skip git
@@ -97,6 +99,17 @@ def read(rel):
             return f.read()
     except (OSError, ValueError):  # unreadable, or not text
         return None
+
+
+def binary(rel):
+    """True when the file's first bytes hold a NUL and no UTF-16 byte-order mark: an image or bytecode, not text
+    in another encoding. UTF-16 text holds NULs too, so its mark tells it apart."""
+    try:
+        with open(os.path.join(ROOT, *rel.split("/")), "rb") as f:
+            head = f.read(8192)
+    except OSError:
+        return False
+    return b"\0" in head and not head.startswith((b"\xff\xfe", b"\xfe\xff"))
 
 
 def words(text, camel=False):
@@ -535,36 +548,80 @@ def git(*args):
     return r.stdout
 
 
-def git_diff(*opts):
-    # Fixed prefixes and no external diff, so diff.noprefix, diff.mnemonicPrefix or a diff tool
-    # in the user's config cannot change the `+++ b/<path>` headers that added_lines reads.
-    # One commit and no second end: the diff runs from the merge base to the work tree.
-    base = git("merge-base", "origin/main", "HEAD").strip()
-    return git("diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", *opts, base)
+_RUN = {}  # what one run asked git, by key: each answer is read once and shared, so a run starts few git processes
+
+
+def once(key, make):
+    if key not in _RUN:
+        _RUN[key] = make()
+    return _RUN[key]
+
+
+def merge_base():
+    return once("base", lambda: git("merge-base", "origin/main", "HEAD").strip())
+
+
+def git_diff():
+    """The one diff of a run: a raw list of the changed paths, then the patch, from the merge base to the work tree.
+
+    Fixed prefixes and no external diff, so diff.noprefix, diff.mnemonicPrefix or a diff tool in the user's
+    config cannot change the `+++ b/<path>` headers that added_lines reads. T (a type change, such as a symlink
+    replaced by a file) is read as an edit."""
+    return once("diff", lambda: git("diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
+                                    "-U0", "-M", "--diff-filter=AMRT", "--patch-with-raw", merge_base()))
 
 
 def untracked():
-    """The untracked, not ignored files in a top-level folder that already holds tracked files."""
-    tracked = {p.split("/")[0] for p in git("ls-files", "-z").split("\0") if "/" in p}
-    found = git("ls-files", "-z", "--others", "--exclude-standard").split("\0")
-    return [p for p in found if "/" in p and p.split("/")[0] in tracked]
+    """The untracked, not ignored files that are new on the base, in a top-level folder where the base holds files.
+
+    A root file and a file in a top-level folder that is new are not part of the change. A path that the
+    base already holds is kept in the work tree only, so it adds no words."""
+    def find():
+        found = [p for p in git("ls-files", "-z", "--others", "--exclude-standard").split("\0") if "/" in p]
+        if not found:
+            return []
+        tops = sorted({p.split("/")[0] for p in found})
+        listed = git("ls-tree", "-r", "-z", "--name-only", merge_base(), "--", *[t + "/" for t in tops])
+        on_base = set(listed.split("\0"))
+        folders = {p.split("/")[0] for p in on_base if "/" in p}
+        return [p for p in found if p.split("/")[0] in folders and p not in on_base]
+    return once("untracked", find)
 
 
-def added():
-    return git_diff("--name-only", "--no-renames", "--diff-filter=A").split("\n") + untracked()
+def unquote(name):
+    """A path as git printed it, unquoted when git quoted it; None when it cannot be read."""
+    if name.startswith('"'):
+        try:
+            return ast.literal_eval(name).encode("latin-1").decode("utf-8")
+        except (SyntaxError, ValueError, UnicodeError):
+            return None
+    return name
 
 
 def diff_path(header):
     """The path of a `+++ b/<path>` header, unquoted when the diff quoted it; None for no path.
 
     Git ends the header with a TAB when the path holds a space."""
-    header = header.rstrip("\t")
-    if header.startswith('"'):
-        try:
-            header = ast.literal_eval(header).encode("latin-1").decode("utf-8")
-        except (SyntaxError, ValueError, UnicodeError):
-            return None
-    return header[2:] if header.startswith("b/") else None
+    path = unquote(header.rstrip("\t"))
+    return path[2:] if path and path.startswith("b/") else None
+
+
+def diff_adds():
+    """The paths the diff adds, a rename's new path too, read from the raw rows that lead the diff."""
+    out = []
+    for row in git_diff().split("\n"):
+        if row.startswith("diff --git "):
+            break
+        if row.startswith(":"):
+            meta, _, names = row.partition("\t")
+            path = unquote(names.split("\t")[-1])
+            if meta.split()[-1][:1] in ("A", "R") and path:
+                out.append(path)
+    return out
+
+
+def added():
+    return diff_adds() + untracked()
 
 
 def added_lines():
@@ -574,7 +631,7 @@ def added_lines():
     A `+++ ` row is a header only between `diff --git` and the first `@@`: past that, it is an
     added line that starts with `++`."""
     out, unknown, path, header = {}, [], None, False
-    for row in git_diff("-U0", "-M", "--diff-filter=AMR").split("\n"):
+    for row in git_diff().split("\n"):
         if row.startswith("diff --git "):
             path, header = None, True
         elif header and row.startswith("+++ "):
@@ -595,6 +652,7 @@ def added_lines():
 
 
 def main(args):
+    _RUN.clear()
     unknown = [a for a in args if a.startswith("-")]
     if unknown:  # read as a path, an unknown option would skip git and check nothing
         print("check_glossary: FAIL: unknown option: %s" % " ".join(unknown))
@@ -616,7 +674,13 @@ def main(args):
     scope, unknown = ({p: None for p in args}, []) if args else added_lines()
     for rel, lines in sorted(scope.items()):
         text = read(rel)
-        if text is None or rel.startswith(SKIP_CODE):
+        if rel.startswith(SKIP_CODE):
+            continue
+        if text is None:
+            # A committed file that does not decode is left alone. An untracked one is new work that no
+            # read can judge, so it is unknown, never clean.
+            if not args and rel in untracked() and not binary(rel):
+                unknown.append("%s is untracked and cannot be read as text" % rel)
             continue
         try:
             bad += code_problems(rel, text, table, lines)
