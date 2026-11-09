@@ -844,6 +844,20 @@ class CannotClaimTests(unittest.TestCase):
                          landed_reply(line)])
         self.assert_passes(out, "a failed push, with the remote's reason after a colon")
 
+    def test_cc_red_a_werent_reason_after_a_colon_names_the_check_after_a_failed_merge(self):
+        # Catches: "weren't" missing from the verbs of a reason, so "the tests weren't green" named no check and blocked a
+        # failed merge that its own reason explained. The curly apostrophe reads the same.
+        for line in ("I couldn't merge PR 12: the tests weren't green.", "I couldn’t merge PR 12: the tests weren’t green."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+                self.assert_passes(out, "a failed merge, with a weren't reason after the colon: %r" % line)
+
+    def test_cc_green_an_aren_t_reason_after_a_colon_passes_after_a_failed_merge(self):
+        # Control: the same failed merge, with aren't in the reason. aren't is a verb of a reason already, so it passes.
+        line = "I couldn't merge PR 12: the tests aren't green."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+        self.assert_passes(out, "a failed merge, with an aren't reason after the colon")
+
     def test_cc_red_a_later_push_success_makes_a_past_failure_no_claim(self):
         # Catches: a push that failed and was then pushed again read as a present claim that the push cannot be done.
         # The later success of the same push makes the failed one a past failure, so the line is no claim.
@@ -1198,6 +1212,19 @@ class CannotClaimTests(unittest.TestCase):
                 out = self.stop([trg.human(prompt), trg.assistant_text(line)])
                 self.assert_blocked_for(out, NO_TRY, line)
 
+    def test_cc_red_an_ly_adverb_before_i_tried_names_no_check(self):
+        # Catches: the writer adverbs read from the twelve listed words only, so "I genuinely tried" let the bare check word
+        # tried name a check. Any -ly adverb between I and tried is the writer's own, so tried names no call.
+        line = "I genuinely tried, and I cannot push."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_green_a_listed_adverb_before_i_tried_names_no_check(self):
+        # Control: actually is a listed adverb, so the writer reads as the subject and the line blocks for naming no check.
+        line = "I actually tried, and I cannot push."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
     def test_cc_red_a_why_yours_line_with_a_capability_phrase_is_judged_as_a_claim(self):
         # Catches: a Why yours line skipped by the cannot-claim check, so "I am not able to push from here" passed with no try.
         line = "Why yours: I am not able to push from here, so you must run it."
@@ -1260,6 +1287,32 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_1"),
                          *ok_bash("gh pr merge 13", "tu_2"), landed_reply(line)])
         self.assert_passes(out, "a failed merge of PR 12, not cancelled by a merge of PR 13")
+
+    def test_cc_red_a_url_of_another_repo_does_not_cancel_a_repo_less_failure(self):
+        # Catches: a PR URL keyed by its number alone, so a merge of o/x PR 12 cancelled a failed merge of PR 12 whose repo
+        # the call never named. The failure stands, so the line that says it could not merge names no check and blocks.
+        line = "I could not merge PR 12 at first."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_1"),
+                         *ok_bash("gh pr merge https://github.com/o/x/pull/12", "tu_2"), landed_reply(line)])
+        self.assertIsNotNone(out, "the merge of o/x PR 12 cancelled the failed merge of PR 12 with no repo named")
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_red_a_same_repo_url_cancels_a_failure_made_with_the_repo_flag(self):
+        # Catches: a PR URL's repo dropped from its key, so the merge of o/x PR 12 by URL did not cancel the failed merge of
+        # PR 12 made with --repo o/x. The same repo and number cancel, so the past failure is no claim.
+        line = "I could not merge PR 12 at first."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12 --repo o/x", "tu_1"),
+                         *ok_bash("gh pr merge https://github.com/o/x/pull/12", "tu_2"), landed_reply(line)])
+        self.assert_passes(out, "the URL merge of o/x PR 12 did not cancel the failed merge made with --repo o/x")
+
+    def test_cc_green_a_same_url_retry_cancels_a_failed_url_merge(self):
+        # Control: a merge by URL that fails, then a retry of the same URL. Both keys name the same repo and number, so the
+        # retry cancels the failure, and the line that says it could not merge at first passes.
+        line = "I could not merge PR 12 at first."
+        url = "https://github.com/o/x/pull/12"
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge " + url, "tu_1"),
+                         *ok_bash("gh pr merge " + url, "tu_2"), landed_reply(line)])
+        self.assert_passes(out, "a failed merge by URL, then a successful retry of the same URL")
 
     # ---- a reason after a failed try names its check, whatever the mark that sets it off, and a check in one sentence backs the next
 
@@ -1993,6 +2046,109 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("reach GitHub"), use("Bash", {"command": "gh pr list"}, "tu_l"),
                          done("tu_l", "HTTP 500 Internal Server Error", error=True), landed_reply(line)])
         self.assert_passes(out, "an error result with HTTP 500 backs the reach claim")
+
+
+    def test_cc_red_a_claim_on_a_non_pr_or_docs_object_is_no_claim(self):
+        # Catches: a merge, an open or an update whose object is not a PR, read as a PR claim with no try, so a claim about
+        # config files, CI logs or docs blocked.
+        for prompt, line in (("merge the config files", "I can't merge these two config files."),
+                             ("open the CI logs", "I can't open the PR's CI logs."),
+                             ("update the docs", "I can't update the docs for PR 12.")):
+            with self.subTest(line=line):
+                out = self.stop([trg.human(prompt), trg.assistant_text(line)])
+                self.assert_passes(out, "a claim whose object is not a PR")
+
+    def test_cc_red_a_run_of_gh_pr_create_is_a_claim(self):
+        # Catches: a run of gh pr create read as no PR claim, so the claim that it cannot run passed with no try.
+        line = "I can't run gh pr create."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+
+    # ---- notes with `Fix: step:clause-parser-claims`: the forms, outage nouns and merge-tool targets the clause parser reads
+
+    def test_cc_red_an_adverb_before_unable_to_is_a_claim(self):
+        # Catches: an -ly adverb that ADVERBS does not list ("temporarily", "presently") between the verb and "unable to", so
+        # the claim that the act cannot be done read as no claim and passed with no try.
+        for prompt, line in (("push the branch", "I am temporarily unable to push."),
+                             ("merge PR 12", "I am presently unable to merge PR 12.")):
+            with self.subTest(line=line):
+                out = self.stop([trg.human(prompt), trg.assistant_text(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_not_authorized_no_access_lack_permission_or_blocked_from_is_a_claim(self):
+        # Catches: "not authorized to", "do not have access to", "lack permission to" and "blocked from" missing from
+        # CANNOT_FORMS, so a claim that an act cannot be done read as no claim and passed with no try.
+        for prompt, line in (("push the branch", "I am not authorized to push."),
+                             ("merge PR 12", "I do not have access to merge PR 12."),
+                             ("push the branch", "I lack permission to push."),
+                             ("push the branch", "I am blocked from pushing.")):
+            with self.subTest(line=line):
+                out = self.stop([trg.human(prompt), trg.assistant_text(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_merge_blamed_on_an_auth_proxy_or_clone_failure_has_no_try(self):
+        # Catches: "auth checks", "proxy checks", "failing to authenticate" and "failing to clone" read as a blocker of the
+        # merge, so the merge claim beside them passed as backed. None of them names a blocker, so the claim has no try.
+        for line in ("I can't merge PR 12 because the auth checks are failing.",
+                     "I can't merge PR 12 because the proxy checks are failing.",
+                     "I can't merge PR 12 because CI is failing to authenticate.",
+                     "I can't merge PR 12 because CI is failing to clone."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_url_merge_success_cancels_a_failed_merge_by_number_of_its_repo(self):
+        # Catches: a merge success whose target is the PR's URL keyed by its number alone, so the failed `gh pr merge 12
+        # --repo o/r` was not cancelled by a later success of that PR by URL, and the past-tense line about it blocked. A
+        # URL keys by its repo and number, so it cancels a failure whose --repo is the URL's repo.
+        line = "I could not merge PR 12 at first."
+        by_number = [trg.human("merge PR 12"), *failed_bash("gh pr merge 12 --repo o/r", "tu_m1"),
+                     *ok_bash("gh pr merge 12 --repo o/r", "tu_m2"), landed_reply(line)]
+        by_url = [trg.human("merge PR 12"), *failed_bash("gh pr merge 12 --repo o/r", "tu_m1"),
+                  *ok_bash("gh pr merge https://github.com/o/r/pull/12", "tu_m2"), landed_reply(line)]
+        # Scope first (P7): the number form is the control, so the URL form is the only change between the two runs.
+        self.assert_passes(self.stop(by_number), "the control: a later success of PR 12 by number and --repo o/r cancels it")
+        self.assert_passes(self.stop(by_url), "a later success of PR 12 by its URL cancels a failure whose --repo is o/r")
+
+    def test_cc_red_a_masked_status_span_does_not_hide_a_claim(self):
+        # Catches: the code span `not connected` between a colon and a semicolon. The later separator is dropped, so the
+        # claim's clause starts at the colon and its negation is read from the masked span. The turn has no try.
+        line = "MCP status: `not connected`; I cannot open a PR."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_masked_quoted_negation_does_not_hide_a_claim(self):
+        # Catches: the quote "not connected" between a colon and a semicolon, read as a negation of the claim after it.
+        # The turn has no try.
+        line = 'GitHub MCP said: "not connected"; I can\'t open a PR.'
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_masked_no_tools_before_a_comma_does_not_hide_a_claim(self):
+        # Catches: the code span `no tools` before a comma, read as a negator of the claim after the comma. The turn has
+        # no try.
+        line = "The notice said: `no tools`, I cannot open a PR."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_a_masked_if_needed_before_a_semicolon_still_blocks(self):
+        # Control of the current verdict: the base already blocks this line, so no case here is red. It pins the verdict
+        # the fix must keep. The conditional read of masked text has no red case behind it.
+        line = "The note said `if needed`; I cannot push."
+        out = self.stop([trg.human("push the branch"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_a_masked_connected_status_still_blocks(self):
+        # Control: the same shape with `connected` in the span. Nothing negates the claim, so it blocks as no try.
+        line = "MCP status: `connected`; I cannot open a PR."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_pass_a_true_negation_of_a_push_claim_still_passes(self):
+        # Control: "did not say" negates the telling, so the reply claims no act and the turn passes.
+        out = self.stop([trg.human("push the branch"), trg.assistant_text("I did not say I cannot push.")])
+        self.assert_passes(out, "a true negation of a push claim")
 
 
 if __name__ == "__main__":
