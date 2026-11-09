@@ -3359,10 +3359,14 @@ make_guard_clone() {
 make_swap_bin() {
   mkdir -p "$1"
   real_mv=$(command -v mv)
+  # $2, when given, is a case pattern for destinations the shim refuses (exit 1), so the install's copy fails for them.
+  refusal=""
+  [ -n "${2:-}" ] && refusal="case \"\$dest\" in $2) exit 1 ;; esac"
   cat > "$1/mv" <<EOF
 #!/bin/sh
 dest=""; src=""
 for a in "\$@"; do src="\$dest"; dest="\$a"; done
+$refusal
 case "\$src" in
   *.cs-new)
     printf 'premv %s %s %s\n' "\$dest" "\$([ -f "\$dest" ] && echo present || echo absent)" "\$(wc -c < "\$src" | tr -d ' ')" >> "\$SWAP_EVENTS" ;;
@@ -5181,6 +5185,121 @@ caseM10() {
   if msg=$(m10_run stalekeep); then ok "$name"; else bad "$name" "$msg"; fi
 }
 
+# ---- stamp cases: a cloud install writes state/hooks-source-sha last, and only after every copy landed ----
+# The stamp holds the full sha of the source the install copied from. session_start.sh reads it to name the lag of
+# the live hooks. Each case reuses cloud_install and the GitHub fixture that caseK1 builds.
+
+# stamp_path HOME: the stamp a cloud install writes into HOME's config dir.
+stamp_path() { printf '%s\n' "$1/.claude-cfg/state/hooks-source-sha"; }
+
+# ---- stampS1: a cloud install writes the full sha of its source to state/hooks-source-sha ----
+stampS1() {
+  name="stampS1: a cloud install writes the full sha of its source to state/hooks-source-sha"
+  fx="$work/s1-fx"; h="$work/s1-home"; scratch="$work/s1-scratch"; bin="$work/s1-bin"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"; want=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+  stamp=$(stamp_path "$h")
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ ! -f "$stamp" ]; then bad "$name" "no stamp at $stamp"
+  elif [ "$(cat "$stamp")" != "$want" ]; then bad "$name" "stamp is [$(cat "$stamp")], want the source HEAD $want"
+  else ok "$name"; fi
+}
+
+# ---- stampS2: a cloud install whose copy is refused exits non-zero and keeps the stamp of the last good install ----
+stampS2() {
+  name="stampS2: a cloud install whose copy is refused exits non-zero and leaves the stamp of the last good install"
+  fx="$work/s2-fx"; h="$work/s2-home"; scratch="$work/s2-scratch"; bin="$work/s2-bin"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"; first=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+  stamp=$(stamp_path "$h")
+  if [ "$(cat "$stamp" 2>/dev/null)" != "$first" ]; then
+    bad "$name" "control: the good install left stamp [$(cat "$stamp" 2>/dev/null)], want $first"; return
+  fi
+  advance_github_fixture "$fx" two
+  make_swap_bin "$bin" '*/hooks/session_start.sh'
+  cloud_install "$h" "$scratch" "$bin"
+  if [ "$rc" -eq 0 ]; then bad "$name" "the install with a refused copy exited 0"
+  elif [ "$(cat "$stamp" 2>/dev/null)" != "$first" ]; then
+    bad "$name" "stamp is [$(cat "$stamp" 2>/dev/null)], want the old $first after the refused copy"
+  else ok "$name"; fi
+}
+
+# ---- stampS3: a cloud install writes the stamp after its startup entries have run ----
+# The probe is a startup entry in the source's settings.json. install.sh runs it inside its startup loop, and it
+# records whether the stamp exists at that point. Last means absent then, and present once the install is done.
+stampS3() {
+  name="stampS3: a cloud install writes the stamp after its startup entries have run"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  fx="$work/s3-fx"; h="$work/s3-home"; scratch="$work/s3-scratch"; bin="$work/s3-bin"; probe="$work/s3-probe"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"
+  probe_cmd="[ -e \"\$CLAUDE_CONFIG_DIR/state/hooks-source-sha\" ] && echo present > \"$probe\" || echo absent > \"$probe\""
+  jq --arg cmd "$probe_cmd" '.hooks.SessionStart = ((.hooks.SessionStart // []) + [{"matcher":"startup","hooks":[{"type":"command","command":$cmd}]}])' \
+    "$fx/src/settings.json" > "$work/s3-settings.json" && mv "$work/s3-settings.json" "$fx/src/settings.json"
+  git -C "$fx/src" add settings.json
+  git -C "$fx/src" -c user.email=t@example.com -c user.name=t commit -q -m "probe startup entry"
+  git -C "$fx/src" push -q "$fx/bare.git" HEAD:refs/heads/main
+  want=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+  stamp=$(stamp_path "$h")
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ "$(cat "$stamp" 2>/dev/null)" != "$want" ]; then bad "$name" "no stamp $want after the install (stamp: [$(cat "$stamp" 2>/dev/null)])"
+  elif [ "$(cat "$probe" 2>/dev/null)" != absent ]; then bad "$name" "a startup entry saw the stamp before the copies finished: probe [$(cat "$probe" 2>/dev/null)]"
+  else ok "$name"; fi
+}
+
+# config_listing HOME: each file under HOME's config dir with its checksum. Three things differ between two runs of
+# the same install and are normalised: the install id, HOME's own path, and the run-time name of guard.d's folder.
+# Bytecode is left out: Python writes it on import, with source times in it.
+config_listing() {
+  ( cd "$1/.claude-cfg" && find . -type f ! -path './backups/*' ! -path '*/__pycache__/*' \
+      ! -name 'claude-settings-install.log' ! -name '.claude-settings-install.lock' \
+      | LC_ALL=C sort | while IFS= read -r f; do
+          name=$(printf '%s\n' "$f" | sed 's|guard\.d/[0-9][0-9]*/|guard.d/ID/|')
+          printf '%s %s\n' "$name" "$(sed -e 's/^INSTALL_ID = ".*"/INSTALL_ID = "X"/' -e "s|$1|HOME|g" "$f" | cksum)"
+        done )
+}
+
+# ---- stampS4: a cloud install adds one file to the config dir, the stamp, against the install.sh before the stamp ----
+# The baseline is install.sh as it stood before the stamp (commit 624dcc188). Both installs run on one fixture, and
+# the two config-dir listings are compared.
+stampS4() {
+  name="stampS4: a cloud install adds one file to the config dir, the stamp, against the install.sh before the stamp"
+  fx="$work/s4-fx"; bin="$work/s4-bin"; scratch="$work/s4-scratch"
+  ha="$work/s4-old-home"; hb="$work/s4-new-home"
+  mkdir -p "$ha" "$hb" "$scratch"
+  make_github_fixture "$fx"
+  write_redirect "$ha" "$fx/bare.git"; write_redirect "$hb" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  old="$work/s4-install-before.sh"
+  if ! git -C "$REPO_ROOT" show 624dcc188:install.sh > "$old" 2>/dev/null; then
+    bad "$name" "fixture: the install.sh before the stamp (624dcc188) is not in this checkout"; return
+  fi
+  current="$INSTALL_SH"
+  INSTALL_SH="$old"; cloud_install "$ha" "$scratch" "$bin"; old_rc=$rc
+  INSTALL_SH="$current"; cloud_install "$hb" "$scratch" "$bin"; new_rc=$rc
+  if [ "$old_rc" -ne 0 ] || [ "$new_rc" -ne 0 ]; then
+    bad "$name" "an install exited non-zero (before $old_rc, now $new_rc): $(install_problems)"; return
+  fi
+  config_listing "$ha" > "$work/s4-before.txt"
+  config_listing "$hb" > "$work/s4-after.txt"
+  d=$(diff "$work/s4-before.txt" "$work/s4-after.txt")
+  added=$(printf '%s\n' "$d" | grep -c '^>')
+  removed=$(printf '%s\n' "$d" | grep -c '^<')
+  if [ "$removed" -ne 0 ]; then bad "$name" "the stamp install changed or removed $removed file(s): $(printf '%s\n' "$d" | head -n 3)"
+  elif [ "$added" -ne 1 ]; then bad "$name" "the stamp install added $added file(s), want exactly one: $(printf '%s\n' "$d" | head -n 3)"
+  elif ! printf '%s\n' "$d" | grep -q '^> \./state/hooks-source-sha '; then bad "$name" "the added file is not state/hooks-source-sha: $(printf '%s\n' "$d" | head -n 3)"
+  else ok "$name"; fi
+}
+
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
 # session_start.sh cases) gets the same redirect as every other case.
 default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
@@ -5345,6 +5464,10 @@ run mergepin2
 run mergepin3
 run mergepin4
 run mergepin5
+run stampS1
+run stampS2
+run stampS3
+run stampS4
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
