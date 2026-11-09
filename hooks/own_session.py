@@ -48,11 +48,18 @@ def _record_json(body):
     return record
 
 
-def agent_transcript_path(transcript, agent_id):
-    """The agent's own transcript: `<transcript minus .jsonl>/subagents/agent-<agent_id>.jsonl`, the layout the
-    harness writes beside the main transcript. The caller passes an agent_id already checked against guard.AGENT_ID."""
+def agent_transcript_dir(transcript):
+    """The folder the harness writes a session's agents' transcripts to: `<transcript minus .jsonl>/subagents`.
+    The one home of that layout: the guards, the stall watch, the report guard and the ruling census all name
+    it through here. Cost: a string join, no read, no file written."""
     root = transcript[:-len(".jsonl")] if transcript.endswith(".jsonl") else transcript
-    return os.path.join(root, "subagents", "agent-" + agent_id + ".jsonl")
+    return os.path.join(root, "subagents")
+
+
+def agent_transcript_path(transcript, agent_id):
+    """The agent's own transcript: `agent-<agent_id>.jsonl` in agent_transcript_dir. The caller passes an agent_id
+    already checked against guard.AGENT_ID."""
+    return os.path.join(agent_transcript_dir(transcript), "agent-" + agent_id + ".jsonl")
 
 
 def own_session_read(transcript, own_id, created=False):

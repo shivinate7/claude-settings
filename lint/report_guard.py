@@ -1331,7 +1331,8 @@ def tool_use_sources(transcript_path):
         return None
     agent = _tool_use_ids(r for r in records if r.get("isSidechain"))
     orchestrator = _tool_use_ids(r for r in records if not r.get("isSidechain"))
-    folder = os.path.splitext(transcript_path)[0] + os.sep + "subagents"
+    import own_session  # the one home of the agent transcript folder
+    folder = own_session.agent_transcript_dir(transcript_path)
     try:
         names = sorted(n for n in os.listdir(folder) if n.endswith(".jsonl"))
     except OSError:
