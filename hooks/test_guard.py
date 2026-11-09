@@ -11528,8 +11528,8 @@ for _label, _command in (
 # THE EDIT ROUTE IN OTHER FORMS. A marked edit is refused whatever form its comment route takes: a full URL, a query string after the
 # comment id, or a command substitution in the id or in the route. The guard judges the route it reads, so a route its pattern does not
 # match is an edit it never judges. Each form takes the edit refusal. An unmarked body on the same route is allowed.
-# The last three forms are unquoted, with a space inside their substitution. The guard splits the command into words first, so the
-# space makes the route several words, and the guard reads no route at all. The quoted forms above keep the route one word.
+# The last three forms are unquoted, with a space inside their substitution. The guard splits the command into words before it reads a
+# route, so the space splits the route into several words. Each form must take the edit refusal, the same as the quoted forms above.
 EDIT_ROUTE_FORMS = (
     ("a full URL", "\"https://api.github.com/repos/y/x/issues/comments/%d\"" % REVIEW_COMMENT_ID),
     ("a query string after the id", "\"repos/y/x/issues/comments/%d?x=1\"" % REVIEW_COMMENT_ID),
