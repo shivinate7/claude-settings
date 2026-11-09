@@ -9623,6 +9623,47 @@ sh("env: heredoc-prose-refuse: a docker exec tee to a file with a -w path ending
    "docker exec -w /app/app c tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\ndocker exec c bash /tmp/run",
    "deny", "env-file", cwd=NOGIT)
 
+# A launch whose flag takes a value before the container name (`--index 2`, `--cidfile f`, `--preserve-fds 3`)
+# tees a body into a file that bash then runs, so the body is bash's and its env read denies. The odd
+# contraction quote in the last case doubles the segment count, so the header parse falls back to the whole line.
+sh("env: heredoc-prose-refuse: a docker compose exec --index 2 tee to a file in a container named node, a /* in the body, an env read, then bash runs it, denies",
+   "docker compose exec --index 2 node tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a podman exec --cidfile tee to a file in a container named node, a /* in the body, an env read, then bash runs it, denies",
+   "podman exec --cidfile f node tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a podman exec --preserve-fds 3 tee to a file in a container named node, a /* in the body, an env read, then bash runs it, denies",
+   "podman exec --preserve-fds 3 node tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a cat write whose line holds an odd contraction quote and a node - heredoc, an env read in the first body, then bash runs go, denies",
+   "cat > go <<'A' ; echo it's ; node - <<'B'\ncp -r a/* b/\nsource " + ENV + "\nA\nconsole.log(1)\nB\nbash go",
+   "deny", "env-file", cwd=NOGIT)
+
+# F1-F3 with app in place of node: no interpreter, so bash's body reads the env file and denies.
+sh("env: heredoc-prose-refuse: a docker compose exec --index 2 tee to a file in a container named app, a /* in the body, an env read, then bash runs it, denies",
+   "docker compose exec --index 2 app tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a podman exec --cidfile tee to a file in a container named app, a /* in the body, an env read, then bash runs it, denies",
+   "podman exec --cidfile f app tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a podman exec --preserve-fds 3 tee to a file in a container named app, a /* in the body, an env read, then bash runs it, denies",
+   "podman exec --preserve-fds 3 app tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+
+# Launches that run a node or python body, with a comment that names the env file and no read: each is allowed.
+sh("env: heredoc-prose-allow: an ssh node - body with a // comment naming an env file, is allowed",
+   "ssh host node - <<'EOF'\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a kubectl exec node - body with a // comment naming an env file, is allowed",
+   "kubectl exec pod -- node - <<'EOF'\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a podman exec -i python3 - body with a # comment naming an env file, is allowed",
+   "podman exec -i c python3 - <<'EOF'\n# read " + ENV + "\nprint(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: an npx node - body with a // comment naming an env file, is allowed",
+   "npx node - <<'EOF'\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a pnpm exec node - body with a // comment naming an env file, is allowed",
+   "pnpm exec node - <<'EOF'\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a docker exec timeout 5 node - body with a // comment naming an env file, is allowed",
+   "docker exec c timeout 5 node - <<'EOF'\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+
 # A data body that a later `sh` runs, or a substitution the shell runs, is judged on what it runs: an env
 # read in the body, a force push in the body, or a force push in a substitution of an unquoted body.
 sh("env: heredoc-r2: a data body with bash <<EOF and an env read, then sh of that file, denies",
