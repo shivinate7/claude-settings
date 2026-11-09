@@ -5230,16 +5230,17 @@ stampS2() {
   else ok "$name"; fi
 }
 
-# ---- stampS3: a cloud install writes the stamp after its startup entries have run ----
+# ---- stampS3: a cloud install writes the stamp before its startup entries run, holding the source sha ----
 # The probe is a startup entry in the source's settings.json. install.sh runs it inside its startup loop, and it
-# records whether the stamp exists at that point. Last means absent then, and present once the install is done.
+# copies the stamp it finds into the probe file, or writes "absent". A session start the loop runs reads the stamp,
+# so the stamp must already name the source the copies came from.
 stampS3() {
-  name="stampS3: a cloud install writes the stamp after its startup entries have run"
+  name="stampS3: a cloud install writes the stamp before its startup entries run, holding the source sha"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
   fx="$work/s3-fx"; h="$work/s3-home"; scratch="$work/s3-scratch"; bin="$work/s3-bin"; probe="$work/s3-probe"
   mkdir -p "$h" "$scratch"
   make_github_fixture "$fx"
-  probe_cmd="[ -e \"\$CLAUDE_CONFIG_DIR/state/hooks-source-sha\" ] && echo present > \"$probe\" || echo absent > \"$probe\""
+  probe_cmd="cat \"\$CLAUDE_CONFIG_DIR/state/hooks-source-sha\" > \"$probe\" 2>/dev/null || echo absent > \"$probe\""
   jq --arg cmd "$probe_cmd" '.hooks.SessionStart = ((.hooks.SessionStart // []) + [{"matcher":"startup","hooks":[{"type":"command","command":$cmd}]}])' \
     "$fx/src/settings.json" > "$work/s3-settings.json" && mv "$work/s3-settings.json" "$fx/src/settings.json"
   git -C "$fx/src" add settings.json
@@ -5252,7 +5253,7 @@ stampS3() {
   stamp=$(stamp_path "$h")
   if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"
   elif [ "$(cat "$stamp" 2>/dev/null)" != "$want" ]; then bad "$name" "no stamp $want after the install (stamp: [$(cat "$stamp" 2>/dev/null)])"
-  elif [ "$(cat "$probe" 2>/dev/null)" != absent ]; then bad "$name" "a startup entry saw the stamp before the copies finished: probe [$(cat "$probe" 2>/dev/null)]"
+  elif [ "$(cat "$probe" 2>/dev/null)" != "$want" ]; then bad "$name" "a startup entry saw stamp [$(cat "$probe" 2>/dev/null)] before the install wrote the source sha $want"
   else ok "$name"; fi
 }
 
@@ -5297,6 +5298,70 @@ stampS4() {
   if [ "$removed" -ne 0 ]; then bad "$name" "the stamp install changed or removed $removed file(s): $(printf '%s\n' "$d" | head -n 3)"
   elif [ "$added" -ne 1 ]; then bad "$name" "the stamp install added $added file(s), want exactly one: $(printf '%s\n' "$d" | head -n 3)"
   elif ! printf '%s\n' "$d" | grep -q '^> \./state/hooks-source-sha '; then bad "$name" "the added file is not state/hooks-source-sha: $(printf '%s\n' "$d" | head -n 3)"
+  else ok "$name"; fi
+}
+
+# ---- stampS5: a cloud install that cannot land one hook keeps the stamp of the last full install ----
+# A person's folder at a hook's file name fails that landing, and the install goes on, so its exit status does not
+# show the partial landing. The stamp is written only when every landing succeeded.
+stampS5() {
+  name="stampS5: a cloud install that cannot land one hook keeps the stamp of the last full install"
+  fx="$work/s5-fx"; h="$work/s5-home"; scratch="$work/s5-scratch"; bin="$work/s5-bin"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"; first=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+  stamp=$(stamp_path "$h")
+  if [ "$(cat "$stamp" 2>/dev/null)" != "$first" ]; then
+    bad "$name" "control: the good install left stamp [$(cat "$stamp" 2>/dev/null)], want $first"; return
+  fi
+  advance_github_fixture "$fx" two
+  hook="$h/.claude-cfg/hooks/session_start.sh"
+  rm -f "$hook"; mkdir -p "$hook"
+  cloud_install "$h" "$scratch" "$bin"
+  if ! printf '%s\n' "$out" | grep -q 'a folder of yours sits where the file hooks/session_start.sh lands'; then
+    bad "$name" "control: the install did not meet the folder at the hook name: $(install_problems)"; return
+  fi
+  if [ "$(cat "$stamp" 2>/dev/null)" != "$first" ]; then
+    bad "$name" "stamp is [$(cat "$stamp" 2>/dev/null)], want the old $first after a hook did not land"
+  else ok "$name"; fi
+}
+
+# ---- stampS6: a session start the startup loop runs prints no lag line when the copies are current ----
+# The startup entry is the copied session_start.sh, run inside the clone. The previous install's stamp is still on
+# disk when the loop runs, and the copies are the new ones, so the stamp must already name the new source.
+stampS6() {
+  name="stampS6: a session start the startup loop runs prints no lag line when the copies are current"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  fx="$work/s6-fx"; h="$work/s6-home"; scratch="$work/s6-scratch"; bin="$work/s6-bin"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"
+  entry_cmd='cd "$HOME/claude-settings" && sh "$CLAUDE_CONFIG_DIR/hooks/session_start.sh"'
+  jq --arg cmd "$entry_cmd" '.hooks.SessionStart = ((.hooks.SessionStart // []) + [{"matcher":"startup","hooks":[{"type":"command","command":$cmd}]}])' \
+    "$fx/src/settings.json" > "$work/s6-settings.json" && mv "$work/s6-settings.json" "$fx/src/settings.json"
+  git -C "$fx/src" add settings.json
+  git -C "$fx/src" -c user.email=t@example.com -c user.name=t commit -q -m "session start entry"
+  git -C "$fx/src" push -q "$fx/bare.git" HEAD:refs/heads/main
+  first=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+  stamp=$(stamp_path "$h")
+  if [ "$rc" -ne 0 ]; then bad "$name" "control: the first install exited $rc: $(install_problems)"; return; fi
+  if [ "$(cat "$stamp" 2>/dev/null)" != "$first" ]; then
+    bad "$name" "control: the first install left stamp [$(cat "$stamp" 2>/dev/null)], want $first"; return
+  fi
+  advance_github_fixture "$fx" two
+  second=$(fixture_sha "$fx")
+  cloud_install "$h" "$scratch" "$bin"
+  if [ "$rc" -ne 0 ]; then bad "$name" "the second install exited $rc: $(install_problems)"; return; fi
+  if ! printf '%s\n' "$out" | grep -q '^checkout '; then
+    bad "$name" "control: the startup loop's session start printed no checkout line: $(printf '%s\n' "$out" | head -n 3)"; return
+  fi
+  lag=$(printf '%s\n' "$out" | grep 'live hooks are from\|origin/main unread' | head -n 1)
+  if [ -n "$lag" ]; then bad "$name" "the startup loop's session start printed a lag line with the copies current: $lag"
+  elif [ "$(cat "$stamp" 2>/dev/null)" != "$second" ]; then bad "$name" "stamp is [$(cat "$stamp" 2>/dev/null)], want the new source $second"
   else ok "$name"; fi
 }
 
@@ -5468,6 +5533,8 @@ run stampS1
 run stampS2
 run stampS3
 run stampS4
+run stampS5
+run stampS6
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
