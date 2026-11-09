@@ -2057,11 +2057,12 @@ def builder_test_path(path: str, cwd: str) -> bool:
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
     """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
     redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
-    python or node script a heredoc body or `-c` / `-e` holds, on the raw command. `tool` is the
+    python or node script a heredoc body, `-c` / `-e` or a script file run by name holds, on the raw
+    command (this is the one caller that reads script files). `tool` is the
     call's tool: it sets which shell's rules read the text."""
     POWERSHELL_CALL[0] = tool == "PowerShell"
     return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
-            or interpreter_write_hit(raw, cwd, builder_test_path))
+            or interpreter_write_hit(raw, cwd, builder_test_path, script_files=True))
 
 
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
