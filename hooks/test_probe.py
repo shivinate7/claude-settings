@@ -167,6 +167,30 @@ def bad_input_problems(rc, out, err):
     return problems
 
 
+# The modules guard_log_report reaches through guard_core: guard_core imports git_reads, which imports
+# shared_names. They sit in hooks/ beside the probe, as in the install. If that chain grows, a case that
+# needs the reader fails its control at once, with the missing module named.
+READER_CHAIN = ("guard_core.py", "git_reads.py", "shared_names.py")
+
+
+def install_layout(root, reader=True):
+    """Build the installed layout under root and return its hooks/ folder. hooks/ holds a copy of the probe and
+    the reader's chain. lint/ holds a copy of the guard.log reader beside it, as ~/.claude has them. With
+    reader=False there is no lint/, so the probe cannot import the reader. The case writes hooks/guard.py.
+    Copies, not links, so the same layout runs on Windows."""
+    hooks = os.path.join(root, "hooks")
+    os.makedirs(hooks)
+    shutil.copyfile(PROBE, os.path.join(hooks, "probe.py"))
+    for name in READER_CHAIN:
+        shutil.copyfile(os.path.join(HERE, name), os.path.join(hooks, name))
+    if reader:
+        lint = os.path.join(root, "lint")
+        os.makedirs(lint)
+        shutil.copyfile(os.path.join(os.path.dirname(HERE), "lint", "guard_log_report.py"),
+                        os.path.join(lint, "guard_log_report.py"))
+    return hooks
+
+
 # ------------------------------------------------------------------ controls: green on the old commit
 
 @case
@@ -378,11 +402,10 @@ SILENT_GUARD = "import sys\nsys.stdin.read()\n"
 @case
 def guard_failure_is_never_allow():
     """Probe: a guard that exits nonzero or crashes gives no verdict and a nonzero exit, never `allow`."""
-    folder = new_dir()
-    # probe.py finds guard.py beside itself, so the stub guard needs a copy of the probe beside it.
-    probe_copy = os.path.join(folder, "probe.py")
-    shutil.copyfile(PROBE, probe_copy)
-    guard_copy = os.path.join(folder, "guard.py")
+    hooks = install_layout(new_dir())
+    # The probe finds guard.py beside itself, so the stub guard goes in the copy's hooks/.
+    probe_copy = os.path.join(hooks, "probe.py")
+    guard_copy = os.path.join(hooks, "guard.py")
     # Scope first: a silent guard that exits 0 prints exactly `allow`, so the copy and the stub really ran.
     write(guard_copy, SILENT_GUARD.encode("utf-8"))
     rc, out, err = probe(flags(HARMLESS), script=probe_copy)
@@ -416,11 +439,10 @@ def guard_stub(judge_body):
 @case
 def judge_crash_is_never_allow():
     """Probe: a guard whose judge raises gives `probe: guard crashed (...), verdict unknown`, nonzero, never allow."""
-    folder = new_dir()
-    # probe.py finds guard.py beside itself, so the stub guard needs a copy of the probe beside it.
-    probe_copy = os.path.join(folder, "probe.py")
-    shutil.copyfile(PROBE, probe_copy)
-    guard_copy = os.path.join(folder, "guard.py")
+    hooks = install_layout(new_dir())
+    # The probe finds guard.py beside itself, so the stub guard goes in the copy's hooks/.
+    probe_copy = os.path.join(hooks, "probe.py")
+    guard_copy = os.path.join(hooks, "guard.py")
     # Scope first: the same stub with the real judge prints exactly `allow` for a harmless command.
     write(guard_copy, guard_stub("pass").encode("utf-8"))
     rc, out, err = probe(flags(HARMLESS), script=probe_copy)
@@ -439,10 +461,10 @@ def judge_crash_is_never_allow():
 def session_fields_stay_out_of_the_guard():
     """Probe: a stdin payload's session_id and agent_id never reach the guard."""
     folder = new_dir()
-    probe_copy = os.path.join(folder, "probe.py")
-    shutil.copyfile(PROBE, probe_copy)
+    hooks = install_layout(folder)
+    probe_copy = os.path.join(hooks, "probe.py")
     received = os.path.join(folder, "received.json")
-    write(os.path.join(folder, "guard.py"), (
+    write(os.path.join(hooks, "guard.py"), (
         "import json, sys\n"
         "with open(%r, 'w', encoding='utf-8') as handle:\n"
         "    json.dump(json.load(sys.stdin), handle)\n" % received).encode("utf-8"))
@@ -614,9 +636,9 @@ def relative_cwd_is_judged_as_the_absolute_folder():
     folder = os.path.realpath(new_dir())
     sub = os.path.join(folder, "sub")
     os.makedirs(sub)
-    probe_copy = os.path.join(folder, "probe.py")
-    shutil.copyfile(PROBE, probe_copy)
-    write(os.path.join(folder, "guard.py"), CWD_STUB.encode("utf-8"))
+    hooks = install_layout(folder)
+    probe_copy = os.path.join(hooks, "probe.py")
+    write(os.path.join(hooks, "guard.py"), CWD_STUB.encode("utf-8"))
     # Scope first: the absolute folder gives the verdict naming that folder.
     rc, out, err = probe(["--tool", "Bash", "--command", HARMLESS, "--cwd", sub], script=probe_copy, run_in=folder)
     bad = scope(rc, out, err)
@@ -673,11 +695,10 @@ def flag_run_without_cwd_judges_the_folder_it_runs_from():
     base = os.path.realpath(new_dir())
     tool_dir = os.path.join(base, "tool")
     work = os.path.join(base, "work")
-    os.makedirs(tool_dir)
     os.makedirs(work)
-    probe_copy = os.path.join(tool_dir, "probe.py")
-    shutil.copyfile(PROBE, probe_copy)
-    write(os.path.join(tool_dir, "guard.py"), CWD_STUB.encode("utf-8"))
+    hooks = install_layout(tool_dir)
+    probe_copy = os.path.join(hooks, "probe.py")
+    write(os.path.join(hooks, "guard.py"), CWD_STUB.encode("utf-8"))
     # Scope first: the absolute folder names that folder.
     rc, out, err = probe(["--tool", "Bash", "--command", HARMLESS, "--cwd", work], script=probe_copy, run_in=base)
     bad = scope(rc, out, err)
@@ -704,9 +725,9 @@ ASK_STUB = (
 def ask_verdict_is_printed_as_asked():
     """Probe: a guard's ask prints as `ask <rule>: <reason>`, never as allow."""
     folder = os.path.realpath(new_dir())
-    probe_copy = os.path.join(folder, "probe.py")
-    shutil.copyfile(PROBE, probe_copy)
-    write(os.path.join(folder, "guard.py"), ASK_STUB.encode("utf-8"))
+    hooks = install_layout(folder)
+    probe_copy = os.path.join(hooks, "probe.py")
+    write(os.path.join(hooks, "guard.py"), ASK_STUB.encode("utf-8"))
     rc, out, err = probe(["--tool", "Bash", "--command", HARMLESS, "--cwd", folder], script=probe_copy)
     bad = scope(rc, out, err)
     if bad:
