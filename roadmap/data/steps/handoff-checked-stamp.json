@@ -1,0 +1,10 @@
+{
+  "title": "A handoff premise's Checked time changes only when the session re-read that premise since compaction",
+  "phase": "now",
+  "status": "todo",
+  "order": 926,
+  "owner": "coordinator",
+  "why": "Coordinator, 2026-11-09 14:11 CST: it marked every handoff premise as checked but had re-checked only two, and fixed it by hand. A false Checked time hides a stale premise from the next session.",
+  "note": "Sighting 1. Fix to find: a guard that compares each changed Checked time in the handoff against the premises the session actually read or checked since compaction, and refuses a stamp with no read behind it. Related, done: handoff-read-before-write (a session must read its handoff after compaction).",
+  "updatedAt": "2026-11-09T14:14:00-06:00"
+}

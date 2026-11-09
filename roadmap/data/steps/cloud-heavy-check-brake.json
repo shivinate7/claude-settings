@@ -1,10 +1,11 @@
 {
   "title": "In a cloud session, a brake stops parallel heavy checks before they hit the ci-job time limit",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 925,
   "owner": "coordinator",
   "why": "Lane verdict-format-line (session_013NEJL1BCgLVUACYU5ujv9A), 2026-11-09 12:42 CST: five merge --lane-lint runs started in parallel while five reviewer agents ran. All five hit ci-job's 1200 s limit and read unknown. Run one at a time, all five passed. In a cloud session the load brake reads n/a, so nothing warned.",
   "note": "Sighting 1. Fix to find: a cloud-side pace for heavy checks (merge --lane-lint and like runs), such as one at a time per session, or a brake that reads the container's own load. c14 (the machine-load brake) and pace-brake-cloud (the n/a pace number) are done and do not cover this. A lane writes the guard against this incident (rule building-guard-needs-incident).",
-  "updatedAt": "2026-11-09T14:12:00-06:00"
+  "updatedAt": "2026-11-09T14:14:00-06:00",
+  "lane": "session_013NEJL1fiv86hWsZGWhjPR6"
 }
