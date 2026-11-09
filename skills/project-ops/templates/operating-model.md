@@ -50,7 +50,10 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
   batches each PR whose review record is done, as `merge --reviewed` finds it at its wake, and merges the
   integration PR on green. It asks the owner for no merge. It prints the merge output on the
-  terminal, never to a log only. It dispatches no deferred step.
+  terminal, never to a log only. A runner that merges a second checkout runs `~/.claude/bin/merge -C <checkout> <pr> --confirm`,
+  never `cd X && merge`, and only when its own record names that checkout's repo (claude-settings record
+  `merge-confirm-repo`). It runs the confirm in the foreground (Bash timeout up to 600000), never with
+  `run_in_background`: a background call misses the allow rule and the auto-mode classifier refuses it. It dispatches no deferred step.
 - **Lane session.** Runs one lane as an orchestrator, with its own builder and reviewer agents.
   It reports up to the coordinator. Work that needs a local machine is a lane session whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
