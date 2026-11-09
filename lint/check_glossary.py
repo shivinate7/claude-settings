@@ -5,19 +5,25 @@ GLOSSARY.md holds one table under the `## Terms` heading: term, meaning, home, n
 
 - Each row's home is an existing file, or `rule:<id>` that names a rule marker in RULE_FILES, and
   each tagged "not" name uses the one tag, `(this sense)`.
-- Each file the change adds (against origin/main, renames counted as adds) has no path segment
+- Each file the change adds (renames counted as adds) has no path segment
   that holds a name from a row's "not" cell. A name matches whole lowercase words inside one
   segment. Words split on any character that is not a letter or a digit, and the segment is read
   both with and without a split at each lower-to-upper case step. The last word may take a
   plural `s` or `es`. `handover` matches `hooks/handover_note.py`, `docs/handovers.md` and
   `HandoverNote.py`, not `docs/handoverly.md`.
 
-- Each line the change adds (against origin/main) has no "not" name in a name of code, read by the
+- Each line the change adds has no "not" name in a name of code, read by the
   same word rule as a path segment:
   - an identifier: a Python name, a bare word of a JS, shell, PowerShell or YAML file, or a JSON key;
   - a rule anchor: `rule:<id>`, in a comment too;
   - a record slug: a backticked id of three hyphen words or more in a Markdown file;
   - a hook message: a string with a space in a `.py` file under `hooks/`, a test file apart.
+
+The change is the tree as it will be pushed, in both its states: the diff from the merge base with
+origin/main to HEAD, read from the HEAD blobs, since the push carries the commits; the diff from the merge
+base to the work tree (committed, staged and unstaged changes); and each untracked, not ignored file in a
+top-level folder that already holds tracked files, added whole. A root file and a new top-level folder are
+not part of the change. A problem that both states hold is reported once.
 
 Comments, docstrings and every other string are prose, and a reviewer reads prose. A sentence that
 names a "not" word passes. A "not" word inside its own term, plural too (`hole` in `safety_holes`),
@@ -26,7 +32,9 @@ A "not" name written `word (this sense)` retires one sense of an everyday word (
 it is read in paths, anchors and slugs, never in identifiers, strings or hook messages, where code
 may use the other sense. Any other parenthesised tag on a "not" name fails. Claude Code's own names
 stay (PLATFORM_NAMES, PLATFORM_PREFIXES). A path or a line that already exists on the base is not
-checked or renamed.
+checked or renamed. An untracked file is read when it is new on the base, in a top-level folder where the base
+holds files. An untracked file that is not valid UTF-8 and holds a NUL in its first 8 KB with no UTF-16
+byte-order mark is binary and skipped; any other untracked file that will not decode as text is UNKNOWN.
 
     python3 lint/check_glossary.py [file ...]
         # files given: check those paths and read each whole, skip git
@@ -92,6 +100,17 @@ def read(rel):
             return f.read()
     except (OSError, ValueError):  # unreadable, or not text
         return None
+
+
+def binary(rel):
+    """True when the file's first bytes hold a NUL and no UTF-16 byte-order mark: an image or bytecode, not text
+    in another encoding. UTF-16 text holds NULs too, so its mark tells it apart."""
+    try:
+        with open(os.path.join(ROOT, *rel.split("/")), "rb") as f:
+            head = f.read(8192)
+    except OSError:
+        return False
+    return b"\0" in head and not head.startswith((b"\xff\xfe", b"\xfe\xff"))
 
 
 def words(text, camel=False):
@@ -522,50 +541,133 @@ def code_problems(rel, text, table, lines=None, spans=()):
     return out
 
 
-def git_diff(*opts):
-    # Fixed prefixes and no external diff, so diff.noprefix, diff.mnemonicPrefix or a diff tool
-    # in the user's config cannot change the `+++ b/<path>` headers that added_lines reads.
-    cmd = ["git", "diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", *opts,
-           "origin/main...HEAD"]
-    r = _nowindow.run(cmd, cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace")
+def git(*args, data=None):
+    """Git's stdout as text. `data`: bytes fed to stdin, and stdout comes back as bytes, for a size-prefixed stream."""
+    text = {} if data is not None else {"encoding": "utf-8", "errors": "replace"}
+    r = _nowindow.run(["git", *args], cwd=ROOT, capture_output=True, input=data, **text)
     if r.returncode:
-        print("check_glossary: UNKNOWN, git diff failed: " + r.stderr.strip())
-        sys.exit(1 if os.environ.get("CI") else 0)  # CI exit code is a verdict: unknown is red there
+        err = r.stderr if data is None else r.stderr.decode("utf-8", "replace")
+        unknown_exit("git %s failed: %s" % (args[0], err.strip()))
     return r.stdout
 
 
-def added():
-    return git_diff("--name-only", "--no-renames", "--diff-filter=A").split("\n")
+def unknown_exit(why):
+    print("check_glossary: UNKNOWN, " + why)
+    sys.exit(1 if os.environ.get("CI") else 0)  # CI exit code is a verdict: unknown is red there
+
+
+_RUN = {}  # what one run asked git, by key: each answer is read once and shared, so a run starts few git processes
+
+
+def once(key, make):
+    if key not in _RUN:
+        _RUN[key] = make()
+    return _RUN[key]
+
+
+def tips():
+    """(HEAD, merge base with origin/main), from one git start: `rev-parse A...B` prints B, A, then ^<merge base>."""
+    def find():
+        out = git("rev-parse", "origin/main...HEAD").split()
+        bases = [r[1:] for r in out if r.startswith("^")]
+        if not bases:
+            unknown_exit("origin/main and HEAD share no merge base")
+        return out[0], bases[0]
+    return once("tips", find)
+
+
+def merge_base():
+    return tips()[1]
+
+
+def git_diff(end=None):
+    """A raw list of the changed paths, then the patch, from the merge base to `end`: None for the work tree,
+    "HEAD" for the commits. Each is read once per run. The commits' diff is empty when HEAD is the base.
+
+    Fixed prefixes and no external diff, so diff.noprefix, diff.mnemonicPrefix or a diff tool in the user's
+    config cannot change the `+++ b/<path>` headers that added_lines reads. T (a type change, such as a symlink
+    replaced by a file) is read as an edit."""
+    def make():
+        if end and tips()[0] == merge_base():
+            return ""
+        return git("diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", "--no-abbrev",
+                   "-U0", "-M", "--diff-filter=AMRT", "--patch-with-raw", merge_base(), *([end] if end else []))
+    return once(("diff", end), make)
+
+
+def untracked():
+    """The untracked, not ignored files that are new on the base, in a top-level folder where the base holds files.
+
+    A root file and a file in a top-level folder that is new are not part of the change. A path that the
+    base already holds is kept in the work tree only, so it adds no words."""
+    def find():
+        found = [p for p in git("ls-files", "-z", "--others", "--exclude-standard").split("\0") if "/" in p]
+        if not found:
+            return []
+        tops = sorted({p.split("/")[0] for p in found})
+        listed = git("ls-tree", "-r", "-z", "--name-only", merge_base(), "--", *[t + "/" for t in tops])
+        on_base = set(listed.split("\0"))
+        folders = {p.split("/")[0] for p in on_base if "/" in p}
+        return [p for p in found if p.split("/")[0] in folders and p not in on_base]
+    return once("untracked", find)
+
+
+def unquote(name):
+    """A path as git printed it, unquoted when git quoted it; None when it cannot be read."""
+    if name.startswith('"'):
+        try:
+            return ast.literal_eval(name).encode("latin-1").decode("utf-8")
+        except (SyntaxError, ValueError, UnicodeError):
+            return None
+    return name
 
 
 def diff_path(header):
     """The path of a `+++ b/<path>` header, unquoted when the diff quoted it; None for no path.
 
     Git ends the header with a TAB when the path holds a space."""
-    header = header.rstrip("\t")
-    if header.startswith('"'):
-        try:
-            header = ast.literal_eval(header).encode("latin-1").decode("utf-8")
-        except (SyntaxError, ValueError, UnicodeError):
-            return None
-    return header[2:] if header.startswith("b/") else None
+    path = unquote(header.rstrip("\t"))
+    return path[2:] if path and path.startswith("b/") else None
 
 
-def added_lines():
-    """({path: set of added line numbers}, unknowns) for each file the change adds or edits, renames
-    followed. A `+++ ` header that yields no path is an unknown, never a skip.
+def raw_rows(diff):
+    """(status letter, new mode, new object id, new path) of each raw row that leads `diff`."""
+    out = []
+    for row in diff.split("\n"):
+        if row.startswith("diff --git "):
+            break
+        if row.startswith(":"):
+            meta, _, names = row.partition("\t")
+            meta = meta.split()
+            out.append((meta[-1][:1], meta[1], meta[3], unquote(names.split("\t")[-1])))
+    return out
 
-    A `+++ ` row is a header only between `diff --git` and the first `@@`: past that, it is an
-    added line that starts with `++`."""
+
+def diff_adds(diff):
+    """The paths `diff` adds, a rename's new path too."""
+    return [path for status, _mode, _id, path in raw_rows(diff) if status in ("A", "R") and path]
+
+
+def added():
+    """The paths the change adds: by the commits, by the work tree, and each untracked file, each once."""
+    return list(dict.fromkeys(diff_adds(git_diff("HEAD")) + diff_adds(git_diff()) + untracked()))
+
+
+def patch_lines(diff):
+    """({path: set of added line numbers}, unknowns) for each file `diff` adds or edits, renames followed.
+
+    A `+++ ` header that yields no path is an unknown, never a skip. `+++ /dev/null` is no unknown: it heads a
+    delete, which git prints before the create of a type change. A `+++ ` row is a header only between
+    `diff --git` and the first `@@`: past that, it is an added line that starts with `++`."""
     out, unknown, path, header = {}, [], None, False
-    for row in git_diff("-U0", "-M", "--diff-filter=AMR").split("\n"):
+    for row in diff.split("\n"):
         if row.startswith("diff --git "):
             path, header = None, True
         elif header and row.startswith("+++ "):
-            path = diff_path(row[4:])
+            path = None if row[4:].rstrip("\t") == "/dev/null" else diff_path(row[4:])
             if path:
                 out.setdefault(path, set())
-            else:
+            elif row[4:].rstrip("\t") != "/dev/null":
                 unknown.append("the diff header '%s' names no path" % row[:80])
         elif row.startswith("@@"):
             header = False
@@ -576,7 +678,49 @@ def added_lines():
     return out, unknown
 
 
+def added_lines():
+    """({path: set of added line numbers}, unknowns) for each file the work tree adds or edits against the
+    base, and each untracked file whole."""
+    out, unknown = patch_lines(git_diff())
+    for path in untracked():  # a new file is added whole
+        out[path] = set(range(1, (read(path) or "").count("\n") + 2))
+    return out, unknown
+
+
+def committed_lines():
+    """([(path, text at HEAD, set of added line numbers)], unknowns) for each regular file the commits add or edit.
+
+    The push carries the commits, so a word that the work tree later fixes or deletes is still in the change.
+    The texts come from one `git cat-file --batch`, by object id. A symlink or a submodule has no text, and a
+    file that does not decode as UTF-8 is left alone, as a committed file is on the work-tree side."""
+    diff = git_diff("HEAD")
+    if not diff:
+        return [], []
+    lines, unknown = patch_lines(diff)
+    ids = {path: oid for _status, mode, oid, path in raw_rows(diff) if mode in ("100644", "100755") and path in lines}
+    if not ids:
+        return [], unknown
+    stream = git("cat-file", "--batch", data="".join(oid + "\n" for oid in ids.values()).encode())
+    blobs, at = {}, 0
+    for oid in ids.values():
+        end = stream.index(b"\n", at)
+        head = stream[at:end].split()
+        if len(head) != 3 or head[1] != b"blob":
+            unknown_exit("git cat-file gave no blob for %s" % oid)
+        size = int(head[2])
+        blobs[oid] = stream[end + 1:end + 1 + size]
+        at = end + 2 + size  # the content, then one newline
+    out = []
+    for path, oid in ids.items():
+        try:
+            out.append((path, blobs[oid].decode("utf-8-sig"), lines[path]))
+        except UnicodeDecodeError:
+            continue
+    return out, unknown
+
+
 def main(args):
+    _RUN.clear()
     unknown = [a for a in args if a.startswith("-")]
     if unknown:  # read as a path, an unknown option would skip git and check nothing
         print("check_glossary: FAIL: unknown option: %s" % " ".join(unknown))
@@ -598,12 +742,28 @@ def main(args):
     scope, unknown = ({p: None for p in args}, []) if args else added_lines()
     for rel, lines in sorted(scope.items()):
         text = read(rel)
-        if text is None or rel.startswith(SKIP_CODE):
+        if rel.startswith(SKIP_CODE):
+            continue
+        if text is None:
+            # A committed file that does not decode is left alone. An untracked one is new work that no
+            # read can judge, so it is unknown, never clean.
+            if not args and rel in untracked() and not binary(rel):
+                unknown.append("%s is untracked and cannot be read as text" % rel)
             continue
         try:
             bad += code_problems(rel, text, table, lines)
         except SyntaxError as e:
             unknown.append("%s does not parse (%s)" % (rel, e.msg))
+    committed, more = ([], []) if args else committed_lines()
+    unknown += more
+    for rel, text, lines in committed:
+        if rel.startswith(SKIP_CODE) or (scope.get(rel) == lines and read(rel) == text):
+            continue  # the work tree holds the same text, so its side read these lines already
+        try:
+            bad += code_problems(rel, text, table, lines)
+        except SyntaxError as e:
+            unknown.append("%s does not parse (%s)" % (rel, e.msg))
+    bad, unknown = list(dict.fromkeys(bad)), list(dict.fromkeys(unknown))
     for p in bad:
         print("check_glossary: FAIL: " + p)
     for p in unknown:

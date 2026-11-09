@@ -4,12 +4,12 @@
 
 Each agent role runs the model and effort of its row in the table below. Sonnet is the ceiling.
 Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`), and the builder's third try by standing grant,
-and the owner watches that cost. An Explore may run Sonnet or Opus when its brief's first non-blank line carries the `Audit:` marker
+and the owner watches that cost. The refuter runs Opus too (owner, 2026-11-06 12:43 CST, waiting-page item 279, pick d; decision `plan-refuter`). An Explore may run Sonnet or Opus when its brief's first non-blank line carries the `Audit:` marker
 (owner, 2026-11-01 18:38 CST, waiting-page item 137, pick a). An Explore on Opus with no marker is refused, and an override lifts it; no scoped `opus explore` form exists (option b, not picked).
 The question reviewer agent hook keeps its class-level grant of 2026-10-21 (see its row). Any other spawn above its role's model, a reviewer's round 3 on Opus too, is refused. It runs only when the owner's typed override or grant names it
 (owner, 2026-11-01 17:25 CST, item 127, pick a: the same for Sonnet and Opus). A lane session or an arbiter session is a session, not an agent: it runs Opus by its row below. Round 2 stays Sonnet. Haiku runs only in Explore,
 claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling and the role rows: an Agent
-or Task spawn that sets model opus is refused, unless Plan, designer, design-reviewer, a builder's `Round 3 of 3` or an Explore's `Audit:` marker covers it.
+or Task spawn that sets model opus is refused, unless Plan, designer, design-reviewer, refuter, a builder's `Round 3 of 3` or an Explore's `Audit:` marker covers it.
 The general override lifts any refusal of a spawn above its role's row. An Opus spawn refusal is also lifted by `opus [role] <time>` (for example `opus 2h` or `opus builders 2h`), by the owner's plain Opus ask in his own typed prompt (owner, 2026-11-03 19:47 CST, chat; the override decision `owner-override`, The Opus override), or by a step grant.
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped and stays dropped.
 
@@ -34,6 +34,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | Plan (`agents/plan.md`) | opus | high |
 | designer (`agents/designer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
 | design-reviewer (`agents/design-reviewer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
+| refuter (`agents/refuter.md`) | opus, the owner's ruling of 2026-11-06 12:43 CST, waiting-page item 279, pick d (decision `plan-refuter`) | high |
 | general-purpose, `claude` | sonnet, by the default | model default |
 | main session | unset, account default | model default |
 | `fallbackModel` | sonnet | n/a |
