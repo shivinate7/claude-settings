@@ -133,13 +133,14 @@ before the merge, waits for CI on the claim commit, reverts the claim if a step 
 then merges. The repo's own opt-in is the `merge` block of its stamp config, see "The merge
 tool contract" in `actions/stamp/README.md`.
 
-Run it from inside the repo, with `gh`, `git`, `node` and Python 3 on PATH:
+Run it from inside the repo, or name the repo's checkout with `-C PATH` (`--repo-dir PATH`), with `gh`, `git`, `node` and Python 3 on PATH:
 
 ```
 merge <pr>              preview: what it would claim and merge. Presses nothing.
 merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, move the local main, clean up.
                         NAME shows in the lock to a waiting run.
 merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
+merge -C PATH <pr> ...  act in the checkout at PATH, not the one the process stands in. Works with every form above and with --lane-lint. The last -C wins.
 merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] [--net-value V]
                         print the review record for the head SHA that was reviewed. Exit 1 when the PR's live head is another sha.
                         Posts nothing: the lane posts it as a PR comment.
@@ -153,6 +154,8 @@ merge --dev ...         run the checkout's own tree, not origin main
 
 `merge --help` lists every flag except `--dev`.
 
+A flag prefix is an error, not the flag it starts (`merge 5 --conf` fails; write `--confirm`).
+
 * **Launcher.** On macOS and Linux, `bin/merge` lands in `~/.claude/bin`. On Windows,
   `bin\merge.cmd` lands there too, and starts `bin\merge`. The installers put `~/.claude/bin`
   on PATH. The launcher holds no merge logic. It finds this clone through `CLAUDE_SETTINGS_DIR`,
@@ -160,6 +163,15 @@ merge --dev ...         run the checkout's own tree, not origin main
   neither, it clones the public repo into a temporary folder. The checkout must have `origin`
   set to `shivinate7/claude-settings`. Any other result stops before a pull request read. A
   repo's own wrapper, such as a `make merge` target, may hold the same lookup instead.
+* **Another checkout.** A batch runner that merges in a second checkout runs
+  `~/.claude/bin/merge -C <checkout> <pr> --confirm`, never `cd <checkout> && merge ...`. It runs
+  in the foreground (Bash timeout up to 600000), never with `run_in_background`. Measured
+  2026-11-03 16:56 CST in a cloud auto-mode session: the foreground call matched the allow rule
+  and ran. The same call in the background went to the auto-mode classifier, which refused it. In a
+  cloud session the guard reads the checkout from the flag, else the `cd`, else the working
+  directory. It allows `--confirm` only when a `cs-repo` tag of the session's own `get_session`
+  record names that checkout's repo (guard rule `merge-confirm-repo`, claude-settings decision
+  `merge-confirm-repo`). A path that is no checkout stops the merge tool before any read.
 * **Fresh code.** Each run fetches `origin main` and runs from a temporary worktree at that
   SHA. It prints the SHA it ran. If it cannot prove fresh code, such as when offline, it
   prints a warning block and runs the code it has. `--dev` skips all of this and runs the
