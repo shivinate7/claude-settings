@@ -966,13 +966,17 @@ class Host:
 
     def holds_head(self, head, other):
         """True when the commit or branch `other` contains `head`: GitHub's compare of head...other reads ahead or identical. Any failed read raises Stop."""
+        return self.compare_status(head, other, f"whether {other[:9]} holds {head[:9]}") in ("ahead", "identical")
+
+    def compare_status(self, head, other, what=None):
+        """GitHub's compare of head...other: its status word (ahead, identical, behind, diverged). Any failed read raises Stop."""
         c, out = self.api(f"compare/{head}...{other}")
         try:
             if c:
                 raise ValueError(out)
-            return json.loads(out)["status"] in ("ahead", "identical")
+            return json.loads(out)["status"]
         except (ValueError, KeyError, TypeError) as e:
-            raise Stop(f"cannot read whether {other[:9]} holds {head[:9]} {READ_CITE}: {e}")
+            raise Stop(f"cannot read {what or f'how {other[:9]} compares with {head[:9]}'} {READ_CITE}: {e}")
 
     def protection_names(self):
         """-> the required check names of the base's branch protection, or None when the base has none (an HTTP 404 that is not a
@@ -1421,6 +1425,13 @@ class Host:
             return "unknown", "a gh call timed out"
         except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
             return "unknown", str(e)
+        if blockers and head:
+            # A push of the base's own tip moves nothing: no run tests a different base. A read that fails keeps the blockers.
+            try:
+                if self.compare_status(base, head) == "identical":
+                    return "green", ""
+            except Stop:
+                pass
         return ("batch", "; ".join(blockers)) if blockers else ("green", "")
 
     def block(self, pending, got):

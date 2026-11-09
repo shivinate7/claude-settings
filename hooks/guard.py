@@ -401,7 +401,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            conflict_markers_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, push_batch_hit, record_writer_hit, records_page_hit, role_proof_hit,
+            conflict_markers_hit, _push_calls, gh_call_of, git_call_of, is_api_merge, merge_call_of, merge_check, merge_check_reason, push_batch_hit, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
@@ -3903,7 +3903,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             continue
         verdict, detail = merge_check(merging[0], merging[1], cite_where)
         if verdict != "green":
-            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
+            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail, is_api_merge(segment)),
                    "gh pr merge " + merging[0] + " " + verdict)
         # A green bare merge in a repo that uses the merge tool asks; a deny above still wins.
         if cite_where and uses_merge_tool(cite_where):
@@ -5236,7 +5236,8 @@ def judge(payload) -> None:
         repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
         verdict, detail = merge_check("" if number is None else str(number), repo, cwd)
         if verdict != "green":
-            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
+            refuse(tool, "deny", "merge-checks",
+                   merge_check_reason(verdict, detail, tool == "mcp__github__enable_pr_auto_merge"),
                    "merge tool " + verdict)
 
     # The MCP create tool carries its own `draft` field.

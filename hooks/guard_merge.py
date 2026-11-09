@@ -112,7 +112,9 @@ MERGE_TOOL_REL = os.path.join("merge", "merge.py")
 # `gh api` flags that take a value (the next token is data, never the endpoint).
 GH_API_VALUE_FLAGS = {"-H", "--header", "-f", "--raw-field", "-F", "--field", "-q", "--jq", "-t", "--template",
                       "--input", "--hostname", "--cache", "-p", "--preview"}
-GH_API_MERGE_PATH = re.compile(r"/?(?:repos/([^/{}\s]+/[^/{}\s]+)/)?pulls/(\d+)/merge/?(?:\?.*)?")
+# gh fills `{owner}/{repo}` from the checkout's remote, so that placeholder names the repo gh resolves, as no path repo does.
+GH_API_PLACEHOLDER_REPO = "{owner}/{repo}"
+GH_API_MERGE_PATH = re.compile(r"/?(?:repos/(\{owner\}/\{repo\}|[^/{}\s]+/[^/{}\s]+)/)?pulls/(\d+)/merge/?(?:\?.*)?")
 
 
 def api_merge_call_of(rest):
@@ -149,7 +151,14 @@ def api_merge_call_of(rest):
     found = GH_API_MERGE_PATH.fullmatch(endpoint)
     if method.upper() != "PUT" or not found:
         return None
-    return found.group(2), found.group(1) or repo
+    path_repo = found.group(1)
+    return found.group(2), (path_repo if path_repo and path_repo != GH_API_PLACEHOLDER_REPO else repo)
+
+
+def is_api_merge(segment: str) -> bool:
+    """True when `segment` is a `gh api` call: its merge is a raw API PUT, not `gh pr merge`."""
+    rest = gh_call_of(segment)
+    return rest is not None and rest[:1] == ["api"]
 
 
 def merge_call_of(segment: str):
@@ -267,6 +276,15 @@ MERGE_CHECK_REASON = (
 )
 
 
+# The head-check refusal of the routes that never go through the merge tool: a raw API PUT and an auto-merge. Its Remedy names no act
+# (git-remedy-never-names-target), because the merge tool is not the way round for them: it would be Claude's copy of a named act.
+MERGE_CHECK_ROUTE_REASON = (
+    "Rule (Git): this head is not settled: %s. A merge waits for every check and workflow run on "
+    "the head, required or not, and a read that could not run counts as not settled. "
+    "Remedy: wait until this head's checks are settled."
+)
+
+
 # Every route that lands a head on the base reads this: a merge call, an auto-merge, a raw API merge and a push to main.
 # The merge tool refuses the merge case too, so the remedy is to wait. It names no act, because the same text
 # answers each route and Claude would copy a named act as the way round (git-remedy-never-names-target).
@@ -309,10 +327,11 @@ def push_batch_hit(args, where: str, overrides=None) -> str:
     return ""
 
 
-def merge_check_reason(verdict: str, detail: str) -> str:
+def merge_check_reason(verdict: str, detail: str, route: bool = False) -> str:
+    """The refusal text for a merge check. `route`: the call is a raw API PUT or an auto-merge, so the head-check text names no merge tool."""
     if verdict == "batch":
         return MERGE_BATCH_REASON % cap_safe(detail, 160)
-    return MERGE_CHECK_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
+    return (MERGE_CHECK_ROUTE_REASON if route else MERGE_CHECK_REASON) % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
 
 
 def _merge_config_at(root: str):
