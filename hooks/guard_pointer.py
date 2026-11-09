@@ -129,7 +129,7 @@ def pointer_edit_hit(targets, cwd: str) -> str:
     if not pointer:
         return ""
     git_dir = os.path.join(pointer, ".git")
-    lanes = os.path.join(pointer, ".claude", "worktrees")
+    worktree_dir = os.path.join(pointer, ".claude", "worktrees")
     for target in targets:
         try:
             resolved = _resolved(target, cwd)
@@ -137,7 +137,7 @@ def pointer_edit_hit(targets, cwd: str) -> str:
             continue
         if (path_is_inside(resolved, pointer) is True
                 and path_is_inside(resolved, git_dir) is not True
-                and path_is_inside(resolved, lanes) is not True):
+                and path_is_inside(resolved, worktree_dir) is not True):
             return target
     return ""
 

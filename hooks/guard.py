@@ -60,7 +60,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        pointer checkout's own files. The pointer's `.git`, a linked worktree under
                        `.claude/worktrees/` or elsewhere, a target outside it, an unreadable or
                        missing pointer and the read tools pass. A shell write is not judged. The
-                       reason names the EnterWorktree tool. An override lifts it. It spawns no git.
+                       reason names the EnterWorktree tool. An override lifts a direct pointer path. A
+                       config-dir spelling of a pointer file is frozen (never_lifted calls is_frozen
+                       per target), so no override lifts it, as with frozen-path. It spawns no git.
   silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
                        git's `-q`. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
@@ -5500,8 +5502,9 @@ def judge(payload) -> None:
     session_hit = session_home_hit(payload, tool, tool_input, cwd)
     if session_hit:
         refuse(tool, "deny", "session-home", SESSION_HOME_REASON, session_hit)
-    # 0, pointer-edit. A write into the pointer checkout's own files is live for every session. An override lifts it,
-    # and it is not in never_lifted: the owner may mean the write.
+    # 0, pointer-edit. A write into the pointer checkout's own files is live for every session. An override lifts it
+    # when the target is a direct pointer path. never_lifted calls is_frozen per target, so a config-dir spelling of a
+    # pointer file is not liftable, as with frozen-path.
     pointer_hit = pointer_edit_hit(write_targets(tool_input), cwd) if tool in WRITE_TOOLS else ""
     if pointer_hit:
         refuse(tool, "deny", "pointer-edit", POINTER_EDIT_REASON, "write target in the pointer checkout: " + pointer_hit)
