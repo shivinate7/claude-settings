@@ -130,14 +130,16 @@ def _copy_hooks(dest, install_id):
             _write(target, _stamp(handle.read(), install_id, name))
 
 
-def build_tree(root, flat_id=None, folder_id=None):
+def build_tree(root, flat_id=None, folder_id=None, flat_text=None):
     """An install tree under root, lint/ beside hooks/, and the report_guard path in it. flat_id stamps the flat
     guard files; None keeps the placeholder, as the repo copy has it. folder_id, when given, adds
     hooks/guard.d/<folder_id>/: the whole module set stamped with that id, whose shared_names.py carries
-    STAMPED_LANE_TAG."""
+    STAMPED_LANE_TAG. flat_text, when given, replaces the flat guard.py with that text."""
     _copy_lint(os.path.join(root, "lint"))
     hooks = os.path.join(root, "hooks")
     _copy_hooks(hooks, flat_id)
+    if flat_text is not None:
+        _write(os.path.join(hooks, "guard.py"), flat_text)
     if folder_id is not None:
         folder = os.path.join(hooks, "guard.d", folder_id)
         _copy_hooks(folder, folder_id)
@@ -153,10 +155,10 @@ def build_tree(root, flat_id=None, folder_id=None):
 
 class StampedCopyTests(unittest.TestCase):
 
-    def tree(self, name, flat_id=None, folder_id=None):
+    def tree(self, name, flat_id=None, folder_id=None, flat_text=None):
         root = tempfile.mkdtemp(prefix=name + "-", dir=trg.RUN_FOLDER)  # the run folder's, never the system temp dir
         self.addCleanup(shutil.rmtree, root, True)
-        return root, build_tree(root, flat_id, folder_id)
+        return root, build_tree(root, flat_id, folder_id, flat_text)
 
     def assert_state(self, root, flat_id, folder_id):
         """Scope before subject (P7): the tree holds the stamp and the folder this case names."""
@@ -198,7 +200,9 @@ class StampedCopyTests(unittest.TestCase):
 
     def test_rgs_green_no_stamp_loads_the_flat_helper_beside_a_folder(self):
         # Catches: a report_guard that loads any guard.d folder, or reads the placeholder as a stamp.
-        root, report_guard = self.tree("unstamped", flat_id=None, folder_id="uninstalled")
+        # The flat guard.py holds only the placeholder: the repo copy's prose line, INSTALL_ID = "<id>", would match
+        # first under an unanchored regex and hide the placeholder.
+        root, report_guard = self.tree("unstamped", flat_id=None, folder_id="uninstalled", flat_text=PLACEHOLDER + "\n")
         self.assert_state(root, None, "uninstalled")
         got = self.probe(root, report_guard)
         self.assertEqual(got["lane_tag"], real_lane_tag(),
