@@ -43,6 +43,12 @@
                           CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock, merges
                           and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
                           measured once on one PR head), one worktree.
+                          A head whose diff against the base touches hooks/mutate_*.py or hooks/mutate_*.mjs also runs the command of
+                          the head's checks-mutate-guard job (step "Guard mutation test") in that same worktree, after a passing lint.
+                          It FAILs on any survivor, on more than MUTATE_UNKNOWN_MAX unknown mutants (the crashed column; a timeout lands
+                          there), on a run past that job's timeout-minutes, and on a nonzero exit or a report it cannot read. It prints
+                          its wall time and killed, survived and unknown counts, on the PASS line or in the FAIL text. Extra cost, only
+                          then: one run of that command (about 11 to 16 min); on any other head, one `git diff --name-only`.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -57,7 +63,7 @@ A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond 
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, contextlib, datetime, functools, io, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, contextlib, datetime, functools, io, json, math, os, pathlib, re, shlex, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -2571,6 +2577,10 @@ def lane_head_and_base(root, target, base):
         raise Stop(f"cannot find {target} as a commit or ref in this clone or on origin {LANE_LINT_CITE}")
     return head, base
 
+def no_github_env():
+    """The environment of a lint run: this one without the GITHUB_ variables, as the merge's own lint run reads it."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
+
 def ci_job_run(wt, *args, notes=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
@@ -2579,9 +2589,8 @@ def ci_job_run(wt, *args, notes=None):
     `skipped <step>: <why>` lines), so no pass hides a CI step that did not run. log: ci-job's log line, as a list of
     0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps.
     notes: a list the caller passes to receive, on a pass, each ci-job line that holds the pin note marker (a stale pin); the draft step passes none and ignores them."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
     try:
-        c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
+        c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=no_github_env(), timeout=LINT_SECONDS, live_stderr=True)
     except subprocess.TimeoutExpired:
         return "unknown", [f"ci-job did not finish in {LINT_SECONDS} s"], [], False
     lines = out.splitlines()
@@ -2595,6 +2604,63 @@ def ci_job_run(wt, *args, notes=None):
     if c == 2:
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
+
+MUTATE_JOB, MUTATE_STEP = "checks-mutate-guard", "Guard mutation test"  # the job and step of checks.yml whose run: line and timeout-minutes the lint reads at the head
+MUTATE_UNKNOWN_MAX = 5  # unknown (crashed or timed-out) mutants a lint tolerates: one or two flaky mutants are noise, a harness that cannot run reads hundreds
+MUTATE_HARNESS = re.compile(r"hooks/mutate_[^/]*\.(?:py|mjs)")
+
+def mutate_report_counts(out):
+    """-> (killed, survived, unknown, unread) of a mutate run's stdout, or None when it holds no report. Two forms: the per-file table of
+    hooks/mutate_shared.format_report (columns file mutants killed crashed survived rate silent; unknown is the crashed column), and the tally line
+    that run_mutants prints, which the job's own command ends with (`K of N mutations killed (S survived, W wrong cause, X skipped)`; unknown is
+    the wrong-cause count). `unread` counts the table's `UNKNOWN (reason)` rows: a file that read no mutant."""
+    rows = re.findall(r"^\S+[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+\d+%", out, re.M)
+    unread = len(re.findall(r"^\S+[ \t]+UNKNOWN \(", out, re.M))
+    if rows:
+        return sum(int(r[1]) for r in rows), sum(int(r[3]) for r in rows), sum(int(r[2]) for r in rows), unread
+    m = re.search(r"^(\d+) of \d+ mutations killed \((\d+) survived, (\d+) wrong cause, \d+ skipped\)", out, re.M)
+    if m:
+        return int(m.group(1)), int(m.group(2)), int(m.group(3)), unread
+    return (0, 0, 0, unread) if unread else None
+
+def mutate_run_check(wt):
+    """Run the head's checks-mutate-guard command in the tree `wt`. -> (summary, failures): one line of wall time and counts, and the reasons the
+    lint fails (empty on a pass). The command and the cap come from the head's checks.yml, through the step parser and job_caps: no copy of either.
+    A workflow, step or cap that cannot be read stops the lint."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    from workflow_steps import job_block, run_body, step_blocks, step_key  # the one home of the step parser
+    try:
+        with open(os.path.join(wt, ".github", "workflows", "checks.yml"), encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeError) as e:
+        raise Stop(f"the head's checks.yml cannot be read ({type(e).__name__}), so its mutate run cannot start. {LANE_LINT_REMEDY}")
+    step = next((st for st in step_blocks(job_block(text, MUTATE_JOB)) if step_key(st, "name") == MUTATE_STEP), None)
+    body = (run_body(step) or "").strip() if step else ""
+    cap = job_caps([text]).get(MUTATE_JOB)
+    if not body or "\n" in body or not cap:
+        raise Stop(f"the head's checks.yml has no one-line run: for step {MUTATE_STEP!r} of job {MUTATE_JOB}, or no timeout-minutes on that job, so its mutate run cannot start. {LANE_LINT_REMEDY}")
+    start = time.monotonic()
+    try:
+        c, out = sh(shlex.split(body), cwd=wt, env=no_github_env(), timeout=cap * 60, live_stderr=True)
+    except subprocess.TimeoutExpired:
+        c, out = None, ""
+    wall = round(time.monotonic() - start) if c is not None else cap * 60
+    counts = mutate_report_counts(out)
+    killed, survived, unknown, unread = counts or (0, 0, 0, 0)
+    failures = []
+    if c is None or wall > cap * 60:
+        failures.append(f"the mutate run took {wall} s, past the {cap}-minute cap of job {MUTATE_JOB}")
+    if counts is None:
+        failures.append(f"the mutate run exited {'at its timeout' if c is None else c} and printed no report that can be read")
+    elif c:
+        failures.append(f"the mutate run exited {c}")
+    if survived:
+        failures.append(f"{survived} mutant{'s' if survived != 1 else ''} survived")
+    if unknown > MUTATE_UNKNOWN_MAX:
+        failures.append(f"{unknown} mutants are unknown (crashed or timed out), more than the {MUTATE_UNKNOWN_MAX} the lint allows")
+    if unread:
+        failures.append(f"{unread} file{'s' if unread != 1 else ''} read no mutant (UNKNOWN row)")
+    return f"mutate run {wall} s, killed {killed}, survived {survived}, unknown {unknown}, {'fail' if failures else 'pass'}", failures
 
 def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
@@ -2617,17 +2683,26 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
         pin_notes = []
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
+        mutate, mutate_fails = "", []
+        if state == "pass" or (liftable and unknown_ok.strip()):  # a lint that fails or stays unknown stops without the run's minutes
+            c, changed = git(root, "diff", "--name-only", f"origin/{base}...{head}")
+            if c:
+                raise Stop(f"cannot list the files the head changes against {base}: {changed} {LANE_LINT_REMEDY}")
+            if any(MUTATE_HARNESS.fullmatch(f) for f in changed.splitlines()):
+                mutate, mutate_fails = mutate_run_check(wt)
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]
+    if mutate_fails:
+        raise Stop("\n".join([f"the lint of {short} against {base} FAILs: the diff touches the mutation harness, and its {mutate}:", *mutate_fails, LANE_LINT_REMEDY]))
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
-        say(f"PASS: lint of {short} against {base} passes{named}. The batch runner may take this head, or join it to a batch.", *pin_notes)
+        say(f"PASS: lint of {short} against {base} passes{named}{'; ' + mutate if mutate else ''}. The batch runner may take this head, or join it to a batch.", *pin_notes)
         return 0
     if state == "fail":
         raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
     if liftable and unknown_ok.strip():
-        say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log)
+        say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log, *([mutate] if mutate else []))
         return 0
     head_line = f"the lint of {short} against {base} is unknown, not a pass:"
     if not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
