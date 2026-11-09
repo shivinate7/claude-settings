@@ -8,8 +8,9 @@ import re
 
 import guard_core
 from guard_core import (
-    REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
-    dir_before_segment, is_powershell, norm, resolve_command, segment_tokens, split_segments,
+    HEREDOC_HEADER, REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally,
+    basename, dir_before_segment, heredoc_delimiter, is_powershell, norm, resolve_command, segment_tokens,
+    split_segments,
 )
 from guard_env import _quoted_words
 
@@ -295,22 +296,34 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
 # `$HOME/.claude/...` target was allowed.
 # Text is not code, and code is not text. An assignment inside double quotes or after a `#` comment
 # is text, and a lone apostrophe in double quotes opens no span, because quotes are read in pairs
-# from the left. An unmated quote is one ordinary character, so the text after it is still read
-# (fail closed: more variables resolve, never fewer). The body of `$(...)` or backticks is a command
+# from the left. An unmated quote is one ordinary character, so the text after it is still read as
+# code, the fail-closed side: a variable read as code resolves, one read as text stays as written.
+# The body of a heredoc with a quoted delimiter is text to the shell, so its quotes are read in the
+# body alone and never pair with a quote after it. The body of `$(...)` or backticks is a command
 # even inside double quotes, and so is the argument of `eval "..."`. A prefix assignment
 # (`S=x cmd "$S"`) sets the variable for that one command: the command's own words and all later
 # text see the value from before it. A subshell `( ... )`, `$( ... )` or backtick pair gives its
 # assignments back where it ends.
+# A redirect (`>/dev/null`, `2>f`, `<<'EOF'`) and the name after `function` leave the command's start
+# as it was, so `D=x >/dev/null` still sets D. An unquoted `$D` whose value holds two words is an
+# ambiguous redirect target that writes nothing, so it stays as written there (unless IFS is set).
 # RESIDUAL GAP: a value from `$(...)`, backticks, `read`, `${D:-x}`, a loop variable, `eval '...'`, or
-# an interpreter (`python -c`) is not resolved, nor is a variable set in a different tool call or in
-# a pipeline stage. Fixing that needs a shell parser, not this one pass.
+# an interpreter (`python -c`) is not resolved, nor is a variable set in a different tool call. An
+# assignment in a pipeline stage or a background job (`D=x | cat`, `D=x &`) is kept here, though the
+# shell runs it in a subshell and keeps nothing, so a later `$D` can read a value the shell does not.
+# Fixing these needs a shell parser, not this one pass.
 _WORD_STOP = frozenset(" \t\r\n;&|()`")
 _ASSIGN_WORD = re.compile(r"([A-Za-z_]\w*)(\+?)=")
 _VAR_USE = re.compile(r"\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})")
 _PS_NAME = re.compile(r"\$[A-Za-z_]\w*")
 _PS_EQUALS = re.compile(r"[ \t]*=(?!=)[ \t]*")
+# A redirect operator at the start of a word (`>`, `>>`, `2>`, `>&`, `>|`, `<`, `<&`, `<>`).
+_REDIRECT_OP = re.compile(r"\d*(?:>>|>&|>\||<&|<>|[<>])")
+# Whitespace between two non-blank characters: the shell splits such a value into two words.
+_TWO_WORDS = re.compile(r"[^ \t\n][ \t\n]+[^ \t\n]")
 # Words after which the next word is still a command's start (`{ D=x; }`, `then D=x`, `eval D=x`).
-_COMMAND_STARTERS = frozenset(("{", "!", "if", "then", "elif", "else", "do", "while", "until", "time", "eval"))
+_COMMAND_STARTERS = frozenset((
+    "{", "!", "if", "then", "elif", "else", "do", "while", "until", "time", "eval", "function"))
 _DECLARERS = frozenset(("export", "declare", "typeset", "local", "readonly"))
 _NEST_LIMIT = 20   # quotes nested in `$(...)` nested in quotes; deeper reads as plain text
 
@@ -402,8 +415,16 @@ def _read_word(cmd: str, i: int):
     return i, parts
 
 
-def _expand(text: str, table: dict) -> str:
-    return _VAR_USE.sub(lambda m: table.get(m.group(1) or m.group(2), m.group(0)), text)
+def _expand(text: str, table: dict, as_target: bool = False) -> str:
+    """`text` with each `$VAR` read. `as_target` is an unquoted redirect target: a value of two words
+    is an ambiguous redirect that writes nothing, so its variable stays as written (fail closed when
+    IFS is set, which can change where the shell splits)."""
+    splits = as_target and "IFS" not in table
+
+    def read(use):
+        value = table.get(use.group(1) or use.group(2))
+        return use.group(0) if value is None or (splits and _TWO_WORDS.search(value)) else value
+    return _VAR_USE.sub(read, text)
 
 
 def _dq_text(text: str, table: dict, depth: int = 0) -> str:
@@ -434,9 +455,10 @@ def _dq_text(text: str, table: dict, depth: int = 0) -> str:
     return "".join(out)
 
 
-def _rebuild(parts, table: dict, as_script: bool = False, depth: int = 0):
+def _rebuild(parts, table: dict, as_script: bool = False, depth: int = 0, as_target: bool = False):
     """(the word's text with each `$VAR` outside single quotes read as its value, the table after it).
-    `as_script` reads a double-quoted span as a command that runs here (`eval "D=x"`)."""
+    `as_script` reads a double-quoted span as a command that runs here (`eval "D=x"`). `as_target` is
+    a redirect target word (see `_expand`)."""
     out = []
     for kind, text in parts:
         if kind == "s":
@@ -447,7 +469,7 @@ def _rebuild(parts, table: dict, as_script: bool = False, depth: int = 0):
         elif kind == "d":
             out.append('"' + _dq_text(text, table, depth) + '"')
         else:
-            out.append(_expand(text, table))
+            out.append(_expand(text, table, as_target))
     return "".join(out), table
 
 
@@ -477,6 +499,33 @@ def _assign(table: dict, name: str, plus: str, parts, opens_group: bool) -> None
         table[name] = value
 
 
+def _heredoc_at(parts) -> int:
+    """Offset in the word of an unquoted `<<` that opens a heredoc (not `<<<`), or -1."""
+    offset = 0
+    for kind, text in parts:
+        if kind != "p":
+            offset += len(text) + 2   # the quotes around the span
+            continue
+        found = re.search(r"(?<!<)<<(?!<)", text)
+        if found:
+            return offset + found.start()
+        offset += len(text)
+    return -1
+
+
+def _heredoc_end(cmd: str, start: int, delimiter: str):
+    """(index where the delimiter line starts, index where its text ends) for a heredoc body that
+    starts at `start`; both are the end of `cmd` when the delimiter never comes."""
+    n, pos = len(cmd), start
+    while pos < n:
+        eol = cmd.find("\n", pos)
+        eol = n if eol < 0 else eol
+        if cmd[pos:eol].strip() == delimiter:
+            return pos, eol
+        pos = eol + 1
+    return n, n
+
+
 def _resolve_vars(cmd: str) -> str:
     """Read each `$VAR` or `${VAR}` as the value assigned earlier in the command."""
     return _resolve_into(cmd, {"HOME": "~"})[0]
@@ -487,30 +536,45 @@ def _resolve_into(cmd: str, table: dict, depth: int = 0):
     out, stack = [], []   # stack: (table to restore where the group ends, glued to a `$`, closer)
     n, i = len(cmd), 0
     at_start, before, mode = True, None, ""   # before: the table from before this command's assignments
+    operand = ""   # "target": the next word names a redirect's file; "name": a function's name
+    heredocs = []   # delimiters of the heredocs whose bodies start after the next newline
     while i < n:
         c = cmd[i]
         if c in " \t\r":
             out.append(c)
             i += 1
+        elif c == "&" and (cmd[i - 1:i] in ("<", ">") or cmd.startswith(">", i + 1)):
+            out.append(c)   # `>&1`, `<&-` and `&>f` are redirects, not a background job
+            i += 1
         elif c in ";&|\n":
             out.append(c)
             i += 1
-            at_start, before, mode = True, None, ""
+            at_start, before, mode, operand = True, None, "", ""
+            while c == "\n" and heredocs:   # a body is text, read in itself: its quotes never pair outward
+                body_end, line_end = _heredoc_end(cmd, i, heredocs.pop(0))
+                body = cmd[i:body_end]
+                out.append(_expand(body, table) if depth >= _NEST_LIMIT
+                           else _resolve_into(body, dict(table), depth + 1)[0])
+                out.append(cmd[body_end:line_end])
+                i = line_end
+                if heredocs and cmd.startswith("\n", i):
+                    out.append("\n")
+                    i += 1
         elif c == "(" or (c == "`" and not (stack and stack[-1][2] == "`")):
             stack.append((dict(table), c == "`" or cmd[i - 1:i] == "$", ")" if c == "(" else "`"))
             out.append(c)
             i += 1
-            at_start, before, mode = True, None, ""
+            at_start, before, mode, operand = True, None, "", ""
         elif c == ")" or c == "`":   # `)` ends the nearest `(`; a second backtick ends the open one
-            group = False
+            glued = False
             for level in range(len(stack) - 1, -1, -1):
                 if stack[level][2] == (")" if c == ")" else "`"):
-                    table, group, _closer = stack[level]
+                    table, glued, _closer = stack[level]
                     del stack[level:]
                     break
             out.append(c)
             i += 1
-            at_start, before, mode = not group, None, ""
+            at_start, before, mode, operand = not glued, None, "", ""
         elif c == "#":   # a comment: its text is read for uses and holds no assignment
             j = cmd.find("\n", i)
             j = n if j < 0 else j
@@ -519,6 +583,25 @@ def _resolve_into(cmd: str, table: dict, depth: int = 0):
         else:
             end, parts = _read_word(cmd, i)
             word = cmd[i:end]
+            if operand:   # a redirect's file or a function's name: a word, never a command or assignment
+                text, table = _rebuild(parts, table, False, depth, operand == "target")
+                out.append(text)
+                operand = ""
+                i = end
+                continue
+            at = _heredoc_at(parts)
+            if at >= 0:
+                header = HEREDOC_HEADER.match(cmd, i + at)
+                if header:
+                    heredocs.append(heredoc_delimiter(header.group(1))[1])
+            redirect = _REDIRECT_OP.match(word)
+            if redirect:   # a redirect is no command: it leaves the command's start as it was
+                text, table = _rebuild(parts, table, False, depth, True)
+                out.append(text)
+                if redirect.end() == len(word) or re.fullmatch(r"\d*<<<?-?", word):
+                    operand = "target"
+                i = end
+                continue
             head = _ASSIGN_WORD.match(parts[0][1]) if parts and parts[0][0] == "p" else None
             if head and (at_start or mode == "declare"):
                 if at_start and before is None:
@@ -541,6 +624,7 @@ def _resolve_into(cmd: str, table: dict, depth: int = 0):
             if at_start:
                 if word in _COMMAND_STARTERS:
                     mode = "eval" if word == "eval" else mode
+                    operand = "name" if word == "function" else operand
                     out.append(word)
                     i = end
                     continue
