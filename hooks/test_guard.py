@@ -11195,6 +11195,7 @@ ENVGLOB_HELD = os.path.join(ROOT, "envglob-held")    # env files in sub/abc, abo
 ENVGLOB_CLEAN = os.path.join(ROOT, "envglob-clean")  # the same folders, each with a README and no env file
 ENVGLOB_PROJ = os.path.join(ENVGLOB_HELD, "proj")    # a folder named proj, with the env file in it, that a grep can start in
 ENVGLOB_FOLDERS = (("sub", "abc"), ("sub", "y"), ("abox", "abc"), ("proj",))  # the folders under each fixture
+ENVPROJ_ROOT = os.path.join(ROOT, "envproj-root")    # its one env file is in proj, so a walk that skips proj shows it
 
 
 def build_envglob_folders():
@@ -11204,9 +11205,12 @@ def build_envglob_folders():
     write(os.path.join(ENVGLOB_HELD, "sub", "abc", ENV), "FIXTURE=1\n")
     write(os.path.join(ENVGLOB_HELD, "abox", "abc", ENV), "FIXTURE=1\n")
     write(os.path.join(ENVGLOB_PROJ, ENV), "FIXTURE=1\n")
+    write(os.path.join(ENVPROJ_ROOT, "README.md"), "held\n")
+    write(os.path.join(ENVPROJ_ROOT, "proj", "README.md"), "held\n")
+    write(os.path.join(ENVPROJ_ROOT, "proj", ENV), "FIXTURE=1\n")
 
 
-lazy_fixture((ENVGLOB_HELD, ENVGLOB_CLEAN, ENVGLOB_PROJ), build_envglob_folders)
+lazy_fixture((ENVGLOB_HELD, ENVGLOB_CLEAN, ENVGLOB_PROJ, ENVPROJ_ROOT), build_envglob_folders)
 
 # A quoted word holds a brace list. Bash expands `"su"b/{abc,y}` to `sub/abc sub/y`, so grep reads the env file
 # in sub/abc. The guard reads the quoted word as it stands, and it names no folder.
@@ -11248,6 +11252,92 @@ sh("env: exclude-dir safety hole, `./sub/` as typed is sub, grep reads the env f
    + _EXDIR_SUB_SLASH, _EXDIR_SUB_SLASH, "deny", "env-file", cwd=ENVGLOB_HELD)
 sh("env: exclude-dir control, the operand `sub` as typed, grep skips it, allowed: " + _EXDIR_SUB_NAMED,
    _EXDIR_SUB_NAMED, "allow", cwd=ENVGLOB_HELD)
+
+# Walk gaps the guard lets through: an anchored exclude, a flag whose value is read as a path, and a runner the
+# walk does not enter. Each deny runs over a folder that holds an env file, and its control runs the same word over
+# a folder with none. ENVPROJ_ROOT holds its only env file in proj, so a walk that skips proj shows the hole.
+_EXDIR_ANCHORED = ("grep -r --exclude-dir=/proj K .", "grep -r --exclude-dir=//proj K .",
+                   "grep -r --exclude-dir='/p*' K .")
+for _cmd in _EXDIR_ANCHORED:
+    sh("env: anchored exclude hole, a leading slash matches no folder name, grep reads proj's env file, refused: "
+       + _cmd, _cmd, "deny", "env-file", cwd=ENVPROJ_ROOT)
+    sh("env: anchored exclude control, the same word over folders with no env file, allowed: " + _cmd, _cmd,
+       "allow", cwd=ENVGLOB_CLEAN)
+_EXDIR_PROJ_OPERAND = "grep -r --exclude-dir=proj K proj"
+sh("env: anchored exclude control, the operand proj as typed, grep skips it, allowed: " + _EXDIR_PROJ_OPERAND,
+   _EXDIR_PROJ_OPERAND, "allow", cwd=ENVPROJ_ROOT)
+_EXCLUDE_ANCHORED_ENV = "grep -r --exclude=/" + ENV + " K ."
+sh("env: anchored exclude hole, --exclude=/.env matches no file name, grep reads the env file at the top, refused: "
+   + _EXCLUDE_ANCHORED_ENV, _EXCLUDE_ANCHORED_ENV, "deny", "env-file", cwd=ENVWALK_HELD)
+sh("env: anchored exclude control, the same word over a folder with no env file, allowed: " + _EXCLUDE_ANCHORED_ENV,
+   _EXCLUDE_ANCHORED_ENV, "allow", cwd=ENVWALK_CLEAN)
+
+_FIND_NOMATCH_XARGS = "find . -name nomatch | xargs grep -r K"
+sh("env: walk hole, xargs runs grep once on the cwd when find names nothing, the walk takes 0 folders, refused: "
+   + _FIND_NOMATCH_XARGS, _FIND_NOMATCH_XARGS, "deny", "env-file", cwd=ENVWALK_HELD)
+sh("env: walk control, the same pipe over a folder with no env file, allowed: " + _FIND_NOMATCH_XARGS,
+   _FIND_NOMATCH_XARGS, "allow", cwd=ENVWALK_CLEAN)
+
+# grep's -D takes `skip` as its value. The guard still walks the cwd for it, so only this plain-folder control is kept.
+_DEVICES_PLAIN_OPERAND = "grep -r -D skip K sub"
+sh("env: value flag control, grep -D takes skip and names the plain folder sub, which holds no env file, allowed: "
+   + _DEVICES_PLAIN_OPERAND, _DEVICES_PLAIN_OPERAND, "allow", cwd=ENVGLOB_CLEAN)
+# ag's --depth takes `3` as its value. ag reads no dotfile without --hidden, so the row carries --hidden, which is what
+# reads the env file.
+_AG_DEPTH_VALUE = "ag --hidden --depth 3 K"
+sh("env: value flag hole, ag --depth takes 3 as a path, the cwd walk is lost, ag --hidden reads the env file, refused: "
+   + _AG_DEPTH_VALUE, _AG_DEPTH_VALUE, "deny", "env-file", cwd=ENVWALK_HELD)
+sh("env: value flag control, the same word over a folder with no env file, allowed: " + _AG_DEPTH_VALUE,
+   _AG_DEPTH_VALUE, "allow", cwd=ENVWALK_CLEAN)
+
+# Runners the walk does not enter. find -exec runs grep once per folder, and each wrapper runs grep as its own command.
+_FIND_EXEC = "find . -exec grep K {} +"
+sh("env: runner hole, find -exec runs grep on the folder it walks, the walk does not enter it, grep reads the env "
+   "file, refused: " + _FIND_EXEC, _FIND_EXEC, "deny", "env-file", cwd=ENVWALK_HELD)
+sh("env: runner control, the same find over a folder with no env file, allowed: " + _FIND_EXEC, _FIND_EXEC, "allow",
+   cwd=ENVWALK_CLEAN)
+for _cmd in ("doas grep -r K", "su -c 'grep -r K'", "stdbuf -oL grep -r K", "setsid -w grep -r K"):
+    sh("env: runner hole, a wrapper runs grep as its own command, the walk does not enter it, grep reads the env file, "
+       "refused: " + _cmd, _cmd, "deny", "env-file", cwd=ENVWALK_HELD)
+    sh("env: runner control, the same wrapper over a folder with no env file, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVWALK_CLEAN)
+_ENV_CHDIR = "env -C sub grep -r K"
+sh("env: runner hole, env -C moves grep into sub, the walk does not enter it, grep reads the env file in sub/abc, "
+   "refused: " + _ENV_CHDIR, _ENV_CHDIR, "deny", "env-file", cwd=ENVGLOB_HELD)
+sh("env: runner control, the same env -C over a sub folder with no env file, allowed: " + _ENV_CHDIR, _ENV_CHDIR,
+   "allow", cwd=ENVGLOB_CLEAN)
+
+# A find that prunes a folder past the walk cap. The pruned entries are not walked, so they must not count toward the
+# cap. The check runs in-process with the cap lowered, as the cap checks above do. The form is `-path ./big -prune`:
+# `-not -path ./big -prune` prunes the start point `.` itself, so find lists nothing.
+ENVCAP_PRUNE = "find . -path ./big -prune -o -name '*' -print | xargs grep K"
+
+
+def env_cap_prune_case():
+    """A find that prunes a folder past the cap is allowed when no env file sits outside it. The pruned entries are
+    not walked, so they must not count toward the cap, which would refuse the search as too large. A folder under
+    the cap with no env file is allowed for the same command."""
+    parent = os.path.join(ROOT, "envcap-prune")
+    big = os.path.join(parent, "big")
+    os.makedirs(big, exist_ok=True)
+    for number in range(ENVCAP_LOW + 1):
+        write(os.path.join(big, "f%06d" % number), "x\n")
+    write(os.path.join(parent, "clean", "README.md"), "clean\n")
+    if len(os.listdir(big)) <= ENVCAP_LOW:
+        return False, "the pruned folder is not past the lowered cap"
+    small = envcap_folder("envcap-prune-small", 0, {"README.md": "x\n"})
+    if len(os.listdir(small)) > ENVCAP_LOW:
+        return False, "the control fixture is past the lowered cap"
+    got = envcap_reason(ENVCAP_PRUNE, small)
+    if got:
+        return False, "%s over a folder under the cap, with no env file, was refused: %s" % (ENVCAP_PRUNE, got[:90])
+    got = envcap_reason(ENVCAP_PRUNE, parent)
+    if got:
+        return False, "%s with big pruned was refused: %s" % (ENVCAP_PRUNE, got[:90])
+    return True, "the pruned folder is not counted past the cap, and the search is allowed; the folder under it too"
+
+
+FIXTURELESS_CHECKS.add(env_cap_prune_case)  # it builds its folders under ROOT, as the cap checks above do
 
 # An unquoted `\*` reaches grep as `*`, because bash removes the backslash. The guard reads the backslash as
 # an escape, so it takes `\*` for the one-letter class `[*]`, which picks no name, and it reads no env file.
@@ -26655,6 +26745,8 @@ LOG_CHECKS = (
      env_cap_positive_glob_case),
     ("env: walk cap, an escaped-dot glob that picks a nested env file is refused too large to check",
      env_cap_escaped_dot_case),
+    ("env: walk cap, a find that prunes a folder past the cap is allowed when it holds no env file",
+     env_cap_prune_case),
     ("liveness: process_start_ms splits alive/dead/unreadable apart", process_start_ms_case),
     ("liveness: process_start_ms reads a repeated-hour start (01:30 CDT) as its instant, in Chicago",
      process_start_ms_repeated_hour_cdt_case),
@@ -33974,6 +34066,7 @@ LOG_RULE_FAMILY = (
     ("log: a branch delete with no resolvable base", "branch-worktree"),
     ("stack: the refusal never names", "shared-tree"),
     ("playwright: the refusal names the stale", "env"),
+    ("env: walk cap, a find that prunes a folder past the cap", "env"),
     ("split_segments: a comment starting a word", "paths"),
     ("liveness: process_start_ms splits", "kill"),
     ("liveness: windows arm splits", "kill"),
