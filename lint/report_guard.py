@@ -161,17 +161,20 @@ whose first salt commit is the shallow boundary, the read deepens first (this St
 merge/merge.py REVIEW_DEEPEN_TRIES fetches of REVIEW_DEEPEN_STEP commits each, with a git log pass after each, so up to 4 git log passes and 3 fetches, more log calls when another
 process races the clone (REVIEW_RACE_TRIES). Each fetch makes a network call and writes objects, the clone's shallow file and origin/<default branch>. The deepen is once per
 clone: when it leaves the boundary older than the salt commit, later reads in any process fetch nothing. Budget: every gh read and the cutover read of one Stop share REVIEW_HOOK_BUDGET
-seconds, below the hook's 35 s timeout in settings.json (a killed hook is a silent allow). A gh read gets what is left, never more than REVIEW_READ_TIMEOUT. The cutover read runs inside
+seconds, below the hook's 80 s timeout in settings.json (a killed hook is a silent allow). A gh read gets what is left, never more than REVIEW_READ_TIMEOUT. The cutover read runs inside
 merge's shared_deadline for what is left, so each deepen fetch gets the time left, never more than its own cap (merge MERGE_READ_TIMEOUT). When the budget runs out mid-deepen,
-review_stamp_since raises Stop naming the budget and starts no fetch after it, and the hook adds the UNKNOWN cutover note; a spent budget before a gh read adds the UNKNOWN read note.
-The budget covers only review_record_problem: its gh reads and the cutover read. It does not cover relay_reasons, which runs past_ruling_problem, a model call of up to 15 s
-(hooks/call_judge.py), after it. A hang there can pass the hook's 35 s timeout, and a killed hook is a silent allow. A budget for the whole hook is queued as step report-guard-hook-budget.
+review_stamp_since raises Stop naming the budget and starts no fetch after it. A budget that runs out before the PR's record is read refuses the claim to run again, and so does one that
+runs out before the cutover read of an unstamped record, since only the cutover could place it. A stamped record done for the live head stays allowed with the UNKNOWN cutover note, since
+its verdict does not depend on the cutover. A cutover read that fails for another cause is no budget run-out: it gets the UNKNOWN note and no refusal.
+The budget covers only review_record_problem: its gh reads and the cutover read. It does not cover relay_reasons, which runs past_ruling_problem, a model call of up to 60 s
+(hooks/call_judge.py PAST_RULING_TIMEOUT), after it. Both together can pass the hook's 80 s timeout, and a killed hook is a silent allow. A budget for the whole hook is queued as step report-guard-hook-budget.
 No log, process kept or timer. A stop_hook_active rewrite is not checked.
 """
 import datetime
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 
@@ -2423,8 +2426,8 @@ REVIEW_HISTORY_RE = re.compile(
 REVIEW_CLAUSE_SPLIT_RE = re.compile(r"[,;]|--")
 REVIEW_PR_RE = re.compile(r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b", re.I)
 REVIEW_READ_TIMEOUT = 30  # seconds for one gh read, cut to what REVIEW_HOOK_BUDGET has left
-# Seconds for every gh read and the cutover read of one Stop (review_record_problem only). 28 s leaves a 7 s margin under the 35 s timeout of this hook in settings.json
-# (a kill is a silent allow). The margin is unmeasured. The judge call in past_ruling_problem is outside this budget.
+# Seconds for every gh read and the cutover read of one Stop (review_record_problem only). 28 s leaves a 52 s margin under the 80 s timeout of this hook in settings.json
+# (a kill is a silent allow). The margin is unmeasured. The judge call in past_ruling_problem (up to 60 s) is outside this budget, so the two together can pass the timeout.
 REVIEW_HOOK_BUDGET = 28
 REVIEW_NO_PR = (
     "Review-record guard: a line of this reply claims a review PASS but names no pull request. Name it as #<n> on that "
@@ -2444,6 +2447,10 @@ REVIEW_UNPARSED = (
     "so merge reads no record from it.%s Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer "
     "read> --kind <kind> --guard <yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a new comment on "
     "PR #%d, then report again."
+)
+REVIEW_BUDGET = (
+    "Review-record guard: this reply claims a review PASS for PR #%d, and the time budget of this check ran out before it could read what "
+    "decides that claim, so the claim is not checked. Run again: report again once the PR's review record can be read in time."
 )
 REVIEW_UNPARSED_CI = (" Cause: the CI line must be the last line before `---`, and nothing may follow it; a line after the CI "
                       "line makes the record unreadable.")
@@ -2484,6 +2491,12 @@ def _gh_json(args, cwd, end):
     if run.returncode:
         raise RuntimeError("gh api exited %d" % run.returncode)
     return json.loads(run.stdout)
+
+
+def _budget_spent(err, end):
+    """True when `err` is the Stop's budget running out, not a read that failed: a read cut at its timeout, our own refusal to start one, or a Stop
+    raised once the budget is gone (merge's review_stamp_since raises Stop on a spent deadline). A failed git read leaves time on the clock."""
+    return isinstance(err, (TimeoutError, subprocess.TimeoutExpired)) or end - time.monotonic() <= 0
 
 
 def _newest_marked(comments, merge_mod):
@@ -2547,10 +2560,13 @@ def review_record_problem(hook, text):
                               "--paginate", "--slurp"], cwd, end)
             comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
             default = (pull["base"].get("repo") or {}).get("default_branch")  # the pull carries it, so no repo read
-        except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block
+        except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block, unless the budget cut it
+            if _budget_spent(err, end):
+                reasons.append(REVIEW_BUDGET % n)
+                continue
             notes.append("Review-record guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
             continue
-        cutover, cutover_known = None, True
+        cutover, cutover_known, cutover_cut = None, True, False
         try:
             if cwd:
                 left = end - time.monotonic()
@@ -2560,6 +2576,7 @@ def review_record_problem(hook, text):
                     cutover = merge_mod.review_stamp_since(cwd, pull["base"]["ref"], default=default)
         except Exception as err:  # the cutover read failing never refuses by itself, and it never hides the record check below
             cutover_known = False
+            cutover_cut = _budget_spent(err, end)
             notes.append("Review-record guard: UNKNOWN, the review cutover could not be read for PR #%d (%s)." % (n, type(err).__name__))
         try:
             rec, body = _newest_record(n, comments, merge_mod, cutover)
@@ -2573,7 +2590,9 @@ def review_record_problem(hook, text):
             notes.append("Review-record guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
             continue
         if placed and placed["n"] == n and merge_mod.review_state(placed, live)[0] == "done":
-            continue  # only the cutover could refuse this unstamped record: the UNKNOWN note above stands, no refusal
+            if cutover_cut:  # the budget, not a failed read, left the cutover unknown: only the cutover could place this record
+                reasons.append(REVIEW_BUDGET % n)
+            continue  # a failed cutover read: the UNKNOWN note above stands, no refusal
         if rec is None and body is not None and placed is None:
             cause = REVIEW_UNPARSED_CI if _text_after_ci_line(body, merge_mod) else ""
             if cutover_known and not cutover and not any(line.startswith("Stamp: ") for line in body.splitlines()):
