@@ -382,6 +382,9 @@ REVIEW_UNREAD_REMEDY = "run the edit again when `gh` can read the comment, or po
 REVIEW_LITERAL_ID_REMEDY = ("write the route with a literal `owner/repo` and a literal comment id, such as repos/owner/repo/issues/comments/<id>, "
                             "or with the `{owner}/{repo}` placeholder, not a shell variable or `$(...)`; the guard then reads that route. "
                             "Or post a new comment.")
+REVIEW_LITERAL_PR_REMEDY = ("write the pull request as a literal number and the repo as a literal `-R owner/repo`, "
+                            "such as `gh pr comment <number> -R owner/repo --edit-last`, not a shell variable or `$(...)`; "
+                            "the guard then reads that pull request. Or post a new comment.")
 REVIEW_BODY_FILE_REASON = (
     "Rule (pr-review-record): the new body's file %s could not be read, so the check could not run and the edit is refused. "
     "The body may be a review record. "
@@ -483,6 +486,8 @@ def _old_body(host, edit):
         if code:
             raise RuntimeError("reading the comment failed")
         return str(json.loads(out).get("body") or "")
+    if "$" in str(ref or "") or "`" in str(ref or ""):   # a variable selector names no pull request, so no retry reads it
+        raise _LiteralIdNeeded("the pull request is not a literal the guard can read")
     rows = host.pages("issues/%d/comments" % host.pr_number(ref))   # 100 a page, so a long thread stays inside MERGE_READ_TIMEOUT
     return str(rows[-1].get("body") or "") if rows else ""
 
@@ -500,7 +505,8 @@ def _old_body_hit(edit, repo: str, where: str):
             old = _old_body(module.Host(repo=repo or None, cwd=where or None), edit)
     except (Exception, SystemExit) as e:
         why = cap_safe((str(e).splitlines() or [type(e).__name__])[0], 80)
-        remedy = REVIEW_LITERAL_ID_REMEDY if isinstance(e, _LiteralIdNeeded) else REVIEW_UNREAD_REMEDY
+        literal = REVIEW_LITERAL_PR_REMEDY if edit[0] == "last" else REVIEW_LITERAL_ID_REMEDY   # each names the form it was typed in
+        remedy = literal if isinstance(e, _LiteralIdNeeded) else REVIEW_UNREAD_REMEDY
         return "edit of a comment, old body not read", REVIEW_OLD_UNREAD_REASON % (why, remedy)
     if module.review_marked(old):
         return "edit of a comment that holds a review record", REVIEW_WITHDRAW_REASON % _review_render(module, "<pr>", "<live head>")
