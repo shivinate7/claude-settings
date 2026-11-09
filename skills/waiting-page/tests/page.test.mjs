@@ -3392,13 +3392,20 @@ async function dismissRowAt(t, { folded, width, pct, scheme }) {
 }
 // The row's edges against one element's, in px. The element sits in the row when both its edges fall inside the row's, to half a pixel.
 // id: the ask whose row holds the element; the Dismiss row by default.
-const inRowFault = (page, sel, name, id = DIS_ROW) => page.evaluate(({ id, sel, name }) => {
-  const row = document.getElementById("row-" + id), el = row.querySelector(sel);
-  if (!el) return `${name} is not in the row`;
-  const r = row.getBoundingClientRect(), e = el.getBoundingClientRect();
-  if (e.left >= r.left - 0.5 && e.right <= r.right + 0.5) return null;
-  return `${name} runs from ${Math.round(e.left)} to ${Math.round(e.right)} px, past its row, which runs from ${Math.round(r.left)} to ${Math.round(r.right)} px`;
-}, { id, sel, name });
+// box: the box's selector, sel: the element's inside it (the first match, or every match when all is true). boxName reads in the message.
+const inBoxFault = (page, { box, sel, name, boxName, all = false }) => page.evaluate(({ box, sel, name, boxName, all }) => {
+  const b = document.querySelector(box);
+  if (!b) return `${boxName} is not drawn`;
+  const els = all ? [...b.querySelectorAll(sel)] : [b.querySelector(sel)].filter(Boolean);
+  if (!els.length) return `${name} is not in ${boxName}`;
+  const r = b.getBoundingClientRect(), faults = [];
+  for (const el of els) {
+    const e = el.getBoundingClientRect();
+    if (!(e.left >= r.left - 0.5 && e.right <= r.right + 0.5)) faults.push(`${name} runs from ${Math.round(e.left)} to ${Math.round(e.right)} px, past ${boxName}, which runs from ${Math.round(r.left)} to ${Math.round(r.right)} px`);
+  }
+  return faults.length ? faults.join("; ") : null;
+}, { box, sel, name, boxName, all });
+const inRowFault = (page, sel, name, id = DIS_ROW) => inBoxFault(page, { box: "#row-" + id, sel, name, boxName: "its row" });
 const ROW_CLAIMS = {
   sideways: { what: "the page does not scroll sideways", check: (page) => sidewaysFault(page) },
   dismiss: { what: "the Dismiss press sits inside its row", check: (page) => inRowFault(page, ".replyend .endrow > .btn.fixw", "the Dismiss press") },
@@ -3553,6 +3560,84 @@ for (const width of [180, 240]) for (const scheme of SCHEMES) {
     await zoomedTo(page, 200);
     const g = await page.evaluate(() => ({ right: document.getElementById("send").getBoundingClientRect().right, iw: innerWidth }));
     assert.ok(g.right <= g.iw + 0.5, `Send answers runs to ${Math.round(g.right)} px in a ${g.iw} px window, ${where}`);
+  });
+}
+
+// ---------------------------------------------------------------- narrow word breaks: the parked block, the folded date and the Dismiss reason
+// Each claim is one test after its scope (the width, the text size and the element drawn), so a failure names one cause. A case that passes on
+// the old page is named "(control)".
+// The page's sideways scroll against its client width, in px: null when the page fits. The cause is named: the text run whose right edge sets the
+// scroll width (a run can pass its element's box, which no box shows), else the element sidewaysFault names.
+const sidewaysClaim = async (page) => {
+  const g = await page.evaluate(() => {
+    const sw = document.documentElement.scrollWidth, cw = document.documentElement.clientWidth;
+    if (sw <= cw) return null;
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      if (!n.data.trim()) continue;
+      const rg = document.createRange(); rg.selectNodeContents(n);
+      if ([...rg.getClientRects()].some((r) => Math.abs(r.right - sw) <= 1)) {
+        const p = n.parentElement;
+        return { sw, cw, run: `the text "${n.data.trim().slice(0, 40)}" in ${p.tagName.toLowerCase()}${p.id ? "#" + p.id : ""}` };
+      }
+    }
+    return { sw, cw, run: null };
+  });
+  if (!g) return null;
+  return g.run ? `the page is ${g.sw} px wide in a ${g.cw} px window: ${g.run} sets the width` : (await sidewaysFault(page)) || `the page is ${g.sw} px wide in a ${g.cw} px client width`;
+};
+
+// Unpark and Drop of one parked line, at 180 to 260 wide, at 200% and 300% text. open() waits for an item, so the one open item is DECISION, as the parked cases use.
+async function parkedPageAt(t, { width, pct, scheme }) {
+  const page = await open(t, { items: [DECISION], meta: PARK_META, viewport: { width, height: 800 }, scheme }); if (!page) return null;
+  await parkLoaded(page);
+  await need(parkBtn(page, PARK_A, "unpark"), "the parked line has no Unpark button");
+  await need(parkBtn(page, PARK_A, "drop"), "the parked line has no Drop button");
+  await zoomedTo(page, pct);
+  return page;
+}
+// The block and its two presses sit inside the window. The page's own scroll width is not the claim here: at 180 and 200 wide doubled, the tab
+// list's count and the Unpark press both end at 209 px, so the page width would name the tab list. The tab list has its own tests.
+// Green on the old page (390dd3f97): the block fits the window at 220 wide and wider doubled, and the presses fit the block at 240 and wider doubled.
+const parkControl = (pct, width, claim) => pct === 200 && width >= (claim === "window" ? 220 : 240) ? " (control)" : "";
+for (const pct of [200, 300]) for (const width of [180, 200, 220, 240, 260]) for (const scheme of SCHEMES) {
+  const where = `at ${width} wide with the root font size ${pct === 200 ? "doubled" : "tripled"}`;
+  test(`narrow word breaks, ${scheme}: the parked block ${where}${parkControl(pct, width, "window")}: the block and its acts sit inside the window`, async (t) => {
+    const page = await parkedPageAt(t, { width, pct, scheme }); if (!page) return;
+    const fault = await inBoxFault(page, { box: "html", sel: ".parked, .parked .btn.pkb", name: "the parked block or one of its acts", boxName: "the window", all: true });
+    assert.ok(!fault, fault && `${fault}, ${where}`);
+  });
+  test(`narrow word breaks, ${scheme}: the parked block ${where}${parkControl(pct, width, "press")}: Unpark and Drop sit inside the block`, async (t) => {
+    const page = await parkedPageAt(t, { width, pct, scheme }); if (!page) return;
+    const fault = await inBoxFault(page, { box: ".parked", sel: ".btn.pkb", name: "the Unpark or Drop press", boxName: "the parked block", all: true });
+    assert.ok(!fault, fault && `${fault}, ${where}`);
+  });
+}
+
+// The folded row's date (.frow .fwhen > .fdate) stays inside its card at 180 and 220 wide, at 300% text: Dismiss, Restore, and a waiting reply's Show answer.
+// 220 and 390 wide are green on the old page (30a2dd126): controls.
+for (const [width, note] of [[180, ""], [220, " (control)"], [390, " (control)"]]) for (const kind of Object.keys(FOLD_ROWS)) for (const scheme of SCHEMES) {
+  test(`narrow word breaks, ${scheme}: folded answered row ${FOLD_ROWS[kind].label} at ${width} wide with the root font size tripled${note}: the date does not run past its card`, async (t) => {
+    const page = await foldedRowPage(t, kind, width, scheme); if (!page) return;
+    await zoomedTo(page, 300);
+    foldedScope(await foldedDate(page, FOLD_ROWS[kind].ask.id), kind, width);
+    const fault = await inBoxFault(page, { box: "#row-" + FOLD_ROWS[kind].ask.id, sel: ".frow .fwhen > .fdate", name: "the date", boxName: "its card" });
+    assert.ok(!fault, fault && `${fault}, at ${width} wide with the root font size tripled`);
+  });
+}
+
+// The Dismiss reason in an unfolded row with a waiting reply, at 180 wide with the root font size tripled: the page does not scroll sideways.
+// The 390 wide case is green on the old page: a control.
+for (const [width, note] of [[180, ""], [390, " (control)"]]) for (const scheme of SCHEMES) {
+  test(`narrow word breaks, ${scheme}: the Dismiss reason in an unfolded row with a waiting reply at ${width} wide with the root font size tripled${note}: the page does not scroll sideways`, async (t) => {
+    const id = FOLD_ROWS.wait.ask.id;
+    const page = await foldedRowPage(t, "wait", width, scheme, { unfolded: true }); if (!page) return;
+    await zoomedTo(page, 300);
+    const s = await page.evaluate((id) => ({ folded: document.getElementById("row-" + id).classList.contains("folded"), why: [...document.querySelectorAll(".endrow .dwhy")].map((e) => e.textContent.trim()) }), id);
+    assert.equal(s.folded, false, `the waiting-reply row is folded at ${width} wide, not unfolded`);
+    assert.deepEqual(s.why, [DIS_OFF], "the Dismiss reason under .endrow reads " + JSON.stringify(s.why) + ", not " + JSON.stringify(DIS_OFF));
+    const fault = await sidewaysClaim(page);
+    assert.ok(!fault, fault && `${fault}, with the Dismiss reason at ${width} wide with the root font size tripled`);
   });
 }
 
