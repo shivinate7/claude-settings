@@ -486,12 +486,23 @@ def _edit_reason(module):
     return "edit of a review record comment", REVIEW_EDIT_REASON % _review_render(module, "<pr>", "<live head>")
 
 
+GRAPHQL_NODE_QUERY = 'query=query{node(id:"%s"){... on IssueComment{body}}}'   # the id is a literal the caller matched with GRAPHQL_NODE_ID
+GRAPHQL_NODE_ID = re.compile(r"[A-Za-z0-9_=+/-]{1,128}")
+
+
 def _old_body(host, edit):
-    """The one read of the body an edit replaces. `edit` is ("comment", id) for an edit that names a comment, or ("last", selector)
+    """The one read of the body an edit replaces. `edit` is ("comment", id) for an edit that names a comment, ("node", node id) for a
+    GraphQL mutation that names it by node id, or ("last", selector)
     for `--edit-last`, which edits the caller's last comment on that pull request: the newest comment of the listing by the caller.
     The caller's login is a second read, made only when the listing names more than one author, so a thread of one author costs
     one read. A read that fails raises."""
     kind, ref = edit
+    if kind == "node":   # no REST route takes a node id, so this read is GraphQL
+        code, out = host.gh(["api", "graphql", "-f", GRAPHQL_NODE_QUERY % ref], host.cwd)
+        node = (json.loads(out).get("data") or {}).get("node") if not code else None
+        if not isinstance(node, dict):
+            raise RuntimeError("reading the comment node failed")
+        return str(node.get("body") or "")
     if kind == "comment":
         if isinstance(ref, str) and ref.isdigit():
             ref = int(ref)
@@ -582,7 +593,7 @@ def review_record_hit(bodies, repo: str, selector, where: str, edit=None, variab
     (`_old_body`) and is refused when that holds a record, or when the read could not run. `unseen` is true when the new body cannot be
     seen (`--input`, stdin): it is read like an unmarked body. `unread` names a body file that could not be read: refused, no read.
     No new body named and none unseen: None, no read. `marked_only`: the old body of the comment cannot be named (a GraphQL
-    mutation), so an edit with no marked body is left alone, with no read.
+    mutation whose node id is not a literal), so an edit with no marked body is left alone, with no read.
     `variable` names the route parts that are shell expansions (`_variable_reason`), empty for a literal route: a marked post is refused with no read, as its pull request cannot be checked."""
     found = _marked_bodies(bodies)
     if edit and not found:

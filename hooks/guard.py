@@ -418,7 +418,7 @@ while True:
             conflict_markers_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_note, pr_call_target, ansi_c_decoded,
-            shell_expanded,
+            shell_expanded, GRAPHQL_NODE_ID,
             FILE_WRITE_TOOLS, UPDATE_COMMENT_TOOL,
         )
         _loading = "guard_frozen"
@@ -1700,7 +1700,67 @@ def _api_bodies(args, keys=("body",)):
 
 
 _GRAPHQL_COMMENT = re.compile(r"\b(addComment|updateIssueComment)\b")
-_GRAPHQL_BODY = re.compile(r'\bbody\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
+# A body is a quoted string (group `plain`, escapes) or a block string (group `block`, raw: only `\"""` is an escape). The block form is
+# tried first, as its opener starts with the empty string `""`.
+_GRAPHQL_BODY = re.compile(r'\bbody\s*:\s*(?:"""(?P<block>(?:\\"""|(?!""").)*)"""|"(?P<plain>(?:[^"\\]|\\.)*)")', re.DOTALL)
+_GRAPHQL_NODE = re.compile(r'\bid\s*:\s*"([^"\\]*)"')   # the `id:` of an updateIssueComment input, a literal node id
+
+
+def _graphql_block_string(text: str) -> str:
+    """Return the text a GraphQL block string holds, as the GraphQL spec reads it: an escaped triple quote is a triple quote, the indent
+    every line after the first shares is dropped, and so are the blank lines at both ends. The marker test reads the first line."""
+    lines = text.replace('\\"""', '"""').split("\n")
+    indents = [len(line) - len(line.lstrip(" \t")) for line in lines[1:] if line.strip()]
+    common = min(indents, default=0)
+    lines = lines[:1] + [line[common:] for line in lines[1:]]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines)
+
+
+def _graphql_bodies(query: str):
+    """Return the texts of the `body:` strings in a GraphQL query, quoted or block, each as GraphQL reads it."""
+    return [_graphql_block_string(found["block"]) if found["block"] is not None else _graphql_string(found["plain"])
+            for found in _GRAPHQL_BODY.finditer(query)]
+
+
+def _api_input_file(args) -> str:
+    """Return the file a `gh api` call takes its request body from, `--input FILE` or `--input=FILE`, else ''. `-` is stdin: ''."""
+    for index, arg in enumerate(args):
+        name = arg[len("--input="):] if arg.startswith("--input=") else (args[index + 1] if arg == "--input" and index + 1 < len(args) else "")
+        if name and name != "-":
+            return name
+    return ""
+
+
+def _read_text_file(name: str, where: str):
+    """Return the first MESSAGE_FILE_MAX characters of the file `name` names from `where`, else None when it cannot be read."""
+    try:
+        with open(os.path.normpath(_absolute(name, where)), encoding="utf-8", errors="replace") as handle:
+            return handle.read(MESSAGE_FILE_MAX)
+    except Exception:
+        return None
+
+
+def _graphql_file_queries(rest, where: str):
+    """Return (queries, read) for the query files of a `gh api graphql` call: `-F query=@file`, and the `query` of a JSON request body
+    read by `--input` (a body that is no JSON object is the query itself). `read` names the files that were read; a file that cannot
+    be read is left out, and the caller reports it."""
+    queries, read = [], []
+    for name in _api_bodies(rest, ("query",))[1] + [_api_input_file(rest)]:
+        text = _read_text_file(name, where) if name else None
+        if text is None:
+            continue
+        read.append(name)
+        try:
+            request = json.loads(text)
+        except ValueError:
+            request = None
+        queries.append(str(request.get("query") or "") if isinstance(request, dict) else text)
+    return queries, read
+
 
 def review_post_hit(segment: str, raw: str, where: str, before: int, previous: str = ""):
     """Return (matched, reason) when this segment posts a review record the guard must refuse, else None. Judges `gh pr comment` and `gh issue comment`
@@ -1708,11 +1768,14 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
     each with the bodies of the heredocs its own header holds. A body of exactly `$(cat FILE)`, and a stdin body piped from
     `cat FILE` (`previous` is the segment piped in), are read from FILE. A file that cannot be read allows, with a note. No body
     whose first line is the marker: no read. A GraphQL `addComment` or `updateIssueComment` names its comment by node id, so no
-    word of the call names the pull request: a marked body is refused with no read, and a call with no marked body is left alone."""
+    word of the call names the pull request: a marked body is refused with no read. The mutation is read from `-f query=`, from
+    `-F query=@file` and from a JSON file of `--input`, and its body from a quoted or a block string. An `updateIssueComment`
+    with no marked body reads the old body of its node, one GraphQL read, and is refused when that holds a record or cannot be read.
+    One whose node id is not a literal is left alone."""
     rest = gh_call_of(ansi_c_decoded(segment))   # bash sends a `$'...'` body decoded
     if rest is None:
         return None
-    edit, variable, graphql = None, (), False
+    edit, variable, graphql, input_read = None, (), False, False
     if rest[:2] in (["pr", "comment"], ["issue", "comment"]):   # an issue comment reaches the same pull request
         args = rest[2:]
         selector, repo = _comment_target(args)
@@ -1723,13 +1786,21 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
     elif rest[:1] == ["api"]:
         rest = gh_call_of(_joined_substitutions(ansi_c_decoded(segment))) or rest
         if _api_endpoint(rest) == "graphql":
-            mutation = _GRAPHQL_COMMENT.search(" ".join(_api_bodies(rest, ("query",))[0]))
+            file_queries, read = _graphql_file_queries(rest, where)
+            queries = _api_bodies(rest, ("query",))[0] + file_queries
+            mutation = _GRAPHQL_COMMENT.search(" ".join(queries))
             if mutation is None:
                 return None
             texts, files, stdin = _api_bodies(rest, None)   # a variable body has any key
-            texts += [_graphql_string(text) for query in list(texts) for text in _GRAPHQL_BODY.findall(query)]
+            files = [name for name in files if name not in read]   # a query file was read above; an unread one stays for the note below
+            texts += [text for query in list(texts) + file_queries for text in _graphql_bodies(query)]
             repo, selector, variable, graphql = "", "", ("graphql",), True
-            edit = ("comment", "") if mutation.group(1) == "updateIssueComment" else None
+            if mutation.group(1) == "updateIssueComment":
+                node = next((found[1] for query in queries if "updateIssueComment" in query
+                             for found in [_GRAPHQL_NODE.search(query, query.find("updateIssueComment"))] if found), "")
+                edit = ("node", node) if GRAPHQL_NODE_ID.fullmatch(node) else ("comment", "")
+                graphql = edit[0] != "node"   # a literal node id names the old body to read; any other id leaves the edit alone
+            input_read = _api_input_file(rest) in read
         else:
             route = _comment_route(rest)
             if route is None:
@@ -1762,14 +1833,14 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
             judged_stdin = True
     unread = ""
     for name in files:
-        try:
-            with open(os.path.normpath(_absolute(name, where)), encoding="utf-8", errors="replace") as handle:
-                texts.append(handle.read(MESSAGE_FILE_MAX))
-        except Exception:
+        text = _read_text_file(name, where)
+        if text is not None:
+            texts.append(text)
+        else:
             unread = unread or name
             if edit is None:   # the not-checked note is a post's fail-open line; an edit fails closed
                 review_note("the body file " + name + " could not be read")
-    unseen = (stdin and not judged_stdin) or _api_input_named(rest)   # an edit's new body the guard cannot see
+    unseen = (stdin and not judged_stdin) or (_api_input_named(rest) and not input_read)   # an edit's new body the guard cannot see
     unseen_stdin = stdin and not judged_stdin
     if unseen_stdin and edit is None:
         review_note("the body comes from stdin and cannot be read")
