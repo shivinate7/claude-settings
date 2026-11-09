@@ -129,7 +129,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        found, or a subject with no cs-repo tag. After a whole read with no carrier it also asks when an
                        open pull request of the cs-repo has the step's head ref (lane_head_refs) and the target does
                        not carry the step, or the step record on origin/roadmap names another session in its `lane`
-                       field; a failed read of either asks. An override lifts it.
+                       field, unless the whole read shows that session as a row whose newest sight is archived or
+                       lacks the step; a failed read of either asks. An override lifts it.
   sendmessage-session-id
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
