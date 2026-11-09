@@ -69,6 +69,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import precompact_handoff as ph  # noqa: E402  the one home of the handoff and flag paths
+import local_time  # noqa: E402  the one home of the inbox paths
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
 
 # Assembled, so this file never holds the token whole.
@@ -102,6 +103,7 @@ FAMILIES = {
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
+    "hook-bypass": "a git commit, merge or push that skips the git hooks: core.hooksPath on the command or in the environment, --no-verify, and -n on commit; the mutation tool's own exemption",
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
@@ -139,6 +141,7 @@ FAMILIES = {
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
     "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
     "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
+    "handoff-sections": "a write that leaves a session's handoff without a section the prompt's marker names is refused, naming the sections; the marker is the one list; the fail-open copies; and the cost",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
@@ -644,9 +647,39 @@ PUSHLANEMASTER = os.path.join(ROOT, "pushlanemaster")
 PUSHSELF = os.path.join(ROOT, "pushself")
 PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
 PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
-# The rule ids the two new asks name. Each is the one home for its id in this file.
+# PUSHOWNREF is `lane-x`, tracking origin/batch-1, and origin/lane-x exists too. The stray rule
+# reads that ref as a destination already on the remote, so an implied push to its own name is silent there.
+PUSHOWNREF = os.path.join(ROOT, "pushownref")
+# Rule push-main reads the remote a push names (ruling 207 a, judged on its URL). Every push fixture's origin is
+# PUSHREMOTE, a network URL the guard never contacts, so the existing push-main asks keep their meaning.
+# PUSHLOCAL has a local origin (a bare path), PUSHSSH an scp-form origin, and PUSHNOREMOTE no remote at all.
+# PUSHLOCALSTRAY has the same local origin, and its branch `feat` tracks origin/other, so an implied destination
+# on it is a stray push. PUSHLOCAL's `feat` has no upstream.
+PUSHREMOTE = "https://example.invalid/repo.git"
+PUSHSSHURL = "git@github.com:o/r.git"
+PUSHLOCAL = os.path.join(ROOT, "pushlocal")
+PUSHLOCALSTRAY = os.path.join(ROOT, "pushlocalstray")
+# PUSHLOCALMAIN is main with the same local origin and tracks origin/main, as PUSHMAINUP does with an https origin.
+# It is the local-origin twin of PUSHMAINUP: the two differ only in the origin's kind.
+PUSHLOCALMAIN = os.path.join(ROOT, "pushlocalmain")
+PUSHSSH = os.path.join(ROOT, "pushssh")
+PUSHNOREMOTE = os.path.join(ROOT, "pushnoremote")
+# Agent-worktree branch names (rule push-agent-branch). A branch is named by HEAD, so each name has its own
+# checkout. PUSHAGENT holds the name that a stray push sent to origin, with no upstream. The other shapes and
+# the near misses sit beside it.
+PUSHAGENT = os.path.join(ROOT, "pushagent")            # claude/agent-<hex>
+PUSHAGENTWT = os.path.join(ROOT, "pushagentwt")        # worktree-agent-<hex>
+PUSHAGENTBARE = os.path.join(ROOT, "pushagentbare")    # agent-<hex>
+PUSHAGENTNOTES = os.path.join(ROOT, "pushagentnotes")  # agent-notes: a prefix with no hex after it
+PUSHAGENTMYABC = os.path.join(ROOT, "pushagentmyabc")  # my-agent-abc: a prefix, too short to hold hex
+PUSHAGENTMYHEX = os.path.join(ROOT, "pushagentmyhex")  # my-agent-<hex>: hex behind a prefix, not the shape
+PUSHAGENTSHORT = os.path.join(ROOT, "pushagentshort")  # agent-<7 hex>: a hex tail one character short of the shape
+PUSHAGENTEIGHT = os.path.join(ROOT, "pushagenteight")  # agent-<8 hex>: the exact shape, at its lower bound
+PUSHAGENTCFG = os.path.join(ROOT, "pushagentcfg")      # claude/agent-<hex> with push.autoSetupRemote in its own config
+# The rule ids the push asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
+PUSH_AGENT_RULE = "push-agent-branch"   # a non-forced push whose destination is an agent-worktree branch name
 # roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
@@ -1839,16 +1872,21 @@ def _build_branch():
 
 def _build_push():
     """The push destinations: the feat, main, trunk and upstream repos and their remotes."""
-    materialize(BRANCHREMOTE)  # every push destination adds the bare remote _build_branch makes
+    materialize(BRANCHREMOTE)  # PUSHLOCAL's origin is this bare remote, a local path
     # ----------------------------------------------------------------- push destinations
     for where, head, branch in ((PUSHFEAT, "main", "feat"), (PUSHMAIN, "main", "main"),
                                 (PUSHTRUNK, "trunk", "feat"), (PUSHTRUNKLOCAL, "trunk", "feat"),
                                 (PUSHNOHEAD, None, "feat"), (PUSHDETACHED, "main", None),
                                 (PUSHSAMETAG, "main", "main"), (RECROADMAP, "main", "roadmap"),
-                                (RECFORK, "main", "roadmap-fork")):
+                                (RECFORK, "main", "roadmap-fork"),
+                                (PUSHLOCAL, "main", "feat"), (PUSHLOCALSTRAY, "main", "feat"),
+                                (PUSHLOCALMAIN, "main", "main"),
+                                (PUSHSSH, "main", "feat"), (PUSHNOREMOTE, None, "feat")):
         make_repo(where, {"base.txt": "base\n"})
         if head:
-            run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+            origin = {PUSHLOCAL: slash(BRANCHREMOTE), PUSHLOCALSTRAY: slash(BRANCHREMOTE),
+                      PUSHLOCALMAIN: slash(BRANCHREMOTE), PUSHSSH: PUSHSSHURL}.get(where, PUSHREMOTE)
+            run_vcs(where, "remote", "add", "origin", origin)
             run_vcs(where, "update-ref", "refs/remotes/origin/" + head, "HEAD")
             run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD",
                     "refs/remotes/origin/" + head)
@@ -1858,6 +1896,31 @@ def _build_push():
             run_vcs(where, "checkout", "-q", "--detach")
         if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
             sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    # Each remote fixture reads back the origin it was given (P7), so a case never judges a remote the build did
+    # not set. PUSHNOREMOTE must have no remote at all.
+    for where, want in ((PUSHLOCAL, slash(BRANCHREMOTE)), (PUSHLOCALSTRAY, slash(BRANCHREMOTE)),
+                        (PUSHLOCALMAIN, slash(BRANCHREMOTE)), (PUSHSSH, PUSHSSHURL)):
+        if run_vcs(where, "config", "--get", "remote.origin.url").stdout.strip() != want:
+            sys.exit("fixture setup failed in build_fixtures: %r needs origin %s" % (where, want))
+    if run_vcs(PUSHNOREMOTE, "remote").stdout.strip():
+        sys.exit("fixture setup failed in build_fixtures: PUSHNOREMOTE must have no remote")
+
+    # PUSHLOCALSTRAY's upstream is set by git (--set-upstream-to), then read back, so a case never judges a
+    # fixture without it.
+    run_vcs(PUSHLOCALSTRAY, "update-ref", "refs/remotes/origin/other", "HEAD")
+    run_vcs(PUSHLOCALSTRAY, "branch", "--set-upstream-to=origin/other", "feat")
+    if run_vcs(PUSHLOCALSTRAY, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip() \
+            != "origin/other":
+        sys.exit("fixture setup failed in build_fixtures: PUSHLOCALSTRAY needs upstream origin/other")
+
+    # PUSHLOCALMAIN tracks origin/main, set by git and read back, the same as PUSHMAINUP. Its checkout is main.
+    run_vcs(PUSHLOCALMAIN, "branch", "--set-upstream-to=origin/main", "main")
+    if run_vcs(PUSHLOCALMAIN, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip() \
+            != "origin/main":
+        sys.exit("fixture setup failed in build_fixtures: PUSHLOCALMAIN needs upstream origin/main")
+    if run_vcs(PUSHLOCALMAIN, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() != "main":
+        sys.exit("fixture setup failed in build_fixtures: PUSHLOCALMAIN must sit on main")
 
     # The feat destination holds the remote-tracking refs that the push cost case's forms read: feat for
     # a HEAD or bare push, lane/foo for a refspec push or HEAD:lane/foo. A local lane/foo is the source.
@@ -1885,7 +1948,7 @@ def _build_push():
     # A dangling origin/HEAD: it names origin/gone, which is missing. origin/main exists, so the read
     # order gives main as the default branch.
     make_repo(PUSHDANGLING, {"base.txt": "base\n"})
-    run_vcs(PUSHDANGLING, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHDANGLING, "remote", "add", "origin", PUSHREMOTE)
     run_vcs(PUSHDANGLING, "update-ref", "refs/remotes/origin/main", "HEAD")
     run_vcs(PUSHDANGLING, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone")
     run_vcs(PUSHDANGLING, "checkout", "-q", "-b", "feat")
@@ -1901,7 +1964,7 @@ def _build_push():
     for where, remote_branch, absent in ((PUSHNOHEADMAIN, "main", "master"),
                                          (PUSHONLYMASTER, "master", "main")):
         make_repo(where, {"base.txt": "base\n"})
-        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
         run_vcs(where, "update-ref", "refs/remotes/origin/" + remote_branch, "HEAD")
         run_vcs(where, "checkout", "-q", "-b", "feat")
         if (run_vcs(where, "symbolic-ref", "-q", "refs/remotes/origin/HEAD").returncode == 0
@@ -1915,7 +1978,7 @@ def _build_push():
     # Two remotes with two default branches. `feat` tracks upstream/main, so a bare push goes there.
     make_repo(PUSHUPSTREAM, {"base.txt": "base\n"})
     for remote, default in (("origin", "develop"), ("upstream", "main")):
-        run_vcs(PUSHUPSTREAM, "remote", "add", remote, slash(BRANCHREMOTE))
+        run_vcs(PUSHUPSTREAM, "remote", "add", remote, PUSHREMOTE)
         run_vcs(PUSHUPSTREAM, "update-ref", "refs/remotes/%s/%s" % (remote, default), "HEAD")
         run_vcs(PUSHUPSTREAM, "symbolic-ref", "refs/remotes/%s/HEAD" % remote,
                 "refs/remotes/%s/%s" % (remote, default))
@@ -1934,7 +1997,7 @@ def _build_push():
     for where, mode, merge in ((PUSHUP, "upstream", "main"), (PUSHUPSELF, "upstream", "feat"),
                                (PUSHNOUP, "upstream", None), (PUSHMATCH, "matching", None)):
         make_repo(where, {"base.txt": "base\n"})
-        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
         run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
         run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
         run_vcs(where, "checkout", "-q", "-b", "feat")
@@ -1948,37 +2011,46 @@ def _build_push():
     # The upstream shapes of rulings 206 a and 207 a. Each upstream is set by git itself (--track and
     # --set-upstream-to), then read back, so a case never judges a fixture that lacks its upstream.
     make_repo(PUSHSTRAY, {"base.txt": "base\n"})
-    run_vcs(PUSHSTRAY, "remote", "add", "origin", slash(BRANCHREMOTE))
-    run_vcs(PUSHSTRAY, "remote", "add", "fork", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTRAY, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHSTRAY, "remote", "add", "fork", PUSHREMOTE)
     run_vcs(PUSHSTRAY, "update-ref", "refs/remotes/origin/lane/x", "HEAD")
     run_vcs(PUSHSTRAY, "checkout", "-q", "-b", "mylocal")
     run_vcs(PUSHSTRAY, "branch", "--set-upstream-to=origin/lane/x", "mylocal")
     run_vcs(PUSHSTRAY, "config", "push.default", "simple")
 
     make_repo(PUSHSELF, {"base.txt": "base\n"})
-    run_vcs(PUSHSELF, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSELF, "remote", "add", "origin", PUSHREMOTE)
     run_vcs(PUSHSELF, "update-ref", "refs/remotes/origin/feat", "HEAD")
     run_vcs(PUSHSELF, "checkout", "-q", "--track", "-b", "feat", "origin/feat")
 
     for where, lane, base in ((PUSHLANE, "lane/foo", "main"), (PUSHLANEMASTER, "lane/bar", "master")):
         make_repo(where, {"base.txt": "base\n"})
-        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
         run_vcs(where, "update-ref", "refs/remotes/origin/" + base, "HEAD")
         run_vcs(where, "checkout", "-q", "--track", "-b", lane, "origin/" + base)
 
     make_repo(PUSHSTACK, {"base.txt": "base\n"})
-    run_vcs(PUSHSTACK, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTACK, "remote", "add", "origin", PUSHREMOTE)
     run_vcs(PUSHSTACK, "update-ref", "refs/remotes/origin/lane/base", "HEAD")
     run_vcs(PUSHSTACK, "checkout", "-q", "--track", "-b", "lane/fix", "origin/lane/base")
 
     make_repo(PUSHMAINUP, {"base.txt": "base\n"})
-    run_vcs(PUSHMAINUP, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHMAINUP, "remote", "add", "origin", PUSHREMOTE)
     run_vcs(PUSHMAINUP, "update-ref", "refs/remotes/origin/main", "HEAD")
     run_vcs(PUSHMAINUP, "branch", "--set-upstream-to=origin/main", "main")
 
+    # Its own name is on origin, so the implied pushes to it are silent. Built by git itself.
+    make_repo(PUSHOWNREF, {"base.txt": "base\n"})
+    run_vcs(PUSHOWNREF, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHOWNREF, "update-ref", "refs/remotes/origin/batch-1", "HEAD")
+    run_vcs(PUSHOWNREF, "update-ref", "refs/remotes/origin/lane-x", "HEAD")
+    run_vcs(PUSHOWNREF, "checkout", "-q", "-b", "lane-x")
+    run_vcs(PUSHOWNREF, "branch", "--set-upstream-to=origin/batch-1", "lane-x")
+
     for where, upstream in ((PUSHSTRAY, "origin/lane/x"), (PUSHSELF, "origin/feat"),
                             (PUSHLANE, "origin/main"), (PUSHLANEMASTER, "origin/master"),
-                            (PUSHSTACK, "origin/lane/base"), (PUSHMAINUP, "origin/main")):
+                            (PUSHSTACK, "origin/lane/base"), (PUSHMAINUP, "origin/main"),
+                            (PUSHOWNREF, "origin/batch-1")):
         got = run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip()
         if got != upstream:
             sys.exit("fixture setup failed in build_fixtures: %r needs upstream %s, reads %r"
@@ -1991,6 +2063,45 @@ def _build_push():
             or run_vcs(PUSHSTRAY, "config", "--get", "push.default").stdout.strip() != "simple"):
         sys.exit("fixture setup failed in build_fixtures: PUSHSTRAY needs remotes fork and origin "
                  "and push.default simple")
+    # Scope before subject (P7). The stray controls need origin/mylocal absent in PUSHSTRAY, and the ruling 432 a
+    # red rows need origin/lane-x present in PUSHOWNREF. Each is read back, so no case judges a fixture without it.
+    for where, ref, present in ((PUSHSTRAY, "refs/remotes/origin/mylocal", False),
+                                (PUSHOWNREF, "refs/remotes/origin/lane-x", True)):
+        if (run_vcs(where, "rev-parse", "-q", "--verify", ref).returncode == 0) != present:
+            sys.exit("fixture setup failed in build_fixtures: %r needs %s %s"
+                     % (where, ref, "present" if present else "absent"))
+
+    # The agent-worktree names and their near misses (rule push-agent-branch). Each reads back its own name
+    # in HEAD and no upstream, so a case judges the name it names and nothing inherited.
+    for where, branch in ((PUSHAGENT, "claude/agent-a22bb0ed47825117b"),
+                          (PUSHAGENTWT, "worktree-agent-a22bb0ed47825117b"),
+                          (PUSHAGENTBARE, "agent-a22bb0ed47825117b"),
+                          (PUSHAGENTNOTES, "agent-notes"),
+                          (PUSHAGENTMYABC, "my-agent-abc"),
+                          (PUSHAGENTMYHEX, "my-agent-a22bb0ed47825117b"),
+                          (PUSHAGENTSHORT, "agent-1234567"),
+                          (PUSHAGENTEIGHT, "agent-12345678")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
+        run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        run_vcs(where, "checkout", "-q", "-b", branch)
+        if run_vcs(where, "symbolic-ref", "-q", "HEAD").stdout.strip() != "refs/heads/" + branch:
+            sys.exit("fixture setup failed in build_fixtures: %r must be on branch %s" % (where, branch))
+        if run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
+            sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % where)
+    # The config-file autoSetupRemote (rule push-agent-branch). The key is written to this repo's own config,
+    # so a bare push reads it there, not from a `-c` override on the call.
+    make_repo(PUSHAGENTCFG, {"base.txt": "base\n"})
+    run_vcs(PUSHAGENTCFG, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHAGENTCFG, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHAGENTCFG, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run_vcs(PUSHAGENTCFG, "checkout", "-q", "-b", "claude/agent-0c1d2e3f4a5b6c7d")
+    run_vcs(PUSHAGENTCFG, "config", "push.autoSetupRemote", "true")
+    if run_vcs(PUSHAGENTCFG, "config", "--get", "push.autoSetupRemote").stdout.strip() != "true":
+        sys.exit("fixture setup failed in build_fixtures: %r must set push.autoSetupRemote in its config" % PUSHAGENTCFG)
+    if run_vcs(PUSHAGENTCFG, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % PUSHAGENTCFG)
 
 def _build_worktrees():
     """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
@@ -2294,7 +2405,10 @@ lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
-              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK],
+              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHOWNREF,
+              PUSHLOCAL, PUSHLOCALSTRAY, PUSHLOCALMAIN, PUSHSSH, PUSHNOREMOTE,
+              PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX,
+              PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -3894,26 +4008,46 @@ HMMAIN = os.path.join(ROOT, "hmmain")                          # a primary check
 HMLANE = os.path.join(HMMAIN, ".claude", "worktrees", "lane1")  # a real linked tree of it, in home
 HMTMPREPO = os.path.join(TEMP_DIR, "hmtmprepo")                # a repo UNDER the guard's temp folder
 HMSCRATCH = slash(os.path.join(TEMP_DIR, "scratch", "lane-a"))  # a scratch target under temp
+HM_AGENT = "hmagentown1"                                        # an agent id, whose home tree is built
+HM_SIBLING = "hmagentsib2"                                      # a second agent id, named in the denies
+HMHOME = os.path.join(HMMAIN, ".claude", "worktrees", "agent-" + HM_AGENT)  # that agent's own home
+HM_GONE = "hmagentgone4"    # an agent whose home was built, recorded, then removed by the harness
+HM_BADREC = "hmagentbad5"   # an agent whose home record is a folder, so reading it raises
+HMGONE = os.path.join(HMMAIN, ".claude", "worktrees", "agent-" + HM_GONE)  # that agent's gone home
 
 
 def _build_hand_made():
     make_repo(HMMAIN, {"f.txt": "base\n"})
     run_vcs(HMMAIN, "worktree", "add", "-q", HMLANE, "-b", "hmlane1")
+    run_vcs(HMMAIN, "worktree", "add", "-q", HMHOME, "-b", "worktree-agent-" + HM_AGENT)
+    # The record the guard writes on an agent's first call from its home, then the harness removes the
+    # folder and its branch together. The record outlives the folder, in the clone's common directory.
+    run_vcs(HMMAIN, "worktree", "add", "-q", HMGONE, "-b", "worktree-agent-" + HM_GONE)
+    run_vcs(HMMAIN, "worktree", "remove", "--force", HMGONE)
+    run_vcs(HMMAIN, "branch", "-D", "worktree-agent-" + HM_GONE)
+    records = os.path.join(HMMAIN, ".git", "agent-homes")
+    os.makedirs(records, exist_ok=True)
+    write(os.path.join(records, HM_GONE), os.path.realpath(HMGONE))
+    os.makedirs(os.path.join(records, HM_BADREC), exist_ok=True)  # a folder where the record should be
     make_repo(HMTMPREPO, {"f.txt": "base\n"})
     for where in (HMMAIN, HMTMPREPO):
         if run_vcs(where, "rev-parse", "--git-dir").returncode != 0:
             sys.exit("fixture setup failed in _build_hand_made: %r is no repository" % where)
     if not os.path.isdir(HMLANE):
         sys.exit("fixture setup failed in _build_hand_made: no linked tree at %r" % HMLANE)
+    if not os.path.isdir(HMHOME):
+        sys.exit("fixture setup failed in _build_hand_made: no agent home tree at %r" % HMHOME)
+    if os.path.exists(HMGONE):
+        sys.exit("fixture setup failed in _build_hand_made: the gone home still exists at %r" % HMGONE)
 
 
-lazy_fixture([HMMAIN, HMLANE, HMTMPREPO], _build_hand_made)
+lazy_fixture([HMMAIN, HMLANE, HMHOME, HMTMPREPO], _build_hand_made)
 HM = "hand-made-worktree"
 HMADD = VCS + " worktree add "
 HMIN = slash(HMMAIN)
 
 
-def hm_deny(name, command, **kw):
+def hm_refuse(name, command, **kw):
     kw.setdefault("cwd", HMMAIN)
     sh("hand-made worktree: " + name, command, "deny", HM, **kw)
 
@@ -3924,33 +4058,35 @@ def hm_allow(name, command, **kw):
 
 
 # DENY. The new tree lands outside <primary>/.claude/worktrees/.
-hm_deny("a relative sibling path from the primary is refused", HMADD + "../lane-x")
-hm_deny("-C reaches the primary from elsewhere, and a scratch path is refused",
+hm_refuse("a relative sibling path from the primary is refused", HMADD + "../lane-x")
+hm_refuse("-C reaches the primary from elsewhere, and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, cwd=NOGIT)
-hm_deny("cd into a non-temp primary, then a tree in the temp folder, is the incident",
+hm_refuse("cd into a non-temp primary, then a tree in the temp folder, is the incident",
         "cd " + HMIN + " && " + HMADD + HMSCRATCH, cwd=NOGIT)
-hm_deny("-b before the path does not hide it", HMADD + "-b hmx ../lane-x")
-hm_deny("-B before the path does not hide it", HMADD + "-B hmx ../lane-x")
-hm_deny("--detach before the path does not hide it", HMADD + "--detach ../lane-x")
-hm_deny("--lock --reason r before the path does not hide it",
+hm_refuse("-b before the path does not hide it", HMADD + "-b hmx ../lane-x")
+hm_refuse("-B before the path does not hide it", HMADD + "-B hmx ../lane-x")
+hm_refuse("--detach before the path does not hide it", HMADD + "--detach ../lane-x")
+hm_refuse("--lock --reason r before the path does not hide it",
         HMADD + "--lock --reason r ../lane-x")
-hm_deny("a double dash ends the options, and the path after it is judged",
+hm_refuse("a double dash ends the options, and the path after it is judged",
         HMADD + "-- ../lane-x")
-hm_deny("a dash-led name after a double dash is still a path", HMADD + "-- -lane-x")
-hm_deny("a .claude/worktrees-x prefix is outside the home folder",
+hm_refuse("a dash-led name after a double dash is still a path", HMADD + "-- -lane-x")
+hm_refuse("a .claude/worktrees-x prefix is outside the home folder",
         HMADD + ".claude/worktrees-x/foo")
-hm_deny("a .claude/worktreesX name is outside the home folder", HMADD + ".claude/worktreesX")
-hm_deny("a dot-dot that climbs out of the home folder is outside",
+hm_refuse("a .claude/worktreesX name is outside the home folder", HMADD + ".claude/worktreesX")
+hm_refuse("a dot-dot that climbs out of the home folder is outside",
         HMADD + ".claude/worktrees/../../lane-x")
-hm_deny("from inside a linked tree, a sibling of the primary is still outside",
+hm_refuse("from inside a linked tree, a sibling of the primary is still outside",
         HMADD + "../../../lane-x", cwd=HMLANE)
-hm_deny("a PowerShell call is judged the same",
+hm_refuse("a PowerShell call is judged the same",
         "Set-Location " + HMIN + "; " + VCS + " worktree add ../lane-x", tool="PowerShell",
         cwd=NOGIT)
-hm_deny("a PowerShell call with -C and a scratch path is refused",
+hm_refuse("a PowerShell call with -C and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, tool="PowerShell", cwd=NOGIT)
-hm_deny("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
-hm_deny("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
+hm_refuse("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
+hm_refuse("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
+hm_refuse("a for loop that builds the tree path from its variable is the incident",
+        "for c in A B; do " + VCS + " worktree add -q --detach " + HMSCRATCH + "/wt-$c $c; done")
 
 # ALLOW. Nothing here is the act, or the act lands in the home folder, or the repo is a throwaway.
 hm_allow("an absolute path under the primary's home folder passes",
@@ -3978,11 +4114,122 @@ hm_allow("a heredoc body that holds the words passes",
          "cat <<'EOF'\ngit worktree add ../x\nEOF")
 hm_allow("a folder that is no git tree passes, since unknown is no hit",
          HMADD + "../lane-x", cwd=NOGIT)
+
+# AGENT. A call with a valid agent_id that adds a tree inside the primary's folder is refused, unless
+# the tree is the agent's own recorded home or its own red-run folder. Each call runs from that home,
+# so the call itself records the home, and no case depends on another case having run first.
+HMAG = dict(cwd=HMHOME, agent_id=HM_AGENT)
+HMWT = os.path.join(HMMAIN, ".claude", "worktrees")
+HMAGENT_SIB_RED = slash(os.path.join(HMWT, "agent-" + HM_SIBLING + "-red"))
+HMAGENT_PREFIX_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "b-red"))
+HMAGENT_OWN_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "-red"))
+HMAGENT_LANE9 = slash(os.path.join(HMWT, "lane9"))
+hm_refuse("an agent adds a sibling agent's red-run folder, by absolute path, is refused",
+        HMADD + HMAGENT_SIB_RED, **HMAG)
+hm_refuse("an agent adds a sibling agent's red-run folder, by a relative path, is refused",
+        HMADD + "../agent-" + HM_SIBLING + "-red", **HMAG)
+hm_refuse("an agent adds a folder whose name only starts with its own id is refused",
+        HMADD + HMAGENT_PREFIX_RED, **HMAG)
+hm_refuse("an agent adds a non-agent folder, lane9, under the primary's folder is refused",
+        HMADD + HMAGENT_LANE9, **HMAG)
+hm_refuse("a PowerShell call by an agent, adding a sibling's red-run folder, is refused",
+        HMADD + HMAGENT_SIB_RED, tool="PowerShell", **HMAG)
+hm_refuse("an agent adds a tree outside the primary's folder is refused, as before",
+        HMADD + slash(os.path.join(ROOT, "hm-agent-outside")), **HMAG)
+# The agent's own red-run folder, added the way the test-author's red run adds it, and the agent's
+# own home, both pass. The same lane9 add with no agent_id passes too, so the refusal above is the agent's.
+hm_allow("an agent adds its own red-run folder, as the red run does, passes",
+         HMADD + "--detach " + HMAGENT_OWN_RED + " HEAD", **HMAG)
+hm_allow("an agent adds its own recorded home tree passes", HMADD + slash(HMHOME), **HMAG)
+hm_allow("with no agent_id, the lane9 add from the primary passes", HMADD + HMAGENT_LANE9)
+# An agent with no home record yet, called from the primary, has no home to match: a tree in the
+# folder is refused, and its own red-run folder still passes. No case records this id's home.
+HM_NOREC = "hmagentnr3"
+HMNOREC = dict(cwd=HMMAIN, agent_id=HM_NOREC)
+hm_refuse("an agent with no home record adds lane9 under the primary's folder is refused",
+        HMADD + HMAGENT_LANE9, **HMNOREC)
+hm_allow("an agent with no home record adds its own red-run folder, as the red run does, passes",
+         HMADD + "--detach " + slash(os.path.join(HMWT, "agent-" + HM_NOREC + "-red")) + " HEAD",
+         **HMNOREC)
+# Only the agent's home itself passes. A tree nested inside it is a new tree in the folder.
+hm_refuse("an agent adds a tree nested inside its own recorded home is refused",
+        HMADD + slash(os.path.join(HMHOME, "sub")), **HMAG)
+
+# GONE HOME. The agent's record names its home, but the folder it calls from is gone. The shell falls
+# back to the primary with a `cd`, so the add still lands in the folder and must be refused.
+HMGONE_CALL = dict(cwd=HMGONE, agent_id=HM_GONE)
+hm_refuse("an agent whose home folder is gone adds lane9 after a cd into the primary is refused",
+        "cd " + HMIN + " && " + HMADD + ".claude/worktrees/lane9", **HMGONE_CALL)
+hm_allow("an agent whose home folder is gone adds its own red-run folder after a cd, passes",
+         "cd " + HMIN + " && " + HMADD + "--detach .claude/worktrees/agent-" + HM_GONE + "-red HEAD",
+         **HMGONE_CALL)
+
+# AN UNREADABLE RECORD. The record path is a folder, so reading it raises and the status is unknown.
+# An add inside the folder passes: nothing is known about the agent's home, and unknown is no hit.
+hm_allow("an agent whose home record cannot be read adds lane9 under the primary's folder, passes",
+         HMADD + HMAGENT_LANE9, cwd=HMMAIN, agent_id=HM_BADREC)
+
+# A DOT-DOT WALK. The agent's own red-run folder is matched by name before the `..` is applied, so a
+# walk out of it must not pass. The sibling's folder reached the same way is refused too. The caller
+# has no home record, so the worktree-home rule, which reads a recorded home, judges nothing here.
+HMDOT_CALL = dict(cwd=HMWT, agent_id=HM_NOREC)
+hm_refuse("an agent walks out of its own red-run folder with .. to add lane9 is refused",
+        HMADD + "./agent-" + HM_NOREC + "-red/../lane9", **HMDOT_CALL)
+hm_refuse("an agent walks out of its own red-run folder with .. to add a sibling's red-run folder is refused",
+        HMADD + "./agent-" + HM_NOREC + "-red/../agent-" + HM_SIBLING + "-red", **HMDOT_CALL)
+
+# AGENT TYPE ALONE. A payload that names an agent type and no agent_id is an agent's call: other rules
+# already read agent_type alone as an agent. Its tree in the folder is refused. The control with neither
+# field is the lane9 add from the primary, above: "with no agent_id, the lane9 add from the primary passes".
+hm_refuse("a call that names an agent_type and no agent_id adds lane9 under the primary's folder is refused",
+        HMADD + HMAGENT_LANE9, agent_type="test-author")
+
 add("hand-made worktree: an Agent call with no isolation, whose prompt names a worktree path, passes",
     "allow", tool="Agent", cwd=HMMAIN, subagent_type="general-purpose", description="lane",
     prompt="Work in the worktree at ../lane-x. Run `git worktree add ../lane-x` first.")
 add("hand-made worktree: an Explore Agent call with no isolation passes", "allow", tool="Agent",
     cwd=HMMAIN, subagent_type="Explore", description="look", prompt="Read the repo.")
+
+# VARIABLE TARGETS. The shell expands `$S` and `${S}` before git sees the path, so a target that holds a
+# variable is judged by the value the same command gives it. A variable the command does not set reads as
+# unknown, and a worktree add from a non-temp primary with an unknown target is refused.
+HMVAR_SCRATCH = "S=" + HMSCRATCH + "; "
+hm_refuse("a scratch path set in the same command, added from the non-temp primary as $S, is refused",
+        HMVAR_SCRATCH + HMADD + '"$S"')
+hm_refuse("a scratch path set in the same command, added from the non-temp primary as $S/lane-x, is refused",
+        HMVAR_SCRATCH + HMADD + '"$S/lane-x"')
+hm_refuse("a scratch path set in the same command, added from the non-temp primary as ${S}, is refused",
+        HMVAR_SCRATCH + HMADD + '"${S}"')
+hm_refuse("a variable this command does not set, added from the non-temp primary as $S/lane, is refused",
+        HMADD + '"$S/lane"')
+hm_refuse("an agent sets a variable to a tree in its folder that is not its home, and adds it, is refused",
+        "S=.claude/worktrees/lane9; " + HMADD + '"$S"', **HMAG)
+hm_allow("a variable set in the same command to a path under the home folder, with no agent, passes",
+         "S=.claude/worktrees/lane2; " + HMADD + '"$S"')
+hm_allow("a repo under the guard's temp folder adds a variable's path, and the throwaway rule passes it",
+         "S=../hmtmp-sibling; " + HMADD + '"$S"', cwd=HMTMPREPO)
+hm_allow("an agent sets a variable to its own red-run folder, as the red run does, and adds it, passes",
+         "R=" + HMAGENT_OWN_RED + "; " + HMADD + '--detach "$R" HEAD', **HMAG)
+# A variable the command never sets, in a throwaway repo: the throwaway rule judges the repo first, so the
+# unknown target passes there. The refusal for an unknown target sits after that rule.
+hm_allow("a repo under the guard's temp folder runs a variable target no command sets, and the throwaway rule passes it",
+         HMADD + '"$S/lane"', cwd=HMTMPREPO)
+
+# A VARIABLE IN -C. The shell expands `$R` in `-C "$R"` before git runs, so a -C target that holds a
+# variable is judged as unknown, and a worktree add that reaches the primary is refused. The assignment
+# may end its segment with `&&` or a newline: both pin the variable target resolved from the same command.
+hm_refuse("a -C variable set in the same command, from a folder with no repo, reaches the primary and is refused",
+        "R=" + HMIN + "; " + VCS + ' -C "$R" worktree add ' + HMSCRATCH, cwd=NOGIT)
+hm_refuse("a scratch path set with && in the same command, added from the non-temp primary as $S, is refused",
+        "S=" + HMSCRATCH + " && " + HMADD + '"$S"')
+hm_refuse("a scratch path set on its own line in the same command, added from the non-temp primary as $S, is refused",
+        "S=" + HMSCRATCH + "\n" + HMADD + '"$S"')
+# A -C VARIABLE READ FROM THE SAME COMMAND. The -C value is resolved from an earlier assignment, so a tree
+# under the primary's home folder passes, and a throwaway repo passes whatever its target is.
+hm_allow("a -C variable set in the same command to the primary, with a home-folder target and no agent, passes",
+         "R=" + HMIN + "; " + VCS + ' -C "$R" worktree add .claude/worktrees/lane2', cwd=NOGIT)
+hm_allow("a -C variable set in the same command to a throwaway repo, with an unset target, passes",
+         "R=" + slash(HMTMPREPO) + "; " + VCS + ' -C "$R" worktree add "$S/lane"', cwd=NOGIT)
 
 TEMP_DIR = None   # back to the system temp for the sections below
 
@@ -4431,7 +4678,7 @@ sh("kill: xargs kill after a pipe from a plain list is not by name", "echo 1 | x
 sh("kill: pgrep alone only reads", "pgrep -f node", "allow", cwd=NOGIT)
 
 # Four ways to stop a process by port, or every
-# process, passed on main. `kill $(lsof -t ...)` is the `$(pgrep ...)` act: the pid list is made by
+# process, and the guard must refuse each. `kill $(lsof -t ...)` is the `$(pgrep ...)` act: the pid list is made by
 # a pattern, but the guard names only pgrep and pidof. `fuser -k` and `kill-port` kill by port, the
 # same act as `lsof -t | xargs kill`. `kill -9 -1` reads `-1` as a flag, so pid -1 (every process)
 # never reaches the pid check; `kill -9 -- -1` above already denies. Claude writes each of these when
@@ -5590,6 +5837,10 @@ sh("narrate: the script run by path, piped to head",
    "~/.claude/bin/merge 12 --confirm | head -5", "deny", "live-stream", cwd=NOGIT)
 sh("narrate: the launcher script run through python, piped to tail",
    "python merge/launch.py 12 --confirm 2>&1 | tail -5", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: a versioned python runs the merge script, piped to tail",
+   "python3.11 merge/merge.py 12 --confirm | tail -3", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: uv run python runs the merge script, piped to tail",
+   "uv run python merge/merge.py 12 --confirm 2>&1 | tail -3", "deny", "live-stream", cwd=NOGIT)
 sh("narrate: --confirm on a command off the roster", "deploy 12 --confirm 2>&1 | tail -5",
    "allow", cwd=NOGIT)
 sh("narrate: a merge preview is not a wait", "merge 12 2>&1 | tail -5", "allow", cwd=NOGIT)
@@ -5668,6 +5919,120 @@ sh("ln: a trailing slash says the destination is a directory",
    "ln -s /opt/tool/x realdir/", "allow", cwd=TRAPLN)
 sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x realdir", "allow",
    cwd=TRAPLN)
+
+# --- a roster command piped into tail or head (rule check-tail)
+#
+# A backgrounded `merge --lane-lint 1476 2>&1 | tail -8` loses its verdict (decision
+# background-check-through-verdict holds the incident). The roster is named, one spelling per entry: `merge`, `merge.cmd`,
+# `~/.claude/bin/merge`, `python merge/merge.py`, `python merge/launch.py`, and `ci-job checks --lint`.
+# `merge --lane-lint` and `merge --review-record` are refused in the foreground and in the background.
+# `ci-job` is refused only in the background. The whole pipeline is read, so a filter between the check
+# and tail or head does not hide it. A `tee` stage does not end the check's reach: a tee before tail or
+# head is refused, since tail still cuts what the agent reads. A tee with nothing after it is allowed. A pipe out of `verdict` is
+# refused by rule verdict-pipe (decision verdict-pipe-refused), so those rows name that rule. A verdict
+# call with no pipe after it is allowed here.
+# Every backgrounded case names an until note, so background-end decides none of them. sh() takes no
+# run_in_background, so the backgrounded cases use add(), the form the background-end section uses.
+TAIL_BG_UNTIL = "Lane lint in the background. until: the lint prints its verdict"
+
+add("check-tail: the incident line, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8")
+add("check-tail: merge --lane-lint piped to head, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 | head -5")
+add("check-tail: merge.cmd --lane-lint piped to tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge.cmd --lane-lint 7 2>&1 | tail -3")
+add("check-tail: the script run through python piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python merge/merge.py --lane-lint 7 2>&1 | tail -3")
+add("check-tail: the launcher run through python piped to head, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python merge/launch.py --lane-lint 7 | head -3")
+add("check-tail: ci-job checks --lint piped to tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -20")
+add("check-tail: a quoted # does not hide a roster command after it, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='echo "# lint"; merge --lane-lint 7 | tail -3')
+add("check-tail: a lone apostrophe in quotes does not hide a roster command, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='echo "it\'s up"; merge --lane-lint 7 2>&1 | tail -3')
+add("check-tail: merge --lane-lint through grep -v and tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 1476 2>&1 | grep -v DEBUG | tail -8")
+
+# A pipe out of verdict is refused by verdict-pipe, which runs before check-tail. The same call with
+# no pipe keeps the point these rows had: the verdict form is not a check-tail refusal.
+add("verdict-pipe: the incident line through verdict piped to tail, backgrounded, is refused", "deny",
+    "verdict-pipe", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8")
+add("check-tail: the incident line through verdict with no pipe, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 2>&1")
+add("verdict-pipe: a python3 verdict wrapper piped to tail, backgrounded, is refused", "deny",
+    "verdict-pipe", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 ~/.claude/bin/verdict merge --lane-lint 1476 | tail -3")
+add("check-tail: a python3 verdict wrapper with no pipe, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 ~/.claude/bin/verdict merge --lane-lint 1476")
+add("check-tail: wait-pid piped to tail, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/wait-pid 1836 2>&1 | tail -3")
+add("check-tail: output kept in a file, then grep piped to tail, backgrounded, is allowed",
+    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/merge --lane-lint 1476 > /tmp/x/lanelint.log 2>&1; echo \"rc=$?\"; "
+            "grep -E '^(PASS|FAIL)' /tmp/x/lanelint.log | tail -15")
+add("check-tail: merge --lane-lint piped to tee, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 1476 2>&1 | tee run.out")
+add("check-tail: a tee between the check and grep and tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 1476 2>&1 | tee x | grep FAIL | tail -3")
+add("check-tail: merge --lane-lint through tee and tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 2>&1 | tee lint.log | tail -5")
+add("check-tail: ci-job checks --lint through tee and head, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tee lint.log | head -20")
+add("check-tail: merge --lane-lint through tee with nothing after it, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 2>&1 | tee lint.log")
+add("check-tail: grep naming the script, piped to tail, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='grep -n "--lane-lint" merge/merge.py | tail -20')
+add("check-tail: an ordinary command piped to tail, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="make check 2>&1 | tail -40")
+add("check-tail: a roster name inside echo's quotes, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="echo 'merge --lane-lint 1' | tail -1")
+add("check-tail: a roster name after a quoted #, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='echo "# merge --lane-lint 1 | tail -3"')
+add("check-tail: a roster name in a multi-line quote, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='echo "first line\nmerge --lane-lint 1 | tail -3\nlast line"')
+
+# Foreground: merge --lane-lint and merge --review-record piped to tail or head are refused. ci-job is
+# not refused in the foreground. A verdict call piped to tail is refused by verdict-pipe; with no pipe
+# after it, a verdict call is allowed.
+sh("check-tail: the incident line in the foreground is refused",
+   "~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-lint piped to tail in the foreground is refused",
+   "merge --lane-lint 1476 2>&1 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --review-record piped to head in the foreground is refused",
+   "~/.claude/bin/merge 12 --review-record --head 0123456789abcdef0123456789abcdef01234567 | head -20",
+   "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: ci-job piped to tail in the foreground is allowed",
+   "~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -20", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks --lint piped to tail in the foreground is allowed",
+   "~/.claude/bin/ci-job checks --lint 2>&1 | tail -20", "allow", cwd=NOGIT)
+sh("verdict-pipe: a verdict call piped to tail in the foreground is refused",
+   "verdict merge --lane-lint 1476 | tail -3", "deny", "verdict-pipe", cwd=NOGIT)
+sh("check-tail: a verdict call with no pipe in the foreground is allowed",
+   "verdict merge --lane-lint 1476", "allow", cwd=NOGIT)
 
 # =========================================================================== 2c. waiter loops
 #
@@ -7541,10 +7906,11 @@ sh("ask-step-hidden: a force push in a sh -c double-quoted substitution denies",
 sh("ask-step-hidden: control, a heredoc body naming a force push inside bash -c allows",
    "bash -c 'cat <<EOF\n" + HIDDEN_PUSH + "\nEOF'", "allow", cwd=PUSHFEAT)
 
-# ASK, owner rulings 206 a. An implied destination (a bare push, HEAD, @, or a
-# colon-less refspec naming the current branch) that lands off the branch's upstream asks, unless the push
-# carries -u and names the local branch (the silent cases below). PUSHSTRAY is `mylocal`, whose upstream is
-# origin/lane/x.
+# ASK, owner rulings 206 a and 432 a. An implied destination (a bare push, HEAD, @, or a colon-less refspec
+# naming the current branch) that lands off the branch's upstream asks while the destination is not yet on
+# origin, that is, no refs/remotes/origin/<name> (ruling 432 a). A push with -u that names the local branch is
+# silent (the silent cases below). PUSHSTRAY is `mylocal`, whose upstream is origin/lane/x, and origin/mylocal
+# is absent, so its rows ask.
 push_case("stray branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
 push_case("stray branch, @ asks", "origin @", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
 push_case("stray branch, the current branch named by its colon-less refspec asks", "origin mylocal", "ask",
@@ -7560,6 +7926,73 @@ push_case("stray branch, a second refspec that names the current branch asks",
           "origin HEAD:push-guard-asks mylocal", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
 sh("push: stray branch, a bare push under push.default current asks",
    VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
+# The remedy names the explicit form with a placeholder only (ruling 432 a). The real branch names of PUSHSTRAY
+# never appear in it.
+sh("push: stray branch, the ask names the explicit form HEAD:<branch>", VCS + " push origin HEAD", "ask",
+   PUSH_STRAY_RULE, cwd=PUSHSTRAY, carries=("HEAD:<branch>",), lacks=("HEAD:mylocal", "HEAD:lane/x"))
+
+# ASK, rule push-agent-branch. A non-forced push whose destination is an agent-worktree name asks, with or
+# without -u. push-stray-branch stays silent on a branch with no upstream, so this rule carries that case. The
+# names are agent-<hex>, claude/agent-<hex> and worktree-agent-<hex>, with 8 or more hex characters after the
+# prefix. PUSHAGENT sits on its claude/agent- branch, with no upstream.
+push_case("agent branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+push_case("agent branch, -u HEAD asks", "-u origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+push_case("agent branch, @ asks", "origin @", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+push_case("agent branch, the current name as a colon-less refspec asks", "origin claude/agent-a22bb0ed47825117b",
+          "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+sh("push: agent branch, a bare push under push.default current asks",
+   VCS + " -c push.default=current push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+push_case("agent worktree, worktree-agent-<hex>, -u HEAD asks", "-u origin HEAD", "ask",
+          cwd=PUSHAGENTWT, rule=PUSH_AGENT_RULE)
+push_case("agent worktree, agent-<hex>, -u HEAD asks", "-u origin HEAD", "ask",
+          cwd=PUSHAGENTBARE, rule=PUSH_AGENT_RULE)
+# An explicit agent destination from a branch with no upstream (PUSHFEAT, `feat`).
+push_case("explicit agent destination from a branch with no upstream asks",
+          "origin HEAD:claude/agent-a22bb0ed47825117b", "ask", rule=PUSH_AGENT_RULE)
+# Under push.autoSetupRemote, git pushes the current name and sets its upstream itself, so a bare push, `origin`
+# or `-u origin` writes the agent name. The key rides on the call, where the guard reads it.
+sh("push: agent branch, a bare push under autoSetupRemote asks",
+   VCS + " -c push.autoSetupRemote=true push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+sh("push: agent branch, origin under autoSetupRemote asks",
+   VCS + " -c push.autoSetupRemote=true push origin", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+sh("push: agent branch, -u origin under autoSetupRemote asks",
+   VCS + " -c push.autoSetupRemote=true push -u origin", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+# The config-file form: push.autoSetupRemote is in the repo's own config, not on the call, so a bare push asks.
+sh("push: agent branch, a bare push under a config autoSetupRemote asks",
+   VCS + " push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENTCFG)
+# The exact shape: eight hex characters after the prefix ask.
+push_case("agent-12345678, -u HEAD asks (8 hex is the exact shape)", "-u origin HEAD", "ask",
+          cwd=PUSHAGENTEIGHT, rule=PUSH_AGENT_RULE)
+# A side effect pin: under push.autoSetupRemote, a bare push from main with no upstream writes main, so push-main asks.
+sh("push: main with no upstream, a bare push under autoSetupRemote asks push-main",
+   VCS + " -c push.autoSetupRemote=true push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
+
+# SILENT, rule push-agent-branch. Each is an allow that prints nothing. The lane and feature branch controls
+# are the no-upstream rows above (PUSHFEAT, `feat`): their -u and HEAD pushes stay silent under this rule too.
+push_case("agent branch, HEAD to lane-x is silent", "origin HEAD:lane-x", "allow", cwd=PUSHAGENT, silent=True)
+push_case("agent branch, HEAD to refs/heads/lane-x is silent", "origin HEAD:refs/heads/lane-x", "allow",
+          cwd=PUSHAGENT, silent=True)
+push_case("agent branch, a dry run of HEAD is not this rule", "--dry-run origin HEAD", "allow",
+          cwd=PUSHAGENT, silent=True)
+push_case("agent branch, --delete of the agent name is not this rule",
+          "--delete origin claude/agent-a22bb0ed47825117b", "allow", cwd=PUSHAGENT, silent=True)
+push_case("agent branch, a colon delete of the agent name is not this rule",
+          "origin :claude/agent-a22bb0ed47825117b", "allow", cwd=PUSHAGENT, silent=True)
+push_case("agent-notes, -u HEAD is silent (no hex after the prefix)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTNOTES, silent=True)
+push_case("my-agent-abc, -u HEAD is silent (too short to be hex)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTMYABC, silent=True)
+push_case("my-agent-<hex>, -u HEAD is silent (the shape must open the name)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTMYHEX, silent=True)
+push_case("agent-1234567, -u HEAD is silent (7 hex is one short of the shape)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTSHORT, silent=True)
+# The same autoSetupRemote forms on a lane branch with no upstream (PUSHFEAT, `feat`) stay silent.
+sh("push: lane branch, a bare push under autoSetupRemote is silent",
+   VCS + " -c push.autoSetupRemote=true push", "allow", cwd=PUSHFEAT, silent=True)
+sh("push: lane branch, origin under autoSetupRemote is silent",
+   VCS + " -c push.autoSetupRemote=true push origin", "allow", cwd=PUSHFEAT, silent=True)
+sh("push: lane branch, -u origin under autoSetupRemote is silent",
+   VCS + " -c push.autoSetupRemote=true push -u origin", "allow", cwd=PUSHFEAT, silent=True)
 
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
@@ -7584,6 +8017,94 @@ sh("push: main, a bare push under push.default current on main asks",
    VCS + " -c push.default=current push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
 sh("push: main, a bare push under push.default upstream from a branch tracking main asks",
    VCS + " push", "ask", PUSH_MAIN_RULE, cwd=PUSHUP)
+
+# ASK, rule push-main, judged on the remote the push names. A network remote still asks: an scp-form origin, a
+# network URL named on the command line, and a `-C` into a repo whose origin is a network URL. The https
+# origin rows above (PUSHFEAT) and the bare push resolving to main on PUSHUP are the other controls.
+push_case("main, an scp-form origin asks", "origin main", "ask", cwd=PUSHSSH, rule=PUSH_MAIN_RULE)
+push_case("main, a network URL named as the remote asks, from a repo with no remote",
+          "https://example.invalid/r.git main", "ask", cwd=PUSHNOREMOTE, rule=PUSH_MAIN_RULE)
+sh("main, git -C into a repo with a network origin asks, from a repo with no remote",
+   VCS + " -C " + slash(PUSHFEAT) + " push origin main", "ask", PUSH_MAIN_RULE, cwd=PUSHNOREMOTE)
+
+# SILENT, rule push-main. The remote the push names is a local path (absolute, relative or file://), or the
+# repo has no remote of that name, so no network remote is written. Each is an allow that prints nothing.
+push_case("main, an origin that is a local path, a push of main is silent", "origin main", "allow",
+          cwd=PUSHLOCAL, silent=True)
+push_case("main, an origin that is a local path, HEAD:main is silent", "origin HEAD:main", "allow",
+          cwd=PUSHLOCAL, silent=True)
+push_case("main, a local path named as the remote is silent", slash(BRANCHREMOTE) + " main", "allow",
+          cwd=PUSHFEAT, silent=True)
+push_case("main, a relative path named as the remote is silent", "../branchremote.git main", "allow",
+          cwd=PUSHFEAT, silent=True)
+push_case("main, a file URL named as the remote is silent", "file://" + slash(BRANCHREMOTE) + " main",
+          "allow", cwd=PUSHFEAT, silent=True)
+push_case("main, a remote the repo does not have is silent", "upstream main", "allow", cwd=PUSHFEAT,
+          silent=True)
+push_case("main, no remote in the repo is silent", "origin main", "allow", cwd=PUSHNOREMOTE, silent=True)
+sh("main, git -C into a repo with no remote is silent, from a repo with a network origin",
+   VCS + " -C " + slash(PUSHNOREMOTE) + " push origin main", "allow", cwd=PUSHFEAT, silent=True)
+
+# ASK, rules 206 a, 207 a and push-agent-branch, on a local-path origin. A main refspec there is silent, and the
+# refspec after it still decides. The controls ask with no main refspec ahead: HEAD on PUSHLOCALSTRAY (its branch
+# tracks origin/other) is stray, and the agent name on PUSHLOCAL asks the agent rule.
+push_case("local origin, main then HEAD on a branch tracking another name asks stray", "origin main HEAD", "ask",
+          cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
+push_case("local origin, main then the agent name asks the agent rule", "origin main claude/agent-deadbeef01",
+          "ask", cwd=PUSHLOCAL, rule=PUSH_AGENT_RULE)
+push_case("local origin, HEAD on a branch tracking another name asks stray (control)", "origin HEAD", "ask",
+          cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
+push_case("local origin, the agent name alone asks the agent rule (control)", "origin claude/agent-deadbeef01",
+          "ask", cwd=PUSHLOCAL, rule=PUSH_AGENT_RULE)
+# The same two commands on a network origin still ask push-main: the main refspec decides there.
+push_case("network origin, main then HEAD asks push-main", "origin main HEAD", "ask", rule=PUSH_MAIN_RULE)
+push_case("network origin, main then the agent name asks push-main", "origin main claude/agent-deadbeef01", "ask",
+          rule=PUSH_MAIN_RULE)
+# A `git -c remote.origin.url=` override names the remote's URL for the read, so the local origin is a network one.
+sh("main, a local origin made a network remote by git -c remote.origin.url asks push-main",
+   VCS + " -c remote.origin.url=https://example.invalid/r.git push origin main", "ask", PUSH_MAIN_RULE,
+   cwd=PUSHLOCAL)
+
+# ASK, rule push-main, on a remote the shell has not expanded. The token holds `$`, a backtick or `$(`. It names no
+# remote in the repo, yet the shell may expand it to a network remote, so the push asks. PUSHFEAT's origin is https,
+# so only the token decides the ask here.
+push_case("main, a double-quoted shell variable as the remote asks push-main", '"$REMOTE" main', "ask",
+          rule=PUSH_MAIN_RULE)
+push_case("main, an unquoted shell variable as the remote asks push-main", "$REMOTE HEAD:main", "ask",
+          rule=PUSH_MAIN_RULE)
+push_case("main, a backtick as the remote asks push-main", "`printf origin` main", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, a command substitution as the remote asks push-main", "$(printf origin) main", "ask",
+          rule=PUSH_MAIN_RULE)
+sh("main, a bare push with a shell variable as the remote asks push-main under push.default current",
+   VCS + ' -c push.default=current push "$REMOTE"', "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
+
+# SILENT, rule push-main, the controls of that ask. A shell-variable remote on a feature destination writes no main.
+# A `$` in the source of a push to main stays in the refspec: the remote is the local origin, so the push is silent.
+push_case("a shell variable as the remote, HEAD to a feature name, is silent", '"$REMOTE" HEAD:feat-x', "allow",
+          silent=True)
+push_case("a shell variable in the source of a push to main on a local origin is silent", 'origin "$SRC":main',
+          "allow", cwd=PUSHLOCALMAIN, silent=True)
+
+# Local origin on main (PUSHLOCALMAIN, tracking origin/main) and its network twin on the same branch and upstream
+# (PUSHMAINUP). Each form that writes main is silent on the local path and asks on the network remote.
+sh("main tracking origin/main, local origin, a bare push under push.default simple is silent",
+   VCS + " -c push.default=simple push", "allow", cwd=PUSHLOCALMAIN, silent=True)
+sh("main tracking origin/main, network origin, a bare push under push.default simple asks push-main",
+   VCS + " -c push.default=simple push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAINUP)
+push_case("main tracking origin/main, local origin, HEAD is silent", "origin HEAD", "allow", cwd=PUSHLOCALMAIN,
+          silent=True)
+push_case("main tracking origin/main, network origin, HEAD asks push-main", "origin HEAD", "ask", cwd=PUSHMAINUP,
+          rule=PUSH_MAIN_RULE)
+push_case("main tracking origin/main, local origin, --all is silent", "origin --all", "allow", cwd=PUSHLOCALMAIN,
+          silent=True)
+push_case("main tracking origin/main, network origin, --all asks push-main", "origin --all", "ask", cwd=PUSHMAINUP,
+          rule=PUSH_MAIN_RULE)
+
+# ASK, rule push-main. A folder that does not exist cannot be read, and an unreadable config is unknown, which asks.
+# The session's own folder is the local origin, so only the missing folder the push runs in can make it a network one.
+sh("main, cd into a folder that does not exist, then origin main, asks push-main",
+   "cd " + slash(os.path.join(ROOT, "pushmissing")) + " && " + VCS + " push origin main", "ask", PUSH_MAIN_RULE,
+   cwd=PUSHLOCALMAIN)
 
 # SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
 # Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.
@@ -7617,6 +8138,15 @@ sh("push: stacked lane, a bare -u under push.default current writes the local na
    VCS + " -c push.default=current push -u origin", "allow", cwd=PUSHSTACK, silent=True)
 push_case("stray branch, -u with HEAD writes the local name, is silent", "-u origin HEAD", "allow",
           cwd=PUSHSTRAY, silent=True)
+# Decision plain-push-asks, item 432 a.
+# A destination already on origin (refs/remotes/origin/<name>) is no stray. PUSHOWNREF is
+# `lane-x`, tracking origin/batch-1, with origin/lane-x present: each implied push to its own name is silent.
+push_case("own ref on origin, HEAD is silent", "origin HEAD", "allow", cwd=PUSHOWNREF, silent=True)
+push_case("own ref on origin, @ is silent", "origin @", "allow", cwd=PUSHOWNREF, silent=True)
+push_case("own ref on origin, the current name as a colon-less refspec is silent", "origin lane-x", "allow",
+          cwd=PUSHOWNREF, silent=True)
+sh("push: own ref on origin, a bare push under push.default current is silent",
+   VCS + " -c push.default=current push", "allow", cwd=PUSHOWNREF, silent=True)
 # A push that moves no branch: tags are not a branch destination, even on main.
 push_case("--tags on main is silent", "origin --tags", "allow", cwd=PUSHMAIN, silent=True)
 push_case("a tag name on main is silent", "origin v1.0", "allow", cwd=PUSHMAIN, silent=True)
@@ -7657,6 +8187,14 @@ chained_ask("push: a lone quote in a commit message does not hide a push to main
             VCS + ' commit -m "don\'t" && ' + VCS + " push origin main", cwd=PUSHFEAT)
 chained_ask("push: a lone quote in a commit message does not hide a stray push that follows it",
             VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHSTRAY)
+chained_ask("push: agent branch, a lone quote in a commit message does not hide a push to an agent name",
+            VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
+chained_ask("push: agent branch, a comment opener inside a string does not hide a push to an agent name",
+            'echo "#" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
+sh("push: text, an echo that names a push to an agent name, is silent",
+   'echo "' + VCS + ' push origin HEAD:claude/agent-a22bb0ed47825117b"', "allow", cwd=PUSHAGENT, silent=True)
+sh("push: text, a multi-line quoted string naming a push to an agent name, is silent",
+   'echo "one line\n' + VCS + ' push origin HEAD"', "allow", cwd=PUSHAGENT, silent=True)
 
 sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", cwd=NOGIT)
 
@@ -10272,6 +10810,199 @@ sh("git env set: Bash printf into a profile, a directive split by adjacent quote
 sh("git env set: Bash printf into a profile, a doubled backslash before n inside a name, denies",
    r"printf GIT_\\nDIR=/x >> ~/.bashrc", "deny", GIT_ENV_RULE, cwd=NOGIT)
 
+# =========================================================================== hook bypass
+# A git commit, merge or push that skips the git hooks is denied under rule hook-bypass. Five spellings of
+# one act: `-c core.hooksPath=...` on the command (the key in any case), `--no-verify` on commit, merge or
+# push, `-n` on commit alone, and the key set in the environment through GIT_CONFIG_COUNT or
+# GIT_CONFIG_PARAMETERS. `-n` is no bypass on push (--dry-run) or on merge (--no-stat), so both stay allowed.
+# The glued form `-ccore.hooksPath=x` is no spelling: git 2.43.0 refuses it as an unknown option, so no case
+# names it.
+#
+# Each deny has a green control beside it: the same command with the bypass taken out. A control that is not
+# allowed means another rule fires on that shape, so the deny beside it proves nothing about this rule.
+# The hooks path is `x`, a value no hook lives at, so the key alone decides, except in the one env case that
+# names /dev/null, as git's own examples do.
+FAMILY = "hook-bypass"
+HOOK_BYPASS = "hook-bypass"
+
+# (1) The key on the command line, for each verb that runs hooks.
+sh("hook-bypass: core.hooksPath on the command, commit, denies",
+   VCS + " -c core.hooksPath=x commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: core.hooksPath on the command, merge, denies",
+   VCS + " -c core.hooksPath=x merge feature/x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: core.hooksPath on the command, push, denies",
+   VCS + " -c core.hooksPath=x push origin feature/x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: the key in capitals on the command, Core.HooksPath, denies",
+   VCS + " -c Core.HooksPath=x commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, commit with no hooks key, allows",
+   VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, merge with no hooks key, allows",
+   VCS + " merge feature/x", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, push with no hooks key, allows",
+   VCS + " push origin feature/x", "allow", cwd=GITMAIN)
+
+# (2) --no-verify on commit, merge and push.
+sh("hook-bypass: --no-verify on commit, denies",
+   VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify on merge, denies",
+   VCS + " merge --no-verify feature/x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify on push, denies",
+   VCS + " push --no-verify origin feature/x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+
+# (3) -n on commit is --no-verify. Bundled with -m, and after the other flags, it is still the bypass.
+sh("hook-bypass: -n on commit is --no-verify, denies",
+   VCS + " commit -n -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: -n bundled with -m on commit, -nm x, denies",
+   VCS + " commit -nm x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify after the other flags and the message, denies",
+   VCS + " commit -am x --no-verify", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, commit -am x with no bypass, allows",
+   VCS + " commit -am x", "allow", cwd=GITMAIN)
+sh("hook-bypass: -mn on commit is the message n, not -n, allows",
+   VCS + " commit -mn", "allow", cwd=GITMAIN)
+
+# (4) The bypass reached through -C, a chain, a cd and a second line.
+sh("hook-bypass: --no-verify after git -C <dir>, denies",
+   VCS + " -C " + slash(GITMAIN) + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, git -C <dir> commit with no bypass, allows",
+   VCS + " -C " + slash(GITMAIN) + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: --no-verify after a status in an && chain, denies",
+   VCS + " status && " + VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, the same && chain with no bypass, allows",
+   VCS + " status && " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: core.hooksPath after a cd, denies",
+   "cd " + slash(GITMAIN) + " && " + VCS + " -c core.hooksPath=x commit -m x", "deny", HOOK_BYPASS,
+   cwd=GITMAIN)
+sh("hook-bypass: control, a cd and then a commit with no bypass, allows",
+   "cd " + slash(GITMAIN) + " && " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: --no-verify on the second line of a command, denies",
+   VCS + " status\n" + VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, the same two lines with no bypass, allows",
+   VCS + " status\n" + VCS + " commit -m x", "allow", cwd=GITMAIN)
+
+# (5) The key set in the environment. GIT_CONFIG_COUNT and GIT_CONFIG_PARAMETERS, each with a control that sets
+# another key, so the value is read and not only the variable's name.
+sh("hook-bypass: GIT_CONFIG_COUNT sets core.hooksPath for a commit, denies",
+   "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null " + VCS
+   + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, GIT_CONFIG_COUNT sets user.name for a commit, allows",
+   "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=x " + VCS + " commit -m x",
+   "allow", cwd=GITMAIN)
+sh("hook-bypass: GIT_CONFIG_PARAMETERS sets core.hooksPath for a push, denies",
+   "GIT_CONFIG_PARAMETERS=\"'core.hooksPath'='/dev/null'\" " + VCS + " push origin feature/x",
+   "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, GIT_CONFIG_PARAMETERS sets user.name for a push, allows",
+   "GIT_CONFIG_PARAMETERS=\"'user.name'='x'\" " + VCS + " push origin feature/x", "allow", cwd=GITMAIN)
+
+# (6) Scanner shapes: a lone apostrophe, and a # inside quotes, before the bypass. The guard reads the text the
+# shell reads, so neither quote nor comment opener may hide the flag that follows.
+sh("hook-bypass: a lone apostrophe in text before a bypass, denies",
+   "echo don't; " + VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, a lone apostrophe before a plain commit, allows",
+   "echo don't; " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: a # inside a quoted message does not hide a later --no-verify, denies",
+   VCS + ' commit -m "a # b" --no-verify', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, a # inside a quoted message with no bypass, allows",
+   VCS + ' commit -m "a # b"', "allow", cwd=GITMAIN)
+sh("hook-bypass: a # inside an echo string does not hide a bypass after it, denies",
+   'echo "# note"; ' + VCS + " -c core.hooksPath=x commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, a # inside an echo string before a plain commit, allows",
+   'echo "# note"; ' + VCS + " commit -m x", "allow", cwd=GITMAIN)
+
+# (7) PowerShell takes the same key on the command line, and its control with no key allows.
+sh("hook-bypass: PowerShell, core.hooksPath on the command, denies",
+   VCS + " -c core.hooksPath=x commit -m x", "deny", HOOK_BYPASS, tool="PowerShell", cwd=GITMAIN)
+sh("hook-bypass: control, PowerShell commit with no hooks key, allows",
+   VCS + " commit -m x", "allow", tool="PowerShell", cwd=GITMAIN)
+
+# (8) A bypass wrapped in another command: a shell, eval, env -S, xargs or timeout. The guard reads the command the
+# wrapper runs, not only the first word, so each wrapped bypass denies. The controls wrap a commit with no bypass,
+# or text that names one, and allow.
+sh("hook-bypass: --no-verify in a bash -c string, denies",
+   'bash -c "' + VCS + ' commit --no-verify -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: -n in an sh -c string, denies",
+   "sh -c '" + VCS + " commit -n -m x'", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify in an eval string, denies",
+   'eval "' + VCS + ' commit --no-verify -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify in an env -S string, denies",
+   'env -S "' + VCS + ' commit --no-verify -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: core.hooksPath in a bash -c string, denies",
+   'bash -c "' + VCS + ' -c core.hooksPath=/dev/null commit -m x"', "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify fed to xargs, denies",
+   "echo --no-verify | xargs " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: --no-verify after timeout 5, denies",
+   "timeout 5 " + VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: control, a bash -c string with a commit and no bypass, allows",
+   'bash -c "' + VCS + ' commit -m x"', "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a bash -c echo that names a bypass is text, allows",
+   "bash -c 'echo " + VCS + " commit --no-verify'", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a sh -c string with a push -n dry run, allows",
+   'sh -c "' + VCS + ' push -n"', "allow", cwd=GITMAIN)
+
+# (8b) A config write that turns hooks off, with a commit, merge or push after it in the same command, is denied.
+# DECIDED: a config write with nothing after it in the command is allowed. It sets a value and skips no hook; the
+# case below pins that. The controls read the key, unset it, set another key, or name the write in text.
+sh("hook-bypass: config core.hooksPath set, then a commit in the same command, denies",
+   VCS + " config core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --local core.hooksPath set, then a commit, denies",
+   VCS + " config --local core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --worktree core.hooksPath set, then a commit, denies",
+   VCS + " config --worktree core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --global core.hooksPath set, then a commit, denies",
+   VCS + " config --global core.hooksPath /dev/null && " + VCS + " commit -m x", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config --add core.hooksPath, then a push after a semicolon, denies",
+   VCS + " config --add core.hooksPath x; " + VCS + " push", "deny", HOOK_BYPASS, cwd=GITMAIN)
+sh("hook-bypass: config core.hookspath set with -C, then a merge, denies (key case-blind)",
+   VCS + " -C " + slash(GITMAIN) + " config core.hookspath x && " + VCS + " merge y", "deny", HOOK_BYPASS,
+   cwd=GITMAIN)
+sh("hook-bypass: control, a config read of core.hooksPath, allows",
+   VCS + " config core.hooksPath", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a config --get of core.hooksPath, then a commit, allows",
+   VCS + " config --get core.hooksPath && " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a config --unset of core.hooksPath, allows",
+   VCS + " config --unset core.hooksPath", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a config write of user.name, then a commit, allows",
+   VCS + " config user.name x && " + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass: control, a quoted mention of the config write, then a commit, allows",
+   'echo "git config core.hooksPath /dev/null" && ' + VCS + " commit -m x", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a config write with no commit, merge or push after it, allows",
+   VCS + " config core.hooksPath /dev/null", "allow", cwd=GITMAIN)
+
+# (9) False alarms. Each names a bypass flag or key as text, or reads the key, and is allowed: no hook is skipped.
+sh("hook-bypass allow: push -n is --dry-run, not a bypass",
+   VCS + " push -n origin feature/x", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: merge -n is --no-stat, not a bypass",
+   VCS + " merge -n feature/x", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: log -n 5 counts commits",
+   VCS + " log -n 5", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: -n as a commit message value",
+   VCS + ' commit -m "-n"', "allow", cwd=GITMAIN)
+sh("hook-bypass allow: --no-verify as a commit message value",
+   VCS + ' commit -m "--no-verify"', "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a quoted --no-verify in a commit message",
+   VCS + " commit -m 'never use --no-verify'", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a quoted core.hooksPath in a commit message",
+   VCS + ' commit -m "refuse core.hooksPath bypass"', "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a heredoc commit message that names --no-verify and core.hooksPath",
+   VCS + " commit -F - <<'EOF'\nrefuse --no-verify and a core.hooksPath bypass\nEOF", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a multi-line quoted commit message that names --no-verify",
+   VCS + ' commit -m "subject\n\nrefuse --no-verify"', "allow", cwd=GITMAIN)
+sh("hook-bypass allow: echo of a bypass command is text",
+   'echo "git commit --no-verify"', "allow", cwd=GITMAIN)
+sh("hook-bypass allow: a trailing shell comment that names --no-verify",
+   VCS + " commit -m x # --no-verify is refused", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: reading core.hooksPath with git config",
+   VCS + " config core.hooksPath", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: -c user.name on a commit, no hooks key",
+   VCS + " -c user.name=x commit -m y", "allow", cwd=GITMAIN)
+sh("hook-bypass allow: -c core.hooksPath on status, which is not commit, merge or push",
+   VCS + " -c core.hooksPath=x status", "allow", cwd=GITMAIN)
+# The exemption: hooks/mutate_shared.py sets core.hooksPath inside Python, for the throwaway worktree it makes.
+# The guard never sees that git call, so the command that runs the file is allowed. The next pin check reads
+# the file, so this allow holds only while that code still sets the key.
+sh("hook-bypass allow: running hooks/mutate_shared.py, whose own checkout sets core.hooksPath",
+   "python3 hooks/mutate_shared.py", "allow", cwd=GITMAIN)
+
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
 #
@@ -11110,12 +11841,15 @@ def record_push_cost_case():
     """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
-    `git symbolic-ref` and two `git config` reads, and reads push.default. A literal destination
-    (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The conflict-markers push check
-    (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
+    `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
+    (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
+    `HEAD:<branch>` adds no read. A stray push (rule push-stray-branch: an implied destination off the
+    upstream) adds one `git rev-parse --verify -q` of the destination's remote-tracking ref. The conflict-markers
+    push check (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
     order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
     finds the merge base itself). A push with a tracking ref reads one base. A push with no tracking ref
-    and no upstream reads three, and the third, the default base, costs one `git symbolic-ref` for
+    and an upstream reads two. A push with no tracking ref and no upstream reads three, and the third, the
+    default base, costs one `git symbolic-ref` for
     origin/HEAD and one `git rev-parse --verify` per candidate branch tried, until one exists. A `git show`
     runs only when a marker finding needs its line read. The layout and extras files
     are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
@@ -11148,17 +11882,21 @@ def record_push_cost_case():
             kinds[word] = kinds.get(word, 0) + 1
         return kinds, lines
 
-    for label, tail, want in (
+    for label, tail, want, *cwd in (
         ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1, "diff": 1}),
         ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1}),
         ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1}),
-        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "diff": 1}),
-        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "diff": 1}),
+        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "config": 1, "diff": 1}),
+        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "config": 1, "diff": 1}),
         ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1, "diff": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
          {"rev-parse": 2, "symbolic-ref": 1, "diff": 3}),
+        # A stray push: HEAD on a branch tracking another name. The destination's ref is read and is absent, so
+        # the conflict check rejects that base and reads the upstream: two diff reads.
+        ("a stray push, HEAD on a branch tracking another name", "push origin HEAD",
+         {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2}, PUSHSTRAY),
     ):
-        kinds, lines = spawn_kinds(VCS + " " + tail, PUSHFEAT)
+        kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
         if kinds != want:
             problems.append("%s: git spawns %s, want %s" % (label, sorted(kinds.items()), sorted(want.items())))
         if label == "a bare push" and not any("push.default" in line for line in lines):
@@ -11175,8 +11913,80 @@ def record_push_cost_case():
         problems.append("a push to roadmap with an unreadable transcript: %s, want deny" % got)
     if problems:
         return False, "; ".join(problems)
-    return True, "one rev-parse per push, symbolic-ref for HEAD and bare, push.default for bare only; " \
+    return True, "one rev-parse per push, one more for a stray push, symbolic-ref for HEAD and bare, " \
+                 "push.default for bare only; " \
                  "the transcript is read only at the record branch"
+
+
+# The conflict-markers commit check's own git spawns (rule conflict-markers, decision commit-refuses-conflict-markers;
+# guard.py 6c2 states the cost). The probe calls conflict_markers_hit alone, so the stand-in git logs that clause's
+# spawns and none of the records-page check's, which judges a commit too and would be counted by a whole-guard run.
+CMK_COST_PROBE = r'''
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import guard_merge
+print(json.dumps(list(guard_merge.conflict_markers_hit(sys.argv[2], sys.argv[3]))))
+'''
+CMK_NO_HIT = '["", ""]'   # the probe's printed decision for no hit: json of ("", "")
+
+
+def _cmk_cost_check(tag, command, want):
+    """The clause's own git spawns for `command` in a clean repo, by git subcommand, are `want`. The clean repo has
+    no change and no untracked file. With `want` None only the scope is checked. The scope comes first: the probe
+    must run and judge the command as no hit, or the counts measure nothing. Why: the commit check's cost must not
+    grow without a test that notices it."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    log, path = _stand_in_git(tag)
+    if path is None:
+        return False, "no git on PATH"
+    where = os.path.join(ROOT, tag)
+    make_repo(where, {"README.md": "x\n"})
+    if os.path.exists(log):
+        os.remove(log)
+    done = subprocess.run(
+        [sys.executable, "-c", CMK_COST_PROBE, os.path.dirname(GUARD), command, where],
+        capture_output=True, text=True, env=dict(os.environ, PATH=path), timeout=60,
+    )
+    if done.returncode != 0 or done.stdout.strip() != CMK_NO_HIT:
+        return False, "%s: the probe did not judge the clean repo as no hit: exit %d, printed %r, error %r" % (
+            command, done.returncode, done.stdout.strip()[:120], done.stderr.strip()[-200:])
+    if want is None:
+        return True, "%s: judged as no hit" % command
+    kinds = {}
+    for line in (open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []):
+        words = line.split()
+        # The stand-in logs `-C <dir>` and `-c <key>=<value>` before the subcommand; those pairs are skipped.
+        while len(words) >= 2 and words[0] in ("-C", "-c"):
+            words = words[2:]
+        word = words[0] if words else ""
+        kinds[word] = kinds.get(word, 0) + 1
+    if kinds != want:
+        return False, "%s: the clause's git spawns are %s, want %s" % (
+            command, sorted(kinds.items()), sorted(want.items()))
+    return True, "%s: %s" % (command, sorted(kinds.items()))
+
+
+def cmk_cost_control_case():
+    """The green control: the probe runs on a clean commit and judges it as no hit, in the old code and the new."""
+    return _cmk_cost_check("cmkcost-control", VCS + " commit -m x", None)
+
+
+def cmk_cost_add_commit_case():
+    return _cmk_cost_check("cmkcost-add-commit", VCS + " add -A && " + VCS + " commit -m x",
+                           {"rev-parse": 1, "diff": 1, "ls-files": 1})
+
+
+def cmk_cost_add_case():
+    return _cmk_cost_check("cmkcost-add", VCS + " add -A", {})
+
+
+def cmk_cost_commit_case():
+    return _cmk_cost_check("cmkcost-commit", VCS + " commit -m x", {"rev-parse": 1, "diff": 1})
+
+
+FIXTURELESS_CHECKS.update((cmk_cost_control_case, cmk_cost_add_commit_case, cmk_cost_add_case,
+                           cmk_cost_commit_case))  # each builds only the clean repo it runs
 
 
 # =========================================================================== 5f. the trust card in a cs-build session
@@ -14877,7 +15687,7 @@ DESELECT = "      - name: Unit\n        run: python3 -m pytest --deselect a::b\n
 NEW_WORKFLOW = ("on: push\njobs:\n  test:\n    steps:\n      - name: Guard tests\n"
                 "        run: python3 hooks/test_guard.py\n")
 
-# Red on main: main refuses every workflow edit by path, so each allow below fails for that one cause.
+# Each allow below pins one test step a workflow edit may add. A refusal here points at the path check alone.
 for _name, _path, _old, _new in (
     ("a Linux test step inserted after a lint step", WF, LINT, LINT + TEST_LINUX),
     ("a Windows python test step inserted after a lint step", WF, LINT, LINT + TEST_WINDOWS),
@@ -15889,6 +16699,35 @@ sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COM
    cwd=NOGIT, agent_id="bld1", agent_type="builder")
 sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
    "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
+
+# ---- hook-bypass: the one exemption. hooks/mutate_shared.py sets core.hooksPath for the throwaway worktree it
+# makes, and the guard never sees that git call. The allow above holds only while that code path sets the key,
+# so this check reads the file and finds the setting in the function that makes the worktree. A copy of the
+# string in the guard would pass a check that reads the guard alone.
+FAMILY = "hook-bypass"
+
+
+def mutate_shared_hooks_path_case():
+    """Scope first: the file has a _make_checkout function. Then the subject: one call in it runs `worktree add`
+    with a core.hooksPath setting. The file is read with ast, so a comment or a docstring that names the key
+    does not count."""
+    path = os.path.join(REPO, "hooks", "mutate_shared.py")
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), path)
+    funcs = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "_make_checkout"]
+    if not funcs:
+        return False, "hooks/mutate_shared.py has no _make_checkout function"
+    for call in (node for node in ast.walk(funcs[0]) if isinstance(node, ast.Call)):
+        texts = [part.value for part in ast.walk(call)
+                 if isinstance(part, ast.Constant) and isinstance(part.value, str)]
+        if "worktree" in texts and "add" in texts and any(text.startswith("core.hooksPath=") for text in texts):
+            return True, "_make_checkout's worktree add sets core.hooksPath"
+    return False, "_make_checkout's worktree add no longer sets core.hooksPath"
+
+
+LOG_CHECKS_EXTRA.append(("hook-bypass: hooks/mutate_shared.py still sets core.hooksPath in the checkout it makes",
+                         mutate_shared_hooks_path_case))
+FIXTURELESS_CHECKS.add(mutate_shared_hooks_path_case)
 
 # ---- frozen: the main mirror and the live pin name are copied into guard_frozen.py from install.sh and
 # merge/install_from_main.sh. Each shell name is a literal in its script, and the guard keeps its own copy
@@ -21921,6 +22760,8 @@ add("brief-claim: an empty brief is allowed", "allow", tool="Agent", prompt="", 
 # on main, where no rule reads a brief. Selector: MUTATE_ONLY=brief-destructive-git: runs these cases and log checks.
 BRIEF_DESTRUCTIVE = "brief-destructive-git"
 # A session id is 8 or more characters, so a short folder name would not read as a scratchpad (in_any_session_scratchpad).
+# The spans below single-quote this path: the brief reader tokenizes a span like bash, which drops the backslashes of an
+# unquoted Windows path, so the path would stop reading as a scratchpad. The forward-slash form needs no quotes.
 SCRATCH_REPO = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "repo")
 from agent_brief import COMMON  # noqa: E402  the standing-rules text the SubagentStart hook gives every agent
 STANDING_LINE_ONE = "\n".join(text for _, text in COMMON[:2])   # the heading, then the first rule line
@@ -21934,7 +22775,7 @@ BRIEF_ALLOW_PARAGRAPHS = (
     "The standing-rules text from hooks/agent_brief.py COMMON line 1 pasted in a brief.\n"
     'Prose with no command span: "the reset with the hard flag lost work".\n'
     "A non-discarding git span: `git reset HEAD file.py`, `git stash list`, `git status`.\n"
-    "A scratch repo: `git -C " + SCRATCH_REPO + " reset --hard` (a path under a session scratchpad, as "
+    "A scratch repo: `git -C '" + SCRATCH_REPO + "' reset --hard` (a path under a session scratchpad, as "
     "`in_any_session_scratchpad` reads it) passes, mirroring the shell guard, which allows the session's own scratchpad."
 )
 add("brief-destructive-git: builder brief that orders `git reset --hard origin/main` is denied", "deny",
@@ -22011,7 +22852,10 @@ add("brief-destructive-git: git stash list is a read and is allowed", "allow",
 add("brief-destructive-git: git status is allowed", "allow",
     tool="Agent", prompt="Run `git status`.", subagent_type="builder", model="sonnet")
 add("brief-destructive-git: a reset --hard in a scratch repo under a session scratchpad is allowed", "allow",
-    tool="Agent", prompt="Try it first: `git -C " + SCRATCH_REPO + " reset --hard`.",
+    tool="Agent", prompt="Try it first: `git -C '" + SCRATCH_REPO + "' reset --hard`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a reset --hard in a scratch repo named with forward slashes is allowed", "allow",
+    tool="Agent", prompt="Try it first: `git -C " + SCRATCH_REPO.replace(os.sep, "/") + " reset --hard`.",
     subagent_type="builder", model="sonnet")
 add("brief-destructive-git: the brief's own allow paragraphs, as a test-author brief, are allowed", "allow",
     tool="Agent", prompt=BRIEF_ALLOW_PARAGRAPHS, subagent_type="test-author")
@@ -22046,7 +22890,7 @@ add("brief-destructive-git: builder brief that orders `git worktree remove x` is
     tool="Agent", prompt="Then run `git worktree remove x`.", subagent_type="builder", model="sonnet")
 add("brief-destructive-git: a brief whose scratch `git -C` segment is joined to a reset outside it is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent",
-    prompt="Compare: `git -C " + SCRATCH_REPO + " status && git reset --hard origin/main`.",
+    prompt="Compare: `git -C '" + SCRATCH_REPO + "' status && git reset --hard origin/main`.",
     subagent_type="builder", model="sonnet")
 add("brief-destructive-git: a reset under an inline ``` span line that is not a fence is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent", prompt="```git status```\nRun `git reset --hard origin/main`.",
@@ -22773,6 +23617,8 @@ REASON_MAY_NAME = {
     # The refusal names the handoff the session must read: under the config folder, which is ROOT here
     # and ~/.claude in a session. That path is the remedy, so the rule may name its folder.
     "handoff-unread": (ROOT, slash(ROOT), ".claude"),
+    # The refusal names the missing sections and may name the handoff it judges: under the config folder.
+    "handoff-sections": (ROOT, slash(ROOT), ".claude"),
 }
 
 
@@ -25347,9 +26193,17 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_override_case),
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
-    ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for a refspec, HEAD and bare, push.default "
-     "for bare only, no read for a literal destination, and reads the transcript only at the record branch",
+    ("roadmap-one-writer: a push starts one rev-parse, one more for a stray push, symbolic-ref for a refspec, "
+     "HEAD and bare, push.default for bare only, one config read of the remote for a literal main destination, "
+     "no read for HEAD:<branch>, "
+     "and reads the transcript only at the record branch",
      record_push_cost_case),
+    ("conflict-markers: the cost probe judges a clean commit as no hit, under a stand-in git (the control)",
+     cmk_cost_control_case),
+    ("conflict-markers: git add -A && git commit -m x spawns one rev-parse, one diff --check and one ls-files",
+     cmk_cost_add_commit_case),
+    ("conflict-markers: git add -A alone spawns no git", cmk_cost_add_case),
+    ("conflict-markers: git commit -m x spawns one rev-parse and one diff --check", cmk_cost_commit_case),
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
      worktree_home_cd_into_other_checkout_case),
@@ -27600,11 +28454,13 @@ OV_ACTS = (
      "kill %d" % FOREIGN, NOGIT, "deny", "machine-wide-kill", None),
     ("ask-linked-discard", "a hard reset in a linked worktree, which asks",
      VCS + " reset --hard", GITWT, "ask", "shared-tree", None),
-    # The two new asks of rulings 206 a and 207 a are lifted by an owner override like any ask.
+    # The asks of rulings 206 a and 207 a, and of rule push-agent-branch, are lifted by an owner override like any ask.
     ("push-stray", "a non-forced push that lands on a stray branch",
      VCS + " push origin HEAD", PUSHSTRAY, "ask", PUSH_STRAY_RULE, None),
     ("push-main", "a non-forced push of main",
      VCS + " push origin main", PUSHMAIN, "ask", PUSH_MAIN_RULE, None),
+    ("push-agent", "a non-forced push of an agent-worktree branch name",
+     VCS + " push origin HEAD", PUSHAGENT, "ask", PUSH_AGENT_RULE, None),
     # The owner's refused wait for a clock time, from the main session (no agent id, so a once override reaches it).
     ("wait-until-clock-loop", "a foreground loop that waits for a clock time",
      WAIT_UNTIL_CLOCK_LOOP, NOGIT, "deny", "waiter", None),
@@ -29299,6 +30155,520 @@ for _label, _check in (
     LOG_CHECKS_EXTRA.append((_label, _check))
 
 
+# =========================================================================== handoff-sections
+# A write that leaves a session's handoff without a section that the prompt's step 4 marker names is refused,
+# and the reason names the missing sections. The marker is read at run time from the installed prompt (the
+# config folder's hooks/precompact_handoff_prompt.md). No code copies its list: a name the marker adds is
+# required, and a name it drops is not. The rule fails open: a prompt with no marker, or one that cannot be
+# read, refuses nothing. Cost: a call it allows writes no file and starts no process; a refusal writes its
+# guard.log line and nothing else.
+FAMILY = "handoff-sections"
+HS_RULE = "handoff-sections"
+HS_SID = "5d2a7c10-0000-4000-8000-00000000f00d"      # the session that writes
+HS_OTHER = "9e41b0c3-0000-4000-8000-00000000beef"    # another session's handoff
+HS_SECTIONS = ("Goal", "Working premises", "Where things stand", "Work in flight", "Next steps",
+               "Files and commands")
+HS_TAIL = ("Work in flight", "Next steps", "Files and commands")   # the three a cut tail loses
+HS_BODIES = {
+    "Goal": "Ship the handoff section check (owner message, 2026-11-08).\n",
+    "Working premises": "- P1 [ruling] Six sections are required. Source: owner, 2026-11-08. Checked 2026-11-08.\n",
+    "Where things stand": "Branch hsk-tests at 2ac382cc6. No pull request.\n",
+    "Work in flight": "Nothing in flight.\n",
+    "Next steps": "The builder adds the check.\n",
+    "Files and commands": "hooks/guard.py and hooks/precompact_handoff.py.\n",
+}
+HS_MARKER = re.compile(r"<!--\s*handoff-sections:\s*(.*?)\s*-->")
+HS_GAP = "3c6e9a41-0000-4000-8000-00000000d1ce"    # a session whose handoff already lacks Next steps
+HS_CFG = os.path.join(ROOT, "hs-cfg")              # the installed prompt, as the repo holds it
+HS_CFG_NOMARK = os.path.join(ROOT, "hs-nomark")    # the installed prompt with its marker line removed
+HS_CFG_DIR = os.path.join(ROOT, "hs-dir")          # the prompt path is a directory
+HS_CFG_BYTES = os.path.join(ROOT, "hs-bytes")      # the prompt is not UTF-8
+HS_CFG_EXTRA = os.path.join(ROOT, "hs-extra")      # the marker names one section more
+HS_CFG_LESS = os.path.join(ROOT, "hs-less")        # the marker drops Files and commands
+HS_CFG_PUNCT = os.path.join(ROOT, "hs-punct")      # the marker names Goal) and Next steps., with their punctuation
+HS_PUNCT_NAMES = {"Goal": "Goal)", "Next steps": "Next steps."}   # a section's name in the marker and its heading
+HS_PROMPT = os.path.join(HERE, "precompact_handoff_prompt.md")
+HS_OPEN = "Open questions"                         # the section HS_CFG_EXTRA's marker adds
+
+
+def hs_text(omit=()):
+    """A handoff holding every section but those in `omit`, each under its own `## ` heading."""
+    parts = ["# Handoff\n\n"]
+    for name in HS_SECTIONS:
+        if name not in omit:
+            parts.append("## %s\n%s\n" % (name, HS_BODIES[name]))
+    return "".join(parts)
+
+
+HS_FULL = hs_text()
+HS_LAST = HS_FULL[HS_FULL.index("## Work in flight\n"):]   # the cut tail: three sections, to the end
+
+
+def hs_prompt_text():
+    with open(HS_PROMPT, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def hs_marker_names(text):
+    """The names on the marker line of `text`, in order; the six sections when it has none."""
+    m = HS_MARKER.search(text)
+    return [n.strip() for n in m.group(1).split("|")] if m else list(HS_SECTIONS)
+
+
+def hs_prompt_with(text, names):
+    """`text` with its marker line set to `names`, appended when it has none."""
+    line = "<!-- handoff-sections: %s -->" % " | ".join(names)
+    if HS_MARKER.search(text):
+        return HS_MARKER.sub(lambda _m: line, text, count=1)
+    return text + "\n" + line + "\n"
+
+
+def hs_prompt_path(config):
+    with hu_config(config):
+        return ph.prompt_path()
+
+
+def hs_handoff(config, session=HS_SID):
+    with hu_config(config):
+        return ph.handoff_path(session)
+
+
+def hs_install(config, text):
+    write(hs_prompt_path(config), text)
+
+
+def hs_write_bytes(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(data)
+
+
+def _build_hs_intact():
+    hs_install(HS_CFG, hs_prompt_text())
+    write(hs_handoff(HS_CFG), HS_FULL)   # the Edit and MultiEdit cases edit this file on disk
+    write(hs_handoff(HS_CFG, HS_GAP), hs_text(omit=("Next steps",)))   # a handoff that already lacks Next steps
+
+
+def _build_hs_nomark():
+    hs_install(HS_CFG_NOMARK, HS_MARKER.sub("", hs_prompt_text()))
+
+
+def _build_hs_dir():
+    os.makedirs(hs_prompt_path(HS_CFG_DIR), exist_ok=True)
+
+
+def _build_hs_bytes():
+    hs_write_bytes(hs_prompt_path(HS_CFG_BYTES), b"\xff\xfe" + hs_prompt_text().encode("utf-8"))
+
+
+def _build_hs_extra():
+    text = hs_prompt_text()
+    hs_install(HS_CFG_EXTRA, hs_prompt_with(text, hs_marker_names(text) + [HS_OPEN]))
+
+
+def _build_hs_less():
+    text = hs_prompt_text()
+    hs_install(HS_CFG_LESS, hs_prompt_with(text, [n for n in hs_marker_names(text)
+                                                  if n != "Files and commands"]))
+
+
+def hs_punct_text(omit=()):
+    """A handoff holding every section but those in `omit`, each heading the marker's name verbatim: Goal) and
+    Next steps. keep their punctuation."""
+    parts = ["# Handoff\n\n"]
+    for name in HS_SECTIONS:
+        if name not in omit:
+            parts.append("## %s\n%s\n" % (HS_PUNCT_NAMES.get(name, name), HS_BODIES[name]))
+    return "".join(parts)
+
+
+def _build_hs_punct():
+    text = hs_prompt_text()
+    hs_install(HS_CFG_PUNCT, hs_prompt_with(text, [HS_PUNCT_NAMES.get(n, n) for n in HS_SECTIONS]))
+
+
+lazy_fixture([HS_CFG], _build_hs_intact)
+lazy_fixture([HS_CFG_NOMARK], _build_hs_nomark)
+lazy_fixture([HS_CFG_DIR], _build_hs_dir)
+lazy_fixture([HS_CFG_BYTES], _build_hs_bytes)
+lazy_fixture([HS_CFG_EXTRA], _build_hs_extra)
+lazy_fixture([HS_CFG_LESS], _build_hs_less)
+lazy_fixture([HS_CFG_PUNCT], _build_hs_punct)
+HS_HANDOFF = hs_handoff(HS_CFG)
+
+# A refusal names every missing section, and names no section that is present. The reason may name the
+# handoff it judges, which sits under the config folder (REASON_MAY_NAME).
+add("handoff-sections: a Write that drops Work in flight, Next steps and Files and commands is refused, naming the three",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_TAIL, lacks=("Goal", "Working premises", "Where things stand"),
+    file_path=HS_HANDOFF, content=hs_text(omit=HS_TAIL))
+add("handoff-sections: a Write that keeps all six sections passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF, content=hs_text())
+add("handoff-sections: a full-size handoff that keeps all six sections passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF,
+    content=HS_FULL.replace(HS_BODIES["Where things stand"],
+                            "Branch hsk-tests at 2ac382cc6.\n" + "A line of state, kept.\n" * 6000))
+add("handoff-sections: a Write that empties the handoff is refused, naming all six sections",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_SECTIONS, file_path=HS_HANDOFF, content="")
+HS_HEADINGS = (
+    "# goal\n\n## WORKING PREMISES\n- P1 [read] The file says so. Source: hooks/guard.py:1. Checked 2026-11-08.\n\n"
+    "## Where things stand (as of 15:26)\nBranch hsk-tests.\n\n"
+    "## Work in flight:\nNothing in flight.\n\n## Next steps\nThe builder adds the check.\n\n"
+    "## Files and commands that matter\nhooks/guard.py\n")
+add("handoff-sections: headings match on the name, in any case, with text after the name, and pass",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF, content=HS_HEADINGS)
+HS_WRONG_LEVEL = (
+    "# Handoff\n\n## Goal\nShip it.\n\n## Working premises\n- P1 [assumed] A guess. Source: none. Checked never.\n\n"
+    "## Where things stand\nBranch.\n\n## Work in flight\nNothing.\n\n### Next steps\nGo on.\n\n"
+    "Next steps are below.\n\n## Files and commands\nhooks/guard.py\n")
+add("handoff-sections: Next steps at ### level, or named only in a sentence, is no heading and is refused",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=("Next steps",), lacks=("Goal", "Working premises", "Where things stand", "Work in flight",
+                                    "Files and commands"),
+    file_path=HS_HANDOFF, content=HS_WRONG_LEVEL)
+add("handoff-sections: another session's handoff is refused the same way, naming the three",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_TAIL, lacks=("Goal", "Working premises", "Where things stand"),
+    file_path=hs_handoff(HS_CFG, HS_OTHER), content=hs_text(omit=HS_TAIL))
+add("handoff-sections: a repo's own HANDOFF.md is not a session handoff, and passes",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=os.path.join(NOGIT, "HANDOFF.md"), content=hs_text(omit=HS_TAIL))
+add("handoff-sections: a file named handoff.md outside the config folder is not a session handoff, and passes",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=os.path.join(NOGIT, "notes", "handoff.md"), content=hs_text(omit=HS_TAIL))
+add("handoff-sections: an Edit that cuts the tail after Where things stand is refused, naming the three",
+    "deny", HS_RULE, tool="Edit", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_TAIL, lacks=("Goal", "Working premises", "Where things stand"),
+    file_path=HS_HANDOFF, old_string=HS_LAST, new_string="")
+add("handoff-sections: an Edit that keeps all six sections passes, silently",
+    "allow", tool="Edit", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF, old_string="Nothing in flight.\n",
+    new_string="Nothing in flight; the red run is recorded.\n")
+add("handoff-sections: a MultiEdit whose second edit cuts the tail is refused, naming the three",
+    "deny", HS_RULE, tool="MultiEdit", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_TAIL, lacks=("Goal", "Working premises", "Where things stand"),
+    file_path=HS_HANDOFF,
+    edits=[{"old_string": "Branch hsk-tests at", "new_string": "Branch hsk-tests2 at"},
+           {"old_string": HS_LAST, "new_string": ""}])
+add("handoff-sections: a MultiEdit that keeps all six sections passes, silently",
+    "allow", tool="MultiEdit", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF,
+    edits=[{"old_string": "The builder adds the check.", "new_string": "The builder adds the check, then the red run."},
+           {"old_string": "Nothing in flight.\n", "new_string": "Nothing in flight; the red run is recorded.\n"}])
+
+# The marker is the one list. A name it adds is required; a name it drops is not, and the control shows
+# the same write is refused while the marker still names that section.
+add("handoff-sections: a name the marker adds is required: a Write without it is refused, naming it",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG_EXTRA,
+    carries=(HS_OPEN,), lacks=HS_SECTIONS,
+    file_path=hs_handoff(HS_CFG_EXTRA), content=hs_text())
+add("handoff-sections: a name the marker drops is not required: a Write without it passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG_LESS, silent=True,
+    file_path=hs_handoff(HS_CFG_LESS), content=hs_text(omit=("Files and commands",)))
+add("handoff-sections: with the same marker, a Write without Next steps is still refused",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG_LESS,
+    carries=("Next steps",), lacks=("Goal", "Working premises", "Where things stand", "Work in flight",
+                                    "Files and commands"),
+    file_path=hs_handoff(HS_CFG_LESS), content=hs_text(omit=("Next steps",)))
+
+
+# A handoff that already lacks a section drops nothing when an edit leaves it that way, so an edit to its Goal
+# passes. Only a write that removes a section the handoff holds is refused. HS_GAP's handoff lacks Next steps on
+# disk; the scope check below proves the Edit cases edit the text they name.
+HS_GOAL_OLD = "Ship the handoff section check (owner message, 2026-11-08)."
+HS_GOAL_NEW = "Ship the handoff section check, with its red cases (owner message, 2026-11-08)."
+HS_WORK_BLOCK = "## Work in flight\n%s\n" % HS_BODIES["Work in flight"]
+add("handoff-sections: an Edit that changes only the Goal of a handoff that already lacks Next steps passes, silently",
+    "allow", tool="Edit", cwd=NOGIT, session=HS_GAP, config=HS_CFG, silent=True,
+    file_path=hs_handoff(HS_CFG, HS_GAP), old_string=HS_GOAL_OLD, new_string=HS_GOAL_NEW)
+add("handoff-sections: a MultiEdit that changes only the Goal and Where things stand of a handoff that already "
+    "lacks Next steps passes, silently",
+    "allow", tool="MultiEdit", cwd=NOGIT, session=HS_GAP, config=HS_CFG, silent=True,
+    file_path=hs_handoff(HS_CFG, HS_GAP),
+    edits=[{"old_string": HS_GOAL_OLD, "new_string": HS_GOAL_NEW},
+           {"old_string": "Branch hsk-tests at", "new_string": "Branch hsk-tests2 at"}])
+add("handoff-sections: an Edit that removes Work in flight from a handoff that already lacks Next steps is refused, "
+    "naming Work in flight",
+    "deny", HS_RULE, tool="Edit", cwd=NOGIT, session=HS_GAP, config=HS_CFG,
+    carries=("Work in flight",), lacks=("Goal", "Working premises", "Where things stand", "Files and commands"),
+    file_path=hs_handoff(HS_CFG, HS_GAP), old_string=HS_WORK_BLOCK, new_string="")
+add("handoff-sections: a Write that lacks Next steps is refused even though the old handoff lacked it, naming Next steps",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_GAP, config=HS_CFG,
+    carries=("Next steps",), lacks=("Goal", "Working premises", "Where things stand", "Work in flight",
+                                    "Files and commands"),
+    file_path=hs_handoff(HS_CFG, HS_GAP), content=hs_text(omit=("Next steps",)))
+
+
+def hs_gap_scope():
+    """The gap handoff is on disk as the fixture wrote it, with the Goal text the Edit cases replace. An Edit whose
+    old text is absent is allowed by the rule, so the Edit cases prove nothing unless the file holds that text."""
+    materialize(HS_CFG)
+    try:
+        with open(hs_handoff(HS_CFG, HS_GAP), "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError as e:
+        return False, "the gap handoff is unreadable: %s" % e
+    if text != hs_text(omit=("Next steps",)):
+        return False, "the gap handoff on disk is not the handoff without Next steps"
+    if HS_GOAL_OLD not in text:
+        return False, "the gap handoff lacks the Goal text the Edit cases replace"
+    return True, "the gap handoff on disk lacks Next steps and holds the Goal text the Edit cases replace"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-sections: scope: the gap handoff on disk is the one the Edit cases edit", hs_gap_scope))
+
+
+# A heading numbered like the prompt's steps holds its section: `## 1. Goal`, and `# 5. Next steps` at H1. A `N)`
+# heading does not: the prompt numbers its steps with `N.` only, and the premises reader reads unnumbered headings.
+def hs_numbered(omit=()):
+    """A handoff whose headings carry the prompt's step numbers, one `#` or `##` heading per section."""
+    parts = ["# Handoff\n\n"]
+    for number, name in enumerate(HS_SECTIONS, 1):
+        if name not in omit:
+            parts.append("%s %d. %s\n%s\n" % ("#" if name == "Next steps" else "##", number, name, HS_BODIES[name]))
+    return "".join(parts)
+
+
+add("handoff-sections: headings numbered like the prompt's steps count as present: a Write with `## 1. Goal` and "
+    "`# 5. Next steps` passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF, content=hs_numbered())
+add("handoff-sections: a numbered Write without Next steps is refused, naming Next steps only",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=("Next steps",), lacks=("Goal", "Working premises", "Where things stand", "Work in flight",
+                                    "Files and commands"),
+    file_path=HS_HANDOFF, content=hs_numbered(omit=("Next steps",)))
+add("handoff-sections: a heading numbered `3)` is no step heading: a Write with `## 3) Where things stand` is "
+    "refused, naming Where things stand only",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=("Where things stand",), lacks=("Goal", "Working premises", "Work in flight", "Next steps",
+                                            "Files and commands"),
+    file_path=HS_HANDOFF, content=hs_text().replace("## Where things stand\n", "## 3) Where things stand\n"))
+
+
+# The rule judges only the session's handoff, <sid>.md, in the handoffs folder. The owner-feedback inbox sits beside
+# it as <sid>.inbox.md and holds item lines, not sections, so a Write to it passes. Its path is local_time's, the one
+# home of the inbox names.
+def hs_inbox(config, session=HS_SID):
+    """The session's owner-feedback inbox, as local_time.inbox_paths builds it."""
+    with hu_config(config):
+        return local_time.inbox_paths(session)[0]
+
+
+HS_INBOX_TEXT = "### 2026-11-08 16:40 CST (UTC-06:00)\n- fb-0958-7 [page] -> page:98\n"
+HS_INBOX_FULL = "### 2026-11-08 16:40 CST (UTC-06:00)\n" + "".join(
+    "- fb-0958-%d [page] -> page:98\n" % n for n in range(1, 2001))
+
+
+def hs_inbox_scope():
+    """The inbox cases write <sid>.inbox.md beside <sid>.md in the handoffs folder: the file the rule must not judge."""
+    inbox, handoff = hs_inbox(HS_CFG), hs_handoff(HS_CFG)
+    if os.path.basename(inbox) != HS_SID + ".inbox.md":
+        return False, "the inbox is %r, want %s.inbox.md" % (os.path.basename(inbox), HS_SID)
+    if os.path.basename(handoff) != HS_SID + ".md" or os.path.dirname(inbox) != os.path.dirname(handoff):
+        return False, "the inbox is not beside the session handoff in the handoffs folder"
+    return True, "the inbox is <sid>.inbox.md, beside <sid>.md in the handoffs folder"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-sections: scope: the inbox cases write <sid>.inbox.md beside the session handoff",
+                         hs_inbox_scope))
+add("handoff-sections: a Write to the owner-feedback inbox, item lines and no sections, passes silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=hs_inbox(HS_CFG), content=HS_INBOX_TEXT)
+add("handoff-sections: an empty owner-feedback inbox passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=hs_inbox(HS_CFG), content="")
+add("handoff-sections: a full-size owner-feedback inbox passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=hs_inbox(HS_CFG), content=HS_INBOX_FULL)
+add("handoff-sections: control: the same item lines written to the session handoff are refused, naming all six sections",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_SECTIONS, file_path=HS_HANDOFF, content=HS_INBOX_TEXT)
+
+
+# A marker name that ends in punctuation matches its verbatim heading. The heading matcher ends each name with (?!\w):
+# a `\b` after `)` or `.` needs a word character next, so `## Goal)` never matched, and the marker refused every write
+# that held it.
+def hs_punct_scope():
+    """The punctuated fixture's installed marker names Goal) and Next steps., verbatim, so the cases below judge the
+    punctuation. A marker that did not change would allow the punctuated write for the wrong reason."""
+    materialize(HS_CFG_PUNCT)
+    with hu_config(HS_CFG_PUNCT):
+        names = ph.required_sections()
+    want = [HS_PUNCT_NAMES.get(n, n) for n in HS_SECTIONS]
+    if names != want:
+        return False, "the installed marker reads %r, want %r" % (names, want)
+    return True, "the installed marker names Goal) and Next steps. verbatim, and the other four as before"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-sections: scope: the punctuated fixture's marker names Goal) and Next steps.",
+                         hs_punct_scope))
+add("handoff-sections: a marker name ending in punctuation matches its verbatim heading: a Write with `## Goal)` and "
+    "`## Next steps.` passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG_PUNCT, silent=True,
+    file_path=hs_handoff(HS_CFG_PUNCT), content=hs_punct_text())
+add("handoff-sections: a punctuated marker still refuses a Write without its `## Next steps.` heading, naming Next steps.",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG_PUNCT,
+    carries=("Next steps.",), lacks=("Working premises", "Where things stand", "Work in flight", "Files and commands"),
+    file_path=hs_handoff(HS_CFG_PUNCT), content=hs_punct_text(omit=("Next steps",)))
+
+
+def hs_case(config, tool, tool_input, session=HS_SID):
+    """A case dict for decide(), with each key decide() reads, built as add() builds one."""
+    return {"name": "handoff-sections", "expected": None, "rule": None, "raw": None, "tool": tool,
+            "cwd": NOGIT, "env_path": None, "session": session, "carries": (), "lacks": (),
+            "config": config, "transcript": None, "agent_id": None, "agent_type": None, "event": None,
+            "stop_active": False, "no_root": False, "max_seconds": None, "env": None, "guard": None,
+            "silent": False, "temp": TEMP_DIR, "tool_input": tool_input, "family": FAMILY,
+            "windows": False}
+
+
+def hs_write(config, content, session=HS_SID):
+    return decide(hs_case(config, "Write", {"file_path": hs_handoff(config, session),
+                                            "content": content}, session))
+
+
+def hs_fail_open(label, config):
+    """The rule allows a drop that the intact prompt refuses, silently. The intact prompt is the control:
+    without it, an allow would prove nothing, since a rule that never refuses also allows."""
+    def check():
+        control = hs_write(HS_CFG, hs_text(omit=HS_TAIL))
+        if control[0] != "deny":
+            return False, "the intact prompt does not refuse the drop: %r" % (control[0],)
+        got = hs_write(config, hs_text(omit=HS_TAIL))
+        if got != ("allow", ""):
+            return False, "%s: the drop got %r, want a silent allow" % (label, got)
+        return True, "%s: the drop is allowed silently, and the intact prompt refuses it" % label
+    return check
+
+
+for _label, _config in (("the prompt has no marker line", HS_CFG_NOMARK),
+                        ("the prompt path is a directory", HS_CFG_DIR),
+                        ("the prompt is not UTF-8", HS_CFG_BYTES)):
+    LOG_CHECKS_EXTRA.append(("handoff-sections: fail open when %s" % _label, hs_fail_open(_label, _config)))
+
+
+# The probe runs one guard call in-process and counts what it does: each file write (open in a write mode,
+# or an os-level write) and each process start (Popen, os.system, os.spawn*). The counts go to stderr, so
+# the guard's own stdout stays the decision. Bytecode writes are off, or a compiled module would hide one.
+HS_PROBE = r"""
+import builtins, io, json, os, runpy, subprocess, sys
+guard, payload = sys.argv[1], sys.argv[2]
+seen = {"writes": [], "starts": []}
+real_open = builtins.open
+
+
+def counted_open(file, mode="r", *args, **kwargs):
+    if any(c in str(mode) for c in "wax+"):
+        seen["writes"].append(os.path.basename(str(file)))
+    return real_open(file, mode, *args, **kwargs)
+
+
+builtins.open = counted_open
+
+
+class CountingPopen(subprocess.Popen):
+    def __init__(self, *args, **kwargs):
+        seen["starts"].append("Popen")
+        super().__init__(*args, **kwargs)
+
+
+subprocess.Popen = CountingPopen
+
+
+def counted(bucket, name, real):
+    def call(*args, **kwargs):
+        # A folder call that finds the folder already there changes nothing, so it is no write.
+        if name in ("makedirs", "mkdir") and args and os.path.exists(args[0]):
+            return real(*args, **kwargs)
+        seen[bucket].append("os." + name)
+        return real(*args, **kwargs)
+    return call
+
+
+for name in ("remove", "unlink", "rename", "replace", "makedirs", "mkdir", "rmdir", "utime", "truncate",
+             "chmod"):
+    if hasattr(os, name):
+        setattr(os, name, counted("writes", name, getattr(os, name)))
+for name in ("system", "spawnv", "spawnve", "spawnvp", "spawnvpe", "posix_spawn", "posix_spawnp",
+             "startfile"):
+    if hasattr(os, name):
+        setattr(os, name, counted("starts", name, getattr(os, name)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(guard)))
+sys.argv = [guard]
+sys.stdin = io.StringIO(payload)
+code = 0
+try:
+    runpy.run_path(guard, run_name="__main__")
+except SystemExit as e:
+    code = e.code
+finally:
+    sys.stderr.write("HS_COST " + json.dumps(seen) + "\n")
+sys.exit(code)
+"""
+
+
+def hs_probe(config, tool, tool_input, session=HS_SID):
+    """One guard call under HS_PROBE. Returns (decision, reason, writes, starts), or None for the counts
+    when the probe printed none (the probe itself failed, so the counts prove nothing)."""
+    materialize(config)   # the config folder's installed prompt, built before the guard reads it
+    env = dict(os.environ)
+    for name in ("CLAUDE_CODE_REMOTE", "PYTHONPATH", "CLAUDE_CODE_SESSION_ID",
+                 "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR"):
+        env.pop(name, None)
+    env["CLAUDE_CONFIG_DIR"] = config
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    payload = json.dumps({"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT, "session_id": session})
+    run = subprocess.run([sys.executable, "-c", HS_PROBE, GUARD, payload], capture_output=True,
+                         text=True, env=env, timeout=120)
+    counts = None
+    for line in run.stderr.splitlines():
+        if line.startswith("HS_COST "):
+            counts = json.loads(line[len("HS_COST "):])
+    decision, reason = read_decision(run.stdout)
+    if counts is None:
+        return decision, reason, None, None
+    return decision, reason, counts["writes"], counts["starts"]
+
+
+def hs_cost_check():
+    """A call the rule allows writes no file and starts no process. A refusal writes its guard.log line and
+    starts no process. The control is a refusal the guard already makes (git-env-set): a probe that counts
+    nothing would also show zero writes, so the control must show the refusal's log line."""
+    control = hs_probe(HS_CFG, "Bash", {"command": "GIT_DIR=/nowhere " + VCS + " status"})
+    if control[2] is None:
+        return False, "the probe printed no count for the control call"
+    if control[0] != "deny" or control[2] != ["guard.log"]:
+        return False, "the control refusal gave %r with writes %r, want deny with one guard.log write" % (
+            control[0], control[2])
+    allowed = hs_probe(HS_CFG, "Write", {"file_path": hs_handoff(HS_CFG), "content": hs_text()})
+    if allowed[2] is None:
+        return False, "the probe printed no count for an allowed handoff Write"
+    if allowed[0] != "allow" or allowed[1]:
+        return False, "a complete handoff Write gave %r, want a silent allow" % (allowed[0],)
+    if allowed[2] or allowed[3]:
+        return False, "an allowed handoff Write made writes %r and starts %r, want none" % (
+            allowed[2], allowed[3])
+    refused = hs_probe(HS_CFG, "Write", {"file_path": hs_handoff(HS_CFG), "content": hs_text(omit=HS_TAIL)})
+    if refused[2] is None:
+        return False, "the probe printed no count for a refused handoff Write"
+    if refused[0] != "deny":
+        return False, "a handoff Write that drops three sections gave %r, want deny" % (refused[0],)
+    if refused[2] != ["guard.log"] or refused[3]:
+        return False, "a refused handoff Write wrote %r and started %r, want one guard.log write and no start" % (
+            refused[2], refused[3])
+    return True, "an allowed handoff Write writes no file and starts no process; a refusal writes its guard.log line only"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-sections: an allowed write writes no file and starts no process; a refusal "
+                         "writes its guard.log line only", hs_cost_check))
+
+
 # =========================================================================== the machine-load brake
 # The brake's local cases are local runs. A cloud container sets CLAUDE_CODE_REMOTE=true, which turns the brake off, so the
 # suite drops it here, and a cloud case passes its own value to lb_decision_check (`remote`). No other case reads it.
@@ -30496,7 +31866,7 @@ lb_add("a lane session's Bash, memory 91.7%: busy, allowed, the reader runs once
 lb_add("a lane session's Edit, 9.4 GB free of 926 GB: busy, allowed, the reader runs once",
        lb_decision_check("Edit", LB_BUSY_EDIT, "allow", tool_input=LB_LANE_EDIT, own_env=LB_OWN, transcript=LB_LANE))
 # An agent of a lane makes an agent's call, so it reads the load once, as an agent's write does, and the lane check never
-# reads it again. Both are green on main: they pin the cost of the new check on an agent's call.
+# reads it again. Both pin the cost of the new check on an agent's call, which must not add a second read.
 lb_add("a lane session's agent Bash (agent_id set), memory 91.7%: busy, allowed, the reader runs once",
        lb_decision_check("Bash", LB_BUSY, "allow", tool_input=LB_LANE_BASH, agent=LB_AGENT, own_env=LB_OWN,
                          transcript=LB_LANE))
@@ -32717,6 +34087,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: a builder write to a path in no repository from a /c/ cwd", "worktree-home"),
     ("cite-by-id: a -F file that cannot be read", "cite"),
     ("env: heredoc-allow-strip", "env"),
+    ("roadmap-one-writer: a push starts one rev-parse", "push-delete"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
     _hits = [label for label in LOG_FAMILY if label.startswith(_prefix)]
