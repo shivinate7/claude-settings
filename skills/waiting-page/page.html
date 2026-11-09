@@ -60,6 +60,8 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .tabs a { flex: none; padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); text-decoration: none; font-weight: 600; border: 1px solid transparent; border-bottom: none; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
 .tabs::-webkit-scrollbar { display: none; }
 .tabs a:focus-visible { outline-offset: -2px; }
+/* Forced colours drop box shadows, so the line under the bar comes back as a border. */
+@media (forced-colors: active) { .tabs { border-bottom: 1px solid CanvasText; } }
 .tabs a[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
 .tabs .cnt { font: 600 12px/1 var(--mono); color: var(--muted); }
 
@@ -954,11 +956,13 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   .replyform .askrow .askhint { grid-column: 1 / -1; }
   .replyform .askrow .btn.rx { grid-column: 1; grid-row: 2; }
   .replyform .askrow .btn.askgo { grid-column: 2; grid-row: 2; }
+  .replyform .askrow .slot { grid-column: 1 / -1; grid-row: 3; }
 }
 @container askf (width < 12.5em) {
   .replyform .askrow { grid-template-columns: minmax(0, 1fr); }
   .replyform .askrow .btn.askgo { grid-column: 1; grid-row: 2; }
   .replyform .askrow .btn.rx { grid-column: 1; grid-row: 3; }
+  .replyform .askrow .slot { grid-row: 4; }
 }
 .asks .empty.unk { color: var(--due); border-color: var(--due); }
 /* The rail row for asks: the head of an overview tier, no chips. With no waiting ask it is grey, as an empty tier is. */
