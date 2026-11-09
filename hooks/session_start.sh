@@ -355,7 +355,8 @@ fi
 # remote is refreshed first with bounded_fetch (`git fetch --prune origin`, on any branch or a detached HEAD),
 # so the compare reads a current origin/main, not a stale one. A refresh that fails or times out prints one
 # "did not run" line (unless an earlier check already printed its own for this checkout) and marks each grant
-# line as read from an unrefreshed ref. No origin remote: no fetch, no line. The compare is the HEAD blob of each
+# line as read from an unrefreshed ref. No origin remote: no fetch and no refresh line; the compare below still
+# runs, so a remote-less repo with a grant file at HEAD prints the unknown-grant line. The compare is the HEAD blob of each
 # grant file (CLAUDE.md, .claude/CLAUDE.md) in the session's toplevel against the blob at origin/main, or at
 # origin/HEAD's target ($default_branch above) when origin/main is absent. A file that differs, or sits on one
 # side only, prints one line with the ref tip's short sha and the git show command that reads the ref's copy. When
@@ -367,8 +368,10 @@ fi
 # objects and FETCH_HEAD; one git remote read, one git cat-file --batch-check and one git rev-list, plus, only
 # when local main differs, one git config read and, when the pointer clone printed behind, two git rev-parse
 # reads, all local. The fetch is bounded by a watchdog (bounded_git): a short-lived subshell and a sleep of at
-# most CLAUDE_SETTINGS_FETCH_TIMEOUT seconds, killed when the fetch returns first. No other timer and no
-# long-lived process. The hook writes no file.
+# most CLAUDE_SETTINGS_FETCH_TIMEOUT seconds; the sleep is killed when the fetch returns first. When the bound
+# hits, the kill reaches only the subshell that runs git, so on bash the git child may finish after the hook
+# exits. It is bounded by git's own run (a prune fetch of all of origin) and is never a daemon. No other timer.
+# The hook itself writes no file; that late git writes only its own refs, objects and FETCH_HEAD.
 gm_unref=""
 if (cd "$toplevel" 2>/dev/null && git remote 2>/dev/null | grep -qx origin); then
   if ! bounded_fetch "$toplevel"; then
