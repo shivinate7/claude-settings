@@ -89,7 +89,11 @@ STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|M
 # `#` and blanks: a real password may hold a lone `)`, `'`, `}` or `||`.
 URL_USER = r"[^/?#\s@:\"'`()\[\]{}|]+"
 URL_PASSWORD = r"[^/?#\s@]+"
-# What may follow the `@`: a bracketed IPv6 host (`[::1]`), or anything but a quote, bracket or `|`, which is code.
+# A password with no code character: a literal. The `@` after it is a credential, whatever follows, a quoted or templated
+# host included (`"postgres://u:pw@" + host`, `u:pw@{db_host}`).
+URL_PLAIN_PASSWORD = r"[^/?#\s@\"'`+()\[\]{}|]+"
+# What may follow the `@` of a password that holds a code character: a bracketed IPv6 host (`[::1]`), or anything but a
+# quote, bracket or `|`, which is code.
 URL_HOST_START = r"(?:(?=\[[0-9A-Fa-f.]*:)|(?![\"'`()\[\]{}|]))"
 # Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
 # from starting inside a longer word ("risk-" and "btn-sk-" are not "sk-").
@@ -112,9 +116,10 @@ SECRET_SHAPES = (
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
     # `scheme://user:password@host`, on any host: a version pin after the `@` is blanked, so an IP host is caught here.
     # The user part holds no quote, bracket or `|`: minified code runs `"https://a"})];x||y:z@` together. The password
-    # may hold them, and the `@` that ends it must not be followed by a quote, bracket or `|` unless an IPv6 host opens
-    # there: `"http://h:"+port+"@"` is code, not a host.
-    ("url-credentials", re.compile(r"://" + URL_USER + r":" + URL_PASSWORD + r"@" + URL_HOST_START)),
+    # may hold them. A password with a code character (a quote, `+`, a bracket) is code when a quote, bracket or `|`
+    # follows the `@` unless an IPv6 host opens there: `"http://h:"+port+"@"`. A plain literal password always refuses.
+    ("url-credentials", re.compile(
+        r"://" + URL_USER + r":(?:" + URL_PLAIN_PASSWORD + r"@|" + URL_PASSWORD + r"@" + URL_HOST_START + r")")),
     # The value is captured in a lookahead, so a match ends at the separator and a later password word on the same line
     # (`password:!0};pwd=hunter2`) is a match of its own. found.end(2) is the end of the value.
     ("password", re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(?=(\S+))", re.I)),
