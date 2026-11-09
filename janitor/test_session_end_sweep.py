@@ -851,12 +851,16 @@ class SessionEndFetchThrottle(unittest.TestCase):
     def session_end(self, cwd):
         self.hook.handle({"hook_event_name": "SessionEnd", "cwd": cwd}, elapsed_seconds=0.0)
 
+    @contextlib.contextmanager
     def pinned_clock(self):
-        """The sweep's wall clock, pinned to PINNED_WALL_CLOCK. A fixture stamped from that value and the
-        sweep that judges it read one instant, so a stall between the stamp and the judge cannot flip it."""
+        """The sweep's wall clock (`time`) is pinned to PINNED_WALL_CLOCK, and its monotonic deadline
+        clock (`_now`) to a fixed reading, so a stall cannot end a pass at its deadline. A fixture stamped
+        from the wall value and the sweep that judges it read one instant."""
         pinned = mock.MagicMock(wraps=time)
         pinned.time.return_value = self.PINNED_WALL_CLOCK
-        return mock.patch.object(self.sweep, "time", pinned)
+        with mock.patch.object(self.sweep, "time", pinned), \
+                mock.patch.object(self.sweep, "_now", lambda: 0.0):
+            yield
 
     def counts(self, repo):
         where = os.path.normcase(os.path.realpath(repo))
@@ -893,11 +897,12 @@ class SessionEndFetchThrottle(unittest.TestCase):
 
     def test_second_session_end_within_10_minutes_runs_no_fetch_and_no_ls_remote(self):
         repo = self.repo("throttle_second")
-        self.session_end(repo)
-        first = self.counts(repo)
-        self.session_end(repo)
-        self.assertEqual(self.counts(repo), first,
-                         "the second SessionEnd inside 10 minutes ran git fetch or ls-remote")
+        with self.pinned_clock():
+            self.session_end(repo)
+            first = self.counts(repo)
+            self.session_end(repo)
+            self.assertEqual(self.counts(repo), first,
+                             "the second SessionEnd inside 10 minutes ran git fetch or ls-remote")
 
     def test_a_record_just_inside_the_window_still_throttles(self):
         repo = self.repo("throttle_inside")
@@ -929,15 +934,16 @@ class SessionEndFetchThrottle(unittest.TestCase):
 
     def test_two_repositories_each_get_their_own_fetch(self):
         repo_a, repo_b = self.repo("throttle_a"), self.repo("throttle_b")
-        self.session_end(repo_a)
-        self.session_end(repo_b)
-        self.assertEqual(self.counts(repo_a)[0], 1)
-        self.assertEqual(self.counts(repo_b)[0], 1, "repo B must not borrow repo A's record")
-        self.assertEqual(len(self.records()), 2, "one record per repository")
-        self.session_end(repo_a)
-        self.session_end(repo_b)
-        self.assertEqual(self.counts(repo_a)[0], 1)
-        self.assertEqual(self.counts(repo_b)[0], 1)
+        with self.pinned_clock():
+            self.session_end(repo_a)
+            self.session_end(repo_b)
+            self.assertEqual(self.counts(repo_a)[0], 1)
+            self.assertEqual(self.counts(repo_b)[0], 1, "repo B must not borrow repo A's record")
+            self.assertEqual(len(self.records()), 2, "one record per repository")
+            self.session_end(repo_a)
+            self.session_end(repo_b)
+            self.assertEqual(self.counts(repo_a)[0], 1)
+            self.assertEqual(self.counts(repo_b)[0], 1)
 
     def test_a_missing_corrupt_or_future_record_means_fetch_now(self):
         # Each row damages the record after a first fetch; the next SessionEnd must fetch again.
@@ -947,59 +953,63 @@ class SessionEndFetchThrottle(unittest.TestCase):
             ("garbage", "not a time"),
             ("nan", "nan"),
             ("inf", "inf"),
-            ("future", repr(time.time() + 3600)),
+            ("future", repr(self.PINNED_WALL_CLOCK + 3600)),
         )
-        for label, text in rows:
-            with self.subTest(record=label):
-                repo = self.repo("throttle_damaged_" + label)
-                self.session_end(repo)
-                self.assertEqual(len(self.records()), 1, "fixture: the first fetch left a record")
-                if text is None:
+        with self.pinned_clock():  # the future row is future to the same clock that judges it
+            for label, text in rows:
+                with self.subTest(record=label):
+                    repo = self.repo("throttle_damaged_" + label)
+                    self.session_end(repo)
+                    self.assertEqual(len(self.records()), 1, "fixture: the first fetch left a record")
+                    if text is None:
+                        for path in self.records():
+                            os.remove(path)
+                    else:
+                        self.set_records(text)
+                    before = self.counts(repo)[0]
+                    self.session_end(repo)
+                    self.assertEqual(self.counts(repo)[0], before + 1,
+                                     "a %s record must fail toward fetching" % label)
                     for path in self.records():
                         os.remove(path)
-                else:
-                    self.set_records(text)
-                before = self.counts(repo)[0]
-                self.session_end(repo)
-                self.assertEqual(self.counts(repo)[0], before + 1,
-                                 "a %s record must fail toward fetching" % label)
-                for path in self.records():
-                    os.remove(path)
 
     def test_an_unwritable_record_folder_still_fetches_and_still_exits(self):
         repo = self.repo("throttle_unwritable")
         write(os.path.join(self.cfg, "state"), "a file where the state folder should be\n")
-        self.session_end(repo)
-        self.session_end(repo)
-        self.assertEqual(self.counts(repo)[0], 2,
-                         "with no record that can be kept, every SessionEnd fetches")
+        with self.pinned_clock():
+            self.session_end(repo)
+            self.session_end(repo)
+            self.assertEqual(self.counts(repo)[0], 2,
+                             "with no record that can be kept, every SessionEnd fetches")
 
     def test_two_worktrees_of_one_clone_share_one_record(self):
         repo = self.repo("throttle_wt_primary")
         linked = os.path.join(ROOT, "throttle_wt_linked")
         require(run_vcs(repo, "worktree", "add", "-q", "-b", "wt-throttle", linked).returncode == 0,
                 "worktree add")
-        self.session_end(repo)
-        self.session_end(linked)
-        self.assertEqual(self.counts(repo)[0], 1, "the linked worktree's SessionEnd must not fetch again")
-        self.assertEqual(len(self.records()), 1, "the clone's common git dir is the one key")
+        with self.pinned_clock():
+            self.session_end(repo)
+            self.session_end(linked)
+            self.assertEqual(self.counts(repo)[0], 1, "the linked worktree's SessionEnd must not fetch again")
+            self.assertEqual(len(self.records()), 1, "the clone's common git dir is the one key")
 
     def test_the_rest_of_the_sweep_still_runs_on_a_throttled_call(self):
         repo = self.repo("throttle_rest")
-        self.session_end(repo)
-        first = self.counts(repo)
-        add_reapable_branch(repo, "reap-me-throttled")
-        gone = os.path.join(ROOT, "throttle_rest_gone")
-        require(run_vcs(repo, "worktree", "add", "-q", "-b", "gone-branch", gone).returncode == 0,
-                "worktree add")
-        shutil.rmtree(gone)  # a stale registration: `git worktree prune` is the sweep's own work
-        self.session_end(repo)
-        self.assertEqual(self.counts(repo), first, "fixture: the second call was throttled")
-        self.assertNotIn("reap-me-throttled", local_branches(repo),
-                         "a throttled call must still reap a merged branch")
-        listed = run_vcs(repo, "worktree", "list", "--porcelain").stdout
-        self.assertNotIn(os.path.basename(gone), listed,
-                         "a throttled call must still prune a stale worktree registration")
+        with self.pinned_clock():
+            self.session_end(repo)
+            first = self.counts(repo)
+            add_reapable_branch(repo, "reap-me-throttled")
+            gone = os.path.join(ROOT, "throttle_rest_gone")
+            require(run_vcs(repo, "worktree", "add", "-q", "-b", "gone-branch", gone).returncode == 0,
+                    "worktree add")
+            shutil.rmtree(gone)  # a stale registration: `git worktree prune` is the sweep's own work
+            self.session_end(repo)
+            self.assertEqual(self.counts(repo), first, "fixture: the second call was throttled")
+            self.assertNotIn("reap-me-throttled", local_branches(repo),
+                             "a throttled call must still reap a merged branch")
+            listed = run_vcs(repo, "worktree", "list", "--porcelain").stdout
+            self.assertNotIn(os.path.basename(gone), listed,
+                             "a throttled call must still prune a stale worktree registration")
 
 
     def pushed_branch(self, repo, name):
@@ -1018,24 +1028,25 @@ class SessionEndFetchThrottle(unittest.TestCase):
         # a throttled run cannot know that from a ref up to 10 minutes old: it is kept too.
         repo = self.repo("throttle_stale_remote")
         remote = repo + "_remote.git"
-        self.session_end(repo)  # fetches, records the time
-        self.pushed_branch(repo, "gone-upstream")
-        self.pushed_branch(repo, "still-pushed")
-        require(run_vcs(remote, "branch", "-D", "gone-upstream").returncode == 0, "delete on remote")
-        first = self.counts(repo)
-        self.session_end(repo)
-        self.assertEqual(self.counts(repo), first, "fixture: the second call was throttled")
-        self.assertIn("gone-upstream", local_branches(repo),
-                      "a throttled call reaped a branch holding the only copy, on a stale ref")
-        self.assertIn("still-pushed", local_branches(repo),
-                      "a throttled call reaped a branch on the strength of an on-remote read")
-        self.set_records(repr(time.time() - (FETCH_THROTTLE_SECONDS + 60)))
-        self.session_end(repo)
-        self.assertEqual(self.counts(repo)[0], first[0] + 1, "fixture: the third call fetched")
-        self.assertIn("gone-upstream", local_branches(repo),
-                      "a fetching run must keep the only copy once the stale ref is pruned")
-        self.assertNotIn("still-pushed", local_branches(repo),
-                         "a fetching run must still reap a branch the fresh remote holds")
+        with self.pinned_clock():  # every record, judge and deadline check in this case reads the pinned clocks
+            self.session_end(repo)  # fetches, records the time
+            self.pushed_branch(repo, "gone-upstream")
+            self.pushed_branch(repo, "still-pushed")
+            require(run_vcs(remote, "branch", "-D", "gone-upstream").returncode == 0, "delete on remote")
+            first = self.counts(repo)
+            self.session_end(repo)
+            self.assertEqual(self.counts(repo), first, "fixture: the second call was throttled")
+            self.assertIn("gone-upstream", local_branches(repo),
+                          "a throttled call reaped a branch holding the only copy, on a stale ref")
+            self.assertIn("still-pushed", local_branches(repo),
+                          "a throttled call reaped a branch on the strength of an on-remote read")
+            self.set_records(repr(self.PINNED_WALL_CLOCK - (FETCH_THROTTLE_SECONDS + 60)))
+            self.session_end(repo)
+            self.assertEqual(self.counts(repo)[0], first[0] + 1, "fixture: the third call fetched")
+            self.assertIn("gone-upstream", local_branches(repo),
+                          "a fetching run must keep the only copy once the stale ref is pruned")
+            self.assertNotIn("still-pushed", local_branches(repo),
+                             "a fetching run must still reap a branch the fresh remote holds")
 
 
 class HookLoadsNoGuardModule(unittest.TestCase):
