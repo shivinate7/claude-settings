@@ -1631,23 +1631,33 @@ def _find_folder_names(expression):
     return bool(folders), [g for a in folders for g in a[2]]
 
 
-def _find_folder_env(folder: str, globs, base: str, low: int, high) -> str:
+def _find_folder_env(folder: str, globs, base: str, low: int, high, walk=_env_file_in) -> str:
     """The first env file below a folder that find would print because a `-name` glob in `globs` matches it, or
     '' for none. `folder` is depth 0 and takes the name `base`, as find names a start word. A folder at depth
-    `low` to `high` (None for no limit) that matches is walked whole, as the program that gets its name reads
-    every file below it. Past ENV_WALK_LIMIT entries it returns ENV_TOO_LARGE."""
+    `low` to `high` (None for no limit) that matches is read whole by the program that gets its name, so
+    `walk(path)` (`_env_file_in` by default) judges it, each under its own cap. A folder is judged when its
+    parent lists it, so one that sits in a parent past ENV_WALK_LIMIT entries is still judged. Past the cap, a
+    folder that is not listed in the part of the tree walked is not seen, and so ENV_TOO_LARGE is returned,
+    for the walk or for a printed folder that is too large to judge."""
+    def printed(path: str, name: str, level: int) -> str:
+        if level >= low and (high is None or level <= high) and any(
+                fnmatch.fnmatchcase(name.lower() if fold else name, pattern.lower() if fold else pattern)
+                for pattern, fold in globs):
+            return walk(path)
+        return ""
+
+    found = printed(folder, base, 0)
+    if found:
+        return found
     seen = 0
     for top, dirs, files in os.walk(folder):
         relative = os.path.relpath(top, folder).replace(os.sep, "/")
         level = 0 if relative == "." else relative.count("/") + 1
-        name = base if level == 0 else os.path.basename(top)
-        if level >= low and (high is None or level <= high) and any(
-                fnmatch.fnmatchcase(name.lower() if fold else name, pattern.lower() if fold else pattern)
-                for pattern, fold in globs):
-            found = _env_file_in(top)
+        dirs[:] = [d for d in dirs if d != ".git"]
+        for name in dirs:
+            found = printed(os.path.join(top, name), name, level + 1)
             if found:
                 return found
-        dirs[:] = [d for d in dirs if d != ".git"]
         if high is not None and level >= high:
             dirs[:] = []
         seen += len(dirs) + len(files)
@@ -1656,7 +1666,8 @@ def _find_folder_env(folder: str, globs, base: str, low: int, high) -> str:
     return ""
 
 
-def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders: bool = True):
+def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders: bool = True,
+                  narrowing=((), (), False)):
     """What the segment before an `xargs` puts on its stdin: (the env file it names, whether the search
     may walk `here`, the folders it names). The env file is '' for none, a path, or ENV_TOO_LARGE.
 
@@ -1664,8 +1675,10 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders
     entry of the folder, dotfiles too. Each file name reaches the search as a path, which `rg` and `grep` read
     whatever their flags. A folder find prints is read whole only when `reads_folders` is set: the search
     walks a folder and reads the dotfiles in it (`_env_walk`). A `find` whose every alternative has a
-    `-name` or `-iname` glob that no env file name fits (`*.py`) names none (`_find_names_no_env`). The
-    folders such a find prints are walked up to the cap, and past it only the names are judged. `-type d`
+    `-name` or `-iname` glob that no env file name fits (`*.py`) names none (`_find_names_no_env`). Each
+    folder such a find prints is walked under its own cap, narrowed by the search's include rules
+    (`narrowing`: rules, exclude-dir globs, whether grep's), and only a folder too large to walk is judged by
+    its names alone. `-type d`
     names folders alone. A start word
     with a variable names folders the guard cannot see. A plain `ls` names no dotfile, so only the folders it names are
     walked. `ls -a` also names `.` and `..`, so `here` and its parent are walked. Any other source, or a pipe that is not directly before the xargs,
@@ -1716,6 +1729,12 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders
         low, high = _find_depth_limits(bare[at:])
         if prints_folder and not names_no_env:
             high = None  # a folder find prints is walked whole by the program that reads it
+        rules, exclude_dir, by_name = narrowing
+
+        def narrowed_walk(path: str) -> str:
+            # A printed folder is read as the search reads a folder it is given, by the search's own include rules.
+            return _env_file_in(path, rules, exclude_dir, by_name=by_name, anchor=_glob_anchor(path, here))
+
         for word, start in starts or [(".", ".")]:
             if re.search(r"[$`]", start):
                 return unknown
@@ -1724,9 +1743,10 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders
             expand = re.search(r"[*?\[]", start) and word == start
             for folder in glob.glob(target) if expand else [target]:
                 if names_no_env:
-                    found = (_find_folder_env(folder, globs, os.path.basename(start.rstrip("/")) or start, low, high)
+                    found = (_find_folder_env(folder, globs, os.path.basename(start.rstrip("/")) or start, low, high,
+                                              narrowed_walk)
                              if os.path.isdir(folder) else "")
-                    # Past the cap only the names are judged, and they name no env file.
+                    # A folder or tree too large to judge is judged by its names alone, and they name no env file.
                     found = "" if found == ENV_TOO_LARGE else found
                 else:
                     found = (_env_file_in(folder, min_depth=low, max_depth=high) if os.path.isdir(folder)
@@ -1834,10 +1854,15 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
                 # With no hidden flag, rg reads a dotfile only when a positive glob picks it, and the walk
                 # judges each glob against the env files it finds. Every env file name is a dotfile.
                 reads_folders = ((command == ENV_GREP_RECURSIVE_COMMAND or _grep_recursive(words, position))
-                                 if grep else bool(hidden or extras["globs"]))
+                                 if grep else bool(hidden or extras["globs"] or extras["types"]))
+                if grep:
+                    rules, exclude_dir = _grep_globs(words, position)
+                else:
+                    rules, exclude_dir = (_rg_rules(extras) if command == "rg" else []), ()
                 # Under xargs, stdin feeds xargs and not the search, and the names it reads are appended
                 # as paths, so a path or `{}` in the command does not spare the folder.
-                sources = {here: _xargs_source(pieces, ends, number, part, here, reads_folders) for here in heres
+                sources = {here: _xargs_source(pieces, ends, number, part, here, reads_folders,
+                                               (rules, exclude_dir, grep)) for here in heres
                            } if via_xargs else {}
                 for here, (listed, _, _) in sources.items():
                     if listed == ENV_TOO_LARGE:
@@ -1846,10 +1871,6 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
                         return ENV_WALK_REASON_FED, "xargs is fed the env file '%s'" % listed
                 if not reads_folders:
                     continue
-                if grep:
-                    rules, exclude_dir = _grep_globs(words, position)
-                else:
-                    rules, exclude_dir = (_rg_rules(extras) if command == "rg" else []), ()
                 # Past the cap an rg type is refused: its globs name a suffix, which an env stem can carry.
                 cap_clear = (grep or not extras["types"]) and _rules_skip_env(rules)
                 for here in heres:
