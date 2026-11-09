@@ -10339,6 +10339,34 @@ sh("env: walk safety hole, find names sub, grep's escaped-dot include reads the 
 sh("env: walk control, find names sub, grep's *.md include reads the env file that ends .md, refused: " + _FIND_INCLUDE_MD,
    _FIND_INCLUDE_MD, "deny", "env-file", cwd=ENVWALK_MD_SUFFIX)
 
+# A search's own glob reads `\.` as a literal dot, so `\.md` picks the env file that ends .md in sub. The guard must
+# read the same escape (`_glob_unescaped`): one that keeps the backslash picks no file and allows the form.
+_ESCAPED_DOT_MD_DENY = (r"grep -r --include='*\.md' K sub", r"rg -g '*\.md' K sub",
+                        r"find . -name 'sub' | xargs rg -g '*\.md' K")
+for _cmd in _ESCAPED_DOT_MD_DENY:
+    sh("env: escaped dot glob, picks the env file that ends .md in sub, refused: " + _cmd, _cmd, "deny", "env-file",
+       cwd=ENVWALK_MD_SUFFIX)
+# `\*`, `\?` and `\[` are literals, so no name in sub matches them. The env file there ends in `d`, so the bracket pin
+# `\[d]` picks it only if the escape is dropped: `*[d]` is a class, and it picks the file.
+_ESCAPED_GLOB_ALLOW = (r"grep -r --exclude='*\.md' K sub", r"grep -r --include='*\*' K sub",
+                       r"grep -r --include='*\?' K sub", r"grep -r --include='*\[d]' K sub")
+for _cmd in _ESCAPED_GLOB_ALLOW:
+    sh("env: escaped glob false alarm, the literal glob picks no env file in sub, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVWALK_MD_SUFFIX)
+# The same globs unescaped are wildcards, and each picks the env file in sub. They are the controls for the allows.
+for _cmd in (r"grep -r --include='*?' K sub", r"grep -r --include='*[d]' K sub"):
+    sh("env: escaped glob control, the unescaped wildcard picks the env file in sub, refused: " + _cmd, _cmd, "deny",
+       "env-file", cwd=ENVWALK_MD_SUFFIX)
+
+# grep skips a named file that its --include does not pick, and rg reads a file it is named whatever its -g glob.
+# So a find that names the env file under a grep narrowed to *.py reads nothing, and rg's *.py glob reads it.
+_FIND_GREP_PY = "find . -type f | xargs grep --include='*.py' K"
+sh("env: walk false alarm, find names sub/.env, grep's *.py include skips it, allowed: " + _FIND_GREP_PY, _FIND_GREP_PY,
+   "allow", cwd=ENVWALK_NESTED)
+_FIND_RG_PY = "find . -type f | xargs rg -g '*.py' K"
+sh("env: walk control, find names sub/.env, rg reads a file it is named under its *.py glob, refused: " + _FIND_RG_PY,
+   _FIND_RG_PY, "deny", "env-file", cwd=ENVWALK_NESTED)
+
 # A -print prints each name before a later test runs, so a name test after -print does not bound the names printed.
 _PRINT_THEN_NAME = "find . -print -name '*.js' | xargs grep K"
 sh("env: walk pin, find -print before -name '*.js' prints every name, refused: " + _PRINT_THEN_NAME, _PRINT_THEN_NAME,
