@@ -1459,6 +1459,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     # One walk gives every segment's folders; asking per segment would walk the segments before it each time.
     places = dir_before_segment(segments, len(segments) - 1, cwd, ends, each=True) if follow_cd and segments else ()
+    bodies = guard_core.case_arm_bodies(segments) if follow_cd else ()   # a case arm's command, past its pattern
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     for number, raw in enumerate(parsed):
         linked = _cp_link_source(raw, holds, cwd, bool(fed))
@@ -1524,7 +1525,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
         # A cd that might not run leaves the segment two possible folders: it is judged in each.
         # A `sh -c` or `bash -c` string is a script of its own: its cds move the commands after them in the string, so
         # it is walked as one, from each folder the segment may run in.
-        tokens = segment_tokens(segments[number]) if follow_cd else None
+        tokens = bodies[number] if follow_cd else None
         body = guard_core.inline_script(tokens) if tokens else ""
         for at in dict.fromkeys((folder or cwd) for folder in places[number]) if follow_cd else (cwd,):
             hit = _shell_write_scan(body, at, predicate, holds, follow_cd, command_position, predicate_command) if body else ""

@@ -1105,17 +1105,51 @@ def _block_change(tokens) -> int:
     return 1 if word in _BLOCK_OPENERS else -1 if word in _BLOCK_CLOSERS else 0
 
 
-def _case_arm(tokens):
-    """(the words after a case-arm pattern, whether the pattern opens with `(`), else None. The pattern is the
-    first word of the segment, or the one after a `case WORD in` header, and ends with `)` (`x)`, `a|b)` once
-    split at its `|`, `*)`, `(x)`). Nothing after it means it is no arm (`(cd)` is a subshell)."""
-    start = 3 if len(tokens) > 3 and tokens[0].lstrip("(") == "case" and tokens[2] == "in" else 0
+def _case_header(tokens) -> bool:
+    """True when the segment opens with `case WORD in`."""
+    return len(tokens) >= 3 and tokens[0].lstrip("(") == "case" and tokens[2] == "in"
+
+
+def _case_arm(tokens, in_case: bool = False):
+    """(the words after a case-arm pattern, whether the pattern opens with `(`), else None. A pattern counts
+    only inside an open `case WORD in` block (`in_case`) or on its header line: outside one, a word that ends
+    in `)` is the close of a subshell (`(cd x; make) > log`). The pattern is the first word of the segment, or
+    the one after the header, and ends with `)` (`x)`, `a|b)` once split at its `|`, `*)`, `(x)`). Nothing
+    after it means it is no arm (`(cd)` is a subshell)."""
+    header = _case_header(tokens) and len(tokens) > 3
+    if not (header or in_case):
+        return None
+    start = 3 if header else 0
     if start >= len(tokens):
         return None
     pattern = tokens[start]
     if not pattern.endswith(")") or len(tokens) == start + 1:
         return None
     return list(tokens[start + 1:]), pattern.startswith("(")
+
+
+def _case_change(tokens, arm) -> int:
+    """+1 for a segment (or the body of its arm) that opens a `case WORD in` block, -1 for one that closes it
+    with `esac`, else 0."""
+    change = 0
+    for words in (tokens, arm[0] if arm else ()):
+        if _case_header(words):
+            change += 1
+        elif words and words[0].strip("()") == "esac":
+            change -= 1
+    return change
+
+
+def case_arm_bodies(segments):
+    """For each segment, its tokens with a case-arm pattern (and a `case WORD in` header before it) dropped, so a
+    command that follows `x)` reads as the segment's command. Tracks open `case` blocks across the segments."""
+    out, depth = [], 0
+    for segment in segments:
+        tokens = segment_tokens(segment)
+        arm = _case_arm(tokens, depth > 0) if tokens else None
+        out.append(arm[0] if arm else tokens)
+        depth = max(0, depth + _case_change(tokens or (), arm))
+    return out
 
 
 def _cd_may_not_run(tokens, before: str, nested: bool = False) -> str:
@@ -1196,6 +1230,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     on_header = False   # the segments left on the header's own line of those bodies: they run, and are no body
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     depth = 0   # compound commands (`if`, `for`, ...) still open: a cd on a line of its own in one may not run
+    case_depth = 0   # `case` blocks still open: only inside one is a word that ends in `)` a case-arm pattern
     seen = []
 
     def run_cd(tokens, segment, before, end, arm=False):
@@ -1235,7 +1270,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         end = ends[at] if at < len(ends) else ""
         before = ends[at - 1] if 0 < at <= len(ends) else ""
         arm_tokens = segment_tokens(segment)
-        arm = _case_arm(arm_tokens) if arm_tokens else None
+        arm = _case_arm(arm_tokens, case_depth > 0) if arm_tokens else None
         if arm:
             for mark in ("(", ")") if arm[1] else (")",):
                 if mark in marks:
@@ -1269,6 +1304,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                     leave()
                     skipping = False
             depth = max(0, depth + _block_change(segment_tokens(segment)))
+            case_depth = max(0, case_depth + _case_change(arm_tokens or (), arm))
             continue
         if stdin_bodies and not on_header:
             if segment.strip() == stdin_bodies[0]:
@@ -1280,7 +1316,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             if not heredoc[0]:
                 # The last body ended: its cds moved a child shell, and its `if` or `fi` lines are the child's text, so
                 # neither the folder nor the open blocks carry past it.
-                (states, held), depth, heredoc = heredoc[1], heredoc[2], None
+                (states, held), depth, case_depth, heredoc = heredoc[1], heredoc[2], heredoc[3], None
             continue
         tokens = segment_tokens(segment)
         run_cd(arm[0] if arm else tokens, segment, before, end, bool(arm))
@@ -1299,11 +1335,12 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                            inner_ends[number_in] or end)
             skipping = False
         depth = max(0, depth + _block_change(tokens))
+        case_depth = max(0, case_depth + _case_change(tokens or (), arm))
         heads, open_quote = heredoc_heads(segment)
         in_fed_frame = any(keeps for _, _, _, keeps in frames)   # inside `source <(` opened on an earlier line
         if heads and not heredoc and not in_fed_frame and not (
                 tokens and (_sources_stdin(tokens) or _fed_to_shell(tokens, open_quote))):
-            heredoc = ([delimiter for _, delimiter in heads], (states, held), depth)
+            heredoc = ([delimiter for _, delimiter in heads], (states, held), depth, case_depth)
         elif heads and not heredoc and not stdin_bodies and tokens and _sources_stdin(tokens):
             stdin_bodies = [delimiter for _, delimiter in heads[:-1]]   # bash reads only the last body as stdin
             on_header = end != "\n"
