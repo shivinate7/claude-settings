@@ -976,12 +976,16 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
     def test_a_failed_post_after_a_pass_prints_the_pass_and_a_reason_and_exits_zero(self):
         tm.install_gh_shim(self)
         tm.GhHalf.set(self, post_fail=tm.rest_err(502, "Bad Gateway"))
+        head = self.head("feat")
         self.use_ci_job(PASSING, 0)
         rc, out = self.lane("--lane-lint", "7", host=merge.Host())
         self.assertEqual(rc, 0, "a PASS whose comment failed to post did not exit 0:\n" + out)
         self.assertTrue(pass_lines(out), "a PASS whose comment failed to post printed no PASS line:\n" + out)
         reasons = [l for l in out.splitlines() if "lane-lint" in l.lower() and "comment" in l.lower() and not l.startswith("PASS:")]
         self.assertTrue(reasons, "a PASS whose comment failed to post printed no reason line that names the lane-lint comment:\n" + out)
+        printed = out[out.index(reasons[0]):]  # the reason on, where the comment body to post by hand must print
+        for part in (LANE_LINT_MARKER, "PR: #7", f"Head: {head}", "Result: PASS"):
+            self.assertIn(part, printed, "a failed post printed no `%s` line of the comment body to post by hand, after the reason:\n%s" % (part, out))
         self.assertEqual(tm.GhHalf.gh_state(self, "posted") or [], [], "the failed post was kept as a posted comment")
 
 
