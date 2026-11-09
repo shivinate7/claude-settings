@@ -3863,6 +3863,51 @@ class UICopyRoundTwoTests(unittest.TestCase):
                              "200 blocks emit %d copy events, over 4x the %d of 50 blocks plus 8"
                              % (big, small))
 
+    def test_114_scan_steps_stay_linear_without_copy_events(self):
+        # Work steps, not time (P5): the Python lines that lint/ste_lint.py runs for one .tsx file, counted by a
+        # trace at 50 blocks and at 200. The copy events of test_114 miss a rescan that emits none, such as one in
+        # the JSX scanner's loop, in a skip scan, or in a rule. Each block holds a generic, a <p>, a string and a
+        # comment, so every scan path runs on each block. The indices are zero-padded so a block has one length:
+        # the steps then grow with the blocks, not with the digits in their names.
+
+        def text_with(blocks):
+            lines = []
+            for i in range(blocks):
+                lines.append("const f%03d = <T extends X>(a: T): T => a;" % i)
+                lines.append("const p%03d = <p>Go now.</p>;" % i)
+                lines.append('const s%03d = "Keep it simple."; // a note on %03d' % (i, i))
+                lines.extend("const v%03d_%03d = %03d;" % (i, j, j) for j in range(7))
+            lines.append("const y = <p>In order to go.</p>;")
+            return "\n".join(lines) + "\n"
+
+        def steps(text):
+            count = [0]
+
+            def line_steps(frame, event, arg):
+                if event == "line":
+                    count[0] += 1
+                return line_steps
+
+            def only_linter(frame, event, arg):
+                # Frames of lint/ste_lint.py share its module globals. Every other frame is left out.
+                return line_steps if frame.f_globals is ste_lint.__dict__ else None
+
+            previous = sys.gettrace()
+            sys.settrace(only_linter)
+            try:
+                codes = self.check("a.tsx", text)
+            finally:
+                sys.settrace(previous)
+            return codes, count[0]
+
+        small_codes, small = steps(text_with(50))
+        self.assertEqual(small_codes, ["STE011"])  # scope: the fixture reaches a rule, so the rules run
+        self.assertGreater(small, 0, "no step was counted: the trace saw no frame of lint/ste_lint.py")
+        big_codes, big = steps(text_with(200))
+        self.assertEqual(big_codes, ["STE011"])
+        self.assertLessEqual(big, 4 * small + 8,
+                             "200 blocks take %d lint steps, over 4x the %d of 50 blocks plus 8" % (big, small))
+
 
 class TurnReaderTests(unittest.TestCase):
     """`read_turn` is the tail reader the idle hooks use; the config report reads only this turn."""
