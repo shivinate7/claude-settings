@@ -4415,19 +4415,24 @@ sh("two-worktrees: git -C <holder> checkout -B x, run in the holder's own tree, 
 
 # THE TREE PER SEGMENT. A `git -C` moves only the call it heads, and the next call runs in the cwd again.
 # One command can therefore run calls in several trees, and each call is judged in the tree it runs in.
-# S is the cwd (TWACT, holds no x), W is the holder (TWHOLD, holds x), and D is the primary checkout on
-# main (TWBASE, holds no x). A `cd` is not used: other-checkout refuses a cd into another checkout of the
-# clone before this rule runs, unless the session has a recorded home there.
+# W is the holder (TWHOLD, holds x). The cwd is TWACT (holds no x) for the first two cases, and the primary
+# checkout TWBASE (on main, holds no x) for the third. A `cd` is not used: other-checkout refuses a cd into
+# another checkout of the clone before this rule runs, unless the session has a recorded home there. A write
+# that a `git -C` sends into another checkout is refused by other-checkout too, so the third case writes in its cwd.
 sh("two-worktrees: checkout -B x after a git -C that names the holder is refused, the checkout runs in the cwd",
    VCS + " -C ../twobr-holder status && " + VCS + " checkout -B x", "deny", TWO_RULE, cwd=TWACT)
 sh("two-worktrees: checkout -B x before a git -C that names the holder is refused, the checkout runs in the cwd",
    VCS + " checkout -B x && " + VCS + " -C ../twobr-holder status", "deny", TWO_RULE, cwd=TWACT)
 sh("two-worktrees: checkout -B x in the primary checkout is refused while the holder holds x, after a git -C to the holder",
-   VCS + " -C ../twobr-holder status && " + VCS + " -C ../twobr-base checkout -B x", "deny", TWO_RULE, cwd=TWACT)
-# THE CONTROLS FOR THE TREE. A checkout that names the holder with -C runs in the holder's own tree, where x
-# is its own branch, so it is allowed. A `cd` inside quotes is text, so the checkout still runs in the cwd.
-sh("two-worktrees: git -C <holder> checkout -B x, from the cwd, runs in the holder's own tree and is allowed",
-   VCS + " -C ../twobr-holder checkout -B x", "allow", cwd=TWACT)
+   VCS + " -C ../twobr-holder status && " + VCS + " checkout -B x", "deny", TWO_RULE, cwd=TWBASE)
+# THE OWN TREE, FUNCTION LEVEL. From another cwd the hook never reaches the holder's own tree: a write that a
+# `git -C` sends into the holder is refused by other-checkout first, and that rule runs before this one. So the
+# own-tree exclusion is checked on the function, in two_worktrees_own_tree_case.
+# THE -C WRITE, REFUSED BY OTHER-CHECKOUT. From the primary checkout, the holder's `checkout -B x` is a write into
+# another checkout, so the deny names other-checkout, not this rule.
+sh("two-worktrees: git -C <holder> checkout -B x, from the primary checkout, is refused by other-checkout",
+   VCS + " -C ../twobr-holder checkout -B x", "deny", "other-checkout", cwd=TWBASE)
+# A `cd` inside quotes is text, so the checkout still runs in the cwd.
 sh("two-worktrees: a cd inside an echo's quotes moves no tree, so checkout -B x runs in the cwd and is refused",
    "echo 'cd ../twobr-holder' && " + VCS + " checkout -B x", "deny", TWO_RULE, cwd=TWACT)
 
@@ -4506,6 +4511,31 @@ def two_worktrees_unrelated_no_list_case():
         if listed:
             return False, "%s read the worktree list: %s" % (command, listed[0])
     return True, "a plain status and a new-branch switch read no worktree list"
+
+
+def two_worktrees_own_tree_case():
+    """The own-tree exclusion, read on the function. Scope first: the holder's own worktree list holds x on the
+    holder, and from the actor's tree the same `checkout -B x` is a hit. Then the subject: from the holder's own
+    tree the same call is no hit, since x there is the holder's own. The hook cannot reach this from another cwd,
+    because other-checkout refuses the write first. GUARD may be a mutated copy, so the module loads from its folder."""
+    import importlib.util
+    materialize(TWHOLD)
+    spec = importlib.util.spec_from_file_location(
+        "guard_branch_worktree_under_test", os.path.join(os.path.dirname(GUARD), "guard_branch_worktree.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    holder = os.path.realpath(TWHOLD)
+    actor = os.path.realpath(TWACT)
+    segment = VCS + " checkout -B x"
+    held = dict(module.clone_worktrees(holder) or [])
+    if held.get(holder) != "refs/heads/x":
+        return False, "scope: the holder's worktree list reads %r for the holder, want refs/heads/x" % (held.get(holder),)
+    if not module.two_worktrees_hit(segment, actor):
+        return False, "scope: from the actor's tree, %r is no hit on the holder's x" % segment
+    own = module.two_worktrees_hit(segment, holder)
+    if own:
+        return False, "own tree: from the holder's own tree, %r is a hit (%r), want no hit" % (segment, own)
+    return True, "from the holder's own tree, checkout -B x is no hit; from the actor's tree it is a hit"
 
 
 # =========================================================================== 1b. the pointer HEAD
@@ -18809,11 +18839,13 @@ TWO_LIST_ONCE_LABEL = "two-worktrees: the refused form reads the worktree list e
 TWO_NO_LIST_LABEL = "two-worktrees: an unrelated git command reads no worktree list"
 LOG_CHECKS_EXTRA.append((TWO_OBSERVER_LABEL, two_worktrees_observer_case))
 LOG_CHECKS_EXTRA.append((TWO_LIST_ONCE_LABEL, two_worktrees_reads_list_once_case))
+TWO_OWN_TREE_LABEL = "two-worktrees: the holder's own checkout -B x is no hit in the rule's own logic, from the holder's root"
 LOG_CHECKS_EXTRA.append((TWO_NO_LIST_LABEL, two_worktrees_unrelated_no_list_case))
-for _label in (TWO_OBSERVER_LABEL, TWO_LIST_ONCE_LABEL, TWO_NO_LIST_LABEL):
+LOG_CHECKS_EXTRA.append((TWO_OWN_TREE_LABEL, two_worktrees_own_tree_case))
+for _label in (TWO_OBSERVER_LABEL, TWO_LIST_ONCE_LABEL, TWO_NO_LIST_LABEL, TWO_OWN_TREE_LABEL):
     LOG_FAMILY[_label] = TWO_RULE
 FIXTURELESS_CHECKS.update((two_worktrees_observer_case, two_worktrees_reads_list_once_case,
-                           two_worktrees_unrelated_no_list_case))
+                           two_worktrees_unrelated_no_list_case, two_worktrees_own_tree_case))
 # The two unreadable-lone-operand checks. Their cases and labels sit in the shared-tree block, which runs
 # before LOG_CHECKS_EXTRA exists, so they register here and their family is set by hand, as above.
 LOG_CHECKS_EXTRA.append((UNREAD_NOGIT_LABEL, unread_lone_operand_no_git_case))
