@@ -591,6 +591,7 @@ ARCHINC_TRUNK = os.path.join(ROOT, "archinc-trunk")            # q_max's default
 ARCHINC_DIVERGED = os.path.join(ROOT, "archinc-diverged")      # the branch diverged from main in q_max, on no pull request
 ARCHINC_REPO404 = os.path.join(ROOT, "archinc-repo-404")       # q_max is named only by a source; its own read answers 404
 ARCHINC_SLOW = os.path.join(ROOT, "archinc-slow")              # two branches of q_max, behind main; each compare of q_max sleeps
+ARCHDRAFT_SLOW = os.path.join(ROOT, "archdraft-slow")          # an open draft of the slug in q_max, behind main, and a branch ahead there; each compare of q_max sleeps
 ARCH_SLOW_A = "claude/slow-behind-a"                           # the first slow branch: behind main in q_max
 ARCH_SLOW_B = "claude/slow-behind-b"                           # the second slow branch: behind main in q_max
 
@@ -1542,6 +1543,11 @@ def build_fixtures():
     # read that runs both sums past one budget. A delay on every call would stretch the run past a minute.
     make_fake_gh(ARCHINC_SLOW, "main", repos=arch_pair(qmax={
         "compares": {"main..." + ARCH_SLOW_A: "behind", "main..." + ARCH_SLOW_B: "behind"}, "compare_delay_s": 13}))
+    # One read budget runs across the slug draft's containment read and the branch read after it. Each compare of q_max
+    # sleeps 13s, under MERGE_READ_TIMEOUT (25s) alone. The draft's head is behind main, so only the branch read can refuse.
+    make_fake_gh(ARCHDRAFT_SLOW, "main", repos=arch_pair(qmax={
+        "others": [dict(slug_head, draft=True)],
+        "compares": {"main..." + slug_head["head"]: "behind", "main..." + ARCH_BRANCH: "ahead"}, "compare_delay_s": 13}))
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
@@ -10841,6 +10847,8 @@ ARCH_UNTAGGED_TAGS = ["cs-repo:o/r"]
 ARCH_INC_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS, "cs-repo:" + ARCH_REPO_QMAX]
 ARCH_QMAX_SOURCE = {"git_repository": {"url": "https://github.com/" + ARCH_REPO_QMAX}}
 ARCH_QMAX_SOURCE_GIT = {"git_repository": {"url": "https://github.com/" + ARCH_REPO_QMAX + ".git"}}
+ARCH_QMAX_SOURCE_WWW = {"git_repository": {"url": "https://www.github.com/" + ARCH_REPO_QMAX}}
+ARCH_QMAX_SOURCE_UPPER = {"git_repository": {"url": "https://GitHub.com/" + ARCH_REPO_QMAX}}
 
 
 def arch_record(tags, branches=None, sources=None, session=ROLE_OTHER, title="a lane session"):
@@ -11000,6 +11008,26 @@ ROLE_LINES = {
     # One lane on q_max alone, two branches of it, both behind main: the reads are slow, not the answers.
     "archive-inc-slow": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
         ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_QMAX], {"": ARCH_SLOW_A, "extra": ARCH_SLOW_B}))),
+    # The same lane, its source URL on www.github.com: that host is github.com, so q_max is the repo it names.
+    "archive-inc-source-www": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS], {"": ARCH_BRANCH},
+        [ARCH_QMAX_SOURCE_WWW]))),
+    # The same lane, its source URL with the host in capitals: GitHub.com is github.com, so q_max is the repo it names.
+    "archive-inc-source-upper": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS], {"": ARCH_BRANCH},
+        [ARCH_QMAX_SOURCE_UPPER]))),
+    # Shape drift in the sources and in the branch values. The branch is behind main in q_max, so only the drift can refuse
+    # it. A source on another host is no repo of GitHub's: its lane is judged on the cs-repo tags alone.
+    "archive-inc-sources-str": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": ARCH_BRANCH}, "https://github.com/" + ARCH_REPO_QMAX))),
+    "archive-inc-source-tree": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": ARCH_BRANCH}, [{"git_repository": {"url": "https://github.com/" + ARCH_REPO_QMAX + "/tree/main"}}]))),
+    "archive-inc-branch-int": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": 5}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-branch-map": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": {"name": ARCH_BRANCH}}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-source-gitlab": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": ARCH_BRANCH}, [{"git_repository": {"url": "https://gitlab.com/" + ARCH_REPO_QMAX}}]))),
 }
 
 
@@ -11629,6 +11657,34 @@ archive_refuse("a current_branches that is a string, not a map, is refused, and 
 # the second outlasts what the first left, so the archive refuses as unreadable. A budget per call would let both through.
 archive_refuse("a lane whose two branch compares outlast one read budget, each under it alone, is refused as unreadable",
                role_path("archive-inc-slow"), fake_gh_path(ARCHINC_SLOW), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+# One read budget across the whole archive check, not one per read: the draft's containment read and the branch read sum
+# past MERGE_READ_TIMEOUT. The branch read runs out of the shared budget and refuses as unreadable. A budget per read lets
+# the branch read run its own 25s, and the lane is refused for its branch instead, with no read failing.
+ARCHIVE_BRANCH_READ_LACKS = ARCHIVE_READ_LACKS + ("open pull requests",)  # a branch-read refusal is neither the open-list one nor the no-pull-request one
+archive_refuse("a lane whose slug draft containment read and branch read sum past one read budget, each under it alone, is refused as unreadable",
+               role_path("archive-inc"), fake_gh_path(ARCHDRAFT_SLOW), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_BRANCH_READ_LACKS)
+# Shape drift in the record's sources and branch values fails closed, with the branch read's reason. The branch is behind main
+# in q_max (or sits in its own tagged repo), so only the drift can refuse the archive.
+archive_refuse("a session_context.sources that is a string, not a list, is refused, and the reason says the read failed",
+               role_path("archive-inc-sources-str"), fake_gh_path(ARCHINC_BEHIND), carries=ARCHIVE_READ_PIN,
+               lacks=ARCHIVE_BRANCH_READ_LACKS)
+archive_refuse("a sources URL on github.com that is no owner/name, a /tree/main URL, is refused, and the reason says the read failed",
+               role_path("archive-inc-source-tree"), fake_gh_path(ARCHINC_BEHIND), carries=ARCHIVE_READ_PIN,
+               lacks=ARCHIVE_BRANCH_READ_LACKS)
+archive_refuse("a current_branches value that is an int is refused, and the reason says the read failed",
+               role_path("archive-inc-branch-int"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN,
+               lacks=ARCHIVE_BRANCH_READ_LACKS)
+archive_refuse("a current_branches value that is a map is refused, and the reason says the read failed",
+               role_path("archive-inc-branch-map"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN,
+               lacks=ARCHIVE_BRANCH_READ_LACKS)
+# Case-insensitive host match, with an optional www.: the source names q_max, and its branch, ahead there, is refused.
+archive_refuse("a source URL on www.github.com names its repo: a branch ahead there on no pull request is refused",
+               role_path("archive-inc-source-www"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+archive_refuse("a source URL on GitHub.com in capitals names its repo: a branch ahead there on no pull request is refused",
+               role_path("archive-inc-source-upper"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# Allowed: a source on another host is skipped, so the lane's branch, behind main in q_max, is judged on its tagged repos.
+archive_allow("a source on gitlab.com is skipped: the lane's branch behind main in q_max is allowed",
+              role_path("archive-inc-source-gitlab"), fake_gh_path(ARCHINC_BEHIND))
 
 
 # The agent's own record. An agent (a call with an `agent_id`) made its get_session call in its own transcript, which
@@ -16291,11 +16347,13 @@ def archive_judged(transcript, folder, agent_id=None):
     })
 
 
-def archive_counted_gh():
+def archive_counted_gh(repos=None, name="archcount"):
     """A counted pull request tool. Its one open pull request is on no slug, so an archive of a lane reads the open
-    list and is allowed: a lane archive is allowed only after that read succeeds."""
-    folder = os.path.join(ROOT, "archcount")
-    make_fake_gh(folder, "main", need=["o/r"], count_file=os.path.join(folder, ARCHIVE_CALLS))
+    list and is allowed: a lane archive is allowed only after that read succeeds. `repos`, when given, holds each
+    repo's answers (make_fake_gh's `repos`), for a lane whose record names branches; then no `need` pins a repo."""
+    folder = os.path.join(ROOT, name)
+    make_fake_gh(folder, "main", need=["o/r"] if repos is None else [], repos=repos,
+                 count_file=os.path.join(folder, ARCHIVE_CALLS))
     return folder
 
 
@@ -16390,6 +16448,166 @@ def archive_agent_non_lane_no_read_case():
 
 LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an agent's non-lane archive makes no gh call",
                          archive_agent_non_lane_no_read_case))
+
+
+def archive_branch_reads_case():
+    """A lane whose record names one branch, checked in each of its two repos, reads in one archive: one open list per
+    repo, one repo read per repo, one compare per repo x branch, and one pulls read for the branch that is ahead. The branch is
+    ahead in q_max on an open pull request, so the archive is allowed, on 2 + 2 + 2 + 1 = 7 gh calls."""
+    folder = archive_counted_gh(repos=arch_pair(qmax={"others": [arch_row(ARCH_BRANCH, 24)]}), name="archcount-branch")
+    gh_calls_taken(folder)
+    decision, reason = archive_judged(role_path("archive-inc"), folder)
+    calls = gh_calls_taken(folder)
+    if decision != "allow" or reason:
+        return False, "a lane whose branch is ahead on an open pull request: %s (%r)" % (decision, reason)
+    kinds = {"open list": 0, "repo read": 0, "compare": 0, "branch pulls": 0}
+    for call in calls:
+        argv = json.loads(call)
+        route = argv[1] if argv[:1] == ["api"] and len(argv) > 1 else ""
+        if "/compare/" in route:
+            kinds["compare"] += 1
+        elif re.fullmatch(r"repos/[^/]+/[^/]+", route):
+            kinds["repo read"] += 1
+        elif route.endswith("/pulls") and any(arg.startswith("head=") for arg in argv):
+            kinds["branch pulls"] += 1
+        elif route.endswith("/pulls"):
+            kinds["open list"] += 1
+    want = {"open list": 2, "repo read": 2, "compare": 2, "branch pulls": 1}
+    if kinds != want or len(calls) != sum(want.values()):
+        return False, "a lane with a branch in each repo made gh calls %r, want %r (%d in all): %r" % (
+            kinds, want, sum(want.values()), calls)
+    return True, "7 gh calls: two open lists, two repo reads, two compares and one branch pulls read"
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane whose record names a branch reads its repos in seven gh calls",
+                         archive_branch_reads_case))
+
+
+# The cost of archive_hit's transcript reads: one open of each transcript of the archive (the target's main transcript,
+# and for an agent's call the agent's own file beside it), each read once. The count is taken in process, on
+# builtins.open, so a second read of the same file shows as a second open of its path.
+class _EmptyPulls:
+    """The merge tool's Host for one repo: the open list reads empty, and no other read is answered."""
+
+    def __init__(self, repo):
+        self.repo = repo
+
+    def pages(self, route, **kwargs):
+        return []
+
+
+class _AheadNoPull:
+    """The merge tool's Host for each repo of the incident: the open list reads empty, the default branch is main, every
+    compare of main and a branch reads ahead, and no pull request holds the branch."""
+
+    def __init__(self, repo):
+        self.repo = repo
+
+    def pages(self, route, **kwargs):
+        return []
+
+    def api(self, route):
+        if route == "":
+            return 0, json.dumps({"default_branch": "main"})
+        if route.startswith("compare/main..."):
+            return 0, json.dumps({"status": "ahead"})
+        return 1, "HTTP 404"
+
+
+def _load_guard_merge():
+    """guard_merge.py beside the guard under test (GUARD), loaded fresh, so a patch to it touches no other load."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("guard_merge_under_test",
+                                                  os.path.join(os.path.dirname(GUARD), "guard_merge.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _archive_opens(transcript, agent_id):
+    """Run one archive of ROLE_OTHER's lane in process, with an empty open list, and count the opens of each transcript
+    the archive reads. Returns (decision, {path: opens}), or (None, None) when the fixture is not as the case needs."""
+    import builtins
+    import types
+    guard_merge = _load_guard_merge()
+    expected = [os.path.abspath(transcript)]
+    if agent_id:
+        expected.append(os.path.abspath(guard_merge.own_session.agent_transcript_path(transcript, agent_id)))
+    materialize(transcript)  # the fixtures are written on first use: before the count
+    if not all(os.path.isfile(path) for path in expected):
+        return None, None
+    fake_tool = types.SimpleNamespace(Host=_EmptyPulls, shared_deadline=contextlib.nullcontext)
+    real_open = builtins.open
+    opened = {path: 0 for path in expected}
+
+    def counting_open(file, *args, **kwargs):
+        if isinstance(file, (str, os.PathLike)):
+            path = os.path.abspath(os.fspath(file))
+            if path in opened:
+                opened[path] += 1
+        return real_open(file, *args, **kwargs)
+
+    with mock.patch.object(guard_merge, "merge_module", return_value=fake_tool), \
+            mock.patch("builtins.open", counting_open):
+        decision = guard_merge.archive_hit(ARCHIVE_TOOL, {"session_id": ROLE_OTHER}, transcript, agent_id=agent_id)
+    return decision, opened
+
+
+def archive_one_read_per_transcript_case():
+    """An archive of a lane reads its target's transcript once. The open list reads empty and the record names no
+    branch, so that one open is the whole archive's read of the transcript."""
+    decision, opened = _archive_opens(role_path("archive-lane"), None)
+    if opened is None:
+        return False, "fixture: the lane transcript is not written as the case needs"
+    if decision is not None:
+        return False, "an archive of the lane with an empty open list was refused: %r" % (decision,)
+    if list(opened.values()) != [1]:
+        return False, "the archive opened the target's transcript %r times, want 1" % (list(opened.values()),)
+    return True, "the archive opened the target's transcript once, and the lane is allowed"
+
+
+def archive_agent_one_read_per_transcript_case():
+    """An agent's archive of a lane reads each of its two transcripts once: the main transcript and the agent's own
+    file beside it. The main record names no lane, and the agent's own record is the lane, with no branch to read."""
+    decision, opened = _archive_opens(role_path("agent-own-lane"), AGENT_OWN_ID)
+    if opened is None:
+        return False, "fixture: the main or the agent transcript is not written as the case needs"
+    if decision is not None:
+        return False, "an agent's archive of the lane with an empty open list was refused: %r" % (decision,)
+    if list(opened.values()) != [1, 1]:
+        return False, "the agent's archive opened its two transcripts %r times, want one each" % (list(opened.values()),)
+    return True, "the agent's archive opened its main and its own transcript once each, and the lane is allowed"
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an archive of a lane opens its target's transcript once",
+                         archive_one_read_per_transcript_case))
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an agent's archive of a lane opens each of its two transcripts once",
+                         archive_agent_one_read_per_transcript_case))
+
+
+def archive_none_ccr_case():
+    """A lane whose record reads as a lane, but whose ccr reads None, is refused. The branch read takes its branches from
+    the ccr, so with none it cannot rule out a stranded branch, and the archive is refused rather than allowed. The control
+    is the same lane with its ccr read: each repo reads the branch ahead on no pull request, so that archive is refused
+    for the branch, and the case proves the fixture can refuse at all."""
+    import types
+    guard_merge = _load_guard_merge()
+    transcript = role_path("archive-inc")
+    materialize(transcript)
+    fake_tool = types.SimpleNamespace(Host=_AheadNoPull, shared_deadline=contextlib.nullcontext)
+    with mock.patch.object(guard_merge, "merge_module", return_value=fake_tool):
+        control = guard_merge.archive_hit(ARCHIVE_TOOL, {"session_id": ROLE_OTHER}, transcript)
+        with mock.patch.object(guard_merge.own_session, "own_session_ccr", return_value=None):
+            decision = guard_merge.archive_hit(ARCHIVE_TOOL, {"session_id": ROLE_OTHER}, transcript)
+    if control is None or control[0] != "archive of a lane with a branch that has no pull request":
+        return False, "fixture: the lane with its ccr read is not refused for its stranded branch: %r" % (control,)
+    if decision is None:
+        return False, "an archive of a lane whose ccr reads None was allowed, want refused"
+    return True, "an archive of a lane whose ccr reads None is refused: %s" % (decision[0],)
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an archive of a lane whose ccr reads None is refused",
+                         archive_none_ccr_case))
 
 
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
