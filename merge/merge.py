@@ -3731,25 +3731,34 @@ def source_record_problem(h, root, a, own_records):
         return None, f"--fix-base-record: that record's Fix check is {rec['fix'][3]}, and a chain never runs through --fix-base-record from a FAIL or WIDE Fix check", "Post this pull request's own review records from round 1: for a normal guard or check change, rounds 1 to 3 with the net-value test at round 3."
     return rec, None, ""
 
-def carry_problem(h, a, info, src):
+def source_chain(h, n):
+    """-> (the source pull request `n`, its parsed review records on it, oldest first, listed since its creation). Two reads; a caller that needs both
+    the copy resolution and the chain count reads them here once and passes the result on. A failed read raises Stop."""
+    source = h.pr(n)
+    records = [r for r in map(parse_review, h.review_comments(source.get("created") or "1970-01-01T00:00:00Z").get(n, [])) if r and r["n"] == n]
+    return source, records
+
+def carry_problem(h, a, info, src, read=None):
     """-> (problem, remedy), or (None, None) when the passed Fix check of the source record `src` may be carried onto this pull request, which replaces
-    the source's. The --fix-check base is the source's Head, the source pull request is closed or merged or this body says `replaces #N`, the source Head
-    and --head hold the same tree (which stands in for the chained ancestor check), and the source's own chain leaves room for one more link. A failed
-    read raises Stop."""
+    the source's. `src` is the source's newest record: the one that holds the Fix check, or a plain copy of the one that does. The --fix-check base is
+    the source's Head, the source pull request is closed or merged or this body says `replaces #N`, the source Head and --head hold the same tree (which
+    stands in for the chained ancestor check), and the source's own chain leaves room for one more link. `read` is source_chain's result when the
+    caller already holds it. A failed read raises Stop."""
     base, n = a.fix_check[0], src["n"]
     if base != src["head"]:
         return f"a carried fix check starts from the source record's Head {src['head'][:9]}, not {base[:9]}", FIX_CARRY_BASE_REMEDY
-    source = h.pr(n)
+    source, records = read or source_chain(h, n)
     if source["state"] == "OPEN" and not re.search(rf"\breplaces #{n}(?!\d)", info["body"], re.I):
         return f"the source pull request #{n} is still open and this pull request's body does not say `replaces #{n}`", FIX_CARRY_OPEN_REMEDY
     if h.commit_tree(src["head"]) != h.commit_tree(a.head):
         return f"the source Head {src['head'][:9]} and --head {a.head[:9]} hold different files, so the fix check cannot be carried", FIX_CARRY_TREE_REMEDY
-    return source_chain_problem(h, source, n, "the carry adds one")
+    return source_chain_problem(h, records, n, "the carry adds one")
 
-def source_chain_problem(h, source, n, adds):
-    """-> (problem, remedy), or (None, None) when the chain on the source pull request `source` (number `n`) leaves room for one more fix check. The
-    comments are listed since the source's creation, and the count is fix_chain_count's, so a plain copy at the end of a capped chain counts the chain it copies. `adds` says what the stand-in adds, for the line."""
-    chain = fix_chain_count([r for r in map(parse_review, h.review_comments(source.get("created") or "1970-01-01T00:00:00Z").get(n, [])) if r and r["n"] == n], h)
+def source_chain_problem(h, records, n, adds):
+    """-> (problem, remedy), or (None, None) when the chain of the parsed records `records` on the source pull request (number `n`, listed since its
+    creation by source_chain) leaves room for one more fix check. The count is fix_chain_count's, so a plain copy at the end of a capped chain counts the
+    chain it copies. `adds` says what the stand-in adds, for the line."""
+    chain = fix_chain_count(records, h)
     if chain >= FIX_CHAIN_CAP:
         return f"the chain on the source pull request #{n} already holds {chain} fix checks, and {adds}", FIX_CAP_REMEDY
     return None, None
@@ -3956,8 +3965,14 @@ def main(argv, host=None, lock=None, hosts=None):
                 if a.fix_base_record:  # a source record on another pull request stands in for the one this pull request lacks
                     last, problem, remedy = source_record_problem(h, root, a, recs)
                     earlier = [last] if last else []
+                    read, original = None, last  # `original` holds the Fix check the source stands on: the newest record, or the one a plain copy repeats
                     if not problem:
                         problem, remedy = floor_problem([last], parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
+                    if not problem and not last["fix"]:  # a plain copy is judged by the record it repeats, which a FAIL or WIDE Fix check refuses as it does a direct source
+                        read = source_chain(h, last["n"])
+                        original = copy_source(read[1] or [last])
+                        if original["fix"] and original["fix"][3] != "PASS":
+                            problem, remedy = fix_follow_problem(original, True)
                 else:
                     last = parse_review(recs[-1]) if recs else None
                     if recs and not last:  # a posted record that does not parse is not a missing one
@@ -3982,11 +3997,11 @@ def main(argv, host=None, lock=None, hosts=None):
                     remedy = FIX_WIDE_REMEDY if held["fix"][3] == "WIDE" else FIX_FINAL_FAIL_REMEDY
                 if not problem:
                     problem, remedy = dropped_round_lines(last, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
-                carry = bool(a.fix_base_record and last and last["fix"])  # a PASS source stands in only through carry_problem
+                carry = bool(a.fix_base_record and last and original["fix"])  # a PASS source, or a plain copy of one, stands in only through carry_problem
                 if not problem and carry:
-                    problem, remedy = carry_problem(h, a, info, last)
+                    problem, remedy = carry_problem(h, a, info, last, read)
                 if not problem and a.fix_base_record and not carry:  # a plain stand-in is the end of the source chain it copies
-                    problem, remedy = source_chain_problem(h, h.pr(last["n"]), last["n"], "the fix check adds one")
+                    problem, remedy = source_chain_problem(h, (read or source_chain(h, last["n"]))[1], last["n"], "the fix check adds one")
                 if not problem and last["head"] != a.fix_check[0]:
                     problem, remedy = fix_base_problem(h, root, a.fix_check[0], last["head"])
                 if not problem and last["fix"] and not carry:  # a chained fix diff must start inside the live head's history
