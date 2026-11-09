@@ -145,15 +145,20 @@ plus the guard_merge and merge module imports. A full clone, or a shallow one wh
 whose first salt commit is the shallow boundary, the read deepens first (this Stop keeps the deepen by the orchestrator's ruling, filed in decision pr-review-record): up to
 merge/merge.py REVIEW_DEEPEN_TRIES fetches of REVIEW_DEEPEN_STEP commits each, with a git log pass after each, so up to 4 git log passes and 3 fetches, more log calls when another
 process races the clone (REVIEW_RACE_TRIES). Each fetch makes a network call and writes objects, the clone's shallow file and origin/<default branch>. The deepen is once per
-clone: when it leaves the boundary older than the salt commit, later reads in any process fetch nothing. No log, process kept or timer. A stop_hook_active rewrite is not checked.
+clone: when it leaves the boundary older than the salt commit, later reads in any process fetch nothing. Budget: every gh read and the cutover read of one Stop share REVIEW_HOOK_BUDGET
+seconds, below the hook's 35 s timeout in settings.json (a killed hook is a silent allow). A gh read gets what is left, never more than REVIEW_READ_TIMEOUT. The cutover read runs inside
+merge's shared_deadline for what is left, so each deepen fetch gets the time left, never more than its own cap (merge MERGE_READ_TIMEOUT). When the budget runs out mid-deepen,
+review_stamp_since raises Stop naming the budget and starts no fetch after it, and the hook adds the UNKNOWN cutover note; a spent budget before a gh read adds the UNKNOWN read note.
+The Stop always ends with a verdict or its UNKNOWN note. No log, process kept or timer. A stop_hook_active rewrite is not checked.
 """
 import datetime
 import json
 import os
 import re
 import sys
+import time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE =os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
     ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
@@ -1644,7 +1649,8 @@ REVIEW_HISTORY_RE = re.compile(
     r"|\b(?:was|were)\s+(?:\w+\s+){0,2}(?:before|prior|earlier)\b)")
 REVIEW_CLAUSE_SPLIT_RE = re.compile(r"[,;]|--")
 REVIEW_PR_RE = re.compile(r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b", re.I)
-REVIEW_READ_TIMEOUT = 30  # seconds for one gh read
+REVIEW_READ_TIMEOUT = 30  # seconds for one gh read, cut to what REVIEW_HOOK_BUDGET has left
+REVIEW_HOOK_BUDGET = 28  # seconds for every gh read and the cutover read of one Stop, below the 35 s timeout of this hook in settings.json (a kill is a silent allow)
 REVIEW_NO_PR = (
     "Review-record guard: a line of this reply claims a review PASS but names no pull request. Name it as #<n> on that "
     "line, and give it a review record for its live head (`merge <pr> --review-record ...`, then post the record on the PR)."
@@ -1683,11 +1689,15 @@ def review_claims(text):
     return claims
 
 
-def _gh_json(args, cwd):
-    """The parsed JSON of one `gh api` read, or raises: a failed or unparseable read is never an answer."""
+def _gh_json(args, cwd, end=None):
+    """The parsed JSON of one `gh api` read, or raises: a failed or unparseable read is never an answer. `end` is the time.monotonic() value
+    where the Stop's budget runs out (REVIEW_HOOK_BUDGET): the read gets what is left, or raises TimeoutError when nothing is."""
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+    timeout = REVIEW_READ_TIMEOUT if end is None else min(REVIEW_READ_TIMEOUT, end - time.monotonic())
+    if timeout <= 0:
+        raise TimeoutError("the Stop's time budget is spent")
     run = _nowindow.run(["gh", "api", *args], cwd=cwd or None, capture_output=True, text=True,
-                        timeout=REVIEW_READ_TIMEOUT)
+                        timeout=timeout)
     if run.returncode:
         raise RuntimeError("gh api exited %d" % run.returncode)
     return json.loads(run.stdout)
@@ -1721,6 +1731,7 @@ def review_record_problem(hook, text):
     claims = review_claims(text)
     if not claims:
         return "", ""
+    end = time.monotonic() + REVIEW_HOOK_BUDGET  # one budget for every read below, across all claimed PRs
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     from override import remote_session_id
     own_id = remote_session_id()
@@ -1736,10 +1747,10 @@ def review_record_problem(hook, text):
             if merge_mod is None:
                 raise ImportError("merge/merge.py not found")
             cwd = hook.get("cwd")
-            pull = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd)
+            pull = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd, end)
             live = pull["head"]["sha"]
             pages = _gh_json(["repos/{owner}/{repo}/issues/%d/comments" % n, "-X", "GET", "-f", "per_page=100",
-                              "--paginate", "--slurp"], cwd)
+                              "--paginate", "--slurp"], cwd, end)
             comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
             default = (pull["base"].get("repo") or {}).get("default_branch")  # the pull carries it, so no repo read
             newest = _newest_marked(comments, merge_mod)
@@ -1748,7 +1759,12 @@ def review_record_problem(hook, text):
             continue
         cutover, cutover_known = None, True
         try:
-            cutover = merge_mod.review_stamp_since(cwd, pull["base"]["ref"], default=default) if cwd else None
+            if cwd:
+                left = end - time.monotonic()
+                if left <= 0:
+                    raise TimeoutError("the Stop's time budget is spent")
+                with merge_mod.shared_deadline(left):  # merge's one home of a read budget: the deepen fetches get what is left
+                    cutover = merge_mod.review_stamp_since(cwd, pull["base"]["ref"], default=default)
         except Exception as err:  # the cutover read failing never refuses by itself, and it never hides the record check below
             cutover_known = False
             notes.append("Review-record guard: UNKNOWN, the review cutover could not be read for PR #%d (%s)." % (n, type(err).__name__))

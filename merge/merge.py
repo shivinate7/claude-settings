@@ -172,7 +172,8 @@ def shared_deadline(seconds):
 def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
     args = [resolve_program(args[0], env), *args[1:]]
     limits = [t for t in (SH_TIMEOUT, timeout) if t is not None]
-    timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else min(limits) if limits else None
+    # Inside `shared_deadline` a call gets what the budget has left, and never more than its own cap (SH_TIMEOUT, or the caller's `timeout`).
+    timeout = min([max(0.05, _READ_DEADLINE - time.monotonic()), *limits]) if _READ_DEADLINE is not None else min(limits) if limits else None
     if live_stderr:  # the child's stderr goes straight to ours; only its stdout is read
         r = _nowindow.run(args, cwd=cwd, input=input, env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", timeout=timeout)
         return r.returncode, r.stdout.strip()
@@ -181,6 +182,10 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
 
 def git(cwd, *a, input=None):
     return sh(["git", "-C", cwd, *a], input=input)
+
+def deadline_left():
+    """-> the seconds the enclosing `shared_deadline` has left (0 or less once it is spent), or None outside one."""
+    return None if _READ_DEADLINE is None else _READ_DEADLINE - time.monotonic()
 
 def fetch_branch(root, name, deepen=None):
     """-> (exit code, output) of the one fetch of origin's branch `name` into refs/remotes/origin/<name>: the home of this refspec.
@@ -3297,7 +3302,8 @@ def review_stamp_since(root, base, default=None):
     (git errors, no origin/<default branch> ref, a shallow clone whose first salt commit is still the boundary after REVIEW_DEEPEN_TRIES deepens of
     REVIEW_DEEPEN_STEP commits or whose deepen fetch fails, a boundary that changes on each of REVIEW_RACE_TRIES reads, a shallow file that cannot be read, or no .git)
     raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
-    (rule verification-report-unknown-reads). The caller fetches first (fetch_default_branch). One call per (repo top, `base`, default branch) in a process. A `root` in a subfolder reads the repo top's history, since the pathspec is relative to it. A record
+    (rule verification-report-unknown-reads). Inside `shared_deadline`, each deepen fetch gets the time left, never more than its own cap, and a spent
+    budget raises Stop naming it and starts no fetch after. The caller fetches first (fetch_default_branch). One call per (repo top, `base`, default branch) in a process. A `root` in a subfolder reads the repo top's history, since the pathspec is relative to it. A record
     created before this time may carry no Stamp line. `default` is the default branch name when the caller already read it (the report guard's
     pulls/N payload, base.repo.default_branch); with none, default_branch_once asks gh."""
     # `base` is only a cache key, since the answer reads the default branch. It stays because both callers and their test doubles pass it.
@@ -3327,7 +3333,17 @@ def review_stamp_since(root, base, default=None):
             if deepened == REVIEW_DEEPEN_TRIES:
                 raise Stop(f"origin/{default} is a shallow history, too shallow to read the review stamp cutover: the first commit holding the salt, {first[0][:9]}, is still the shallow boundary "
                            f"after {REVIEW_DEEPEN_TRIES} deepens of {REVIEW_DEEPEN_STEP} commits. Run `git fetch --unshallow origin`, then run the command again. " + REVIEW_CITE)
-            fc, fout = fetch_branch(top, default, deepen=REVIEW_DEEPEN_STEP)
+            spent = (f"The time budget of this read (or one deepen fetch's own time limit) ran out before the review stamp cutover was found: origin/{default} is a shallow history, and the first commit holding the salt, "
+                     f"{first[0][:9]}, is the shallow boundary. Run the command again to continue the deepen, or `git fetch --unshallow origin` for the full history. " + REVIEW_CITE)
+            left = deadline_left()
+            if left is not None and left <= 0:
+                raise Stop(spent)  # no fetch starts once the budget is spent
+            try:
+                fc, fout = fetch_branch(top, default, deepen=REVIEW_DEEPEN_STEP)
+            except subprocess.TimeoutExpired as e:
+                if left is None:
+                    raise
+                raise Stop(spent) from e  # the budget ran out inside this fetch
             if fc:
                 raise Stop(f"origin/{default} is a shallow history, too shallow to read the review stamp cutover: the first commit holding the salt, {first[0][:9]}, is the shallow boundary, "
                            f"and the fetch that deepens it by {REVIEW_DEEPEN_STEP} commits (`git fetch --deepen={REVIEW_DEEPEN_STEP} origin`) failed (git exited {fc}): {fout[:300]}. "
