@@ -144,9 +144,6 @@ INTERPRETER_RUNNER = re.compile(
     r"(?:^|[\s;&|(])(?:(?:python[\d.]*|node(?:js)?|ruby|perl|php|deno)\s+(?:-\w+\s+)*-\w*[ce]"
     r"|php\s+(?:-\w+\s+)*-\w*r"
     r"|deno\s+(?:-\w+\s+)*eval(?:\s+-{1,2}\w[\w-]*(?:=\S*)?(?:\s+[^\s\"'-]\S*)?)*)\s*$")
-# An argv call: `new Deno.Command("git", {args: ["push", "-f"]})` names its program and its
-# arguments as separate strings, so the pairs of one call are read as one command line.
-ARGV_CALL = re.compile(r"\bDeno\.Command\s*\(\s*$")
 # The text between two strings of one argv call. Each part starts with its own character, so a
 # failed fullmatch takes linear time.
 ARGV_GAP = re.compile(r"[\s,]*(?:\{\s*args\s*:\s*\[[\s,]*)?")
@@ -156,14 +153,20 @@ ARGV_GAP = re.compile(r"[\s,]*(?:\{\s*args\s*:\s*\[[\s,]*)?")
 # quote in a neighbouring word and blank the words between.
 ARGV_UNSAFE = re.compile(r"[^\w@%+=:,./-]")
 # Inside a script, a call that runs its string argument as a command, even inside a print.
-CALL_RUNNER = re.compile(
-    r"(?:\bos\.(?:system|popen|exec\w*|spawn\w*)|\bsubprocess\.\w+|\bPopen|\bexec\w*|\bsystem|\bpopen)"
-    r"\s*\(\s*\[?\s*$")
+RUN_CALL = (r"(?:\bos\.(?:system|popen|exec\w*|spawn\w*)|\bsubprocess\.\w+|\bPopen|\bexec\w*|\bsystem|\bpopen)"
+            r"\s*\(\s*")
+CALL_RUNNER = re.compile(RUN_CALL + r"\[?\s*$")
+# An argv call: `new Deno.Command("git", {args: ["push", "-f"]})` and a run call with a list
+# (`subprocess.run(["git", "push", "-f"])`) name the program and its arguments as separate strings,
+# so the pairs of one call are read as one command line.
+ARGV_CALL = re.compile(r"\bDeno\.Command\s*\(\s*$|" + RUN_CALL + r"\[\s*$")
 # The printers: the one place that names the calls and commands that show their string and run
 # nothing. A pair inside a runner script is a command unless a printer holds it.
 PRINT_NAME = (r"print\w*|console\.\w+|puts|say|logger\.\w+|System\.out\.print\w*"
-              r"|Write-(?:Host|Output)")
+              r"|sys\.std(?:out|err)\.write|Write-(?:Host|Output)")
 PRINT_CALL_NAME = re.compile(r"\b(?:" + PRINT_NAME + r")$")
+# The calls that build a string and run nothing: a printer around one still prints.
+FORMAT_NAME = re.compile(r"\b(?:json\.dumps|JSON\.stringify|format|repr|str|String)$")
 PRINT_COMMAND = re.compile(r"[\s\"'(]*(?:(?:sudo|command|builtin)\s+)?(?:echo|printf|print|puts)\b")
 # The call name that ends the text ahead of an open `(`. Words that take a `(` and call nothing
 # (`if (`, `return (`) are no call.
@@ -210,7 +213,8 @@ class _Statement:
             self.calls.pop()
 
     def printed(self, index: int) -> bool:
-        named = next((name for name in reversed(self.calls) if name), "")
+        named = next((name for name in reversed(self.calls)
+                      if name and not FORMAT_NAME.search(name)), "")
         if named:
             return PRINT_CALL_NAME.search(named) is not None
         if self.command is None:
@@ -243,7 +247,9 @@ def _nested_commands(span: str, before: str = "", mark: str = '\\"') -> str:
         if words:
             # A shell's `-c` argument is a script, read as a runner line of its own.
             shell = inline_script(words)
-            lines.append(shell + "\n" if shell else " ".join(map(_argv_word, words)) + "\n")
+            # A list of one string runs as a command line under shell=True, so it is read as one.
+            lines.append(shell + "\n" if shell else words[0] + "\n" if len(words) == 1
+                         else " ".join(map(_argv_word, words)) + "\n")
             words = []
 
     def piped_into_shell(close: int) -> bool:
