@@ -12177,9 +12177,9 @@ def graphql_block(text):
     return '"""%s"""' % text
 
 
-def gh_graphql(query):
-    """The `gh api graphql` call that sends `query` as its -f value, quoted for the shell."""
-    return "gh api graphql -f %s" % shlex.quote("query=" + query)
+def gh_graphql(query, route="graphql"):
+    """The `gh api` call that sends `query` as its -f value to `route` (the GraphQL endpoint by default), quoted for the shell."""
+    return "gh api %s -f %s" % (route, shlex.quote("query=" + query))
 
 
 GRAPHQL_NODE = "IC_kwDO%d" % REVIEW_COMMENT_ID   # the node id of comment 4417, which the fakes answer
@@ -12189,15 +12189,27 @@ GRAPHQL_REQUEST = os.path.join(GRAPHQL_DIR, "request.json")    # the request bod
 GRAPHQL_VARIABLE_QUERY = 'mutation($b:String!){addComment(input:{subjectId:"X",body:$b}){clientMutationId}}'   # its body is the variable `b`
 GRAPHQL_VARIABLE_REQUEST = os.path.join(GRAPHQL_DIR, "variable-request.json")   # the request `--input` names, its marked record in `variables`
 GRAPHQL_VARIABLE_PLAIN_REQUEST = os.path.join(GRAPHQL_DIR, "variable-plain-request.json")   # the same request, its body unmarked
+GRAPHQL_NODE_REQUEST = os.path.join(GRAPHQL_DIR, "node-request.json")   # the request `--input` names: FIELD_ID_UPDATE, its node id in `variables`
+GRAPHQL_NODE_FILE = os.path.join(GRAPHQL_DIR, "node-id.txt")            # the file `-F id=@` names: the node id of comment 4417
+GRAPHQL_NESTED_QUERY = 'mutation($input:AddCommentInput!){addComment(input:$input){clientMutationId}}'   # its body is in `variables.input`
+GRAPHQL_NESTED_REQUEST = os.path.join(GRAPHQL_DIR, "nested-request.json")   # the request `--input` names, its marked record nested in `variables`
+GRAPHQL_NESTED_PLAIN_REQUEST = os.path.join(GRAPHQL_DIR, "nested-plain-request.json")   # the same request, its body unmarked
 
 
 def build_graphql_fixtures():
-    """The request files: a marked addComment as a query, the same mutation inside a JSON request body, and that request with its
-    body in `variables`, once marked and once unmarked."""
+    """The request files: a marked addComment as a query, the same mutation inside a JSON request body, that request with its
+    body in `variables`, once marked and once unmarked, and the node-id forms: an id held in a request variable, an id in a file,
+    and a body nested in `variables`, once marked and once unmarked."""
     write(GRAPHQL_QUERY, graphql_add(graphql_block(review_record())))
     write(GRAPHQL_REQUEST, json.dumps({"query": graphql_add(graphql_block(review_record()))}))
     write(GRAPHQL_VARIABLE_REQUEST, json.dumps({"query": GRAPHQL_VARIABLE_QUERY, "variables": {"b": review_record()}}))
     write(GRAPHQL_VARIABLE_PLAIN_REQUEST, json.dumps({"query": GRAPHQL_VARIABLE_QUERY, "variables": {"b": GRAPHQL_PLAIN}}))
+    write(GRAPHQL_NODE_REQUEST, json.dumps({"query": FIELD_ID_UPDATE, "variables": {"id": GRAPHQL_NODE}}))
+    write(GRAPHQL_NODE_FILE, GRAPHQL_NODE + "\n")
+    write(GRAPHQL_NESTED_REQUEST, json.dumps({"query": GRAPHQL_NESTED_QUERY,
+                                              "variables": {"input": {"subjectId": "X", "body": review_record()}}}))
+    write(GRAPHQL_NESTED_PLAIN_REQUEST, json.dumps({"query": GRAPHQL_NESTED_QUERY,
+                                                    "variables": {"input": {"subjectId": "X", "body": GRAPHQL_PLAIN}}}))
 
 
 lazy_fixture([GRAPHQL_DIR], build_graphql_fixtures)
@@ -12212,16 +12224,16 @@ bash_post("review-record: a marked addComment in a query file is refused, gh api
 bash_post("review-record: a marked addComment in a request body read by --input is refused, gh api graphql --input file",
           "gh api graphql --input %s" % GRAPHQL_REQUEST, "deny", rule=REVIEW_RULE, carries=("node id",))
 
-# A BODY IN `variables`. Decision pr-review-record, the gap list: the guard reads the `query` of a request body, not its `variables`, so a
-# record held in a variable passes. The control is the same request with an unmarked body.
+# A BODY IN `variables`. Decision pr-review-record: the guard reads the `query` of a request body and every string its `variables` hold, so a
+# record held in a variable is refused. The control is the same request with an unmarked body.
 bash_post("review-record: a marked addComment whose body is a request variable is refused, gh api graphql --input file",
           "gh api graphql --input %s" % GRAPHQL_VARIABLE_REQUEST, "deny", rule=REVIEW_RULE, carries=("node id",))
 bash_post("review-record: an unmarked addComment whose body is a request variable is allowed, gh api graphql --input file",
           "gh api graphql --input %s" % GRAPHQL_VARIABLE_PLAIN_REQUEST, "allow")
 
 # AN UPDATE WHOSE NODE ID IS A VARIABLE. Decision pr-review-record, the GraphQL text: a marked updateIssueComment is refused as an edit with
-# no read. The guard reads an old body only from a literal node id, so this id is a variable and no read is made. An unmarked body under a
-# variable id is refused as unreadable, in the cases after the field-id cases below.
+# no read. The guard reads an old body only from a node id it can name: a literal, or a field that names the variable. With no field
+# naming the variable, the id is unknown and no read is made, so an unmarked body is allowed. The field-named cases come after the field-id cases below.
 UPDATE_BY_VARIABLE = 'mutation($id:ID!){updateIssueComment(input:{id:$id, body: %s}){clientMutationId}}' % graphql_block(review_record())
 REVIEW_LOG_CHECKS.append(("review-record:a marked updateIssueComment whose node id is a variable is refused with no gh read, gh api graphql -f id=",
                          review_reads("Bash", {"command": "gh api graphql -f %s -f id=%s" % (shlex.quote("query=" + UPDATE_BY_VARIABLE), GRAPHQL_NODE)},
@@ -12259,6 +12271,152 @@ for _label, _id in (('"$ID"', '"$ID"'), ("$(cat f)", "$(cat f)")):
                              review_reads("Bash", {"command": "gh api graphql -f %s -f id=%s" % (shlex.quote("query=" + FIELD_ID_UPDATE), _id)},
                                           "deny", 0, folder=GHRECORDCOUNT, bodies=REVIEW_OLD_RECORD,
                                           carries=(REVIEW_RULE, "the read of the comment's current body could not run"))))
+
+# THE GRAPHQL FORMS THE GUARD JUDGES. Decision pr-review-record, the GraphQL text: a marked addComment is refused with no read on every
+# route and string form the guard can name, and an unmarked updateIssueComment is judged on the node it names. The A cases are allowed
+# today, so each is red. The B pins are green, and each is red on the guard mutant its comment names.
+def guard_merge_text(name):
+    """The value of the string constant `name` in guard_merge.py beside the guard under test, read as text (an import would run the
+    module). The literals and names it joins are joined as the module joins them. None when it is no plain string there."""
+    path = os.path.join(os.path.dirname(os.path.realpath(GUARD)), "guard_merge.py")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+    except (OSError, SyntaxError, ValueError):
+        return None
+    values = {}
+
+    def text_of(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.Name):
+            return values.get(node.id)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left, right = text_of(node.left), text_of(node.right)
+            return None if left is None or right is None else left + right
+        return None
+
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            value = text_of(node.value)
+            if value is not None:
+                values[node.targets[0].id] = value
+    return values.get(name)
+
+
+def remedy_is(name):
+    """A checker of a refusal's remedy: it must be the string constant `name` of guard_merge.py, whitespace aside."""
+    def check(remedy):
+        want = guard_merge_text(name)
+        if want is None:
+            return False, "%s is not a plain string constant in guard_merge.py beside the guard" % name
+        if " ".join(remedy.split()) != " ".join(want.split()):
+            return False, "the remedy is %r, want %s" % (remedy[:110], name)
+        return True, "the remedy is %s" % name
+    return check
+
+
+def with_graphql_files(check):
+    """`check` with the GraphQL request files built first. The check names those files in its own code, so the case loop does not build them."""
+    def wrapped():
+        materialize(GRAPHQL_DIR)
+        return check()
+    FIXTURELESS_CHECKS.add(wrapped)
+    return wrapped
+
+
+def node_read_failure_check():
+    """-> (ok, note). A node read that fails refuses an unmarked update of a literal node id as a read that could not run. The remedy is
+    the constant that names the REST edit, since a retry of the GraphQL read reads no better."""
+    def check():
+        materialize(GHRECORDBROKEN)
+        command = gh_graphql(graphql_update(GRAPHQL_NODE, GRAPHQL_PLAIN))
+        decision, reason = decide(review_case("Bash", {"command": command}, GHRECORDBROKEN + os.pathsep + PY_PATH))
+        if decision != "deny" or REVIEW_RULE not in reason:
+            return False, "want a refusal under %s, got %s: %s" % (REVIEW_RULE, decision, reason[:90])
+        if "could not run" not in reason:
+            return False, "refused, but not as a read that could not run: %s" % reason[:90]
+        return remedy_is("REVIEW_NODE_UNREAD_REMEDY")(remedy_of(reason))
+    FIXTURELESS_CHECKS.add(check)
+    return check
+
+
+# The mutation on the GraphQL route's other spellings: `/graphql`, and the full URL. The guard reads `graphql` as the endpoint only.
+bash_post("review-record: a marked addComment sent to /graphql is refused, gh api /graphql -f query=",
+          gh_graphql(graphql_add(graphql_block(review_record())), route="/graphql"), "deny", rule=REVIEW_RULE, carries=("node id",))
+bash_post("review-record: a marked addComment sent to the full GraphQL URL is refused, gh api https://api.github.com/graphql -f query=",
+          gh_graphql(graphql_add(graphql_block(review_record())), route="https://api.github.com/graphql"), "deny", rule=REVIEW_RULE,
+          carries=("node id",))
+# The query read by a shell substitution: `-f query="$(cat FILE)"`. The shell fills the query from the file, which holds the marked addComment.
+bash_post("review-record: a marked addComment read into a query by a shell substitution is refused, gh api graphql -f query=\"$(cat FILE)\"",
+          'gh api graphql -f query="$(cat %s)"' % GRAPHQL_QUERY, "deny", rule=REVIEW_RULE, carries=("node id",))
+# The query fed on stdin: `-F query=@-`, with the heredoc as the query text.
+bash_post("review-record: a marked addComment fed to -F query=@- by a heredoc is refused, gh api graphql -F query=@-",
+          "gh api graphql -F query=@- <<'EOF'\n%s\nEOF\n" % graphql_add(graphql_block(review_record())), "deny", rule=REVIEW_RULE,
+          carries=("node id",))
+
+# An update whose node id is the `id` of an input object: `updateIssueComment(input:$input)`, with `-F input[id]=` naming the node. The guard
+# reads the node a field names, as it reads a literal id: one read, and the stamped record that node holds is refused.
+UPDATE_INPUT_QUERY = 'mutation($input:UpdateIssueCommentInput!){updateIssueComment(input:$input){clientMutationId}}'
+UPDATE_INPUT_CALL = "gh api graphql -f %s -F %s -F %s" % (shlex.quote("query=" + UPDATE_INPUT_QUERY), shlex.quote("input[id]=" + GRAPHQL_NODE),
+                                                       shlex.quote("input[body]=" + GRAPHQL_PLAIN))
+REVIEW_LOG_CHECKS.append(("review-record:an unmarked updateIssueComment whose input object names the node by a field is refused over a stamped record after one gh read of that node, gh api graphql -F input[id]=",
+                         review_reads("Bash", {"command": UPDATE_INPUT_CALL}, "deny", 1, folder=GHRECORDCOUNT, bodies=REVIEW_OLD_RECORD,
+                                      carries=(REVIEW_RULE,) + WITHDRAW_REMEDY)))
+sh("review-record: an unmarked updateIssueComment whose input object names the node by a field is allowed over a plain comment, gh api graphql -F input[id]=",
+   UPDATE_INPUT_CALL, "allow", cwd=NOGIT, env_path=GHNODEPLAIN + os.pathsep + PY_PATH)
+
+# A node id no word of the call names: a variable that no field and no request variable gives. The guard leaves that edit alone, with no read.
+REVIEW_LOG_CHECKS.append(("review-record:an unmarked updateIssueComment whose node id no word names is allowed with no gh read, gh api graphql -f query=",
+                         review_reads("Bash", {"command": gh_graphql(FIELD_ID_UPDATE)}, "allow", 0, folder=GHRECORDCOUNT,
+                                      bodies=REVIEW_OLD_RECORD)))
+# A node id held in a request variable, given by `--input FILE` and by `--input=FILE`. The guard reads the variable's value as the node id.
+REVIEW_LOG_CHECKS.append(("review-record:an unmarked updateIssueComment whose node id is a request variable is refused over a stamped record after one gh read, gh api graphql --input FILE",
+                         with_graphql_files(review_reads("Bash", {"command": "gh api graphql --input %s" % GRAPHQL_NODE_REQUEST}, "deny", 1,
+                                                          folder=GHRECORDCOUNT, bodies=REVIEW_OLD_RECORD,
+                                                          carries=(REVIEW_RULE,) + WITHDRAW_REMEDY))))
+REVIEW_LOG_CHECKS.append(("review-record:an unmarked updateIssueComment whose node id is a request variable is refused over a stamped record after one gh read, gh api graphql --input=FILE",
+                         with_graphql_files(review_reads("Bash", {"command": "gh api graphql --input=%s" % GRAPHQL_NODE_REQUEST}, "deny", 1,
+                                                          folder=GHRECORDCOUNT, bodies=REVIEW_OLD_RECORD,
+                                                          carries=(REVIEW_RULE,) + WITHDRAW_REMEDY))))
+# A node id held in a file, given as `-F id=@FILE`. The guard names no comment from a file, so it refuses the edit before any read.
+REVIEW_LOG_CHECKS.append(("review-record:an unmarked updateIssueComment whose node id is a file is refused as a node id it cannot read, with no gh read, gh api graphql -F id=@",
+                         with_graphql_files(review_reads("Bash", {"command": "gh api graphql -f %s -F id=@%s" % (
+                             shlex.quote("query=" + FIELD_ID_UPDATE), GRAPHQL_NODE_FILE)}, "deny", 0, folder=GHRECORDCOUNT,
+                                                          bodies=REVIEW_OLD_RECORD, carries=(REVIEW_RULE,),
+                                                          remedy=remedy_is("REVIEW_LITERAL_NODE_REMEDY")))))
+# A node read that fails: the remedy is the constant that names the REST edit, and it says no retry.
+REVIEW_LOG_CHECKS.append(("review-record:a node read that fails refuses an unmarked update of a literal node id, and the remedy is the REST edit constant, gh api graphql -f query=",
+                         node_read_failure_check()))
+
+# A body nested in a request variable: `variables.input.body`, the record a GraphQL input object holds. Every string the variables hold is
+# judged, at any depth, so the nested record is refused, and its unmarked control is allowed.
+bash_post("review-record: a marked addComment whose body is nested in a request variable is refused, gh api graphql --input FILE",
+          "gh api graphql --input %s" % GRAPHQL_NESTED_REQUEST, "deny", rule=REVIEW_RULE, carries=("node id",))
+bash_post("review-record: an unmarked addComment whose body is nested in a request variable is allowed, gh api graphql --input FILE",
+          "gh api graphql --input %s" % GRAPHQL_NESTED_PLAIN_REQUEST, "allow")
+
+# A BLOCK STRING WITH AN INDENTED BODY. Decision pr-review-record, the GraphQL text: a block string reads as GraphQL reads it, so the indent
+# every line after the first shares is dropped, and the blank first and last lines are dropped. The marker is then the first line.
+FORMATTED_RECORD = "\n" + "\n".join("    " + line for line in review_record().splitlines()) + "\n    "
+bash_post("review-record: a marked addComment in an indented block string with blank first and last lines is refused, gh api graphql -f query=",
+          gh_graphql(graphql_add(graphql_block(FORMATTED_RECORD))), "deny", rule=REVIEW_RULE, carries=("node id",))
+# AN ESCAPED TRIPLE QUOTE. Decision pr-review-record, the GraphQL text: `\"""` inside a block string is one triple quote, so the string runs on
+# past it. The escape sits in the footer after `---`, which the record form ignores, so the body still reads as a record.
+bash_post("review-record: a marked addComment whose footer holds an escaped triple quote is refused, gh api graphql -f query=",
+          gh_graphql(graphql_add(graphql_block(review_record(footer=True) + 'Quoted \\""" in the footer.\n'))), "deny", rule=REVIEW_RULE,
+          carries=("node id",))
+# A LONE QUOTE IN A BLOCK STRING. Decision pr-review-record, the GraphQL text: one `"` inside a block string is text. The quote sits in the
+# footer, which the record form ignores, so the body still reads as a record.
+bash_post("review-record: a marked addComment whose footer holds a lone quote is refused, gh api graphql -f query=",
+          gh_graphql(graphql_add(graphql_block(review_record(footer=True) + 'Say "hi in the footer.\n'))), "deny", rule=REVIEW_RULE,
+          carries=("node id",))
+# A COMMENT OPENER IN A BLOCK STRING. Decision pr-review-record, the GraphQL text: `/*` inside a string is text, so a reader that cuts comments
+# from the query must not cut the body. The closing `*/` sits in a GraphQL `#` comment after the mutation.
+bash_post("review-record: a marked addComment whose footer holds a comment opener, with a closing one after the mutation, is refused, gh api graphql -f query=",
+          gh_graphql(graphql_add(graphql_block(review_record(footer=True) + "Open /* in the footer.\n")) + " # */"), "deny", rule=REVIEW_RULE,
+          carries=("node id",))
+
 
 # THE LOGIN READ. `--edit-last` reads the caller's login only when its listing names more than one author. Decision pr-review-record,
 # the cost paragraph. The one-author case makes the listing read and no other; the two-author case makes the login read too.
@@ -12398,9 +12556,9 @@ REVIEW_LOG_CHECKS.append(("review-record:an unmarked post whose repo is a spaced
 bash_post("review-record: a PUT to a shell-expanded endpoint with an --input body is allowed, it is not an edit, gh api -X PUT",
           'gh api -X PUT "$EP" --input prot.json', "allow")
 
-# THE WRAPPED FORMS. Decision pr-review-record, the gap list. `bash -c`, `sh -c` and `eval` hand a gh call to a shell as text, so the
-# guard reads the wrapper word and no call. A hand-typed record on any of them is refused as on a plain call. Each form has an allowed
-# control on the same form: a correct record at the live head, so a fix that refuses every marked body is caught.
+# THE HAND-TYPED WRAPPED POSTS AND EDITS. Decision pr-review-record, the gap list. `bash -c`, `sh -c` and `eval` hand a gh call to a shell as
+# text, and the guard reads the script each one runs (inner_commands, hooks/guard.py). A hand-typed record on any of them is refused as on a
+# plain call. Each form has an allowed control on the same form: a correct record at the live head, so a fix that refuses every marked body is caught.
 bash_post("review-record: a hand-typed record in a bash -c post is refused, gh api post",
           "bash -c \"gh api repos/y/x/issues/12/comments -f 'body=%s'\"" % WRONG_HEAD_RECORD, "deny", rule=REVIEW_RULE)
 bash_post("review-record: a hand-typed record in a sh -c post is refused, gh pr comment --body",
@@ -12423,9 +12581,9 @@ bash_post("review-record: a correct record at the live head is allowed in a sh -
 bash_post("review-record: a correct record at the live head is allowed in an eval post, gh api post",
           "eval \"gh api repos/y/x/issues/12/comments -f 'body=%s'\"" % review_record(), "allow")
 
-# A QUOTED PARENTHESIS IN A SPACED ID. Decision pr-review-record, the gap list. `_joined_substitutions` counts a quoted parenthesis as
-# open, so the joined word runs on past the route and the route is never read. A quoted `(` and a quoted `)` each take the refusal on a
-# post, and a quoted `(` takes it on an edit. An unmarked body is allowed on the same route, since no marker is read.
+# A QUOTED PARENTHESIS IN A SPACED ID. Decision pr-review-record, the gap list. `_joined_substitutions` reads a quoted parenthesis as text, so the
+# joined word ends with the route and the route is read. A quoted `(` and a quoted `)` each take the refusal on a post, and a quoted `(` takes
+# it on an edit. An unmarked body is allowed on the same route, since no marker is read.
 bash_post("review-record: a hand-typed record under a quoted ( in a spaced substitution id is refused, gh api post",
           "gh api repos/y/x/issues/$(echo '(' 12)/comments -f 'body=%s'" % WRONG_HEAD_RECORD, "deny", rule=REVIEW_RULE)
 bash_post("review-record: a hand-typed record under a quoted ) in a spaced substitution id is refused, gh api post",
@@ -12455,9 +12613,9 @@ bash_post("review-record: an unmarked GraphQL addComment variable is allowed, gh
           "gh api graphql -f query='mutation($b:String!){addComment(input:{subjectId:\"PR_kwDOAA\",body:$b}){clientMutationId}}' -f b='%s'"
           % UNMARKED_BODY, "allow")
 
-# `--edit-last` UNDER ANOTHER LOGIN'S COMMENT. Decision pr-review-record, the open limit. `--edit-last` edits the caller's own last
-# comment, but the guard reads the newest comment of the pull request, whoever wrote it. The login fixtures put another login's
-# unmarked comment newest, above the caller's record (or the caller's note, in the control). The guard's read and gh's edit then differ.
+# `--edit-last` UNDER ANOTHER LOGIN'S COMMENT. Decision pr-review-record. `--edit-last` edits the caller's own last comment. The guard reads the
+# caller's newest comment, the one gh edits, and reads the caller's login only when the listing names more than one author. The login fixtures
+# put another login's unmarked comment newest, above the caller's record (or the caller's note, in the control), so the case turns on that filter.
 sh("review-record: an unmarked edit that replaces the caller's record is refused when another login's comment is newer, gh issue comment --edit-last",
    "gh issue comment 12 --edit-last --body '%s'" % UNMARKED_BODY, "deny", rule=REVIEW_RULE, cwd=NOGIT,
    env_path=GHLOGINRECORD + os.pathsep + PY_PATH)
