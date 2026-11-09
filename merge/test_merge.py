@@ -15323,16 +15323,22 @@ def cost_host(**reads):
              2402: [touch_file(TOUCH_GUARD, "@@ -1,1 +1,1 @@", "+a guard line")]}
     return TouchesHost(pulls, files, **{"logs": {TOUCH_RUN: [failed_case(TOUCH_CASE_A)]}, **reads})
 
+def unit_failed_line(name):
+    """A failing unittest case's line in a run's log, in the form unittest prints: FAIL, the test's name, then its dotted id in merge/test_merge.py."""
+    return f"FAIL: {name} (merge.test_merge.TouchesRead.{name})"
+
 class TouchesHost(PullsHost):
     """The reads of `merge --touches`, scripted over PullsHost: the open pulls (`pages("pulls")`, PullsHost's list read, whose Stop is `pulls_error`),
     each open pull's changed files (`pull_files`; `files_error` maps a pull number to the Stop its read raises) and a run's failed lines
     (`failed_lines`; `logs_error` is its Stop). `file_calls` and `log_calls` keep each call's argument, in order. A gh route is an error, unless
-    `count_gh` lets the list read run the real Host.pages over scripted gh; then `gh_calls` names each route it asked."""
+    `count_gh` runs the real Host reads (pull_files, failed_lines, pages, api) over scripted gh; then `gh_calls` names each route it asked, `jobs`
+    maps a run id to the jobs `actions/runs/N/jobs` lists, and `job_logs` maps a job id to the text `actions/jobs/N/logs` returns."""
 
-    def __init__(self, pulls=(), files=None, logs=None, pulls_error=None, files_error=None, logs_error=None, count_gh=False):
+    def __init__(self, pulls=(), files=None, logs=None, pulls_error=None, files_error=None, logs_error=None, count_gh=False, jobs=None, job_logs=None):
         super().__init__(list(pulls), {}, pulls_error=pulls_error, count_gh=count_gh)
         self.files, self.logs = files or {}, logs or {}
         self.files_error, self.logs_error = files_error or {}, logs_error
+        self.jobs, self.job_logs = jobs or {}, job_logs or {}
         self.file_calls, self.log_calls = [], []
 
     def gh(self, args, cwd=None):
@@ -15340,13 +15346,44 @@ class TouchesHost(PullsHost):
             raise AssertionError("unexpected gh call: " + " ".join(args))
         return super().gh(args, cwd)
 
+    def answer(self, rel, argv):
+        """The routes a touches read asks over gh: the open pulls and each pull's files as list reads, a run's jobs as a list read, a job's log."""
+        _method, _path, params, flags, _jq = REST.parse(argv)
+        m = re.fullmatch(r"pulls/(\d+)/files", rel)
+        if m:
+            return self.list_reply(argv, rel, self.files.get(int(m.group(1)), []), None, params, flags)
+        if rel == "pulls":
+            return self.list_reply(argv, rel, self.pulls, None, params, flags)
+        m = re.fullmatch(r"actions/runs/(\d+)/jobs", rel)
+        if m:
+            return self.list_reply(argv, rel, self.jobs.get(m.group(1), []), "jobs", params, flags)
+        m = re.fullmatch(r"actions/jobs/(\d+)/logs", rel)
+        if m:
+            return self.job_logs.get(m.group(1), "")
+        return super().answer(rel, argv)
+
+    def list_reply(self, argv, rel, items, key, params, flags):
+        """A list read's reply as gh api prints it: the page asked for. Under -i it starts with the header block, whose Link (rel="next")
+        names the next page while pages follow, as GitHub sends it."""
+        body = REST.listing(items, key, params, flags, None, 100)
+        if "-i" not in argv:
+            return body
+        size = max(1, min(int(params.get("per_page", 30)), 100))
+        last, n = max(1, -(-len(items) // size)), int(params.get("page", 1))
+        link = f'Link: <https://api.github.com/repos/o/r/{rel}?page={n + 1}>; rel="next"\n' if n < last else ""
+        return "HTTP/2.0 200 OK\n" + link + "\n" + body
+
     def pull_files(self, n):
+        if self.count_gh:  # the real read: Host.pull_files, one gh call per page
+            return merge.Host.pull_files(self, n)
         self.file_calls.append(n)
         if n in self.files_error:
             raise merge.Stop(self.files_error[n])
         return self.files.get(n, [])
 
     def failed_lines(self, run_id):
+        if self.count_gh:  # the real read: Host.failed_lines, one jobs read and one log read per failed job
+            return merge.Host.failed_lines(self, run_id)
         self.log_calls.append(str(run_id))
         if self.logs_error:
             raise merge.Stop(self.logs_error)
@@ -15443,8 +15480,11 @@ class TouchesRead(Env):
         self.assertEqual(rc, 1, out + err)
         self.assertIn(TOUCH_UNKNOWN, out + err, "a run with no failing lines printed no unknown line")
         self.assertNotIn(TOUCH_NONE, out + err, "a run with no failing lines read as clear")
-        # the remedy the unknown line names: an explicit --file is a query of its own, and it runs
+        # with --file too, the silent run is still unknown beside the file: the file alone is a query of its own, and it runs
         rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, "--file", TOUCH_GUARD, host=incident_host(logs={TOUCH_RUN: []}))
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("merge: unknown", err, "a silent run beside --file read clear:\n" + out + err)
+        rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=incident_host())
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}"], out)
 
@@ -15470,10 +15510,6 @@ class TouchesRead(Env):
         self.assertEqual(host.list_calls, [("pulls", {"state": "open"})], "the open pulls were not read as one list page")
         self.assertEqual(sorted(host.file_calls), [2390, 2401, 2402], "the files were not read once per open pull")
         self.assertEqual(host.log_calls, [TOUCH_RUN], "the run's failed lines were not read once")
-        host = cost_host(count_gh=True)  # the same query over scripted gh: the pull list is one page, and no other route is asked
-        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=host)
-        self.assertEqual(rc, 0, out + err)
-        self.assertEqual(host.gh_calls, ["pulls"], "the pull list read asked GitHub for more than one page or another route")
         host = cost_host()  # no --run: the failed lines are not read at all
         rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=host)
         self.assertEqual(rc, 0, out + err)
@@ -15504,7 +15540,101 @@ class TouchesRead(Env):
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(out.splitlines(), [touch_head(2301, "feat-2301", "ready") + "file docs/logo.png"], out)
 
-    def test_the_module_docstring_names_the_flag_and_its_cost(self):
+    def test_a_run_line_with_a_reason_note_names_its_case_without_the_note(self):
+        note = "  (the reason does not name rule 'brief-destructive-git': the Bash call was allowed)"  # test_guard's suffix on a line that has a reason
+        host = incident_host(logs={TOUCH_RUN: [failed_case(TOUCH_CASE_A) + note]})
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"],
+                         "the note after the case was read as part of the case:\n" + out)
+
+    def test_a_unittest_fail_line_names_its_case_and_the_file_of_its_module(self):
+        name = "test_a_brief_orders_the_reset_is_denied"
+        module_pull = touch_pull(2430, "guard-tests")  # touches the module's own file, with no case text
+        case_pull = touch_pull(2431, "case-tests")  # names the test in a `+` line of another file
+        files = {2430: [touch_file("merge/test_merge.py", "+an unrelated line")], 2431: [touch_file("docs/x.md", f"+    {name}")]}
+        host = TouchesHost([module_pull, case_pull], files, logs={TOUCH_RUN: [unit_failed_line(name)]})
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2430, "guard-tests", "ready") + "file merge/test_merge.py",
+                                            touch_head(2431, "case-tests", "ready") + f"case {name}"],
+                         "the unittest line named no case, or no file from its module:\n" + out)
+
+    def test_a_run_whose_failing_lines_name_no_case_is_unknown_beside_a_file_or_case(self):
+        unparsed = ["FAIL: the runner stopped before any case ran"]  # a failing line with no case text: it parses to nothing
+        for argv in (("--file", TOUCH_GUARD), ("--case", TOUCH_CASE_A)):
+            with self.subTest(argv=argv):
+                rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, *argv, host=incident_host(logs={TOUCH_RUN: unparsed}))
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("merge: unknown", err, "the run's unparsed failing lines read clear beside " + argv[0] + ":\n" + out + err)
+
+    def test_a_red_job_that_timed_out_or_was_cancelled_is_unknown_beside_a_file(self):
+        for conclusion in ("timed_out", "cancelled"):
+            with self.subTest(conclusion=conclusion):
+                jobs = {TOUCH_RUN: [{"id": 301, "name": "tests", "conclusion": conclusion}]}  # the real jobs read, over scripted gh
+                rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, "--file", TOUCH_GUARD, host=incident_host(jobs=jobs, count_gh=True))
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("merge: unknown", err, f"a {conclusion} red job read clear beside --file:\n" + out + err)
+
+    def test_a_changed_file_with_no_patch_makes_its_pull_unknown_for_a_case(self):
+        pulls = [touch_pull(2390, TOUCH_FIX), touch_pull(2401, "docs-x")]
+        files = {2390: [touch_file(TOUCH_GUARD, f"+    {TOUCH_CASE_A}")],  # holds the case in a `+` line: its own match still prints
+                 2401: [{"filename": "docs/logo.png"}]}  # a binary file: GitHub gives it no patch
+        unknown = touch_head(2401, "docs-x", "ready") + "unknown: file docs/logo.png has no patch to read"
+        match = touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"
+        rc, out, err = self.run_args("--touches", "--case", TOUCH_CASE_A, host=TouchesHost(pulls, files))
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(unknown, (out + err).splitlines(), "the patch-less file did not make its pull unknown:\n" + out + err)
+        self.assertIn(match, (out + err).splitlines(), "the pull that holds the case lost its line beside the unknown one:\n" + out + err)
+        self.assertNotIn(TOUCH_NONE, out + err, "a case query read a pull with a patch-less file as clear")
+        rc, out, err = self.run_args("--touches", "--file", "docs/logo.png", host=TouchesHost(pulls, files))  # the control: a file query matches by path
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2401, "docs-x", "ready") + "file docs/logo.png"], out)
+
+    def test_an_empty_run_case_or_file_is_a_usage_error(self):
+        for argv in (("--run", ""), ("--run", "", "--file", TOUCH_GUARD), ("--case", ""), ("--case", "", "--file", TOUCH_GUARD),
+                     ("--file", ""), ("--file", "", "--case", TOUCH_CASE_A)):
+            with self.subTest(argv=argv):
+                self.assert_touches_usage("--touches", *argv)
+
+    def test_a_file_spelled_with_a_leading_dot_slash_matches_its_path(self):
+        rc, out, err = self.run_args("--touches", "--file", "./" + TOUCH_GUARD, host=incident_host())
+        self.assertEqual(rc, 0, out + err)
+        lines = out.splitlines()
+        self.assertEqual(len(lines), 1, "the ./ spelling matched no pull, or more than the fix:\n" + out)
+        self.assertTrue(lines[0].startswith(touch_head(2390, TOUCH_FIX, "ready")), "the ./ spelling did not name #2390:\n" + out)
+        self.assertRegex(lines[0], rf"file (\./)?{re.escape(TOUCH_GUARD)}$", "the file hit does not name the file")
+
+    def test_an_os_error_from_a_read_is_unknown_with_no_traceback(self):
+        no_gh = os.path.join(self.t, "no-gh")  # a PATH with no gh on it: the read's program cannot start
+        os.makedirs(no_gh)
+        with unittest.mock.patch.dict(os.environ, {"PATH": no_gh}):
+            try:
+                rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=merge.Host(pause=lambda s: None))
+            except OSError as e:
+                self.fail(f"an OSError from a read escaped merge.main instead of printing a `merge: unknown` line: {e!r}")
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("merge: unknown", err, out + err)
+        self.assertNotIn("Traceback", err, err)
+
+    def test_a_run_query_makes_each_gh_read_once_over_the_real_host(self):
+        jobs = {TOUCH_RUN: [{"id": 201, "name": "tests", "conclusion": "failure"}, {"id": 202, "name": "lint", "conclusion": "failure"},
+                            {"id": 203, "name": "build", "conclusion": "success"}]}
+        job_logs = {"201": failed_case(TOUCH_CASE_A), "202": failed_case(TOUCH_CASE_B)}  # the log of each failed job, one line each
+        pulls = [touch_pull(2390, TOUCH_FIX), touch_pull(2401, "docs-x"), touch_pull(2402, "wip-many", draft=True)]
+        files = {2390: [touch_file(TOUCH_GUARD, f"+    {TOUCH_CASE_A}")],
+                 2401: [touch_file("docs/x.md", "+a docs line")],
+                 2402: [touch_file(f"docs/gen/{i:03d}.md", "+a generated line") for i in range(101)]}  # 101 files: two pages of 100
+        host = TouchesHost(pulls, files, jobs=jobs, job_logs=job_logs, count_gh=True)
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=host)
+        self.assertEqual(rc, 0, out + err)
+        expected = [f"actions/runs/{TOUCH_RUN}/jobs",  # the run: one jobs read, then one log read per failed job (not the passing one)
+                    "actions/jobs/201/logs", "actions/jobs/202/logs",
+                    "pulls",  # the open pulls: one page
+                    "pulls/2390/files", "pulls/2401/files", "pulls/2402/files", "pulls/2402/files"]  # each pull's files; 2402's two pages
+        self.assertEqual(sorted(host.gh_calls), sorted(expected), "the gh calls of a run query differ from one read each:\n" + "\n".join(host.gh_calls))
+
+    def test_the_module_docstring_names_the_flag_and_each_read_it_makes(self):
         lines = (merge.__doc__ or "").splitlines()
         start = next((i for i, line in enumerate(lines) if "merge --touches" in line), None)
         self.assertIsNotNone(start, "merge.py's module docstring does not name `merge --touches`")
@@ -15512,7 +15642,8 @@ class TouchesRead(Env):
         while end < len(lines) and lines[end].startswith("  ") and not lines[end].startswith("  merge "):  # the entry's continuation lines, up to the next entry
             end += 1
         entry = "\n".join(lines[start:end])
-        self.assertRegex(entry, r"\b[Cc]ost\b", "the `merge --touches` entry of merge.py's docstring names no cost")
+        for kind in ("pull list", "pulls/N/files", "jobs read", "log read"):
+            self.assertIn(kind, entry, f"the `merge --touches` entry of merge.py's docstring does not name the {kind} read")
 
 
 if __name__ == "__main__":
