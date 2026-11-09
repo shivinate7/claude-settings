@@ -1054,7 +1054,7 @@ def shell_abs(path: str, base):
     return path
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, made=()):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1067,7 +1067,8 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
     a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
-    fails closed on an untrusted `cd` keeps doing so."""
+    fails closed on an untrusted `cd` keeps doing so. `made` is absolute folders the command makes before
+    it runs: a `cd` into one is trusted as if it existed."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
@@ -1101,7 +1102,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                 where = None
             else:
                 target = shell_abs(move or "~", where)
-                if target and os.path.isdir(target):
+                if target and (os.path.isdir(target) or os.path.normpath(target) in made):
                     where = target
                 elif target and failed_cd_stays:
                     skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops

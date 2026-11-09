@@ -711,7 +711,7 @@ def _written_sources(word, cwd):
 def _copy_written_hit(raw, cwd, predicate, fed, filters, made=frozenset()) -> str:
     """The path a `cp` segment writes that `predicate(path, cwd)` accepts, else ''. The sources are the
     words with their braces and globs expanded against `cwd`. DEST is a folder when it ends in a slash,
-    is an existing folder, is a folder `made` holds (an earlier `mkdir` of the same command), is `-t`'s word, is
+    is an existing folder, is a folder `made` holds (absolute folders an earlier `mkdir` of the same command makes), is `-t`'s word, is
     fed, or there is more than one source: the copy then writes
     `DEST/<basename of each source>`, so a test-named source copied into any folder writes a test there.
     With `--parents` DEST is always a folder and the copy writes `DEST/<each source as named>`.
@@ -734,7 +734,7 @@ def _copy_written_hit(raw, cwd, predicate, fed, filters, made=frozenset()) -> st
     flagged = _glued_cp_target(raw[at]) is not None or at > 0 and _CP_TARGET.fullmatch(_unquoted(raw[at - 1]))
     parents = _cp_keeps_parents(raw)
     into = bool(fed or flagged or parents or dest.endswith(("/", "\\")) or len(sources) > 1
-                or os.path.normpath(dest) in made or os.path.isdir(_expanded(dest, cwd)))
+                or os.path.normpath(_expanded(dest, cwd)) in made or os.path.isdir(_expanded(dest, cwd)))
     if capped and _may_hold_a_test(dest, cwd, predicate):
         return _unquoted(raw[operands[0]]) + _TOO_LARGE_NOTE
     for word, source in sources:
@@ -764,20 +764,21 @@ def _cp_keeps_parents(raw) -> bool:
     return False
 
 
-def _made_folders(raw) -> set:
-    """The folders a `mkdir` segment makes, each with the folders above it, as `os.path.normpath` text. A flag's
-    value (`-m MODE`) is not one."""
+def _made_folders(raw, cwd) -> set:
+    """The folders a `mkdir` segment run in `cwd` makes, each with the folders above it that do not exist yet,
+    as absolute `os.path.normpath` paths. A flag's value (`-m MODE`) is not one. A brace in quotes is text."""
     start = _cp_start(raw, True, ("mkdir",))
     made, skip = set(), False
-    for word in ([_unquoted(word) for word in raw[start + 1:]] if start is not None else []):
+    for word in (raw[start + 1:] if start is not None else []):
+        plain = _unquoted(word)
         if skip:
             skip = False
-        elif word in ("-m", "--mode"):
+        elif plain in ("-m", "--mode"):
             skip = True
-        elif not word.startswith("-"):
+        elif not plain.startswith("-"):
             for each in _brace_words(word):
-                folder = os.path.normpath(each)
-                while folder not in made and folder not in ("", ".", "/"):
+                folder = os.path.normpath(_expanded(_unquoted(each), cwd))
+                while folder not in made and not os.path.isdir(folder) and folder != os.path.dirname(folder):
                     made.add(folder)
                     folder = os.path.dirname(folder)
     return made
@@ -1456,7 +1457,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
             if index == dest_at:
                 dest_words.update(range(before, len(words)))
         text = " ".join(shown)
-        at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
+        at = (dir_before_segment(segments, number, cwd, ends, made=made) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
         for position, word in enumerate(words):
             if word.startswith("-") or REDIRECT.fullmatch(word):
@@ -1479,7 +1480,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
             wrote = _copy_written_hit(raw, at, predicate, bool(fed), filters, made)
             if wrote:
                 return wrote
-            made |= _made_folders(raw)
+            made |= _made_folders(raw, at)
     return ""
 
 
