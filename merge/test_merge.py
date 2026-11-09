@@ -15907,7 +15907,14 @@ class BatchFreeze(CloudSession):
             self.lane(n)
         x = self.frozen_batch("x", [101, 102])
         nightly = self.frozen_batch("nightly", [104], on="batch/x", draft=True)  # a draft stacked on batch/x
-        self.host.merge(x, "merge", self.head("batch/x"))  # batch/x's pull request merges into main: its branch is now in the base
+        # batch/x's pull request merges into main: its branch is now in the base. FakeHost.merge names the head of its own branch, so the
+        # fake points at batch/x for this one merge and goes back to the lane branch after it.
+        lane_branch, self.host.branch = self.host.branch, "batch/x"
+        try:
+            _, refusal = self.host.merge(x, "merge", self.head("batch/x"))
+        finally:
+            self.host.branch = lane_branch
+        self.assertEqual(refusal, "", "setup: the merge of batch/x's pull request into main was refused: %s" % refusal)
         self.host.prs[x]["state"] = "MERGED"
         self.assertTrue(self.ancestor(self.head("batch/x"), "origin/main"), "setup: batch/x is not contained in main after its pull request merged")
         lanes_before = [line for line in block_lines(self.body(nightly)) or [] if line.startswith("Lane: ")]
