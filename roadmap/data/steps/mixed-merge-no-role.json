@@ -5,7 +5,7 @@
   "order": 0.9,
   "owner": "coordinator",
   "why": "Coordinator, 13:51 CST Nov 7: filed as a step, not a note.",
-  "note": "",
+  "note": " Sighting (lane commit-refuses-conflict-markers, session_013NEJKzXJPDWrSRe3i1fGJd, 22:12 CST Nov 8): merging main e0b9696ca into #2083 conflicts in hooks/guard_merge.py (import union) and hooks/test_guard.py (two loops); the builder was refused the test hunk and the test-author declined the product hunk. Workaround: a test-author moves the branch's test loop first, so the merge conflicts only in product code, then a builder merges. Same gap as steps merge-conflict-mixed-roles and mixed-merge-resolver.",
   "lane": "session_013NEJL2BusqrX6qy1CCAgoH",
-  "updatedAt": "2026-11-07T13:51:00-06:00"
+  "updatedAt": "2026-11-08T22:11:00-06:00"
 }
