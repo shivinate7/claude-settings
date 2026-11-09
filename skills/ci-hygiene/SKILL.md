@@ -65,7 +65,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    head. A FAIL keeps it a draft. A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
-   **Freeze the lane set when the build starts** (decision `batch-freeze-lane-set`, a batch's lane set
+   **When the build starts, freeze the lane set** (decision `batch-freeze-lane-set`, a batch's lane set
    freezes at its build). A release or a drop that arrives after that goes to the next batch. It never
    triggers a rebuild. The one change after the freeze is the drop of a red run's blamed lane. Mark the integration PR ready at the first build, once its one batch-head lint
    passes. A draft run skips every job, so never rebuild a draft batch only to close it. The next
