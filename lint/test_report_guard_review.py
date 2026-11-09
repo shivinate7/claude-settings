@@ -24,7 +24,8 @@ review record for its live head. Choices pinned here:
 - The budget (decision `pr-review-record`): every gh read and the cutover read of one Stop share REVIEW_HOOK_BUDGET. A gh
   read gets what is left, never more than REVIEW_READ_TIMEOUT. A read that starts with nothing left is not started. When the
   budget runs out before a claim's record is read, or before the cutover read its record check needs, the claim is refused
-  with the run-again cause. It is never let through on an UNKNOWN note alone.
+  with the run-again cause. It is never let through on an UNKNOWN note alone. The clock alone decides a run-out: a read cut at its own
+  cap with time left is a failed read, with the UNKNOWN note and no refusal (decision `pr-review-record`, "The cutover").
 - The remedy names `merge <n> --review-record` and never the live head sha: a record must name the head the
   reviewer read, and the refusal cannot know which head that was.
 - The installed layout: the script is a symlink in the config folder, with no merge/ beside lint/. The check still
@@ -55,6 +56,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "merge"))
 import test_report_guard as trg  # noqa: E402  the Stop runner, transcript records and run folder (one home)
 import merge as merge_mod  # noqa: E402  the review record's form and parser (one home, merge/merge.py)
 import report_guard as rg  # noqa: E402  the Stop's budget constants (one home, lint/report_guard.py)
+import guard_merge as gm  # noqa: E402  the merge tool's own read cap, MERGE_READ_TIMEOUT (one home, hooks/guard_merge.py)
 
 LINT_DIR = HERE
 HOOKS_DIR = os.path.join(HERE, "..", "hooks")
@@ -250,16 +252,28 @@ finally:
 # The Stop hook, run as __main__ in a process of its own on the fake clock (lint/test_fake_fetch.py). The hook's time.monotonic and its
 # child starts read that clock, so each gh call's start and timeout are fake values. The driver's log: the fake seconds elapsed, and each
 # gh call's [start, timeout, argv].
-BUDGET_DRIVER = """import json, runpy, sys
+BUDGET_DRIVER = """import json, runpy, subprocess, sys
 sys.path[:0] = [%(hooks)r, %(lint)r]
 import test_fake_fetch
-clock = test_fake_fetch.FakeFetchClock(step=0.0, read_steps=%(read_steps)r)
+clock = test_fake_fetch.FakeFetchClock(step=%(step)r, read_steps=%(read_steps)r)
+fetch_run, log_step, logs = clock.run, %(log_step)r, []
+def run(args, timeout=None, **kwargs):
+    # The cutover's one git log takes log_step fake seconds and is cut at its own timeout, as a fetch is cut. Every other call is the fake's.
+    if log_step is None or "log" not in args:
+        return fetch_run(args, timeout=timeout, **kwargs)
+    logs.append([clock.now, timeout])
+    if timeout is not None and log_step > timeout:
+        clock.now += timeout
+        raise subprocess.TimeoutExpired(args, timeout)
+    clock.now += log_step
+    return clock.passthrough(args, **kwargs)
+clock.run = run
 try:
     with clock.patched_process():
         runpy.run_path(%(guard)r, run_name="__main__")
 finally:
     with open(%(log)r, "w", encoding="utf-8") as handle:
-        json.dump({"elapsed": clock.now, "reads": clock.reads}, handle)
+        json.dump({"elapsed": clock.now, "reads": clock.reads, "fetches": clock.fetches, "git": logs}, handle)
 """
 
 
@@ -369,17 +383,18 @@ class ReviewRecordTests(unittest.TestCase):
         with open(log, encoding="utf-8") as handle:
             return out, json.load(handle)
 
-    def budget_run(self, prs, read_steps, reply):
+    def budget_run(self, prs, read_steps, reply, cwd=None, step=0.0, log_step=None):
         """The Stop hook on a lane's `reply`, for the pull requests `prs` (serve's shape), in a process of its own on the fake clock: each
-        gh call takes the fake seconds `read_steps` gives its arguments. -> (the hook's printed reply, the driver's log: the fake seconds
-        elapsed, and each gh call's [start, timeout, argv])."""
+        gh call takes the fake seconds `read_steps` gives its arguments, each fetch `step` fake seconds, and the cutover's git log `log_step`
+        when given. `cwd` is the hook's folder, the fixture repo when None. -> (the hook's printed reply, the driver's log: the fake seconds
+        elapsed, each gh call's [start, timeout, argv], each fetch's [start, timeout], each git log's [start, timeout])."""
         self.serve(prs=prs)
         log = os.path.join(self.run_dir, "budget-log.json")
         driver = os.path.join(self.run_dir, "budget-driver.py")
         with open(driver, "w", encoding="utf-8") as handle:
-            handle.write(BUDGET_DRIVER % {"hooks": os.path.abspath(HOOKS_DIR), "lint": LINT_DIR, "read_steps": read_steps,
-                                          "guard": trg.REPORT_GUARD, "log": log})
-        out = self.stop(self.lane_turn(reply), script=driver)
+            handle.write(BUDGET_DRIVER % {"hooks": os.path.abspath(HOOKS_DIR), "lint": LINT_DIR, "read_steps": read_steps, "step": step,
+                                          "log_step": log_step, "guard": trg.REPORT_GUARD, "log": log})
+        out = self.stop(self.lane_turn(reply), script=driver, cwd=cwd)
         with open(log, encoding="utf-8") as handle:
             return out, json.load(handle)
 
@@ -1216,6 +1231,52 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_blocked(out, msg="the budget ran out before the cutover read, and the claim passed on the cutover's UNKNOWN note alone, not a refusal:")
         self.assertRegex(out["reason"], r"(?i)\brun again\b", "the refusal does not tell the reader to run again: %r" % (out,))
         self.assertIn("PR #12", out["reason"], out)
+
+    # The clock alone decides a run-out (decision `pr-review-record`, "The cutover"): a read that ends with the Stop's time spent is a run-out,
+    # and a read that fails or times out on its own cap with time left is a failed read. The cases below run the whole hook on one fake clock.
+
+    def test_a_cutover_git_read_cut_at_its_own_cap_with_time_left_is_unknown_not_a_budget_run_out(self):
+        # Catches: a cutover read cut at its own cap, with time left on the Stop's clock, refused as a budget run-out. The two gh reads take
+        # 2 s, so the cutover's git log starts at 2 s with 26 s left. merge gives it its own cap (MERGE_READ_TIMEOUT), and it is cut there at
+        # 27 s, with 1 s left. That is a failed read: the unstamped record is done, so the claim passes with the UNKNOWN note and no refusal.
+        budget, cap = rg.REVIEW_HOOK_BUDGET, gm.MERGE_READ_TIMEOUT
+        out, log = self.budget_run({PR: {"head": LIVE, "comments": [unstamped(record())]}}, {"pulls/": 2}, report(CLAIM), log_step=cap + 5)
+        self.assertEqual(log["git"], [[2.0, cap]], "fixture: the cutover's git log did not start at 2 s with merge's own cap: %r" % (log["git"],))
+        self.assertEqual(log["elapsed"], 2.0 + cap, "fixture: the hook did not end at the git log's cut, %d s after the reads: %r" % (cap, log["elapsed"]))
+        self.assertLess(log["elapsed"], budget, "fixture: the cut came with no time left on the Stop's clock")
+        self.assertIsNotNone(out, "the hook printed nothing")
+        self.assertNotEqual(out.get("decision"), "block", "a cutover read cut at its own cap with time left was refused as a budget run-out, "
+                            "not read as a failed read: %r" % (out,))
+        message = out.get("systemMessage", "")
+        self.assertIn("review cutover could not be read for PR #%d" % PR, message, "the cutover's UNKNOWN note is missing: %r" % (out,))
+        self.assertIn("TimeoutExpired", message, "the note does not name the timed-out read: %r" % (out,))
+
+    def test_an_unstamped_record_is_refused_when_the_budget_runs_out_inside_the_cutover_read(self):
+        # Catches: a cutover read that the Stop's budget ends, read as a failed read, so an unstamped record that only the cutover can place
+        # passes on the UNKNOWN note alone. The two gh reads take 10 s, so the cutover gets 18 s. Its deepen fetch takes 21 s: it is cut at
+        # the 18 s left, the budget is spent, and merge raises Stop. The claim is refused to run again.
+        budget = rg.REVIEW_HOOK_BUDGET
+        clone = self.shallow_cutover_clone()
+        out, log = self.budget_run({PR: {"head": LIVE, "comments": [unstamped(record())]}}, {"pulls/": 10}, report(CLAIM), cwd=clone, step=21)
+        self.assertEqual(log["fetches"], [[10.0, budget - 10.0]], "fixture: the deepen fetch did not start at 10 s with 18 s left: %r" % (log["fetches"],))
+        self.assertEqual(log["elapsed"], budget, "fixture: the cutover read did not end at the budget: %r" % (log["elapsed"],))
+        self.assert_blocked(out, msg="the budget ran out inside the cutover read, and the unstamped record passed on the UNKNOWN note alone, "
+                            "not a refusal:")
+        self.assertRegex(out["reason"], r"(?i)\brun again\b", "the refusal does not tell the reader to run again: %r" % (out,))
+        self.assertIn("PR #12", out["reason"], out)
+
+    def test_a_stamped_record_for_the_live_head_passes_when_the_budget_runs_out_before_the_cutover_read(self):
+        # Pin: a stamped record's verdict does not need the cutover, so a budget spent before the cutover read does not refuse it. The UNKNOWN
+        # cutover note still says the read did not run.
+        budget = rg.REVIEW_HOOK_BUDGET
+        out, log = self.budget_run({PR: {"head": LIVE, "comments": [record()]}}, {"pulls/": 20, "/comments": budget - 20}, report(CLAIM))
+        self.assertTrue(any(a.endswith("issues/%d/comments" % PR) for argv in self.gh_calls() for a in argv),
+                        "fixture: the comment read did not reach the stand-in, so the record was not read: %r" % (self.gh_calls(),))
+        self.assertEqual(log["elapsed"], budget, "fixture: the reads did not spend the whole budget before the cutover read: %r" % (log["elapsed"],))
+        self.assertIsNotNone(out, "the hook printed nothing")
+        self.assertIn("review cutover could not be read for PR #%d" % PR, out.get("systemMessage", ""), "the cutover's UNKNOWN note is missing: %r" % (out,))
+        self.assertNotEqual(out.get("decision"), "block", "a stamped record for the live head was refused when the budget ran out before the "
+                            "cutover read: %r" % (out,))
 
 
 if __name__ == "__main__":
