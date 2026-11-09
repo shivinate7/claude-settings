@@ -6333,6 +6333,126 @@ test("a stalled or paused row reads Stalled or Paused in its status, label and m
   }
 });
 
+// ---------------------------------------------------------------- the row tint: a stalled row takes the stalled colour, a paused row none (lane nfp-stalled-row-tint)
+// The tint and the edge are on the row's .rrow. A stalled row takes the page's own red tint, --holds mixed 14% into --surface as .dl.bad
+// draws it, and a 3px left edge in --holds. A paused row takes no tint and a 3px left edge in --muted. The in-progress row (a4, with a live
+// lane) keeps --acc-soft and --acc. A to-do row takes neither. Each expected value is computed on the row, in each scheme. Each row's mark is
+// checked first, so a red names the tint or the edge and not the label.
+// The probe helpers are copied from the roadmap test file, which does not export its own, and no shared test module holds one yet, so this file keeps a copy.
+const probeOf = (loc, prop, value) => loc.evaluate((el, [p, v]) => {
+  const s = document.createElement("span");
+  s.style[p] = v;
+  el.appendChild(s);
+  const out = getComputedStyle(s)[p];
+  s.remove();
+  return out;
+}, [prop, value]);
+const computedOf = (loc, prop) => loc.evaluate((el, p) => getComputedStyle(el)[p], prop);
+const STALLED_TINT = "color-mix(in srgb, var(--holds) 14%, var(--surface))";
+test("the row tint: a stalled row's background is the stalled tint and its left edge --holds, in light and dark", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#s-c1 [aria-label="Stalled"]').count(), 1, "step c1 is not marked Stalled: there is no stalled row to tint");
+  const row = page.locator("#s-c1 .rrow");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const bg = await computedOf(row, "backgroundColor"), wantBg = await probeOf(row, "backgroundColor", STALLED_TINT);
+    assert.equal(bg, wantBg, `in ${scheme} the stalled row's background is ${bg}, not the stalled tint ${wantBg}`);
+    const edge = await computedOf(row, "boxShadow"), wantEdge = await probeOf(row, "boxShadow", "inset 3px 0 0 var(--holds)");
+    assert.equal(edge, wantEdge, `in ${scheme} the stalled row's left edge is ${edge}, not the 3px --holds edge ${wantEdge}`);
+  }
+});
+test("the row tint: a paused row takes no tint and a 3px left edge in --muted, in light and dark", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#s-a3 [aria-label="Paused"]').count(), 1, "step a3 is not marked Paused: there is no paused row to clear");
+  const row = page.locator("#s-a3 .rrow");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const bg = await computedOf(row, "backgroundColor"), wantBg = await probeOf(row, "backgroundColor", "transparent");
+    assert.equal(bg, wantBg, `in ${scheme} the paused row keeps a tint: its background is ${bg}, not none`);
+    const edge = await computedOf(row, "boxShadow"), wantEdge = await probeOf(row, "boxShadow", "inset 3px 0 0 var(--muted)");
+    assert.equal(edge, wantEdge, `in ${scheme} the paused row's left edge is ${edge}, not the 3px --muted edge ${wantEdge}`);
+  }
+});
+test("control: the row tint: an in-progress row keeps the --acc-soft tint and its 3px --acc edge, in light and dark", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  assert.match(await page.locator("#s-a4 .rrow").getAttribute("aria-label"), /In progress/, "step a4 does not read In progress");
+  const row = page.locator("#s-a4 .rrow");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const bg = await computedOf(row, "backgroundColor"), wantBg = await probeOf(row, "backgroundColor", "var(--acc-soft)");
+    assert.equal(bg, wantBg, `in ${scheme} the in-progress row's background is ${bg}, not the --acc-soft tint ${wantBg}`);
+    const edge = await computedOf(row, "boxShadow"), wantEdge = await probeOf(row, "boxShadow", "inset 3px 0 0 var(--acc)");
+    assert.equal(edge, wantEdge, `in ${scheme} the in-progress row's left edge is ${edge}, not the 3px --acc edge ${wantEdge}`);
+  }
+});
+
+// The stalled fixture has no to-do step, so the to-do control adds one (t7) to it, in the same phase.
+const stalledWithTodoPage = () => {
+  const steps = stalledFixture();
+  Object.assign(steps, stepsOf([["t7", "cleanup", 7, "todo"]]));
+  return withStalled(phasePage(steps), STALLED);
+};
+test("control: the row tint: a to-do row beside a stalled one keeps no tint and no stalled edge, in light and dark", async (t) => {
+  const page = await open(t, { pageHtml: stalledWithTodoPage() }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#s-c1 [aria-label="Stalled"]').count(), 1, "step c1 is not marked Stalled: there is no stalled row beside the to-do row");
+  assert.match(await page.locator("#s-t7 .rrow").getAttribute("aria-label"), /To do/, "step t7 does not read To do");
+  const row = page.locator("#s-t7 .rrow");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const bg = await computedOf(row, "backgroundColor"), wantBg = await probeOf(row, "backgroundColor", "transparent");
+    assert.equal(bg, wantBg, `in ${scheme} the to-do row takes a tint: its background is ${bg}, not none`);
+    const edge = await computedOf(row, "boxShadow"), wantEdge = await probeOf(row, "boxShadow", "none");
+    assert.equal(edge, wantEdge, `in ${scheme} the to-do row has a left edge ${edge}, not none`);
+  }
+});
+// A paused title keeps the in-progress title's weight: it is read against that title, not against a literal.
+test("the row tint: a paused row's title has the in-progress title's font weight", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#s-a3 [aria-label="Paused"]').count(), 1, "step a3 is not marked Paused: there is no paused title to compare");
+  assert.match(await page.locator("#s-a4 .rrow").getAttribute("aria-label"), /In progress/, "step a4 does not read In progress: there is no in-progress title to compare with");
+  const paused = await computedOf(page.locator("#s-a3 .rrow .ttl"), "fontWeight"), active = await computedOf(page.locator("#s-a4 .rrow .ttl"), "fontWeight");
+  assert.equal(paused, active, `the paused step's title is weight ${paused}, not the in-progress title's ${active}`);
+});
+// A paused row keeps no tint at rest, but takes the hover fill when the pointer is on it. The rule that gives it the fill is
+// .rsteps .pzd-row > .rrow:hover: it outranks the paused row's own background: none, which the plain .rrow:hover fill cannot beat.
+// The fill is read on the hovered row and compared with a probe of the same colour. The probe must not read transparent, or the
+// test would pass on a page that draws no fill at all.
+const HOVER_FILL = "color-mix(in srgb, var(--chip) 60%, transparent)";
+test("the row tint: a paused row takes the hover fill when the pointer is on it, in light and dark", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#s-a3 [aria-label="Paused"]').count(), 1, "step a3 is not marked Paused: there is no paused row to hover");
+  const row = page.locator("#s-a3 .rrow");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await row.hover();
+    const wantBg = await probeOf(row, "backgroundColor", HOVER_FILL);
+    assert.notEqual(wantBg, await probeOf(row, "backgroundColor", "transparent"), `in ${scheme} the hover fill ${HOVER_FILL} reads as transparent here, so the fill cannot be read`);
+    const bg = await computedOf(row, "backgroundColor");
+    assert.equal(bg, wantBg, `in ${scheme} the hovered paused row's background is ${bg}, not the hover fill ${wantBg}`);
+  }
+});
+// Control: a hovered to-do row takes the same fill, and no rule overrides it. It stays green on a page without the paused-row hover rule.
+test("control: the row tint: a to-do row takes the hover fill when the pointer is on it, in light and dark", async (t) => {
+  const page = await open(t, { pageHtml: stalledWithTodoPage() }); if (!page) return;
+  await openStatus(page);
+  assert.match(await page.locator("#s-t7 .rrow").getAttribute("aria-label"), /To do/, "step t7 does not read To do");
+  const row = page.locator("#s-t7 .rrow");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await row.hover();
+    const wantBg = await probeOf(row, "backgroundColor", HOVER_FILL);
+    assert.notEqual(wantBg, await probeOf(row, "backgroundColor", "transparent"), `in ${scheme} the hover fill ${HOVER_FILL} reads as transparent here, so the fill cannot be read`);
+    const bg = await computedOf(row, "backgroundColor");
+    assert.equal(bg, wantBg, `in ${scheme} the hovered to-do row's background is ${bg}, not the hover fill ${wantBg}`);
+  }
+});
+
 test("merged_page.py --live hands its JSON to the build as the live file", () => {
   const live = { readAt: new Date().toISOString(), threads: [], pulls: [] };
   const html = mergedPage("--live", JSON.stringify(live));
@@ -8178,6 +8298,256 @@ test("a view that cannot reach the store says to paste its answers in chat, and 
   assert.doesNotMatch(text, NO_THREAD, "the no-store empty state names a thread: " + JSON.stringify(text));
 });
 
+// ---------------------------------------------------------------- the bars and the words: stalled and paused (lane nfp-stalled-kind-color)
+// The Status tab's bars draw a stalled step and a paused step as their own cells, in the roadmap's order. barsStalled is the stalled
+// fixture with 24 to-do steps: a full phase of 30 steps, and a to-do cell to compare with. c1, a2, a5 stalled; a3 paused; a4, d6 in progress.
+const barsStalled = () => ({ ...stalledFixture(), ...stepsOf(Array.from({ length: 24 }, (_, i) => ["t" + (i + 7), "cleanup", i + 7, "todo"])) });
+const barsPage = () => withStalled(phasePage(barsStalled()), STALLED);
+const BARS_W = [["the Now card's bar", "#svNow .segbar"], ["the rail's cleanup bar", '#svRail button[data-phase="cleanup"] .segbar'], ["the phase head's bar", "#svPhases .ph-head .segbar"]];
+const W_ORDER = ["act", "act", "stl", "stl", "stl", "pzd", ...Array(24).fill("")];
+const wCellKinds = (page, scope) => page.locator(`${scope} > i`).evaluateAll((els) => els.map((e) => e.className));
+test("the bars draw a stalled and a paused step as their own cells, in the order done, in progress, stalled, paused, to do", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  for (const [name, scope] of BARS_W) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    assert.deepEqual(await wCellKinds(page, scope), W_ORDER, `${name} does not draw a stalled or paused step as its own cell, in order`);
+  }
+});
+// barsBlocked: a done step and a blocked step in place of two to-do steps, so all six kinds show in one phase of 30 cells.
+const barsBlocked = () => ({ ...barsStalled(), ...stepsOf([["t29", "cleanup", 29, "done"], ["t30", "cleanup", 30, "blocked"]]) });
+const barsBlockedPage = () => withStalled(phasePage(barsBlocked()), STALLED);
+const W_ORDER_BLK = ["done", "act", "act", "stl", "stl", "stl", "pzd", "blk", ...Array(22).fill("")];
+test("the bars draw a blocked step after a stalled and a paused one, in the order done, in progress, stalled, paused, blocked, to do", async (t) => {
+  const page = await open(t, { pageHtml: barsBlockedPage() }); if (!page) return;
+  await openStatus(page);
+  for (const [name, scope] of BARS_W) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    assert.deepEqual(await wCellKinds(page, scope), W_ORDER_BLK, `${name} does not draw the blocked step after the paused one, in order`);
+  }
+});
+test("a stalled cell and a paused cell look different from a to-do cell in each bar", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  const look = (loc) => loc.evaluate((el) => { const s = getComputedStyle(el); return [s.backgroundImage, s.backgroundColor, s.boxShadow].join(" | "); });
+  for (const [name, scope] of BARS_W) {
+    const todo = page.locator(`${scope} > i:not([class])`);
+    const plainCount = await todo.count();
+    assert.equal(plainCount, 24, `${name} draws ${plainCount} to-do cells, not 24: a stalled or paused step is drawn as to do`);
+    const plain = await look(todo.first());
+    assert.equal(await page.locator(`${scope} > i.stl`).count(), 3, `${name} draws no stalled cell (i.stl) for the three stalled steps`);
+    assert.equal(await page.locator(`${scope} > i.pzd`).count(), 1, `${name} draws no paused cell (i.pzd)`);
+    assert.notEqual(await look(page.locator(`${scope} > i.stl`).first()), plain, `${name}: the stalled cell looks like a to-do cell`);
+    assert.notEqual(await look(page.locator(`${scope} > i.pzd`)), plain, `${name}: the paused cell looks like a to-do cell`);
+  }
+});
+test("control: a phase with nothing stalled or paused draws no stalled or paused cell in any bar", async (t) => {
+  const steps = stepsOf([["d6", "cleanup", 1, "doing"], ["c1", "cleanup", 2, "todo"]]);
+  const page = await open(t, { pageHtml: withStalled(phasePage(steps), { why: "", steps: [], paused: [], badPause: [], items: [], ...NO_ITEMS }) }); if (!page) return;
+  await openStatus(page);
+  for (const [name, scope] of BARS_W) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    assert.deepEqual(await wCellKinds(page, scope), ["act", ""], `${name} draws a stalled or paused cell with none stalled or paused`);
+  }
+});
+test("the rail's cleanup button names its stalled and paused steps in its label", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  const btn = page.locator('#svRail button[data-phase="cleanup"]');
+  assert.equal(await btn.count(), 1, "the rail has no cleanup button");
+  assert.match((await btn.getAttribute("aria-label")) || "", /3 stalled, 1 paused/, "the rail's cleanup label does not name the stalled and paused steps");
+});
+test("the phase head's text names its stalled and paused steps", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  const prog = page.locator("#svPhases .ph-head .prog");
+  assert.equal(await prog.count(), 1, "the phase head has no progress part (.prog)");
+  const text = (await prog.locator(".sr").allTextContents()).join(" ").replace(/\s+/g, " ");
+  assert.match(text, /3 stalled, 1 paused/, "the phase head's text does not name the stalled and paused steps: " + text);
+});
+// The rail's label and the phase head's text name a blocked step in the form of the stalled and paused words, when the bar draws one.
+test("the rail's cleanup button names its blocked step in its label, as its bar draws it", async (t) => {
+  const page = await open(t, { pageHtml: barsBlockedPage() }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#svRail button[data-phase="cleanup"] .segbar > i.blk').count(), 1, "the rail's cleanup bar draws no blocked cell (i.blk)");
+  const label = (await page.locator('#svRail button[data-phase="cleanup"]').getAttribute("aria-label")) || "";
+  assert.match(label, /, 1 blocked\b/, `the rail's cleanup label does not name the blocked step: "${label}"`);
+});
+test("the phase head's text names its blocked step, as its bar draws it", async (t) => {
+  const page = await open(t, { pageHtml: barsBlockedPage() }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator("#svPhases .ph-head .segbar > i.blk").count(), 1, "the phase head's bar draws no blocked cell (i.blk)");
+  const text = (await page.locator("#svPhases .ph-head .prog .sr").allTextContents()).join(" ").replace(/\s+/g, " ");
+  assert.match(text, /, 1 blocked\b/, `the phase head's text does not name the blocked step: "${text}"`);
+});
+test("control: the rail's cleanup label and the phase head's text name no blocked step when none is drawn", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator("#svPhases .ph-head .segbar > i.blk").count(), 0, "the phase head's bar draws a blocked cell with no blocked step");
+  const label = (await page.locator('#svRail button[data-phase="cleanup"]').getAttribute("aria-label")) || "";
+  const text = (await page.locator("#svPhases .ph-head .prog .sr").allTextContents()).join(" ");
+  assert.doesNotMatch(label, /blocked/, `the rail's cleanup label names a blocked step that is not there: "${label}"`);
+  assert.doesNotMatch(text, /blocked/, `the phase head's text names a blocked step that is not there: "${text}"`);
+});
+// The Now card's bar counts a blocked step as blocked, as the rail's bar and the phase head's bar do.
+const blockedSteps = () => stepsOf([["c1", "cleanup", 1, "todo"], ["d1", "cleanup", 2, "done"], ["b2", "cleanup", 3, "blocked"], ["t3", "cleanup", 4, "todo"]]);
+const noStalled = { why: "", steps: [], paused: [], badPause: [], items: [], ...NO_ITEMS };
+test("the Now card's bar draws a blocked step as blocked, not as to do", async (t) => {
+  const page = await open(t, { pageHtml: withStalled(phasePage(blockedSteps()), noStalled) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator("#svNow .segbar").count(), 1, "the Now card has no phase bar (#svNow .segbar)");
+  assert.equal(await page.locator("#svNow .segbar > i.blk").count(), 1, "the Now card's bar draws the blocked step as to do: no blocked cell (i.blk)");
+});
+test("control: the rail's cleanup bar draws a blocked step as blocked", async (t) => {
+  const page = await open(t, { pageHtml: withStalled(phasePage(blockedSteps()), noStalled) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#svRail button[data-phase="cleanup"] .segbar').count(), 1, "the rail has no cleanup bar");
+  assert.equal(await page.locator('#svRail button[data-phase="cleanup"] .segbar > i.blk').count(), 1, "the rail's cleanup bar does not draw the blocked step as blocked");
+});
+// The Now card's count line (renderNow, line "N of M done, K in progress") names the stalled and paused steps, as notes item 3 says.
+test("the Now card's count line names the stalled and paused steps", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  // The first .lead of the Now card is the count line; the second is "Whole plan".
+  const lead = page.locator("#svNow > div:first-child > .lead");
+  assert.ok((await lead.count()) > 0, "the Now card has no count line (#svNow > div:first-child > .lead)");
+  const text = (await lead.first().textContent()).replace(/\s+/g, " ");
+  assert.match(text, /3 stalled, 1 paused/, "the Now card's count line does not name the stalled and paused steps: " + text);
+});
+test("the Now card's count line names the blocked step when the Now card's bar draws one", async (t) => {
+  const page = await open(t, { pageHtml: barsBlockedPage() }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator("#svNow .segbar > i.blk").count(), 1, "the Now card's bar draws no blocked cell (i.blk)");
+  const lead = page.locator("#svNow > div:first-child > .lead");
+  assert.ok((await lead.count()) > 0, "the Now card has no count line (#svNow > div:first-child > .lead)");
+  const text = (await lead.first().textContent()).replace(/\s+/g, " ");
+  assert.match(text, /, 1 blocked/, "the Now card's count line does not name the blocked step: " + text);
+});
+
+// ---------------------------------------------------------------- a to-do or done step listed paused or stalled (lane nfp-stalled-kind-color)
+// The band on the Status tab takes a listed step into its count and its rows only when it is doing, as the roadmap's band does (its
+// cases are in skills/roadmap/tests/page.test.mjs). Each case lists doing step a beside step x, so the count is 1 when x is left out
+// and 2 when it is not. This file keeps its own read shape, as its countLinesW copy notes; the roadmap file has the same shape.
+const bandRead = (kind, ids) => kind === "stalled"
+  ? { why: "", steps: ids.map((id) => ({ id, fix: "todo" })), paused: [], badPause: [], items: [], ...NO_ITEMS }
+  : { why: "", steps: [], paused: ids, badPause: [], items: [], ...NO_ITEMS };
+const BAND_WORD = { stalled: "Stalled", paused: "Paused" };
+for (const kind of ["stalled", "paused"]) for (const status of ["todo", "done"]) {
+  test(`the band counts a ${status} step listed ${kind} in neither its count nor a row, and still counts the doing step beside it`, async (t) => {
+    const steps = stepsOf([["c1", "cleanup", 1, "todo"], ["a", "cleanup", 2, "doing"], ["x", "cleanup", 3, status]]);
+    const page = await open(t, { pageHtml: withStalled(phasePage(steps), bandRead(kind, ["a", "x"])) }); if (!page) return;
+    await openStatus(page);
+    for (const id of ["a", "x"]) assert.equal(await page.locator(`#s-${id}`).count(), 1, `step ${id} has no row in the Status list`);
+    assert.equal(await band(page).locator('button[data-go="a"]').count(), 1, `the band draws no row for doing step a listed ${kind}`);
+    const text = await bandText(page);
+    assert.match(text, new RegExp(`${BAND_WORD[kind]}:\\s*1(?!\\d)`), `the band counts the ${status} step x listed ${kind} as well as doing step a: ${text}`);
+    assert.equal(await band(page).locator('button[data-go="x"]').count(), 0, `the band draws a row for the ${status} step x listed ${kind}`);
+  });
+}
+// Control: a listed id with no step in the plan keeps its count and its row, named Untitled step, as before the band read steps.
+for (const kind of ["stalled", "paused"]) {
+  test(`control: a ${kind} id with no step in the plan keeps its count and its row, named Untitled step`, async (t) => {
+    const steps = stepsOf([["c1", "cleanup", 1, "todo"], ["a", "cleanup", 2, "doing"]]);
+    const page = await open(t, { pageHtml: withStalled(phasePage(steps), bandRead(kind, ["a", "zz"])) }); if (!page) return;
+    await openStatus(page);
+    assert.equal(await page.locator("#s-a").count(), 1, "step a has no row in the Status list");
+    const text = await bandText(page);
+    assert.match(text, new RegExp(`${BAND_WORD[kind]}:\\s*2(?!\\d)`), `the band does not count the listed id zz with no step as ${BAND_WORD[kind]}: ${text}`);
+    assert.equal(await band(page).locator('button[data-go="zz"]').count(), 1, "the band draws no row for the listed id zz with no step");
+    assert.match(await band(page).locator('button[data-go="zz"]').textContent(), /Untitled step/, "the row of the listed id zz with no step is not named Untitled step");
+  });
+}
+
+// The edge, as on the roadmap: a to-do step listed paused (t1) and a done step listed stalled (d1), beside to-do c1 and doing a2. Each
+// place reads the step's own status. EDGE_W_FULL is the same at full size: 30 steps, so each bar draws every cell.
+const EDGE_W = () => {
+  const s = stepsOf([["c1", "cleanup", 1, "todo"], ["t1", "cleanup", 2, "todo"], ["d1", "cleanup", 3, "done"], ["a2", "cleanup", 4, "doing"]]);
+  s.t1.paused = { why: "Waits for a month of CI numbers.", decides: "owner", at: "2026-11-05T16:20:00-06:00", by: "triage" };
+  return s;
+};
+const EDGE_W_FULL = () => ({ ...EDGE_W(), ...stepsOf(Array.from({ length: 26 }, (_, i) => ["t" + (i + 5), "cleanup", i + 5, "todo"])) });
+const EDGE_W_READ = { why: "", steps: [{ id: "d1", fix: "todo" }], paused: ["t1"], badPause: [], items: [], ...NO_ITEMS };
+const edgePage = (steps = EDGE_W()) => withStalled(phasePage(steps), EDGE_W_READ);
+test("the row labels of a to-do step listed paused and a done step listed stalled read To do and Done", async (t) => {
+  const page = await open(t, { pageHtml: edgePage() }); if (!page) return;
+  await openStatus(page);
+  for (const [id, word] of [["t1", "To do"], ["d1", "Done"]]) {
+    assert.equal(await page.locator(`#s-${id}`).count(), 1, `step ${id} has no row in the Status list`);
+    const label = (await page.locator(`#s-${id} .rrow`).getAttribute("aria-label")) || "";
+    assert.ok(label.startsWith(`${id}, ${word}:`), `step ${id} is ${word} and listed, but its row label reads "${label}"`);
+    assert.equal(await page.locator(`#s-${id} .tag.stl, #s-${id} .tag.pzd`).count(), 0, `step ${id} is ${word} and listed, but its row carries a Stalled or Paused tag`);
+  }
+});
+test("the where-you-are line counts neither the to-do step listed paused nor the done step listed stalled", async (t) => {
+  const page = await open(t, { pageHtml: edgePage() }); if (!page) return;
+  await openStatus(page);
+  const where = await whereLine(page);
+  assert.match(where, /1 in progress/, "the where-you-are line does not count the doing step a2: " + where);
+  assert.doesNotMatch(where, /stalled/, "the where-you-are line counts a done step as stalled: " + where);
+  assert.doesNotMatch(where, /paused/, "the where-you-are line counts a to-do step as paused: " + where);
+});
+test("the bars draw a to-do step listed paused and a done step listed stalled as to-do and done cells, at full size", async (t) => {
+  const page = await open(t, { pageHtml: edgePage(EDGE_W_FULL()) }); if (!page) return;
+  await openStatus(page);
+  for (const [name, scope] of BARS_W) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    assert.deepEqual(await wCellKinds(page, scope), ["done", "act", ...Array(28).fill("")], `${name} draws a listed step as a stalled or paused cell`);
+  }
+});
+const feedRowMark = (page, id) => page.locator("#svSide ul.feed li", { has: page.locator(`button[data-go="${id}"]`) }).locator('[role="img"]');
+const logRowMark = (page, id) => page.locator("#svDays .ev", { has: page.locator(`button[data-go="${id}"]`) }).locator('[role="img"]');
+test("Latest changes and the Changes log read the to-do step listed paused and the done step listed stalled as their own status", async (t) => {
+  const page = await open(t, { pageHtml: edgePage() }); if (!page) return;
+  await openStatus(page);
+  for (const [id, word] of [["t1", "To do"], ["d1", "Done"]]) {
+    for (const [where, mark] of [["Latest changes", feedRowMark(page, id)], ["the Changes log", logRowMark(page, id)]]) {
+      assert.equal(await mark.count(), 1, `step ${id} has no state mark in ${where}`);
+      const label = await mark.getAttribute("aria-label");
+      assert.equal(label, word, `step ${id} is ${word} and listed, but its row in ${where} reads ${label}`);
+    }
+  }
+});
+
+// The Now card's count line: a group (", 1 stalled") is never split across lines. Lines are read from the word boxes: a line that starts
+// with a group word or a separator, or ends on a bare number, has broken a group. The helper is a copy of the roadmap test's
+// (skills/roadmap/tests/page.test.mjs): the two pages' test files keep their own helpers.
+const GROUP_WORDS_W = new Set(["in", "progress", "done", "stalled", "paused", "blocked"]);
+const bareOf = (w) => w.replace(/[.,·]/g, "");
+async function countLinesW(page, sel) {
+  return page.evaluate((s) => {
+    const root = document.querySelector(s);
+    if (!root) return null;
+    const words = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const re = /\S+/g;
+      for (let m = re.exec(node.data); m; m = re.exec(node.data)) {
+        const range = document.createRange();
+        range.setStart(node, m.index);
+        range.setEnd(node, m.index + m[0].length);
+        const r = range.getClientRects()[0];
+        if (r) words.push({ w: m[0], y: (r.top + r.bottom) / 2 });
+      }
+    }
+    const lines = [];
+    for (const { w, y } of words) {
+      const last = lines[lines.length - 1];
+      if (last && Math.abs(last.y - y) < 4) last.words.push(w); else lines.push({ y, words: [w] });
+    }
+    return lines.map((l) => l.words);
+  }, sel);
+}
+for (const width of [390, 1280]) test(`the Now card's count line keeps each group whole at ${width} wide, with blocked, stalled and paused steps`, async (t) => {
+  const page = await open(t, { pageHtml: barsBlockedPage(), viewport: { width, height: 900 } }); if (!page) return;
+  await openStatus(page);
+  const lines = await countLinesW(page, "#svNow > div:first-child > .lead");
+  assert.ok(lines && lines.length, "the Now card has no count line (#svNow > div:first-child > .lead)");
+  const text = lines.map((l) => l.join(" ")).join(" | ");
+  const starts = lines.find((l) => bareOf(l[0]) === "" || GROUP_WORDS_W.has(bareOf(l[0])));
+  assert.equal(starts, undefined, `at ${width} wide a line of the count line starts inside a group: ${text}`);
+  const ends = lines.find((l) => /^\d+$/.test(bareOf(l[l.length - 1])));
+  assert.equal(ends, undefined, `at ${width} wide a line of the count line ends on a bare number: ${text}`);
+});
 // ---------------------------------------------------------------- touch sizes and the dashed edge
 
 // The touch rules read pointer: coarse. A touch page must match it and a fine page must not, or a size check proves nothing.
