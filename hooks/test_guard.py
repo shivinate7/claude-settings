@@ -15032,6 +15032,25 @@ def fold_unc_prefix_check():
     return True, "_folded keeps the leading // of a UNC path, plain and as a glob"
 
 
+def fold_unc_dotdot_check():
+    """A `..` after a UNC share name stops at the share root: `//server/share/../tests` folds to `//server/share/tests`,
+    and `//server/share/a/../../x` to `//server/share/x`. The fold popped the absent share name as a folder, so the server
+    name became the parent and the share was lost. Both rows share that one cause."""
+    frozen = _folded_module()
+    if frozen is None:
+        return False, "guard.py did not load guard_frozen, so _folded cannot be judged"
+    rows = (("//server/share/../tests", "//server/share/tests"),
+            ("//server/share/a/../../x", "//server/share/x"))
+    wrong = []
+    for path, want in rows:
+        got = frozen._folded(path)
+        if got != want:
+            wrong.append("_folded(%r) returned %r, want %r" % (path, got, want))
+    if wrong:
+        return False, "; ".join(wrong) + ": a `..` popped the UNC share name, so the fold went past the share root"
+    return True, "_folded stops a UNC path's `..` at its share root"
+
+
 def fold_root_dot_check():
     """`/.` folds to the root `/`. Its `.` part is dropped, and the root's empty part is all that is left, which joins to
     '' rather than '/'. An empty path names no file, so a glob under the root matches nothing."""
@@ -15072,12 +15091,13 @@ def fold_plain_paths_check():
             ("/home/u/repo/tests/test_a.py", "/home/u/repo/tests/test_a.py"),
             (absent + "/b/..", absent),
             (absent + "/../tests/test_a.py", "/tests/test_a.py"),
+            (absent + "/../b", "/b"),
             ("a/../b", "a/../b"))
     for path, want in rows:
         got = frozen._folded(path)
         if got != want:
             return False, "_folded(%r) returned %r, want %r: a path that folded as before changed" % (path, got, want)
-    return True, "_folded folds the seven pinned rows as before"
+    return True, "_folded folds the eight pinned rows as before"
 
 
 def fold_root_builder_find_check():
@@ -15098,6 +15118,7 @@ def fold_root_builder_find_check():
 
 
 LOG_CHECKS_EXTRA.append(("fold: _folded keeps the leading // of a UNC path, plain and as a glob", fold_unc_prefix_check))
+LOG_CHECKS_EXTRA.append(("fold: a '..' after a UNC share name stops at the share root, not past it", fold_unc_dotdot_check))
 LOG_CHECKS_EXTRA.append(("fold: a builder's find at cwd / past the walk cap is too large to check, not allowed",
                          fold_root_builder_find_check))
 LOG_CHECKS_EXTRA.append(("fold: _folded('/.') folds to the root '/', not an empty path", fold_root_dot_check))
