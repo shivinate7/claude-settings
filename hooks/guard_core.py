@@ -1054,15 +1054,57 @@ def shell_abs(path: str, base):
     return path
 
 
-def _read_cd_variable(segments, number: int, move: str) -> str:
-    """The folder a `cd` at `segments[number]` names, each variable read as the value an earlier
-    segment assigned. `move` unchanged when the segment reads no other way. The earlier segments
-    are joined by a marker so `_resolve_vars` sees the whole command, and the one segment is cut
-    back out. An empty read is not trusted: the resolver reads a variable set by backticks as
-    empty, and an empty `cd` would be taken for home. Imported late: guard_frozen imports this file."""
+# Commands that cannot set a variable of the shell they run in. A segment whose command is not here
+# (unset, read, printf -v, export, a loop, eval, a function, `R+=x`) may, so the walk forgets every
+# variable after it.
+_VARIABLE_SAFE_WORDS = frozenset(CD_WORDS + POP_WORDS + (
+    "echo", "true", "false", "git", "gh", "ls", "cat", "pwd", "mkdir", "rm", "grep", "test", "[", "sleep",
+    "python", "python3"))
+_VARIABLE_SET_IN_ARGS = re.compile(r"\$\(\(|\$\{[^}]*=")   # `$((R=1))` and `${R:=x}` set R from an argument
+
+
+def _variable_text(known, text: str) -> str:
+    """`text` with each `$VAR` read as the value in `known`. The values go through `_resolve_vars`, the
+    one resolver, as assignments written ahead of the text; it is imported late (guard_frozen imports
+    this file). A variable not in `known` stays as written."""
     from guard_frozen import _resolve_vars
     mark = " ;\x00; "
-    tokens = segment_tokens(_resolve_vars(mark.join(segments[:number + 1])).split(mark)[-1])
+    given = "".join('%s="%s"%s' % (name, value, mark) for name, value in known.items())
+    return _resolve_vars(given + text).split(mark)[-1]
+
+
+def _track_variables(known, segment: str, tokens, ran: bool) -> None:
+    """Update `known`, the variables the shell holds, for one segment the walk passes. Only a segment of
+    plain `NAME=value` words that ran here (`ran`: not in a pipe, not after `||`, not after a cd that may
+    have failed) sets a variable. A value holding a substitution, a quote, a backslash or an unread
+    variable, an empty value, and a quoted `~` (bash does not expand it) leave the variable unknown. A
+    segment that is not an assignment keeps `known` only when its command cannot set a variable."""
+    if tokens and all(ASSIGNMENT.match(token) for token in tokens):
+        for token in tokens:
+            name, value = token.split("=", 1)
+            read = None
+            if (ran and value and not set(value) & set("`'\"(\\")
+                    and not ("~" in value and "%s=~" % name not in segment)):
+                read = _variable_text(known, value)
+                if not read or "$" in read:
+                    read = None
+            if read is None:
+                known.pop(name, None)
+            else:
+                known[name] = read
+        return
+    index = resolve_command(tokens) if tokens else None
+    if (index is None or basename(tokens[index]) not in _VARIABLE_SAFE_WORDS
+            or _VARIABLE_SET_IN_ARGS.search(segment)):
+        known.clear()
+
+
+def _read_cd_variable(known, segment: str, move: str, ran: bool) -> str:
+    """The folder a `cd` names with each variable read from `known`, or `move` unchanged when it cannot be
+    read: a `cd` that may not run (`ran` False), or a result that is empty, which would be taken for home."""
+    if not ran:
+        return move
+    tokens = segment_tokens(_variable_text(known, segment))
     read = _segment_cd_move(tokens) if tokens else None
     return read if isinstance(read, str) and read else move
 
@@ -1073,9 +1115,10 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
     real shell keeps: `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes
     back, a `cd` inside `( ... )` ends with the parenthesis, and `popd` is not tracked. A `cd` to
-    `$VAR`, `"$VAR"` or `"${VAR}"` is read as the value an earlier segment assigned (`_resolve_vars`,
-    the one resolver). A path that still holds `$` after that (unassigned, a substitution), or holds
-    `%` or a backtick, is not tracked. A `cd` into a folder that does not exist is not trusted (the
+    `$VAR`, `"$VAR"` or `"${VAR}"` is read as the value a plain `NAME=value` segment set in this shell
+    (`_track_variables`); a prefix assignment, one in a pipe, a subshell or after `||`, and any step that
+    may set a variable (`unset`, `read`, a loop) leave it unknown. A path that still holds `$` after that
+    (unassigned, a substitution), or holds `%` or a backtick, is not tracked. A `cd` into a folder that does not exist is not trusted (the
     shell stays where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
     in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
@@ -1085,10 +1128,12 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     fails closed on an untrusted `cd` keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
+    known = {}         # the variables the shell holds: plain assignments that ran here (`_track_variables`)
+    doubt = False      # the last cd may have failed in an `&&` chain: a segment after it may not run
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
-        stack.extend([(where, prev)] * marks.count("("))
+        stack.extend([(where, prev, dict(known))] * marks.count("("))
         end = ends[at] if at < len(ends) else ""
         if at == number:
             return None if skipping else where
@@ -1096,20 +1141,25 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             skipping = end in ("&&", "|")
             for _ in range(marks.count(")")):
                 if stack:
-                    where, prev = stack.pop()
+                    where, prev, saved = stack.pop()
+                    known = dict(saved)
                     skipping = False
             continue
         tokens = segment_tokens(segment)
         move = _segment_cd_move(tokens) if tokens else None
-        if move is not None and not is_powershell(segment) and "|" in (
-                ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
+        before = ends[at - 1] if 0 < at <= len(ends) else ""
+        piped = "|" in (end, before)
+        if move is not None and not is_powershell(segment) and piped:
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
+        ran = not (doubt or piped or before == "||")   # this segment runs in the shell, as itself
+        _track_variables(known, segment, tokens, ran)
+        doubt = doubt and end == "&&"
         if tokens is None:
             where = None
         elif move is not None:
             old = where
             if move is not CD_UNKNOWN and "$" in move:
-                move = _read_cd_variable(segments, at, move)
+                move = _read_cd_variable(known, segment, move, ran)
             if move is CD_UNKNOWN:
                 where = None
             elif move == "-":
@@ -1125,10 +1175,12 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                     old = prev   # a failed cd leaves the folder `cd -` goes back to alone
                 else:
                     where = None
+            doubt = doubt or (where is None and end == "&&")
             prev = old
         for _ in range(marks.count(")")):
             if stack:
-                where, prev = stack.pop()
+                where, prev, saved = stack.pop()
+                known = dict(saved)
     return where
 
 
