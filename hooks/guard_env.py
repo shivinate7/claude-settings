@@ -14,12 +14,12 @@ from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
     POWERSHELL_CALL, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _git, _split_heredocs,
     _segment_cd_move, _without_message_values, dir_before_segment, is_powershell, norm, resolve_command,
-    segment_tokens, split_segments,
+    segment_tokens, split_segments, _wrapper_flags,
 )
 
 # The wrappers `_env_words` looks through for a folder search, beyond its own list: each runs the program
 # after its flags, and `xargs` also hands that program the paths it reads from stdin.
-ENV_RUNNER_WRAPPERS = ("sudo", "nohup", "exec", "xargs")
+ENV_RUNNER_WRAPPERS = ("sudo", "doas", "nohup", "exec", "xargs")
 
 
 # ------------------------------------------------------------------ the environment file
@@ -117,6 +117,13 @@ ENV_VALUE_LONG = (
 # names, or a glob that includes the file, and stays judged.
 ENV_EXCLUDE_LONG = ("--exclude", "--exclude-dir")
 ENV_VALUE_SHORT = "ABCmgd"
+# The long flags that take a value in one tool only. `ag --depth 3` and `ag --ignore PAT` own the next word, as
+# grep's `--devices ACTION` and `--directories ACTION` do. The word is no pattern and no path.
+ENV_VALUE_LONG_BY_COMMAND = {
+    "ag": ("--depth", "--ignore", "--ignore-dir", "--workers", "--width", "--pager", "--path-to-ignore",
+           "--color-line-number", "--color-match", "--color-path"),
+    "grep": ("--devices", "--directories", "--binary-files", "--label", "--group-separator"),
+}
 # rg reads its flags by its own table, kept whole so a flag outside it can be told from one inside:
 # the flags that take a value (a word after them is no pattern and no path), and the plain switches.
 # A `--no-...` flag is always a switch. A flag in neither table might take a value, so the search is
@@ -152,7 +159,7 @@ ENV_SCRIPT_VALUE_SHORT = "Fv"
 ENV_BOOLEAN_F_COMMANDS = ("ag", "ack")
 # `ag -G` takes a regex that picks the files to search, and `ag -p` a file of ignore patterns, which
 # is judged as a path. In grep `-G` is a plain switch, so the letters are not shared.
-ENV_VALUE_SHORT_BY_COMMAND = {"rg": "tTjrEM", "ag": "Gp"}
+ENV_VALUE_SHORT_BY_COMMAND = {"rg": "tTjrEM", "ag": "GpW", "grep": "D"}
 # The value of these letters is no path, so it is skipped: after rg `-t` or `-T` a file type name,
 # after ag `-G` a file regex, judged by `_ag_hidden_regex_refusal` instead.
 ENV_NO_PATH_SHORT_BY_COMMAND = {"rg": "tT", "ag": "G"}
@@ -783,8 +790,8 @@ def _pattern_words(words, position: int, command: str):
                 elif not (name in ENV_RG_SWITCH_LONG or name.startswith("--no-") or "=" in word
                           or name in ENV_PATTERN_LONG + ENV_FILE_LONG + ENV_EXCLUDE_LONG):
                     extras["unknown"] += 1
-            i += 1 if attached or not (takes or name in ENV_PATTERN_LONG + ENV_FILE_LONG
-                                       + ENV_VALUE_LONG) else 2
+            i += 1 if attached or not (takes or name in ENV_PATTERN_LONG + ENV_FILE_LONG + ENV_VALUE_LONG
+                                       + ENV_VALUE_LONG_BY_COMMAND.get(command, ())) else 2
             continue
         step = 1
         for k, letter in enumerate(word[1:], 1):
@@ -1092,8 +1099,11 @@ ENV_WRAPPER_VALUE_FLAGS = {
     "nice": ("-n", "--adjustment"),
     "sudo": ("-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U", "--user", "--group", "--host"),
     "stdbuf": ("-i", "-o", "-e"),
+    "setsid": (),
     "env": ("-u", "--unset", "-C", "--chdir", "-S"),
 }
+# `env -C DIR` and `env --chdir=DIR` run the program in DIR, and the value may be glued to the flag.
+ENV_CHDIR_GLUED = re.compile(r"-C\S+|--chdir=\S*")
 TIMEOUT_FLAG_GLUED = re.compile(r"^(--(kill-after|signal)=\S+|-[ks]\S+)$")
 PY_LAUNCHER_FLAG = re.compile(r"^-(\d(\.\d+)?(-\d+)?|u)$")  # `py -3`, `py -3.12`, `python -u`
 
@@ -1162,7 +1172,7 @@ def _skip_wrappers(words, position: int, runner_child: bool = False, walk: bool 
     that a runner's child or a shell-string segment may lead with (`nice`, `sudo`, `stdbuf`,
     `env VAR=x`, and `exec`, `command`, `builtin`, `nohup`); the parent shell form leaves them.
     `walk` adds the wrappers a folder search hides behind: `command [-p]`,
-    `env [-i] [-u NAME] [--] [VAR=value]...` and
+    `env [-i] [-u NAME] [-C DIR] [--] [VAR=value]...`, `stdbuf` and `setsid` with their flags, and
     `nice [-n N | -nN | -N | --adjustment N | --adjustment=N] [--]`."""
     while position < len(words):
         if walk and (REDIRECT.fullmatch(words[position]) or words[position] == "<"):
@@ -1194,8 +1204,10 @@ def _skip_wrappers(words, position: int, runner_child: bool = False, walk: bool 
                     after = _assignment_end(words, after)
                 elif words[after] in ("-i", "-0", "--ignore-environment"):
                     after += 1
-                elif words[after] in ("-u", "--unset"):
+                elif words[after] in ("-u", "--unset", "-C", "--chdir"):
                     after += 2
+                elif ENV_CHDIR_GLUED.fullmatch(words[after]):
+                    after += 1
                 elif words[after] == "--":
                     # After `--` env takes no flag: only assignments, then the command.
                     after += 1
@@ -1230,7 +1242,7 @@ def _skip_wrappers(words, position: int, runner_child: bool = False, walk: bool 
             position = after + 1
         elif runner_child and word in ENV_COMMAND_PREFIXES:
             position = after
-        elif runner_child and word in ENV_WRAPPER_VALUE_FLAGS:
+        elif (runner_child or walk) and word in ENV_WRAPPER_VALUE_FLAGS:
             while after < len(words) and (words[after] in ENV_WRAPPER_VALUE_FLAGS[word]
                                           or words[after].startswith("-")
                                           or (word != "stdbuf" and ASSIGNMENT.match(words[after]))):
@@ -1241,6 +1253,31 @@ def _skip_wrappers(words, position: int, runner_child: bool = False, walk: bool 
         else:
             break
     return position
+
+
+def _env_chdirs(words, position: int):
+    """The folders that each `env -C DIR` or `env --chdir=DIR` before the command word at `position` moves
+    to, in order, as typed. The command runs in the last one, each relative to the one before."""
+    found = []
+    for at, word in enumerate(words[:position]):
+        if _base(word) != "env":
+            continue
+        i = at + 1
+        while i < position:
+            flag = words[i]
+            if flag in ("-C", "--chdir") and i + 1 < position:
+                found.append(_shell_value(words[i + 1]))
+                i += 2
+            elif ENV_CHDIR_GLUED.fullmatch(flag):
+                found.append(_shell_value(flag[2:] if flag[:2] == "-C" else flag.partition("=")[2]))
+                i += 1
+            elif flag in ("-u", "--unset"):
+                i += 2
+            elif flag.startswith("-") or ASSIGNMENT.match(flag):
+                i += 1
+            else:
+                break   # the next wrapper: its flags are not env's
+    return found
 
 
 def _env_words(segment: str, walk: bool = False):
@@ -1333,14 +1370,14 @@ ENV_GREP_COMMANDS = ("grep", "egrep", "fgrep")
 ENV_GREP_RECURSIVE_COMMAND = "rgrep"
 ENV_GREP_RECURSIVE_LONG = ("--recursive", "--dereference-recursive")
 # Letters of a grep flag cluster that take a value, and so end the cluster: `-A 3`, `-e pat`, `-f file`.
-ENV_GREP_VALUE_SHORT = ENV_VALUE_SHORT + "ef"
+ENV_GREP_VALUE_SHORT = ENV_VALUE_SHORT + "ef" + ENV_VALUE_SHORT_BY_COMMAND["grep"]
 ENV_WALK_LIMIT = 50000
 ENV_TOO_LARGE = "<too large>"
 ENV_WALK_REASON = ("this command would search a folder that holds an environment file, and a "
                    "hidden flag makes it read dotfiles")
 ENV_WALK_LARGE_REASON = (
     "this command would search a folder too large to check, so it cannot be shown clean of "
-    "environment files. Remedy: name a smaller folder")
+    "environment files. Remedy: name a smaller folder, or skip the large one with --exclude-dir=node_modules")
 ENV_GREP_WALK_REASON = (
     "this command would search a folder that holds an environment file, and a recursive grep "
     "reads dotfiles. Remedy: add --exclude with a glob that covers the environment file names, "
@@ -1547,7 +1584,9 @@ def _glob_picks(name: str, relative: str, glob: str, fold: bool, by_name: bool =
         tails = [relative] + [relative[at + 1:] for at, letter in enumerate(relative)
                               if letter == "/" and relative[at + 1:at + 2] != "/"]
         return any(fnmatch.fnmatchcase(tail, glob) for tail in tails)
-    glob = _glob_unescaped(glob.lstrip("/"))
+    # rg anchors a glob that leads with `/` at the folder it searches. grep and find match a name, which holds no
+    # `/`, so a leading `/` there makes a glob that picks nothing.
+    glob = _glob_unescaped(glob if by_name else glob.lstrip("/"))
     if by_name or "/" not in glob:
         return fnmatch.fnmatchcase(name, glob)
     return any(fnmatch.fnmatchcase(relative, g) or (
@@ -1581,7 +1620,7 @@ def _glob_anchor(folder: str, cwd: str) -> str:
 
 
 def _env_file_in(folder: str, rules=(), exclude_dir=(), ignored=frozenset(), by_name=False,
-                 anchor="", min_depth: int = 0, max_depth=None, named=False) -> str:
+                 anchor="", min_depth: int = 0, max_depth=None, named=False, prune=None) -> str:
     """The first env file under `folder`, or ENV_TOO_LARGE past ENV_WALK_LIMIT entries, else ''. A symlink is not followed, as rg and ag do not.
     `.git` holds no env file and is skipped. `rules` narrow it, as `_glob_picked` reads them (`by_name` and `named` are grep's), on
     each path with `anchor` (`_glob_anchor`) in front, and a
@@ -1589,13 +1628,16 @@ def _env_file_in(folder: str, rules=(), exclude_dir=(), ignored=frozenset(), by_
     or folder in it is skipped, except a file that a rule with `overrides` set picks. An ignored folder
     that such a rule's glob picks by itself is entered, as rg enters it: `-g '*'` picks every folder.
     `min_depth` and `max_depth` (None for no limit) bound the depth of a file as find counts it: a file in
-    `folder` is at depth 1, and a file in a folder under it at depth 2."""
+    `folder` is at depth 1, and a file in a folder under it at depth 2. `prune(path, name)` (`_find_pruned`)
+    says find does not enter the folder `name`, which find prints as `path`: it is not walked, so its entries
+    do not count toward the cap."""
     seen = 0
     overriding = [rule for rule in rules if rule[3]]
     for top, dirs, files in os.walk(folder):
         relative = os.path.relpath(top, folder).replace(os.sep, "/")
         prefix = "" if relative == "." else relative + "/"
         dirs[:] = [d for d in dirs if d != ".git"
+                   and not (prune and prune(anchor + prefix + d, d))
                    and not any(_glob_picks(d, d, g, False, by_name=True) for g in exclude_dir)
                    and (prefix + d + "/" not in ignored
                         or any(_glob_picks(d, anchor + prefix + d, glob_text, fold)
@@ -1723,17 +1765,43 @@ def _rules_skip_env(rules) -> bool:
 
 
 # The shell commands that run a string as a command of their own.
-ENV_SHELL_STRING_COMMANDS = ("bash", "sh", "zsh", "dash", "ksh", "eval")
+ENV_SHELL_STRING_COMMANDS = ("bash", "sh", "zsh", "dash", "ksh", "eval", "su")
 # The long options of bash and sh that take a value word, so the word is no script.
 ENV_SHELL_VALUE_LONG = ("--rcfile", "--init-file")
 
 
+def _su_string(words, position: int) -> str:
+    """The text `su -c STRING`, `su --command=STRING` or `su -cSTRING` runs, else ''. A user name may come before
+    the flag, and `-s`, `-g` and `-G` take a value word of their own."""
+    i = position + 1
+    while i < len(words):
+        word = _flag_word(words[i])
+        i += 1
+        if word.startswith("--"):
+            name, attached, value = word.partition("=")
+            if name == "--command":
+                return _shell_value(value if attached else (words[i] if i < len(words) else ""))
+            i += not attached and name in ("--shell", "--group", "--supp-group")
+        elif word.startswith("-") and word != "-":
+            for k, letter in enumerate(word[1:], 1):
+                rest = word[k + 1:]
+                if letter == "c":
+                    return _shell_value(rest or (words[i] if i < len(words) else ""))
+                if letter in "sgG":
+                    i += not rest
+                    break
+    return ""
+
+
 def _shell_string(words, position: int, command: str) -> str:
     """The text a shell runs from a string, else ''. `bash -c STRING` and `sh -c STRING` (the `-c` may
-    sit in a cluster such as `-lc`) run the first word after their options. `eval` runs its words
-    joined by spaces. Each word is read by `_shell_value`, the tokenizer's quote removal."""
+    sit in a cluster such as `-lc`) run the first word after their options. `su -c STRING` runs it too
+    (`_su_string`). `eval` runs its words joined by spaces. Each word is read by `_shell_value`, the
+    tokenizer's quote removal."""
     if command == "eval":
         return " ".join(_shell_value(word) for word in words[position + 1:])
+    if command == "su":
+        return _su_string(words, position)
     run, i = False, position + 1
     while i < len(words):
         word = _flag_word(words[i])
@@ -1862,6 +1930,8 @@ ENV_FIND_OTHER_OUTPUT = ("-printf", "-fprintf", "-fprint", "-fprint0", "-fls", "
                          "-okdir")
 ENV_WALK_REASON_FED = ("this command would search a name that a lister hands to xargs, and the name is an "
                        "environment file")
+ENV_WALK_REASON_EXEC = ("this command would search a name that find hands to its -exec program, and the name is "
+                        "an environment file")
 
 
 def _find_names_no_env(expression) -> bool:
@@ -1913,6 +1983,101 @@ def _find_depth_limits(expression):
     return low or 0, high
 
 
+# The find tests that tell which folder a `-prune` alternative stops at: `-path` and `-name`, each with its
+# `i` form that ignores case, and `-type d`.
+ENV_FIND_PATH_TESTS = {"-path": False, "-wholename": False, "-ipath": True, "-iwholename": True}
+ENV_FIND_NAME_TESTS = {"-name": False, "-iname": True}
+
+
+def _find_pruned(expression):
+    """A function `(path, name) -> bool` that says find does not enter the folder `name`, printed as `path`, or
+    None when no folder is pruned that the guard can tell. An alternative (between two top-level `-o`) that holds
+    `-prune` prunes the folders that pass the tests before it, when those are `-path`, `-name` and `-type d`
+    tests only. An alternative with any other test before its `-prune`, a `!`, or a paren in the expression is
+    not read: find then prunes at most what the guard walks, and the folder is counted. With `-depth` or
+    `-delete`, find ignores `-prune`, so nothing is pruned."""
+    if "(" in expression or "-depth" in expression or "-delete" in expression:
+        return None
+    alternatives, current = [], []
+    for word in expression:
+        if word in ("-o", "-or"):
+            alternatives.append(current)
+            current = []
+        else:
+            current.append(word)
+    alternatives.append(current)
+    prunes = []
+    for words in alternatives:
+        if "-prune" not in words:
+            continue
+        tests, at, readable = [], 0, True
+        while at < words.index("-prune"):
+            word = words[at]
+            if word in ("-a", "-and"):
+                at += 1
+            elif (word in ENV_FIND_PATH_TESTS or word in ENV_FIND_NAME_TESTS) and at + 1 < len(words):
+                kind = "path" if word in ENV_FIND_PATH_TESTS else "name"
+                tests.append((kind, words[at + 1], {**ENV_FIND_PATH_TESTS, **ENV_FIND_NAME_TESTS}[word]))
+                at += 2
+            elif word == "-type" and words[at + 1:at + 2] == ["d"]:
+                at += 2
+            else:
+                readable = False
+                break
+        if readable:
+            prunes.append(tests)
+    prunes = [tests for tests in prunes if tests]
+    if not prunes:
+        return None
+
+    def pruned(path: str, name: str) -> bool:
+        def holds(kind, glob_text, fold):
+            if kind == "name":
+                return _glob_picks(name, name, glob_text, fold, by_name=True)
+            shown = path.lower() if fold else path
+            return fnmatch.fnmatchcase(shown, _glob_unescaped(glob_text.lower() if fold else glob_text))
+        return any(all(holds(*test) for test in tests) for tests in prunes)
+    return pruned
+
+
+def _find_prints_nothing(starts, here: str, expression, low: int, high) -> bool:
+    """True when no entry under the start folders of a find has a name that one of its `-name` or `-iname` globs
+    picks, within the depth limits, so the find prints nothing and a xargs behind it runs on no names. A find with
+    no such glob, a start word with a variable, or a tree past ENV_WALK_LIMIT entries is not known to print
+    nothing. A negated test picks no name here."""
+    globs = [(expression[at + 1], word == "-iname") for at, word in enumerate(expression[:-1])
+             if word in ENV_FIND_NAME_TESTS and expression[at - 1:at] not in (["!"], ["-not"])]
+    if not globs:
+        return False
+
+    def picked(name: str, level: int) -> bool:
+        return level >= low and (high is None or level <= high) and any(
+            _glob_picks(name, name, pattern, fold, by_name=True) for pattern, fold in globs)
+
+    seen = 0
+    for word, start in starts:
+        if re.search(r"[$`]", start):
+            return False
+        target = os.path.join(here, os.path.expanduser(start))
+        expand = re.search(r"[*?\[]", start) and word == start
+        for folder in glob.glob(target) if expand else [target]:
+            if not os.path.exists(folder):
+                continue
+            if picked(os.path.basename(start.rstrip("/")) or start, 0):
+                return False
+            for top, dirs, files in os.walk(folder):
+                relative = os.path.relpath(top, folder).replace(os.sep, "/")
+                level = 0 if relative == "." else relative.count("/") + 1
+                if any(picked(name, level + 1) for name in dirs + files):
+                    return False
+                seen += len(dirs) + len(files)
+                if seen > ENV_WALK_LIMIT:
+                    return False
+                if high is not None and level + 1 >= high:
+                    dirs[:] = []
+    return True
+
+
 def _find_folder_names(expression):
     """(whether a find expression may print a folder, the (glob, ignores case) of the `-name` and `-iname` tests
     on the alternatives that may). An alternative prints only files when an unnegated `-type f` comes before
@@ -1947,14 +2112,17 @@ def _find_folder_names(expression):
     return bool(folders), [g for a in folders for g in a[2]]
 
 
-def _find_folder_env(folder: str, globs, base: str, low: int, high, walk=_env_file_in) -> str:
+def _find_folder_env(folder: str, globs, base: str, low: int, high, walk=_env_file_in, prune=None,
+                     shown: str = "") -> str:
     """The first env file below a folder that find would print because a `-name` glob in `globs` matches it, or
     '' for none. `folder` is depth 0 and takes the name `base`, as find names a start word. A folder at depth
     `low` to `high` (None for no limit) that matches is read whole by the program that gets its name, so
     `walk(path)` (`_env_file_in` by default) judges it, each under its own cap. A folder is judged when its
     parent lists it, so one that sits in a parent past ENV_WALK_LIMIT entries is still judged. Past the cap, a
     folder that is not listed in the part of the tree walked is not seen, and so ENV_TOO_LARGE is returned,
-    for the walk or for a printed folder that is too large to judge."""
+    for the walk or for a printed folder that is too large to judge. `prune(path, name)` (`_find_pruned`) says find
+    prints the folder `name` as `path` (the start `shown`, then the way down) but does not enter it: its name is
+    judged and its entries are not walked, so they do not count toward the cap."""
     def printed(path: str, name: str, level: int) -> str:
         if level >= low and (high is None or level <= high) and any(
                 _glob_picks(name, name, pattern, fold, by_name=True) for pattern, fold in globs):
@@ -1973,6 +2141,9 @@ def _find_folder_env(folder: str, globs, base: str, low: int, high, walk=_env_fi
             found = printed(os.path.join(top, name), name, level + 1)
             if found:
                 return found
+        if prune:
+            dirs[:] = [d for d in dirs if not prune("%s/%s" % (
+                (shown or base).rstrip("/"), os.path.relpath(os.path.join(top, d), folder).replace(os.sep, "/")), d)]
         if high is not None and level >= high:
             dirs[:] = []
         seen += len(dirs) + len(files)
@@ -1982,9 +2153,23 @@ def _find_folder_env(folder: str, globs, base: str, low: int, high, walk=_env_fi
 
 
 def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders: bool = True,
-                  narrowing=((), (), False, False)):
-    """What the segment before an `xargs` puts on its stdin: (the env file it names, whether the search
-    may walk `here`, the folders it names). The env file is '' for none, a path, or ENV_TOO_LARGE.
+                  narrowing=((), (), False, False), runs_empty: bool = False):
+    """What the segment before an `xargs` puts on its stdin (`_feed_source`). `runs_empty` is set when xargs
+    runs its command once with no names for an empty stdin, as GNU xargs does without `-r`. Any other source,
+    or a pipe that is not directly before the xargs, names paths the guard cannot see, so `here` is walked."""
+    unknown = ("", True, [])
+    if not (part == 0 and number > 0 and ends[number - 1] == "|"):
+        return unknown
+    words, position, command = _env_words(_env_parts(pieces[number - 1])[-1], walk=True)
+    return _feed_source(command, words[position + 1:], here, reads_folders, narrowing, runs_empty)
+
+
+def _feed_source(command: str, rest, here: str, reads_folders: bool = True,
+                 narrowing=((), (), False, False), runs_empty: bool = False):
+    """What the lister `command` (its argument words are `rest`) hands to a search as names, from xargs or as
+    the `{}` of its own `-exec`: (the env file it names, whether the search may walk `here`, the folders it
+    names). The env file is '' for none, a path, or ENV_TOO_LARGE. With `runs_empty` the search runs once on
+    `here` when the lister names nothing, so `here` is walked then.
 
     `find` names every file under each folder it is given (default `.`), and `ls -a` or `ls -A` names each
     entry of the folder, dotfiles too. Each file name reaches the search as a path. rg reads it whatever its
@@ -1998,13 +2183,9 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders
     alone, and for rg whatever the narrowing. `-type d`
     names folders alone. A start word
     with a variable names folders the guard cannot see. A plain `ls` names no dotfile, so only the folders it names are
-    walked. `ls -a` also names `.` and `..`, so `here` and its parent are walked. Any other source, or a pipe that is not directly before the xargs,
+    walked. `ls -a` also names `.` and `..`, so `here` and its parent are walked. Any other source
     names paths the guard cannot see, so `here` is walked."""
     unknown = ("", True, [])
-    if not (part == 0 and number > 0 and ends[number - 1] == "|"):
-        return unknown
-    words, position, command = _env_words(_env_parts(pieces[number - 1])[-1], walk=True)
-    rest = words[position + 1:]
     flags = [w for w in rest if w.startswith("-")]
     paths = [w for w in rest if not w.startswith("-")]
     if command == "ls":
@@ -2045,9 +2226,15 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders
         prints_folder, globs = _find_folder_names(bare[at:])
         # A search that reads no folder it is given reads only the files find prints.
         prints_folder = prints_folder and reads_folders
-        if names_no_env and not prints_folder:
-            return "", False, []
         low, high = _find_depth_limits(bare[at:])
+
+        def names_nothing():
+            # Run on no names, xargs runs its search once on `here`: a find that prints nothing leaves it there.
+            return ("", runs_empty and _find_prints_nothing(starts or [(".", ".")], here, bare[at:], low, high), [])
+
+        if names_no_env and not prints_folder:
+            return names_nothing()
+        pruned = _find_pruned(bare[at:])
         rules, exclude_dir, by_name, no_ignore = narrowing
 
         def narrowed_walk(path: str) -> str:
@@ -2067,7 +2254,7 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders
                          else folder).replace(os.sep, "/")
                 if names_no_env:
                     found = (_find_folder_env(folder, globs, os.path.basename(start.rstrip("/")) or start, low, high,
-                                              narrowed_walk)
+                                              narrowed_walk, pruned, shown)
                              if os.path.isdir(folder) else "")
                     # A folder or tree too large to judge is judged by its names alone, and they name no env file.
                     found = "" if found == ENV_TOO_LARGE else found
@@ -2076,19 +2263,58 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders
                     # exclude rules pick the path find prints. A folder find prints is walked whole by the
                     # search, which reads only the files its rules pick.
                     found = (_env_file_in(folder, rules, anchor=shown.rstrip("/") + "/", min_depth=low,
-                                          max_depth=high, named=True) if by_name
-                             else _env_file_in(folder, min_depth=low, max_depth=high))
+                                          max_depth=high, named=True, prune=pruned) if by_name
+                             else _env_file_in(folder, anchor=shown.rstrip("/") + "/", min_depth=low,
+                                               max_depth=high, prune=pruned))
                     if not found and prints_folder:
                         found = _find_folder_env(folder, [("*", False)], os.path.basename(start.rstrip("/")) or start,
-                                                 low, high, narrowed_walk)
+                                                 low, high, narrowed_walk, pruned, shown)
                 else:
                     base = os.path.basename(folder)
                     found = folder if names_env_file(base) and not low and (
                         not by_name or _glob_picked(base, shown, rules, named=True)[0]) else ""
                 if found:
                     return found, False, []
-        return "", False, []
+        return names_nothing()
     return unknown
+
+
+# The find actions that run a program, and the words that end its argument list.
+ENV_FIND_RUNNERS = ("-exec", "-execdir", "-ok", "-okdir")
+ENV_FIND_RUNNER_ENDS = (";", "+")
+# The xargs flags after which it runs nothing for an empty stdin. A plain xargs runs its command once.
+ENV_XARGS_NO_EMPTY_RUN = ("-r", "--no-run-if-empty", "-I", "-i", "--replace")
+
+
+def _find_runners(words, position: int):
+    """The programs a find at `words[position]` runs with `-exec`, `-execdir`, `-ok` and `-okdir`, each as
+    (its words, the index of its command word past its wrappers, its command name), and the words of the find
+    after its name. A program's words run up to the first `;` or `+` word, as find reads them. A `{}` among
+    them is a name that find hands over."""
+    rest = words[position + 1:]
+    found, at = [], 0
+    while at < len(rest):
+        if _shell_value(rest[at]) in ENV_FIND_RUNNERS:
+            end = at + 1
+            while end < len(rest) and _shell_value(rest[end]) not in ENV_FIND_RUNNER_ENDS:
+                end += 1
+            child = rest[at + 1:end]
+            start = _skip_wrappers(child, 0, walk=True)
+            if start < len(child):
+                found.append((child, start, _base(child[start])))
+            at = end
+        at += 1
+    return found, rest
+
+
+def _xargs_runs_empty(words, position: int) -> bool:
+    """True when the xargs before the command word at `position` runs it once with no names for an empty stdin:
+    GNU xargs does, unless it has `-r`, or `-I` or `-i`, which make a run per input line."""
+    for at, word in enumerate(words[:position]):
+        if _wrapper_name(_base(word)) == "xargs":
+            flags = _wrapper_flags("xargs", words[:position], at + 1)[1]
+            return not any(flag in ENV_XARGS_NO_EMPTY_RUN for flag, _ in flags)
+    return False
 
 
 def _env_walk(texts, cwd, depth: int = 0, places=None):
@@ -2106,11 +2332,14 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
     that holds it runs (`_text_folders`, from `places`), so `cd D && x=$(rg --hidden K)` walks D.
     `cwd` is a folder, or a list of them for a string that a conditional `cd` may run in.
 
-    The search is found behind a subshell paren, a brace group, `command`, `env`, `nice`, `sudo`, `nohup`,
-    `exec` and `xargs` (`_env_words`), and past a redirect in front of the program. Under `xargs` stdin feeds
-    xargs, so a `<`, a pipe, a path or `{}` in the command does not spare the folder. A `find` or `ls -a`
-    before the xargs names each env file under the folder it lists, and the search is refused over it
-    (`_xargs_source`). A string that `bash -c`, `sh -c`, `zsh -c`, `dash -c`, `ksh -c` or `eval` runs is a command of its own: it is cut
+    The search is found behind a subshell paren, a brace group, `command`, `env`, `nice`, `sudo`, `doas`, `nohup`,
+    `exec`, `stdbuf`, `setsid` and `xargs` (`_env_words`), and past a redirect in front of the program. `env -C DIR`
+    starts the walk in DIR (`_env_chdirs`). Under `xargs` stdin feeds xargs, so a `<`, a pipe, a path or `{}` in the
+    command does not spare the folder, and with no names on stdin xargs runs the search once on the folder it is in
+    (`_xargs_runs_empty`). A `find` or `ls -a` before the xargs names each env file under the folder it lists, and
+    the search is refused over it (`_xargs_source`). The program that a `find -exec`, `-execdir`, `-ok` or `-okdir`
+    runs is a search that gets each name find prints, and it is judged the same way (`_find_runners`). A string
+    that `bash -c`, `sh -c`, `zsh -c`, `dash -c`, `ksh -c`, `su -c` or `eval` runs is a command of its own: it is cut
     by `_substitutions` and walked from the folder the shell command runs in. An unquoted comma brace
     list in a word (`{a,b}`) is expanded as bash expands it. A path word that starts with `$PWD`,
     `${PWD}` or a `pwd` substitution is that folder. A glob word is expanded against it as the shell
@@ -2135,8 +2364,8 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
     flag's value.
 
     ACCEPTED LIMITS: a path word with any other variable or substitution is not resolved, a wrapper
-    that changes folder (`env -C`, `sudo -D`), any other wrapper, or a shell given a script file is
-    not looked through, a program other than a search that xargs feeds an env file name is not judged
+    that changes folder (`sudo -D`) is looked through but the search is walked in the folder the command
+    runs in, any other wrapper, or a shell given a script file is not looked through, a program other than a search that xargs feeds an env file name is not judged
     here, a `cd` in a `case` branch is not read, a search in the body of a heredoc is not walked, an rg `!` glob is not read,
     a brace sequence (`{a..c}`) is not expanded, past the cap a glob that no sample name matches
     (`*.py`) is allowed though a name with an env stem and a `.py` suffix would match it, a `cd` that
@@ -2158,8 +2387,7 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
             for part, segment in enumerate(_env_parts(piece)):
                 words, position, command = _env_words(segment, walk=True)
                 if command in ENV_SHELL_STRING_COMMANDS:
-                    # The string keeps its newlines, each of which ends a command.
-                    words, position, command = _env_words(segment, walk=True)
+                    # The string is one word with its newlines kept (`_env_words`), and each ends a command in it.
                     inner = _shell_string(words, position, command)
                     inner_places = []
                     inner_texts, too_deep = (_substitutions(inner, places=inner_places) if inner
@@ -2172,89 +2400,111 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
                         if refusal[0]:
                             return refusal
                     continue
-                grep = command in ENV_GREP_COMMANDS + (ENV_GREP_RECURSIVE_COMMAND,)
-                if not (command in ENV_WALK_COMMANDS or grep):
-                    continue
-                # Bash expands an unquoted brace list before the search sees its words.
-                words = words[:position + 1] + [e for w in words[position + 1:] for e in _brace_expand(w)]
-                skip, _, hidden, plain, no_ignore, extras = _pattern_words(
-                    words, position, "grep" if grep else command)
-                if extras["lists_files"]:
-                    continue
-                heres = _folders_at(pieces, number, text_folders[index], ends)
-                via_xargs = "xargs" in (_wrapper_name(w.rsplit("/", 1)[-1].rsplit("\\", 1)[-1])
-                                        for w in words[:position])
-                # Whether the search reads env files inside a folder it is given. grep does only with -r.
-                # With no hidden flag, rg reads a dotfile only when a positive glob picks it, and the walk
-                # judges each glob against the env files it finds. Every env file name is a dotfile.
-                reads_folders = ((command == ENV_GREP_RECURSIVE_COMMAND or _grep_recursive(words, position))
-                                 if grep else bool(hidden or extras["globs"] or extras["types"]))
-                if grep:
-                    rules, exclude_dir = _grep_globs(words, position)
-                else:
-                    rules, exclude_dir = (_rg_rules(extras) if command == "rg" else []), ()
-                # Under xargs, stdin feeds xargs and not the search, and the names it reads are appended
-                # as paths, so a path or `{}` in the command does not spare the folder.
-                sources = {here: _xargs_source(pieces, ends, number, part, here, reads_folders,
-                                               (rules, exclude_dir, grep, no_ignore)) for here in heres
-                           } if via_xargs else {}
-                for here, (listed, _, _) in sources.items():
-                    if listed == ENV_TOO_LARGE:
-                        return ENV_WALK_LARGE_REASON, "xargs is fed names from '%s', which is past the walk cap" % here
-                    if listed:
-                        return ENV_WALK_REASON_FED, "xargs is fed the env file '%s'" % listed
-                if not reads_folders:
-                    continue
-                # Past the cap an rg type is refused: its globs name a suffix, which an env stem can carry.
-                cap_clear = (grep or not extras["types"]) and _rules_skip_env(rules)
-                for here in heres:
-                    # A `<` and the word after it are stdin, not a path the search reads.
-                    paths = [i for i in plain if i not in skip and i != extras["pattern"]
-                             and words[i] != "<" and words[i - 1] != "<"]
-                    # Each (folder, operand as grep receives it). A folder no operand names, such as the
-                    # cwd a grep with no path walks or one xargs feeds, has None (`_exclude_dir_skips`).
-                    folders = []
-                    head = os.path.join(here, "")
-                    for i in paths:
-                        word = re.sub(r"[\\\"']", "", words[i])
-                        rest = None if words[i].startswith("'") else _pwd_rest(word, pwd_text)
-                        if rest is not None:
-                            # grep receives the cwd's full path, which the guard does not match: None walks it.
-                            word, typed = "." + rest, None
-                        elif re.search(r"[$`]", word):
-                            continue
-                        else:
-                            typed = os.path.expanduser(word)
-                        target = os.path.join(here, os.path.expanduser(word))
-                        # A quoted glob is no glob to the shell, so it is not expanded.
-                        expand = re.search(r"[*?\[]", word) and words[i] == word
-                        for f in glob.glob(target) if expand else [target]:
-                            # The shell hands grep each match as the glob was typed: relative unless absolute.
-                            given = typed
-                            if expand and typed is not None:
-                                given = f[len(head):] if not os.path.isabs(typed) and f.startswith(head) else f
-                            if os.path.isdir(f) and (f, given) not in folders:
-                                folders.append((f, given))
+                # A find that runs a program with `-exec` hands it each name it prints: that program is the search,
+                # fed as xargs feeds one (`_feed_source`). Any other command is the search itself.
+                feed = None
+                searches = [(words, position, command)]
+                if command == "find":
+                    searches, feed = _find_runners(words, position)
+                for words, position, command in searches:
+                    grep = command in ENV_GREP_COMMANDS + (ENV_GREP_RECURSIVE_COMMAND,)
+                    if not (command in ENV_WALK_COMMANDS or grep):
+                        continue
+                    # Bash expands an unquoted brace list before the search sees its words.
+                    words = words[:position + 1] + [e for w in words[position + 1:] for e in _brace_expand(w)]
+                    skip, _, hidden, plain, no_ignore, extras = _pattern_words(
+                        words, position, "grep" if grep else command)
+                    if extras["lists_files"]:
+                        continue
+                    heres = _folders_at(pieces, number, text_folders[index], ends)
+                    for moved in _env_chdirs(words, position):
+                        # `env -C DIR` runs the search in DIR, which a `$` or a backtick leaves unresolved.
+                        heres = [here if re.search(r"[$`]", moved)
+                                 else os.path.normpath(os.path.join(here, os.path.expanduser(moved)))
+                                 for here in heres]
+                    via_xargs = "xargs" in (_wrapper_name(w.rsplit("/", 1)[-1].rsplit("\\", 1)[-1])
+                                            for w in words[:position])
+                    # Whether the search reads env files inside a folder it is given. grep does only with -r.
+                    # With no hidden flag, rg reads a dotfile only when a positive glob picks it, and the walk
+                    # judges each glob against the env files it finds. Every env file name is a dotfile.
+                    reads_folders = ((command == ENV_GREP_RECURSIVE_COMMAND or _grep_recursive(words, position))
+                                     if grep else bool(hidden or extras["globs"] or extras["types"]))
+                    if grep:
+                        rules, exclude_dir = _grep_globs(words, position)
+                    else:
+                        rules, exclude_dir = (_rg_rules(extras) if command == "rg" else []), ()
+                    # Under xargs, stdin feeds xargs and not the search, and the names it reads are appended
+                    # as paths, so a path or `{}` in the command does not spare the folder. Under `find -exec`
+                    # the search gets each name find prints as a path of its own, as `{}`.
+                    narrowing = (rules, exclude_dir, grep, no_ignore)
                     if via_xargs:
-                        _, walks_here, named = sources[here]
-                        folders += [(d, None) for d in named if (d, None) not in folders]
-                        folders += [(here, None)] * (walks_here and (here, None) not in folders)
-                    elif len(paths) <= extras["unknown"] and (
-                            grep or not ((fed and part == 0) or "<" in words)):
-                        folders += [(here, None)] * ((here, None) not in folders)
-                    for folder, given in folders:
-                        found = _search_walk(folder, here, rules, exclude_dir, grep, no_ignore, given)
-                        if found == ENV_TOO_LARGE and cap_clear:
-                            continue
-                        if found == ENV_TOO_LARGE:
+                        empty = _xargs_runs_empty(words, position)
+                        sources = {here: _xargs_source(pieces, ends, number, part, here, reads_folders, narrowing,
+                                                       empty) for here in heres}
+                    elif feed is not None:
+                        sources = {here: _feed_source("find", feed, here, reads_folders, narrowing) for here in heres}
+                    else:
+                        sources = {}
+                    lister = "xargs is fed" if via_xargs else "find -exec is fed"
+                    for here, (listed, _, _) in sources.items():
+                        if listed == ENV_TOO_LARGE:
                             return (ENV_WALK_LARGE_REASON,
-                                    "'%s' %s walks '%s', which is past the walk cap"
-                                    % (command, "recursive" if grep else "with a hidden flag", folder))
-                        if found:
-                            return (ENV_GREP_WALK_REASON if grep else ENV_WALK_REASON,
-                                    "'%s' %s walks '%s', which holds '%s'"
-                                    % (command, "recursive" if grep else "with a hidden flag", folder,
-                                       found))
+                                    "%s names from '%s', which is past the walk cap" % (lister, here))
+                        if listed:
+                            return (ENV_WALK_REASON_FED if via_xargs else ENV_WALK_REASON_EXEC,
+                                    "%s the env file '%s'" % (lister, listed))
+                    if not reads_folders:
+                        continue
+                    # Past the cap an rg type is refused: its globs name a suffix, which an env stem can carry.
+                    cap_clear = (grep or not extras["types"]) and _rules_skip_env(rules)
+                    for here in heres:
+                        # A `<` and the word after it are stdin, not a path the search reads.
+                        paths = [i for i in plain if i not in skip and i != extras["pattern"]
+                                 and words[i] != "<" and words[i - 1] != "<"]
+                        # Each (folder, operand as grep receives it). A folder no operand names, such as the
+                        # cwd a grep with no path walks or one xargs feeds, has None (`_exclude_dir_skips`).
+                        folders = []
+                        head = os.path.join(here, "")
+                        for i in paths:
+                            word = re.sub(r"[\\\"']", "", words[i])
+                            rest = None if words[i].startswith("'") else _pwd_rest(word, pwd_text)
+                            if rest is not None:
+                                # grep receives the cwd's full path, which the guard does not match: None walks it.
+                                word, typed = "." + rest, None
+                            elif re.search(r"[$`]", word):
+                                continue
+                            else:
+                                typed = os.path.expanduser(word)
+                            target = os.path.join(here, os.path.expanduser(word))
+                            # A quoted glob is no glob to the shell, so it is not expanded.
+                            expand = re.search(r"[*?\[]", word) and words[i] == word
+                            for f in glob.glob(target) if expand else [target]:
+                                # The shell hands grep each match as the glob was typed: relative unless absolute.
+                                given = typed
+                                if expand and typed is not None:
+                                    given = f[len(head):] if not os.path.isabs(typed) and f.startswith(head) else f
+                                if os.path.isdir(f) and (f, given) not in folders:
+                                    folders.append((f, given))
+                        if via_xargs:
+                            _, walks_here, named = sources[here]
+                            folders += [(d, None) for d in named if (d, None) not in folders]
+                            folders += [(here, None)] * (walks_here and (here, None) not in folders)
+                        elif len(paths) <= extras["unknown"] and (
+                                grep or not ((fed and part == 0) or "<" in words)):
+                            folders += [(here, None)] * ((here, None) not in folders)
+                        for folder, given in folders:
+                            found = _search_walk(folder, here, rules, exclude_dir, grep, no_ignore, given)
+                            if found == ENV_TOO_LARGE and cap_clear:
+                                continue
+                            if found == ENV_TOO_LARGE:
+                                return (ENV_WALK_LARGE_REASON,
+                                        "'%s' %s walks '%s', which is past the walk cap"
+                                        % (command, "recursive" if grep else "with a hidden flag", folder))
+                            if found:
+                                return (ENV_GREP_WALK_REASON if grep else ENV_WALK_REASON,
+                                        "'%s' %s walks '%s', which holds '%s'"
+                                        % (command, "recursive" if grep else "with a hidden flag", folder,
+                                           found))
     return "", ""
 
 
