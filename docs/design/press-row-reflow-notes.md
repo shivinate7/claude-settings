@@ -120,19 +120,22 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
 - The tab bar is one row that scrolls on its own. A tab is never wider than the strip (`.tabs` is a size container; each tab has
   `max-inline-size: calc(100cqw + var(--in-l) + var(--in-r))` and `overflow-wrap: anywhere`). 100cqw is the bar's content box, 32 px
   narrower than the strip, so the cap adds back the bar's side padding (`--in-l`, `--in-r`, the `.in` gutters). A label wraps inside its
-  tab, and a word breaks mid-word only where it is wider than the strip less the tab's own padding. Measured on the built page (widths
-  180 to 520 and up, in the 23 steps of the harness): "Questions" breaks at 180 to 200 wide at 200% text and at 180 to 260 at 300%;
-  "Designs" breaks at 180 to 220 at 300%; "Status" and every label at 100%, 150% and 390 wide or more never break. A lone letter
-  appears at 190 to 200 wide at 200% ("Question|s") and at 260 at 300%, and at 210 to 220 at 300% for "Designs" ("Design|s"). The page
+  tab. A word breaks mid-word when it does not fit its line, and a word narrower than the strip can break too, because the count chip
+  shares the line: "Questions" is 157 px against 166 to 186 px of room at 180 to 200 wide at 200% text. Measured on the built page
+  (the 23 harness widths: 180, 190, 200, 210, 220, 240, 260, 280, 300, 320, 360, 390, 430, 480, 520, 540, 560, 600, 640, 700, 820, 1024
+  and 1280; 225, 230, 250, 270 and 275 added for the range ends): "Questions" breaks at 180 to 200 wide at 200% text and at 180 to 270
+  at 300%; "Designs" breaks at 180 to 230 at 300%; "Status" and every label at 100%, 150% and 390 wide or more never break. A lone
+  letter appears at 190 to 200 wide at 200% ("Question|s") and at 260 to 270 at 300%, and at 210 to 230 at 300% for "Designs"
+  ("Design|s"). A named limit; fix: step `page-narrow-breaks-rest`. The page
   before this lane never broke a tab label: its tab ran wider than the strip, and the bar scrolled. When the Designs sheet closes,
   `revealTab()` scrolls the selected tab fully into the bar, as a tab press does.
 - The Designs sheet's head wraps (`.dsh-head .in`, `flex-wrap: wrap`). The title's basis is 0 and its floor is 4em (`min-width: 4em`),
   so the row breaks where the buttons leave the title under 4em. The title keeps the first line, alone if no button fits beside it.
   Then the last buttons take a second line and Close sits at its end, inside the window. Prev and Next sit in one box (`.dnav`), so they
   wrap as a pair, never one on each row. The head takes a third row
-  at 180 to 210 wide at the default text and at 150%, 180 to 220 at 200% and 180 to 280 at 300% (measured at 180, 190, 200, 210, 220,
-  then 240 to 300 in steps of 20, on the built page). Row 3 holds Close alone at 180 to 210 at the default text and at 150%, and at 260
-  to 280 at 300%. It holds Open full size and Close at 180 to 220 at 200% and at 180 to 240 at 300%.
+  at 180 to 210 wide at the default text, at 125% and at 150%, 180 to 220 at 200% and 180 to 280 at 300% (measured at 180, 190, 200,
+  210, 220, then 240 to 300 in steps of 20, on the built page). Row 3 holds Close alone at 180 to 210 at the default text, at 125% and
+  at 150%, and at 260 to 280 at 300%. It holds Open full size and Close at 180 to 220 at 200% and at 180 to 240 at 300%.
 - The title's text grows with the root size, `min(1.0625rem, 24cqw)`: 17 px at the default text, 21.25 px at 125%, 25.5 px at 150%, 34 px
   at 200%. The cap, 24% of the head's content width, keeps 4em of the title inside one line of the head. It sets the size only at large
   text in a narrow window: at 300%, 35.5 px at 180 wide, 40.3 at 200, 45.1 at 220 and 49.9 at 240, not 51 px. There the title is
@@ -168,15 +171,16 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   180 to 290 wide tripled, and ran it past the window at 180 to 190 doubled and 180 to 260 tripled.
 - The failure line breaks inside "(permission|-denied)" at 180 wide at 100% text, 180 to 200 at 125%, 180 to 225 at 150%, 180 to 270 at
   200% and 180 to 360 at 300%. PR 2383 broke it after the hyphen. The cause is the 88 px `.sline.dline` column at 180 wide at 100%.
-  A named limit; fix: step page-narrow-word-breaks.
-  The failure lines also break inside "dismissed" ("Not dis|missed"), "restored" and "(permission" ("(per|mission") at 180 to 190 wide at
+  A named limit; fix: step `page-narrow-breaks-rest`.
+  The failure lines also break inside "denied" ("denie|d") at 180 wide at 200% and at 210 to 230 at 300% ("deni|ed" or "den|ied" at 180
+  to 205 at 300%), and inside "dismissed" ("Not dis|missed"), "restored" and "(permission" ("(per|mission") at 180 to 190 wide at
   150%, 180 to 220 at 200% and 180 to 300 at 300% ("(permission" to 210 at 150%, 240 at 200% and 320 at 300%; "restored" at 180 at
   150%, 180 to 200 at 200% and 180 to 260 at 300%). The page before this lane did not break these words and ran past the window there:
   the page scrolled sideways at 180 to 190 at 150%, 180 to 220 at 200% and 180 to 320 at 300%.
 - Departs from: the page before this lane (PR 2383's head) in eight places, as window widths in 10 px steps (5 px under 225). Folded rows with Dismiss or Restore take the phone
   arrangement at 530 to 670 at the default text, 650 to 830 and 970 to 1100 at 125%, and 770 to 960 and from 1040 up to 1920 at 150%.
   The Designs head takes a second row at 220 to 320 and 530 to 620 at the default text, 220 to 340 and 650 to 730 at 125%, and 220 to
-  360 and 770 to 840 at 150%; its title is larger at every width at 125% and 150%. Its third row is new at 180 to 210 at the default text and at
+  360 and 770 to 840 at 150%; its title is larger at every width at 125% and 150%. Its third row is new at 180 to 210 at the default text, at 125% and at
   150%, 180 to 220 doubled and 180 to 280 tripled (Close alone, or with Open full size at 180 to 220 doubled and 180 to 240 tripled). The position "1/2" is smaller than before at 180 to 230 wide tripled (35.5
   to 47.5 px, not 48), where it takes the title's cap. The bar status takes its own line at 180 to 205 at
   the default text, 210 to 230 at 125%, 240 to 260 at 150% and at 300 at 200% (it did before at 180 to 205 at 125%, 180 to 230 at 150% and 180 to 280 at 200%). The
