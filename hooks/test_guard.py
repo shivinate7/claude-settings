@@ -14832,6 +14832,9 @@ sh("builder join: a TemporaryDirectory held in a variable, joined through .name 
 # reads_test.py only reads one. SCRIPTREPO is one real checkout that holds every script the cases run.
 SCRIPTREPO = os.path.join(ROOT, "scriptrepo")
 SCRIPTFRESH = os.path.join(SCRIPTREPO, "fresh")   # empty, so no probe.py sits beside the heredoc case
+# A linked worktree of SCRIPTREPO, nested as the harness nests a lane. `..` from its root is the primary's
+# .claude/worktrees folder, inside the primary checkout: a write there is a write into another checkout.
+SCRIPTWT = os.path.join(SCRIPTREPO, ".claude", "worktrees", "scriptlane")
 SB = dict(B, cwd=SCRIPTREPO)   # a builder, run in SCRIPTREPO
 SA = dict(A, cwd=SCRIPTREPO)   # a test-author, run in SCRIPTREPO
 
@@ -14850,17 +14853,26 @@ def _build_scriptrepo():
         "scan/block.js": "const fs = require('fs');\nconst g = '/*'; fs.writeFileSync('tests/test_x.js', 'x');\n",
         "scan/quote.py": "print(\"Don't stop\")\nopen('tests/test_x.py', 'w').write('x')\n",
         "probe_dir.py/notes.txt": "a folder named like a script\n",
+        # __file__ and __dirname bind to the script's own folder, so `..` from tools/ is the repo itself.
+        "tools/regen.py": "import os\nopen(os.path.join(os.path.dirname(__file__), '..', 'tests', 'golden.json'),\n"
+                          "     'w').write('{}')\n",
+        "tools/gen.js": "const fs = require('fs');\nconst path = require('path');\n"
+                        "fs.writeFileSync(path.join(__dirname, '..', 'tests', 'x.js'), 'x');\n",
+        "tools/build.py": "import os\nopen(os.path.join(os.path.dirname(__file__), '..', 'dist', 'out.txt'),\n"
+                          "     'w').write('x')\n",
     })
+    run_vcs(SCRIPTREPO, "worktree", "add", "-q", SCRIPTWT, "-b", "scriptlane")
     os.makedirs(SCRIPTFRESH, exist_ok=True)
     # The scope before the subject: a case expects these to be there, or to be absent.
     if (os.listdir(SCRIPTFRESH) or os.path.exists(os.path.join(SCRIPTREPO, "tools", "missing.py"))
             or not os.path.isfile(os.path.join(SCRIPTREPO, "probe.py"))
-            or not os.path.isdir(os.path.join(SCRIPTREPO, "probe_dir.py"))):
+            or not os.path.isdir(os.path.join(SCRIPTREPO, "probe_dir.py"))
+            or not os.path.isfile(os.path.join(SCRIPTWT, "tools", "build.py"))):
         sys.exit("fixture setup failed in _build_scriptrepo: %r lacks the scripts the cases name"
                  % SCRIPTREPO)
 
 
-lazy_fixture([SCRIPTREPO], _build_scriptrepo)
+lazy_fixture([SCRIPTREPO, SCRIPTWT], _build_scriptrepo)
 
 # RED: the write is in the script's body, and the shell call runs that body by name, by path, after a cd,
 # or with a heredoc that writes it in the same command. Each must be refused as a heredoc body is.
@@ -14903,6 +14915,28 @@ sh("builder script file: a run named in a trailing # comment is allowed",
    "ls  # python3 probe.py", "allow", **SB)
 sh("builder script file: a run named in a double-quoted string with an apostrophe is allowed",
    "echo \"don't run python3 probe.py\"", "allow", **SB)
+
+# RED, a heredoc that adds to a script file: the file's own body on disk is judged, and each body the
+# command writes to it is judged, not the first one only. A heredoc body never hides the file it adds to.
+sh("builder script file: a heredoc that appends to a script whose own body writes a test path, then runs it, is refused",
+   "cat >> probe.py <<'EOF'\nprint(1)\nEOF\npython3 probe.py", "deny", rule=BT, **SB)
+sh("builder script file: a tee -a heredoc that appends to a script whose own body writes a test path, is refused",
+   "tee -a probe.py <<'EOF'\nprint(1)\nEOF\npython3 probe.py", "deny", rule=BT, **SB)
+sh("builder script file: two heredocs to one script, the second body writing a test path, then a run, is refused",
+   "cat > d.py <<'EOF'\nprint(1)\nEOF\ncat >> d.py <<'EOF'\nopen('tests/test_x.py', 'w').write('x')\nEOF\n"
+   "python3 d.py", "deny", rule=BT, **dict(SB, cwd=SCRIPTFRESH))
+# RED, the script's own folder: __file__ and __dirname are the folder of tools/, so `..` climbs to the repo
+# and its tests folder. Each write lands in a test path, and must be refused.
+sh("builder script file: a python script writing os.path.join(dirname(__file__), '..', 'tests') is refused",
+   "python3 tools/regen.py", "deny", rule=BT, **SB)
+sh("builder script file: a node script writing path.join(__dirname, '..', 'tests') is refused",
+   "node tools/gen.js", "deny", rule=BT, **SB)
+# GREEN, any role: a script run from a linked worktree that writes dist/ by __file__ lands in that same
+# checkout, so it is no write into another checkout and no test path. A test-author's run is allowed too.
+sh("builder script file: a script run from a worktree, writing dist by __file__ in that checkout, is allowed",
+   "python3 tools/build.py", "allow", **dict(B, cwd=SCRIPTWT))
+sh("builder script file: a test-author running the same worktree script, writing dist, is allowed",
+   "python3 tools/build.py", "allow", **dict(A, cwd=SCRIPTWT))
 
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
