@@ -11414,11 +11414,11 @@ RR_REMEDY_LABEL = ("review-record-after-round: every merge command the design-re
                    "--review-record, --head, --kind, --guard and --round")
 
 
-# The pull request a reviewer brief names (rule review-needs-pr, decision pr-review-record). A reviewer or
-# design-reviewer spawn by an orchestrator (no agent_id) whose brief carries a review-round marker (`Round N of 3`,
-# BRIEF_MARKERS kind round) is refused when the brief names no pull request: `PR #<n>`, `PR <n>`, `PR: <n>`,
+# The pull request a reviewer brief names (rule review-needs-pr, decision pr-review-record). An orchestrator's spawn
+# (no agent_id) of `reviewer` is refused when its brief names no pull request: `PR #<n>`, `PR <n>`, `PR: <n>`,
 # `PR (#<n>)`, `PR number <n>`, `pull request #<n>`, or a github.com pull URL. `#<n>` alone is an issue and does
-# not count. A brief with no round marker is not judged: a blind design-review brief names pages only. The rule
+# not count. A `design-reviewer` spawn is judged only when its brief carries a review-round marker (`Round N of 3`,
+# BRIEF_MARKERS kind round); a design-reviewer brief with no marker is not judged. The rule
 # reads the git config at the payload's cwd only: a linked worktree's `.git` file leads to the common config. A repo
 # with no GitHub remote is exempt, and so is a config the rule cannot read. A github.com remote and a cloud proxy
 # origin both count as GitHub remotes. A builder or Explore spawn is not judged.
@@ -11459,8 +11459,7 @@ NPR_GITLAB_COM = "https://gitlab.com/owner/repo.git"
 NPR_PROXY_ELSEWHERE = "http://local_proxy@203.0.113.7:1234/git/owner/name"
 # A github url under a section that is not a remote (a submodule), with no remote section at all.
 NPR_SUBMODULE_CONFIG = '[submodule "vendor"]\n\turl = %s\n' % NPR_GITHUB_HTTPS
-# A reviewer brief is judged with or without a round marker. A design-reviewer brief is judged only with one, because
-# its blind read names pages and no pull request.
+# A reviewer brief is judged with or without a round marker. A design-reviewer brief is judged only with one.
 NPR_DIFF_LANE_X = "Review the diff of branch lane-x against main and report PASS or FAIL."
 NPR_PR_12 = "Review PR #12 and report PASS or FAIL."
 NPR_PULL_ONLY = "Review https://github.com/o/r/pull/12 and report PASS or FAIL."
@@ -11476,6 +11475,12 @@ NPR_CTRL_NO_PR_YET = "The lane has no PR yet. Review the diff and report PASS or
 NPR_CTRL_PRS_GOOD = "Review the diff. PRs are good practice here, so report PASS or FAIL."
 NPR_CTRL_PR_WILL_FOLLOW = "Review the diff. A PR will follow, so report PASS or FAIL."
 NPR_CTRL_PR_HASH_ONLY = "Review PR # and report PASS or FAIL."
+# Briefs whose PR word is followed by a line break and then a number: the number on the next line is not a pull request.
+NPR_LINE_BREAK_COLON = "Judge this PR:\n1. foo"
+NPR_LINE_BREAK_BLANK = "Review the PR\n\n25 lines cap"
+# A PR word, a number and more words on one line: the number is a pull request number.
+NPR_PR_OF_3 = "Review PR 2 of 3 and report PASS or FAIL."
+NPR_PAGES_AND_PR_12 = "Review the settings and billing pages and PR #12 for layout and report PASS or FAIL."
 
 
 def npr_path(name):
@@ -11569,6 +11574,10 @@ npr_refuse("a brief that names #1908 with no PR word is refused",
            "Agent", npr_spawn("reviewer", NPR_ISSUE_NUMBER_1908, "haiku"), npr_path("github-https"))
 npr_refuse("a brief that says PR review with no number is refused",
            "Agent", npr_spawn("reviewer", NPR_PR_WORD_NO_NUMBER, "haiku"), npr_path("github-https"))
+npr_refuse("a PR word at a line end, then a numbered list on the next line, names no pull request and is refused",
+           "Agent", npr_spawn("reviewer", NPR_LINE_BREAK_COLON, "haiku"), npr_path("github-https"))
+npr_refuse("a PR word, then a blank line and a number on the next paragraph, names no pull request and is refused",
+           "Agent", npr_spawn("reviewer", NPR_LINE_BREAK_BLANK, "haiku"), npr_path("github-https"))
 npr_refuse("a github remote in scp form counts: a brief that names no pull request is refused",
            "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("github-scp"))
 npr_refuse("a github remote behind a gitlab origin counts: a brief that names no pull request is refused",
@@ -11615,10 +11624,16 @@ npr_allow("a brief that names PR (#12) in parentheses is allowed",
           "Agent", npr_spawn("reviewer", NPR_PR_PAREN, "haiku"), npr_path("github-https"))
 npr_allow("a brief that names PR number 12 is allowed",
           "Agent", npr_spawn("reviewer", NPR_PR_NUMBER_WORD, "haiku"), npr_path("github-https"))
-# A blind design-review brief names pages only and carries no round marker: the rule does not judge it. It is a
-# design-reviewer brief, because a reviewer with no marker and no pull request is judged.
-npr_allow("a blind design-review brief with no round marker that names pages only is allowed",
+npr_allow("a brief that names PR 2 of 3, a number with words after it, is allowed",
+          "Agent", npr_spawn("reviewer", NPR_PR_OF_3, "haiku"), npr_path("github-https"))
+# A design-reviewer brief with no round marker is not judged, so a pages-only brief is allowed. A reviewer brief with
+# no marker is judged, so the two roles differ here.
+npr_allow("a design-reviewer brief with no round marker that names pages only is allowed",
           "Agent", npr_spawn("design-reviewer", NPR_PAGES, "opus", round_line=None), npr_path("github-https"))
+# A blind design-review read is spawned as `reviewer` (the design-review skill), so it is judged with or without a
+# marker. This one names PR #12, so it is allowed.
+npr_allow("a reviewer blind brief with no round marker that names pages and PR #12 is allowed",
+          "Agent", npr_spawn("reviewer", NPR_PAGES_AND_PR_12, "haiku", round_line=None), npr_path("github-https"))
 npr_allow("a design-reviewer brief with no round marker and no pull request is allowed",
           "Agent", npr_spawn("design-reviewer", NPR_NO_PR, "opus", round_line=None), npr_path("github-https"))
 npr_allow("a brief with no pull request is allowed in a repo whose only remote is gitlab",
