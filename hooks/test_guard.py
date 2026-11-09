@@ -5248,12 +5248,13 @@ sh("git-after-cd: a check, then && a landed cd, then && a git push, passes",
 sh("git-after-cd: a check, then && a git push, passes",
    "pytest -q && %s push" % VCS, "allow", cwd=NOGIT)
 # A CHECK JOINED BY || OR |. A push after `||` runs only when the check fails, and a `|` hides the check's status
-# (the pipe's status is its last command's), so the push after `&&` runs whatever the check did. Both refuse.
+# (the pipe's status is its last command's), so the push after `&&` runs whatever the check did. Both refuse. The
+# pipe's reason names `pipefail`, the setting that makes the pipe report the check's status.
 sh("git-after-cd: a check joined to a push by ||, then a git push -u, is refused",
    "pytest || %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
 sh("git-after-cd: a pipe into tee, then && a git push -u, is refused",
    "make check | tee l && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
-   carries=("&&",))
+   carries=("pipefail",))
 # A CHAIN OVER NEWLINES, AND COMPOUNDS. A `&&` at a line's end joins the next line, so the lines are one chain.
 # An if, a while, a set -e line and an exit guard run the push only when the check passed. A check and a push
 # inside `{ }` or `( )`, joined by `;`, run the push whatever the check did, so both forms are refused.
@@ -5411,7 +5412,8 @@ sh("git-after-cd: a check, then ; an echo of a make substitution protected by ||
    "pytest -q; echo $(make x) || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd",
    cwd=NOGIT, carries=("&&",))
 sh("git-after-cd: a check || an echo then && a git push -u, is refused",
-   "pytest -q || echo x && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+   "pytest -q || echo x && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("|| exit 1",))
 sh("git-after-cd: an if ! check whose then body is an echo of a substitution then ; exit 1, then ; a git push -u, passes",
    'if ! pytest -q; then echo "$(date)"; exit 1; fi; %s push -u origin b' % VCS, "allow", cwd=NOGIT)
 # A `|| exit` before a && chain runs the exit when the check fails, so the push after the chain is never reached.
@@ -5574,6 +5576,14 @@ sh("git-after-cd: an apostrophe in double quotes of an echo piped to cat, then &
 # none, and the push after `&&` runs on a successful commit. The control is the braced check piped to tee above, refused.
 sh("git-after-cd: a braced git commit piped to tee, then && a git push -u, passes",
    "{ %s commit -m x; } | tee l && %s push -u origin b" % (VCS, VCS), "allow", cwd=NOGIT)
+# AN IF TEST THAT PIPES A CHECK TO TAIL. The test reads tail's status, not make's, so the then branch runs on a failed
+# make, and the push there runs on that failure. Bash runs the push here, so it is refused.
+sh("git-after-cd: an if test of a check piped to tail, then a git push -u in the then branch, is refused",
+   "if make check | tail -3; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT)
+# A PRINTF PIPED TO A GIT COMMIT, THEN && A PUSH. printf runs no check, and the push waits on the commit's status, so
+# the push runs only after a commit that succeeded. No check runs before it, so it passes.
+sh("git-after-cd: a printf piped to a git commit -F, then && a git push -u, passes",
+   "printf '%s' \"$m\" | " + VCS + " commit -F - && " + VCS + " push -u origin b", "allow", cwd=NOGIT)
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
 # git-after-cd rule refuses the push after the cd, and the crash is logged as a guard crash. The planted copy
 # raises at that try. The intact copy, on the same landing cd, is the control, so the refusal can only come
