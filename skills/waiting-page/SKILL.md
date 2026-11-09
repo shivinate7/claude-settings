@@ -396,6 +396,34 @@ live page.
 7. Write the new URL into the repo's extras file, in a pull request. Set the `url` of the `waiting-page` role entry
    in `artifacts`. If the repo has no such entry, set the `waiting-page` key.
 
+## Merge a copy into a live page
+
+Use this when two accounts each wrote a page for the same repo. One account's page is live. The other account's
+export is in the repo copy. This adds the copy's missing items to the live page. The live page wins, so a live item
+is never changed.
+
+1. Check out the record branch in its own worktree and name the copy folder, as "Keep a copy in the repo" step 1 says.
+2. Fetch the live page's collections into one new folder, `<live folder>`, as "Keep a copy in the repo" step 2 says.
+   Touch `.complete` in each collection folder after its last page. A folder with no marker is `unknown`. Also read
+   the live page with `Artifact` action `read`, and use the file the read names as `<html file>`. A read that gives a
+   summary, not the raw page, is `unknown`.
+3. Make one new empty folder, `<out folder>`. Run
+   `python3 ~/.claude/skills/waiting-page/export_page.py --merge <copy folder> --live <live folder> --batches <out folder> --live-page <html file>`.
+   For an artifact other than the waiting page, add `--collections <names>`.
+4. Read the last line: `batches <k> docs <n> kept-live <s> renumbered <r> designs <d>`. `renumbered` counts the copied
+   items that took a new `n` because the live page holds theirs. Each such item's answer takes the same `n`. A copy
+   answer is skipped when the live page holds its item. An `unknown` line writes nothing. Say it in the reply.
+5. Send each `batch-NNN.json` list to the live page as one `ArtifactData batch`, in order. Each entry is a `set`.
+6. Read the live page's items back. Their count must equal the count of live items from step 2, plus the items among
+   the `<n>` written docs.
+7. Put the mockups in, on main's code ("Keep the page on main's code"). Run its read, `stale_pages.py --write` and copy
+   steps on the live page. The page that `--write` writes is main's `page.html` with the live roadmap block carried
+   over. In that page, replace the text inside the `designData` script element with `<out folder>/designData.json`,
+   as is. The file already writes each `<` as `\u003c`, so no string can close the script. Publish that page once to
+   the live URL, as that section's republish step says.
+8. Rewrite each `page item <n>` cite of the copy's account in the roadmap, with `<out folder>/renumbered.json`: the
+   key is the old `n`, and the value is the new one. Commit it on the record branch.
+
 ## Add an item
 
 0. A lane's question comes in the lane's report. Write the item from that report, with yourself as
