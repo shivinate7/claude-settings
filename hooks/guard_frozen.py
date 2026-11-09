@@ -700,12 +700,19 @@ def _folded(path, held=None):
     cannot pass through a folder that is not there yet. Where the folder exists, `..` stays for the
     filesystem to resolve, as a symlink's `..` is its target's parent. A relative path is returned as is.
     In a rooted one a `.` part is dropped first, so it is never the part a `..` removes.
+    An empty part is dropped too, except the second of a leading `//` (exactly two slashes, a UNC
+    `//server/share` root), which stays with the first as the root. Three or more leading slashes are one
+    root, as in POSIX. A rooted path that folds to nothing comes back as its root, `/` or `//`, never ''.
     `held` is set for a glob: the count of leading parts that are a literal folder. They come back escaped,
     and a later part with a glob character is never folded past, as it may match a file."""
     names = path.split("/")
     rooted = not names[0] and len(names) > 1
+    unc = path.startswith("//") and not path.startswith("///")
     kept = []
     for at, each in enumerate(names):
+        if unc and at == 1:
+            kept.append((each, False, held is not None and at < held))
+            continue
         if rooted and (each == "." or not each and 0 < at < len(names) - 1):
             continue
         foldable = held is None or at < held or not _GLOB_MAGIC.search(each)
@@ -714,7 +721,10 @@ def _folded(path, held=None):
             kept.pop()
         else:
             kept.append((each, foldable, held is not None and at < held))
-    return "/".join(glob.escape(name) if held_part else name for name, _, held_part in kept)
+    folded = "/".join(glob.escape(name) if held_part else name for name, _, held_part in kept)
+    if rooted and not folded.strip("/"):
+        return "//" if unc else "/"
+    return folded
 
 
 def _written_sources(word, cwd):
