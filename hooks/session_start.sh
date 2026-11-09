@@ -25,13 +25,12 @@ tier_line() {
 # env_path_line: puts ~/.claude/bin first on PATH for the session's later Bash calls, through the file Claude Code
 # sources first (CLAUDE_ENV_FILE), so the guard's bare `wait-until` and `wait-pid` remedies and the rm shim resolve
 # in a cloud session too, ahead of a system rm. Runs before any exit below. Writes nothing when no env file is set,
-# when PATH already starts with the folder, when the env file is a directory, or when the file already holds the
-# line. A missing file is created. A seed with no final newline gets one before the line. Cost: one append per
-# session start, no process, no timer, no log.
+# when PATH already starts with the folder, or when the file already holds the line. A missing file is created;
+# a directory or a missing folder takes no write and prints nothing. A seed with no final newline gets one before
+# the line. Cost: one append per session start, no process, no timer, no log.
 env_path_line() {
   [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -n "${HOME:-}" ] || return 0
   case "$PATH" in "$HOME/.claude/bin" | "$HOME/.claude/bin:"*) return 0 ;; esac
-  [ -d "$CLAUDE_ENV_FILE" ] && return 0
   epl_line='export PATH="$HOME/.claude/bin:$PATH"'
   epl_have=''
   epl_open=''
