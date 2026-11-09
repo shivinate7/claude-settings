@@ -1432,6 +1432,11 @@ path = os.path.join("docs", "guide.md")  # a checks suite that reads one tracked
 sys.exit(1 if os.path.exists(path) and "BROKEN" in open(path, encoding="utf-8").read() else 0)
 '''
 
+def ci_job_busy_text():
+    """bin/ci-job's HEAVY_BUSY, the text of its busy refusal, read from that file: bin/ci-job is a script, so it has no module to import."""
+    with open(os.path.join(HERE, "..", "bin", "ci-job"), encoding="utf-8") as f:
+        return re.search(r'^HEAVY_BUSY = "([^"]+)"', f.read(), re.M).group(1)
+
 class SmallBaseMove(Env):
     """Main moved, but only by paths that no CI job of the batch reads (merge-needs-current-base, step c150).
     The real ci-scope.sh and the real bin/ci-job run against a fixture workflow whose `checks` job holds one cross-file lint:
@@ -1443,12 +1448,19 @@ class SmallBaseMove(Env):
         cls.run_dir = _test_temp.run_folder()  # test-temp-standard: the plain repos below are made in this run's folder
         cls.addClassCleanup(shutil.rmtree, cls.run_dir, True)
 
-    def batch_repo(self):
-        """A plain repo: main at a base commit, and branch n with one commit, the batch head. -> (repo, the batch head's sha)."""
+    def batch_repo(self, scope=False):
+        """A plain repo: main at a base commit, and branch n with one commit, the batch head. scope: the base commit also holds the
+        real ci-scope.sh and landed-dirs.txt, so ci-scope reads main's later paths (without the list it turns every job on).
+        -> (repo, the batch head's sha)."""
         repo = tempfile.mkdtemp(dir=self.run_dir)
         sh(repo, "git", "init", "-q")
         sh(repo, "git", "checkout", "-q", "-B", "main")
-        put(os.path.join(repo, "base.txt"), "base\n"); sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "base")
+        put(os.path.join(repo, "base.txt"), "base\n")
+        if scope:
+            with open(SCOPE_SCRIPT, encoding="utf-8") as f:
+                put(os.path.join(repo, ".github", "scripts", "ci-scope.sh"), f.read())
+            put(os.path.join(repo, "landed-dirs.txt"), "hooks\n")
+        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "base")
         sh(repo, "git", "checkout", "-q", "-b", "n"); put(os.path.join(repo, "n.txt"), "N\n")
         sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "N head")
         return repo, sh(repo, "git", "rev-parse", "HEAD")
@@ -1496,6 +1508,38 @@ class SmallBaseMove(Env):
         refusal, _ = merge.holds_base(repo, "main", n_head)
         self.assertIsNotNone(refusal)
         self.assertIn("does not hold main", refusal)
+
+    def small_move_with_a_lint_run(self, lines, rc):
+        """A batch head that lacks main's tip, with main moved by a docs file only, so small_base_move reaches its lint run. That run
+        is a stand-in script (merge.CI_JOB) that prints `lines` and exits `rc`, and logs each call's argv. -> (holds_base's refusal,
+        its why, the stand-in's call log)."""
+        repo, n_head = self.batch_repo(scope=True)
+        sh(repo, "git", "checkout", "-q", "main"); put(os.path.join(repo, "docs", "guide.md"), "# Guide\n")
+        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "main adds a doc")
+        sh(repo, "git", "checkout", "-q", "n")  # small_base_move merges the tip into the worktree's HEAD, which must be the head
+        folder = tempfile.mkdtemp(dir=self.run_dir)
+        calls = os.path.join(folder, "calls.txt")
+        stand_in = os.path.join(folder, "ci_job_stand_in.py")
+        put(stand_in, "import sys\nwith open(%r, 'a', encoding='utf-8') as f:\n    f.write(' '.join(sys.argv) + '\\n')\n"
+                      "for line in %r:\n    print(line)\nsys.exit(%d)\n" % (calls, lines, rc))
+        with unittest.mock.patch.object(merge, "CI_JOB", stand_in), tempfiles_in_run_folder():
+            refusal, why = merge.holds_base(repo, "main", n_head)
+        return refusal, why, calls
+
+    def test_a_lint_run_refused_as_busy_is_no_stale_head_and_never_says_merge_the_base(self):
+        """A lint run that finds another heavy run holding the lock never ran, so its exit 2 says nothing about the merge. The result
+        must not call the head stale and tell the reader to merge main into the branch: that remedy is for a head that lacks main's tip."""
+        busy = "unknown %s (4242 bin/ci-job checks --lint --base main); run one at a time and retry when it ends" % ci_job_busy_text()
+        refusal, why, calls = self.small_move_with_a_lint_run([busy], 2)
+        result = refusal or why or ""
+        self.assertTrue(os.path.exists(calls), "precondition: the lint run never ran, so the busy line was never read: " + result)
+        self.assertNotIn("Merge main into the branch", result, "a busy lint run reads as a stale head and gives the stale-head remedy: " + result)
+
+    def test_a_lint_run_that_really_fails_on_the_same_small_move_is_still_a_refusal(self):
+        """The control for the busy case: the same batch and main move, with a lint that really fails. Its verdict reaches the result."""
+        refusal, why, calls = self.small_move_with_a_lint_run(["FAIL           comment narration (exit 1)"], 1)
+        self.assertTrue(os.path.exists(calls), "precondition: the lint run never ran: " + (refusal or why or ""))
+        self.assertIn("the lints of the merge are not all PASS", refusal or "", "a failing lint no longer refuses the small move: " + str(why))
 
     def test_a_batch_rename_of_a_path_main_changed_is_a_shared_path(self):
         # --no-renames in small_base_move: the batch's rename names its old path too, so main's change to base.txt is shared.
