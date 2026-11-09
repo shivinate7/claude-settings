@@ -5883,7 +5883,7 @@ sh("check-tail: ci-job checks | tail -3& echo $!, a glued & mid-line with the pi
    "ci-job checks | tail -3& echo $!", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: ci-job checks|tail&echo done, a glued & mid-line with no pid, is refused; "
    "detached-launch refuses it first", "ci-job checks|tail&echo done", "deny", "detached-launch", cwd=NOGIT)
-# Controls for that reading, each held in the foreground and each allowed on fd92ee52a. A `&` that is no job
+# Controls for that reading, each held in the foreground and each allowed on the code before this change. A `&` that is no job
 # is a `&&`, a quoted `&`, a redirect's `&`, or the `&` of `|&`. None of these may turn into a background job.
 sh("check-tail: a&&b, an && glued to both words, is allowed", "a&&b", "allow", cwd=NOGIT)
 sh("check-tail: x |& tail, the & of |& is a pipe, is allowed", "x |& tail", "allow", cwd=NOGIT)
@@ -8501,7 +8501,7 @@ rm_parent("rm -rf ..& is refused by detached-launch", "rm -rf ..&", rule="detach
 # With a pid captured on the same line, detached-launch does not refuse the job (bare_background_hit returns on
 # `$!`), as it does not refuse the spaced `rm -rf .. & echo $!`. That spaced form is refused by destructive-delete,
 # so this glued form is too. destructive-delete reads no target glued to a shell operator (above), so this row
-# is red on fd92ee52a, and a fix to the job reader alone leaves it red.
+# is red on the code before this change, and a fix to the job reader alone leaves it red.
 rm_parent("rm -rf ..& echo $!, a glued & with the pid captured, is refused by destructive-delete",
           "rm -rf ..& echo $!", rule="destructive-delete")
 # `&>` redirects both streams, so `..` is the target and the delete is refused by destructive-delete. Only
