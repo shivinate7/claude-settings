@@ -15847,9 +15847,13 @@ class ReviewStampSince(unittest.TestCase):
         return subprocess.run(["git", "-C", root, *args], check=True, capture_output=True, env=env)
 
     def test_a_failed_salt_read_stops_naming_the_read(self):
-        # not a repository: git log fails. A read that could not run is no "no salt commit" answer, so the cutover stops the run
-        root = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
-        self.addCleanup(shutil.rmtree, root, True)
+        # A real repo, with a .git, whose origin/main names a commit the repo does not hold, so git log fails. The no-.git Stop has its own
+        # case. A read that could not run is no "no salt commit" answer, so the cutover stops naming the read.
+        root = self.repo(salt_at=2)
+        with open(os.path.join(root, ".git", "refs", "remotes", "origin", "main"), "w") as f:
+            f.write("0123456789abcdef0123456789abcdef01234567\n")
+        self.assertNotEqual(subprocess.run(["git", "-C", root, "log", "-1", "origin/main"], capture_output=True).returncode, 0,
+                            "the fixture's origin/main still reads, so git log does not fail")
         with self.assertRaises(merge.Stop) as cm:
             review_fn(self, "review_stamp_since")(root, "main")
         self.assertIn("origin/main", str(cm.exception), "the Stop does not name the read of origin/main:\n" + str(cm.exception))
