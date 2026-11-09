@@ -12753,6 +12753,10 @@ sh("frozen shell: a chain past the walk limit, then a later cd into the docs fol
    "allows [reset pin]", "true && cd " + CFG_SUB_DIR + " && cd " + CFG_DOCS_DIR + " && cd " + CFG_SUB_DIR
    + " && cd " + CFG_DOCS_DIR + " && cd " + slash(CFG) + "; cd " + CFG_DOCS_DIR + "; sed -i s/a/b/ settings.json",
    "allow", cwd=NOGIT)
+# A cd after && may not run, but a failed one stops the chain, so the sed runs only in the docs folder. Only a settings.json
+# at the config root is frozen, so the write under the docs folder is allowed.
+sh("frozen shell: cd into the config folder && cd docs && sed -i on settings.json there, which is not frozen, allows "
+   "[and-chain red]", "cd " + slash(CFG) + " && cd docs && sed -i s/a/b/ settings.json", "allow", cwd=NOGIT)
 # A repository's own docs/CLAUDE.md is not the config CLAUDE.md: CONFIG_FROZEN_FILES freezes a CLAUDE.md only at the
 # config root. Either way the sed, if it runs, writes the clone's own docs/CLAUDE.md, which is not frozen.
 sh("frozen shell: make && cd docs && sed -i on CLAUDE.md in the clone's docs folder is allowed [false alarm pin]",
