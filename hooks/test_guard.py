@@ -10213,6 +10213,32 @@ _PRUNE_NAMED_FOLDER = "find . -path ./node_modules -prune -o -name sub -print | 
 sh("env: walk safety hole, find names the sub folder that holds an env file, grep -r reads it, refused: "
    + _PRUNE_NAMED_FOLDER, _PRUNE_NAMED_FOLDER, "deny", "env-file", cwd=ENVWALK_NESTED)
 
+# A -name glob that no env file name fits names no env file, so a folder past the walk cap is not refused for its size.
+# find prints the folders it matches too, and grep without -r reads no folder, so nothing printed is read. The control
+# names the same folder with -type f, which prints no folder, and it stays allowed.
+_FIND_NAME_LARGE = "find . -name 'a1*' | xargs grep K"
+sh("env: walk false alarm, find -name a1* over a folder past the cap with no env file, allowed: " + _FIND_NAME_LARGE,
+   _FIND_NAME_LARGE, "allow", cwd=ENVWALK_LARGE)
+_FIND_TYPE_F_LARGE = "find . -type f -name 'a1*' | xargs grep K"
+sh("env: walk control, find -type f -name a1* over a folder past the cap, allowed: " + _FIND_TYPE_F_LARGE,
+   _FIND_TYPE_F_LARGE, "allow", cwd=ENVWALK_LARGE)
+
+# rg reads no hidden file without --hidden, and the env file below sub is hidden. find -maxdepth 1 names sub, and
+# rg reads only the visible files in it, so the walk allows it. --hidden reads that file, so it stays refused. The
+# grep -r form of this pipe is refused by _MAXDEPTH_ONE_FOLDERS above.
+_MAXDEPTH_ONE_RG = "find . -maxdepth 1 | xargs rg K"
+sh("env: walk false alarm, find -maxdepth 1 names sub, rg reads no hidden env file below it, allowed: "
+   + _MAXDEPTH_ONE_RG, _MAXDEPTH_ONE_RG, "allow", cwd=ENVWALK_NESTED)
+_MAXDEPTH_ONE_RG_HIDDEN = "find . -maxdepth 1 | xargs rg --hidden K"
+sh("env: walk pin, find -maxdepth 1 names sub, rg --hidden reads the env file below it, refused: "
+   + _MAXDEPTH_ONE_RG_HIDDEN, _MAXDEPTH_ONE_RG_HIDDEN, "deny", "env-file", cwd=ENVWALK_NESTED)
+
+# grep without -r reads no folder it is given, so the sub folder that find names is not read, and the env file below it
+# is not read either.
+_MAXDEPTH_ONE_GREP = "find . -maxdepth 1 | xargs grep K"
+sh("env: walk false alarm, find -maxdepth 1 names sub, grep without -r reads no folder, allowed: " + _MAXDEPTH_ONE_GREP,
+   _MAXDEPTH_ONE_GREP, "allow", cwd=ENVWALK_NESTED)
+
 # A -print prints each name before a later test runs, so a name test after -print does not bound the names printed.
 _PRINT_THEN_NAME = "find . -print -name '*.js' | xargs grep K"
 sh("env: walk pin, find -print before -name '*.js' prints every name, refused: " + _PRINT_THEN_NAME, _PRINT_THEN_NAME,
