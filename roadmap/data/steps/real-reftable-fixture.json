@@ -1,11 +1,11 @@
 {
   "title": "The reftable test uses a real reftable store",
   "why": "Lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), from #2419 round 1 record 6737973073 (tests for #2308, push-new-branch), 04:41 CST Nov 9: fixture REF_REFTABLE (hooks/test_guard.py) is an empty folder in a files-backend repo, not git's reftable store, so it pins routing only. A guard that reads refs on a reftable repo is untested.",
-  "note": "A real reftable fixture needs git 2.45 or later in CI; the cloud sandbox has 2.43. Filed 04:41 CST Nov 9. Lane session_013NEJKzMBfrPdhX9rxFg8p8 started 12:13 CST Nov 9 (coordinator).",
+  "note": "A real reftable fixture needs git 2.45 or later in CI; the cloud sandbox has 2.43. Filed 04:41 CST Nov 9. Lane session_013NEJKzMBfrPdhX9rxFg8p8 started 12:13 CST Nov 9 (coordinator). Back to todo 12:18 CST Nov 9 (coordinator): starts after #2419 merges; its lane session_013NEJKzMBfrPdhX9rxFg8p8 stays idle until then.",
   "phase": "next",
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
   "lane": "session_013NEJKzMBfrPdhX9rxFg8p8",
-  "status": "doing",
+  "status": "todo",
   "order": 903,
-  "updatedAt": "2026-11-09T12:11:00-06:00"
+  "updatedAt": "2026-11-09T12:14:00-06:00"
 }

@@ -1,11 +1,11 @@
 {
   "title": "A test or skill step that names a JSON escape keeps the escape, not the decoded character",
   "why": "Lane artifact-pages-other-account (session_013NEJL49cWWQx8kXJAVpNoi), 05:23 CST Nov 9: the six-character JSON escape for the less-than sign (a backslash, then u003c) was decoded to a raw less-than sign on its way through tool text 4 times in one step: in a brief, in a test check (#2424, test_export_page.py near line 1487), in a SKILL.md step, and in a builder's first Edit. The result is a check that tests for the wrong byte, and a SKILL step that says to write the character as itself.",
-  "note": "Workaround that worked: build the escape in code (chr(92) + \"u003c\") and check the bytes with `od -c`. Guard idea from the lane: a lint that flags a raw less-than sign written as the escape's spelling beside the word \"escape\" in SKILL.md files and tests. Fix #2424's check if it still tests the wrong byte. Filed 05:24 CST Nov 9. Lane session_013NEJL1DpC6h3weFbSR6cW6 started 12:13 CST Nov 9 (coordinator).",
+  "note": "Workaround that worked: build the escape in code (chr(92) + \"u003c\") and check the bytes with `od -c`. Guard idea from the lane: a lint that flags a raw less-than sign written as the escape's spelling beside the word \"escape\" in SKILL.md files and tests. Fix #2424's check if it still tests the wrong byte. Filed 05:24 CST Nov 9. Lane session_013NEJL1DpC6h3weFbSR6cW6 started 12:13 CST Nov 9 (coordinator). Done as no defect on main (coordinator 12:18 CST Nov 9): SKILL.md and the test bytes hold the true six-character escape. Workaround for an agent that must write one: build the escape in code, not as typed text.",
   "phase": "now",
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
   "lane": "session_013NEJL1DpC6h3weFbSR6cW6",
-  "status": "doing",
+  "status": "done",
   "order": 906,
-  "updatedAt": "2026-11-09T12:11:00-06:00"
+  "updatedAt": "2026-11-09T12:14:00-06:00"
 }

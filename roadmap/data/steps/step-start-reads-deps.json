@@ -1,0 +1,11 @@
+{
+  "title": "A lane start is refused while a PR its step starts after is unmerged",
+  "why": "Coordinator's own mistake, 12:18 CST Nov 9: it started 8 lanes whose steps say \"starts after #N\" while #N was an open draft; the lanes went idle and back to todo (real-reftable-fixture, retire-use-hooks-home, frozen-crash-followups, branch-force-other-worktree, parallel-wrapper-flags, rm-after-cd-one-walk, push-refs-drop-redirects). Harm: lanes started on a base that is not on main sit idle or build on the wrong base.",
+  "note": "Fix: a check in the lane-start path or the brief guard reads the step's \"starts after\" and \"Merge after\" PRs and refuses a lane start while any of them is unmerged. Red case first: a brief for a step whose start PR is open. Related: step lane-start-checks-roadmap (the same lane-start path).",
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "todo",
+  "order": 918,
+  "updatedAt": "2026-11-09T12:14:00-06:00"
+}
