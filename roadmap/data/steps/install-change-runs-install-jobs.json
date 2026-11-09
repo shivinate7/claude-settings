@@ -1,10 +1,11 @@
 {
   "title": "A PR that changes install.sh or its test runs both install CI jobs",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 934,
   "owner": "coordinator",
   "why": "Coordinator 16:27 CST Nov 9: #2458 changed install.sh (+35) and hooks/test_install_src.sh (+144), but its own PR run skipped checks-merge-install and shell-macos, so the batch found the step-cap overrun, not the lane. Harm: a lane's cost lands on the whole batch (#2470 is held for lane shoot-job-cap).",
-  "note": "Fix: the CI job scope (lint/test_ci_scope.py and the workflow's path rules) runs checks-merge-install and shell-macos when a PR changes install.sh or hooks/test_install_src.sh. Done check: a scope test case with that file set selects both jobs, red on main. Related: ci-scope-playwright-action (done, same shape), shoot-job-cap. Unassigned.",
-  "updatedAt": "2026-11-09T16:27:00-06:00"
+  "note": "Fix: the CI job scope (lint/test_ci_scope.py and the workflow's path rules) runs checks-merge-install and shell-macos when a PR changes install.sh or hooks/test_install_src.sh. Done check: a scope test case with that file set selects both jobs, red on main. Related: ci-scope-playwright-action (done, same shape), shoot-job-cap. Lane session_013NEJL456ejBKaXgyyLuYHS started 16:28 CST Nov 9 (coordinator).",
+  "updatedAt": "2026-11-09T16:29:00-06:00",
+  "lane": "session_013NEJL456ejBKaXgyyLuYHS"
 }
