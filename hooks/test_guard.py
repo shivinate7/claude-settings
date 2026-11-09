@@ -10397,6 +10397,33 @@ for _name, _command in GH_WRITES:
     gh_write_refused(_name, _command)
 gh_write_refused("pr merge", "gh pr merge 12 --squash", **GH_MERGE_FIXTURE)
 
+# A write that another rule also refuses gets the gh-write-cloud verdict in a cloud session. Its remedy
+# names an MCP tool, never the refused form. Each refusal has a twin outside a cloud session.
+sh("gh-write-cloud: a pull request opened without --draft is refused in a cloud session",
+   "gh pr create --title x --body y", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh pr create",))
+sh("gh-write-cloud: a merge with a pending head is refused in a cloud session, not by merge-checks",
+   "gh pr merge 12", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY,
+   lacks=("pending",), env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("gh-write-cloud: a merge with a pending head is judged by merge-checks outside a cloud session",
+   "gh pr merge 12", "deny", "merge-checks", cwd=NOGIT, carries="pending",
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("gh-write-cloud: a // and a /* inside a quoted body still refuse a pr comment in a cloud session",
+   'gh pr comment 12 --body "see // and /* here"', "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh pr comment",))
+sh("gh-write-cloud: a // and a /* inside a quoted body are allowed outside a cloud session",
+   'gh pr comment 12 --body "see // and /* here"', "allow", cwd=NOGIT)
+sh("gh-write-cloud: gh api with -X GET then --method POST is refused in a cloud session, the last method wins",
+   "gh api -X GET repos/o/r/issues --method POST", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh api",))
+sh("gh-write-cloud: gh api with -X GET then --method POST is allowed outside a cloud session",
+   "gh api -X GET repos/o/r/issues --method POST", "allow", cwd=NOGIT)
+sh("gh-write-cloud: gh api --input with no method is refused in a cloud session",
+   "gh api repos/o/r/issues --input -", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh api",))
+sh("gh-write-cloud: gh api --input with no method is allowed outside a cloud session",
+   "gh api repos/o/r/issues --input -", "allow", cwd=NOGIT)
+
 # Forms a naive reader misses. A `#` or a lone quote inside a quoted body is text, not a comment, and a write
 # is still a write after a root repo flag, a wrapper, a command substitution, a chain, or a comment tail.
 for _name, _command, _lacks in (
