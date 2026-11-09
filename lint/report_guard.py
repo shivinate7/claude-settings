@@ -136,9 +136,11 @@ PR on its line is refused and asks for the PR. The remedy names the act (`merge 
 record) and never the live head. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
 checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
-blocks: it adds a systemMessage that says UNKNOWN. The comment's last edit time and the cutover (merge/merge.py review_stamp_since, for the PR's base) go to parse_review, so an unstamped
-record from before the cutover reads done, as merge --reviewed reads it; with no cwd, or a cwd with no cutover, the Stamp line is required, and the refusal names it. Cost: 2 gh reads and one git log
-(review_stamp_since, cached per (root, base) in the process: one per distinct base per Stop; the default branch comes from the pull, never a third gh read), plus the guard_merge and merge module imports; no file,
+blocks: it adds a systemMessage that says UNKNOWN. The comment's last edit time and the cutover (merge/merge.py review_stamp_since, read on the default branch) go to parse_review, so an unstamped
+record from before the cutover reads done, as merge --reviewed reads it; with no cwd, or a cwd with no cutover, the Stamp line is required, and the refusal names it.
+A failed cutover read never refuses by itself. Only an unstamped record, otherwise well formed and done for the live head, gets the UNKNOWN note and no refusal.
+A Stamp line that does not match, or a malformed field, is refused as with a known cutover. Cost: 2 gh reads and one git log
+(review_stamp_since, cached per (repo top, base, default branch) in the process: one per distinct key per Stop; the default branch comes from the pull, never a third gh read), plus the guard_merge and merge module imports; no file,
 process kept or timer. A stop_hook_active rewrite is not checked.
 """
 import datetime
@@ -1649,7 +1651,7 @@ REVIEW_NO_RECORD = (
     "<yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a comment on PR #%d, then report again."
 )
 REVIEW_NO_STAMP = (
-    " The newest review record on that PR has no Stamp line, and with no cutover for the base this check requires one. "
+    " The newest review record on that PR has no Stamp line, and with no cutover this check requires one. "
     "Render the record again with `merge <pr> --review-record`, which prints the Stamp line, and post that."
 )
 
@@ -1709,8 +1711,9 @@ def review_record_problem(hook, text):
     reads nothing. A claim with no PR is refused. Else two REST reads (the PR's live head, its issue comments); the newest
     review record must name the PR, and merge's review_state must call it done for the live head. A read that could not
     run, or a merge tool that could not load, is a note with UNKNOWN, never a block. The cutover read is the one exception to "skip the check": when it
-    fails, a claim with no record at all is still refused, since no record exists whatever the cutover. A record that exists but only the cutover
-    could place (no Stamp line) gets the UNKNOWN note and no refusal. The failed read itself never refuses."""
+    fails, the record check still runs, and the failed read itself never refuses. Only an unstamped record, otherwise well formed and done for the
+    live head, gets the UNKNOWN note and no refusal, since only the cutover could refuse it. Every other claim is refused whatever the cutover:
+    no record, a Stamp line that does not match, a malformed field, or a record for another PR or head."""
     claims = review_claims(text)
     if not claims:
         return "", ""
@@ -1747,12 +1750,18 @@ def review_record_problem(hook, text):
             notes.append("Review-record guard: UNKNOWN, the review cutover could not be read for PR #%d (%s)." % (n, type(err).__name__))
         try:
             rec = _newest_record(n, comments, merge_mod, cutover)
+            placed = None
+            if not cutover_known and rec is None and newest is not None:
+                # Read the record as if made before the cutover. With a time given and no cutover, parse_review skips only a missing
+                # Stamp line: a Stamp line that is there must still match, and every field must still parse. The time is never
+                # compared with no cutover, so any value does; the comment's own time may be absent.
+                placed = merge_mod.parse_review(newest.get("body") or "", "unknown", None)
         except Exception as err:
             notes.append("Review-record guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
             continue
-        if not cutover_known and rec is None and newest is not None:
-            continue  # a record exists that only the cutover could place (no Stamp line): the note above stands, no refusal
-        unstamped = (not cutover and newest is not None
+        if placed and placed["n"] == n and merge_mod.review_state(placed, live)[0] == "done":
+            continue  # only the cutover could refuse this unstamped record: the UNKNOWN note above stands, no refusal
+        unstamped = (cutover_known and not cutover and newest is not None
                      and not any(line.startswith("Stamp: ") for line in (newest.get("body") or "").splitlines()))
         if not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
             reasons.append(REVIEW_NO_RECORD % (n, n, n) + (REVIEW_NO_STAMP if unstamped else ""))
