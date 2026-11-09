@@ -326,7 +326,6 @@
 - sweep-anchor-first-match: mutate_sweep apply path replaces the first anchor match, so a second copy in one file passes silently (janitor/mutate_sweep.py)
 - sweep-no-deadline-many-trees: SessionEnd sweep calls already running are not capped by the deadline; a kill mid worktree remove can leave a half-removed tree (janitor/sweep.py, session_end_sweep.py)
 - sweep-test-symlink-privilege: two tests in janitor/test_sweep.py error with WinError 1314 on a Windows host with no symlink right instead of skipping (janitor)
-- sweep-tests-sleep-bounds: _peak_concurrency uses a 0.2 s sleep; on a slow host a parallel-confirm mutant can survive (janitor/test_sweep.py)
 - symrun-link-gap-unmeasured: the symrun case needs a mixed-id window; the link route's gap is unmeasured and may flake on a loaded runner (install-no-gap.test.ps1, install.ps1)
 - test-guard-posix-blocks-no-skip: two platform-only case blocks (nt, darwin) print no SKIP row when dropped (hooks/test_guard.py near lines 2847 and 3167)
 - test-utils-name-refused: `echo x > src/test_utils.py` is refused by name, as the Edit path refuses it. The file may be product code, so this may be a false alarm (hooks/guard.py is_test_rel)
