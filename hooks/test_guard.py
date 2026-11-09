@@ -13003,9 +13003,9 @@ sh("frozen resolve-vars: control, a prefix assignment of a safe path into a here
 sh("frozen resolve-vars: control, an export of the frozen path before a heredoc script, then its write, denies",
    "export OUT=" + CFG_SETTINGS + "; bash <<'EOF'\necho y > \"$OUT\"\nEOF", "deny", "frozen-path", cwd=NOGIT)
 
-# A run of heredoc blocks before an assignment must not hide the write after it. Each block nests the resolver
-# one level deeper, and past `_NEST_LIMIT` (20) a body is read as plain text. So 20 blocks stay green, and
-# 21 and 30 must deny.
+# A run of heredoc blocks does not hide the write after it. Each closed body is read alone, on a copy of
+# the table, and the command goes on at its own depth, so the run never reaches `_NEST_LIMIT`. 20, 21 and
+# 30 blocks deny. The 21-block control with a safe path allows.
 _HEREDOC_BLOCK = "cat > f <<EOF\nline\nEOF\n"
 for _blocks in (20, 21, 30):
     sh("frozen resolve-vars: %d heredoc blocks, then an assignment to the frozen path and a write to it, denies"
