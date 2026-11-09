@@ -12669,8 +12669,9 @@ cmk_allow("two commits, the first adding a triplet and the second removing it, t
 
 # An unreadable git read. The commit check reads git through `_git`, which three modules bind by name: guard_merge
 # takes it from guard_core, which takes it from git_reads. A patch on git_reads alone reaches no reader, so each
-# case answers None on all three names. A read that times out or fails is None, and the commit check reads None as
-# no hit, so the commit is allowed. These judge in-process: every other row runs the guard as a subprocess.
+# case answers None on all three names. A git read that fails or times out is None, and it counts as unread: the
+# check asks, and a triplet it already found keeps its deny. These judge in-process; every other row runs the guard
+# as a subprocess.
 CMK_READ_MODULES = ("git_reads", "guard_core", "guard_merge")
 CMK_STAGED_COMMIT = VCS + " add -A && " + VCS + " commit -m x"
 
