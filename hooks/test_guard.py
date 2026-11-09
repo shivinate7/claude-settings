@@ -507,6 +507,7 @@ GHBATCHDIVERGED = os.path.join(ROOT, "ghbatchdiverged")  # the same as GHBATCH, 
 GHBATCHBEHIND = os.path.join(ROOT, "ghbatchbehind")  # the same as GHBATCHCONTAIN, but pull request 1's head is behind main (compare "main...<head>" "behind")
 GHBATCHDRAFT = os.path.join(ROOT, "ghbatchdraft")    # the same as GHBATCH, but pull request 2 is a draft: CI skips a draft, so it never blocks
 GHBATCHBASE = os.path.join(ROOT, "ghbatchbase")      # the same as GHBATCH, but pull request 2 is on the base `release`, not main
+GHBATCHPAGE2 = os.path.join(ROOT, "ghbatchpage2")    # the same as GHBATCH, but the open list is two pages long and pull request 2 is on page two
 GHPINNED = os.path.join(ROOT, "ghpinned")        # the same, with the protection naming `gate`: STAMPREPO pins `checks`, and only the pin counts
 GHNOPROT = os.path.join(ROOT, "ghnoprot")        # no branch protection: pull request 2's pending check counts, whatever its name
 GHNOPROTDONE = os.path.join(ROOT, "ghnoprotdone")  # the same, with pull request 2's check passed
@@ -1352,6 +1353,10 @@ def build_fixtures():
                  compares={"abc1234...pr-two-head": "ahead", "main...abc1234": "behind"})
     make_fake_gh(GHBATCHDRAFT, "main", others=[dict(batch_other(("checks", "pending"))[0], draft=True)])
     make_fake_gh(GHBATCHBASE, "main", others=[dict(batch_other(("checks", "pending"))[0], base="release")])
+    # Page size 2: the open list is the state pull request, two passing filler pull requests, then pull request 2 on page two.
+    _filler = [{"number": n, "head": "filler-%d" % n, "draft": False, "checks": [{"name": "checks", "bucket": "pass", "link": ""}]}
+               for n in (3, 4)]
+    make_fake_gh(GHBATCHPAGE2, "main", page_cap=2, others=_filler + batch_other(("checks", "pending")))
     # the guard's required names: a pinned list, or the branch protection (none, failed, or a list that is not pinned)
     make_fake_gh(GHPINNED, "main", others=batch_other(("checks", "pass"), ("gate", "pending")), required=["gate"])
     make_fake_gh(GHNOPROT, "main", others=batch_other(("sync", "pending")), protection="absent")
@@ -10125,6 +10130,8 @@ add("merge-batch: a pinned merge.requiredChecks list is the required list, so a 
 # (refuse() prints that line for every refusal the veto does not stop), and keeps `merge` and `push` out of its Remedy sentence.
 # The route cases are red on main, where the route is allowed or asked. The controls pin today's allow or ask, so they are green.
 # The checks on the refusal text and on the cost of one attempt are registered with the log checks, below the archive checks.
+# The guard's temp folder for these cases is this run's, not the system's (test-temp-standard); the sections below reset it.
+TEMP_DIR = os.path.join(ROOT, "tmp")
 ROUTE_ON = GHBATCH + os.pathsep + PY_PATH
 ROUTE_CARRIES = ("#2", "pending", "override")
 ROUTE_LACKS = ("No override lifts",)
@@ -10148,9 +10155,9 @@ for _label, _tool, _command, _input in ROUTE_DENIALS:
     else:
         sh(_name, _command, "deny", "merge-checks", carries=ROUTE_CARRIES, lacks=ROUTE_LACKS, cwd=NOGIT, env_path=ROUTE_ON)
 # With no ready pull request on main, a push to main still asks as it does today.
-sh("merge-route: git push origin main with no ready pr on main still asks", VCS + " push origin main", "ask", PUSH_MAIN_RULE,
+sh("merge-route: git push origin main with no busy pr on main still asks", VCS + " push origin main", "ask", PUSH_MAIN_RULE,
    cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
-sh("merge-route: git push origin HEAD:main with no ready pr on main still asks", VCS + " push origin HEAD:main", "ask",
+sh("merge-route: git push origin HEAD:main with no busy pr on main still asks", VCS + " push origin HEAD:main", "ask",
    PUSH_MAIN_RULE, cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
 # Controls: a push of another branch is no merge, and a push to main whose busy pull request holds this head stays an ask.
 sh("merge-route: git push origin some-branch is allowed while another ready pr's required check is pending",
@@ -10161,7 +10168,7 @@ sh("merge-route: git push origin abc1234:refs/heads/main still asks, and is not 
 # Controls for a raw merge call: each lets the merge through where the brake does not hold it (the owner's Nov 1 reading for the
 # contained head, drafts, another base, and no ready pull request), and a GET or another PUT on the same API is no merge.
 for _label, _fixture, _command in (
-    ("no ready pr on main", GHMAIN, GH_API_MERGE),
+    ("no busy pr on main", GHMAIN, GH_API_MERGE),
     ("a busy pr that is a draft", GHBATCHDRAFT, GH_API_MERGE),
     ("a busy pr on another base", GHBATCHBASE, GH_API_MERGE),
     ("a busy pr whose head holds this head", GHBATCHCONTAIN, GH_API_MERGE),
@@ -10170,10 +10177,27 @@ for _label, _fixture, _command in (
 ):
     sh("merge-route: gh api, %s, is allowed: %s" % (_label, _command), _command, "allow", silent=True, cwd=NOGIT,
        env_path=_fixture + os.pathsep + PY_PATH)
-for _label, _fixture in (("no ready pr on main", GHMAIN), ("a busy pr that is a draft", GHBATCHDRAFT),
+for _label, _fixture in (("no busy pr on main", GHMAIN), ("a busy pr that is a draft", GHBATCHDRAFT),
                          ("a busy pr on another base", GHBATCHBASE), ("a busy pr whose head holds this head", GHBATCHCONTAIN)):
     add("merge-route: enable_pr_auto_merge with %s is allowed" % _label, "allow", tool=MCP_AUTO, cwd=NOGIT,
         pullNumber=1, repo="x", owner="y", env_path=_fixture + os.pathsep + PY_PATH, silent=True)
+# Fixture proof, under today's brake: a draft and another base do not block a merge, and a busy pull request on page two does.
+# Without these, a fixture that left pull request 2 ready on main would turn the controls above into vacuous passes.
+sh("merge-route: fixture: gh pr merge 1 is allowed past a draft pr with a required check pending", "gh pr merge 1 --squash",
+   "allow", silent=True, cwd=NOGIT, env_path=GHBATCHDRAFT + os.pathsep + PY_PATH)
+sh("merge-route: fixture: gh pr merge 1 is allowed past a pr on another base with a required check pending",
+   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHBASE + os.pathsep + PY_PATH)
+sh("merge-route: fixture: gh pr merge 1 is refused when the busy pr is on page two of the open list", "gh pr merge 1 --squash",
+   "deny", "merge-checks", carries=("#2", "pending"), cwd=NOGIT, env_path=GHBATCHPAGE2 + os.pathsep + PY_PATH)
+# The busy pull request on page two is refused for a raw merge call too: the whole open list is read, not its first page.
+sh("merge-route: gh api -X PUT is refused when the busy pr is on page two of the open list", GH_API_MERGE, "deny", "merge-checks",
+   carries=ROUTE_CARRIES, lacks=ROUTE_LACKS, cwd=NOGIT, env_path=GHBATCHPAGE2 + os.pathsep + PY_PATH)
+# A push to main with a busy pull request that is a draft, or on another base, still asks as it does today.
+sh("merge-route: git push origin main with a busy pr that is a draft still asks", VCS + " push origin main", "ask", PUSH_MAIN_RULE,
+   cwd=NOGIT, env_path=GHBATCHDRAFT + os.pathsep + PY_PATH)
+sh("merge-route: git push origin main with a busy pr on another base still asks", VCS + " push origin main", "ask", PUSH_MAIN_RULE,
+   cwd=NOGIT, env_path=GHBATCHBASE + os.pathsep + PY_PATH)
+TEMP_DIR = None  # back to the system temp for the sections below
 
 _BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
 # ASK: the repo uses the merge tool, and the call skips it.
@@ -15435,11 +15459,12 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no fi
 
 # ---- merge-route checks: the refusal text and the cost of each route the batch brake refuses (the merge-route cases above).
 WRITE_VERBS = ("PUT", "POST", "PATCH", "DELETE")
+ROUTE_TEMP = os.path.join(ROOT, "tmp")  # the guard's temp folder for a route, the run's own (build_fixtures makes it)
 
 
 def route_case(tool, command, tool_input, env_path):
     """The payload fields of one route case, as decide() reads them: a shell route names its command, an MCP route its input."""
-    return {"raw": None, "tool": tool, "cwd": NOGIT, "session": None, "env_path": env_path,
+    return {"raw": None, "tool": tool, "cwd": NOGIT, "session": None, "env_path": env_path, "temp": ROUTE_TEMP,
             "tool_input": {"command": command} if command is not None else dict(tool_input)}
 
 
@@ -15495,14 +15520,15 @@ def route_cost_case():
         folder = os.path.join(ROOT, "routecount-%d" % index)
         make_fake_gh(folder, "main", others=batch_other(("checks", "pending")), count_file=os.path.join(folder, ARCHIVE_CALLS))
         gh_calls_taken(folder)
-        before = _guard_log_free(tree_files(CFG))
+        before = _guard_log_free(tree_files(CFG, NOGIT, ROUTE_TEMP))
         got, _ = decide(route_case(tool, command, tool_input, folder + os.pathsep + PY_PATH))
-        after = _guard_log_free(tree_files(CFG))
+        after = _guard_log_free(tree_files(CFG, NOGIT, ROUTE_TEMP))
         calls = [json.loads(line) for line in gh_calls_taken(folder)]
-        lists = [argv for argv in calls if any(token.endswith("/pulls") for token in argv)]
-        writes = [argv for argv in calls if any(token in WRITE_VERBS for token in argv)]
         if got != "deny":
             problems.append("%s: %s, not deny, so the route is not judged" % (label, got))
+            continue
+        lists = [argv for argv in calls if any(token.endswith("/pulls") for token in argv)]
+        writes = [argv for argv in calls if any(token in WRITE_VERBS for token in argv)]
         if len(lists) != 1:
             problems.append("%s: %d open pull-list reads, want 1" % (label, len(lists)))
         if writes:
