@@ -317,6 +317,10 @@ _ASSIGN_WORD = re.compile(r"([A-Za-z_]\w*)(\+?)=")
 _VAR_USE = re.compile(r"\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})")
 _PS_NAME = re.compile(r"\$[A-Za-z_]\w*")
 _PS_EQUALS = re.compile(r"[ \t]*=(?!=)[ \t]*")
+_PS_ASSIGN = re.compile(r"\$([A-Za-z_]\w*)=(?!=)")
+_BLANKS = re.compile(r"[ \t]*")
+# `env` options whose next word is their argument, not the command or an assignment.
+_ENV_ARGUMENT_OPTIONS = frozenset(("-u", "--unset", "-C", "--chdir", "-S", "--split-string"))
 # A redirect operator at the start of a word (`>`, `>>`, `2>`, `>&`, `>|`, `<`, `<&`, `<>`).
 _REDIRECT_OP = re.compile(r"\d*(?:>>|>&|>\||<&|<>|[<>])")
 # Whitespace between two non-blank characters: the shell splits such a value into two words.
@@ -474,15 +478,16 @@ def _rebuild(parts, table: dict, as_script: bool = False, depth: int = 0, as_tar
 
 
 def _value_of(parts, table: dict) -> str:
-    """The value a shell gives an assignment's word: quotes removed, `$VAR` read, escapes dropped."""
+    """The value a shell gives an assignment's word: quotes removed, `$VAR` read, escapes dropped. A
+    backslash-newline outside single quotes joins two lines, so it adds nothing to the value."""
     pieces = []
     for kind, text in parts:
         if kind == "s":
             pieces.append(text)
         elif kind == "d":
-            pieces.append(re.sub(r'\\(["\\$`])', r"\1", _expand(text, table)))
+            pieces.append(re.sub(r'\\(?:\n|(["\\$`]))', r"\1", _expand(text, table)))
         else:
-            pieces.append(re.sub(r"\\(.)", r"\1", _expand(text, table), flags=re.S))
+            pieces.append(re.sub(r"\\(?:\n|(.))", r"\1", _expand(text, table), flags=re.S))
     return "".join(pieces)
 
 
@@ -533,48 +538,63 @@ def _resolve_vars(cmd: str) -> str:
 
 def _resolve_into(cmd: str, table: dict, depth: int = 0):
     """(`cmd` with each `$VAR` read, the table after it): `_resolve_vars` from a given table."""
-    out, stack = [], []   # stack: (table to restore where the group ends, glued to a `$`, closer)
+    # stack: (table to restore where the group ends, glued to a `$`, closer, the outer command's child names)
+    out, stack = [], []
     n, i = len(cmd), 0
     at_start, before, mode = True, None, ""   # before: the table from before this command's assignments
     operand = ""   # "target": the next word names a redirect's file; "name": a function's name
-    heredocs = []   # delimiters of the heredocs whose bodies start after the next newline
+    # (delimiter, quoted?, the child's names) of the heredocs whose bodies start after the next newline
+    heredocs = []
+    child = {}   # names this command's prefix or `env NAME=v` words give its child: value, or None if unknown
     while i < n:
         c = cmd[i]
         if c in " \t\r":
             out.append(c)
             i += 1
+        elif c == "\\" and cmd.startswith("\n", i + 1):   # a line join is a blank: the command goes on
+            out.append("\\\n")
+            i += 2
         elif c == "&" and (cmd[i - 1:i] in ("<", ">") or cmd.startswith(">", i + 1)):
             out.append(c)   # `>&1`, `<&-` and `&>f` are redirects, not a background job
             i += 1
         elif c in ";&|\n":
             out.append(c)
             i += 1
-            at_start, before, mode, operand = True, None, "", ""
-            while c == "\n" and heredocs:   # a body is text, read in itself: its quotes never pair outward
-                body_end, line_end = _heredoc_end(cmd, i, heredocs.pop(0))
-                body = cmd[i:body_end]
-                out.append(_expand(body, table) if depth >= _NEST_LIMIT
-                           else _resolve_into(body, dict(table), depth + 1)[0])
+            at_start, before, mode, operand, child = True, None, "", "", {}
+            while c == "\n" and heredocs:   # a body is read in itself: its quotes never pair outward
+                delimiter, quoted, names = heredocs.pop(0)
+                body_end, line_end = _heredoc_end(cmd, i, delimiter)
+                if body_end == n:   # no closer: the rest is read on here as code, and nests nothing
+                    heredocs.clear()
+                    break
+                scope = dict(table)
+                for name, value in names.items():
+                    if value is None and quoted:
+                        scope.pop(name, None)
+                    elif value is not None and (quoted or name not in table):
+                        scope[name] = value   # the child expands a verbatim body; the parent, any other
+                out.append(_resolve_into(cmd[i:body_end], scope, depth + 1)[0])
                 out.append(cmd[body_end:line_end])
                 i = line_end
                 if heredocs and cmd.startswith("\n", i):
                     out.append("\n")
                     i += 1
         elif c == "(" or (c == "`" and not (stack and stack[-1][2] == "`")):
-            stack.append((dict(table), c == "`" or cmd[i - 1:i] == "$", ")" if c == "(" else "`"))
+            stack.append((dict(table), c == "`" or cmd[i - 1:i] == "$", ")" if c == "(" else "`", child))
             out.append(c)
             i += 1
-            at_start, before, mode, operand = True, None, "", ""
+            at_start, before, mode, operand, child = True, None, "", "", {}
         elif c == ")" or c == "`":   # `)` ends the nearest `(`; a second backtick ends the open one
-            glued = False
+            glued, outer = False, {}
             for level in range(len(stack) - 1, -1, -1):
                 if stack[level][2] == (")" if c == ")" else "`"):
-                    table, glued, _closer = stack[level]
+                    table, glued, _closer, outer = stack[level]
                     del stack[level:]
                     break
             out.append(c)
             i += 1
             at_start, before, mode, operand = not glued, None, "", ""
+            child = outer if glued else {}   # `$(...)` ends inside a word of the outer command
         elif c == "#":   # a comment: its text is read for uses and holds no assignment
             j = cmd.find("\n", i)
             j = n if j < 0 else j
@@ -590,10 +610,11 @@ def _resolve_into(cmd: str, table: dict, depth: int = 0):
                 i = end
                 continue
             at = _heredoc_at(parts)
-            if at >= 0:
+            if at >= 0 and depth < _NEST_LIMIT:   # past the cap a body is read on here as code
                 header = HEREDOC_HEADER.match(cmd, i + at)
-                if header:
-                    heredocs.append(heredoc_delimiter(header.group(1))[1])
+                if header:   # any quote or backslash in the delimiter makes the body verbatim
+                    heredocs.append((heredoc_delimiter(header.group(1))[1],
+                                     any(mark in header.group(1) for mark in "'\"\\"), child))
             redirect = _REDIRECT_OP.match(word)
             if redirect:   # a redirect is no command: it leaves the command's start as it was
                 text, table = _rebuild(parts, table, False, depth, True)
@@ -612,11 +633,32 @@ def _resolve_into(cmd: str, table: dict, depth: int = 0):
                 out.append(word)
                 i = end
                 continue
+            if head and mode == "env":   # `env NAME=v cmd`: the value reaches the child only
+                scope = dict(table)
+                scope.update((name, value) for name, value in child.items() if value is not None)
+                rest = parts[0][1][head.end():]
+                _assign(scope, head.group(1), head.group(2), ([("p", rest)] if rest else []) + parts[1:],
+                        cmd.startswith(("(", "`"), end))
+                child[head.group(1)] = scope.get(head.group(1))
+                out.append(word)
+                i = end
+                continue
+            ps = _PS_ASSIGN.match(parts[0][1]) if at_start and parts and parts[0][0] == "p" else None
+            if ps:   # PowerShell `$D=v`, `$D='v'` or `$D= v` at a statement's start
+                rest = parts[0][1][ps.end():]
+                vend, vparts = end, ([("p", rest)] if rest else []) + parts[1:]
+                if not vparts:   # `$D= v`: the value is the next word
+                    vend, vparts = _read_word(cmd, _BLANKS.match(cmd, end).end())
+                for held in [table] + [level[0] for level in stack]:
+                    _assign(held, ps.group(1), "", vparts, cmd.startswith(("(", "`"), vend))
+                out.append(cmd[i:vend])
+                i = vend
+                continue
             if head is None and len(parts) == 1 and parts[0][0] == "p" and _PS_NAME.fullmatch(parts[0][1]):
                 eq = _PS_EQUALS.match(cmd, end)
                 if eq:   # PowerShell `$D = v`. A paren is no scope there, so every level keeps it.
                     vend, vparts = _read_word(cmd, eq.end())
-                    for held in [table] + [saved for saved, _glued, _closer in stack]:
+                    for held in [table] + [level[0] for level in stack]:
                         _assign(held, parts[0][1][1:], "", vparts, cmd.startswith(("(", "`"), vend))
                     out.append(cmd[i:vend])
                     i = vend
@@ -628,13 +670,19 @@ def _resolve_into(cmd: str, table: dict, depth: int = 0):
                     out.append(word)
                     i = end
                     continue
-                if before is not None:
-                    table, before = before, None   # a prefix assignment reaches only its own command
+                if before is not None:   # a prefix assignment reaches only its own command and its child
+                    child.update((name, table.get(name)) for name in set(table) | set(before)
+                                 if table.get(name) != before.get(name))
+                    table, before = before, None
                 at_start = False
                 mode = ("declare" if word in _DECLARERS else "unset" if word == "unset"
-                        else mode if mode == "eval" else "")
+                        else "env" if word.rsplit("/", 1)[-1] == "env" else mode if mode == "eval" else "")
             elif mode == "unset" and re.fullmatch(r"\w+", word):
                 table.pop(word, None)
+            elif mode == "env-argument":
+                mode = "env"
+            elif mode == "env":   # an option goes on; the first other word is the command
+                mode = "env-argument" if word in _ENV_ARGUMENT_OPTIONS else "env" if word.startswith("-") else ""
             text, table = _rebuild(parts, table, mode == "eval", depth)
             out.append(text)
             i = end
