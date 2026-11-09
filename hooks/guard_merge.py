@@ -1114,9 +1114,8 @@ def _covered(module, host, branch: str, tip, rows, open_rows, slugs) -> bool:
     tip is `tip` (read from the branch when None, and only once a closed or merged row needs it). An open pull
     request covers. A merged one covers when its head is the tip. A closed unmerged one covers only when the tip is
     contained in the head of an open or merged pull request (compare of that head...tip reads behind or identical);
-    those heads come from the branch's own rows and from the repo's open list rows on a lane head form (coordinator
-    scope reading of step archive-refuses-unpr-branch, 2026-11-09 04:00 CST). A merged pull request on another head
-    form that is no longer open is not read."""
+    those heads come from the branch's own rows and from the repo's open list rows on a lane head form. A merged
+    pull request on another head form is not read, to spare a read; that case refuses."""
     if _is_open(rows):
         return True
     if not rows:
