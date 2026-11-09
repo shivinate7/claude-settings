@@ -59,3 +59,14 @@ Not read:
 
 Kind: process
 Home: hooks/guard_encoded.py
+
+## The question
+
+**Open, awaiting the owner's ruling.** Debt `encoded-retry-runtime-assembly`, a refused word rebuilt at runtime, needs this choice for its Retire part.
+
+- **Narrow.** Keep the refused command text in the refusal row, and refuse a command whose assembled text equals it.
+- **General.** Refuse string assembly by its shape.
+
+Against the general option: string assembly is ordinary shell and python, so a shape rule would refuse real work after any refusal. That is a false alarm, and a guard that cries wolf is spent (decision `guard-that-cries-wolf-is-spent`).
+
+The debt's unrelated-assembly Retire case depends on this choice: its no-refusal twin and an unrelated assembly both pass.
