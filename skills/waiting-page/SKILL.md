@@ -132,7 +132,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     with `waits` and `lastAnswer` reads as answered on the page.
     `stale_pages.py --items` names each open item's wait `ended`, `waiting` or `unknown` (see "Route and close").
   - `repo` (`owner/name`, as in `waits`) is the repo the question is about. It is required on every open decision and task. A page's own repo writes its own name.
-  - `checked_with` is the session id of the triage, coordinator or owner's-computer session of that repo that said the owner has not ruled on it. It is required when `repo` is not this page's repo, and it is never the session in the item's `owner` or, in a cloud session, the session that writes the item. To change `repo` or `checked_with`, send an `update` that carries both; a `str_replace` on either, or an `update` with `checked_with` and no `repo`, is refused. The writer refuses an item without it (guard rule `question-checked-with-repo`).
+  - `checked_with` is the session id of the triage, coordinator or owner's-computer session of that repo that said the owner has not ruled on it. It is required when `repo` is not this page's repo. It is never the session in the item's `owner` or, in a cloud session, the session that writes the item. To change `repo` or `checked_with`, send an `update` that carries both; a `str_replace` on either, or an `update` with `checked_with` and no `repo`, is refused. The writer refuses an item without it (guard rule `question-checked-with-repo`).
   - Before writing `reply`, `replied`, `lastAnswer`, `lane` or `waits`, the writer checks that the page is current with `stale_pages.py`, the same
     check as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the five.
   - The page draws only the top-level fields that its `itemFields` block lists (`page.html`). A write that names another
@@ -283,7 +283,7 @@ repo's waiting page from a file behind main is refused, and its reason repeats s
 publish of main's page stamps main's page version, and the next session start says when the page is behind.
 
 Cost: on demand, inside a wake already running. One `Artifact read`, one python process, at most
-one short read-only git process, with no fetch, and one gh call per open item with `waits`, and with `--answers` one more `ArtifactData list answers` read. It writes `<out>` only, and no file without
+one short read-only git process, with no fetch, and one gh call per open item with `waits`. With `--answers`, one more `ArtifactData list answers` read. It writes `<out>` only, and no file without
 `--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
 
 ## Keep a copy in the repo
