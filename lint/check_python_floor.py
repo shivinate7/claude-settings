@@ -28,8 +28,10 @@ venv is built in a sibling temp folder and renamed into place, so a parallel run
 loser of the rename uses the winner's. Ordinary PIP_* env applies to the install. Env FLOOR_VERMIN_CMD (split like a
 shell line) replaces the venv and skips the bootstrap.
 
-Cost: first use is one venv create and one pip install (two process starts), about 10 MB under the temp folder,
-and network. Later runs reuse the cache and start no extra process.
+Cost: first use is three process starts (venv create, its ensurepip child, pip install), about 15 MB under the
+temp folder, and network. Later runs reuse the cache, and each starts one `import vermin` probe. A cache whose
+probe fails is rebuilt. A cache folder that holds other files (neither `.ok` nor `pyvenv.cfg`) is refused, never
+deleted.
 
 Exits 0 and prints nothing when clean. Exits 1 and prints one line per offending file for vermin (file and
 feature) and one line per union type (file:line). Exits 2, naming the cause, when vermin cannot run or be
@@ -122,6 +124,35 @@ def run_step(what, cmd):
                          % (VERMIN_PIN, what, proc.returncode, lines[-1]))
 
 
+def move_aside(path):
+    """Delete `path` by renaming it into a fresh sibling folder first, so a parallel run never reads half of it."""
+    aside = tempfile.mkdtemp(prefix=os.path.basename(path) + ".old-", dir=os.path.dirname(path))
+    try:
+        os.rename(path, os.path.join(aside, "old"))
+    except OSError:
+        pass
+    shutil.rmtree(aside, ignore_errors=True)
+
+
+def refuse_foreign_folder(cache):
+    """Raises Unreadable for a folder that holds files and is neither a finished cache nor an old venv."""
+    try:
+        names = os.listdir(cache)
+    except OSError:
+        return  # missing, or not a folder the rename will report
+    if names and OK_MARKER not in names and "pyvenv.cfg" not in names:
+        raise Unreadable("cannot install vermin==%s: the cache folder %s holds other files and is neither a vermin "
+                         "cache nor a venv; name another folder in FLOOR_VENV_DIR or empty it" % (VERMIN_PIN, cache))
+
+
+def imports_vermin(cache):
+    try:
+        proc = _nowindow.run([venv_python(cache), "-c", "import vermin"], capture_output=True, timeout=TIMEOUT)
+    except Exception:  # OSError, ValueError, subprocess.TimeoutExpired: the cache cannot run
+        return False
+    return proc.returncode == 0
+
+
 def build_cache(cache):
     """Make the venv in a sibling temp folder, then rename it to `cache`. A rename lost to a parallel run keeps the
     winner's cache. Raises Unreadable when the venv cannot be made or the pin cannot be installed."""
@@ -136,6 +167,8 @@ def build_cache(cache):
         run_step("python -m venv", [sys.executable, "-m", "venv", stage])
         run_step("pip install", [venv_python(stage), "-m", "pip", "install", "--disable-pip-version-check",
                                  "vermin==" + VERMIN_PIN])
+        # pip can succeed and put vermin elsewhere (PIP_TARGET, PIP_USER): the marker needs a vermin the venv imports.
+        run_step("import vermin", [venv_python(stage), "-c", "import vermin"])
         try:
             with open(os.path.join(stage, OK_MARKER), "w", encoding="utf-8") as handle:
                 handle.write(VERMIN_PIN + "\n")
@@ -152,12 +185,8 @@ def build_cache(cache):
                     raise Unreadable("cannot install vermin==%s: cannot move the cache into place: %s"
                                      % (VERMIN_PIN, err))
                 # `cache` holds no marker, so it is an incomplete leftover: move it aside, then rename again.
-                aside = tempfile.mkdtemp(prefix=os.path.basename(cache) + ".old-", dir=parent)
-                try:
-                    os.rename(cache, os.path.join(aside, "old"))
-                except OSError:
-                    pass
-                shutil.rmtree(aside, ignore_errors=True)
+                refuse_foreign_folder(cache)
+                move_aside(cache)
         if not os.path.isfile(marker):
             raise Unreadable("cannot install vermin==%s: cannot move the cache into place at %s" % (VERMIN_PIN, cache))
     finally:
@@ -175,7 +204,11 @@ def vermin_command():
             _COMMAND.append(shlex.split(custom))
         else:
             cache = cache_dir()
-            if not os.path.isfile(os.path.join(cache, OK_MARKER)):
+            marker = os.path.join(cache, OK_MARKER)
+            if os.path.isfile(marker) and not imports_vermin(cache):
+                move_aside(cache)  # a marker over a venv that cannot import vermin: rebuild
+            if not os.path.isfile(marker):
+                refuse_foreign_folder(cache)
                 build_cache(cache)
             _COMMAND.append([venv_python(cache), "-c", VERMIN_CODE])
     return list(_COMMAND[0])
