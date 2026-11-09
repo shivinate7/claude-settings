@@ -13119,6 +13119,7 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
     OWN, OWN_TWO, OWN_THREE = ANCESTOR, "3d" * 20, "3e" * 20  # commits of this pull request, each an ancestor of the live head
     FOREIGN = ("18" * 20, "19" * 20, "1a" * 20)  # heads of another pull request: none of them is a commit of this pull request
     BASE_COMMIT = "ba5e" * 10  # a commit the base branch holds: an ancestor of the live head, and not a commit of this pull request
+    OWN_EARLY = "3f" * 20  # an own commit, an ancestor of OWN_THREE, which no earlier round of the top round cases names
 
     def own_replies(self, *shas):
         """The compare replies that make each sha one of this pull request's own commits: an ancestor of the live head, and not held by the base."""
@@ -13556,10 +13557,12 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         self.assertIn(f"Round 1: reviewer, sonnet, PARTIAL, {self.OWN}", lines, "the PARTIAL line of round 1 is not printed")
         self.assertIn(f"Round 1: reviewer, haiku, PASS, {self.OWN}", lines, "the PASS line of round 1 is not printed")
 
-    def top_round_lines(self, top=None):
-        """The three record lines of the fix base cases: the first round FAIL on OWN, the second round FAIL on OWN_TWO, the third round PASS on `top` (OWN_THREE by default)."""
+    def top_round_lines(self, top=None, extra=None):
+        """The three record lines of the fix base cases: the first round FAIL on OWN, the second round FAIL on OWN_TWO, the third round PASS on `top` (OWN_THREE by default).
+        `extra`, when given, adds a design-reviewer line in the same top round, PASS on the sha `extra`."""
         top = self.OWN_THREE if top is None else top
-        return (f"Round 1: reviewer, haiku, FAIL, {self.OWN}", f"Round 2: reviewer, haiku, FAIL, {self.OWN_TWO}", f"Round 3: reviewer, opus, PASS, {top}")
+        lines = (f"Round 1: reviewer, haiku, FAIL, {self.OWN}", f"Round 2: reviewer, haiku, FAIL, {self.OWN_TWO}", f"Round 3: reviewer, opus, PASS, {top}")
+        return lines + ((f"Round 3: design-reviewer, opus, PASS, {extra}",) if extra is not None else ())
 
     def test_fix_base_top_round_sha_is_written_with_no_earlier_record(self):
         # the top round's sha is one of this pull request's own commits, so a fix check may start from it with no earlier record
@@ -13575,6 +13578,42 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         host = self.record_host(diffs=self.own_replies(self.OWN, self.OWN_TWO, self.OWN_THREE))
         rc, out, err = self.write_at(host, round_args(self.top_round_lines()), extra=("--fix-check", f"{self.OWN_TWO}:reviewer:sonnet:PASS"))
         self.assert_refused_without_record(rc, out, err, "a fix base that is a named round 2 head, not the top round's, with no earlier record")
+
+    def test_fix_base_top_round_one_own_sha_on_both_top_round_lines_is_written(self):
+        # control (decision pr-review-record): both lines of the top round name OWN_THREE, so that sha is the earliest of them, and a fix check from it is written
+        diffs = {**self.own_replies(self.OWN, self.OWN_TWO, self.OWN_THREE), (self.OWN_THREE, self.OWN_THREE): compare_of("identical")}
+        host = self.record_host(diffs=diffs)
+        rc, out, err = self.write_at(host, round_args(self.top_round_lines(top=self.OWN_THREE, extra=self.OWN_THREE)),
+                                     extra=("--fix-check", f"{self.OWN_THREE}:reviewer:sonnet:PASS"))
+        self.assertEqual(rc, 0, "control: a fix check from the one own sha both top round lines name was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.OWN_THREE, "reviewer", "sonnet", "PASS"),
+                         "the printed fix check does not start from the sha both top round lines name")
+
+    def test_fix_base_top_round_earliest_of_two_own_shas_is_written(self):
+        # the top round names two own commits, one on each line. OWN_EARLY is an ancestor of OWN_THREE, so it is the earliest of them (decision
+        # pr-review-record), and a fix check from it is written whichever line names it. No earlier round names OWN_EARLY, so no other rule applies
+        diffs = {**self.own_replies(self.OWN, self.OWN_TWO, self.OWN_THREE, self.OWN_EARLY), (self.OWN_EARLY, self.OWN_THREE): compare_of("ahead")}
+        for label, top, extra in (("the reviewer's line names the earliest", self.OWN_EARLY, self.OWN_THREE),
+                                  ("the design reviewer's line names the earliest", self.OWN_THREE, self.OWN_EARLY)):
+            with self.subTest(label=label):
+                host = self.record_host(diffs=diffs)
+                rc, out, err = self.write_at(host, round_args(self.top_round_lines(top=top, extra=extra)),
+                                             extra=("--fix-check", f"{self.OWN_EARLY}:reviewer:sonnet:PASS"))
+                self.assertEqual(rc, 0, f"a fix check from the earliest of two top round shas was refused, {label}:\n" + out + err)
+                self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.OWN_EARLY, "reviewer", "sonnet", "PASS"),
+                                 "the printed fix check does not start from the earliest top round sha")
+
+    def test_fix_base_top_round_later_of_two_own_shas_is_refused(self):
+        # the same two top round shas, with OWN_EARLY the earliest (decision pr-review-record). A fix check from the later one, OWN_THREE, is refused
+        # whichever line names it. A rule that takes the first line's sha as the earliest accepts it in one of the two orders
+        diffs = {**self.own_replies(self.OWN, self.OWN_TWO, self.OWN_THREE, self.OWN_EARLY), (self.OWN_EARLY, self.OWN_THREE): compare_of("ahead")}
+        for label, top, extra in (("the reviewer's line names the earliest", self.OWN_EARLY, self.OWN_THREE),
+                                  ("the design reviewer's line names the earliest", self.OWN_THREE, self.OWN_EARLY)):
+            with self.subTest(label=label):
+                host = self.record_host(diffs=diffs)
+                rc, out, err = self.write_at(host, round_args(self.top_round_lines(top=top, extra=extra)),
+                                             extra=("--fix-check", f"{self.OWN_THREE}:reviewer:sonnet:PASS"))
+                self.assert_refused_without_record(rc, out, err, f"a fix base that is the later of two top round shas, {label}")
 
     def test_fix_base_top_round_sha_is_written_after_an_earlier_record_at_another_head(self):
         # the earlier record's Head is HEAD_A. The files between HEAD_A and the top round's sha are code, so the old base rule refuses that base;
@@ -14691,6 +14730,35 @@ class ReviewFixBaseRecord(ReviewEnv):
         rc, out, err = self.flagged(self.argv(self.fix_of(), self.link(), rounds=(f"1:reviewer:sonnet:PASS:{REVIEW_OLD_HEAD}",)), host)
         self.assertEqual(rc, 0, "a carried copy of the source record's round line was refused as a foreign head:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
+    TOP = "5a" * 20  # an own commit of this pull request, which the source record's top round names and its Head does not
+
+    def test_round_heads_fix_base_record_base_its_top_round_names_itself_is_written(self):
+        # control (decision pr-review-record): the source record's top round names its own Head, so that Head is the base and the copy is written
+        host = self.record_host(self.source(rounds=(f"Round 1: reviewer, sonnet, PASS, {REVIEW_OLD_HEAD}",)), head=REVIEW_HEAD)
+        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link(), rounds=(f"1:reviewer:sonnet:PASS:{REVIEW_OLD_HEAD}",)), host)
+        self.assertEqual(rc, 0, "control: a copy whose top round names the source Head was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
+    def test_round_heads_fix_base_record_refuses_the_source_head_when_its_top_round_names_another_sha(self):
+        # the source record's Head is REVIEW_OLD_HEAD, and its top round names TOP. The named-head rule (decision pr-review-record) takes a fix base only as
+        # the top round's sha or as a chain link, and the source Head is neither, so the copy's flag may not start the fix check from it
+        host = self.record_host(self.source(rounds=(f"Round 1: reviewer, sonnet, PASS, {self.TOP}",)), head=REVIEW_HEAD)
+        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link(), rounds=(f"1:reviewer:sonnet:PASS:{self.TOP}",)), host)
+        self.assert_refused(rc, out, err)
+        self.assertIn(REVIEW_OLD_HEAD[:9], err, "the refusal does not name the source Head, which is the fix base:\n" + err)
+        self.assertIn(merge.FIX_NAMED_BASE_REMEDY, err, "the refusal is not the named fix base refusal:\n" + err)
+
+    def test_round_heads_fix_base_record_writes_the_top_round_sha_beside_the_source_head(self):
+        # the source record's Head is REVIEW_OLD_HEAD, and its top round names TOP, a commit past it that changes only merge.py. The named-head rule
+        # (decision pr-review-record) takes TOP as the fix base, since it is the top round's own sha, so the copy is written
+        diffs = {(REVIEW_OLD_HEAD, self.TOP): compare_of("ahead", file_entry("merge/merge.py")), (self.TOP, REVIEW_HEAD): compare_of("ahead"),
+                 ("main", self.TOP): compare_of("ahead")}
+        host = self.record_host(self.source(rounds=(f"Round 1: reviewer, sonnet, PASS, {self.TOP}",)), head=REVIEW_HEAD, diffs=diffs)
+        rc, out, err = self.flagged(self.argv(self.fix_of(self.TOP), self.link(), rounds=(f"1:reviewer:sonnet:PASS:{self.TOP}",)), host)
+        self.assertEqual(rc, 0, "a copy whose fix base is the top round's own sha, beside the source Head, was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.TOP, "reviewer", "haiku", "PASS"),
+                         "the printed fix check does not start from the top round's sha")
 
     def test_a_stand_in_after_round_3_may_not_change_its_net_value_guard_or_kind(self):
         # the final-round rule (decision hold-unsafe-after-round-3) holds for the record a --fix-base-record stands in for. The new record copies every
