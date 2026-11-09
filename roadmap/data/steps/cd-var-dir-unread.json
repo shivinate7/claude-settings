@@ -1,11 +1,11 @@
 {
   "title": "The guard's cd walk resolves a `cd \"$VAR\"` target, so `cd \"$R\" && git worktree add` and `git -C \"$R\" worktree add` get the same verdict",
   "why": "Lane agent-worktree-add-in-tool-dir (session_013NEJL382EZLqWkzVvjj7UP), review round 2 of the variable-target follow-up, Nov 8 19:01 CST by triage's clock: `R=<primary>; cd \"$R\" && git worktree add /tmp/x`, run from cwd /tmp, is allowed, because hooks/guard_core.py dir_before_segment (about line 1057) drops a cd whose target holds a variable; the same add with `-C \"$R\"` is now refused on that lane's branch. Main allows both. Claude writes `cd \"$X\" && ...` in normal work.",
-  "note": "dir_before_segment feeds many rules, so this needs its own lane and review, like resolve-vars-quote-split. Related: rm-after-cd-one-walk (todo) shares the same cd walk. The coordinator routes it.",
+  "note": "dir_before_segment feeds many rules, so this needs its own lane and review, like resolve-vars-quote-split. Related: rm-after-cd-one-walk (todo) shares the same cd walk. The coordinator routes it. Routed by the coordinator, Nov 8 19:02 CST by triage's clock.",
   "phase": "now",
   "owner": "coordinator",
-  "lane": "",
-  "status": "todo",
+  "lane": "session_013NEJL4487j21efFiHf2AHP",
+  "status": "doing",
   "order": 854,
-  "updatedAt": "2026-11-08T19:01:00-06:00"
+  "updatedAt": "2026-11-08T19:03:00-06:00"
 }
