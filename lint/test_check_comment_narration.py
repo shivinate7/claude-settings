@@ -1380,6 +1380,11 @@ class RuleQuotes(Case):
         self.assertHit(out, "x.py", 3)
         self.assertEqual(rc, 1, out)
 
+    def test_gloss_that_opens_with_the_bare_id_still_flags_the_round(self):
+        rc, out = self.scan({"x.py": "# (hold-unsafe-after-round-3, round 3)\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
 
 class SelfCheck(unittest.TestCase):
     def test_check_file_comments_and_docstrings_hit_no_pattern(self):
