@@ -377,8 +377,11 @@ def main(argv):
         print(text)
         if not agent:
             raw = sys.stdin.buffer.read()
+            try:
+                capture(raw, stamp[len("Local time: "):])
+            except Exception as e:  # a capture error never stops the grant
+                print("local_time: capture: %s" % e, file=sys.stderr)
             grant_override(raw, now)
-            capture(raw, stamp[len("Local time: "):])
             mail_lines(raw)
     except Exception as e:  # advisory hook: fail open; one stderr line shows in --debug
         print("local_time: %s" % e, file=sys.stderr)
