@@ -140,3 +140,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - stamp-refusal-three-fixes (lane message-time-matches-clock, via the coordinator 19:22 CST Nov 8, Decision: local-time-central): the stamp refusal names three fixes, not two (STAMP_REASON in hooks/guard_merge.py).
 - dash-separator-space-one-side (same source and decision): the dash separator regex needs a space only before the dash, not on both sides.
 - written-times-says-bash (same source and decision): the "Written times" bullet says Bash, but SHELL_TOOLS also judges PowerShell.
+- fix-check-model-wording-stale (#2342 round 3, via the coordinator 19:27 CST Nov 8): agent-model-cap.md:93 and debate-model-tiers.md:26 keep older wording about fix-check models.
+- fix-check-cites-unpinned (same source): no check pins the five doc cites of the literal "Fix check".
