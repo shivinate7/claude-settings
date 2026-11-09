@@ -13456,7 +13456,7 @@ class ReviewEnv(Env):
 
 class ReviewArgs(ReviewEnv):
     """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
-    --unlock. --confirm posts the record (ReviewRecordConfirmGate). Each refusal has a control: the same flag with good values exits 0, so a parser that never learned the flag fails here too."""
+    --unlock. --confirm posts the record (ReviewRecordConfirmFlag). Each refusal has a control: the same flag with good values exits 0, so a parser that never learned the flag fails here too."""
 
     def test_reviewed_stands_alone(self):
         for argv in (("--reviewed", "--confirm"), ("--reviewed", "7"), ("--role", "coordinator", "--reviewed")):
@@ -13622,7 +13622,7 @@ class RealPostHost(merge.Host):
         return {"number": n, "state": "OPEN", "head": self.live, "branch": "feat", "base": "main", "draft": False, "body": "",
                 "mergeable": "MERGEABLE", "merge_state": "CLEAN"}
 
-class ReviewRecordConfirmGate(ReviewEnv):
+class ReviewRecordConfirmFlag(ReviewEnv):
     """`merge <pr> --review-record` prints the record and posts nothing. With --confirm it posts the record once. The good-value post with --confirm is
     ReviewRecordPost.test_a_valid_record_posts_one_comment_and_is_printed, and a bad body with --confirm is ReviewRecordPost.test_a_body_that_does_not_parse_is_never_posted.
     Here: without --confirm nothing is posted, and every refusal that runs with --confirm posts nothing and says its own cause."""
