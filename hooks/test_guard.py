@@ -11339,6 +11339,57 @@ def env_cap_prune_case():
 
 FIXTURELESS_CHECKS.add(env_cap_prune_case)  # it builds its folders under ROOT, as the cap checks above do
 
+# Find takes `-o` as a break between alternatives. When an earlier alternative is true for an entry, find stops
+# there and never reaches a `-prune` after it, so `-print` or `-type d -print` before `-path ./big -prune` lets find
+# descend into big. The guard reads that prune as a skip of big. ENVBIG_ROOT is the ENVPROJ shape with the env file in
+# big/, and its other folders hold plain files only. The control keeps `-prune` first, which find reads as a skip.
+ENVBIG_ROOT = os.path.join(ROOT, "envbig-root")  # big/ holds the env file; the top folder and big/ hold plain files
+
+
+def build_envbig_root():
+    write(os.path.join(ENVBIG_ROOT, "README.md"), "top\n")
+    write(os.path.join(ENVBIG_ROOT, "app.py"), "print(1)\n")
+    write(os.path.join(ENVBIG_ROOT, "big", "README.md"), "held\n")
+    write(os.path.join(ENVBIG_ROOT, "big", ENV), "FIXTURE=1\n")
+
+
+lazy_fixture((ENVBIG_ROOT,), build_envbig_root)
+for _cmd in ("find . -print -o -path ./big -prune | xargs grep K",
+             "find . -name '*' -o -path ./big -prune | xargs grep K",
+             "find . -type d -print -o -path ./big -prune | xargs grep K"):
+    sh("env: find prune hole, an earlier -o alternative holds for big, so find never reaches -prune and big's env "
+       "file is read, refused: " + _cmd, _cmd, "deny", "env-file", cwd=ENVBIG_ROOT)
+_FIND_PRUNE_FIRST = "find . -path ./big -prune -o -print | xargs grep K"
+sh("env: find prune control, -prune comes first, so find skips big and its env file is not read, allowed: "
+   + _FIND_PRUNE_FIRST, _FIND_PRUNE_FIRST, "allow", cwd=ENVBIG_ROOT)
+
+# A find with -exec runs its program on each name it prints. These -name tests pick only .py or .md names, or none,
+# and no env file has one of those names, so the program reads no env file. The tree holds an env file in big/.
+for _cmd in (r"find . -name '*.py' -exec grep -n K {} \;", "find . -name '*.md' -exec grep K {} +",
+             "find . -name nomatch -exec grep K {} +"):
+    sh("env: find -exec false alarm, its -name picks no env file name, so the program reads no env file, allowed: "
+       + _cmd, _cmd, "allow", cwd=ENVBIG_ROOT)
+
+# A relative cd and an env -C reach the env file's folder through two steps the guard follows: cd src moves into
+# clean/src, and env -C ../../held reaches held, which holds the env file.
+ENVCD_ROOT = os.path.join(ROOT, "envcd-root")
+ENVCD_HELD = os.path.join(ENVCD_ROOT, "held")    # holds the env file
+ENVCD_CLEAN = os.path.join(ENVCD_ROOT, "clean")  # a README, a src folder, and no env file
+ENVCD_SRC = os.path.join(ENVCD_CLEAN, "src")
+
+
+def build_envcd_root():
+    write(os.path.join(ENVCD_HELD, "README.md"), "held\n")
+    write(os.path.join(ENVCD_HELD, ENV), "FIXTURE=1\n")
+    write(os.path.join(ENVCD_CLEAN, "README.md"), "clean\n")
+    write(os.path.join(ENVCD_SRC, "README.md"), "clean\n")
+
+
+lazy_fixture((ENVCD_ROOT,), build_envcd_root)
+_CD_REL_ENV_CHDIR = "cd src && env -C ../../held grep -r K"
+sh("env: cd control, a relative cd src then env -C ../../held reaches the env file, the guard follows it, refused: "
+   + _CD_REL_ENV_CHDIR, _CD_REL_ENV_CHDIR, "deny", "env-file", cwd=ENVCD_CLEAN)
+
 # An unquoted `\*` reaches grep as `*`, because bash removes the backslash. The guard reads the backslash as
 # an escape, so it takes `\*` for the one-letter class `[*]`, which picks no name, and it reads no env file.
 # The quoted form is a literal in grep and in the guard, and its allow row is above.
