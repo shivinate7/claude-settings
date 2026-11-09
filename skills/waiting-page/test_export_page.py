@@ -33,6 +33,11 @@ Contract the page cases assume (the builder builds to it):
   Digit-led domains are emails: jane@1st.example.com, jane@12.34.example.com and jane@1.2.3.com refuse in page text.
   URL credentials refuse on an IP host as on a host name: postgres://app:<password>@10.0.0.5:5432/db refuses; an IP
     host with no credentials passes.
+  --rebuild DIR --batches OUT --collections NAME [NAME ...]. The named collections are the only folders allowed besides
+    page/, and a batch entry's `collection` is its folder name. A named collection with no folder is empty. A folder not
+    named is unknown, exit 2, even one of the five waiting collections. Without --collections the five are allowed.
+    --collections without --rebuild, or a name that is not a collection slug, is a usage error: exit 2, an argparse
+    `error:` line, nothing written. The error for --collections without --rebuild names --rebuild.
   Verdict words: `changed N`, `same`, `refused` (exit 1), `unknown` (exit 2), and a crash (exit 3, one line).
   Not pinned here: whether a supporting file no longer fetched is deleted.
 """
@@ -377,6 +382,12 @@ def verdict_lines(r):
 def says(r, word):
     """True when a line the run printed starts with the verdict word, as `unknown` or `unknown - asks missing` does."""
     return any(re.match(re.escape(word) + r"\b", line) for line in verdict_lines(r))
+
+
+def error_line(r):
+    """The `error:` line argparse prints for a usage error, or None."""
+    found = [line.strip() for line in r.stderr.splitlines() if "error:" in line]
+    return found[-1] if found else None
 
 
 def changed_count(r):
@@ -836,9 +847,33 @@ class Rebuild(Base):
             entries.extend(batch)
         return files, entries, sizes
 
-    def rebuild(self, waiting, batches):
+    def rebuild(self, waiting, batches, collections=()):
         os.makedirs(batches, exist_ok=True)
-        return self.run_cmd("--rebuild", waiting, "--batches", batches)
+        args = ["--rebuild", waiting, "--batches", batches]
+        if collections:
+            args += ["--collections", *collections]
+        return self.run_cmd(*args)
+
+    def copy_of(self, folders, name="copy"):
+        """A copy of a registry artifact: `folders` maps each folder name to {doc_id: data}, and each doc is written as
+        `<doc_id>.json`, as an export holds it. A rebuild reads no marker, so none is written. An empty folder is kept."""
+        root = self.out(name)
+        for folder, docs in folders.items():
+            os.makedirs(os.path.join(root, folder), exist_ok=True)
+            for doc_id, data in docs.items():
+                write_text(os.path.join(root, folder, doc_id + ".json"), canonical(data))
+        return root
+
+    def assertOptionBuilt(self, r):
+        """The script knows --collections. argparse rejects an option it does not know, so this red names the cause."""
+        self.assertNotIn("unrecognized arguments", shown(r), "the option is not built: argparse rejects --collections")
+
+    def assertUnknownNames(self, r, folder):
+        """Exit 2 and an `unknown` line that names `folder` as neither a named collection nor page/."""
+        self.assertEqual(r.returncode, 2, shown(r))
+        lines = [line for line in verdict_lines(r) if line.startswith("unknown")]
+        self.assertTrue(any(("/%s is neither" % folder) in line for line in lines),
+                        "no unknown line names the folder %s. Output:\n%s" % (folder, shown(r)))
 
     def exported(self, docs, page=True):
         fetched = self.fetch(**docs)
@@ -933,6 +968,75 @@ class Rebuild(Base):
         r = self.rebuild(self.out(), os.path.join(self.tmp.name, "batches"))
         self.assertVerdict(r, "unknown")
         self.assertEqual(r.returncode, 2, shown(r))
+
+    def test_named_collections_rebuild_their_docs_under_their_folder_names(self):
+        # 30 + 30 docs need two batches of at most 50. `receipts` is named but has no folder: it is empty, not unknown.
+        steps = {"step-%03d" % n: {"n": n, "title": "Step %d" % n} for n in range(1, 31)}
+        topics = {"topic-%03d" % n: {"n": n, "title": "Topic %d" % n} for n in range(1, 31)}
+        waiting = self.copy_of({"steps": steps, "topics": topics})
+        write_text(os.path.join(waiting, "page", "page.html"), "<!doctype html>\n<title>registry</title>\n")
+        write_text(os.path.join(waiting, "page", "files", "x.css"), "body {}\n")
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.rebuild(waiting, batches, collections=("steps", "topics", "receipts"))
+        self.assertOptionBuilt(r)
+        self.assertEqual(r.returncode, 0, shown(r))
+        files, entries, sizes = self.batch_entries(batches)
+        self.assertEqual(len(files), 2, "60 docs in batches of at most 50 make two batches, not %d" % len(files))
+        self.assertBatches(r, 2, 60)
+        for entry in entries:
+            self.assertEqual(set(entry), {"op", "collection", "doc_id", "data"}, "an entry has the wrong keys")
+            self.assertEqual(entry["op"], "set")
+        self.assertEqual({entry["collection"] for entry in entries}, {"steps", "topics"},
+                         "the batches name a collection other than the two folders that exist")
+        want = collections.Counter([("steps", doc_id, canonical(doc)) for doc_id, doc in steps.items()]
+                                   + [("topics", doc_id, canonical(doc)) for doc_id, doc in topics.items()])
+        got = collections.Counter((e["collection"], e["doc_id"], canonical(e["data"])) for e in entries)
+        self.assertEqual(got, want, "the batches do not hold each named folder's docs under its folder name")
+
+    def test_a_folder_not_named_with_collections_is_unknown_and_exits_2(self):
+        waiting = self.copy_of({"steps": {"step-001": {"n": 1}}, "topics": {"topic-001": {"n": 1}}})
+        r = self.rebuild(waiting, os.path.join(self.tmp.name, "batches"), collections=("steps",))
+        self.assertOptionBuilt(r)
+        self.assertUnknownNames(r, "topics")
+
+    def test_named_collections_replace_the_five_so_a_waiting_folder_not_named_is_unknown(self):
+        waiting = self.copy_of({"items": {"item-001": item(1)}, "steps": {"step-001": {"n": 1}}})
+        r = self.rebuild(waiting, os.path.join(self.tmp.name, "batches"), collections=("steps",))
+        self.assertOptionBuilt(r)
+        self.assertUnknownNames(r, "items")
+
+    def test_without_collections_a_non_waiting_folder_is_still_unknown(self):
+        waiting = self.copy_of({"steps": {"step-001": {"n": 1}}})
+        r = self.rebuild(waiting, os.path.join(self.tmp.name, "batches"))
+        self.assertUnknownNames(r, "steps")
+
+    def test_collections_without_rebuild_is_a_usage_error_that_names_rebuild(self):
+        fetched, out = self.fetch(), self.out()
+        forms = {
+            "export mode": ["--fetched", fetched, "--out", out, "--collections", "steps"],
+            "batches without rebuild": ["--batches", os.path.join(self.tmp.name, "batches"), "--collections", "steps"],
+        }
+        for label, args in forms.items():
+            with self.subTest(form=label):
+                r = self.run_cmd(*args)
+                self.assertOptionBuilt(r)
+                self.assertEqual(r.returncode, 2, shown(r))
+                err = error_line(r)
+                self.assertIsNotNone(err, "no usage error line. Output:\n" + shown(r))
+                self.assertIn("--rebuild", err, "the usage error does not name --rebuild: %s" % err)
+        self.assertFalse(os.path.exists(out), "a usage error wrote the export folder")
+
+    def test_a_collection_name_that_is_not_a_slug_is_a_usage_error(self):
+        waiting = self.copy_of({"steps": {"step-001": {"n": 1}}})
+        names = [("../steps",), ("a/b",), (".hidden",), ("",), ("steps", "a b")]
+        for number, bad in enumerate(names):
+            batches = os.path.join(self.tmp.name, "batches-%d" % number)
+            with self.subTest(names=bad):
+                r = self.rebuild(waiting, batches, collections=bad)
+                self.assertOptionBuilt(r)
+                self.assertEqual(r.returncode, 2, shown(r))
+                self.assertIsNotNone(error_line(r), "a name that is not a slug is not a usage error. Output:\n" + shown(r))
+                self.assertEqual(glob.glob(os.path.join(batches, "batch-*.json")), [], "a bad name still wrote batches")
 
 
 class All(Base):
