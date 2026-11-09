@@ -6966,6 +6966,14 @@ sh("silent-write [cdvar-unread]: R=<throwaway>, a quote, R=<real>, cd \"$R\", th
 sh("silent-write [cdvar-unread]: as the row before, with a second quote after R=<real>, is refused",
    "R=" + TSLASH + "; echo \"it's\"; R=" + slash(GITMAIN) + "; echo \"it's\"; cd \"$R\" && " + VCS
    + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)
+# A `[ -d <missing> ] &&` may fail, so the assignment after it may not run and the cd target is unknown:
+# the discarded commit is refused. Red on 5b6135cbf, which reads the assignment as run and allows the commit.
+# The row after it is its twin with the assignment first, which runs, so the throwaway repo is judged.
+sh("silent-write [cdvar-unread]: [ -d <missing> ] && R=<throwaway>, cd \"$R\", then a discarded commit, is refused",
+   "[ -d " + slash(os.path.join(ROOT, "no-such-folder")) + " ] && R=" + TSLASH + "; cd \"$R\" && " + VCS
+   + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write [cdvar-unread]: control: R=<throwaway> && cd \"$R\", then a discarded commit, is allowed",
+   "R=" + TSLASH + " && cd \"$R\" && " + VCS + " commit -m x >/dev/null 2>&1", "allow", cwd=GITMAIN)
 sh("silent-write throwaway: --git-dir names the throwaway repo, and it is judged there",
    VCS + " --git-dir=" + TSLASH + "/.git commit -m x >/dev/null", "allow", cwd=GITMAIN)
 sh("silent-write throwaway: a discarded pipe tail in a throwaway repo",
