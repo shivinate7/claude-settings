@@ -379,6 +379,11 @@ REVIEW_OLD_UNREAD_REASON = (
     "(decision pr-review-record, hooks fail closed on a read that cannot run)"
 )
 REVIEW_UNREAD_REMEDY = "run the edit again when `gh` can read the comment, or post a new comment."
+REVIEW_REST_EDIT = "`gh api -X PATCH repos/<owner>/<repo>/issues/comments/<id>`"   # the REST edit: the guard reads its comment without GraphQL
+REVIEW_NODE_UNREAD_REMEDY = ("edit the comment on the REST route, " + REVIEW_REST_EDIT + ", which the guard reads without GraphQL "
+                             "(GraphQL is refused in a cloud session), or post a new comment.")
+REVIEW_LITERAL_NODE_REMEDY = ("write the node id literally, such as `-f id=IC_...`, not a shell expansion; the guard then reads that comment. "
+                              "Or edit the comment on the REST route, " + REVIEW_REST_EDIT + ", or post a new comment.")
 REVIEW_LITERAL_ID_REMEDY = ("write the route with a literal `owner/repo` and a literal comment id, such as repos/owner/repo/issues/comments/<id>, "
                             "or with the `{owner}/{repo}` placeholder, not a shell variable or `$(...)`; the guard then reads that route. "
                             "Or post a new comment.")
@@ -498,10 +503,15 @@ def _old_body(host, edit):
     one read. A read that fails raises."""
     kind, ref = edit
     if kind == "node":   # no REST route takes a node id, so this read is GraphQL
+        if not GRAPHQL_NODE_ID.fullmatch(str(ref)):   # a shell expansion or a file: no read names its comment
+            raise _LiteralIdNeeded("the comment node id is not a literal the guard can read", REVIEW_LITERAL_NODE_REMEDY)
         code, out = host.gh(["api", "graphql", "-f", GRAPHQL_NODE_QUERY % ref], host.cwd)
-        node = (json.loads(out).get("data") or {}).get("node") if not code else None
+        try:   # a retry of this read fails the same way where GraphQL is refused, so no failure here says to run the edit again
+            node = (json.loads(out).get("data") or {}).get("node") if not code else None
+        except (ValueError, AttributeError):
+            node = None
         if not isinstance(node, dict):
-            raise RuntimeError("reading the comment node failed")
+            raise _LiteralIdNeeded("reading the comment node failed", REVIEW_NODE_UNREAD_REMEDY)
         return str(node.get("body") or "")
     if kind == "comment":
         if isinstance(ref, str) and ref.isdigit():
