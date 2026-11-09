@@ -1053,6 +1053,37 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_blocked(out, "a failed cutover read let a PASS claim through on an unstamped record for a stale head:")
         self.assertIn("PR #12", out["reason"], out)
 
+    def test_a_failed_cutover_read_still_refuses_an_edited_unstamped_newest_record(self):
+        # Catches: an edited newest record read as no record when the cutover read fails, so its body is never parsed. The record is
+        # well formed and done for the live head, so the claim is let through with an UNKNOWN note. An edit makes the newest record
+        # untrusted, whatever the cutover, so the claim is refused.
+        comment = {"body": unstamped(record()), "created_at": BEFORE, "updated_at": AFTER}
+        self.assertIsNotNone(merge_mod.review_newest([comment])[1], "fixture: merge does not call the edited newest record untrusted")
+        placed = merge_mod.parse_review(comment["body"], "unknown", None)
+        self.assertIsNotNone(placed, "fixture: merge/merge.py does not parse the unstamped record the way a failed read does")
+        self.assertEqual(merge_mod.review_state(placed, LIVE)[0], "done", "fixture: the record is not done for the live head")
+        self.serve(comments=[comment])
+        self.delete_cutover_ref()
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assert_blocked(out, "a failed cutover read let a PASS claim through on an edited unstamped newest record:")
+        self.assertIn("PR #12", out["reason"], out)
+
+    def test_a_failed_cutover_read_still_refuses_an_edited_stamped_newest_record(self):
+        # Catches: an edited newest record with a matching Stamp line read as no record when the cutover read fails, so the claim is
+        # let through with an UNKNOWN note. The record is well formed and done for the live head, so only its edit decides: an edit
+        # makes the newest record untrusted, and the claim is refused.
+        comment = {"body": record(), "created_at": BEFORE, "updated_at": AFTER}
+        self.assertIsNotNone(merge_mod.review_newest([comment])[1], "fixture: merge does not call the edited newest record untrusted")
+        self.assertEqual(merge_mod.review_state(merge_mod.parse_review(comment["body"]), LIVE)[0], "done",
+                         "fixture: merge/merge.py does not call the stamped record done with no edit")
+        self.serve(comments=[comment])
+        self.delete_cutover_ref()
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assert_blocked(out, "a failed cutover read let a PASS claim through on an edited stamped newest record:")
+        self.assertIn("PR #12", out["reason"], out)
+
 
 if __name__ == "__main__":
     unittest.main()
