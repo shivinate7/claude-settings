@@ -9524,6 +9524,45 @@ sh("env: heredoc-prose-refuse: a node body with a regex holding an escaped slash
 sh("env: heredoc-prose-allow: a node body with a regex holding an escaped slash, then a // comment naming an env file on its own line, is allowed",
    "node - <<'EOF'\nconst r = /a\\/b/;\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
 
+# A template literal nested in another's ${...} holds a backtick that the blanker reads as the outer template's close.
+# A `/*` or `//` after that backtick then reads as a comment, and it hides the env read on its line or below.
+# Each nested form below must deny. The non-nested controls hold the same read outside a nested template.
+sh("env: heredoc-prose-refuse: a node body whose template literal nests a /* template on line 1, then a backtick cat of an env file on line 2, denies",
+   "node - <<'EOF'\nconst s = `rm -rf ${dirs.map(d => `${d}/*`)}`;\nrequire('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body whose template literal nests a // URL template, then a backtick cat of an env file on the same line, denies",
+   "node - <<'EOF'\nconst u = `${`${a}://${b}`}`; require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body whose template literal nests a /* template, then a backtick cat of an env file on the same line, denies",
+   "node - <<'EOF'\nconst s = `${`${d}/*`}`; require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body with one template literal, not nested, holding a // URL and a backtick cat of an env file, denies",
+   "node - <<'EOF'\nconst u = `${a}://${b}`; require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body with one template literal, not nested, holding /* and a backtick cat of an env file on line 2, denies",
+   "node - <<'EOF'\nconst s = `rm -rf ${d}/*`;\nrequire('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+
+# A heredoc with a node or python word before its `<<` (in the file name or a cd path), then bash runs the
+# file, holds shell text. The blanker reads its body by node or python rules, so a `/*` or a `#` hides the read after it.
+sh("env: heredoc-prose-refuse: a script written to node/go with a /* in its body and an env read on the next line, run by bash, denies",
+   "cat > node/go <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash node/go", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a script written by cd into ~/node as go with a /* in its body and an env read, run by bash, denies",
+   "cd ~/node && cat > go <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash go", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a script written to python3/go with a # in its body and an env read on the same line, run by bash, denies",
+   "cat > python3/go <<'EOF'\necho $# ; source " + ENV + "\nEOF\nbash python3/go", "deny", "env-file", cwd=NOGIT)
+# The same bodies under a file name with no interpreter word are controls: the read refuses.
+sh("env: heredoc-prose-refuse: a script written to run/go with a /* in its body and an env read, run by bash, denies",
+   "cat > run/go <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash run/go", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a script written by cd into ~/run as go with a /* in its body and an env read, run by bash, denies",
+   "cd ~/run && cat > go <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash go", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a script written to run/go with a # in its body and an env read on the same line, run by bash, denies",
+   "cat > run/go <<'EOF'\necho $# ; source " + ENV + "\nEOF\nbash run/go", "deny", "env-file", cwd=NOGIT)
+
+# A node body run by `node -` is code, and a `//` comment after code is text: an env name in it is allowed.
+sh("env: heredoc-prose-allow: a node - body with a // comment after code that names an env file, is allowed",
+   "node - <<'EOF'\nconst a = 1; // do not read " + ENV + "\nconsole.log(a)\nEOF", "allow", cwd=NOGIT)
+
 # A data body that a later `sh` runs, or a substitution the shell runs, is judged on what it runs: an env
 # read in the body, a force push in the body, or a force push in a substitution of an unquoted body.
 sh("env: heredoc-r2: a data body with bash <<EOF and an env read, then sh of that file, denies",
