@@ -13,7 +13,7 @@ from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
     _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
     _SHELLS, _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
-    inline_script, is_powershell, norm, resolve_command, segment_tokens, split_segments,
+    is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
 
 
@@ -152,9 +152,12 @@ ARGV_GAP = re.compile(r"[\s,]*(?:\{\s*args\s*:\s*\[[\s,]*)?")
 # PUSH_QUOTED reads raw quotes and ignores backslashes, so a quote here could pair with a
 # quote in a neighbouring word and blank the words between.
 ARGV_UNSAFE = re.compile(r"[^\w@%+=:,./-]")
-# Inside a script, a call that runs its string argument as a command, even inside a print.
-RUN_CALL = (r"(?:\bos\.(?:system|popen|exec\w*|spawn\w*)|\bsubprocess\.\w+|\bPopen|\bexec\w*|\bsystem|\bpopen)"
-            r"\s*\(\s*")
+# Inside a script, the names of a call that runs its string argument as a command, even inside a
+# print: the one list of run calls.
+RUN_NAME = (r"\bos\.(?:system|popen|exec\w*|spawn\w*)|\bsubprocess\.\w+|\bPopen|\bexec\w*|\bsystem|\bpopen"
+            r"|\bcheck_(?:output|call)|\bshell_exec|\bspawn\w*")
+RUN_NAME_END = re.compile(r"(?:" + RUN_NAME + r")$")
+RUN_CALL = r"(?:" + RUN_NAME + r")\s*\(\s*"
 CALL_RUNNER = re.compile(RUN_CALL + r"\[?\s*$")
 # An argv call: `new Deno.Command("git", {args: ["push", "-f"]})` and a run call with a list
 # (`subprocess.run(["git", "push", "-f"])`) name the program and its arguments as separate strings,
@@ -165,8 +168,6 @@ ARGV_CALL = re.compile(r"\bDeno\.Command\s*\(\s*$|" + RUN_CALL + r"\[\s*$")
 PRINT_NAME = (r"print\w*|console\.\w+|puts|say|logger\.\w+|System\.out\.print\w*"
               r"|sys\.std(?:out|err)\.write|Write-(?:Host|Output)")
 PRINT_CALL_NAME = re.compile(r"\b(?:" + PRINT_NAME + r")$")
-# The calls that build a string and run nothing: a printer around one still prints.
-FORMAT_NAME = re.compile(r"\b(?:json\.dumps|JSON\.stringify|format|repr|str|String)$")
 PRINT_COMMAND = re.compile(r"[\s\"'(]*(?:(?:sudo|command|builtin)\s+)?(?:echo|printf|print|puts)\b")
 # The call name that ends the text ahead of an open `(`. Words that take a `(` and call nothing
 # (`if (`, `return (`) are no call.
@@ -191,10 +192,11 @@ def _argv_word(arg: str) -> str:
 
 class _Statement:
     """The statement a script walk is in: where it starts and which calls are open in it. A pair is
-    held as printed text when the statement starts with a printer command (`echo`, `printf`) and no
-    call is open, or when the nearest open call is a printer (`print(`, `console.log(`). A printer
-    that wraps another call (`echo shell_exec(`, `print(check_output(`) holds nothing: that call
-    runs its string."""
+    held as printed text when a printer holds it: the statement starts with a printer command
+    (`echo`, `printf`), or an open call is a printer (`print(`, `console.log(`). Inside a printer a
+    pair runs only when a run call (RUN_NAME) sits between it and the printer (`echo shell_exec(`,
+    `print(check_output(`); any other call (`print(len(`, `echo json_encode(`) prints its result.
+    With no printer, every pair runs, whatever call holds it."""
 
     def __init__(self, body: str):
         self.body, self.start, self.calls, self.command = body, 0, [], None
@@ -213,10 +215,13 @@ class _Statement:
             self.calls.pop()
 
     def printed(self, index: int) -> bool:
-        named = next((name for name in reversed(self.calls)
-                      if name and not FORMAT_NAME.search(name)), "")
-        if named:
-            return PRINT_CALL_NAME.search(named) is not None
+        # A run call named some other way (`sh = os.system; print(sh(...))`) reads as printed: only
+        # a writer who means to hide the call takes that shape.
+        for name in reversed(self.calls):
+            if RUN_NAME_END.search(name):
+                return False
+            if PRINT_CALL_NAME.search(name):
+                return True
         if self.command is None:
             self.command = PRINT_COMMAND.match(self.body, self.start, index) is not None
         return self.command
@@ -245,11 +250,12 @@ def _nested_commands(span: str, before: str = "", mark: str = '\\"') -> str:
     def emit():
         nonlocal words
         if words:
-            # A shell's `-c` argument is a script, read as a runner line of its own.
-            shell = inline_script(words)
+            # A list whose program runs an element as a command line (`sh -c`, `ssh`, `su -c`,
+            # `watch`: inner_commands) hands that line on as it stands. Any other element is one word.
+            handed = inner_commands(words)
             # A list of one string runs as a command line under shell=True, so it is read as one.
-            lines.append(shell + "\n" if shell else words[0] + "\n" if len(words) == 1
-                         else " ".join(map(_argv_word, words)) + "\n")
+            lines.append("".join(text + "\n" for text in handed) if handed else words[0] + "\n"
+                         if len(words) == 1 else " ".join(map(_argv_word, words)) + "\n")
             words = []
 
     def piped_into_shell(close: int) -> bool:

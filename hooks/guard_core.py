@@ -377,6 +377,7 @@ WRAPPER_VALUE_FLAGS.update({
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
     "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
+    "watch": {"-n", "--interval", "-q", "--equexit"},
 })
 # `timeout` and `python` unwrap only in their wrapper shape: `timeout [flags] DURATION cmd` (Windows
 # `timeout /t 5` is the waiter, not a wrapper) and `python bin/verdict cmd` (the repo's runner).
@@ -1815,8 +1816,13 @@ def ssh_remote_script(tokens) -> str:
 def wrapped_commands(tokens, at: int):
     """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
     `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `unbuffer`,
-    `caffeinate`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as `sh -c`."""
+    `caffeinate`, `watch`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as
+    `sh -c`. `watch` joins its words with spaces and hands the line to `sh -c`, so its text is that
+    line."""
     word, rest = basename(tokens[at]), tokens[at + 1:]
+    if word == "watch":
+        index, _ = _wrapper_flags(word, rest, 0)
+        return [" ".join(rest[index:])] if rest[index:] else []
     if word == "kubectl" and "exec" in rest and "--" in rest:
         return [shlex.join(rest[rest.index("--") + 1:])]
     if word == "find":
@@ -1847,7 +1853,7 @@ def wrapped_commands(tokens, at: int):
 def bare_words(segment: str):
     """(words, bare): one segment's shell words, dequoted, and the indexes of the words that hold
     no quote at all. A rule that reads a danger word at ANY bare position keeps main's breadth, so
-    a runner no reader names (`docker run`, `watch`, `uv run`) still shows its inner command, and
+    a runner no reader names (`docker run`, `uv run`) still shows its inner command, and
     quoted text (`echo 'tail -f x'`, a commit message) still reads as text. A search command's
     words are patterns and paths, never a command (ENV_PATTERN_COMMANDS): `grep -rn tail -F x`
     has no bare word."""
