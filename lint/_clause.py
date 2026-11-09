@@ -1,7 +1,9 @@
 """The clause parser the cannot-claim check reads: sentences, clauses and the lexicons of their grammar.
 
 `lint/report_guard.py` imports this module, so the check has one copy of its sentence and clause boundaries and one home
-for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANNOT_FORMS, OUTAGE_NOUNS, OUTAGE_VERBS, BACK_PATTERN, STATUS_PATTERN). The module reads text and
+for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANT_FORMS, CANNOT_FORMS, CHECK_WORDS,
+STATE_VERBS, OUTAGE_NOUNS, OUTAGE_VERBS, BACK_PATTERN, STATUS_PATTERN, SPEECH_VERBS, CALL_SUBJECTS) and for the words that
+name the writer (WRITER_BEFORE_RE, FROM_HERE_RE and the lead-ins and subject words that own_subject reads). The module reads text and
 a mask only: no file, no process. Its cost is one regex pass over a sentence and one over each clause, so the work grows
 in step with the text.
 
@@ -12,8 +14,8 @@ opens it (and, but, or, so, yet, then, because) is its `join`. `lead` and `term`
 `lead_at` and `lead_end` are where the separator before it starts and ends; `hard_end` is where the nearest hard stop (. ; : ! ? a dash) at or
 after its start sits, and `sent_end` the nearest of . ; : ! ? (a dot inside a token counts); all are offsets into the
 sentence. A clause's other fields are read from its words alone. The helpers below the clauses (conditional,
-veil, negated_near, own_subject, past, opens_with, opens_with_joiner, strip_adverbs, reasons, is_reason, form_pattern) read the grammar of the cannot-claim
-check from the same lexicons.
+veil, negated_near, own_subject, past, opens_with, opens_with_joiner, strip_adverbs, reasons, reasons_before, is_reason,
+check_word_counts, form_pattern, unopen) read the grammar of the cannot-claim check from the same lexicons.
 """
 import bisect
 import re
@@ -29,6 +31,7 @@ CONDITIONALS = ("if", "unless", "whether", "would")
 REASON_LINKS = ("because",)
 DETERMINERS = ("a", "an", "the", "this", "that", "these", "those", "its", "their", "his", "her", "our", "my", "your")
 JOINERS = ("and", "but", "or", "so", "yet", "then")
+SUBORDINATORS = ("since", "as", "while", "although", "though")  # open a clause whose subject follows
 PREPOSITIONS = ("for", "of", "in", "on", "to", "from", "with", "about", "against", "at", "by", "per")
 _BE_NT_FORMS = ("isn't", "aren't", "wasn't", "weren't")  # every be-form with n't
 VERBS = ("is", "are", "was", "were", "has", "have", "had", "does", "do", "did", "can", "cannot") + _BE_NT_FORMS + (
@@ -62,6 +65,17 @@ SIZE_UNITS = ("lines?", "files?", "words?", "chars?", "commits?", "bytes?", "[km
 STATUS_PATTERN = r"[45]\d\d\b(?![-\w])(?!\s+(?:%s)\b)" % "|".join(SIZE_UNITS)
 WINDOW = 6  # words after a phrase, in its clause, that may name the act
 NEGATOR_GAP = 3  # words before a phrase that a negator may sit in and still negate it
+NEGATOR_GAP_SKIP = ("am",)  # words the gap does not count: "did not say I am not authorized" reaches the first not
+# The words that name a call's outcome: a try, or what the call returned. A sentence that holds one names its check, unless
+# the writer is its subject ("I tried" names no call).
+CHECK_WORDS = ("tried", "ran", "returned", "refused", "denied", "failed", "errored", "rejected", "blocked", "said",
+               "returns", "refuses", "denies", "rejects", "blocks", "says", "fails", "errors")
+# The verbs of telling: a negator reaches across a new subject after one ("did not say I am not authorized"), and a check word
+# among them (said, says) names a call only when a tool, hook, check, command or remote is its subject ("the hook said").
+SPEECH_VERBS = ("say", "says", "said", "saying", "claim", "claims", "claimed", "claiming", "mean", "means", "meant",
+                "meaning", "write", "writes", "wrote", "written", "writing")
+SPEECH_CHECK_WORDS = tuple(word for word in CHECK_WORDS if word in SPEECH_VERBS)
+CALL_SUBJECTS = ("tool", "hook", "check", "command", "remote")  # a source of a call's answer, never a person
 
 _STOPS = PREPOSITIONS + ("without", "into", "onto", "over", "under", "through", "via", "than", "as", "like")
 _PRONOUNS = ("i", "we", "you", "he", "she", "it", "they", "there", "here")
@@ -71,6 +85,7 @@ _CONTRACTED = {"i'm": ("i", "am"), "we're": ("we", "are"), "you're": ("you", "ar
                "i'd": ("i", "would"), "we'd": ("we", "would")}
 _MODALS = ("can", "could", "would", "will", "shall", "should", "may", "might", "must")
 _BE = ("is", "are", "was", "were", "be", "been", "being", "am")
+STATE_VERBS = _BE + ("remain", "remains", "remained", "stay", "stays", "stayed", "still")  # "is open" is a state, not an act
 _HAVE = ("has", "have", "had")
 _DO = ("do", "does", "did")
 _PAST_AUX = ("could", "did", "was", "were", "had")
@@ -106,6 +121,8 @@ def _lemma(word):
 _WORD = re.compile(r"\w+(?:['’]\w+)*(?:-\w+)*")
 _BOUND = re.compile(r"(\s-{1,2}\s)|([;:!?—–]|\.(?!\w))|(,)|\b(but|because)\b", re.I)
 _STOP_ANY = re.compile(r"[.;:!?]")
+_REASON_STOP = re.compile(r"[;:!?]|\.(?!\w)")  # a dot inside a token (package.json) ends no reason
+_OPEN_ADJ = re.compile(r"\b((?:%s)\s+(?:\w+ly\s+)*)open\b" % "|".join(STATE_VERBS + DETERMINERS), re.I)
 _SENTENCE_GAP = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -151,10 +168,23 @@ def sentences(text, mask):
 _ADV = ADVERB_PATTERN
 _COND_RE = re.compile(r"\b(?:%s)\b" % "|".join(CONDITIONALS), re.I)
 _NEGATOR_RE = re.compile(r"\b(?:%s)\b|n['’]t\b" % "|".join(w for w in NEGATORS if w.isalpha()), re.I)
-_LEAD_RE = re.compile(r"^\W*(?:(?:and|but|so|then)\b\W*)?", re.I)
+# The writer: the one home of its lead-ins and subject words. A joiner, because or a subordinator may open the clause before
+# its subject. I and we are the writer wherever they sit just before a phrase; the cloud and this session too, unless a
+# preposition (PREPOSITIONS) sits just before them: "The builder in this session is unable to push." is the builder's line.
+_WRITER = r"(?:I|we)"
+_PLACE = r"(?:the\s+cloud(?:\s+session)?|this\s+session)"
+_LEAD = "|".join(JOINERS + REASON_LINKS + SUBORDINATORS)
+_LEAD_RE = re.compile(r"^\W*(?:(?:%s)\b\W*)?" % _LEAD, re.I)
+_WRITER_START = re.compile(r"^\W*(?:(?:%s)\b\W*)?%s\b" % (_LEAD, _WRITER), re.I)
+WRITER_BEFORE_RE = re.compile(r"\b%s(?:\s+%s)*\s+$" % (_WRITER, _ADV), re.I)  # the text ends in the writer: "I just "
+FROM_HERE_RE = re.compile(r"\bfrom\s+(?:here|%s)\b" % _PLACE, re.I)
 _OWN_RE = re.compile(
-    r"(?:^|\b(?:I|we)(?:\s+(?:am|are|was|were|have|has|had))?|\bI['’]m|\bwe['’]re|\bthe\s+cloud(?:\s+session)?"
-    r"|\bthis\s+session|\bhere|\bthere(?:\s+(?:is|was)|['’]s))(?:\s+" + _ADV + r")*\s*$", re.I)
+    r"(?:^|\b%s(?:\s+(?:am|are|was|were|have|has|had))?|\bI['’]m|\bwe['’]re"
+    r"|\bhere|\bthere(?:\s+(?:is|was)|['’]s))" % _WRITER
+    + r"(?:\s+" + _ADV + r")*\s*$", re.I)
+_PLACE_END_RE = re.compile(r"\b%s(?:\s+(?:is|was))?(?:\s+%s)*\s*$" % (_PLACE, _ADV), re.I)
+_PREPOSITION_END_RE = re.compile(r"\b(?:%s)\W*$" % "|".join(PREPOSITIONS), re.I)
+_CALL_SUBJECT_RE = re.compile(r"\b(?:%s)s?\s+(?:%s\s+)*$" % ("|".join(CALL_SUBJECTS), _ADV), re.I)
 _PAST_RE = re.compile(r"^(?:could|(?:was|were)n['’]t)", re.I)
 _WAS_RE = re.compile(r"\b(?:was|were)(?:\s+%s)*\s*$" % _ADV, re.I)
 _ADV_LEAD_RE = re.compile(r"^(?:%s\s+)+" % _ADV, re.I)
@@ -176,8 +206,22 @@ def veil(text, shadow):
 
 
 def negated_near(text, gap=NEGATOR_GAP):
-    """True when a negator (NEGATORS) sits in the last `gap` words of `text`."""
-    return bool(_NEGATOR_RE.search(" ".join(text.split()[-gap:])))
+    """True when a negator (NEGATORS) sits in the last `gap` words of `text` and reaches the end of it. A word of
+    NEGATOR_GAP_SKIP (am) takes no slot. A negator reaches no further than a new subject (a pronoun) unless a speech verb
+    (SPEECH_VERBS) comes first: "Don't worry I am" is no negation, "did not say I am" is."""
+    counted = [w for w in text.split() if w.lower() not in NEGATOR_GAP_SKIP][-gap:]
+    return any(_NEGATOR_RE.search(word) and not _new_subject(counted[k + 1:]) for k, word in enumerate(counted))
+
+
+def _new_subject(words_after):
+    """True when a pronoun that is a subject (not here) sits in `words_after` with no speech verb before it."""
+    for word in words_after:
+        bare = word.strip(".,;:()\"'_").lower().replace("’", "'")
+        if bare in SPEECH_VERBS:
+            return False
+        if any(w in _PRONOUNS and w != "here" for w in _CONTRACTED.get(bare, (bare,))):
+            return True
+    return False
 
 
 def first_words(text, count=WINDOW):
@@ -186,10 +230,24 @@ def first_words(text, count=WINDOW):
 
 
 def own_subject(before):
-    """True when the words just before a phrase end in the writer's own subject (I, we, the cloud, this session, here,
-    there is), with the auxiliary after I or we and an adverb (ADVERBS) allowed, or hold no subject: the phrase opens
-    its clause. A joining word (and, but, so, then) before the subject is skipped."""
-    return bool(_OWN_RE.search(_LEAD_RE.sub("", before)))
+    """True when the words just before a phrase end in the writer's own subject (I, we, here, there is, the cloud, this
+    session), with the auxiliary after it and an adverb (ADVERBS) allowed, or hold no subject: the phrase opens its clause.
+    A joining word (JOINERS), because or a subordinator (SUBORDINATORS) before the subject is skipped. The cloud and this
+    session are no subject after a preposition (PREPOSITIONS): "The builder in this session is" is the builder's subject."""
+    text = _LEAD_RE.sub("", before)
+    if _OWN_RE.search(text):
+        return True
+    place = _PLACE_END_RE.search(text)
+    return bool(place) and not _PREPOSITION_END_RE.search(text[:place.start()])
+
+
+def check_word_counts(before, word, writer_counts=False):
+    """True when the bare check word `word` (CHECK_WORDS) names a call, `before` being the text just before it. The writer as
+    its subject names none ("I tried"), unless `writer_counts`. A speech word (said, says) names one only when a tool, hook,
+    check, command or remote is its subject (CALL_SUBJECTS): "the hook said" does, "the owner said" does not."""
+    if not writer_counts and WRITER_BEFORE_RE.search(before):
+        return False
+    return word.lower() not in SPEECH_CHECK_WORDS or bool(_CALL_SUBJECT_RE.search(before))
 
 
 def past(phrase, before):
@@ -226,7 +284,7 @@ def is_reason(text):
 
 def reasons(text):
     """The clauses of `text` that a reason link opens, in order: the text after a : ; , or dash that whitespace follows,
-    the text after because, and the words in parentheses. Each runs to the next . ; : ! ? and a link inside one is part of
+    the text after because, and the words in parentheses. Each runs to the next . ; : ! ? (a dot inside a token, as in package.json, ends none) and a link inside one is part of
     it."""
     events = []
     for c in clauses(text, [False] * len(text)):
@@ -243,12 +301,29 @@ def reasons(text):
         if at < done:
             continue
         if stop is None:
-            hit = _STOP_ANY.search(text, begin)
+            hit = _REASON_STOP.search(text, begin)
             stop = hit.start() if hit else len(text)
         if stop > begin:
             found.append(text[begin:stop])
             done = stop
     return found
+
+
+def reasons_before(head):
+    """The clauses of `head`, the text of a sentence up to the end of a phrase, that say why before the phrase: each clause
+    ahead of the phrase's own that is_reason accepts. A clause with the writer as its subject (I, we: "I tried it"), one that
+    conditions, one that a but follows (a contrast: "The branch is protected but I cannot push" gives no reason) and a
+    lead-in with no verb ("Sorry") say nothing."""
+    parts = clauses(head, [False] * len(head))
+    return [head[c.start:c.end] for c, nxt in zip(parts, parts[1:])
+            if not c.conditional and nxt.join != "but" and not _WRITER_START.match(head[c.start:c.end])
+            and is_reason(head[c.start:c.end])]
+
+
+def unopen(text):
+    """`text` with each `open` that a state verb or a determiner just before it makes an adjective ("PR 12 is open", "the
+    open PR") read as underscores of the same length, so no act reads it."""
+    return _OPEN_ADJ.sub(lambda m: m.group(1) + "_" * 4, text)
 
 
 def form_pattern(form):
