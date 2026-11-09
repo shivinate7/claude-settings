@@ -5159,13 +5159,14 @@ def _push_test_tails(segments, ends, opener: int, head: int):
     """For the test that ends at the body opener `segments[opener]`: one triple for each `||` step that exits 0
     whatever stands before it (`_cannot_fail`, an echo with a substitution too) in the test's `&&`, `||` and `|`
     chain, which runs back from the opener to no further than the compound's head. The triple holds the steps before
-    that `||`, the step, and the steps after it. A redirect on the step that fails to open (`>/no/dir`) is no matter
+    that `||`, the step, and the steps after it, each with the join before it. A redirect on the step that fails to open (`>/no/dir`) is no matter
     here: the step still succeeds when it opens, so the check before it is swallowed."""
     tail = opener - 1
     left = tail
     while left > head and ends[left - 1] in ("&&", "||", "|"):
         left -= 1
-    return [(segments[left:at], segments[at], segments[at + 1:tail + 1]) for at in range(left + 1, tail + 1)
+    return [(segments[left:at], segments[at], [(ends[after - 1], segments[after]) for after in range(at + 1, tail + 1)])
+            for at in range(left + 1, tail + 1)
             if ends[at - 1] == "||" and _cannot_fail(segments[at], substitution_ok=True)]
 
 
@@ -5186,11 +5187,12 @@ def _push_then_test_unfailing(segments, ends, opener: int, head: int) -> bool:
 
 def _push_test_cannot_fail(segments, ends, opener: int, head: int) -> bool:
     """True when `segments[opener]` is the `then` of an `if` or `elif` whose own test cannot fail: a `||` tail and every
-    step after it that never fail (`_step_never_fails`), or no step after it. Its body always runs, so each `elif`
-    and `else` body after it never does."""
+    step after it that never fail (`_step_never_fails`), or no step after it. A step joined by `||` after the tail
+    never runs, since the status stays 0, so it does not count. Its body always runs, so each `elif` and `else` body
+    after it never does."""
     if (segment_tokens(segments[opener]) or [""])[0] != "then":
         return False
-    return any(all(_step_never_fails(part) for part in (step, *after))
+    return any(_step_never_fails(step) and all(join == "||" or _step_never_fails(part) for join, part in after)
                for _, step, after in _push_test_tails(segments, ends, opener, head))
 
 

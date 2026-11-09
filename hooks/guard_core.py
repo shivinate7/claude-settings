@@ -1118,9 +1118,9 @@ def is_print_step(segment: str, may_fail: bool) -> bool:
 def redirect_can_fail(segment: str, null_ok: bool = False) -> bool:
     """True when SEGMENT holds a redirect that can fail: any `<` or `>` outside quotes, past the fd copies of
     `FD_COPY` (a file may be missing, a descriptor closed). Quoted text is no redirect. With NULL_OK a redirect to a
-    null device (`SILENT_WRITE_REDIRECT`) opens always and is no such redirect."""
+    null device (`NULL_DEVICE_REDIRECT`) opens always and is no such redirect; a closed descriptor (`>&-`) stays one."""
     if null_ok:
-        segment = SILENT_WRITE_REDIRECT.sub("", segment)
+        segment = NULL_DEVICE_REDIRECT.sub("", segment)
     bare = "".join("x" if quote else char for _, char, quote in walk_quotes(segment))
     return any(char in "<>" for char in FD_COPY.sub("", bare))
 
@@ -1945,11 +1945,10 @@ def agent_role(payload) -> str:
 # A null-device target, on either stream, in the three shells this guard reads a command from:
 # POSIX (`/dev/null`), Windows cmd (`NUL`), and PowerShell (`$null`). `2>&1` duplicates one stream
 # onto another file descriptor and is not this: the line still reaches a stream the session reads.
-SILENT_WRITE_REDIRECT = re.compile(
-    r"(?:&>>?|\d?>>?&?)\s*(['\"]?)(?:/dev/null|NUL|\$null)\1(?=$|[\s;&|])"
-    r"|\d?>&-(?=$|[\s;&|])",   # a closed descriptor
-    re.IGNORECASE,
-)
+NULL_DEVICE_REDIRECT = re.compile(
+    r"(?:&>>?|\d?>>?&?)\s*(['\"]?)(?:/dev/null|NUL|\$null)\1(?=$|[\s;&|])", re.IGNORECASE)
+CLOSED_FD_REDIRECT = r"\d?>&-(?=$|[\s;&|])"   # a closed descriptor: the write fails, and it is silenced too
+SILENT_WRITE_REDIRECT = re.compile(NULL_DEVICE_REDIRECT.pattern + "|" + CLOSED_FD_REDIRECT, re.IGNORECASE)
 
 
 def _norm_dir(path: str):
