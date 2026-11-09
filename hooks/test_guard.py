@@ -16971,6 +16971,33 @@ sh("builder-find: cp --parents of src/*.txt into docs/ from a cwd under a test f
    "cp --parents src/*.txt docs/", "allow", **dict(BR, cwd=FINDABS))
 sh("builder-find: cp --parents of src/b.txt into docs/ from a cwd under a test folder, writes docs/src/b.txt, is allowed",
    "cp --parents src/b.txt docs/", "allow", **dict(BR, cwd=FINDABS))
+# ---- the builder test-edit check on loop lists and substitution values. FINDCP holds tests/ and src/, as the fed-path
+# rows above do. The false alarms and the two loop-list holes are red on a3fca1973. The controls beside them are green.
+# A loop value that is a glob outside the repository is no repo test path, so a copy of a test out to /tmp writes none.
+sh("builder-find: for d in /tmp/run*, cp tests/a.py \"$d\", reads a test and writes outside the repo, is allowed",
+   'for d in /tmp/run*; do cp tests/a.py "$d"; done', "allow", **dict(BR, cwd=FINDCP))
+# cat and grep -c print content or a count. Neither is a path, so the sed's file operand stays src/a.py.
+sh("builder-find: n=$(cat tests/VERSION), sed -i on src/a.py with $n in the script, is allowed",
+   'n=$(cat tests/VERSION); sed -i "s/N/$n/" src/a.py', "allow", **dict(BR, cwd=FINDCP))
+sh("builder-find: n=$(grep -c foo tests/a.py), sed -i on src/a.py with $n in the script, is allowed",
+   'n=$(grep -c foo tests/a.py); sed -i "s/N/$n/" src/a.py', "allow", **dict(BR, cwd=FINDCP))
+# A multi-item list becomes one cp with many operands, and the loop writes each item. The test in the list is written.
+sh("builder-find: for f in tests/a.py src/x.py, cp y \"$f\" writes tests/a.py, is refused",
+   'for f in tests/a.py src/x.py; do cp y "$f"; done', "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDCP))
+sh("builder-find: for d in tests src, cp x $d/a.py writes tests/a.py, is refused",
+   "for d in tests src; do cp x $d/a.py; done", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+# Controls: the reversed-order lists refuse today, and a copy of each test out to /tmp writes no test.
+sh("builder-find: for f in src/x.py tests/a.py, cp y \"$f\", the test item last, is refused",
+   'for f in src/x.py tests/a.py; do cp y "$f"; done', "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDCP))
+sh("builder-find: for d in src tests, cp x $d/a.py, the test folder last, is refused",
+   "for d in src tests; do cp x $d/a.py; done", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: find src tests -name *.py -exec cp x {}, the test folder last, is refused",
+   "find src tests -name '*.py' -exec cp x {} \\;", "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDCP))
+sh("builder-find: for f in tests/*, cp \"$f\" to /tmp/snap/, reads each test and writes none, is allowed",
+   'for f in tests/*; do cp "$f" /tmp/snap/; done', "allow", **dict(BR, cwd=FINDCP))
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
     ("new-test", _put("tests/test_new.py", "pass\n")),
