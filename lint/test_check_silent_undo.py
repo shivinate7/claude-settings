@@ -2417,6 +2417,11 @@ class RevivedNote(unittest.TestCase):
     LATER = "- later-note: a finding main adds after the doubled note (lint/check_later.py)"
     REWORDED = "- retired-note: a finding the branch retires, reworded (lint/check_retired.py)"
     IN_PLACE = "an edit in place does not keep a note"  # the refusal's words, compared lowercased
+    NONSLUG = "- AskUserQuestion gain/loss rule may refuse terse real choices: check it on real questions."  # no slug: a space before the colon
+    NONSLUG_MAIN = "- a note with no slug form, appended on main (lint/check_second.py)"
+    NONSLUG_EDITED = "- AskUserQuestion gain/loss rule may refuse terse real choices: check it on real questions, reworded."
+    SIBLING = "- AskUserQuestion gain/loss rule may refuse terse real choices: keep it as it is."  # shares NONSLUG's first 40 characters
+    SIBLING_NEW = "- AskUserQuestion gain/loss rule may refuse terse real choices: a note main adds."
 
     def text(self, *lines):
         return "".join(line + "\n" for line in (self.HEADING,) + lines)
@@ -2632,6 +2637,127 @@ class RevivedNote(unittest.TestCase):
         self.commit_notes("re-add the note on purpose", self.body(head))
         self.assertIn(self.RETIRED, self.notes_at("HEAD"), "premise: the re-add put retired-note back in the head")
         self.assertEqual(self.r.verdict(), [], "a note a merge brought back, then deleted and re-added on purpose, was refused")
+
+    def octopus(self):
+        """Merges two side branches into the branch in one commit, so the head has three parents. Each side is cut from the
+        branch's head and adds its own file. Neither touches the notes file, so the octopus strategy merges no content. -> the head sha."""
+        r = self.r
+        feat = r.sh("rev-parse", "HEAD")
+        for name in ("side-a", "side-b"):
+            r.sh("checkout", "-q", "-b", name, feat)
+            r.put(name + ".txt", name + "\n")
+            r.sh("add", "-A")
+            r.sh("commit", "-q", "-m", "%s adds its own file" % name)
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-ff", "-m", "Octopus merge of two side branches", "side-a", "side-b")
+        head = r.sh("rev-parse", "HEAD")
+        self.assertEqual(len(r.sh("rev-list", "--parents", "-n", "1", head).split()), 4, "premise: the head is an octopus merge of three parents")
+        return head
+
+    def unknown_of(self, head):
+        """The Unknown that check() raises for head, or None when check() returns a verdict."""
+        try:
+            C.check(self.r.dir, "origin/main", head)
+        except C.Unknown as e:
+            return e
+        return None
+
+    def main_on(self, head, *extra):
+        """main() on the branch's repo at head, with CI unset. -> (rc, the lines it printed)."""
+        with unittest.mock.patch.dict(os.environ), contextlib.redirect_stdout(io.StringIO()) as out:
+            os.environ.pop("CI", None)
+            rc = C.main(["--repo", self.r.dir, "--upstream", "origin/main", "--head", head, *extra])
+        return rc, out.getvalue().splitlines()
+
+    def test_an_octopus_merge_does_not_hide_a_revived_note(self):
+        self.start(union=True)
+        self.merge_main()
+        head = self.octopus()
+        e = self.unknown_of(head)
+        self.assertIsNotNone(e, "premise: check() reads the octopus merge as UNKNOWN")
+        self.assert_refused(getattr(e, "problems", None) or [])
+
+    def test_an_octopus_unknown_for_a_revived_note_carries_its_notes_as_a_list(self):
+        self.start(union=True)
+        self.merge_main()
+        head = self.octopus()
+        e = self.unknown_of(head)
+        self.assertIsNotNone(e, "premise: check() reads the octopus merge as UNKNOWN")
+        self.assertIsInstance(getattr(e, "notes", None), list,
+                              "the UNKNOWN for the octopus merge carries no .notes list: %r" % (getattr(e, "notes", None),))
+
+    def test_main_prints_the_finding_then_unknown_and_exits_1_without_strict(self):
+        self.start(union=True)
+        self.merge_main()
+        head = self.octopus()
+        rc, lines = self.main_on(head)
+        self.assertEqual(rc, 1, "main() exits 0 on an octopus merge that hides a revived note: %r" % lines)
+        fail = [i for i, l in enumerate(lines) if "FAIL" in l and "retired-note" in l and self.retire[:7] in l]
+        unknown = [i for i, l in enumerate(lines) if "UNKNOWN" in l]
+        self.assertTrue(fail, "main() printed no FAIL line for retired-note: %r" % lines)
+        self.assertTrue(unknown, "main() printed no UNKNOWN line: %r" % lines)
+        self.assertLess(fail[0], unknown[0], "main() printed UNKNOWN before the FAIL line: %r" % lines)
+
+    def test_an_octopus_merge_with_no_finding_stays_a_plain_unknown(self):  # control
+        self.start(union=True, retire=False)
+        self.merge_main()
+        head = self.octopus()
+        e = self.unknown_of(head)
+        self.assertIsNotNone(e, "premise: check() reads the octopus merge as UNKNOWN")
+        self.assertFalse(getattr(e, "problems", None), "an octopus merge with no finding carries findings: %r" % (getattr(e, "problems", None),))
+        rc, lines = self.main_on(head)
+        self.assertEqual(rc, 0, "an UNKNOWN with no finding exits 1 without --strict: %r" % lines)
+        self.assertTrue(any("UNKNOWN" in l for l in lines), "main() printed no UNKNOWN line: %r" % lines)
+        rc, lines = self.main_on(head, "--strict")
+        self.assertEqual(rc, 1, "--strict does not exit 1 on an UNKNOWN: %r" % lines)
+
+    def test_another_unknown_from_the_history_read_carries_no_findings(self):  # control
+        self.start(union=True)
+        head = self.merge_main()
+        boom = C.Unknown("git cat-file failed on a read of the history: test")
+        with unittest.mock.patch.object(C, "lost_lines", side_effect=boom):
+            e = self.unknown_of(head)
+        self.assertIsNotNone(e, "premise: the faulted read raised")
+        self.assertEqual(str(e), str(boom), "a read that is not the octopus read changed its Unknown: %r" % str(e))
+        self.assertFalse(getattr(e, "problems", None), "a read that is not the octopus read carries findings: %r" % (getattr(e, "problems", None),))
+
+    def test_a_merge_brings_back_a_deleted_non_slug_note_is_refused(self):
+        self.start(union=True, base=(self.UNTOUCHED, self.RETIRED, self.NONSLUG), branch=(self.UNTOUCHED, self.RETIRED),
+                   main=(self.UNTOUCHED, self.RETIRED, self.NONSLUG, self.MAIN))
+        head = self.merge_main()
+        self.assertIn(self.NONSLUG, self.notes_at(head), "premise: the union merge brought the non-slug note back")
+        self.assert_refused(self.r.verdict(), slug=self.NONSLUG[2:])
+
+    def test_a_merge_brings_back_a_deleted_non_slug_note_in_a_file_of_only_such_notes_is_refused(self):
+        self.start(union=True, base=(self.NONSLUG,), branch=(), main=(self.NONSLUG, self.NONSLUG_MAIN))
+        head = self.merge_main()
+        self.assertEqual(set(self.body(head)), {self.NONSLUG, self.NONSLUG_MAIN},
+                         "premise: the head holds only non-slug notes, with the deleted one back")
+        self.assert_refused(self.r.verdict(), slug=self.NONSLUG[2:])
+
+    def test_a_non_slug_note_the_branch_deletes_then_re_adds_on_purpose_passes(self):  # control
+        self.start(union=True, base=(self.UNTOUCHED, self.NONSLUG), branch=(self.UNTOUCHED,),
+                   main=(self.UNTOUCHED, self.NONSLUG, self.MAIN))
+        head = self.commit_notes("the branch re-adds the non-slug note on purpose", [self.UNTOUCHED, self.NONSLUG])
+        self.assertIn(self.NONSLUG, self.notes_at(head), "premise: the re-add put the non-slug note back in the head")
+        self.assertEqual(self.r.verdict(), [], "a non-slug note the branch deleted and re-added on purpose was refused")
+
+    def test_an_in_place_edit_of_a_non_slug_note_is_not_a_revival(self):  # control
+        self.start(union=True, base=(self.UNTOUCHED, self.NONSLUG, self.RETIRED),
+                   branch=(self.UNTOUCHED, self.NONSLUG_EDITED, self.RETIRED),
+                   main=(self.UNTOUCHED, self.NONSLUG, self.RETIRED, self.MAIN))
+        head = self.merge_main()
+        self.assertIn(self.NONSLUG_EDITED, self.notes_at(head), "premise: the branch's in-place edit is in the head")
+        self.assertNotIn(self.NONSLUG, self.notes_at(head), "premise: the head holds no copy of the original text")
+        self.assertEqual(self.r.verdict(), [], "an in-place edit of a non-slug note was refused as a revival")
+
+    def test_a_deleted_non_slug_note_does_not_flag_a_different_note_with_the_same_start(self):  # control
+        self.start(union=True, base=(self.UNTOUCHED, self.NONSLUG, self.SIBLING), branch=(self.UNTOUCHED, self.SIBLING),
+                   main=(self.UNTOUCHED, self.NONSLUG, self.SIBLING, self.SIBLING_NEW))
+        head = self.merge_main()
+        self.assertEqual(self.body(head), [self.UNTOUCHED, self.SIBLING, self.SIBLING_NEW],
+                         "premise: the head holds the sibling and the new note, not the deleted one")
+        self.assertEqual(self.r.verdict(), [], "a deleted non-slug note flagged a different note that shares its first 40 characters")
 
 
 if __name__ == "__main__":
