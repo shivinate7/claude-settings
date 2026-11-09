@@ -11656,6 +11656,9 @@ AGENT_FIXTURES = {
     "agent-dir-at-file": (role_target_call("g1", ARCH_TRIAGE_TAGS), [(AGENT_OWN_ID, None)]),
     "main-lane-agent-second-step": (role_target_call("g1", ARCH_LANE_TAGS),
                                     [(AGENT_OWN_ID, role_target_call("g1", ARCH_AGENT_LANE_TAGS))]),
+    # The main transcript holds no record of the target: the lane's record is only in the agent's own file, with a branch.
+    "agent-own-branch-lane": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_raw("g1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": ARCH_BRANCH}, [ARCH_QMAX_SOURCE]))))]),
 }
 
 
@@ -11739,6 +11742,11 @@ archive_refuse("a lane in both records, with the open pull request on the agent 
 archive_refuse("a lane in both records, with the open pull request on the main record's step only, is refused for that pull request",
                role_path("main-lane-agent-second-step"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
                carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN)
+# The branch read takes the target's record from the main transcript only. Here the lane's record, with a branch
+# ahead of main on no pull request, is in the agent's own transcript alone, so the branch read must find it there too.
+archive_refuse("an agent's archive of a lane known only from the agent's transcript is refused for a stranded branch",
+               role_path("agent-own-branch-lane"), fake_gh_path(ARCHINC_NOPR), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH + ARCHIVE_NO_RECORD_PIN)
 
 
 # =========================================================================== 5h. one lane, one topic
