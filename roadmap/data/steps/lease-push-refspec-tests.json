@@ -1,12 +1,12 @@
 {
   "title": "Tests prove the refspec-form lease push allow entry passes a lane's own branch and refuses every other target",
   "why": "Owner chat 18:31 CST Nov 8 (via the coordinator, 18:31 CST): the owner pushes a refspec form of Own Branch Lease Push (`origin <src>:<branch>`) straight to main from a local session, with no tests of its own.",
-  "note": "Blocked until the owner's four autoMode.allow entries are on main (steps lease-push-c-and-d and debt-classifier-lease-push close then). Cases to prove: a lease push of the lane's own branch through a refspec passes; a refspec whose target is main, another lane's branch, or an archive branch does not. The coordinator routes it once the entries land. Unblocked: the owner's lease push entries landed in #2350 (e53fad223). Own CI Run Cancel and Own Check-in Delete are not on main yet.",
+  "note": "Blocked until the owner's four autoMode.allow entries are on main (steps lease-push-c-and-d and debt-classifier-lease-push close then). Cases to prove: a lease push of the lane's own branch through a refspec passes; a refspec whose target is main, another lane's branch, or an archive branch does not. The coordinator routes it once the entries land. Unblocked: the owner's lease push entries landed in #2350 (e53fad223). Own CI Run Cancel and Own Check-in Delete are not on main yet. Folded into #1429, released to runner 8 (coordinator 20:20 CST Nov 8); done when #1429 merges. The entries themselves landed in #2350.",
   "phase": "now",
   "owner": "coordinator",
   "lane": "",
-  "status": "todo",
+  "status": "ready",
   "order": 851,
   "blockedBy": "the owner's autoMode.allow push to main",
-  "updatedAt": "2026-11-08T20:02:00-06:00"
+  "updatedAt": "2026-11-08T20:21:00-06:00"
 }
