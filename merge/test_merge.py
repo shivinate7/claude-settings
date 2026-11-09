@@ -12924,7 +12924,7 @@ def record_text(rounds=REVIEW_PASS, head=REVIEW_HEAD, kind="normal", guard="no",
     return "\n".join([marker, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
                       *rounds, *fix, f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
 
-def fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model="haiku"):
+def fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model="sonnet"):
     """The one literal of the fix check line: the reviewed head the fix diff starts from, the role, the model and the verdict."""
     return f"Fix check: {head}, {role}, {model}, {verdict}"
 
@@ -12970,8 +12970,8 @@ def no_record_numbers(out):
     """The pull request numbers named on the `no record:` line."""
     return {int(m) for l in out.splitlines() if l.startswith("no record:") for m in re.findall(r"#(\d+)", l)}
 
-REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", "haiku", "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict
-REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", "haiku", "FAIL")
+REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", "sonnet", "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict
+REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", "sonnet", "FAIL")
 
 def fix_state(test, fix, **kw):
     """-> (state, why) of a record built without a fix line, with `fix` set on its parsed dict. review_state runs without the parser, so a
@@ -13047,6 +13047,14 @@ class ReviewFixForm(unittest.TestCase):
         self.assertEqual(parse_text(self, good).get("fix"), REVIEW_FIX_PASS, "the well-formed fix line did not parse")
         self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(fix_check_line(head=REVIEW_HEAD),))),
                           "parse_review accepted a fix line whose reviewed head is the record's Head")
+
+    def test_a_posted_fix_check_naming_haiku_still_parses_and_judges_as_its_sonnet_twin(self):
+        # History is never re-judged: a record posted before the model rule still parses, and reads the same state as its sonnet twin.
+        # The case sits in the parser's class, so a builder that moves the model check into parse_review fails here.
+        haiku = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(model="haiku"),))
+        self.assertEqual(parse_text(self, haiku).get("fix"), (REVIEW_OLD_HEAD, "reviewer", "haiku", "PASS"), "the posted haiku fix check did not parse")
+        sonnet = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(model="sonnet"),))
+        self.assertEqual(record_state(self, haiku), record_state(self, sonnet), "a posted haiku fix check reads a different state from its sonnet twin")
 
 class ReviewRecordForm(unittest.TestCase):
     """The form: review_body prints a record and parse_review reads it back. The parser accepts the form and refuses what it does not allow."""
@@ -13525,7 +13533,7 @@ class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
     error prints no record. Each refusal sits beside the good value, which must exit 0, so a parser that never learned the flag fails here too."""
 
-    def fix_value(self, head=REVIEW_OLD_HEAD, role="reviewer", model="haiku", verdict="PASS"):
+    def fix_value(self, head=REVIEW_OLD_HEAD, role="reviewer", model="sonnet", verdict="PASS"):
         return f"{head}:{role}:{model}:{verdict}"
 
     def earlier_host(self):
@@ -13569,6 +13577,31 @@ class ReviewFixFlag(ReviewEnv):
         rc, out, err = self.run_args("7")
         self.assertEqual(rc, 0, out + err)
 
+    def test_a_fix_check_naming_a_model_other_than_sonnet_is_refused(self):
+        # A fix check runs sonnet (agent-model-cap, the reviewer row; owner item 444 a, 2026-11-08 15:04 CST). The merge tool refuses the
+        # record that names another model: exit 2, no record, and an error that names the fix check and sonnet. Each refusal has the sonnet
+        # value beside it on the same earlier host, so a base refusal cannot pass for the model refusal.
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(model="sonnet"), host=self.earlier_host())
+        self.assertEqual(rc, 0, "the sonnet fix check, the control beside the refusals, was refused:\n" + out + err)
+        for model in ("haiku", "claude-haiku-5-5", "opus", "claude-opus-5-5", "fable"):
+            with self.subTest(model=model):
+                rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(model=model),
+                                             host=self.earlier_host())
+                self.assertEqual(rc, 2, f"a fix check naming {model} was not refused:\n" + out + err)
+                self.assertNotIn(REVIEW_MARKER, out, f"a fix check naming {model} was refused but still printed a record")
+                self.assertNotIn("Traceback", err)
+                self.assertIsNotNone(re.search(r"fix[ -]check", err, re.I), f"the refusal of {model} does not name the fix check:\n" + err)
+                self.assertIn("sonnet", err, f"the refusal of {model} does not name sonnet:\n" + err)
+
+    def test_a_fix_check_naming_sonnet_prints_the_record(self):
+        # control for the refusal above: sonnet, short or full id, prints the record with its fix line
+        for model in ("sonnet", "claude-sonnet-5-5"):
+            with self.subTest(model=model):
+                rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(model=model),
+                                             host=self.earlier_host())
+                self.assertEqual(rc, 0, f"a fix check naming {model} was refused:\n" + out + err)
+                self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (REVIEW_OLD_HEAD, "reviewer", model, "PASS"))
+
 class ReviewFixBase(ReviewEnv):
     """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of the newest review record already on the pull request, and
     that record has no fix check line. The fix diff then starts from the head the last record reviewed, and a fix never follows a fix. The
@@ -13578,7 +13611,7 @@ class ReviewFixBase(ReviewEnv):
     OTHER_HEAD = "2e" * 20  # a head that no record reviewed
 
     def review_with_base(self, base, host):
-        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:haiku:PASS", host=host)
+        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:sonnet:PASS", host=host)
 
     def assert_refused(self, rc, out, err):
         self.assertEqual(rc, 2, "the fix check was not refused:\n" + out + err)
