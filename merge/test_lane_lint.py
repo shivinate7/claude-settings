@@ -19,6 +19,7 @@ sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint 
 sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: the pin note's names (hooks/pin_note.py)
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
+from test_merge import LANE_LINT_MARKER, NOT_OWNER, OWNER, lint_comment  # noqa: E402  the lint comment's one form, in test_merge.py (decision lanes-run-no-full-ci-job)
 import merge  # noqa: E402
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
@@ -884,22 +885,6 @@ class RunFolderSweep(unittest.TestCase):
         self.assertFalse(os.path.exists(old), "the sweep kept a run folder two days old")
         self.assertTrue(os.path.isdir(new), "the sweep removed a run folder made now")
         self.assertTrue(os.path.isdir(own))
-
-
-LANE_LINT_MARKER = "<!-- lane-lint -->"  # the first line of a lane's lint comment (decision lanes-run-no-full-ci-job); lint_body pins the rest of its form
-OWNER = {"login": "o", "association": "OWNER"}  # the repo's owner, as a comment object names its author
-NOT_OWNER = {"login": "mallory", "association": "NONE"}
-
-
-def lint_body(head, verdict="PASS", n=7):
-    """The one literal of a lane-lint comment: the marker, the pull request, the head the lint read, and its verdict."""
-    return "\n".join([LANE_LINT_MARKER, f"PR: #{n}", f"Head: {head}", f"Result: {verdict}"]) + "\n"
-
-
-def lint_comment(cid, head, verdict="PASS", n=7, by=OWNER):
-    """A comment on pull request n as the repo-wide issue comment list gives it: its body and its author."""
-    return {"id": cid, "created_at": "2026-10-02T00:00:00Z", "issue_url": f"https://api.github.com/repos/o/r/issues/{n}",
-            "body": lint_body(head, verdict, n), "user": {"login": by["login"]}, "author_association": by["association"]}
 
 
 def other_comment(cid, n=7):

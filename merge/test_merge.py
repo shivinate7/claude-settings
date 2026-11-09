@@ -12670,6 +12670,23 @@ def review_comment(cid, number, body, created="2026-10-02T00:00:00Z"):
     """A comment on issue or pull request `number`, as the repo-wide comment list gives it."""
     return {"id": cid, "created_at": created, "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
 
+LANE_LINT_MARKER = "<!-- lane-lint -->"  # the first line of a lane's lint comment (decision lanes-run-no-full-ci-job); lint_body pins the rest of its form
+OWNER = {"login": "o", "association": "OWNER"}  # the repo's owner, as a comment object names its author
+NOT_OWNER = {"login": "mallory", "association": "NONE"}
+
+def lint_body(head, verdict="PASS", n=7):
+    """The one literal of a lane-lint comment: the marker, the pull request, the head the lint read, and its verdict."""
+    return "\n".join([LANE_LINT_MARKER, f"PR: #{n}", f"Head: {head}", f"Result: {verdict}"]) + "\n"
+
+def lint_comment(cid, head, verdict="PASS", n=7, by=OWNER):
+    """A comment on pull request n as the repo-wide issue comment list gives it: its body and its author."""
+    return {"id": cid, "created_at": "2026-10-02T00:00:00Z", "issue_url": f"https://api.github.com/repos/o/r/issues/{n}",
+            "body": lint_body(head, verdict, n), "user": {"login": by["login"]}, "author_association": by["association"]}
+
+def lint_of(n, head):
+    """The lane-lint PASS of pull request n at `head`, as the comment list gives it. A done pull request needs one (decision lanes-run-no-full-ci-job)."""
+    return lint_comment(500 + n, head, n=n)
+
 def list_line(test, out, n):
     """The one `merge --reviewed` line for pull request n."""
     lines = [l for l in out.splitlines() if l.startswith(f"#{n} ")]
@@ -13363,7 +13380,8 @@ class ReviewedList(ReviewEnv):
         return host, rc, out, err
 
     def test_the_newest_record_decides_the_line(self):
-        comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), review_comment(2, 7, record_text(rounds=REVIEW_PASS))]
+        comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), review_comment(2, 7, record_text(rounds=REVIEW_PASS)),
+                    lint_of(7, REVIEW_HEAD)]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
@@ -13383,7 +13401,7 @@ class ReviewedList(ReviewEnv):
         list_line(self, out, 7)
 
     def test_a_comment_without_the_marker_is_not_a_record(self):
-        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS)), review_comment(2, 7, "LGTM")]
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS)), review_comment(2, 7, "LGTM"), lint_of(7, REVIEW_HEAD)]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), r"done: ")
@@ -13395,7 +13413,7 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(no_record_numbers(out), {7}, out)
 
     def test_a_draft_is_listed_with_no_ci_read(self):
-        host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))])
+        host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS)), lint_of(9, REVIEW_HEAD)])
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 9), rf"^#9 feat9 {REVIEW_HEAD[:9]} done: .*; CI draft, no run$")
         self.assertEqual([rel for rel, _ in host.list_calls if rel.startswith("commits/")], [], "a draft's head was read")
@@ -13470,7 +13488,7 @@ class ReviewedList(ReviewEnv):
         # The older record is open, so the newer one must be the record the list reads. Its footer is trailing text: the line is done, not bad.
         older = record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))
         newest = record_text(rounds=REVIEW_PASS).rstrip("\n") + REVIEW_FOOTER
-        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest)])
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest), lint_of(7, REVIEW_HEAD)])
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
 
@@ -13556,7 +13574,7 @@ class ReviewedRoots(ReviewEnv):
     def roots_with_done(self, alpha_read=None, bravo_read=None):
         """Both roots, each with one done pull request, number 5. A read keyword (`pulls_error` or `comments_error`) fails that root's read."""
         def repo(name, read):
-            return root_host(name, pulls=[batch_pull(5, hex_head("5"))], comments=[record_of(5, hex_head("5"))],
+            return root_host(name, pulls=[batch_pull(5, hex_head("5"))], comments=[record_of(5, hex_head("5")), lint_of(5, hex_head("5"))],
                              check_rows={hex_head("5"): green()}, **(read or {}))
         return {self.alpha: repo("o/alpha", alpha_read), self.bravo: repo("o/bravo", bravo_read)}
 
@@ -13648,7 +13666,7 @@ unexpected(method + " " + rel)
         if busy:
             pulls.append(batch_pull(8, head8))
             rows[head8] = running()
-        comments = [record_of(5, head5), record_of(6, head6)]
+        comments = [record_of(5, head5), record_of(6, head6), lint_of(5, head5), lint_of(6, head6)]
         return {self.alpha: root_host("o/alpha", pulls=pulls, comments=comments, check_rows=rows, compares=compares)}
 
     def make_trunk_default(self, root, config=None):
@@ -13668,7 +13686,7 @@ unexpected(method + " " + rel)
         the compare table: {(head 5, head 9): "ahead"} says #9 holds #5, as GitHub's compare of head 5 with head 9 reads."""
         heads = {n: hex_head(str(n)) for n in (5, 6, 9)}
         pulls = [batch_pull(5, heads[5], draft=True), batch_pull(6, heads[6], draft=True), batch_pull(9, heads[9], draft=draft9)]
-        comments = [record_of(5, heads[5]), record_of(6, heads[6])]
+        comments = [record_of(5, heads[5]), record_of(6, heads[6]), lint_of(5, heads[5]), lint_of(6, heads[6])]
         return {self.alpha: root_host("o/alpha", pulls=pulls, comments=comments, check_rows={h: green() for h in heads.values()}, compares=compares)}
 
     def batch_numbers(self, lines):
@@ -13729,7 +13747,7 @@ unexpected(method + " " + rel)
         # alpha has a ready integration pull request with its CI pending and no done pull request. bravo has one done pull request and nothing
         # running. bravo's batch opens: the running CI in alpha does not hold it.
         hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(3, hex_head("3"))], check_rows={hex_head("3"): running()}),
-                 self.bravo: root_host("o/bravo", pulls=[batch_pull(5, hex_head("5"))], comments=[record_of(5, hex_head("5"))],
+                 self.bravo: root_host("o/bravo", pulls=[batch_pull(5, hex_head("5"))], comments=[record_of(5, hex_head("5")), lint_of(5, hex_head("5"))],
                                        check_rows={hex_head("5"): green()})}
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
@@ -13741,7 +13759,7 @@ unexpected(method + " " + rel)
     def test_a_repo_with_no_done_pr_prints_no_batch_line(self):
         # the number 5 is done in alpha and open in bravo: each block names only its own done pull requests
         head5, head8 = hex_head("5"), hex_head("8")
-        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()}),
+        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5), lint_of(5, head5)], check_rows={head5: green()}),
                  self.bravo: root_host("o/bravo", pulls=[batch_pull(5, head5), batch_pull(8, head8)],
                                        comments=[record_of(5, head5, rounds=OPEN_ROUNDS), record_of(8, head8, rounds=OPEN_ROUNDS)],
                                        check_rows={head8: green()})}
@@ -13753,9 +13771,9 @@ unexpected(method + " " + rel)
 
     def test_a_busy_repo_builds_the_next_batch_and_an_idle_one_opens_its_own(self):
         head5, head6, head9 = hex_head("5"), hex_head("6"), hex_head("9")
-        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6)], comments=[record_of(5, head5)],
+        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6)], comments=[record_of(5, head5), lint_of(5, head5)],
                                        check_rows={head5: green(), head6: running()}),
-                 self.bravo: root_host("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9)], check_rows={head9: green()})}
+                 self.bravo: root_host("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9), lint_of(9, head9)], check_rows={head9: green()})}
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         blocks = by_repo(self, out, "o/alpha", "o/bravo")
@@ -13765,7 +13783,7 @@ unexpected(method + " " + rel)
     def test_done_prs_are_listed_in_ascending_order_and_held_or_open_ones_are_left_out(self):
         pulls = [batch_pull(n, hex_head(c)) for n, c in ((9, "9"), (6, "6"), (5, "5"), (4, "4"))]  # out of order on purpose
         comments = [record_of(9, hex_head("9")), record_of(6, hex_head("6"), rounds=OPEN_ROUNDS), record_of(5, hex_head("5")),
-                    record_of(4, hex_head("4"), net="negative")]
+                    record_of(4, hex_head("4"), net="negative"), lint_of(9, hex_head("9")), lint_of(5, hex_head("5"))]
         check_rows = {hex_head("9"): green(), hex_head("5"): green()}
         hosts = {self.bravo: root_host("o/bravo", pulls=pulls, comments=comments, check_rows=check_rows)}
         rc, out, err = self.run_roots("--reviewed", "--root", self.bravo, hosts=hosts)
@@ -13776,7 +13794,7 @@ unexpected(method + " " + rel)
     def test_every_done_pr_of_a_full_repo_is_listed(self):
         heads = {n: format(n, "x") * 40 for n in range(1, 13)}
         pulls = [batch_pull(n, heads[n]) for n in reversed(range(1, 13))]
-        comments = [record_of(n, heads[n]) for n in range(1, 13)]
+        comments = [record_of(n, heads[n]) for n in range(1, 13)] + [lint_of(n, heads[n]) for n in range(1, 13)]
         hosts = {self.bravo: root_host("o/bravo", pulls=pulls, comments=comments, check_rows={heads[n]: green() for n in range(1, 13)})}
         rc, out, err = self.run_roots("--reviewed", "--root", self.bravo, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
@@ -13795,7 +13813,7 @@ unexpected(method + " " + rel)
         # a draft never counts as a running batch: only a ready pull request with CI pending holds the next one
         head5, head6 = hex_head("5"), hex_head("6")
         hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6, draft=True)],
-                                       comments=[record_of(5, head5)], check_rows={head5: green(), head6: running()})}
+                                       comments=[record_of(5, head5), lint_of(5, head5)], check_rows={head5: green(), head6: running()})}
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         blocks = by_repo(self, out, "o/alpha")
@@ -13835,7 +13853,7 @@ unexpected(method + " " + rel)
                 if running_batch:
                     pulls.append(batch_pull(6, hex_head("6")))
                     rows[hex_head("6")] = running()
-                host = root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5"))], check_rows=rows)
+                host = root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), lint_of(5, hex_head("5"))], check_rows=rows)
                 rc, out, err = self.run_args("--reviewed", host=host)
                 self.assertEqual(rc, 0, out + err)
                 self.assertRegex(list_line(self, out, 5), r" done: ")  # the done line is printed before the batch lines are judged
@@ -13868,7 +13886,7 @@ unexpected(method + " " + rel)
     def test_a_done_pr_that_is_ready_with_ci_running_is_not_named(self):
         # #5 is done and ready, with its CI running: it is not named. #6, a done draft with nothing running, is named.
         pulls = [batch_pull(5, hex_head("5")), batch_pull(6, hex_head("6"), draft=True)]
-        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6"))],
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6")), lint_of(5, hex_head("5")), lint_of(6, hex_head("6"))],
                                        check_rows={hex_head("5"): running(), hex_head("6"): green()})}
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
@@ -13879,7 +13897,7 @@ unexpected(method + " " + rel)
     def test_a_done_ready_pr_with_green_ci_is_named(self):
         # The control for the running case: #5 ready with CI green is named, with #6.
         pulls = [batch_pull(5, hex_head("5")), batch_pull(6, hex_head("6"), draft=True)]
-        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6"))],
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6")), lint_of(5, hex_head("5")), lint_of(6, hex_head("6"))],
                                        check_rows={hex_head("5"): green(), hex_head("6"): green()})}
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
@@ -13890,7 +13908,7 @@ unexpected(method + " " + rel)
     def test_a_done_pr_on_another_base_is_not_named(self):
         # #5 is done on release, not the repo's default main: no batch line names it. #6, done on main, is named.
         pulls = [batch_pull(5, hex_head("5"), base="release"), batch_pull(6, hex_head("6"), draft=True)]
-        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6"))],
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6")), lint_of(5, hex_head("5")), lint_of(6, hex_head("6"))],
                                        check_rows={hex_head("5"): green(), hex_head("6"): green()})}
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
@@ -13903,7 +13921,7 @@ unexpected(method + " " + rel)
         # host does. The batch line still names the PR, because the root's base is its own default branch.
         self.make_trunk_default(self.alpha)
         hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, hex_head("5"), base="trunk")],
-                                       comments=[record_of(5, hex_head("5"))], check_rows={hex_head("5"): green()})}
+                                       comments=[record_of(5, hex_head("5")), lint_of(5, hex_head("5"))], check_rows={hex_head("5"): green()})}
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         block = by_repo(self, out, "o/alpha")["o/alpha"]
@@ -13957,7 +13975,7 @@ unexpected(method + " " + rel)
         # escape, named. In both orders the missing root is one `repo DIR: unknown (...)` line at its place, and the good root's block is whole.
         missing = os.path.join(os.path.dirname(self.alpha), "missing")
         self.per_root_gh({self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, hex_head("5"))],
-                                                      comments=[record_of(5, hex_head("5"))], check_rows={hex_head("5"): green()})})
+                                                      comments=[record_of(5, hex_head("5")), lint_of(5, hex_head("5"))], check_rows={hex_head("5"): green()})})
         for failing_first in (True, False):
             order = (missing, self.alpha) if failing_first else (self.alpha, missing)
             with self.subTest(failing_first=failing_first):
@@ -13976,8 +13994,8 @@ unexpected(method + " " + rel)
         # cwd would read it.
         head5, head9 = hex_head("5"), hex_head("9")
         self.per_root_gh({
-            self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()}),
-            self.bravo: self.root_state("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9)], check_rows={head9: green()}),
+            self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5), lint_of(5, head5)], check_rows={head5: green()}),
+            self.bravo: self.root_state("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9), lint_of(9, head9)], check_rows={head9: green()}),
         })
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=None)
         self.assertEqual(rc, 0, out + err)
@@ -14022,9 +14040,9 @@ unexpected(method + " " + rel)
         # alpha keeps its lines, and its batch line says why in place of the batch line. The root is not unknown as a whole, and bravo prints in full.
         head5, head9 = hex_head("5"), hex_head("9")
         self.per_root_gh({
-            self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()},
+            self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5), lint_of(5, head5)], check_rows={head5: green()},
                                         contexts=None),
-            self.bravo: self.root_state("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9)], check_rows={head9: green()}),
+            self.bravo: self.root_state("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9), lint_of(9, head9)], check_rows={head9: green()}),
         })
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=None)
         self.assertEqual(rc, 1, out + err)
