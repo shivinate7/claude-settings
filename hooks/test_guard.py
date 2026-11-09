@@ -31555,7 +31555,7 @@ role_model_refuse("role-model: builder on fable names no reviewer form and no ro
                   "builder", "fable", "Fix the failing case.",
                   lacks=ROLE_LACKS + (ROUND_MARKER, FIX_MARKER, ROUND_FIX_FORM, ROUND_ONE_SENTENCE) + FREE_ROUND_MARKERS)
 # A fix check on a later round, its first line `Round 2 of 3 (fix check)`, lifts a reviewer on Sonnet: the round row reads it.
-role_model_allow("role-model: fix check: reviewer on sonnet with Round 2 of 3 (fix check) on line one is allowed",
+role_model_allow("role-model: round row: reviewer on sonnet with Round 2 of 3 (fix check) on line one is allowed, as a round 2 brief",
                  "reviewer", "sonnet", "Round 2 of 3 (fix check). Re-run the cases.")
 
 
