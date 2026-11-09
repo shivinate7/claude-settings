@@ -181,7 +181,7 @@ Same-repo action: `uses: $/path` (GitHub changelog 2026-07-30). This repo's `che
 unknown; read zizmor's docs for self-repository.
 
 Pins of claude-settings' `ste-lint` and `zizmor` actions follow the session's tools. Check drift with
-the tool that reads the pins. It exits 3 when a pin lags:
+the tool that reads the pins. A direct run exits 3 when a pin lags:
 
 ```sh
 bin/ste-changed origin/main
