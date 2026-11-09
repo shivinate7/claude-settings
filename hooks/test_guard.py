@@ -15115,7 +15115,7 @@ sh("builder-find: for loop of cp of quoted \"$f\" over src/*.py into docs/ write
 sh("builder-find: for loop of cp of quoted \"$f\" over src/*.txt into docs/ writes docs/b.txt, is allowed",
    'for f in src/*.txt; do cp "$f" docs/; done', "allow", **dict(BR, cwd=FINDCP))
 # A glued -t names the folder from the same word: -rtdocs is -r -t docs, so the copy writes docs/test_x.py.
-# This case is a pin, not a red: 094e7b3a8 already refuses it for that cause.
+# This case is a pin, not a red: the guard already refuses it for that cause.
 sh("builder-find: cp -rtdocs of src/test_x.py writes docs/test_x.py, is refused",
    "cp -rtdocs src/test_x.py", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
 sh("builder-find: cp -rtdocs of src/b.txt writes docs/b.txt, no test, is allowed",
@@ -15126,7 +15126,7 @@ sh("builder-find: cp --parents of tests/notes.txt into docs/ writes docs/tests/n
 sh("builder-find: cp --parents of src/b.txt into docs/ writes docs/src/b.txt, no test, is allowed",
    "cp --parents src/b.txt docs/", "allow", **dict(BR, cwd=FINDCP))
 # A copy inside an if or a brace group is still a copy, so it writes docs/test_x.py. These two cases are pins, not
-# reds: 094e7b3a8 already refuses both for that cause.
+# reds: the guard already refuses both for that cause.
 sh("builder-find: if-then cp of src/test_x.py into docs/ writes docs/test_x.py, is refused",
    "if true; then cp src/test_x.py docs/; fi", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
 sh("builder-find: if-then cp of src/b.txt into docs/ writes docs/b.txt, is allowed",
