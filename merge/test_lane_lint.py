@@ -9,6 +9,7 @@ fixture come from merge/test_merge.py: a case extends that fixture, it does not 
 (class ReadyChecks) runs the same stub, through CiJobStub.
 The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
 BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four CI step runs, 0.5 s measured (3 runs of 2 cases). Its two lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
+BusyTextMatch runs one real busy refusal of bin/ci-job (its lock held by the case) and reads merge's HEAVY_BUSY_TEXT against that line.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -1057,6 +1058,48 @@ class RunFolderSweep(unittest.TestCase):
         self.assertFalse(os.path.exists(old), "the sweep kept a run folder two days old")
         self.assertTrue(os.path.isdir(new), "the sweep removed a run folder made now")
         self.assertTrue(os.path.isdir(own))
+
+
+def load_ci_job():
+    """bin/ci-job as a module, loaded the way lint/test_ci_job.py's load_ci_job loads it. A copy, not an import: importing that
+    suite runs its run-folder setup, which this run would not remove. sys.path is restored, since the script puts its hooks/
+    and lint/ folders first on it."""
+    import importlib.machinery, importlib.util
+    saved = list(sys.path)
+    try:
+        loader = importlib.machinery.SourceFileLoader("ci_job_busy_text", merge.CI_JOB)
+        module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+        loader.exec_module(module)
+    finally:
+        sys.path[:] = saved
+    return module
+
+
+@unittest.skipUnless(os.name == "posix", "the busy refusal's lock is an flock: POSIX only")
+class BusyTextMatch(unittest.TestCase):
+    """merge's HEAVY_BUSY_TEXT must sit in the busy refusal bin/ci-job prints. The two are copies, since bin/ci-job is a script
+    with no module to import. The case runs one real refusal: it holds the lock file in its own folder, and a cloud-session
+    run in that folder finds the lock held."""
+
+    def test_merge_busy_text_is_in_the_refusal_ci_job_prints(self):
+        import fcntl
+        ci_job = load_ci_job()
+        folder = tempfile.mkdtemp(prefix="busy-text-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        workflow = os.path.join(folder, "wf.yml")
+        with open(workflow, "w", encoding="utf-8", newline="\n") as f:
+            f.write("name: t\non: push\njobs:\n  lane:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n")
+        held = os.open(os.path.join(folder, ci_job.HEAVY_LOCK), os.O_RDWR | os.O_CREAT, 0o600)  # non-inheritable: the child gets no copy
+        self.addCleanup(os.close, held)
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)  # the holder: the child's own open of the same file is refused
+        env = dict(os.environ, CLAUDE_CODE_REMOTE="true", TMPDIR=folder)
+        done = subprocess.run([sys.executable, merge.CI_JOB, "lane", "--workflow", workflow], cwd=folder, env=env,
+                              capture_output=True, text=True, timeout=120)
+        refusals = [ln for ln in done.stdout.splitlines() if ln.startswith("unknown")]
+        self.assertEqual(done.returncode, 2, "precondition: the run was not refused, so no lock was held: " + done.stdout + done.stderr)
+        self.assertEqual(len(refusals), 1, "precondition: want one unknown line, got: " + done.stdout)
+        self.assertIn(ci_job.HEAVY_BUSY, refusals[0], "precondition: the refusal does not hold bin/ci-job's HEAVY_BUSY: " + refusals[0])
+        self.assertIn(merge.HEAVY_BUSY_TEXT, refusals[0], "merge's HEAVY_BUSY_TEXT is not in the refusal bin/ci-job prints: " + refusals[0])
 
 
 if __name__ == "__main__":
