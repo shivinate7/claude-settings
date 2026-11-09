@@ -12,11 +12,12 @@ one home of what a test path is) calls a test, or a name `_test*.py`. A `# nover
 line, in both passes; the same text in a string does not. Use it on an import that a try/except ImportError
 guards.
 
-The ast pass flags a `|` when an operand is None, a builtin type name (int, str, list and the like) or a
-subscript of one, in a place that runs: an argument or return annotation, a module or class annotation, a module
-or class assignment value, or the second argument of isinstance or issubclass. Under
-`from __future__ import annotations` the annotations are exempt. A local annotation in a function body, a string
-annotation, a bit-flag OR and a union of plain names are not flagged.
+The ast pass flags each `|` in an annotation that runs: an argument or return annotation, or a module or class
+annotation. A flag OR is never a valid annotation, so any `|` there is a union type, `Foo | Bar` too. In a module
+or class assignment value, or the second argument of isinstance or issubclass, it flags a `|` only when an
+operand is None, a builtin type name (int, str, list and the like) or a subscript of one, so a bit-flag OR such as
+`re.MULTILINE | re.DOTALL` stays silent. Under `from __future__ import annotations` the annotations are exempt.
+A local annotation in a function body and a string annotation are not flagged.
 
     python3 lint/check_python_floor.py [--root DIR]
 
@@ -29,7 +30,9 @@ feature) and one line per union type (file:line). Exits 2, naming the cause, whe
 file cannot be read, or a file cannot be parsed: an unread file is never clean.
 
 Limits: vermin's tables miss `subprocess.run(process_group=)` and `datetime.fromisoformat` with a "Z" suffix, both
-3.11 behaviour, so neither is caught. A symlinked folder under hooks/ or lint/ is not followed.
+3.11 behaviour, so neither is caught. A symlinked folder under hooks/ or lint/ is not followed. An assignment value
+or isinstance argument that joins non-builtin names (`Alias = Foo | Bar`) is not caught, since it reads the same
+as a bit-flag OR.
 """
 import ast
 import io
@@ -130,11 +133,12 @@ def is_type_operand(node):
     return isinstance(node, ast.Name) and node.id in BUILTIN_TYPES
 
 
-def union_lines(expr):
-    """The line numbers of each union-type `|` inside the expression."""
+def union_lines(expr, annotation=False):
+    """The line numbers of each union-type `|` inside the expression. In an annotation every `|` is a union type,
+    since a flag OR is never a valid annotation; elsewhere an operand must be a type (`is_type_operand`)."""
     return {node.lineno for node in ast.walk(expr)
             if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr)
-            and (is_type_operand(node.left) or is_type_operand(node.right))}
+            and (annotation or is_type_operand(node.left) or is_type_operand(node.right))}
 
 
 def marker_lines(source):
@@ -154,9 +158,9 @@ class Unions(ast.NodeVisitor):
         self.scope = "module"
         self.lines = set()
 
-    def take(self, expr):
+    def take(self, expr, annotation=False):
         if expr is not None:
-            self.lines |= union_lines(expr)
+            self.lines |= union_lines(expr, annotation)
 
     def function(self, node):
         if not self.future:
@@ -164,8 +168,8 @@ class Unions(ast.NodeVisitor):
             every = args.posonlyargs + args.args + args.kwonlyargs + [args.vararg, args.kwarg]
             for arg in every:
                 if arg is not None:
-                    self.take(arg.annotation)
-            self.take(node.returns)
+                    self.take(arg.annotation, annotation=True)
+            self.take(node.returns, annotation=True)
         outer, self.scope = self.scope, "function"
         for child in node.body:
             self.visit(child)
@@ -187,7 +191,7 @@ class Unions(ast.NodeVisitor):
     def visit_AnnAssign(self, node):
         if self.scope != "function":
             if not self.future:
-                self.take(node.annotation)
+                self.take(node.annotation, annotation=True)
             self.take(node.value)
         self.generic_visit(node)
 
