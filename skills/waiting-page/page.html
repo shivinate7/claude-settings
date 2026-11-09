@@ -322,7 +322,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .receipt ol.picks li::before { counter-increment: pk; content: counter(pk) "."; font: 600 14px var(--mono); color: var(--muted); text-align: end; }
 .receipt .picks .key { color: var(--ink); }
 /* The thread: the owner's last answer, then the writer's reply, in one calm panel with the shape of .stake. */
-.thread { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px; border-radius: 8px; background: var(--chip); min-width: 0; }
+.thread { display: grid; gap: 8px; padding: 12px; border-radius: 8px; background: var(--chip); min-width: 0; }
 .thread > .last:has(+ .reply) { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 /* The last answer extends the receipt: muted head, ink answer, no done mark, no Change button. */
 .receipt.last { gap: 4px; }
@@ -424,9 +424,9 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 @media (prefers-reduced-motion: no-preference) { .dfitwrap.scroll .dcue, .dfitwrap.scroll .dtop { transition: opacity 150ms linear; } }
 .dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
 .dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
-/* The title's basis is 0, so the row breaks only where the buttons alone are wider than the head's content: then the last ones take a second line, inside the window, Close at its end. */
+/* The title's basis is 0 and its floor is 4em, so the row breaks where the buttons leave the title under 4em: then the title keeps the first line, alone if no button fits beside it, and the last buttons take a second line, inside the window, Close at its end. */
 .dsh-head .in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-block: 8px; container: dsh / inline-size; }
-.dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 0; min-width: 4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsh-head .btn { flex: none; white-space: nowrap; }
 #dClose { margin-inline-start: auto; }
 .dsh-head .sm { display: none; }
@@ -835,6 +835,8 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .sline b { color: var(--good); }
 .sline .bad { color: var(--due); font-weight: 600; }
 .sline .btn { font-variant-numeric: tabular-nums; }
+/* A long word in the line ("Restored." at large text in a narrow window) breaks inside the line, never past the window. */
+.sline.dline > span { overflow-wrap: anywhere; }
 /* When the count ends the Undo keeps its box, hidden, so the line does not move. */
 .sline .btn.spent { visibility: hidden; }
 @media (max-width: 520px) { .sline { grid-template-columns: auto minmax(0, 1fr); } .sline .btn { grid-column: 2; justify-self: start; } }

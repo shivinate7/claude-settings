@@ -46,8 +46,9 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   The 19.5em and 16.5em floors above stay. At 100% text each box is the same as the 520 px rule drew it at 320, 390 and 1280.
 - Readable minimum: 8em of text column beside a press (128 px at 100%, 256 at 200%). 360 keeps 146 px, so it stays beside.
   A folded row with Dismiss or Restore beside it keeps that floor from 30.5em to 40em too (`askl (30.5em < width <= 40em)`): the date,
-  "Show answer" and the press leave the title 0 px at 530 wide and 65 px at 600. From 40em (640 px) the title has 128 px or more
-  beside them. Up to that width the row takes the phone arrangement, "Show answer" in the button's name only.
+  "Show answer" and the press leave the title 0 px at 530 wide and 65 px at 600. From 40em (640 px) the title has about 134 px or more
+  beside them. Measured at a 641 px list with the page's own date text ("Answered May 28, 17:08 CDT"; January to October tried): the least
+  is 134 px, beside Restore with a May date. Nov and Dec were not measured. Up to that width the row takes the phone arrangement, "Show answer" in the button's name only.
 - Stacked row: the row button is two columns (glyph, text). Title up to 3 lines, then the date, then "Show answer" on a row
   with no side press. On a row with Dismiss or Restore, "Show answer" stays in the button's name only, as today's phone row.
   The glyph sits on the title's first line (`align-items: start`), not on the middle of the block.
@@ -119,10 +120,23 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
 - The tab bar is one row that scrolls on its own. A tab is never wider than the bar (`.tabs` is a size container, each tab has
   `max-inline-size: 100cqw` and `overflow-wrap: anywhere`), so at 180 wide with text doubled, or tripled up to 240 wide, a label
   wraps inside its tab. When the Designs sheet closes, `revealTab()` scrolls the selected tab fully into the bar, as a tab press does.
-- The Designs sheet's head wraps (`.dsh-head .in`, `flex-wrap: wrap`). The title's basis is 0, so the row breaks only where the buttons
-  alone are wider than the head's content. Then the last buttons take a second line and Close sits at its end, inside the window.
-  At the default text the head wraps below about 254 px. At 220 and 240 wide Close was outside the window, or 2 px from its edge, before.
-- The send bar's status is never under 2em wide (`.bar .st`, `min-width: 2em`, 27 px). Where the buttons would leave it less, they wrap
-  under it and it takes the line: at 180 and 200 wide at the default text. At 220 it stays beside Send answers, 41 px wide, as before.
-- An answered thread has one `minmax(0, 1fr)` track (`.thread`), and its filed path breaks anywhere (`.askc .thread .filed`), so a long
-  unbroken path never scrolls the page.
+- The Designs sheet's head wraps (`.dsh-head .in`, `flex-wrap: wrap`). The title's basis is 0 and its floor is 4em (`min-width: 4em`,
+  68 px: the title's text is 17 px at every root size), so the row breaks where the buttons leave the title under 4em. The title keeps
+  the first line, alone if no button fits beside it. Then the last buttons take a second line and Close sits at its end, inside the window.
+  At the default text the head is one row from 340 to 520 wide and takes two rows at 320 and under (title 66 px before, 114 px now at 320).
+  Above the 30.5em short-label floor the labels are long: at 540 and 560 the head already took two rows (title 65 and 85 px before,
+  199 and 85 px now), and from 580 to 620 it takes two rows now (title 19 to 59 px before, 105 to 145 px now). At 640 and over nothing
+  moves. At 220 and 240 wide Close was outside the window, or 2 px from its edge, before.
+- The send bar's status has two numbers. The CSS floor is 2em (`.bar .st`, `min-width: 2em`): 27 px at 520 wide or less (13.5 px text),
+  29 px above (14.5 px text). The tests measure 4em (54 px, 58 px) at 180 and 390 wide at the default text: the status is that wide or
+  sits on its own line. Where the buttons would leave it under 2em, they wrap under it and it takes the line: at 180 and 200 wide at
+  the default text. At 220 it stays beside Send answers, 41 px wide, as before.
+- An answered thread has no column template (`.thread` is a grid with one implicit track), and its reply and filed path break anywhere
+  (`.askc .thread .reply`, `.askc .thread .filed`), so a long unbroken path never scrolls the page. No case needed its old
+  `minmax(0, 1fr)` track.
+- After a Restore, the "Restored." line (`.sline.dline > span`, `overflow-wrap: anywhere`) breaks inside the line. At 180 wide with text
+  doubled, and at 180 to 240 wide with text tripled, the word is wider than the line's column. It ran past the window and scrolled
+  the page sideways before. At the default text nothing moves.
+- Departs from: the Designs sheet's head at the default text takes a second row at 260 to 320 wide and at 580 to 620 wide, so the title
+  keeps 4em. The page before round 2 draws one row there, with a title of 6 to 66 px at 260 to 320 and 19 to 59 px at
+  580 to 620.
