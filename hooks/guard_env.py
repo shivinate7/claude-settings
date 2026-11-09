@@ -1448,15 +1448,25 @@ def _env_file_in(folder: str, rules=(), exclude_dir=(), ignored=frozenset(), by_
     return ""
 
 
-def _search_walk(folder: str, here: str, rules, exclude_dir, grep: bool, no_ignore: bool) -> str:
+def _exclude_dir_skips(typed, exclude_dir) -> bool:
+    """True when grep skips the folder operand `typed`, as grep receives it, because an `exclude_dir` glob
+    matches it. grep 3.11 matches the operand on its whole text and on each tail after a `/`, as typed, and
+    skips no folder when no operand is typed (`typed` is None). A `.` or `..` last part or a trailing `/`
+    is never skipped: the guard is not sure of grep there, and walking is the safe side."""
+    if typed is None or typed.endswith("/") or typed.rsplit("/", 1)[-1] in (".", ".."):
+        return False
+    return any(_glob_picks(typed, typed, g, False, named=True) for g in exclude_dir)
+
+
+def _search_walk(folder: str, here: str, rules, exclude_dir, grep: bool, no_ignore: bool, typed=None) -> str:
     """The first env file a search reads in `folder` that it is given, as `_env_file_in` returns it. The
     search's include `rules` and `exclude_dir` globs narrow it, with the path from `here` (`_glob_anchor`) in
-    front. For rg and ag with the ignore rules on, a file the checkout ignores is skipped
-    (`_ignored_paths`, read only when the first walk found a file or ran past the cap)."""
+    front. `typed` is the folder operand as grep receives it, or None for a folder no operand names; grep
+    skips it when `_exclude_dir_skips` says so. For rg and ag with the ignore rules on, a file the checkout
+    ignores is skipped (`_ignored_paths`, read only when the first walk found a file or ran past the cap)."""
     anchor = _glob_anchor(folder, here)
-    base = os.path.basename(os.path.normpath(folder))
-    if any(_glob_picks(base, base, g, False, by_name=True) for g in exclude_dir):
-        return ""  # grep 3.11 skips a command-line folder whose name matches `--exclude-dir`
+    if _exclude_dir_skips(typed, exclude_dir):
+        return ""
     found = _env_file_in(folder, rules, exclude_dir, by_name=grep, anchor=anchor)
     if found and not grep and not no_ignore:
         found = _env_file_in(folder, rules, exclude_dir, ignored=_ignored_paths(folder), anchor=anchor)
@@ -2034,28 +2044,39 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
                     # A `<` and the word after it are stdin, not a path the search reads.
                     paths = [i for i in plain if i not in skip and i != extras["pattern"]
                              and words[i] != "<" and words[i - 1] != "<"]
+                    # Each (folder, operand as grep receives it). A folder no operand names, such as the
+                    # cwd a grep with no path walks or one xargs feeds, has None (`_exclude_dir_skips`).
                     folders = []
+                    head = os.path.join(here, "")
                     for i in paths:
                         word = re.sub(r"[\\\"']", "", words[i])
                         rest = None if words[i].startswith("'") else _pwd_rest(word, pwd_text)
                         if rest is not None:
-                            word = "." + rest
+                            # grep receives the cwd's full path, which the guard does not match: None walks it.
+                            word, typed = "." + rest, None
                         elif re.search(r"[$`]", word):
                             continue
+                        else:
+                            typed = os.path.expanduser(word)
                         target = os.path.join(here, os.path.expanduser(word))
                         # A quoted glob is no glob to the shell, so it is not expanded.
                         expand = re.search(r"[*?\[]", word) and words[i] == word
-                        folders += [f for f in (glob.glob(target) if expand else [target])
-                                    if os.path.isdir(f) and f not in folders]
+                        for f in glob.glob(target) if expand else [target]:
+                            # The shell hands grep each match as the glob was typed: relative unless absolute.
+                            given = typed
+                            if expand and typed is not None:
+                                given = f[len(head):] if not os.path.isabs(typed) and f.startswith(head) else f
+                            if os.path.isdir(f) and (f, given) not in folders:
+                                folders.append((f, given))
                     if via_xargs:
                         _, walks_here, named = sources[here]
-                        folders += [d for d in named if d not in folders]
-                        folders += [here] * (walks_here and here not in folders)
+                        folders += [(d, None) for d in named if (d, None) not in folders]
+                        folders += [(here, None)] * (walks_here and (here, None) not in folders)
                     elif len(paths) <= extras["unknown"] and (
                             grep or not ((fed and part == 0) or "<" in words)):
-                        folders += [here] * (here not in folders)
-                    for folder in folders:
-                        found = _search_walk(folder, here, rules, exclude_dir, grep, no_ignore)
+                        folders += [(here, None)] * ((here, None) not in folders)
+                    for folder, given in folders:
+                        found = _search_walk(folder, here, rules, exclude_dir, grep, no_ignore, given)
                         if found == ENV_TOO_LARGE and cap_clear:
                             continue
                         if found == ENV_TOO_LARGE:
