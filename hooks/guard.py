@@ -3398,14 +3398,9 @@ EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
 ROLE_MODEL_REASON = (
-    "Rule (configuration): this spawn names a model above the one its role runs on. Remedy: %s. (decision agent-model-cap)"
+    "Rule (configuration): this spawn names a model above the one its role runs on. Remedy: drop the model "
+    "field, or name the role's model%s. (decision agent-model-cap)"
 )
-ROLE_MODEL_REMEDY = "drop the model field, or name the role's model"
-# A reviewer on Sonnet is refused with this remedy in place of ROLE_MODEL_REMEDY: the first review runs the role's own model, and only a
-# marker lifts a different one. The rounds fill the first %s and the fix check marker the second, from the constants at call time.
-# It names no model, so the refusal never offers a model by name. The round marker counts at any line start (hooks/shared_names.py).
-ROLE_REVIEWER_SONNET_REMEDY = ("round 1 runs the role's own model; a different model needs a `Round N of 3` marker at a line start (%s), "
-                               "or a first line that opens with the `%s` marker")
 # A reviewer has a second way past its row, so only its refusal names it. Rounds come from the constant at call time.
 ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
 ROLE_REVIEWER_FIX_CHECK_REMEDY = (", or, when this brief is a fix check, open its first line with the `%s` marker, "
@@ -3652,13 +3647,9 @@ def role_model_one(tool_input):
             return "", "", False
         if named > ROLE_MODEL_RANK.index(row):
             extra = ""
-            remedy = ROLE_MODEL_REMEDY
             if role == EXPLORE_ROLE and named < top:
                 extra = ROLE_EXPLORE_AUDIT_REMEDY % EXPLORE_AUDIT_MARKER
-            if role == "reviewer" and named < top:
-                remedy = ROLE_REVIEWER_SONNET_REMEDY % (" or ".join("`Round %s of 3`" % n for n in ROLE_REVIEWER_FREE_ROUNDS),
-                                                        FIX_CHECK_MARKER)
-            elif role == "reviewer":
+            if role == "reviewer":
                 extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(ROLE_REVIEWER_FREE_ROUNDS),
                                                     ", ".join("`Round %s of 3`" % n for n in ROLE_REVIEWER_FREE_ROUNDS))
                 extra += ROLE_REVIEWER_FIX_CHECK_REMEDY % (FIX_CHECK_MARKER, " or ".join(ROLE_REVIEWER_FREE_ROUNDS))
@@ -3666,7 +3657,7 @@ def role_model_one(tool_input):
                 extra += ", or " + BRIEF_LITERAL_REMEDY
             if role == "reviewer":
                 extra += ROLE_TEST_AUTHOR_NOTE if "1" in ROLE_REVIEWER_FREE_ROUNDS else ROLE_REVIEWER_FIRST_ROUND_NOTE
-            return ROLE_MODEL_REASON % (remedy + extra), model, False
+            return ROLE_MODEL_REASON % extra, model, False
         return "", "", False
     if os.environ.get(ROLE_MODEL_ENV, "").strip():
         return "", "", False
