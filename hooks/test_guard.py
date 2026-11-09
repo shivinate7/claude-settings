@@ -9243,6 +9243,7 @@ ENVWALK_BULK = os.path.join(ROOT, "envwalk-bulk")            # a clean repo whos
 ENVWALK_MODULES_OPEN = os.path.join(ROOT, "envwalk-modules-open")  # the same bulk tree, with no .gitignore line
 ENVWALK_MODULES_ENV = os.path.join(ROOT, "envwalk-modules-env")    # an env file only under node_modules, and a README
 ENVWALK_SUB_CLEAN = os.path.join(ROOT, "envwalk-sub-clean")    # a sub folder with one ordinary file, and no env file
+ENVWALK_SUB_CLEAN_CHILD = os.path.join(ENVWALK_SUB_CLEAN, "sub")  # one ordinary file; its parent has no env file
 ENVWALK_TYPE_MD = os.path.join(ROOT, "envwalk-type-md")        # a sub folder with an env file that rg's md type names
 ENVWALK_TYPE_JAVA = os.path.join(ROOT, "envwalk-type-java")    # a sub folder with an env file that rg's java type names
 ENVWALK_LOCAL_TOP = os.path.join(ROOT, "envwalk-localtop")    # a top folder with a .env.local file, and a README
@@ -10059,14 +10060,18 @@ sh("env: walk control, three conditional cds, first runs and two skipped, no env
 # folder with no env file, which stays allowed.
 
 # xargs appends each name it reads to the program, or puts it where `{}` stands. `find` and `ls -a` list the env file
-# by name, so each form hands the env file to the search.
-_XARGS_FEEDS_ENV = ("find . -type f | xargs grep -l K", "find . -type f | xargs rg K",
-                    "ls -a | xargs rg --hidden K src", "ls -a | xargs -I{} rg --hidden K {}")
-for _cmd in _XARGS_FEEDS_ENV:
+# by name, so each form hands the env file to the search. `ls -a` also names `..`, the parent folder, so its control
+# runs in a sub folder whose parent holds no env file. The parent of ENVWALK_CLEAN is ROOT, and rg walks down from
+# ROOT into the fixtures that hold env files.
+_XARGS_FEEDS_ENV = (("find . -type f | xargs grep -l K", ENVWALK_CLEAN),
+                    ("find . -type f | xargs rg K", ENVWALK_CLEAN),
+                    ("ls -a | xargs rg --hidden K src", ENVWALK_SUB_CLEAN_CHILD),
+                    ("ls -a | xargs -I{} rg --hidden K {}", ENVWALK_SUB_CLEAN_CHILD))
+for _cmd, _clean_cwd in _XARGS_FEEDS_ENV:
     sh("env: walk safety hole, xargs feeds an env file name to a search, refused: " + _cmd, _cmd, "deny", "env-file",
        cwd=ENVWALK_HELD)
     sh("env: walk control, xargs feeds names from a folder with no env file, allowed: " + _cmd, _cmd, "allow",
-       cwd=ENVWALK_CLEAN)
+       cwd=_clean_cwd)
 
 # A plain `ls` lists no dotfile, so no env file name reaches xargs. The search reads src, which holds no env file, so
 # the walk allows it. The `ls -a` form above is the same pipe with the env file named.
