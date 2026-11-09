@@ -120,6 +120,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
+  sendmessage-session-id
+                       deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
+                       hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
+                       mcp__claude-code-remote__send_message tool pass. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -140,7 +144,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
                        (agent-model-cap)
                        deny. An Agent or Task spawn that sets model opus, unless Plan, designer,
-                       design-reviewer, a builder's third-round marker or an Explore's `Audit:` marker
+                       design-reviewer, refuter, a builder's third-round marker or an Explore's `Audit:` marker
                        covers it. The general override, `opus [role] <time>` or a step grant lifts the
                        spawn refusal; none lifts the settings-write ask.
   ask-alone            deny. An ask command chained with other commands. (ask-commands-run-alone)
@@ -209,6 +213,28 @@ Other tools, in `judge` order:
                        shorthand key is not seen. A regex literal after `)`, `return` or
                        `typeof` that holds a quote can hide an `agent()` call.
                        (agent-model-cap)
+  brief-claim-has-probe
+                       deny. An Agent or Task brief to a builder or a test-author with a sentence that says what
+                       main, origin/main or today passes, allows, accepts, refuses, rejects or blocks, for an input
+                       (a backtick span, a double-quoted string, or a single-quoted one), when no command line holds
+                       that input, as the whole text between quotes or the whole line, with a result line right
+                       under it. Active form: `main` or `origin/main` (a backticked one too) with the verb next to
+                       it, or today with it, they, guard, hook, rule or check; "the main session" is no subject.
+                       Passive form: `X` is refused on main. Fenced text is read. A command line is a line of its own
+                       in a fence, in backticks, or after `$ `, led by python, python3, git, verdict, bash, sh, node,
+                       npm, npx, pytest, gh, grep, rg or jq; a line that holds a claim is never one. A path after in,
+                       at, from, under, inside, within or via is a locator, not an input. A line that starts with
+                       `Add a case:` or `Must deny:` is case data. A sentence with no input is not judged. A lone
+                       backtick reads to the line's end. Other roles pass. An override lifts it.
+                       (brief-claim-has-probe)
+  brief-destructive-git
+                       deny. An Agent, Task or Workflow brief that holds a command the shell guard reads as a
+                       discard of a working tree (`shared_tree_match`): a backtick span, a fenced line or a line led
+                       by `$ `. Each is cut with `split_segments`, so the verb list has one home. Passes: a span
+                       whose `git -C` or `cd` target is under a session scratchpad; a line with `Must deny:` or
+                       `Add a case:` before the span; a span with never, do not, don't or no in its own clause
+                       (no `;`, `.` or `,` between) within 4 words before it. Prose with no span is not read. Any
+                       role. An override lifts it. (brief-destructive-git)
   lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt is
                        not exactly `/effort medium` (LANE_EFFORT), with no trimming. A lane tag is
                        any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
@@ -354,7 +380,7 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -385,25 +411,26 @@ while True:
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
             PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
-            parent_delete_hit, push_ask_hit, push_target, push_text, push_verdict, rm_delete_hit,
+            parent_delete_hit, push_ask_hit, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            conflict_markers_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _resolve_vars, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
-            is_project_config, project_config_shell_hit,
+            FROZEN_REASON, MUTATING_COMMAND, _resolve_vars, _shell_write_hit, frozen_shell_hit, interpreter_may_write,
+            interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
         from guard_env import (
             ENV_ADVICE, ENV_TOOL_REASON, _substitutions, env_heredoc_refusal, env_refusal, is_env,
+            substitution_commands,
         )
         _loading = "guard_kill"
         from guard_kill import (
@@ -1546,6 +1573,7 @@ AUTHOR_BASENAMES = {"requirements-dev.txt"}
 # The three mutation tests are test code for a test-author, named one by one so a later product
 # mutate_*.py stays a builder's. A builder keeps editing them: they are not test paths. Case folds as in `is_test_rel`.
 AUTHOR_MUTATION_TESTS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
+MUTATION_TEST_NAMES = {name.rsplit("/", 1)[-1] for name in AUTHOR_MUTATION_TESTS}
 TEST_CONFIG = re.compile(
     r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
     r"|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+|\.mocharc(?:\.\w+)?|[^/]+\.xctestplan)$")
@@ -1653,7 +1681,7 @@ WORKFLOW_VALUE_FLAGS = {"-X", "-W", "-r", "--require", "--import", "-o"}
 # Interpreter flags after which a command or module follows, so no script path does (`python -m`, `bash -c`).
 WORKFLOW_NO_PATH_FLAGS = {"-c", "-m"}
 WORKFLOW_DISABLE_STEP = re.compile(
-    r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:false|\$\{\{\s*false\s*\}\}))\s*$")
+    r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:false|\$\{\{\s*false\s*\}\}))(?:\s+#.*)?\s*$")  # YAML: a comment needs space before `#`
 
 
 def is_workflow_rel(rel: str) -> bool:
@@ -1683,6 +1711,50 @@ def workflow_script_index(args):
     return index if index < len(args) else None
 
 
+# Commands that run the command after them. Each maps to the flags that take a value (their next token is
+# not the wrapped command); `timeout` also takes a duration, and `coverage` and `uv` run their subcommand `run`.
+WORKFLOW_WRAPPERS = {
+    "timeout": {"-k", "-s", "--kill-after", "--signal"},
+    "xvfb-run": {"-e", "-n", "-f", "-s", "-w", "--error-file", "--server-num", "--auth-file",
+                 "--server-args", "--wait"},
+    "env": {"-u", "-C", "--unset", "--chdir"},
+    "nice": {"-n", "--adjustment"},
+    "coverage": {"--rcfile", "--include", "--omit", "--source", "--data-file", "--context"},
+    "uv": {"--with", "--python", "-p", "--project", "--directory", "--group", "--extra", "--env-file",
+           "--package", "-w", "--with-requirements"},
+}
+WORKFLOW_RUN_SUBCOMMAND = {"coverage", "uv"}
+
+
+def workflow_unwrap(tokens):
+    """`tokens` without the wrapper commands before the command they run (`timeout 600`, `xvfb-run -a`,
+    `env FOO=1`, `nice`, `coverage run`, `uv run`, `python -m coverage run`), each with its own flags and
+    values. A wrapper that wraps nothing, or `coverage` or `uv` with another subcommand, is left as it is."""
+    tokens = list(tokens)
+    while tokens:
+        if (tokens[0] in WORKFLOW_INTERPRETERS and tokens[1:4] == ["-m", "coverage", "run"]):
+            tokens = tokens[4:]
+            name = "coverage"
+        elif tokens[0] in WORKFLOW_WRAPPERS:
+            name, tokens = tokens[0], tokens[1:]
+            if name in WORKFLOW_RUN_SUBCOMMAND:
+                # `uv` takes global flags before `run`; skip them to find it.
+                probe = 0
+                while probe < len(tokens) and tokens[probe].startswith("-"):
+                    probe += 2 if tokens[probe] in WORKFLOW_WRAPPERS[name] else 1
+                if tokens[probe:probe + 1] != ["run"]:
+                    return [name] + tokens
+                tokens = tokens[probe + 1:]
+        else:
+            break
+        values = WORKFLOW_WRAPPERS[name]
+        while tokens and (tokens[0].startswith("-") or (name == "env" and re.match(r"^\w+=", tokens[0]))):
+            tokens = tokens[2:] if tokens[0] in values else tokens[1:]
+        if name == "timeout" and tokens:
+            tokens = tokens[1:]   # the duration
+    return tokens
+
+
 def workflow_step_disables(line: str) -> bool:
     """True when one step line is `continue-on-error: true` or `if: false`, so the step runs no test that counts."""
     return bool(WORKFLOW_DISABLE_STEP.match(line))
@@ -1705,6 +1777,7 @@ def workflow_run_is_test(value: str) -> bool:
     if any(set(tok) <= set(lexer.punctuation_chars) for tok in tokens):
         return False
     script = 0
+    tokens = workflow_unwrap(tokens)
     if tokens and tokens[0] in WORKFLOW_INTERPRETERS:
         tokens = tokens[1:]
         script = workflow_script_index(tokens)
@@ -1768,15 +1841,34 @@ WORKFLOW_RUN_PREFIX = re.compile(r"^\s*(?:-\s+)?run:\s*")
 WORKFLOW_RUN_BLOCK = re.compile(r"^(\s*)(?:-\s+)?run:\s*[|>][+-]?\s*$")
 
 
+def workflow_runs_test(path: str) -> bool:
+    """A run of this path is a test run: a test path, or a mutation test (not a test path for edit ownership).
+    A mutation test counts by file name, so `cd hooks && python3 mutate_guard.py` and a `working-directory`
+    step are runs too."""
+    return is_test_rel(path) or basename(norm(path).lower()) in MUTATION_TEST_NAMES
+
+
 def workflow_command_tests(command: str) -> set:
     """The test paths one shell command line runs, each in its `workflow_path` spelling: the script an
     interpreter runs past its flags, every test path after a test runner, or the command itself when it is a
     test path. A lint tool that is given a test folder (`ruff check tests/`) runs none."""
     found = set()
     for segment in WORKFLOW_COMMAND_SPLIT.split(command):
-        tokens = [tok.strip("\"'") for tok in segment.split()]
-        while tokens and (re.match(r"^\w+=", tokens[0]) or tokens[0] in ("npx", "sudo", "time")):
-            tokens.pop(0)
+        # A quoted value with a space is one word. No escape character, so a Windows `tests\x.py` keeps its
+        # backslash for `workflow_path` to turn into `/`.
+        lexer = shlex.shlex(segment, posix=True)
+        lexer.whitespace_split, lexer.commenters, lexer.escape = True, "", ""
+        try:
+            tokens = list(lexer)
+        except ValueError:
+            tokens = [tok.strip("\"'") for tok in segment.split()]
+        while tokens:
+            if re.match(r"^\w+=", tokens[0]) or tokens[0] in ("npx", "sudo", "time"):
+                tokens.pop(0)
+            elif workflow_unwrap(tokens) != tokens:
+                tokens = workflow_unwrap(tokens)
+            else:
+                break
         if not tokens:
             continue
         runner = bool(TEST_RUNNER_CONTEXT.search(segment))
@@ -1785,7 +1877,7 @@ def workflow_command_tests(command: str) -> set:
             args = tokens[1:] if runner else ([] if script is None else [tokens[1 + script]])
         else:
             args = tokens if runner else tokens[:1]
-        found.update(workflow_path(tok) for tok in args if is_test_rel(workflow_path(tok)))
+        found.update(workflow_path(tok) for tok in args if workflow_runs_test(workflow_path(tok)))
     return found
 
 
@@ -2052,13 +2144,18 @@ def git_names(root: str, *args):
     return [p for p in answer.stdout.split("\0") if p]
 
 
-def changed_paths(root: str, old: str, new=None):
+def changed_paths(root: str, old: str, new=None, top: str = ""):
     """The paths that differ from `old` (a commit or tree) to `new` (a commit), or to the working tree
-    and its untracked files when `new` is None; None when git failed."""
+    and its untracked files when `new` is None; None when git failed.
+    Every path is relative to the checkout's top. `git diff` prints that from any folder, but only
+    with `--no-relative`: under `diff.relative=true` it names paths relative to the run folder, and
+    `text_at` would read the wrong file. `git ls-files --others` lists only the folder it
+    runs in, relative to it, so it runs in `top` (the checkout's top, which `diff_violation` already
+    read; it defaults to `root`)."""
     if new is not None:
-        return git_names(root, "diff", "--name-only", "-z", "--no-renames", old, new)
-    tracked = git_names(root, "diff", "--name-only", "-z", "--no-renames", old)
-    fresh = git_names(root, "ls-files", "--others", "--exclude-standard", "-z")
+        return git_names(root, "diff", "--no-relative", "--name-only", "-z", "--no-renames", old, new)
+    tracked = git_names(root, "diff", "--no-relative", "--name-only", "-z", "--no-renames", old)
+    fresh = git_names(top or root, "ls-files", "--others", "--exclude-standard", "-z")
     if tracked is None or fresh is None:
         return None
     return tracked + sorted(fresh)
@@ -2083,14 +2180,14 @@ def upstream_kept(root: str, orig: str, onto: str):
         return None
     if held.returncode:
         return []
-    replayed = git_names(root, "diff", "--name-only", "-z", "--no-renames", onto + "..." + orig)
-    moved = git_names(root, "diff", "--name-only", "-z", "--no-renames", onto)
+    replayed = git_names(root, "diff", "--no-relative", "--name-only", "-z", "--no-renames", onto + "..." + orig)
+    moved = git_names(root, "diff", "--no-relative", "--name-only", "-z", "--no-renames", onto)
     if replayed is None or moved is None:
         return None
     return [p for p in replayed if p not in set(moved)]
 
 
-def own_changes(root: str):
+def own_changes(root: str, top: str = ""):
     """The agent's own change, as a list of `(old, new, paths, kind)`; None when git could not answer:
     unknown, never clear. `new` None is the working tree, and `old` '' is no commit.
 
@@ -2106,7 +2203,9 @@ def own_changes(root: str):
     builder left it during the rebase. A write of those bytes after the rebase finished is its own change:
     the working tree or a commit of its own carries it, and that is refused.
     A plain cherry-pick or rebase pick, a clean merge, a reset, a checkout and a pull are other
-    people's commits, and are not read."""
+    people's commits, and are not read.
+    `top` is the checkout's top, where untracked files are listed. A caller that already read it passes
+    it, so no git call is added; it defaults to `root`."""
     log = guard_core._git(root, "reflog", "show", "--format=%H %gs", "HEAD")
     gitdir = guard_core._git(root, "rev-parse", "--absolute-git-dir")
     merging = guard_core._git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
@@ -2139,8 +2238,8 @@ def own_changes(root: str):
         if old is None:
             return None
         paths = (changed_paths(root, old, sha) if old else
-                 git_names(root, "diff-tree", "--root", "-r", "--name-only", "--no-commit-id", "-z",
-                           "--no-renames", sha))
+                 git_names(root, "diff-tree", "--no-relative", "--root", "-r", "--name-only",
+                           "--no-commit-id", "-z", "--no-renames", sha))
         if paths is None:
             return None
         changes.append((old, sha, paths, kind))
@@ -2149,7 +2248,7 @@ def own_changes(root: str):
         old = merge_tree(root, "HEAD", merging.stdout.strip())
         if old is None:
             return None
-    paths = changed_paths(root, old)
+    paths = changed_paths(root, old, top=top)
     if paths is None:
         return None
     replaying = merging.returncode != 0 and any(
@@ -2211,12 +2310,13 @@ def pyproject_author_ok(old: str, new: str) -> bool:
                for key in set(before) | set(after) if not key.startswith("tool.pytest"))
 
 
-def text_at(root: str, rev, rel: str) -> str:
+def text_at(root: str, rev, rel: str, top: str = "") -> str:
     """The file's text at `rev` (a commit or tree), in the working tree when `rev` is None, and ''
-    when it does not exist there or `rev` is '' (no commit)."""
+    when it does not exist there or `rev` is '' (no commit). `rel` is relative to the top of the checkout,
+    so the working tree is read from `top`; `top` defaults to `root`."""
     if rev is None:
         try:
-            with open(os.path.join(root, rel), encoding="utf-8", errors="replace") as handle:
+            with open(os.path.join(top or root, rel), encoding="utf-8", errors="replace") as handle:
                 return handle.read()
         except Exception:
             return ""
@@ -2237,21 +2337,21 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
         names = [rel, os.path.relpath(real, top)]
         if role == AUTHOR_ROLE and is_workflow_rel(rel) and all(
                 is_workflow_rel(n) or author_path_ok(n) for n in names):
-            bad = not workflow_test_steps_only(text_at(root, old, rel), text_at(root, new, rel))
+            bad = not workflow_test_steps_only(text_at(root, old, rel, top), text_at(root, new, rel, top))
         elif role == AUTHOR_ROLE:
             bad = not all(author_path_ok(n) for n in names)
             if not bad and basename(rel) == "package.json":
-                bad = not package_json_author_ok(text_at(root, old, rel), text_at(root, new, rel))
+                bad = not package_json_author_ok(text_at(root, old, rel, top), text_at(root, new, rel, top))
             if not bad and basename(rel) == "pyproject.toml":
-                bad = not pyproject_author_ok(text_at(root, old, rel), text_at(root, new, rel))
+                bad = not pyproject_author_ok(text_at(root, old, rel, top), text_at(root, new, rel, top))
         elif role == WRITER_ROLE:
             bad = not all(n.lower().endswith(".md") for n in names)
         elif role == DESIGNER_ROLE:
             bad = not all(designer_path_ok(n) for n in names)
         else:
             bad = any(is_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
-                text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines())) or (
-                is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel), text_at(root, new, rel)))
+                text_at(root, new, rel, top).splitlines(), text_at(root, old, rel, top).splitlines())) or (
+                is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel, top), text_at(root, new, rel, top)))
         if bad:
             found.append(rel)
     return found
@@ -2261,11 +2361,13 @@ def diff_violation(root: str, role: str):
     """Judge the agent's own change (`own_changes`). Returns `(offence, noted)`: the first path the role
     may not change ('' when none, None when git could not answer: UNKNOWN, never clear), and the paths
     a builder changed that are logged and never refused. Every offence of another role is logged only."""
-    changes = own_changes(root)
     top = guard_core._git(root, "rev-parse", "--show-toplevel")
-    if changes is None or top is None or top.returncode != 0:
+    if top is None or top.returncode != 0:
         return None, []
     top = os.path.realpath(top.stdout.strip())
+    changes = own_changes(root, top)
+    if changes is None:
+        return None, []
     builder = role == BUILDER_ROLE
     noted = []
     for old, new, paths, kind in changes:
@@ -2347,7 +2449,7 @@ SESSION_TOOL = "mcp__ccd_session__start_session"
 CREATE_SESSION_TOOL = "mcp__claude-code-remote__create_session"
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
-LANE_TAG = "cs-build:lane"
+from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with lint/report_guard.py
 LANE_EFFORT_REASON = (
     "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
     "prompt. Start the lane with that prompt, then send the brief by send_message (decision agent-model-cap)."
@@ -2575,6 +2677,415 @@ def brief_markers(brief) -> list:
 def builder_third_round(brief) -> bool:
     """True when a brief holds a builder's third-round marker, in either spelling."""
     return any(kind.lower() in BUILDER_MARKERS and n == "3" for kind, n in brief_markers(brief))
+
+
+# BRIEF CLAIMS NEED A PROBE (rule brief-claim-has-probe, decision brief-claim-has-probe). A brief to a builder or a
+# test-author that says what main, origin/main or "today" passes, allows, accepts, refuses, rejects or blocks for an
+# input must carry the probe that showed it: a command line that holds the input, and a result line under it. The scan
+# reads the brief in one pass, line by line, and masks each line's quoted spans once (_claim_mask). An input is a
+# backtick span, a double-quoted string (backticks inside it too, so a quoted case text is one data span, not a claim)
+# or a single-quoted one that opens after a non-word character; an apostrophe or a lone quote opens nothing, and a lone
+# backtick reads to the line's end. A claim is a clause in the active form (a subject, then the verb) or the passive
+# form (`X` is refused on main), and the clause ends at ", so", ", and" or ", then". The subject is `main` or
+# `origin/main` with the verb next to it (so "the main session" is no subject), or today with it, they, guard, hook,
+# rule or check. A backticked `main` is still the word. The verb may be negated (doesn't refuse, never refuses) or be
+# "lets ... through". The verb may be a base or -ing form before "on main" or "today" ("`a` and `b` pass on main",
+# "listed `X` as passing on main"). A leading "On main," or "Today" before the inputs and the verb is a claim too, and
+# so is a subject with "today" later ("The guard refuses `x` today"). With no input after the verb, the clause takes
+# every input of its own only when nothing but today, now or punctuation follows the verb. A claim clause with no
+# input of its own that says it or them, or says both, all, each or these at its end, before "of them", "of these"
+# or "of those", or before a count word (all three, both cases, each one, both today), takes the inputs of its own
+# sentence if it has any, else those of the sentence, or the run of list lines, right before it; one that ends with ":"
+# takes the list lines after it, up to a "Controls ...:" heading. Fenced text is read too. A NUL in a brief is a space. A path after in, at, from, under, inside, within or via is a locator, not an input.
+# Cost: pure text work inside the one guard call. No process, no file.
+BRIEF_CLAIM_ROLES = ("builder", "test-author")
+_CLAIM_VERB = r"(?:passes|passed|allows|allowed|accepts|accepted|refuses|refused|rejects|rejected|blocks|blocked)"
+_CLAIM_BASE = r"(?:pass|allow|accept|refuse|reject|block)"
+_CLAIM_THROUGH = r"\b(?=[^.!?;]*\bthrough\b)"   # lets counts as a verb only with through after it
+_CLAIM_NOT = r"(?:(?:does|did|do)\s+not|(?:does|did|do)n['\u2019]t)\s+"
+_CLAIM_ADVERB = r"(?:(?:still|also|now|today|currently|already|even|always|never)\s+)?"
+_CLAIM_MAIN = r"(?<![\w/.-])(?:origin/main|main)(?![\w/-])(?!\.\w)"
+_CLAIM_ING = r"(?:passing|allowing|accepting|refusing|rejecting|blocking)"
+_CLAIM_ANY = r"(?:" + _CLAIM_VERB + r"|" + _CLAIM_BASE + r"|" + _CLAIM_ING + r")"
+_CLAIM_SUBJECT = r"(?:it|they|guard|hook|rule|check)"
+_CLAIM_ACTS = (_CLAIM_ADVERB + r"(?:" + _CLAIM_VERB + r"\b|lets" + _CLAIM_THROUGH
+               + r"|" + _CLAIM_NOT + _CLAIM_ADVERB + r"(?:" + _CLAIM_BASE + r"\b|let" + _CLAIM_THROUGH + r"))")
+_CLAIM_ACTIVE_LEAD = (r"(?:" + _CLAIM_MAIN + r"|(?<![\w/.-])today,?\s+(?:(?:the|this)\s+)?" + _CLAIM_SUBJECT + r")\s+"
+                      + _CLAIM_ACTS)
+BRIEF_CLAIM_ACTIVE_LEAD = re.compile(_CLAIM_ACTIVE_LEAD, re.IGNORECASE)
+BRIEF_CLAIM_ACTIVE = re.compile(
+    _CLAIM_ACTIVE_LEAD
+    # A subject first and "today" later in the sentence: "The guard refuses `x` today."
+    + r"|(?<![\w/.-])(?:(?:the|this)\s+)?" + _CLAIM_SUBJECT + r"\s+" + _CLAIM_ACTS + r"(?=[^.!?;]*\btoday\b)",
+    re.IGNORECASE)
+BRIEF_CLAIM_TODAY = re.compile(r"\btoday\b", re.IGNORECASE)
+BRIEF_CLAIM_PASSIVE = re.compile(
+    r"(?:\b(?:is|are|was|were|gets|get)\s+)?\b" + _CLAIM_ANY + r"\b\s+"
+    r"(?:(?:on|by)\s+(?:origin/main|main)(?![\w/-])|today\b)", re.IGNORECASE)
+# A leading "On main," or "Today" then the inputs, then the verb: "On main, `a` passes." The inputs are the masked
+# spans between the frame and the verb.
+BRIEF_CLAIM_FRAMED = re.compile(
+    r"(?<![\w/.-])(?:on\s+(?:origin/main|main)(?![\w/-])|today\b),?\s+"
+    r"(?:\x00\d+\x00(?:\s*,\s*(?:and\s+)?|\s+and\s+|\s+)?)+" + _CLAIM_ADVERB + r"(?:" + _CLAIM_NOT + r")?"
+    + _CLAIM_ADVERB + _CLAIM_ANY + r"\b", re.IGNORECASE)
+BRIEF_CLAIM_SPAN = re.compile(
+    r"(`+)(.+?)\1(?!`)|`+(.*)$|\"([^\"\n]+)\"|(?<!\w)'([^'`\n]+)'(?!\w)")
+BRIEF_CLAIM_MASK = re.compile(r"\x00(\d+)\x00")
+BRIEF_CLAIM_LOCATOR = re.compile(r"\b(?:in|at|from|under|inside|within|via)\s+$", re.IGNORECASE)
+BRIEF_CLAIM_BREAK = re.compile(r",\s+(?:so|and|then)\b", re.IGNORECASE)
+# it and them are referents anywhere in the clause. both, all, each and these only at the clause end, or before
+# "of them", "of these" or "of those": "main passes all tests" has no referent, "main passes all of them" has one.
+BRIEF_CLAIM_REFERENT = re.compile(
+    r"\b(?:it|them)\b|\b(?:both|all|each|these)\b(?=[\s.!?:;,)]*$|\s+of\s+(?:them|these|those)\b)", re.IGNORECASE)
+# A count word that names the inputs before it: "all three", "both cases", "these two", "each one", "both today".
+_CLAIM_COUNT_WORD = r"(?:one|ones|two|three|four|five|six|seven|eight|nine|ten|\d+|cases?|inputs?)"
+BRIEF_CLAIM_COUNT = re.compile(
+    r"\b(?:both|all|each|these)\s+(?:" + _CLAIM_COUNT_WORD + r"\b(?:\s+(?:today|now)\b)?|(?:today|now)\b)[\s.!?:;,)]*$",
+    re.IGNORECASE)
+# What may follow a verb for the active form to take every input of its clause: today, now and punctuation only.
+BRIEF_CLAIM_BARE = re.compile(r"(?:\s|[.,:;!?)\"']|\b(?:today|now)\b)*", re.IGNORECASE)
+# A heading that closes a claimed list: "Controls that must still pass:", bare, bulleted or numbered.
+BRIEF_CLAIM_HEADING = re.compile(r"(?:(?:[-*+]|\d+[.)])\s+)?controls?\b[^:]*:\s*$", re.IGNORECASE)
+BRIEF_CLAIM_LIST = re.compile(r"(?:[-*+]|\d+[.)])\s")
+BRIEF_CLAIM_COMMAND = re.compile(
+    r"(?:(?:cd\s[^&|;\n]*&&|echo\s[^|\n]*\||[A-Za-z_]\w*=\S*|time)\s+)*"
+    r"(?:\S*/)?(?:python3?|git|verdict|bash|sh|node|npm|npx|pytest|gh|grep|rg|jq)(?=\s|$)")
+BRIEF_CLAIM_INLINE = re.compile(r"`([^`]+)`(.*)$")
+BRIEF_CLAIM_REASON = (
+    "The brief says what main, origin/main or today does with an input, and carries no probe for it. Add the probe, "
+    "or drop the claim. The probe is the command you ran, on a line of its own, that holds the input in quotes (in a "
+    "fence, in backticks, or after `$ `): for example `python3 ...`, `git show origin/main:<path>` piped into it, or "
+    "`verdict ...`; and its result line right under it. Each input with no probe: %s. "
+    "(decision brief-claim-has-probe, a brief's claim about main carries the probe that showed it)"
+)
+
+
+def _claim_mask(text: str):
+    """The line with each input masked as \\x00n\\x00, and the inputs in the order met. A backticked main stays the
+    word, so it can be a subject."""
+    spans = []
+    text = text.replace("\x00", " ")   # a NUL in a brief would read as a marker of its own
+
+    def mask(hit):
+        body = next((g for g in hit.groups()[1:] if g is not None), "").strip()
+        if hit.group(1) and body.lower() in ("main", "origin/main"):
+            return body
+        spans.append(body)
+        return "\x00%d\x00" % (len(spans) - 1)
+
+    return BRIEF_CLAIM_SPAN.sub(mask, text), spans
+
+
+def _claim_refers(text: str) -> bool:
+    """True when the clause text says it, them, or a count of inputs (both, all three, each one, these two today)."""
+    return bool(BRIEF_CLAIM_REFERENT.search(text) or BRIEF_CLAIM_COUNT.search(text))
+
+
+def _claim_active(sentence: str):
+    """The leftmost active-form match in one masked sentence, or None. The subject-first form needs "today" later in
+    its sentence, so it is searched only up to the last "today": its lookahead then ends there and the scan stays
+    linear in the sentence."""
+    clause = BRIEF_CLAIM_ACTIVE_LEAD.search(sentence)
+    late = None
+    for late in BRIEF_CLAIM_TODAY.finditer(sentence):
+        pass
+    if late is not None:
+        subject = BRIEF_CLAIM_ACTIVE.search(sentence, 0, late.end())
+        if subject is not None and (clause is None or subject.start() < clause.start()):
+            return subject
+    return clause
+
+
+def _claim_clause(sentence: str, marks: list):
+    """The claim in one masked sentence, or None. A claim is (claimed, refer): the inputs its clause names, and, when
+    it names none, "after" for a clause that ends with ":", "before" for one that says both, all, them, it, each or
+    these, else None. The active form names the inputs after its verb, the passive form those before it; either falls
+    back to every input in its clause. marks are the sentence's (offset, input) pairs."""
+    clause = _claim_active(sentence)
+    passive = clause is None
+    framed = False
+    if passive:
+        clause = BRIEF_CLAIM_PASSIVE.search(sentence)
+        if clause is None:
+            clause = BRIEF_CLAIM_FRAMED.search(sentence)
+            framed = True
+            if clause is None:
+                return None
+    lo = max((b.end() for b in BRIEF_CLAIM_BREAK.finditer(sentence, 0, clause.start())), default=0)
+    stop = BRIEF_CLAIM_BREAK.search(sentence, clause.end())
+    hi = stop.start() if stop else len(sentence)
+    first, last = (clause.start(), clause.end()) if framed else (lo, clause.start()) if passive else (clause.end(), hi)
+    claimed = [item for at, item in marks if first <= at < last]
+    if not claimed and (passive or BRIEF_CLAIM_BARE.fullmatch(sentence, clause.end(), hi)):
+        claimed = [item for at, item in marks if lo <= at < hi]
+    refers = _claim_refers(sentence[first:last])
+    if not claimed and not passive and refers:   # "Edit `x`, because main refuses it."
+        claimed = [item for at, item in marks if lo <= at < hi]
+    if claimed:
+        return claimed, None
+    if sentence[lo:hi].rstrip().endswith(":"):
+        return [], "after"
+    return [], "before" if refers else None
+
+
+def _claim_line(text: str) -> list:
+    """One line's sentences, in order, each as (inputs, claim): the sentence's inputs with locators left out, and its
+    claim from _claim_clause, or None."""
+    plain, spans = _claim_mask(text)
+    sentences = []
+    for sentence in re.split(r"(?<=[.!?;])\s+", plain):
+        marks = []
+        for m in BRIEF_CLAIM_MASK.finditer(sentence):
+            item = spans[int(m.group(1))]
+            locator = (bool(BRIEF_CLAIM_LOCATOR.search(sentence[:m.start()])) and len(item.split()) == 1
+                       and ("/" in item or "." in item))
+            if item and not locator:
+                marks.append((m.start(), item))
+        sentences.append(([item for _, item in marks], _claim_clause(sentence, marks)))
+    return sentences
+
+
+def _claim_rows(brief: str) -> list:
+    """The rows of a brief, in line order, for brief_claim_gaps: ("claim", [inputs]), ("cmd", text, result or None),
+    ("out", text) and ("fence", None). A result is only the row right after its command, so a fence marker or a claim
+    ends it. A fence marker with no partner is a plain line. A line that holds a claim is a claim row first, so it is
+    never its own probe. A claim that refers back takes the inputs of the sentence before it, or of the whole run of
+    list lines before it; a claim that ends with ":" takes the inputs of the list lines after it."""
+    lines = brief.split("\n")
+    marks = [i for i, line in enumerate(lines) if line.strip().startswith("```")]
+    if len(marks) % 2:
+        marks.pop()
+    marks = set(marks)
+    rows, fenced = [], False
+    before, block, waiting = [], [], None   # the inputs a referent takes; the list run; the claim that takes a list
+    for i, line in enumerate(lines):
+        if i in marks:
+            fenced = not fenced
+            rows.append(("fence", None))
+            continue
+        text = line.strip()
+        if not text:
+            continue
+        command = text if fenced else text[2:] if text[:2] in ("$ ", "> ") else None
+        if command is not None and BRIEF_CLAIM_COMMAND.match(command.lstrip("$> ")):
+            rows.append(("cmd", command, None))
+            before, block, waiting = [], [], None
+            continue
+        listed = bool(BRIEF_CLAIM_LIST.match(text))
+        sentences = _claim_line(text)
+        own = [item for inputs, _ in sentences for item in inputs]
+        if waiting is not None and not own and BRIEF_CLAIM_HEADING.match(text):
+            waiting = None
+        elif listed and waiting is not None:
+            waiting.extend(own)
+        else:
+            waiting = None
+        claimed, takes_list = [], False
+        for inputs, claim in sentences:
+            if claim:
+                items, refer = claim
+                claimed.extend(before if refer == "before" else items)
+                takes_list = takes_list or refer == "after"
+            before = inputs
+        block = (block + own) if listed else []
+        if listed:
+            before = block
+        if claimed or takes_list:
+            rows.append(("claim", claimed))
+            if takes_list:
+                waiting = claimed
+            continue
+        inline = BRIEF_CLAIM_INLINE.match(text) if text.startswith("`") and not fenced else None
+        if inline and BRIEF_CLAIM_COMMAND.match(inline.group(1).lstrip("$> ")):
+            rows.append(("cmd", inline.group(1), inline.group(2).strip(" -:=>–—→") or None))
+        else:
+            rows.append(("out", text))
+    return rows
+
+
+def _claim_probed(key: str, texts: list) -> bool:
+    """True when a probe line holds the input as a whole argument: the same text between quotes, or the whole line.
+    A longer input that merely contains it, such as `git push --force` for `git push`, is another input."""
+    shown = re.compile(r"(?:^|['\"`])" + re.escape(key) + r"(?:$|['\"`])")
+    return any(shown.search(text) for text in texts)
+
+
+def brief_claim_gaps(brief) -> list:
+    """The inputs a brief claims something about for main or today, with no probe, in the order claimed. An input has a
+    probe when a command line holds it, or the result line right under that command does, and that result line is
+    there (_claim_probed). A brief that is not text claims nothing. Pure."""
+    if not isinstance(brief, str):
+        return []
+    rows = _claim_rows(brief)
+    probes = []
+    for i, row in enumerate(rows):
+        if row[0] != "cmd":
+            continue
+        result = row[2]
+        if result is None and i + 1 < len(rows) and rows[i + 1][0] == "out":
+            result = rows[i + 1][1]
+        if result is not None:
+            probes.append([" ".join(row[1].split()), " ".join(result.split())])
+    gaps = []
+    for row in rows:
+        for item in row[1] if row[0] == "claim" else ():
+            key = " ".join(item.split())
+            if item not in gaps and not any(_claim_probed(key, texts) for texts in probes):
+                gaps.append(item)
+    return gaps
+
+
+def brief_claim_hit(tool: str, tool_input) -> list:
+    """Every input an Agent or Task brief to a builder or a test-author claims about main with no probe, or []."""
+    if tool not in SPAWN_TOOLS or role_key(tool_input.get("subagent_type")) not in BRIEF_CLAIM_ROLES:
+        return []
+    return brief_claim_gaps(tool_input.get("prompt"))
+
+
+# A BRIEF MUST NOT ORDER A DISCARD (rule brief-destructive-git, rule shared-trees-no-destructive-git). A brief that tells a
+# builder to run a command the shell guard refuses starts a lane that hits the refusal, or one that works around it. The
+# scan reads only the command-shaped parts of a brief: a backtick span, a line inside a fence, and a line led by `$ `.
+# Each part is cut by the shell guard's own `split_segments` and judged by its own `shared_tree_match`, so this rule holds
+# no git verb list. A brief has no tree, so no subject is read and the match alone decides. Only a working-tree discard counts:
+# the branch and worktree deletes `shared_tree_match` also returns stay with the shell guard. Only a writing role is
+# judged: READ_ONLY in hooks/agent_brief.py is the one home of the read-only roles, and a plugin prefix
+# (my-plugin:reviewer) is dropped as the SubagentStart hook drops it. Passes: a segment whose own `git -C` target, else
+# the `cd` before it, is under ANY session's scratchpad (parent ruling 11:42 CST; the shell guard passes only the calling
+# session's own); a line with `Must deny:` or `Add a case:` before the part (case data for a test-author); a part with a
+# negator in its own clause, within 4 words before it, where "avoid" and "without" count only as the word directly
+# before it (a prohibition); and a part under a negating heading. A negating heading is a line that ends with ":" once
+# `*`, `_` and a leading bullet are stripped, and holds a negator with a run verb within 2 words after it ("Never run:",
+# "Do not run any of these:"). Its cover holds across blank lines, over a fence opened under it, and over bullets nested
+# under it; it ends at the next prose line that is no bullet, or at a bullet no deeper than a bullet heading. A Workflow
+# script is read through `_brief_spawns`, which counts each agent() call whatever its model. Cost: pure text work inside
+# the one guard call. No process, no file.
+try:
+    from agent_brief import READ_ONLY  # noqa: E402  the one home of the read-only roles, shared with the SubagentStart hook
+except Exception:  # fail closed (decision guard-hooks-fail-closed): with no read-only list, every role is judged
+    READ_ONLY = frozenset()
+BRIEF_DESTRUCTIVE_SPAN = re.compile(r"(`+)(.+?)\1(?!`)")
+BRIEF_DESTRUCTIVE_INLINE = re.compile(r"(`{3,})[^`].*?\1")
+BRIEF_DESTRUCTIVE_CASE_DATA = re.compile(r"must deny:|add a case:", re.IGNORECASE)  # glossary-ok: the marker text briefs carry
+BRIEF_DESTRUCTIVE_NEGATORS = ("never", "no", "don't", "do-not", "shouldn't", "mustn't", "can't", "cannot")
+BRIEF_DESTRUCTIVE_NEXT_TO = ("avoid", "without")   # a negator only as the word directly before the part
+BRIEF_DESTRUCTIVE_RUN_VERBS = ("run", "use", "call", "execute", "type")
+BRIEF_DESTRUCTIVE_NOT = re.compile(r"\b(?:do|must|should|can)\s+not\b", re.IGNORECASE)
+BRIEF_DESTRUCTIVE_LIST_COMMA = re.compile(r"\x00\s*,\s*(?:(?:and|or|nor)\s+)*(?=\x00|$)", re.IGNORECASE)
+BRIEF_DESTRUCTIVE_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
+BRIEF_DESTRUCTIVE_SKIP = ("branch-delete", "worktree-remove", "worktree-prune")
+BRIEF_DESTRUCTIVE_REASON = (
+    "The brief orders a command that throws away work in a checkout other sessions share, and no step puts it back. "
+    "Drop the order from the brief, or move that work to a scratch repo under the session's scratchpad. "
+    "(rule shared-trees-no-destructive-git; decision guard-guards-mistakes-only, a guard stops Claude's mistakes)"
+)
+
+
+def _brief_words(text: str) -> list:
+    """The lower-case words of `text`, with emphasis marks gone and each two-word "do not" form read as one word."""
+    text = BRIEF_DESTRUCTIVE_NOT.sub("do-not", re.sub(r"[*_]", "", text.replace("’", "'")))
+    return [w.strip("\"'()[]:").lower() for w in text.split()]
+
+
+def _brief_heading(line: str) -> bool:
+    """True for a line that heads a prohibited list: it ends with ":" and a negator has a run verb within 2 words."""
+    bullet = BRIEF_DESTRUCTIVE_BULLET.match(line)
+    text = re.sub(r"[*_]", "", line[bullet.end():] if bullet else line).strip()
+    if not text.endswith(":"):
+        return False
+    words = _brief_words(text)
+    return any(word in BRIEF_DESTRUCTIVE_NEGATORS + BRIEF_DESTRUCTIVE_NEXT_TO
+               and any(verb in BRIEF_DESTRUCTIVE_RUN_VERBS for verb in words[at + 1:at + 3])
+               for at, word in enumerate(words))
+
+
+def _brief_commands(prompt: str):
+    """Yield (command text, line text before it, covered) for each command-shaped part of a brief: a backtick span, a
+    line in a fence, and a line led by `$ `. `covered` is true for a part under a negating heading's cover.
+    A lone backtick opens nothing, and a line led by a triple-backtick span closed on itself is no fence."""
+    fenced, covered, cover_indent = False, False, -1
+    for line in prompt.replace("\x00", " ").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```") and not BRIEF_DESTRUCTIVE_INLINE.match(stripped):
+            fenced = not fenced
+            continue
+        if fenced:
+            yield stripped, "", covered   # a fence keeps the cover it opened under
+            continue
+        if not stripped:
+            continue                      # a blank line keeps the cover
+        bullet = bool(BRIEF_DESTRUCTIVE_BULLET.match(line))
+        indent = len(line) - len(line.lstrip())
+        heading = _brief_heading(line)
+        if heading:
+            covered, cover_indent = True, (indent if bullet else -1)
+        elif not bullet or indent <= cover_indent:
+            covered = False
+        if stripped.startswith("$ "):
+            yield stripped[2:], "", False
+        for span in BRIEF_DESTRUCTIVE_SPAN.finditer(line):
+            yield span.group(2).strip(), line[:span.start()], covered and not heading
+
+
+def _brief_prohibits(before: str) -> bool:
+    """True when a negator sits in the same clause as the command, within 4 words before it; "avoid" and "without"
+    count only as the word directly before it."""
+    # an earlier span reads as one word, so "Never run `a` or `b`" keeps its negation for `b`
+    # a comma after a span, with only "or"/"and" before the next span, continues the list and drops the earlier spans
+    # from the negator's window; a comma before plain words ends the clause
+    # a span becomes a NUL, which no prose word holds, so "fix, `git reset`" is no list; a NUL already in the brief
+    # reads as a space first, so it cannot pose as a span
+    spans = BRIEF_DESTRUCTIVE_SPAN.sub("\x00", before.replace("\x00", " "))
+    listed = BRIEF_DESTRUCTIVE_LIST_COMMA.sub("", spans)
+    words = _brief_words(re.split(r"[;.,]", listed)[-1])
+    return any(word in BRIEF_DESTRUCTIVE_NEGATORS for word in words[-4:]) \
+        or bool(words) and words[-1] in BRIEF_DESTRUCTIVE_NEXT_TO
+
+
+def _brief_target(segment: str, moved):
+    """(this segment's own target, the `cd` target in force after it): its `git -C` path, else the `cd` before it."""
+    words = segment_tokens(segment) if segment.strip() else None
+    if not words:
+        return moved, moved
+    own = _segment_git_c_target(words)
+    moved = _segment_cd_target(words) or moved
+    return (moved if own is None else own), moved
+
+
+def _brief_spawns(tool: str, tool_input):
+    """Yield each spawn whose brief this rule reads, as (`subagent_type`, `prompt`). Unlike spawn_inputs, a Workflow
+    agent() call counts whatever its model (none, or held in a variable). An agentType the scan cannot read is the
+    default role, which writes, so its brief is judged. A prompt the scan cannot read yields nothing."""
+    if tool == "Workflow" and isinstance(tool_input.get("script"), str):
+        for prompt, bodies in script_agent_calls(tool_input["script"]):
+            keys, unseen = {}, set()
+            for k, u, _ in bodies:
+                keys.update(k)
+                unseen |= u
+            if prompt is not None:
+                yield {"subagent_type": None if "agentType" in unseen else keys.get("agentType"), "prompt": prompt}
+    else:
+        yield from spawn_inputs(tool, tool_input)
+
+
+def brief_destructive_hit(tool: str, tool_input) -> str:
+    """The first command an Agent, Task or Workflow brief orders that discards a working tree, or ""."""
+    read_only = {role.lower() for role in READ_ONLY}
+    for spawn in _brief_spawns(tool, tool_input):
+        prompt = spawn.get("prompt")
+        role = role_key(spawn.get("subagent_type")).rsplit(":", 1)[-1]   # plugin prefix: my-plugin:reviewer
+        if not isinstance(prompt, str) or role in read_only:
+            continue
+        for command, before, covered in _brief_commands(prompt):
+            if covered or BRIEF_DESTRUCTIVE_CASE_DATA.search(before) or _brief_prohibits(before):
+                continue
+            moved = None
+            for segment in split_segments(command):
+                target, moved = _brief_target(segment, moved)
+                match = shared_tree_match(segment) if segment.strip() else None
+                if match and match[1] not in BRIEF_DESTRUCTIVE_SKIP \
+                        and not (target is not None and in_any_session_scratchpad(shell_abs(target, None) or target)):
+                    return command
+    return ""
 
 
 # A Workflow agent() call is read statically; one whose prompt or model the scan cannot read passes.
@@ -3089,7 +3600,7 @@ def load_full(reading) -> list:
 OPUS_SPAWN_REASON = (
     "Rule (configuration): this spawn sets model Opus, above its role's model. Opus runs "
     "only on the owner's typed override or grant for this spawn, except Plan, the designer, the design "
-    "reviewer, a builder's Round 3 of 3 and an Explore whose brief's first line carries the `%s` marker "
+    "reviewer, the refuter, a builder's Round 3 of 3 and an Explore whose brief's first line carries the `%s` marker "
     "(decision agent-model-cap). Remedy: drop the model field, or name the role's model. A reviewer's Round 2 or "
     "Round 3 brief names sonnet."
 ) % EXPLORE_AUDIT_MARKER
@@ -3097,14 +3608,14 @@ OPUS_BUILDER_REASON = (
     OPUS_SPAWN_REASON + " No `Round 3 of 3` marker was found in the brief's first line or at the start of "
     "any line. The marker applies only to a builder's third try, after review round 2 failed."
 )
-OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer")
+OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer", REFUTER_ROLE)
 
 
 def opus_spawn_hit(tool: str, tool_input) -> tuple:
     """(model, role, brief_unread) of the first spawn in an Agent, Task or Workflow call that sets Opus with no standing grant,
     else ("", "", False). `role` is the role the spawn names, "" for none. `brief_unread` is the spawn's BRIEF_UNREAD.
     A standing grant
-    is the role Plan, designer or design-reviewer, a builder whose brief holds the third-round marker (the same marker
+    is the role Plan, designer, design-reviewer or refuter, a builder whose brief holds the third-round marker (the same marker
     step_up_hit reads), or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (decision agent-model-cap).
     Any other spawn above its role's model is refused (decision agent-model-cap), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
     for spawn in spawn_inputs(tool, tool_input):
@@ -3276,9 +3787,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "git-env-set", GIT_ENV_REASON, matched)
 
-    # 1. Shared trees.
+    # 1. Shared trees. The shell runs a command inside `$( )` or backticks, so each such text is
+    # read as a command of its own, after the command (rules 1, 2 and 4 read `texts` the same way).
+    # Not a recursive judge_shell: that clears PENDING_ASK and would lose a deny.
+    texts = [stripped, *substitution_commands(raw, stripped)]
     whole_root = []   # command_root reads the whole command: once per command, never per segment
-    for segment in split_segments(stripped):
+    for segment in (part for text in texts for part in split_segments(text)):
         if not segment.strip():
             continue
         words = segment_tokens(segment)
@@ -3411,24 +3925,25 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
     # judge nothing rather than guess what it would run.
-    previous = None
     call_tokens = []
-    for segment in split_segments(stripped):
-        if not segment.strip():
-            continue
-        tokens = segment_tokens(segment)
-        if tokens is None:
-            previous = None
-            continue
-        call_tokens.append(tokens)
-        matched = kill_hit(tokens) or kill_fed_by_name(tokens) or kill_fed_by_pipe(tokens, previous)
-        previous = tokens
-        if matched:
-            refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
-        # Every agent shares the main session's id, so only the main session may own by tag.
-        matched = foreign_pid_kill(tokens, transcript, "" if agent else session_id)
-        if matched:
-            refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
+    for text in texts:
+        previous = None   # a pipe never reaches across a substitution's edge
+        for segment in split_segments(text):
+            if not segment.strip():
+                continue
+            tokens = segment_tokens(segment)
+            if tokens is None:
+                previous = None
+                continue
+            call_tokens.append(tokens)
+            matched = kill_hit(tokens) or kill_fed_by_name(tokens) or kill_fed_by_pipe(tokens, previous)
+            previous = tokens
+            if matched:
+                refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
+            # Every agent shares the main session's id, so only the main session may own by tag.
+            matched = foreign_pid_kill(tokens, transcript, "" if agent else session_id)
+            if matched:
+                refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
     # The whole call, not one segment: an `lsof -t` pid list reaches a kill across a filter, a loop or a file.
     matched = lsof_pids_reach_kill(call_tokens)
     if matched:
@@ -3502,16 +4017,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 4. A wide delete refuses, and a force push asks.
     # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
-    delete_segments = [delete_text(segment) for segment in split_segments(stripped)]
-    for number in range(len(delete_segments)):
-        matched, reason = parent_delete_hit(delete_segments, number, cwd)
-        if matched:
-            refuse(tool, "deny", "destructive-delete", reason, matched)
+    delete_texts = [[delete_text(segment) for segment in split_segments(text)] for text in texts]
+    for delete_segments in delete_texts:
+        for number in range(len(delete_segments)):
+            matched, reason = parent_delete_hit(delete_segments, number, cwd)
+            if matched:
+                refuse(tool, "deny", "destructive-delete", reason, matched)
     for pattern in DESTRUCTIVE_DELETE:
         found = pattern.search(cmd)
         if found:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, found.group(0))
-    for segment in delete_segments:
+    for segment in (part for delete_segments in delete_texts for part in delete_segments):
         matched = rm_delete_hit(segment) or cmd_exe_delete_hit(segment)
         if matched:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, matched)
@@ -3520,15 +4036,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
-    for segment in split_segments(stripped):
-        for subcommand, args in git_calls(push_text(segment)):
-            where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
-            verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
+    for segment in (part for text in texts for part in split_segments(text)):
+        for args, where, overrides in _push_calls(segment, stripped, cwd):
+            verdict = push_verdict(args, where, overrides)
             if verdict == "ask":
                 ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
-            elif subcommand == "push" and not read_verb("push", args):
+            elif not read_verb("push", args):
                 # Owner rulings 206 a and 207 a: a non-forced push that writes main or master, or an
                 # implied destination off the branch's upstream. A dry run writes nothing.
                 kind = push_ask_hit(args, where, overrides)
@@ -3625,7 +4140,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # ------------------------------------------------------------------ a waiting-page item states the question form
 #
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
-# `command-in-item`, `gh-login-switch`, `task-names-check`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
+# `command-in-item`, `gh-login-switch`, `task-names-check`, `task-why-cited`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
 # write to this repo's waiting page.
 from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
@@ -3865,6 +4380,16 @@ def page_design_hit(writes, tool_input, cwd):
     finally:
         _design_deadline[0] = None
     return None
+
+
+# ------------------------------------------------------------------ SendMessage to a cloud session
+#
+# SendMessage addresses an agent by name. A `session_...` id is no agent name, and auto mode refused such a call, so
+# the hand-off could go missing. Whether it would deliver is unmeasured.
+SENDMESSAGE_REASON = ("A session_ id is not an agent name, so this SendMessage may never be delivered. Send it with "
+                      "mcp__claude-code-remote__send_message, passing the id as session_id, the sure route. "
+                      "Rule sendmessage-session-id "
+                      "(decision sendmessage-session-id-refused, a SendMessage names an agent, not a cloud session).")
 
 
 # ------------------------------------------------------------------ impeccable is review-only
@@ -4494,7 +5019,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         targets = None
         raw = str(tool_input.get("command", "") or "")
         command = strip_heredoc_bodies(raw)
-        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
+        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command))) or interpreter_may_write(raw)
         moves = _cd_targets(tool, raw, where) if where else []
         # A git verb spends the list only when stat and file reads show it can reach another clone.
         writes = writes or (_git_verb_called(command) and _git_verb_may_hit(command, where))
@@ -4546,6 +5071,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
             return (OTHER_CLONE_CD_DETAIL if clone_hit.get(move) else OTHER_CHECKOUT_CD_DETAIL) + move
     if targets is None:
         hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True) if writes else ""
+        if not hit and interpreter_may_write(raw):
+            hit = interpreter_write_hit(raw, where, elsewhere)
         if not hit:
             # A git verb that changes files, run in a separate clone or from a stranded cwd. The one
             # reader of such verbs is session_home_git_hit; only the folder test differs.
@@ -5005,6 +5532,19 @@ def judge(payload) -> None:
                opus_model,
                spawn_role=opus_role or "general-purpose")
 
+    # 9e. A builder's or test-author's brief that claims what main or today does with an input carries the probe that
+    # showed it (rule brief-claim-has-probe). An override lifts it: the owner may mean the brief as it stands.
+    claimed = brief_claim_hit(tool, tool_input)
+    if claimed:
+        named = ", ".join("`" + item[:120].replace("`", "'") + "`" for item in claimed)
+        refuse(tool, "deny", "brief-claim-has-probe", BRIEF_CLAIM_REASON % named, named[:120])
+
+    # 9e2. A brief that orders a discard of a working tree (rule brief-destructive-git). Any role; an override lifts it,
+    # because the owner may mean the brief as it stands.
+    ordered = brief_destructive_hit(tool, tool_input)
+    if ordered:
+        refuse(tool, "deny", "brief-destructive-git", BRIEF_DESTRUCTIVE_REASON, ordered[:120])
+
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:
         owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
@@ -5025,7 +5565,9 @@ def judge(payload) -> None:
         refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
 
     # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
-    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    archive_agent = payload.get("agent_id")
+    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
+                           archive_agent if isinstance(archive_agent, str) and AGENT_ID.match(archive_agent) else None)
     if archived:
         refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
 
@@ -5033,6 +5575,12 @@ def judge(payload) -> None:
     briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # A SendMessage addressed to a cloud session id (rule sendmessage-session-id).
+    if tool == "SendMessage":
+        target = tool_input.get("to")
+        if isinstance(target, str) and target.startswith("session_"):
+            refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
@@ -5057,6 +5605,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "gh-login-switch", question_form.PAGE_REASONS["gh-login-switch"], matched)
         if rule == "task-names-check":
             refuse(tool, "deny", "task-names-check", question_form.PAGE_REASONS["task-names-check"], matched)
+        if rule == "task-why-cited":
+            refuse(tool, "deny", "task-why-cited", question_form.PAGE_REASONS["task-why-cited"], matched)
         if rule == "owner-judge":
             refuse(tool, "deny", "owner-judge", question_form.PAGE_REASONS["owner-judge"], matched)
         if rule == "option-letter-keys":
