@@ -2425,7 +2425,7 @@ REVIEW_NO_RECORD = (
 REVIEW_UNPARSED = (
     "Review-record guard: this reply claims a review PASS for PR #%d, and the newest review record on that PR does not parse, "
     "so merge reads no record from it.%s Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer "
-    "read> --kind <kind> --guard <yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a new comment on "
+    "read> --kind <kind> --guard <yes|no> --round <N:ROLE:MODEL:VERDICT> --confirm`, which posts the record as a new comment on "
     "PR #%d, then report again."
 )
 REVIEW_UNPARSED_CI = (" Cause: the CI line must be the last line before `---`, and nothing may follow it; a line after the CI "
