@@ -1,0 +1,10 @@
+{
+  "title": "A roadmap step file uses only the field names build.py knows",
+  "why": "Triage 22:05 CST Nov 8: four step files carried `updated` in place of `updatedAt` after triage's own inline edits, so the page lost their change times. Nothing refused the unknown key.",
+  "note": "Proposed check: roadmap/build.py refuses (exit non-zero) a step file with a key outside its known set (title, why, note, phase, owner, lane, status, order, updatedAt, ask, paused, grants, blockedBy, home, due). Red case first: a step file with `updated`.",
+  "phase": "next",
+  "owner": "coordinator",
+  "status": "todo",
+  "order": 870,
+  "updatedAt": "2026-11-08T22:08:00-06:00"
+}
