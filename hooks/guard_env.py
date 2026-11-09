@@ -459,7 +459,8 @@ ENV_GLOB_PART = re.compile(r"\[[!^]?([^\]])[^\]]*\]|\?|\*")
 def _glob_could_name_env(word: str, fold: bool = False, by_path: bool = False) -> bool:
     """True when the glob `word` could match the name of an env file. The glob is tried on the
     sample names (`ENV_SAMPLE_NAMES`, and `.env.x`), and each of its parts is filled in as the shortest
-    and a one letter match. `fold` reads the glob without case. With `by_path` the glob is a search
+    and a one letter match. `fold` reads the glob without case. The glob is read as grep and rg read it
+    (`_glob_unescaped`): `\\.` is a dot and `[^a]` a negated class. With `by_path` the glob is a search
     flag's, so a `/` in it is a folder in front of the name, which can be any folder: only the last
     part is judged, and a glob that ends in `/` picks every file under a folder."""
     if by_path:
@@ -468,6 +469,7 @@ def _glob_could_name_env(word: str, fold: bool = False, by_path: bool = False) -
             return True
     if fold:
         word = word.lower()
+    word = _glob_unescaped(word)
     if any(fnmatch.fnmatchcase(name, word) for name in ENV_SAMPLE_NAMES + (ENV_PREFIX + ".x",)):
         return True
     for fill in ("", "x"):
@@ -711,7 +713,7 @@ def _rg_value(extras, flag: str, value: str, fold: bool):
     """Record what an rg flag's value says about the files read: a `-g` or `--iglob` glob (a glob
     that starts with `!` is a negative one and narrows nothing, and a brace list is expanded), a
     `-t` type, or a changed type table."""
-    value = re.sub(r"[\"']", "", value)
+    value = _shell_value(value)
     if flag in ("-g", "--glob", "--iglob") and value and not value.startswith("!"):
         # rg expands a brace list in a glob itself, whatever the shell did with the word.
         extras["globs"] += [(g, fold or flag == "--iglob") for g in _brace_list(value)]
@@ -1253,12 +1255,83 @@ def _zero_folder_forms(glob: str):
     return forms
 
 
+# The ASCII members of a POSIX class in a glob bracket, as glibc fnmatch reads it.
+GLOB_POSIX_CLASS_MEMBERS = {
+    "alpha": "a-zA-Z", "digit": "0-9", "alnum": "a-zA-Z0-9", "upper": "A-Z", "lower": "a-z",
+    "xdigit": "0-9A-Fa-f", "space": " \t\n\r\f\v", "blank": " \t", "punct": "!-/:-@[-`{-~",
+    "cntrl": "\x00-\x1f\x7f", "print": " -~", "graph": "!-~",
+}
+
+
+def _class_chars(spec: str):
+    """The characters that a list of members stands for: each `x-y` is a range, any other char itself."""
+    chars = set()
+    for low, high, single in re.findall(r"(.)-(.)|(.)", spec, flags=re.DOTALL):
+        if single:
+            chars.add(single)
+        else:
+            chars.update(chr(code) for code in range(ord(low), min(ord(high), ord(low) + 4096) + 1))
+    return chars
+
+
+def _bracket_member(glob: str, i: int):
+    """(the char of the bracket member at `glob[i]`, the index after it). A backslash escapes the next char."""
+    if glob[i] == "\\" and i + 1 < len(glob):
+        return glob[i + 1], i + 2
+    return glob[i], i + 1
+
+
+def _glob_bracket(glob: str, at: int):
+    """(the fnmatch class for the bracket expression that opens at `glob[at]`, the index after it), or
+    None when it never closes, so the `[` is a literal. glibc and rg negate with `^` as well as `!`,
+    and glibc reads `[:alpha:]` inside a bracket as a class. Python's fnmatch reads neither, so the
+    class is written out as its members: a range, a POSIX class, or a char after a backslash."""
+    i = at + 1
+    negated = glob[i:i + 1] in ("!", "^")
+    i += negated
+    chars, first = set(), True
+    while i < len(glob) and (glob[i] != "]" or first):
+        first = False
+        end = glob.find(":]", i + 2) if glob.startswith("[:", i) else -1
+        if end != -1 and glob[i + 2:end] in GLOB_POSIX_CLASS_MEMBERS:
+            chars |= _class_chars(GLOB_POSIX_CLASS_MEMBERS[glob[i + 2:end]])
+            i = end + 2
+            continue
+        low, i = _bracket_member(glob, i)
+        high = low
+        if glob[i:i + 1] == "-" and glob[i + 1:i + 2] not in ("", "]"):
+            high, i = _bracket_member(glob, i + 1)
+        chars |= _class_chars(low + "-" + high) if high != low else {low}
+    if i >= len(glob):
+        return None
+    # `]` goes first and `-` last, and `^` is never first, so every fnmatch reads the set the same way.
+    body = "".join(sorted(chars - set("]^-")))
+    text = ("]" if "]" in chars else "") + body + ("^" if "^" in chars else "")
+    text += "-" if "-" in chars else ""
+    if text.startswith("^"):
+        text = text[1:] + "^"
+    return "[%s%s]" % ("!" if negated else "", text), i + 1
+
+
 def _glob_unescaped(glob: str) -> str:
     """`glob` as fnmatch reads it, with each `\\x` that rg and grep read as the literal x written out: a
-    wildcard becomes a one-letter class (`\\*` is `[*]`), any other letter stands for itself. A trailing
-    lone backslash stays."""
-    return re.sub(r"\\(.)", lambda m: "[%s]" % m.group(1) if m.group(1) in "*?[" else m.group(1), glob,
-                  flags=re.DOTALL)
+    wildcard becomes a one-letter class (`\\*` is `[*]`), any other letter stands for itself. A bracket
+    expression is written out by `_glob_bracket`. A trailing lone backslash stays."""
+    out, i = [], 0
+    while i < len(glob):
+        char = glob[i]
+        if char == "\\" and i + 1 < len(glob):
+            letter = glob[i + 1]
+            out.append("[%s]" % letter if letter in "*?[" else letter)
+            i += 2
+        elif char == "[":
+            made = _glob_bracket(glob, i)
+            out.append(made[0] if made else "[[]")
+            i = made[1] if made else i + 1
+        else:
+            out.append(char)
+            i += 1
+    return "".join(out)
 
 
 def _glob_picks(name: str, relative: str, glob: str, fold: bool, by_name: bool = False, named: bool = False) -> bool:
@@ -1389,14 +1462,18 @@ def _grep_globs(words, position: int):
     """The (rules, exclude-dir globs) of a grep command line, as the shell passes them. A rule is
     (`include` or `exclude`, glob, False, False), in command-line order. An unquoted brace list is
     expanded, and a whole quoted flag word is read as the flag."""
-    shaped = [_flag_word(e) for word in words[position + 1:] for e in _brace_expand(word)]
+    raw = [e for word in words[position + 1:] for e in _brace_expand(word)]
+    shaped = [_flag_word(e) for e in raw]
     rules, exclude_dir = [], []
     for i, word in enumerate(shaped):
         name, attached, value = word.partition("=")
         if name in ("--include", "--exclude", "--exclude-dir"):
+            at = i
             if not attached and i + 1 < len(shaped):
-                value = shaped[i + 1]
-            value = re.sub(r"[\"']", "", value)
+                at, value = i + 1, shaped[i + 1]
+            # The shell removes the quotes, and the backslash of an unquoted `\*`, before grep reads the glob.
+            # A flag that was one whole quoted word keeps its backslashes.
+            value = re.sub(r"[\"']", "", value) if raw[at] != shaped[at] else _shell_value(value)
             if name == "--exclude-dir":
                 exclude_dir.append(value.rstrip("/"))
             else:
@@ -1731,7 +1808,9 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders
             return unknown
         folders = [os.path.join(here, n) for n in entries
                    if (dotfiles or not n.startswith(".")) and os.path.isdir(os.path.join(here, n))]
-        named = next((os.path.join(here, n) for n in entries if dotfiles and names_env_file(n)), "")
+        # grep skips a name that its include and exclude rules leave out. rg reads each name it is given.
+        named = next((os.path.join(here, n) for n in entries if dotfiles and names_env_file(n)
+                      and (not narrowing[2] or _glob_picked(n, n, narrowing[0], named=True)[0])), "")
         every = "a" in letters or "--all" in flags
         # `ls -a` names `.` and `..` as well, which listdir leaves out: `.` is `here`, and `..` its parent.
         parent = os.path.dirname(os.path.normpath(here))
@@ -1739,6 +1818,8 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str, reads_folders
             folders.append(parent)
         return named, every, folders
     if command == "find":
+        # Bash expands an unquoted brace list in a word before find sees it: `sub/{a,b}` is two start paths.
+        rest = [e for w in rest for e in _brace_expand(w)]
         # find sees each word after the shell's quote removal: `"."` is the folder `.`, and `\(` a paren.
         bare = [_shell_value(w) for w in rest]
         at = 0
