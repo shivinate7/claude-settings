@@ -5,7 +5,8 @@
 Owner, 2026-10-21: refuse the hand-made worktree fully, and record which layer refused isolation. A worktree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool. `hooks/guard.py` rule `hand-made-worktree` refuses the workaround.
 
 - **The act.** A shell call (Bash or PowerShell) that holds a real `git worktree add`, read with `git_calls`, whose new tree resolves outside `<primary>/.claude/worktrees/`. `<primary>` is the primary checkout of the repo the call runs in: its last `cd`, its `-C`, or the payload cwd. A relative path resolves against that folder. A Windows path counts.
-- **Passes.** A new tree under `.claude/worktrees/`. A repo under the temp folder, such as a test fixture: the rule judges the repo, not the target, so a real repo that adds a tree into a scratchpad is refused. Every other `worktree` subcommand, `--help`, and text that only mentions the command. A non-git folder or an unreadable primary is unknown, and allows (`verification-report-unknown-reads`).
+- **An agent's call.** A call whose payload carries a valid `agent_id` is refused a new tree inside `<primary>/.claude/worktrees/` too, unless the tree is that agent's recorded home (`agent_worktree_home`, status "home") or its own red-run folder (`_own_red_run`). A payload with an `agent_type` and no valid `agent_id` counts as an agent with no record. An agent with no recorded home is refused. A tree is flattened (`..` applied) before it is compared. When the call's own cwd is gone, the home is read again from the folder the shell stands in. An unreadable record allows. A call with no `agent_id` keeps the rule above (coordinator ruling, 2026-11-08 06:17 CST).
+- **Passes.** For a call with no `agent_id`, a new tree under `.claude/worktrees/`. A repo under the temp folder, such as a test fixture: the rule judges the repo, not the target, so a real repo that adds a tree into a scratchpad is refused. Every other `worktree` subcommand, `--help`, and text that only mentions the command. A non-git folder or an unreadable primary is unknown, and allows (`verification-report-unknown-reads`).
 - **Not read.** Brief prose. An Agent or Task spawn with no isolation passes, whatever paths its prompt names: a read-only Explore spawn needs no tree, and a guard that reads prose cries wolf (`verification-cry-wolf-guard-is-spent`).
 - **The refusal** names the two tools, never the refused path or command (`git-remedy-never-names-target`). It tells the session, when the tool's isolation was refused, to make no tree by hand and to report which layer refused and its exact message: a guard refusal names its rule and holds `Rule (`; any other refusal is the harness's.
 - **The pointer remedy** (`pointer-head`) names the EnterWorktree tool, not a hand-made worktree, so the two rules never contradict.
@@ -19,12 +20,13 @@ Named limits, each a form Claude rarely writes:
 - A `git worktree add` inside `bash -c`, `sh -c`, `eval` or `powershell -c` passes: the guard leaves those strings unparsed, a known gap.
 - A repo named only by `--git-dir`, and a target that holds a variable (`$HOME/wt`), read as unknown and pass.
 - A hand-typed read-only checkout (a review or a "before" image) is refused. EnterWorktree serves that need too.
+- A payload with `agent_type` and no `agent_id` is read as an agent with no record, as `guard.py` `judge` and decision `a-kill-by-pid-needs-an-owned-pid` do. Whether a main session started with `--agent` carries `agent_type` is unmeasured (hooks/guard_core.py). If it does, such a session's hand-made add inside the folder is refused, and EnterWorktree is the remedy.
 
 Which layer refused on 2026-10-19, by reading, unmeasured live: the harness. That day `hooks/guard.py` judged an orchestrator's Agent call by model rules only, and each of their refusals names a model; `worktree-home` reads only an agent's call. The Agent prompt hook in `settings.json` judges brief contents, and its refusal names a rule id. This repo had no `WorktreeCreate` hook. The harness's message was not recorded. The next refusal's layer and message are still owed: the refusal text asks the session to report both.
 
 Risk kind: incident, per `building-guard-needs-incident`: 2026-10-20 16:53 CDT, two agents wrote into the main clone. Landed 2026-10-26.
 
-Cost, per `outcomes-mechanize-rules`: process starts, one `git` read per `git worktree add` call, none on any other call. Files written: none on an allowed call; a refusal adds one line to `guard.log`, which `lint/guard_log_report.py` reads.
+Cost, per `outcomes-mechanize-rules`: process starts, one `git` read per `git worktree add` call, none on any other call. A call from an agent adds at most two home-record reads, the second only when the first reads unknown and the folder the shell stands in differs from the cwd. Files written: none on an allowed call; a refusal adds one line to `guard.log`, which `lint/guard_log_report.py` reads.
 
 ### A fix round
 
