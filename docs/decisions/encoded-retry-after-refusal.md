@@ -30,6 +30,10 @@ The state is read only after the call's shape matches, so an ordinary call costs
 
 The guard.log rows are read through `lint/guard_log_report.py`. The rule finds `lint/` by walking up from `guard_encoded.py`, so it works in a repo (`hooks/` beside `lint/`) and in a copy install (`hooks/guard.d/<id>/`, with `lint/` beside `hooks/`).
 
+The guard.log read covers only the last 256 KB (`LOG_TAIL_BYTES`, `hooks/guard_encoded.py`), so a fresh deny buried under more than 256 KB of later rows is missed.
+
+The rule's own deny row in guard.log re-arms the ten-minute window, so a retry after its own refusal is refused again.
+
 A fault in the shape read fails this rule open and no other. The guard's later rules still judge the call.
 
 The refusal tells the agent to report and does not name the form as a remedy. One line in `COMMON` in `hooks/agent_brief.py` gives the same rule to every agent brief, reviewers included.
@@ -38,7 +42,7 @@ Mistake it stops: an agent met a refusal of a command, then sent the same comman
 
 Outcome protected: a refusal stays final, so the owner or the orchestrator decides the next step.
 
-False-alarm cost: an ordinary decode into a shell within ten minutes of an unrelated refusal in the same session is refused once, and the agent reports. An override lifts it. A guard.log deny from one agent brakes the orchestrator's own decode-and-run for ten minutes (accepted, the log names no agent). A decoded variable used as data in a shell's script, as `bash -c "./deploy.sh $PW"`, is refused too.
+False-alarm cost: an ordinary decode into a shell within ten minutes of an unrelated refusal in the same session is refused, and the agent reports. Each retry inside the window is refused again, so the block lasts until ten minutes pass with no refusal. An override lifts it. A guard.log deny from one agent brakes the orchestrator's own decode-and-run for ten minutes (accepted, the log names no agent). A decoded variable used as data in a shell's script, as `bash -c "./deploy.sh $PW"`, is refused too.
 
 Not read:
 
