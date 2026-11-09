@@ -13161,9 +13161,12 @@ def record_push_cost_case():
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
-    (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main), and the batch
-    brake's reads (decision no-merge-during-batch-ci): one `git rev-parse` of the pushed head and one `git remote`
-    read. A literal `HEAD:<branch>` adds no read. A stray push (rule push-stray-branch: an implied destination off the
+    (`origin main`, `HEAD:main`) adds two `git config` reads, one `git rev-parse` of the pushed head and one
+    `git remote -v`. The guard's own reads are the remote's URL (rule push-main, one `git config`) and the batch
+    brake's `git rev-parse` of the pushed head (decision no-merge-during-batch-ci). The other two are `gh`'s
+    repo resolution, run by the brake's `gh` call through the stand-in git on PATH: a `git config --get-regexp`
+    over the remotes' `gh-resolved` keys, and `git remote -v`. Without `gh` on PATH, neither happens. A literal
+    `HEAD:<branch>` adds no read. A stray push (rule push-stray-branch: an implied destination off the
     upstream) adds one `git rev-parse --verify -q` of the destination's remote-tracking ref. The conflict-markers
     push check (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
     order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
@@ -13206,8 +13209,10 @@ def record_push_cost_case():
         ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1, "diff": 1}),
         ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1}),
         ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1}),
-        ("a push to main, origin main", "push origin main", {"rev-parse": 2, "config": 1, "remote": 1, "diff": 1}),
-        ("a push to main, HEAD:main", "push origin HEAD:main", {"rev-parse": 2, "config": 1, "remote": 1, "diff": 1}),
+        ("a push to main, origin main (push-main URL read, gh gh-resolved read, gh remote read, brake rev-parse)",
+         "push origin main", {"rev-parse": 2, "config": 2, "remote": 1, "diff": 1}),
+        ("a push to main, HEAD:main (push-main URL read, gh gh-resolved read, gh remote read, brake rev-parse)",
+         "push origin HEAD:main", {"rev-parse": 2, "config": 2, "remote": 1, "diff": 1}),
         ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1, "diff": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
          {"rev-parse": 2, "symbolic-ref": 1, "diff": 3}),
@@ -29267,7 +29272,8 @@ LOG_CHECKS = (
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
     ("roadmap-one-writer: a push starts one rev-parse, one more for a stray push, symbolic-ref for a refspec, "
-     "HEAD and bare, push.default for bare only, one config read of the remote for a literal main destination, "
+     "HEAD and bare, push.default for bare only, two config reads for a literal main destination (the remote's URL "
+     "and gh's repo resolution), "
      "no read for HEAD:<branch>, "
      "and reads the transcript only at the record branch",
      record_push_cost_case),
