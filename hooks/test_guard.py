@@ -15004,8 +15004,10 @@ LOG_CHECKS_EXTRA.append(("builder-cap: a filtered find past the list cap is refu
                          builder_cap_list_remedy_check))
 LOG_CHECKS_EXTRA.append(("builder-cap: an unfiltered capped walk's remedy names both a narrower path and a -name filter",
                          builder_cap_unfiltered_remedy_check))
-# ---- builder-find cases: a cp destination that is a walk root, a find's -path narrowing, and a glued -t on mv and
-# install. MUTATE_ONLY="builder-find:" runs these alone.
+# ---- a builder's copy, move and find, judged on the files they write. The guard refuses a copy or move only when it
+# lands a test file, so a harmless one passes. The cases check that a copy's destination is not a walk root, that a
+# find's -path and -regex narrow only the names it lists, and that mv and install read a glued -t target as cp does.
+# MUTATE_ONLY="builder-find:" runs these cases alone.
 # (a) A cp destination is not a walk root. FINDDEEP holds a test two folders down, under src/, so a copy into src/
 # that writes no test is allowed.
 sh("builder-find: a for loop of cp of a and b into src/, over a test two folders down, is allowed",
