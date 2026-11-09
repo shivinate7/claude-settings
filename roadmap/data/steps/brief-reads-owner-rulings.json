@@ -1,0 +1,10 @@
+{
+  "title": "A lane brief that contradicts an owner-ruled decision is flagged before it is sent",
+  "why": "Coordinator incident 22:12 CST Nov 8: its brief for batch-freeze-lane-set(-enforce) asked for the integration PR to go ready at first build, against decision draft-until-reviewed (owner ruling). Two lanes built it (#2367 text, #2378 tool) before a lane's report guard caught it.",
+  "note": "Proposed check: the agent_brief hook, or the send_message brief guard, reads a lane brief against the decisions it names or touches, and flags a contradiction of an owner-ruled decision before the brief is sent.",
+  "phase": "next",
+  "owner": "coordinator",
+  "status": "todo",
+  "order": 871,
+  "updatedAt": "2026-11-08T22:09:00-06:00"
+}
