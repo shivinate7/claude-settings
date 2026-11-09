@@ -40,6 +40,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (`judge_stop`) refuses the builder's first stop the same way; a second stop
                        passes.
                        (builders-cannot-edit-tests)
+  plumbing-commit-diff deny. A `git commit-tree` call of a builder, test-author, record-writer or
+                       designer whose tree holds a path the role may not change, judged against
+                       the first parent (git's own merge of two parents; no tree for no parent).
+                       The reason names no path. No override lifts it. A tree git cannot read is
+                       logged as role-diff-unread and allowed.
+                       (builders-cannot-edit-tests)
   author-diff, writer-diff, designer-diff, role-diff-*
                        noted. A test-author or record-writer commit or push.
                        The diff it would send is logged for the reviewer. Never refuses.
@@ -2351,14 +2357,21 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
     return found
 
 
+def checkout_top(root: str):
+    """The real path of the checkout's top, or None when git could not answer."""
+    top = guard_core._git(root, "rev-parse", "--show-toplevel")
+    if top is None or top.returncode != 0:
+        return None
+    return os.path.realpath(top.stdout.strip())
+
+
 def diff_violation(root: str, role: str):
     """Judge the agent's own change (`own_changes`). Returns `(offence, noted)`: the first path the role
     may not change ('' when none, None when git could not answer: UNKNOWN, never clear), and the paths
     a builder changed that are logged and never refused. Every offence of another role is logged only."""
-    top = guard_core._git(root, "rev-parse", "--show-toplevel")
-    if top is None or top.returncode != 0:
+    top = checkout_top(root)
+    if top is None:
         return None, []
-    top = os.path.realpath(top.stdout.strip())
     changes = own_changes(root, top)
     if changes is None:
         return None, []
@@ -2407,6 +2420,79 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
         refuse(tool, "deny", "builder-diff", builder_diff_reason(), found)
     elif found or noted:
         record(tool, "noted", diff_rule(role), found or noted[0])
+
+
+PLUMBING_REASON = (
+    "A role session does not commit a change its role may not make. Stop and report the change you "
+    "could not make. The orchestrator assigns it to the role that owns it. This refusal is final. "
+    "(decision builders-cannot-edit-tests)"
+)
+# `git commit-tree` options that take a value in the next word.
+COMMIT_TREE_VALUE_OPTS = ("-p", "-m", "-F")
+
+
+def commit_tree_args(args):
+    """`(tree, parents)` read from the words after `commit-tree`, or None when they do not name exactly
+    one tree."""
+    tree, parents, index = "", [], 0
+    while index < len(args):
+        word = args[index]
+        if word in COMMIT_TREE_VALUE_OPTS:
+            if index + 1 >= len(args):
+                return None
+            if word == "-p":
+                parents.append(args[index + 1])
+            index += 2
+        elif word.startswith("-"):
+            index += 1
+        elif tree:
+            return None
+        else:
+            tree = word
+            index += 1
+    return (tree, parents) if tree else None
+
+
+def plumbing_diff(root: str, top: str, role: str, args):
+    """The paths of a `commit-tree` call that the role may not change, judged on the tree it would
+    commit; None when git could not answer (unknown, never clear). The tree is compared with its
+    first parent, with git's own merge of the first two parents when there are two or more, and with
+    no tree at all (every path counts as added) when there is no parent."""
+    read = commit_tree_args(args)
+    if read is None:
+        return None
+    named, parent_names = read
+    ids = []
+    for name, kind in [(named, "tree")] + [(p, "commit") for p in parent_names]:
+        answer = guard_core._git(root, "rev-parse", "--verify", "--quiet", name + "^{" + kind + "}")
+        if answer is None or answer.returncode != 0 or not answer.stdout.strip():
+            return None
+        ids.append(answer.stdout.strip())
+    tree, parents = ids[0], ids[1:]
+    if not parents:
+        old, paths = "", git_names(root, "ls-tree", "-r", "--name-only", "-z", tree)
+    else:
+        old = parents[0]
+        if len(parents) > 1:
+            # the merge of the first two parents; a merge git cannot make falls back to the first parent
+            old = merge_tree(root, parents[0], parents[1]) or old
+        paths = changed_paths(root, old, tree, top)
+    if paths is None:
+        return None
+    return role_offences(root, top, role, paths, old, tree)
+
+
+def plumbing_refusal(tool: str, role: str, args, root: str) -> None:
+    """Judge a role's `git commit-tree` call on the tree it would commit (rule `plumbing-commit-diff`),
+    the route past `diff_refusal`, which reads `git commit` and `git push` only. An offence of any role
+    is a final deny. A tree git cannot read is logged as role-diff-unread and allowed."""
+    top = checkout_top(root)
+    found = plumbing_diff(root, top, role, args) if top else None
+    if found is None:
+        record(tool, "noted", "role-diff-unread", root)
+    elif found:
+        guard_core.set_override_veto(lambda: True)
+        refuse(tool, "deny", "plumbing-commit-diff", PLUMBING_REASON, found[0])
 
 
 def judge_stop(payload) -> None:
@@ -3777,9 +3863,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 0b. A builder, test-author or record-writer's `git commit` or `git push` is judged on the diff it would send.
     if role:
         for segment in split_segments(stripped):
-            for subcommand, _ in git_calls(segment):
+            for subcommand, args in git_calls(segment):
                 if subcommand in ("commit", "push"):
                     diff_refusal(tool, role, command_root(stripped, cwd))
+                elif subcommand == "commit-tree":
+                    plumbing_refusal(tool, role, args, command_root(stripped, cwd))
 
     # 0c. A command that sets a git location variable (q_max incident, 2026-10-14). Placed before
     # rule 1 on purpose: the deny wins where the shared-tree guard would only ask (arbiter ruling).
