@@ -1103,8 +1103,8 @@ class ReviewRecordTests(unittest.TestCase):
 
     def test_a_gh_read_that_starts_past_the_budget_is_not_started_and_the_hook_ends_inside_it(self):
         # Catches: a gh read given no budget. Each read takes more than the whole budget, so the first pull request's head read is cut at
-        # the budget's end and spends it. The second pull request's head read must not start: its UNKNOWN read note must print, and the hook
-        # must end inside the budget. The second pull request holds a stamped record, so a read that ran would pass it silently.
+        # the budget's end and spends it. The second pull request's head read must not start: its claim must be refused with the run-again
+        # cause, and the hook must end inside the budget. The second pull request holds a stamped record, so a read that ran would pass it silently.
         budget = rg.REVIEW_HOOK_BUDGET
         prs = {PR: {"head": LIVE, "comments": [CHATTER]}, PR + 1: {"head": LIVE, "comments": [record(n=PR + 1)]}}
         out, log = self.budget_run(prs, {"pulls/": budget + 1, "/comments": budget + 1},
@@ -1117,8 +1117,9 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertFalse(any(a.endswith("pulls/%d" % (PR + 1)) for argv in self.gh_calls() for a in argv),
                          "the stand-in answered the second pull request's head read: %r" % (self.gh_calls(),))
         self.assertIsNotNone(out, "the hook printed nothing")
-        self.assertIn("Review-record guard: UNKNOWN, the check read nothing for PR #%d" % (PR + 1), out.get("systemMessage", ""),
-                      "the second pull request has no UNKNOWN read note: %r" % (out,))
+        self.assertEqual(out.get("decision"), "block", "the second pull request's claim passed with the budget spent: %r" % (out,))
+        self.assertRegex(out["reason"], r"(?i)\brun again\b", "the refusal does not tell the reader to run again: %r" % (out,))
+        self.assertIn("PR #%d" % (PR + 1), out["reason"], "the refusal does not name the second pull request: %r" % (out,))
         self.assertLessEqual(log["elapsed"], budget, "the hook ended at %r s of fake time, past its %d s budget" % (log["elapsed"], budget))
 
     def test_a_slow_gh_read_is_given_the_time_left_not_the_full_read_timeout(self):
@@ -1139,7 +1140,7 @@ class ReviewRecordTests(unittest.TestCase):
     def test_a_spent_budget_never_lets_a_claim_pass_without_a_note(self):
         # Catches: a gh read that runs on past the Stop's budget and reads a record, so each claim passes with no note. Both pull requests
         # hold a stamped record for the live head, which passes if read, and every read takes more than the whole budget. The hook must end
-        # inside its timeout, since a killed hook prints nothing, and each claimed pull request must carry its UNKNOWN read note.
+        # inside its timeout, since a killed hook prints nothing, and each claimed pull request must be refused with the run-again cause.
         timeout = self.report_hook_timeout()
         budget = rg.REVIEW_HOOK_BUDGET
         prs = {PR: {"head": LIVE, "comments": [record()]}, PR + 1: {"head": LIVE, "comments": [record(n=PR + 1)]}}
@@ -1148,8 +1149,10 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertLessEqual(log["elapsed"], timeout, "the hook ran %r s of fake time, past its %d s timeout: a killed hook prints nothing, a silent pass"
                              % (log["elapsed"], timeout))
         self.assertIsNotNone(out, "the hook printed nothing, so its claims passed with no note")
+        self.assertEqual(out.get("decision"), "block", "a claim passed with the budget spent, so no claim passes silently: %r" % (out,))
+        self.assertRegex(out["reason"], r"(?i)\brun again\b", "the refusal does not tell the reader to run again: %r" % (out,))
         for n in (PR, PR + 1):
-            self.assertIn("the check read nothing for PR #%d" % n, out.get("systemMessage", ""), "PR #%d passed with no read note: %r" % (n, out))
+            self.assertIn("PR #%d" % n, out["reason"], "PR #%d is not named in the refusal: %r" % (n, out))
 
     # The run-again cause (decision `pr-review-record`): a claim whose record the Stop's budget cut before the read is refused with that cause.
     # The two controls below run the same reads with time to spare, so each red case differs from its control by the budget alone.
@@ -1195,15 +1198,17 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertRegex(out["reason"], r"(?i)\brun again\b", "the refusal does not tell the reader to run again: %r" % (out,))
         self.assertIn("PR #12", out["reason"], out)
 
-    def test_a_budget_spent_before_the_cutover_read_refuses_a_record_that_would_pass(self):
-        # Catches: a claim passing on the cutover's UNKNOWN note alone when the Stop's budget is spent before the cutover read. The pulls read
-        # takes 20 s and the comment read takes the 8 s left. It reads the record, which passes, and leaves the cutover read no time. The
-        # claim is refused with the run-again cause, not let through on the note.
+    def test_a_budget_spent_before_the_cutover_read_refuses_an_unstamped_record(self):
+        # Catches: a claim passing on the cutover's UNKNOWN note alone when the Stop's budget is spent before the cutover read, and the record's
+        # verdict needs that cutover. The pulls read takes 20 s and the comment read takes the 8 s left. The record is unstamped, so only the
+        # cutover could place it: the claim is refused with the run-again cause. A stamped record in the same spot is allowed, since its verdict
+        # does not depend on the cutover (test_a_slow_cutover_read_ends_within_the_hook_timeout_and_prints_the_unknown_note).
         budget = rg.REVIEW_HOOK_BUDGET
         pulls_s, comments_s = 20, budget - 20
-        body = record()
-        self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body), LIVE)[0], "done",
-                         "fixture: merge/merge.py does not call this record done")
+        body = unstamped(record())
+        self.assertIsNone(merge_mod.parse_review(body), "fixture: merge/merge.py reads the unstamped record as well formed with no cutover")
+        self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body, BEFORE, CUTOVER), LIVE)[0], "done",
+                         "fixture: merge/merge.py does not call the unstamped record done once the cutover is known")
         out, log = self.budget_run({PR: {"head": LIVE, "comments": [body]}}, {"pulls/": pulls_s, "/comments": comments_s}, report(CLAIM))
         self.assertTrue(any(a.endswith("issues/%d/comments" % PR) for argv in self.gh_calls() for a in argv),
                         "fixture: the comment read did not reach the stand-in, so the record was not read: %r" % (self.gh_calls(),))
