@@ -2492,7 +2492,7 @@ def _newest_record(n, comments, merge_mod, cutover=None):
 
 def _text_after_ci_line(body, merge_mod):
     """True when non-blank text follows the last CI line before the first `---` line: the one cause named for an unparsed record."""
-    lines = body.splitlines()
+    lines = [line.rstrip() for line in body.splitlines()]  # parse_review reads each line without its trailing whitespace
     if "---" in lines:
         lines = lines[:lines.index("---")]
     at = [i for i, line in enumerate(lines) if line == merge_mod.REVIEW_CI_LINE]
@@ -2535,7 +2535,7 @@ def review_record_problem(hook, text):
         if rec is None and body is not None:
             cause = REVIEW_UNPARSED_CI if _text_after_ci_line(body, merge_mod) else ""
             if not cutover and not any(line.startswith("Stamp: ") for line in body.splitlines()):
-                cause = cause or REVIEW_NO_STAMP
+                cause = REVIEW_NO_STAMP  # the missing Stamp line is the first fault merge meets, so it is the cause named
             reasons.append(REVIEW_UNPARSED % (n, cause, n, n))
         elif not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
             reasons.append(REVIEW_NO_RECORD % (n, n, n))
