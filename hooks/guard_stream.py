@@ -186,8 +186,8 @@ def _pipeline_hit(stages, find_stage, any_filter: bool = False) -> str:
     """The matched text when a stage that `find_stage(segment, backgrounded)` names in one pipeline's stages reaches
     `tail`/`head`. A `tee` between them does not end the reach, since the filter after it still cuts
     what the agent reads. A `tee` with no `tail` or `head` after it is not a hit. The one walk for the
-    narrated rule and the check rule. `any_filter` (the check rule, coordinator ruling 2026-11-08
-    07:16 CST) widens the reach to every later stage but a file writer (`tee`, `tee.exe`, `Tee-Object`, `Out-File`), since `sed -n`, `grep -m1` and `awk`
+    narrated rule and the check rule. `any_filter` (the check rule, decision `background-check-through-verdict`)
+    widens the reach to every later stage but a file writer (`tee`, `tee.exe`, `Tee-Object`, `Out-File`), since `sed -n`, `grep -m1` and `awk`
     cut what the agent reads as `tail` does."""
     for first, segment in enumerate(stages):
         stage = find_stage(segment, _ends_in_ampersand(stages, first))
