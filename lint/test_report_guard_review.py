@@ -274,10 +274,15 @@ class ReviewRecordTests(unittest.TestCase):
 
     def cutover_history(self, base=None, root=None, default=None):
         """HEAD of `root` (this run's repo when None) holds merge/merge.py without the salt line, then the commit that adds it, at CUTOVER.
-        With a `base`, update-ref also sets origin/<base> to that HEAD, so nothing is pushed. With a `default` other than `base`, the
-        commit that adds the salt line sits on origin/<default> alone: origin/<base>, a stacked base, stops before it. merge's
-        review_stamp_since reads origin/<default branch>, and tool_stamp_since reads the merge tool checkout's HEAD."""
+        With a `base`, update-ref sets origin/<base> to that HEAD, so nothing is pushed, and the in-process default branch is `default`
+        (`base` when None), which setUp's default_branch_once patch answers. With a `default` other than `base`, the commit that adds the
+        salt line sits on origin/<default> alone: origin/<base>, a stacked base, stops before it. merge's review_stamp_since reads
+        origin/<default branch>, and tool_stamp_since reads the merge tool checkout's HEAD. With no `base` and no `default`, the tool-cutover
+        path, the in-process default branch stays as setUp served it."""
         root = root or self.repo
+        default = base if default is None else default
+        if default is not None:
+            self.default_branch = default  # the default branch is the one that holds the salt line, so the in-process read reads it
         path = os.path.join(root, "merge", "merge.py")
         os.makedirs(os.path.dirname(path))
         for text, date in ((PRE_SALT_SOURCE, "2026-10-20 10:00:00 +0000"), (SALT_SOURCE, CUTOVER_GIT_DATE)):
@@ -287,14 +292,10 @@ class ReviewRecordTests(unittest.TestCase):
             subprocess.run(["git", "-C", root, "add", "merge/merge.py"], check=True, capture_output=True)
             subprocess.run(["git", "-C", root, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com",
                             "commit", "-q", "-m", "fixture"], check=True, capture_output=True, env=env)
-        stacked = default not in (None, base)  # the default branch holds the salt commit; a stacked base stops before it
         if base is not None:
-            subprocess.run(["git", "-C", root, "update-ref", "refs/remotes/origin/" + base, "HEAD~1" if stacked else "HEAD"],
-                           check=True, capture_output=True)
-        if stacked:
-            subprocess.run(["git", "-C", root, "update-ref", "refs/remotes/origin/" + default, "HEAD"], check=True, capture_output=True)
-        if default is not None:
-            self.default_branch = default  # the in-process default branch (setUp's default_branch_once patch) is the one with the salt
+            base_tip = "HEAD~1" if default != base else "HEAD"  # a stacked base stops before the commit that adds the salt line
+            for name, rev in ((base, base_tip), (default, "HEAD")):
+                subprocess.run(["git", "-C", root, "update-ref", "refs/remotes/origin/" + name, rev], check=True, capture_output=True)
 
     def in_process_cutover(self, default):
         """merge's review_stamp_since, run in this process for the default branch `default`, passed in so the read asks no gh. setUp's
@@ -476,12 +477,21 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_blocked(self.stop(self.lane_turn(report(CLAIM))))
 
     def test_marker_line_with_trailing_spaces_is_a_record_as_merge_reads_it(self):
-        # Catches: _newest_record's raw first-line test, which reads a record whose marker line has trailing spaces as no
-        # record, so a lane's PASS claim on a PR that merge --reviewed reads as done is refused. merge's review_marked and
-        # parse_review both strip a line's trailing whitespace.
+        # Catches: a marker test on the raw first line, which reads a record whose marker line has trailing spaces as no record,
+        # so a lane's PASS claim on a PR that merge --reviewed reads as done is refused. _newest_record reads the newest record
+        # through merge's review_newest, whose marker test, review_marked, strips the line's trailing whitespace, as parse_review does.
         body = record().replace(merge_mod.REVIEW_MARKER + "\n", merge_mod.REVIEW_MARKER + "  \n", 1)
         self.assertTrue(merge_mod.review_marked(body), "fixture: merge does not read the marker line with trailing spaces as the marker")
         self.assert_record_satisfies_claim(body)
+
+    def test_cutover_history_sets_the_default_branch_the_in_process_read_answers(self):
+        # Catches: cutover_history(base) leaving the in-process default branch at the one setUp served (main, which holds no salt
+        # commit), so merge's review_stamp_since, asked with no default, reads main and falls through to the merge tool's cutover.
+        self.cutover_history("fixture")
+        self.assertEqual(merge_mod.default_branch_once(self.repo), "fixture",
+                         "fixture: the in-process default branch is not the base that cutover_history was given")
+        self.assertEqual(merge_mod.review_stamp_since(self.repo, "fixture"), CUTOVER,
+                         "fixture: review_stamp_since with no default does not read the cutover of the base's history")
 
     def test_a_subfolder_cwd_reads_the_same_cutover_as_the_repo_root(self):
         # Catches: the cutover read run from a subfolder of the checkout, `git -C <subfolder>` reading merge/merge.py as a path under the
@@ -545,8 +555,9 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertNotIn("Stamp line", out["reason"], "the refusal names the Stamp line with a cutover set: %r" % out["reason"])
 
     def test_a_hand_edited_newest_record_blocks_a_pass_claim(self):
-        # Catches: _newest_record taking the newest record without its edit, so a record that merge --reviewed reads bad (its updated_at
-        # differs from its created_at) satisfies a PASS claim. The body alone reads done, so only the edit can block the claim.
+        # Catches: a newest-record read that ignores the record's edit, so a record that merge --reviewed reads bad (its updated_at
+        # differs from its created_at) satisfies a PASS claim. _newest_record gives no record when review_newest reports the newest
+        # record edited. The body alone reads done, so only that edit can block the claim.
         body = record()
         self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body), LIVE)[0], "done",
                          "fixture: merge/merge.py does not call the body done with no edit")
