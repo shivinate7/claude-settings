@@ -15830,7 +15830,7 @@ for _label, _check in (
 
 
 # The agent's own transcript folder has one home (rule agent-transcript-path-one-home): own_session's agent_transcript_dir,
-# <transcript minus .jsonl>/subagents. The copies in hooks/guard_kill.py and hooks/stall_watch.py must name that folder.
+# The agent folder beside the transcript: <transcript minus .jsonl>/subagents/agent-<id>.jsonl. The copies in hooks/guard_kill.py and hooks/stall_watch.py must name that folder.
 # The copies in lint/report_guard.py and lint/ruling_census.py are pinned in their own suites.
 AGENT_HOME_ID = "ab12cd34ef56a7890"  # an agent id as the harness sends it: 17 hex characters
 
@@ -15848,7 +15848,7 @@ def load_hook(name, file_name):
 
 
 def agent_home_shape_check():
-    """agent_transcript_dir names <transcript minus .jsonl>/subagents, for a transcript path with .jsonl, without it, and dotted."""
+    """agent_transcript_dir names the agent folder beside the transcript, for a transcript path with .jsonl, without it, and dotted."""
     own = _load_own_session()
     if not hasattr(own, "agent_transcript_dir"):
         return False, "own_session has no agent_transcript_dir: the one home of the agent folder is not built"
@@ -15858,7 +15858,7 @@ def agent_home_shape_check():
         want = os.path.join(base, name[:-len(".jsonl")] if name.endswith(".jsonl") else name, "subagents")
         if got != want:
             return False, "agent_transcript_dir(%s) is %s, want %s" % (name, got, want)
-    return True, "agent_transcript_dir names <transcript minus .jsonl>/subagents for each shape"
+    return True, "agent_transcript_dir names the agent folder beside the transcript for each shape"
 
 
 def agent_path_check():
@@ -15901,7 +15901,7 @@ def agent_stall_finds_check():
 
 
 def agent_copies_agree_check():
-    """The stall_watch and guard_kill copies name <transcript minus .jsonl>/subagents, for each transcript shape."""
+    """The stall_watch and guard_kill copies name the agent folder beside the transcript, for each transcript shape."""
     own = _load_own_session()
     stall = load_hook("stall_watch_home_agree", "stall_watch.py")
     kill = load_hook("guard_kill_home_agree", "guard_kill.py")
@@ -15925,7 +15925,7 @@ def agent_copies_agree_check():
 
 
 for _label, _check in (
-        ("agent-transcript-path-one-home: agent_transcript_dir names <transcript minus .jsonl>/subagents, with or without .jsonl",
+        ("agent-transcript-path-one-home: agent_transcript_dir names the agent folder beside the transcript, with or without .jsonl",
          agent_home_shape_check),
         ("agent-transcript-path-one-home: agent_transcript_path is the agent's file in the home folder",
          agent_path_check),
