@@ -32,7 +32,7 @@ CI: read live by merge --reviewed
 
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
-- The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. A PASS counts as its round passing when Guard or check is `no`; for `yes` see the done rules. After round 3 it keeps the net value round 3 gave. With no round recorded it reads open.
+- The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. On every record, a Fix check whose model is not exactly `sonnet` (any letter case; `claude-sonnet-5-5` is not) is open, and `--fix-check` refuses it, whatever Guard or check says (owner item 444 a, 2026-11-08 15:04 CST; it widens item 351 a, 2026-11-07 14:44 CST). A fix check PASS counts as its round passing in any round when Guard or check is `no`. When Guard or check is `yes`, a fix check PASS before round 3 does not end review (item 402 a, owner, 2026-11-08 06:08 CST). After round 3, a PASS keeps the net value round 3 gave; with no round recorded it reads open.
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run.
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
@@ -45,7 +45,7 @@ CI: read live by merge --reviewed
 
 A change is done when one of these holds (rule `roles-review-cap-three`):
 
-- Guard or check is `no`, round 1 or 2 is the last round and is PASS (or a fix check PASSes after its FAIL), and the last `design-reviewer` line is PASS or absent;
+- Guard or check is `no`, round 1 or 2 is the last round and is PASS (or a fix check PASSes after its FAIL), and the last `design-reviewer` line (across all rounds) is PASS or absent;
 - round 3 is done, and Guard or check is `no`;
 - round 3 is done, Guard or check is `yes`, and Net value is zero or positive;
 - Kind is `delete-only`, Guard or check is `yes`, every `Round` line is PASS and there is no `Fix check` line (then the rules for Guard or check `no` apply);
@@ -56,6 +56,26 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 - A round 3 verdict does not decide done. When Guard or check is `yes`, Net value does, even after a round 3 PASS: `not owed` is open, and `negative` holds the change (record `hold-unsafe-after-round-3`).
 - A change with Guard or check `yes` is open below round 3, whatever the verdicts, the Net value and any fix check PASS (items 359 b and 402 a, record `hold-unsafe-after-round-3`). The `delete-only` rule above is the one exception.
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
+
+The review a changed head owes. Coordinator pick (owner session coordinator, 2026-11-08 to 2026-11-09). Process-only, not the owner's words. A lane reads it instead of asking.
+
+- A chain gets one fix check.
+- The PR gets one fresh full review at the live head when any of these holds:
+  - the newest record already holds a fix check;
+  - a fix check failed;
+  - a round read an older head than the live one;
+  - the record was made or edited by hand;
+  - the head moved after round 3.
+- The fresh review has these parts:
+  - its brief line 1 is `Round 3 of 3`;
+  - it runs on Sonnet;
+  - it reads the whole diff against main;
+  - it runs the net-value test (record `hold-unsafe-after-round-3`, hold a change with negative net value after round 3).
+- Post it with the lines the merge tool prints: the real round 1 and round 2 lines, the new round 3 line, and no `Fix check` line.
+- Free text goes only below `---`. A record is never edited or deleted.
+- A round 3 FAIL with net value at or above zero merges (round 3 done rule above).
+- A lane merges origin/main once, after the pending batch lands. It uses an ordinary merge commit. It never replays, rebases or force-pushes.
+- A merge with both test and product conflicts waits for the mixed-merge route (decision `mixed-merge-resolver`, not on main yet).
 
 ## The cost
 
