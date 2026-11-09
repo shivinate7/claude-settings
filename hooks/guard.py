@@ -3110,19 +3110,26 @@ def brief_blind_verdict_text(brief: str) -> str:
 
 def brief_blind_hit(brief) -> tuple:
     """(shape, line): the shape of a brief that a reviewer must not read, "report", "item" or "verdict", else "", and the
-    1-based number of the brief line that holds it (0 for none). A report or item is read at its first label or item line.
-    The verdict scan runs line by line, which reads the same as the whole text: no step crosses a newline. One pass."""
+    1-based number of the brief line that holds it (0 for none). The line is the first refused line of the brief, whatever
+    the shape: the earliest line over every shape that hits, and the shape is the one found on that line. A line that holds
+    two shapes reports the first of report, item, verdict. A report is read at its first label line, an item at its first
+    item line. The verdict scan runs line by line, which reads the same as the whole text (no step crosses a newline), and
+    stops at the earliest report or item line, since a later verdict cannot be first. One pass."""
     if not isinstance(brief, str):
         return "", 0
+    hits = []
     if len(set(BRIEF_BLIND_LABELS.findall(brief))) >= 2:
-        return "report", brief.count("\n", 0, BRIEF_BLIND_LABELS.search(brief).start()) + 1
+        hits.append(("report", brief.count("\n", 0, BRIEF_BLIND_LABELS.search(brief).start()) + 1))
     item = BRIEF_BLIND_ITEM.search(brief)
     if item:
-        return "item", brief.count("\n", 0, item.start()) + 1
+        hits.append(("item", brief.count("\n", 0, item.start()) + 1))
+    first = min(hits, key=lambda hit: hit[1]) if hits else ("", 0)
     for number, line in enumerate(brief.split("\n"), 1):
+        if first[1] and number >= first[1]:
+            break
         if BRIEF_BLIND_VERDICT.search(brief_blind_verdict_text(line)):
             return "verdict", number
-    return "", 0
+    return first
 
 
 def brief_blind_role(role) -> bool:
