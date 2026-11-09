@@ -12934,6 +12934,13 @@ sh("env: runner hole, find -exec runs grep on the folder it walks, the walk does
    "file, refused: " + _FIND_EXEC, _FIND_EXEC, "deny", "env-file", cwd=ENVWALK_HELD)
 sh("env: runner control, the same find over a folder with no env file, allowed: " + _FIND_EXEC, _FIND_EXEC, "allow",
    cwd=ENVWALK_CLEAN)
+# A -name after -exec filters only what the program prints. find runs the program on every name before the -name test
+# is read, so each form hands grep the env file, and each control names no env file in a folder that has none.
+for _cmd in (r"find . -exec grep K {} + -name '*.py'", r"find . -exec grep K {} \; -name '*.py'"):
+    sh("env: runner hole, a -name after -exec filters only the output, find hands every name to grep, grep reads the "
+       "env file, refused: " + _cmd, _cmd, "deny", "env-file", cwd=ENVWALK_HELD)
+    sh("env: runner control, the same -name after -exec over a folder with no env file, allowed: " + _cmd, _cmd,
+       "allow", cwd=ENVWALK_CLEAN)
 for _cmd in ("doas grep -r K", "su -c 'grep -r K'", "stdbuf -oL grep -r K", "setsid -w grep -r K"):
     sh("env: runner hole, a wrapper runs grep as its own command, the walk does not enter it, grep reads the env file, "
        "refused: " + _cmd, _cmd, "deny", "env-file", cwd=ENVWALK_HELD)
