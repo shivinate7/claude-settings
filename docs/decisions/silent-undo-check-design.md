@@ -70,9 +70,10 @@ changed lines are a new edit, so the reversal dial stays at one line until a mea
   differs from both the lost line and the base line, and its operators and negation match the lost line.
   Numbers may differ only when both sides changed the base line (a third value).
 
-**Unknown is red in CI.** No upstream, a shallow clone, a merge of three or more parents, an old git, or a
-failed git read prints UNKNOWN. Locally it exits 0. With env `CI` or `--strict` it exits 1
-(ci-unknown-is-red). `merge.py` refuses on unknown, because its merge cannot be taken back. The
+**Unknown is red in CI.** No upstream, a shallow clone, an old git, or a failed git read prints UNKNOWN.
+Locally it exits 0. With env `CI` or `--strict` it exits 1 (ci-unknown-is-red). A merge of three or more
+parents is read in full: every parent is checked. Parent count alone never prints UNKNOWN.
+`merge.py` refuses on unknown, because its merge cannot be taken back. The
 way out that does not depend on the check is the reason flag
 `merge <pr> --confirm --undo-check-unknown-ok "<reason>"`. Claude may type it, with a reason (owner
 ruling, Cockpit item 178 a, 2026-11-03 22:31 CST). Each lift is printed and written to the merge
