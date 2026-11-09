@@ -85,11 +85,12 @@ STREET_WORDS = ("Street", "St", "Avenue", "Ave", "Road", "Rd", "Drive", "Dr", "L
                 "Highway", "Hwy")
 STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND"
                "|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY")
-# The user part of a URL credential; the password part's character: a plain one, a `|` that is no `||`, or a quoted or
-# bracketed run with no `@`, `/`, `?`, `#` or blank in it.
+# The user part of a URL credential holds no quote, bracket or `|`. The password holds any character but `@`, `/`, `?`,
+# `#` and blanks: a real password may hold a lone `)`, `'`, `}` or `||`.
 URL_USER = r"[^/?#\s@:\"'`()\[\]{}|]+"
-URL_PASSWORD_CHAR = (r"[^/?#\s@\"'`()\[\]{}|]|\|(?!\|)|\"[^\"\s/?#@]*\"|'[^'\s/?#@]*'"
-                     r"|\([^()\s/?#@]*\)|\[[^\[\]\s/?#@]*\]")
+URL_PASSWORD = r"[^/?#\s@]+"
+# What may follow the `@`: a bracketed IPv6 host (`[::1]`), or anything but a quote, bracket or `|`, which is code.
+URL_HOST_START = r"(?:(?=\[[0-9A-Fa-f.]*:)|(?![\"'`()\[\]{}|]))"
 # Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
 # from starting inside a longer word ("risk-" and "btn-sk-" are not "sk-").
 SECRET_SHAPES = (
@@ -111,11 +112,12 @@ SECRET_SHAPES = (
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
     # `scheme://user:password@host`, on any host: a version pin after the `@` is blanked, so an IP host is caught here.
     # The user part holds no quote, bracket or `|`: minified code runs `"https://a"})];x||y:z@` together. The password
-    # may hold them, as a pair (`"p"`, `(p)`, `[p]`) or a single `|`, and the `@` that ends it must not be followed by a
-    # quote, bracket or `|`: that is code (`"http://h:"+port+"@"`), not a host.
-    ("url-credentials", re.compile(
-        r"://" + URL_USER + r":(?:" + URL_PASSWORD_CHAR + r")+@(?![\"'`()\[\]{}|])")),
-    ("password", re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(\S+)", re.I)),
+    # may hold them, and the `@` that ends it must not be followed by a quote, bracket or `|` unless an IPv6 host opens
+    # there: `"http://h:"+port+"@"` is code, not a host.
+    ("url-credentials", re.compile(r"://" + URL_USER + r":" + URL_PASSWORD + r"@" + URL_HOST_START)),
+    # The value is captured in a lookahead, so a match ends at the separator and a later password word on the same line
+    # (`password:!0};pwd=hunter2`) is a match of its own. found.end(2) is the end of the value.
+    ("password", re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(?=(\S+))", re.I)),
     ("email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
     # Bare "Bearer <token>" or "Basic <credential>" with no header name: 20 or more token characters, so prose such as
     # "Bearer tokens" or "Basic idea" passes.
@@ -214,13 +216,14 @@ def bare_value(value):
 
 
 def boolean_run_is_code(found):
-    """True when the value after a password word is a minified boolean and everything after it on the line is code:
-    nothing, a closer (`}` `)` `]`), or `,name:` / `;name=` members, each with a boolean or any value. A word after the
-    boolean (`!0,hunter2`, `!0 hunter2`) is a value, so it is not code."""
+    """True when the value after a password word is a minified boolean and everything after it on the line, up to a
+    closer (`}` `)` `]`) or the line end, is `,name:` / `;name=` members that each hold a boolean. A word after the
+    boolean (`!0,hunter2`, `!0 hunter2`) or a member with any other value (`!0,pwd:hunter2`) may be the secret, so it is
+    not code. Text after the closer is no part of this match: a later password word there is a match of its own."""
     start = JS_BOOLEAN_START.match(found.group(2))
     if not start:
         return False
-    rest = found.group(2)[start.end():] + REST_OF_LINE.match(found.string, found.end()).group(0)
+    rest = found.group(2)[start.end():] + REST_OF_LINE.match(found.string, found.end(2)).group(0)
     while True:
         rest = rest.lstrip()
         if not rest.strip(".,;") or rest[0] in "})]":
@@ -231,7 +234,7 @@ def boolean_run_is_code(found):
         rest = rest[member.end():]
         start = JS_BOOLEAN_START.match(rest)
         if not start:
-            return True
+            return False
         rest = rest[start.end():]
 
 
@@ -240,7 +243,7 @@ def password_is_no_secret(found):
     `PWD=<path>`, and nothing but blanks follows it on its line."""
     if boolean_run_is_code(found):
         return True
-    if REST_OF_LINE.match(found.string, found.end()).group(0).strip():
+    if REST_OF_LINE.match(found.string, found.end(2)).group(0).strip():
         return False
     value = bare_value(found.group(2))
     if found.group(1) == SHELL_PWD and SHELL_PATH.fullmatch(value):
