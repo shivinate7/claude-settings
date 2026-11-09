@@ -1129,15 +1129,15 @@ class LintCheckJoin(tm.CloudSession):
     def test_a_pass_under_one_claim_commit_lets_the_join_go_ahead(self):
         # the join resumed after a claim push: the PASS names the head before the claim, and the newest commit is the claim alone
         linted = self.head("feat")
-        self.feat_commit({"docs/decisions/d901.md": "# D901\n"}, "Claim record numbers", "Record-claim: D-901")
+        self.feat_commit({"docs/decisions/d901.md": tm.record("D-901", "d901")}, "Claim record numbers", "Record-claim: D-901")
         rc, out = self.join([lint_comment(2, linted)])
         self.assertEqual(rc, 0, "a claim-only commit on the linted head refused the join:\n" + out)
         self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), out)
 
     def test_a_pass_under_two_stacked_claim_commits_lets_the_join_go_ahead(self):
         linted = self.head("feat")
-        self.feat_commit({"docs/decisions/d901.md": "# D901\n"}, "Claim record numbers", "Record-claim: D-901")
-        self.feat_commit({"docs/decisions/d902.md": "# D902\n"}, "Claim record numbers", "Record-claim: D-902")
+        self.feat_commit({"docs/decisions/d901.md": tm.record("D-901", "d901")}, "Claim record numbers", "Record-claim: D-901")
+        self.feat_commit({"docs/decisions/d902.md": tm.record("D-902", "d902")}, "Claim record numbers", "Record-claim: D-902")
         rc, out = self.join([lint_comment(2, linted)])
         self.assertEqual(rc, 0, "two claim-only commits on the linted head refused the join:\n" + out)
         self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), out)
