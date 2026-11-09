@@ -141,6 +141,7 @@ LINUX_SUITES = {
     "python3 lint/test_check_hook_dup_names.py": (None, None),
     "python3 lint/test_check_record_slugs.py": (None, None),
     "python3 lint/test_check_red_run.py": (None, None),
+    "python3 lint/test_check_step_cites.py": (None, None),
     "python3 lint/test_find_copies.py": (None, None),
     "python3 lint/test_find_time_pinned.py": (None, None),
     "python3 lint/test_check_mod_versions.py": (None, None),
