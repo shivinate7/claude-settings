@@ -1597,6 +1597,65 @@ def _find_depth_limits(expression):
     return low or 0, high
 
 
+def _find_folder_names(expression):
+    """(whether a find expression may print a folder, the (glob, ignores case) of the `-name` and `-iname` tests
+    on the alternatives that may). An alternative prints only files when an unnegated `-type f` comes before
+    its first `-print`. Alternatives are read as in `_find_names_no_env`. `-printf` prints a file's folder. With
+    a paren the expression is not split: it prints only files when no `-o` or negation is in it and a
+    `-type f` is."""
+    def glob_at(at):
+        negated = at > 0 and expression[at - 1] in ("!", "-not")
+        return None if negated or at + 1 >= len(expression) else (expression[at + 1], expression[at] == "-iname")
+    every = [g for at, word in enumerate(expression) if word in ("-name", "-iname") and (g := glob_at(at))]
+    if "-printf" in expression:
+        return True, every
+    if "(" in expression:
+        files_only = (not any(w in ("-o", "-or", "!", "-not") for w in expression)
+                      and any(w == "-type" and expression[i + 1:i + 2] == ["f"] for i, w in enumerate(expression)))
+        return not files_only, every
+    alternatives, files_only, printed, globs = [], False, False, []
+    for at, word in enumerate(expression):
+        if word in ("-o", "-or"):
+            alternatives.append((files_only, printed, globs))
+            files_only, printed, globs = False, False, []
+        elif word in ("-print", "-print0"):
+            printed = True
+        elif word == "-type" and not printed and expression[at + 1:at + 2] == ["f"]:
+            files_only = files_only or not (at > 0 and expression[at - 1] in ("!", "-not"))
+        elif word in ("-name", "-iname") and not printed and glob_at(at):
+            globs.append(glob_at(at))
+    alternatives.append((files_only, printed, globs))
+    if any(prints for _, prints, _ in alternatives):
+        alternatives = [a for a in alternatives if a[1]]
+    folders = [a for a in alternatives if not a[0]]
+    return bool(folders), [g for a in folders for g in a[2]]
+
+
+def _find_folder_env(folder: str, globs, base: str, low: int, high) -> str:
+    """The first env file below a folder that find would print because a `-name` glob in `globs` matches it, or
+    '' for none. `folder` is depth 0 and takes the name `base`, as find names a start word. A folder at depth
+    `low` to `high` (None for no limit) that matches is walked whole, as the program that gets its name reads
+    every file below it."""
+    seen = 0
+    for top, dirs, files in os.walk(folder):
+        relative = os.path.relpath(top, folder).replace(os.sep, "/")
+        level = 0 if relative == "." else relative.count("/") + 1
+        name = base if level == 0 else os.path.basename(top)
+        if level >= low and (high is None or level <= high) and any(
+                fnmatch.fnmatchcase(name.lower() if fold else name, pattern.lower() if fold else pattern)
+                for pattern, fold in globs):
+            found = _env_file_in(top)
+            if found:
+                return found
+        dirs[:] = [d for d in dirs if d != ".git"]
+        if high is not None and level >= high:
+            dirs[:] = []
+        seen += len(dirs) + len(files)
+        if seen > ENV_WALK_LIMIT:
+            return ENV_TOO_LARGE
+    return ""
+
+
 def _xargs_source(pieces, ends, number: int, part: int, here: str):
     """What the segment before an `xargs` puts on its stdin: (the env file it names, whether the search
     may walk `here`, the folders it names). The env file is '' for none, a path, or ENV_TOO_LARGE.
@@ -1645,9 +1704,13 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str):
             at += 1
         if any(bare[i + 1:i + 2] == ["d"] for i, w in enumerate(bare) if w == "-type"):
             return unknown
-        if _find_names_no_env(bare[at:]):
+        names_no_env = _find_names_no_env(bare[at:])
+        prints_folder, globs = _find_folder_names(bare[at:])
+        if names_no_env and not prints_folder:
             return "", False, []
         low, high = _find_depth_limits(bare[at:])
+        if prints_folder and not names_no_env:
+            high = None  # a folder find prints is walked whole by the program that reads it
         for word, start in starts or [(".", ".")]:
             if re.search(r"[$`]", start):
                 return unknown
@@ -1655,8 +1718,12 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str):
             # A quoted glob is no glob to the shell, so it is not expanded.
             expand = re.search(r"[*?\[]", start) and word == start
             for folder in glob.glob(target) if expand else [target]:
-                found = (_env_file_in(folder, min_depth=low, max_depth=high) if os.path.isdir(folder)
-                         else folder if names_env_file(os.path.basename(folder)) and not low else "")
+                if names_no_env:
+                    found = (_find_folder_env(folder, globs, os.path.basename(start.rstrip("/")) or start, low, high)
+                             if os.path.isdir(folder) else "")
+                else:
+                    found = (_env_file_in(folder, min_depth=low, max_depth=high) if os.path.isdir(folder)
+                             else folder if names_env_file(os.path.basename(folder)) and not low else "")
                 if found:
                     return found, False, []
         return "", False, []

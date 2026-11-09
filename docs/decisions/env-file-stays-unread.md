@@ -79,7 +79,9 @@ Known limits:
 - Accepted limit: past the cap, an rg `-g` or `--iglob` glob, or a grep `--include` glob, that matches none of the sample env file names, such as `*.py`, is allowed. A name with an env stem and a `.py` suffix would match that glob and is read, out of the walk's sight. Under the cap the walk sees it. `find . -name '*.py' | xargs rg K` also reads a file named `.env.py`, at any folder size, out of the walk's sight. Its `-name` shortcut reads `*.py` as naming no env file.
 - A search in a heredoc body is not walked.
 - The walk sees a search behind a subshell paren, a `{ ...; }` group, `command`, `env`, `nice`, `sudo`, `nohup`, `exec` or `xargs`. A search behind `env -C` or `sudo -D` is not walked.
-- A `find` or `ls -a` piped to `xargs` names the paths the search reads. `ls -a` names the parent folder too. A find expression with a paren, or with `-exec` or `-printf`, is not read, so its start folders are walked. With an explicit `-print`, only the branches that hold one are judged, and `-maxdepth` and `-mindepth` limit the walk.
+- A `find` or `ls -a` piped to `xargs` names the paths the search reads. `ls -a` names the parent folder too. A find expression with a paren, or with `-exec` or `-printf`, is not read, so its start folders are walked. With an explicit `-print`, only the branches that hold one are judged, and `-maxdepth` and `-mindepth` limit the walk. Where find may print a folder, the walk reads that folder whole, as `grep -r` does.
+- Known limit: `find . -type f ! -name '.env*' | xargs grep K` is still refused, because the word check on the env-shaped word is kept.
+- `-mindepth` filters which paths find prints. A file above that depth is not named, so it is not read.
 - An ignore file other than the checkout's own is not read. So a search of a folder with an env file is refused, even when such a file skips it.
 - Accepted limit: a regex with no `.env` prefix of its own, such as `prod$`, is judged on the sample names only. Rewriting `\.py$` as the names it could pick would refuse every extension filter.
 
