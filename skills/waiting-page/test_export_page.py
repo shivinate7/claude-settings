@@ -1460,6 +1460,34 @@ class Rebuild(Base):
         self.assertTrue(os.path.isfile(renumbered), "renumbered.json is not written when no n moves: it must be, empty")
         self.assertEqual(json.loads(read_text(renumbered)), {}, "the map of a merge with no moves must be {}")
 
+    def test_the_renumber_map_keys_only_the_item_that_moved_when_two_copies_share_an_n(self):
+        # item-a keeps 7 (no live clash). item-b, the later one, takes 8. The map keys item-b's old n and no other item.
+        copy = self.copy_of({"items": {"item-a": item_as("item-a", 7), "item-b": item_as("item-b", 7)}})
+        live = self.fetch()
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 2, 0, 1)
+        renumbered = os.path.join(batches, "renumbered.json")
+        self.assertTrue(os.path.isfile(renumbered), "no renumbered.json in the batches folder")
+        self.assertEqual(json.loads(read_text(renumbered)), {"7": 8},
+                         "only the mover is keyed, and its key maps to its own new n 8: the keeper must not appear")
+
+    def test_the_design_file_holds_no_raw_less_than_and_parses_to_the_same_values(self):
+        # The file is pasted into the page's script block as it is, so a "</script>" in a value must not reach it raw.
+        live = self.fetch(items={"item-001": item(1)})
+        live_page = self.live_page_with({"a": "live </script> a"})
+        copy = self.copy_with_designs({"items": {"item-002": item(2)}}, {"c": "copy <b>tag</b>"})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches, live_page=live_page)
+        self.assertMergeSummary(r, 1, 1, 0, 0, designs=1)
+        design_file = os.path.join(batches, "designData.json")
+        self.assertTrue(os.path.isfile(design_file), "no designData.json in the batches folder")
+        raw = read_text(design_file)
+        self.assertNotIn("<", raw, "designData.json holds a raw '<': every '<' must be written as the escape \\u003c")
+        self.assertIn(r"<", raw, "designData.json has no \\u003c escape for the '<' in its values")
+        self.assertEqual(json.loads(raw), {"a": "live </script> a", "c": "copy <b>tag</b>"},
+                         "designData.json must parse to the live values plus the copy's added key")
+
     def test_fifty_one_missing_docs_with_one_live_make_one_batch_of_fifty(self):
         live = self.fetch(items={"item-001": item(1)})
         copy = self.copy_of({"items": {"item-%03d" % n: item(n) for n in range(1, 52)}})
