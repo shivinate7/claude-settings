@@ -77,7 +77,17 @@
 # --lint each install CI step adds its processes, plus network and disk only when a job has one; a pip install writes to the active Python. Each `not run` line,
 # the summary and each step's `start: <name>` line on stderr (before it runs, so a caller sees which step is running)
 # are one print.
-import os, re, shutil, subprocess, sys, tarfile, tempfile
+# In a cloud session (CLAUDE_CODE_REMOTE=true) a heavy run (any run but --plan) takes a non-blocking exclusive flock on
+# one file in the temp dir (ci-job-heavy.lock) before its first step, and holds it to the end: parallel heavy runs in one
+# container starve each other past the step time limit, and the load brake reads n/a there. A run that finds the lock held
+# starts no step: one unknown line names the holder's pid and command line (read from the file), exit 2. It never waits.
+# The file holds the holder's pid and argv; a stale one is harmless, since the flock decides. No lock off a cloud session
+# or without fcntl (Windows). Cost: one lock file, one open and flock per heavy run; no process, no timer.
+import os, re, shlex, shutil, subprocess, sys, tarfile, tempfile
+try:
+    import fcntl
+except ImportError:  # no POSIX flock here: no lock
+    fcntl = None
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
@@ -449,6 +459,38 @@ def plan(step, pr, values, top, lint=False, pinned=False):
     return "run", body, argv, env, step_key(step, "working-directory")
 
 
+HEAVY_LOCK = "ci-job-heavy.lock"
+_heavy_lock_fd = None  # held open to the end of the run, so the lock lasts as long as the process; never inherited by a child
+
+
+def take_heavy_lock():
+    """None when this run holds the lock or needs none, else a description of the holder (its pid and command line)."""
+    global _heavy_lock_fd
+    if fcntl is None or os.environ.get("CLAUDE_CODE_REMOTE") != "true":
+        return None
+    path = os.path.join(tempfile.gettempdir(), HEAVY_LOCK)
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)  # non-inheritable by default
+    except OSError:
+        return None  # no temp file to lock: run unbraked rather than refuse
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        try:
+            held = " ".join(os.read(fd, 4096).decode("utf-8", "replace").split())
+        except OSError:
+            held = ""
+        os.close(fd)
+        return held or "pid and command line not yet written"
+    try:
+        os.ftruncate(fd, 0)
+        os.write(fd, ("%d %s\n" % (os.getpid(), shlex.join(sys.argv))).encode("utf-8"))
+    except OSError:
+        pass  # the lock holds; only the refusal's holder text is lost
+    _heavy_lock_fd = fd
+    return None
+
+
 def main(argv):
     args = list(argv)
     opts = {"--workflow": None, "--base": None}
@@ -497,6 +539,11 @@ def main(argv):
         for w in absent:
             print("%-15s --step %s: no step of job %r has this name" % ("unknown", w, job))
         return 2
+    if not dry:
+        holder = take_heavy_lock()
+        if holder is not None:
+            print("%-15s another heavy check runs in this container (%s); run one at a time and retry when it ends" % ("unknown", holder))
+            return 2
     base, no_base = opts["--base"], False
     if lint and not base:
         # A no-base lint run once read as a pass while CI's pull-request steps failed: default to CI's base.
