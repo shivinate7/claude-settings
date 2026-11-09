@@ -24,7 +24,7 @@
                           unless the newest earlier record on the PR has no Fix check line or a PASS one, and HEAD is that record's Head
                           (or differs from it only by record or notes files; after a PASS, HEAD must also be an ancestor of the live head),
                           read from the PR's issue comments since the PR opened. When the --round lines name heads, HEAD must instead be the
-                          top round's sha (needs no earlier record) or the Head of an earlier record with a PASS Fix check, and nothing else. A chained fix check (after a PASS) on a record whose last
+                          earliest top-round sha (needs no earlier record) or the Head of an earlier record with a PASS Fix check, and nothing else. This holds for the --fix-base-record source record's rounds too. A chained fix check (after a PASS) on a record whose last
                           round is 3 must carry that record's Net value.
                           --fix-base-record names a record comment on another PR of this repo to stand in when this PR has none of its own.
                           --round's optional SHA (9 to 40 lowercase hex) is the head that round's reviewer read; it prints as `Round N: role,
@@ -122,7 +122,7 @@ UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not r
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
 FIX_HEAD_REMEDY = "The reviewed head must be the Head of the newest earlier review record, or differ from it only by record or notes files."
-FIX_NAMED_BASE_REMEDY = "Start the fix check from one of two heads: the top round's sha in this record, or the Head of an earlier record on this pull request that carries a passed Fix check."
+FIX_NAMED_BASE_REMEDY = "Start the fix check from one of two heads: the earliest sha of the top round in this record, or the Head of an earlier record on this pull request that carries a passed Fix check."
 FIX_FLOOR_REMEDY = "Carry every round up to the floor: pass each round line with --round."
 FIX_FROZEN_REMEDY = "Pass the old values."
 FIX_ANCESTOR_REMEDY = "The fix base must be an ancestor of the live head. Base the fix check on a head that sits inside the live head's history."
@@ -3512,14 +3512,21 @@ def fix_base_problem(host, root, base, last_head):
         return f"{base[:9]} is not the newest earlier record's Head, and the files between them are not all record or notes files: {', '.join(code[:3])}{' ...' if len(code) > 3 else ''}", FIX_HEAD_REMEDY
     return None, None
 
-def named_fix_base(rounds, base, earlier):
-    """-> "top", "chain" or None: how a fix check may start from `base` when the new record's `rounds` name heads. "top" is a sha the highest round's lines
-    name (each already proven one of the pull request's commits by round_head_problem), so it needs no earlier record. "chain" is the Head of an earlier
-    parsed record `earlier` that carries a passed Fix check. Any other base, a plain earlier record's Head included, is None. Old-form records keep
-    fix_base_problem's rule: this is the home of the named-head rule only."""
+def named_fix_base(h, rounds, base, earlier):
+    """-> "top", "chain" or None: how a fix check may start from `base` when `rounds` name heads. "top": `base` is the earliest sha the highest round's
+    lines name, the one that is an ancestor of, or equal to, every other (each is already proven one of the pull request's commits by round_head_problem,
+    so it needs no earlier record). "chain": `base` is the Head of a parsed record in `earlier` that carries a passed Fix check. Any other base, a plain
+    earlier record's Head included, is None. Cost: one compare read per other distinct top-round sha, only when `base` names one of them. Records with
+    no round heads keep fix_base_problem's rule: this is the home of the named-head rule only."""
     top = max(r[0] for r in rounds)
-    if any(same_head(r[4], base) for r in rounds if r[0] == top):
-        return "top"
+    shas = [r[4] for r in rounds if r[0] == top]
+    if any(same_head(s, base) for s in shas):
+        others = []
+        for s in shas:
+            if not same_head(s, base) and not any(same_head(s, o) for o in others):
+                others.append(s)
+        if all(h.compare_files(base, s)["behind_by"] == 0 for s in others):  # behind_by counts the base's commits the other sha lacks, so none means the base is its ancestor or the same commit
+            return "top"
     if any(e["head"] == base and e["fix"] and e["fix"][3] == "PASS" for e in earlier):
         return "chain"
 
@@ -3787,7 +3794,7 @@ def main(argv, host=None, lock=None):
                 recs = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])  # the one comment-list read of the fix path, shared with same_head_problem
                 problem, earlier = None, []
                 remedy = FIX_HEAD_REMEDY  # a refusal that is not a head refusal sets its own remedy beside its problem
-                named = route = None  # set below on the plain path; a --fix-base-record run keeps its source record's rule
+                named = route = None  # set below: True when the rounds that decide the base name heads, and how a named base was reached
                 if a.fix_base_record:  # a source record on another pull request stands in for the one this pull request lacks
                     last, problem, remedy = source_record_problem(h, root, a, recs)
                     earlier = [last] if last else []
@@ -3796,12 +3803,14 @@ def main(argv, host=None, lock=None):
                         if heads:
                             print(f"merge: {heads}. {FIX_ROUND_HEAD_REMEDY} " + REVIEW_CITE, file=sys.stderr)
                             return 2
+                    named = bool(last) and all(len(r) > 4 for r in last["rounds"])  # the source record's own rounds decide the base: named ones take the named-head rule, old-form ones keep the source Head
+                    route = named_fix_base(h, last["rounds"], a.fix_check[0], []) if named else None  # no earlier record of this pull request exists, so no chain link
                     if not problem:
                         problem, remedy = floor_problem([last], parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
                 else:
                     last = parse_review(recs[-1]) if recs else None
                     named = bool(a.round) and len(a.round[0]) > 4  # a record that names heads takes the named-head fix base rule; an old-form one keeps the earlier Head
-                    route = named_fix_base(a.round, a.fix_check[0], [r for r in map(parse_review, recs) if r and r["n"] == a.pr]) if named else None
+                    route = named_fix_base(h, a.round, a.fix_check[0], [r for r in map(parse_review, recs) if r and r["n"] == a.pr]) if named else None
                     if recs and not last:  # a posted record that does not parse is not a missing one
                         problem, remedy = "the newest review record on this pull request does not parse", FIX_PROSE_REMEDY
                     elif not last and route == "top":  # the top round's sha is one of this pull request's commits, so no earlier record is needed
@@ -3832,8 +3841,8 @@ def main(argv, host=None, lock=None):
                     problem, remedy = (dropped_round_lines(last, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) if last else None) or (None, remedy)
                 if not problem:
                     problem, remedy = same_head_problem(earlier, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)), recs) or (None, remedy)
-                if not problem and not a.fix_base_record and route is None and named:
-                    problem, remedy = f"the fix base {a.fix_check[0][:9]} is neither the top round's sha nor the Head of an earlier record with a passed Fix check", FIX_NAMED_BASE_REMEDY
+                if not problem and route is None and named:
+                    problem, remedy = f"the fix base {a.fix_check[0][:9]} is neither the earliest top-round sha nor the Head of an earlier record with a passed Fix check", FIX_NAMED_BASE_REMEDY
                 elif not problem and not named and last["head"] != a.fix_check[0]:
                     problem, remedy = fix_base_problem(h, root, a.fix_check[0], last["head"])
                 if not problem and (route == "chain" or (not named and last["fix"])):  # a chained fix diff must start inside the live head's history
