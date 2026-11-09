@@ -48,7 +48,13 @@ The handoff holds these sections, in this order:
 - Work in flight: agents, workflow runs, and servers. Give each server its pid
   and its port.
 - Next steps.
-- The files and commands that matter.
+- Files and commands: the files and commands that matter.
+
+The marker line below is the one list of the required sections. The guard refuses a write that
+drops one, and the Stop hook names one that is missing. Each sits under its own `## ` heading.
+"Rulings with NO HOME YET" is conditional and not in the list.
+
+<!-- handoff-sections: Goal | Working premises | Where things stand | Work in flight | Next steps | Files and commands -->
 
 For a list that has a home (a page collection, a roadmap ref, a git ref or a GitHub query), name the home and never copy the list.
 
