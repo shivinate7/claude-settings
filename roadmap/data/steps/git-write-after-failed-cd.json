@@ -1,11 +1,11 @@
 {
   "title": "The guard refuses a git write joined by ';' after a cd",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 266.9,
   "owner": "coordinator",
   "lane": "session_013NEJL1Eaa8LA5StpPbWgvA",
   "why": "Runner 9's incident at 16:15 CST Nov 7: a git write ran after a cd joined by ';'. If the cd fails, the write still runs, in the wrong checkout.",
-  "note": "Also checks whether the merge tool removed runner 9's scratch worktree. Done check: the ';' form is red on main and refused; the '&&' form still passes. The guard's verdict changes, so this is a build lane. Built as #1670 (head 8a6a7711a, merges after #1508): round 2 PASS; with runner 8. Lane session_013NEJL1Eaa8LA5StpPbWgvA filed debt git-after-cd-variable-cd. Coordinator 21:00 CST Nov 7; updated 21:00 CST.",
-  "updatedAt": "2026-11-07T21:00:00-06:00"
+  "note": "Also checks whether the merge tool removed runner 9's scratch worktree. Done check: the ';' form is red on main and refused; the '&&' form still passes. The guard's verdict changes, so this is a build lane. Built as #1670 (head 8a6a7711a, merges after #1508): round 2 PASS; with runner 8. Lane session_013NEJL1Eaa8LA5StpPbWgvA filed debt git-after-cd-variable-cd. Coordinator 21:00 CST Nov 7; updated 21:00 CST. Lane 03:40 CST Nov 9: merging main 81a720c42 into #2099 (after-cd-errexit), then review and lane lint, then hand to the coordinator.",
+  "updatedAt": "2026-11-09T03:41:00-06:00"
 }
