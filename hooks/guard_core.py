@@ -670,19 +670,61 @@ def _interpreter_header(words: str):
     return re.compile(r"(?<!\w)(?:" + words + r")(?:\.exe|\.cmd)?(?![\w.-])[^\n]*<<").search
 
 
-# A launcher runs the interpreter it is given as a later word (`uv run python -`, `docker exec -i c python3 -`).
-_LAUNCHERS = frozenset(
-    "uv uvx poetry pipenv pdm rye hatch conda mamba pyenv pipx npx pnpm yarn bunx volta fnm ssh docker podman kubectl".split())
-_REDIRECT_END = re.compile(r"[<>]\|?$")
+# A launcher starts another command, and that CHILD is what runs the heredoc body: `docker exec -i c python3 -`,
+# `ssh host python3 -`, `uv run python -`. The child is read, never a later word of the launcher's line: a
+# container, pod, host, `-w` path, file or `tee` argument named `node` is no interpreter. docker, podman,
+# kubectl and ssh reuse `wrapped_commands` and `ssh_remote_script`. A package runner takes the first word after
+# its subcommand, and no flag stands before it, because its value flags are not known here: a flag value read as
+# the child would make a `tee` body read as that interpreter. A flag before the child leaves the launcher
+# unread, which costs a false alarm on prose and never lets a read through.
+_RUN_LAUNCHERS = {
+    "uv": "run", "poetry": "run", "pipenv": "run", "pdm": "run", "rye": "run", "hatch": "run",
+    "conda": "run", "mamba": "run", "pipx": "run", "volta": "run", "pyenv": "exec", "fnm": "exec",
+    "pnpm": "exec", "uvx": "", "npx": "", "bunx": ""}
+_LAUNCHERS = frozenset(_RUN_LAUNCHERS) | {"ssh", "docker", "podman", "kubectl"}
+
+
+def _launched_commands(tokens, at: int):
+    """The command texts the launcher at `tokens[at]` starts, else []."""
+    word = basename(tokens[at])
+    if word == "ssh":
+        return [text for text in [ssh_remote_script(tokens)] if text]
+    if word not in _RUN_LAUNCHERS:
+        return wrapped_commands(list(tokens), at)   # it compares list slices
+    index, sub = at + 1, _RUN_LAUNCHERS[word]
+    if sub:
+        if tokens[index:index + 1] != (sub,):
+            return []
+        index += 1
+    if tokens[index:index + 1] == ("--",):
+        index += 1
+    elif tokens[index:index + 1] and tokens[index].startswith("-"):
+        return []
+    return [shlex.join(tokens[index:])] if index < len(tokens) else []
 
 
 def _interpreter_command(words: str):
     """Like `_interpreter_header`, but the interpreter must be the COMMAND of the heredoc's segment (after
-    assignments and wrappers such as `timeout 5` or `env X=1`), or follow a launcher's word. The word as a
-    redirect target (`cat > node <<EOF`), a path part (`cat > node/go <<EOF`, `cd ~/node && cat > go <<EOF`)
-    or an argument of another command is the name of a file, and the body is not that interpreter's.
+    assignments and wrappers such as `timeout 5` or `env X=1`), or the command a launcher starts
+    (`_launched_commands`). The word as a redirect target (`cat > node <<EOF`, `cat >& node <<EOF`), a path
+    part (`cat > node/go <<EOF`, `cd ~/node && cat > go <<EOF`) or an argument of another command is the
+    name of a file, and the body is not that interpreter's.
     A segment the tokenizer cannot read is no match, so the caller keeps the body whole."""
     word = re.compile(r"(?:" + words + r")(?:\.exe|\.cmd)?").fullmatch
+
+    def runs_interpreter(tokens) -> bool:
+        index = _walk_wrappers(tokens)[0]
+        if index is None:
+            return False
+        if word(basename(tokens[index])):
+            return True
+        if basename(tokens[index]) not in _LAUNCHERS:
+            return False
+        for child in _launched_commands(tokens, index):
+            read = _segment_tokens(child)
+            if read is not None and runs_interpreter(read[0]):
+                return True
+        return False
 
     def command_is_interpreter(header: str) -> bool:
         for segment in split_segments(header):
@@ -696,14 +738,7 @@ def _interpreter_command(words: str):
                 if "<<" in token:
                     break
                 tokens.append(token)
-            index = _walk_wrappers(tuple(tokens))[0]
-            if index is None:
-                continue
-            if word(basename(tokens[index])):
-                return True
-            if basename(tokens[index]) in _LAUNCHERS and any(
-                    word(basename(token)) and not _REDIRECT_END.search(tokens[at])
-                    for at, token in enumerate(tokens[index + 1:], index) if token):
+            if runs_interpreter(tuple(tokens)):
                 return True
         return False
     return command_is_interpreter
@@ -795,8 +830,29 @@ def _split_heredocs(cmd: str, contractions_are_text: bool = False):
     return kept, bodies
 
 
+def _own_headers(line: str, count: int):
+    """For each of the `count` heredoc headers of one line, the text of the command that owns it: its
+    segment, and the commands it pipes into when they hold no header (`cat <<A | sh`). Two commands on one
+    line (`cat > go <<'A' && node - <<'B'`) so each body is classified by its own command. When the
+    segments do not account for every header (a quote carried over from the line before), every
+    header gets the whole line, as before."""
+    ends = []
+    segments = split_segments(line, ends)
+    owners = []
+    for at, segment in enumerate(segments):
+        found = len(heredoc_heads(segment)[0])
+        if not found:
+            continue
+        text, last = segment, at
+        while last + 1 < len(segments) and ends[last] == "|" and not heredoc_heads(segments[last + 1])[0]:
+            last += 1
+            text += "|" + segments[last]
+        owners += [text] * found
+    return owners if len(owners) == count else [line] * count
+
+
 def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool = False,
-                   kept_at: "list | None" = None):
+                   kept_at: "list | None" = None, own_heads: "list | None" = None):
     """Return (kept lines, [(quote, body, header)], unclosed): every header line kept, every body set apart,
     each body with the text of the header line that opened it (two headers share one line).
     The walk is bash's own reading, where a later `'` closes a contraction's mark. With
@@ -805,7 +861,8 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     bash runs walks both.
     The one walk `_drop_heredoc_bodies` and the environment layer both need. A header is read as
     heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing.
-    A caller that passes `kept_at` gets the line index of each kept line appended to it."""
+    A caller that passes `kept_at` gets the line index of each kept line appended to it, and one that
+    passes `own_heads` gets, for each body, the text of the command that owns its header (_own_headers)."""
     lines = cmd.split("\n")
     last = -1 if contractions_are_text else max(
         (i for i, line in enumerate(lines) if "'" in line), default=-1)
@@ -821,6 +878,8 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
         header_line = lines[index]
         heads, stack = heredoc_heads(header_line, stack, index < last, legacy)   # a later line holds a `'`
         index += 1
+        if own_heads is not None and heads:
+            own_heads.extend(_own_headers(header_line, len(heads)))
         for quote, delimiter in heads:
             start = index
             while index < len(lines) and lines[index].strip() != delimiter:

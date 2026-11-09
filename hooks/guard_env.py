@@ -9,7 +9,8 @@ import re
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
     NODE_WORDS, POWERSHELL_CALL, PYTHON_WORDS, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE,
-    _interpreter_command, _split_heredocs, _without_message_values, is_powershell, norm, split_segments,
+    _interpreter_command, _split_heredocs, _walk_heredocs, _without_message_values, is_powershell, norm,
+    split_segments,
 )
 
 
@@ -413,7 +414,9 @@ _ESCAPED_QUOTE = re.compile(r"""\\\\|\\['"]""")
 def _rewrite_interpreter_bodies(cmd: str, rewrite) -> str:
     """Replace each python, node, perl or ruby heredoc body (no shell reads it) with
     `rewrite(body, header, quoted)`. `quoted` is true for a quoted delimiter, where the shell expands nothing."""
-    for quote, body, header in _split_heredocs(cmd)[1]:
+    own = []
+    bodies = _walk_heredocs(cmd, own_heads=own)[1]
+    for (quote, body, _), header in zip(bodies, own):   # each body is read by its own command
         header = _without_message_values(header)
         if body and INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header):
             cmd = cmd.replace(body, rewrite(body, header, bool(quote)), 1)
