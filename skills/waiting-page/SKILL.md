@@ -402,15 +402,21 @@ is never changed.
 
 1. Check out the record branch in its own worktree and name the copy folder, as "Keep a copy in the repo" step 1 says.
 2. Fetch the live page's collections into one new folder, as "Keep a copy in the repo" step 2 says. Touch `.complete`
-   in each collection folder after its last page. A folder with no marker is `unknown`.
-3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --merge <copy folder> --live <live folder> --batches <new folder>`.
+   in each collection folder after its last page. A folder with no marker is `unknown`. Also save the live page's
+   html from `Artifact` action `read` to a file.
+3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --merge <copy folder> --live <live folder> --batches <new folder> --live-page <html file>`.
    For an artifact other than the waiting page, add `--collections <names>`.
-4. Read the last line: `batches <k> docs <n> kept-live <s> renumbered <r>`. `renumbered` counts the copied items that
-   took a new `n` because the live page holds theirs. Each such item's answer takes the same `n`. An `unknown` line
-   writes nothing. Say it in the reply.
+4. Read the last line: `batches <k> docs <n> kept-live <s> renumbered <r> designs <d>`. `renumbered` counts the copied
+   items that took a new `n` because the live page holds theirs. Each such item's answer takes the same `n`. A copy
+   answer is skipped when the live page holds its item. An `unknown` line writes nothing. Say it in the reply.
 5. Send each `batch-NNN.json` list to the live page as one `ArtifactData batch`, in order. Each entry is a `set`.
 6. Read the live page's items back. Their count must equal the count of live items from step 2, plus the items among
    the `<n>` written docs.
+7. Put the mockups in. Take the live page's html. Replace the text inside its `designData` script element with the JSON
+   of `<new folder>/designData.json`. Write each `<` as `<`. Republish it to the live URL, as "Rebuild a page from
+   the repo" step 5 says.
+8. Rewrite each `page item <n>` cite of the copy's account in the roadmap, with `<new folder>/renumbered.json`: the
+   key is the old `n`, and the value is the new one. Commit it on the record branch.
 
 ## Add an item
 

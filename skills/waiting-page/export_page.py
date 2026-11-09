@@ -72,15 +72,19 @@ the worst of 1 (refused), 2 (unknown: also a registry that is missing, empty or 
 
 Merge, a second account's copy into a live page. It reads the repo copy and a fetch of the live page:
 
-    python3 ~/.claude/skills/waiting-page/export_page.py --merge COPY_DIR --live LIVE_DIR --batches OUT_DIR [--collections NAME ...]
+    python3 ~/.claude/skills/waiting-page/export_page.py --merge COPY_DIR --live LIVE_DIR --batches OUT_DIR [--collections NAME ...] [--live-page FETCHED.html]
 
 COPY_DIR holds the --rebuild layout. LIVE_DIR holds the fetched layout, one folder per collection with its `.complete`
 marker. OUT_DIR gets batch-NNN.json files as --rebuild writes them (the same split and caps), with one `set` entry for
 each (collection, doc_id) of the copy that the live page lacks. The live page wins: a doc it holds is never written.
 A copied item whose `n` is taken, by a live item or an earlier written copied item (sorted doc_id order), takes the next
-free `n` above the highest in either folder, and its answer takes the same `n`. The last line is
-`batches K docs N kept-live S renumbered R`. Unknown, exit 2: a missing or empty copy, a missing live folder, a live
-collection with no marker, a folder that is no collection in either, a doc over the cap, or nothing left to write.
+free `n` above the highest in either folder, and its answer takes the same `n`. A copy answer is not written when the
+live page holds its item (it counts in kept-live). OUT_DIR/renumbered.json maps each old `n` to its new `n`, string keys,
+written even when empty. When the copy holds page/designData.json, --live-page (the live page's html) is required, and
+OUT_DIR/designData.json holds the live page's designData plus each copy key it lacks. The last line is
+`batches K docs N kept-live S renumbered R designs D`. Unknown, exit 2: a missing or empty copy, a missing live folder,
+a live collection with no marker, a folder that is no collection in either, a doc over the cap, copy designs with no
+--live-page or a live page with no designData block, or nothing left to write.
 `--merge` without `--live` or `--batches` is a usage error, exit 2. `--collections` works as with --rebuild.
 
 Cost: one python process, one read of each file, writes only for a changed doc. No git, no network, no timer.
@@ -613,17 +617,19 @@ def number_of(data):
 
 def renumber(fresh, entries, held):
     """The entries in `fresh` with each item whose `n` is taken given the next free `n` above the highest in the live
-    page or the copy, in sorted doc_id order, and its answer given the same `n` and its item's id. (entries, count)."""
+    page or the copy, in sorted doc_id order, and its answer given the same `n` and its item's id. (entries, count of
+    items moved, {old n as a string: new n})."""
     taken = {number_of(data) for data in held["items"].values()} - {None}
     highest = max([n for n in (number_of(e["data"]) for e in entries if e["collection"] == "items") if n is not None]
                   + list(taken), default=0)
-    moved = {}
+    moved, numbers = {}, {}
     for entry in sorted((e for e in fresh if e["collection"] == "items"), key=lambda e: e["doc_id"]):
         n = number_of(entry["data"])
         if n is None:
             continue
         if n in taken:
             highest += 1
+            numbers.setdefault(str(n), highest)
             n = highest
             moved[entry["doc_id"]] = (n, entry["data"].get("id") if isinstance(entry["data"].get("id"), str) else entry["doc_id"])
         taken.add(n)
@@ -635,21 +641,47 @@ def renumber(fresh, entries, held):
         elif move and entry["collection"] == "answers":
             entry = dict(entry, data=dict(entry["data"], n=move[0], item=move[1]))
         result.append(entry)
-    return result, len(moved)
+    return result, len(moved), numbers
 
 
-def merge(copy, live, batches, collections=COLLECTIONS):
-    """Batches of `set` entries for each doc of the repo copy that the live page lacks. The live page wins."""
+def merged_design(copy, live_page):
+    """(the live page's designData plus each copy key it lacks, count of keys added), or (None, 0) when the copy holds no
+    page/designData.json. A copy with designs needs the live page's html, whose block must hold a JSON object."""
+    path = os.path.join(copy, PAGE_FOLDER, DESIGN_FILE)
+    if not os.path.isfile(path):
+        return None, 0
+    theirs = load_json(path, "%s/%s" % (PAGE_FOLDER, DESIGN_FILE))
+    if not live_page:
+        raise Stop("unknown - the copy holds %s/%s: pass --live-page, the live page's html" % (PAGE_FOLDER, DESIGN_FILE), UNKNOWN)
+    ours = design_data(read_page(live_page)[1])
+    if not (isinstance(ours, dict) and isinstance(theirs, dict)):
+        raise Stop("unknown - the live page's designData and the copy's are not both JSON objects", UNKNOWN)
+    added = {key: value for key, value in theirs.items() if key not in ours}
+    return dict(ours, **added), len(added)
+
+
+def merge(copy, live, batches, collections=COLLECTIONS, live_page=None):
+    """Batches of `set` entries for each doc of the repo copy that the live page lacks, the map of renumbered `n` and the
+    merged designData. The live page wins. A copy answer is kept when the live page holds its item."""
     entries = read_copy(copy, collections)
     held = live_docs(live, collections)
-    fresh = [e for e in entries if e["doc_id"] not in held[e["collection"]]]
+    live_items = held.get("items", {})
+    fresh = [e for e in entries if e["doc_id"] not in held[e["collection"]]
+             and not (e["collection"] == "answers" and e["doc_id"] in live_items)]
     kept = len(entries) - len(fresh)
     if not fresh:
         raise Stop("unknown - the live page already holds all %d doc(s) of the copy; nothing to write" % len(entries), UNKNOWN)
-    moved = 0
+    moved, numbers = 0, {}
     if "items" in collections:
-        fresh, moved = renumber(fresh, entries, held)
-    return "batches %d docs %d kept-live %d renumbered %d" % (write_batches(fresh, batches), len(fresh), kept, moved)
+        fresh, moved, numbers = renumber(fresh, entries, held)
+    design, added = merged_design(copy, live_page)
+    count = write_batches(fresh, batches)
+    with open(os.path.join(batches, "renumbered.json"), "w", encoding="utf-8", newline="") as handle:
+        handle.write(canonical(numbers))
+    if design is not None:
+        with open(os.path.join(batches, DESIGN_FILE), "w", encoding="utf-8", newline="") as handle:
+            handle.write(canonical(design))
+    return "batches %d docs %d kept-live %d renumbered %d designs %d" % (count, len(fresh), kept, moved, added)
 
 
 def main(argv):
@@ -666,6 +698,7 @@ def main(argv):
     ap.add_argument("--batches", help="the folder to write batch-NNN.json into")
     ap.add_argument("--merge", help="the repo copy whose docs the live page lacks are batched")
     ap.add_argument("--live", help="with --merge: the folder `ArtifactData list` saved from the live page, markers included")
+    ap.add_argument("--live-page", help="with --merge: the live page's fetched html, for its designData block")
     ap.add_argument("--collections", nargs="+", metavar="NAME",
                     help="with --rebuild or --merge: the collection folders to allow, in place of the waiting page's five")
     args = ap.parse_args(argv)
@@ -680,6 +713,8 @@ def main(argv):
     merge_mode = bool(args.merge or args.live)
     export_mode = bool(args.out or args.page or (args.fetched and not all_mode and not merge_mode))
     rebuild_mode = bool(args.rebuild or (args.batches and not merge_mode))
+    if args.live_page and not args.merge:
+        ap.error("--live-page goes with --merge")
     if merge_mode and not (args.merge and args.live and args.batches):
         ap.error("--merge needs --live DIR and --batches DIR: --merge DIR --live DIR --batches DIR")
     if [all_mode, export_mode, rebuild_mode, merge_mode].count(True) != 1 or (all_mode and not (args.all and args.fetched and args.worktree)) \
@@ -695,7 +730,7 @@ def main(argv):
         if export_mode:
             verdict = export(args.fetched, args.out, args.page, args.allow_empty)
         elif merge_mode:
-            verdict = merge(args.merge, args.live, args.batches, tuple(args.collections or COLLECTIONS))
+            verdict = merge(args.merge, args.live, args.batches, tuple(args.collections or COLLECTIONS), args.live_page)
         else:
             verdict = rebuild(args.rebuild, args.batches, tuple(args.collections or COLLECTIONS))
     except Stop as stop:
