@@ -16,7 +16,7 @@ Exit 0 clean. Exit 1 on a hit, printed as `path:line: pattern: matched text`.
 Exit 2 when the base or a file cannot be read: an unread diff is never a clean one. An unread file does not stop
 the scan: every other file is read, every hit prints, and the run then exits 2.
 Exit 3 when the node tool for JS, TS and Astro cannot run (no npx, an npx error, comment_scan.mjs missing,
-typescript not found). Every Python and Swift hit prints first. Exit 3 wins over exit 2.
+typescript not found). Every Python, Swift and shell hit prints first. Exit 3 wins over exit 2.
 """
 import argparse
 import ast
@@ -30,7 +30,9 @@ import sys
 import tokenize
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+sys.path.insert(0, HERE)
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import layout  # noqa: E402  the one home of where a repo keeps its decisions (lint/layout.py)
 
 class DatedText:
     """A date pattern that skips a date a rule or a limit runs on: the word effective, valid, until or expires,
@@ -42,6 +44,74 @@ class DatedText:
 
     def finditer(self, text):
         return (m for m in self.DATE.finditer(text) if not self.EXEMPT.search(text[:m.start()]))
+
+
+class ReviewRound:
+    """The pattern group for round numbers, kept as a class for its exemption. A round number is narration whatever
+    follows "in", "after" or "from", and a bare one is narration unless a numeric unit follows it, as in "2 decimals",
+    which is arithmetic. A comment that quotes a rule glosses a decision id holding `round-N`, such as
+    hold-unsafe-after-round-N. A round number with the same N passes only inside that gloss, and only when
+    docs/decisions/<id>.md exists at the git top level. The gloss is the parentheses that open with the id, as in
+    "(decision <id>, ...)" or "(`<id>`, ...)", or the parentheses right after the id, as in "Decision <id> (...)".
+    Anything else stays flagged: the same words outside the gloss, an id with no decision file, an id holding
+    another number, and parentheses that hold the id later on."""
+    ROUND = re.compile(r"\b(?:in|after|from)\s+round\s*\d+"
+                       r"|\bround\s*\d+(?!\d)(?!\s*(?:decimals?|places?|digits?)\b)"
+                       r"|\breview\s+(?:round|finding|points?)\b", re.I)
+    ID = r"(?P<id>[a-z0-9][a-z0-9-]*)"
+    # Form (i) needs a marker: "decision" with optional backticks, or backticks alone.
+    OPENS = re.compile(r"\s*(?:decision\s+(?P<q>`?)|`)" + ID + r"(?(q)(?P=q)|`)\s*,", re.I)
+    BEFORE = re.compile(r"(?<![\w`-])(`?)" + ID + r"\1\s*$", re.I)
+
+    def __init__(self):
+        self.top, self.known = None, {}
+
+    def real(self, ident, n):
+        """True when ident holds `round-n` and names a decision file in the repo being checked."""
+        if not re.search(r"(?:^|-)round-%s(?:-|$)" % n, ident, re.I):
+            return False
+        if ident not in self.known:
+            if self.top is None:
+                try:
+                    self.top = git("rev-parse", "--show-toplevel").strip()
+                except Unread:
+                    self.top = ""
+            self.known[ident] = bool(self.top) and self.has_decision(ident)
+        return self.known[ident]
+
+    def has_decision(self, ident):
+        """True when the first decisions folder the layout allows for the repo at self.top holds ident.md. A layout
+        that does not read says nothing is real, so the round stays flagged."""
+        try:
+            return any(os.path.isfile(os.path.join(self.top, *folder.split("/"), ident + ".md"))
+                       for folder in layout.candidates(self.top, "decisions"))
+        except (layout.LayoutError, KeyError, OSError):
+            return False
+
+    @staticmethod
+    def paren_spans(text):
+        spans, stack = [], []
+        for k, c in enumerate(text):
+            if c == "(":
+                stack.append(k)
+            elif c == ")" and stack:
+                spans.append((stack.pop(), k))
+        return spans
+
+    def gloss_ids(self, text, lo):
+        """The ids the parentheses at lo gloss: the one they open with, and the one right before them."""
+        for m in (self.OPENS.match(text, lo + 1), self.BEFORE.search(text[:lo])):
+            if m:
+                yield m.group("id")
+
+    def finditer(self, text):
+        spans = self.paren_spans(text)
+        for m in self.ROUND.finditer(text):
+            n = re.search(r"round\s*(\d+)", m.group(0), re.I)
+            if n and any(lo < m.start() < hi and self.real(ident, n.group(1))
+                         for lo, hi in spans for ident in self.gloss_ids(text, lo)):
+                continue
+            yield m
 
 
 class HistoryPhrase:
@@ -79,16 +149,13 @@ class HistoryPhrase:
 
     def finditer(self, text):
         run = (m for m in self.RUN.finditer(text)
-               if not self.CONDITION.search(re.split(r"[.;:!?]", text[:m.start()])[-1]))
+               if not self.CONDITION.search(re.split(r"[.;:!?,]", text[:m.start()])[-1]))
         return itertools.chain(self.FORMS.finditer(text), run)
 
 
 PATTERNS = {
-    # "in", "after" or "from" before a round number is narration whatever follows. A bare round number is
-    # narration unless a numeric unit follows it, as in "2 decimals", which is arithmetic.
-    "review round": re.compile(r"\b(?:in|after|from)\s+round\s*\d"
-                               r"|\bround\s*\d+(?!\d)(?!\s*(?:decimals?|places?|digits?)\b)"
-                               r"|\breview\s+(?:round|finding|points?)\b", re.I),
+    # A round number is narration, except as a unit ("2 decimals") or inside a decision id's gloss (ReviewRound).
+    "review round": ReviewRound(),
     "pr number": re.compile(r"\bPR\s*#?\s*\d{3,}"),
     "commit hash": re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"),
     "status word": re.compile(r"\b(?:MEASURED|CORRECTED)\b|\bADDED\s+\d"),
@@ -466,6 +533,7 @@ SH_CMD_WORD = re.compile(r"(?:case|esac|then|do|else|elif|if|while|until|time)" 
 SH_FUNCTION = re.compile(r"function[ \t]+[^\s;&|()<>`]+")
 SH_TEST_OPEN = re.compile(r"\[\[(?=\s)")
 SH_TEST_CLOSE = re.compile(r"\]\]" + SH_BOUNDARY)
+SH_BRACKET_EXPR = re.compile(r"\[[!^]?\]?(?:\[:\w+:\]|[^\]\s$`'\"\\])*\]")
 SH_IN_WORD = re.compile(r"in" + SH_BOUNDARY)
 SH_ESAC_WORD = re.compile(r"esac" + SH_BOUNDARY)
 
@@ -476,11 +544,15 @@ def sh_code_end(src, i, spans, pending, close=None):
     comment: a quote or an expansion ends a word that goes on, so `"a"#b` and `$(x)#b` hold no comment. `cmd` is
     True only at command position, the only place `case`, `esac` and the other reserved words count: after a newline,
     `;`, `&`, `|`, `$(`, a backtick, `{`, `then` or `do`, or a `(` that opens a subshell. `parens` holds one kind per
-    open `(`: cmd for a subshell or a process substitution, list for an array, an extglob or a regex group, where a
-    newline or `|` starts no command. Inside `[[ ... ]]` (`test`) nothing starts a command either. Each open `case`
-    is one entry in `cases`, [state, paren depth in a pattern]: word0 and word1 before `in`, pat for the arm
-    patterns, body for an arm's commands. A pattern's `)` ends the pattern, never the substitution."""
-    ws, cmd, test, parens, cases = True, True, False, [], []
+    open `(`: cmd for a subshell or a process substitution, list for an array, where a newline or `|` starts no
+    command, and word for a paren that is part of a word, an extglob group (right after `?*+@!`), a regex group or a
+    case pattern group, where `)#b` holds no comment. A bracket expression `[(]` inside `[[ ]]` or a case pattern is
+    one word that pushes and pops no paren. Inside `[[ ... ]]` (`test`) nothing starts a command either.
+    `<<` is a shift, not a heredoc, inside an array subscript `a[1<<2]` (`sub` counts the open `[`); `((` and `$((`
+    are read by sh_try_arith. Each open `case` is one entry in `cases`, [state, paren depth where it opened]: word0
+    and word1 before `in`, pat for the arm patterns, body for an arm's commands. A pattern's `)` ends the pattern,
+    never the substitution."""
+    ws, cmd, test, sub, parens, cases = True, True, False, 0, [], []
 
     def starts_cmd():
         return not test and (not parens or parens[-1] == "cmd")
@@ -497,7 +569,7 @@ def sh_code_end(src, i, spans, pending, close=None):
             continue
         if st and st[0] == "word0" and ws and c not in " \t\n\\#":
             st[0] = "word1"
-        if st and st[0] == "pat" and ws and not st[1]:
+        if st and st[0] == "pat" and ws and len(parens) == st[1]:
             if c == "(":
                 i += 1  # a bare ( before a pattern
                 continue
@@ -519,7 +591,7 @@ def sh_code_end(src, i, spans, pending, close=None):
         if cmd and (not st or st[0] == "body") and (m := SH_CMD_WORD.match(src, i)):
             word = m.group(0)
             if word == "case":
-                cases.append(["word0", 0])
+                cases.append(["word0", len(parens)])
                 i, ws, cmd = m.end(), True, False
             elif word == "esac":
                 if not st:
@@ -563,9 +635,12 @@ def sh_code_end(src, i, spans, pending, close=None):
             i += 1
             if pending:
                 i = sh_heredoc_bodies(src, i, pending)
-            ws, cmd = True, starts_cmd()
+            ws, sub, cmd = True, 0, starts_cmd()  # a line continuation is read by the backslash branch, so [[ ]] goes on
         elif src.startswith("<<<", i):
             i += 3  # a here-string, not a heredoc
+            ws = True
+        elif sub and src.startswith("<<", i):
+            i += 2
             ws = True
         elif src.startswith("<<", i):
             i, entry = sh_heredoc_word(src, i + 2)
@@ -574,26 +649,36 @@ def sh_code_end(src, i, spans, pending, close=None):
         elif ws and src.startswith("((", i) and (j := sh_try_arith(src, i + 2, spans, pending)) is not None:
             i = j
             ws = cmd = False
+        elif c == "[" and (test or (st and st[0] == "pat" and len(parens) == st[1])) and (m := SH_BRACKET_EXPR.match(src, i)):
+            i, ws, cmd = m.end(), False, False  # a bracket expression is one word: a ( or ) in it opens and closes nothing
+        elif c == "[" and i and (src[i - 1].isalnum() or src[i - 1] in "_]"):
+            sub += 1
+            i += 1
+            ws = cmd = False
+        elif c == "]" and sub:
+            sub -= 1
+            i += 1
+            ws = cmd = False
         elif c == "(":
-            if st and st[0] == "pat":
-                st[1] += 1  # an extglob group in a pattern
-                ws = False
+            if test or (st and st[0] == "pat") or (i > 0 and src[i - 1] in "?*+@!"):
+                kind = "word"
+            elif cmd or (i > 0 and src[i - 1] in "<>"):
+                kind = "cmd"
             else:
-                subshell = not test and (cmd or (i > 0 and src[i - 1] in "<>"))
-                parens.append("cmd" if subshell else "list")
-                ws, cmd = True, subshell
+                kind = "list"
+            parens.append(kind)
+            ws, cmd = kind != "word", kind == "cmd"
             i += 1
         elif c == ")":
             i += 1
-            if st and st[0] == "pat":
-                if st[1]:
-                    st[1] -= 1
-                    ws = False
+            base = st[1] if st else 0
+            if st and st[0] == "pat" and len(parens) == base:
+                st[0], ws, cmd = "body", True, True
+            elif len(parens) > base:
+                if parens.pop() == "word":
+                    ws = cmd = False
                 else:
-                    st[0], ws, cmd = "body", True, True
-            elif parens:
-                parens.pop()
-                ws, cmd = True, starts_cmd()  # starts_cmd keeps `f() {` a function body
+                    ws, cmd = True, starts_cmd()  # starts_cmd keeps `f() {` a function body
             elif cases:
                 raise Unread("case arm ends with a lone )")
             elif close == ")":

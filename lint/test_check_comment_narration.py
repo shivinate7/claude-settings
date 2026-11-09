@@ -47,7 +47,7 @@ NEEDS_TSC = unittest.skipUnless(shutil.which("tsc") or os.environ.get("CI"),
 
 # Run-state history: a comment that states a run's colour or result on a head, on main or on the base is history,
 # whatever verb or label comes before it. A colour phrase after when, if, unless, until, while or once in the same
-# clause is a condition and stays clean (see CLEAN). A condition word in an earlier clause, past a `;`, `:`, `.`,
+# clause is a condition and stays clean (see CLEAN). A condition word in an earlier clause, past a `;`, `:`, `.`, `,`,
 # `!` or `?`, does not exempt a later run phrase. The `history phrase` pattern flags each hit. The list also joins
 # FLAGGED, so every flagged test runs it.
 RUN_STATE = [
@@ -60,6 +60,7 @@ RUN_STATE = [
     "fails on main", "passes on the head", "This case passes on main.", "RED before this change",
     "(green before the fix)", "the run is red on main", "Control, green on main:",
     "if X; it passed on main", "when ready: this passed on main", "if cold, skip. The run is red on main",
+    "Once the fix landed, the tests went green on main", "When it ran, it was red on main",
 ]
 
 # Text the check must flag, in a comment or in a docstring line.
@@ -214,6 +215,11 @@ class Case(unittest.TestCase):
         rc, out = self.lint()
         self.assertEqual(rc, 0, out)
         self.assertNotIn("Traceback", out)
+
+    def scan(self, files, extra_base=None):
+        self.base({"keep.py": "x = 1\n", **(extra_base or {})})
+        self.change(files)
+        return self.lint()
 
 
 class FlagsAddedLines(Case):
@@ -904,11 +910,6 @@ class SwiftScan(Case):
 class ShellScan(Case):
     """Shell comments: a `#` inside quotes, after an escape, in an expansion, in arithmetic or in a heredoc body is text."""
 
-    def scan(self, files):
-        self.base({"keep.py": "x = 1\n"})
-        self.change(files)
-        return self.lint()
-
     def assertReadsClean(self, src):
         """The construct reads with no Unread, so the file exits 0."""
         rc, out = self.scan({"x.sh": src})
@@ -1141,6 +1142,55 @@ class ShellScan(Case):
         self.assertHit(out, "x.sh", 2)
         self.assertEqual(rc, 1, out)
 
+    def test_round2_pin_arithmetic_base_with_a_trailing_comment_then_a_later_comment(self):
+        rc, out = self.scan({"x.sh": "(( x = 16#ff )) # c\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_pin_shift_assignment_in_arithmetic_then_a_later_comment(self):
+        rc, out = self.scan({"x.sh": "(( n <<= 1 ))\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_pin_hash_joined_to_a_continued_word_is_text(self):
+        rc, out = self.scan({"x.sh": "echo a\\\n#x fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 3)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_pin_arithmetic_that_falls_back_to_a_subshell_then_a_later_comment(self):
+        rc, out = self.scan({"x.sh": "(( 1 ) ; echo a)\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_gap_regex_group_hash_is_text_not_a_comment(self):
+        rc, out = self.scan({"x.sh": "[[ $x =~ ^(a)(#b.round2)$ ]]\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_gap_extglob_hash_is_text_not_a_comment(self):
+        rc, out = self.scan({"x.sh": "case $x in +(a|b)#round2) echo;; esac\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_gap_subscript_shift_is_not_a_heredoc(self):
+        rc, out = self.scan({"x.sh": "a[1<<2]=x\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_gap_control_comment_after_a_closing_paren_still_hits(self):
+        rc, out = self.scan({"x.sh": "(cmd) # fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_gap_control_real_heredoc_after_a_subscript_shift_still_skips_its_body(self):
+        rc, out = self.scan({"x.sh": "a[1<<2]=x\ncat <<EOF\n# fixed on 2026-10-28\nEOF\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 5)
+        self.assertNoHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
     def test_reader_gap_comment_in_a_case_arm_in_a_quoted_substitution_is_flagged(self):
         rc, out = self.scan({"x.sh": 'x="$(case $k in\na) echo ;;\n# fixed in round 2\nesac)"\n'})
         self.assertHit(out, "x.sh", 3)
@@ -1161,6 +1211,11 @@ class ShellScan(Case):
         rc, out = self.scan({"x.sh": src})
         self.assertHit(out, "x.sh", 5)
         self.assertNoHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_let_argument_redirect_is_a_heredoc_and_skips_its_body(self):
+        rc, out = self.scan({"x.sh": "let x=1 <<EOF\nit's\nEOF\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 4)
         self.assertEqual(rc, 1, out)
 
     def test_reader_gap_spaced_hash_in_a_quoted_string_in_a_later_arm_is_text(self):
@@ -1241,6 +1296,100 @@ class ShellScan(Case):
         self.assertEqual(rc, 2, out)
         self.assertRegex(out, r"UNKNOWN.*x\.sh")
         self.assertIn("command substitution never closes", out)
+
+    def test_run_state_after_a_condition_across_a_comma_is_flagged(self):
+        rc, out = self.scan({"x.sh": "# Once the fix landed, the tests went green on main\necho hi\n"
+                                     "# When it ran, it was red on main\n"})
+        self.assertHit(out, "x.sh", 1)
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_run_state_condition_clauses_stay_clean_in_a_shell_comment(self):
+        rc, out = self.scan({"x.sh": "# if red on main, page the on-call\n# once green on the head, merge\necho hi\n"})
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Traceback", out)
+
+    def test_bracket_paren_in_a_case_arm_reads_and_flags_the_history_comment(self):
+        rc, out = self.scan({"x.sh": "case $x in\n  a) [[ $y == [(] ]] # changed from a dict to a list\n;;\nesac\n"})
+        self.assertNotEqual(rc, 2, out)  # the file is read: exit 2 would be the reader's cause
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_bracket_without_a_paren_in_a_case_arm_flags_the_history_comment(self):
+        rc, out = self.scan({"x.sh": "case $x in\n  a) [[ $y == [x] ]] # changed from a dict to a list\n;;\nesac\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_bracket_close_paren_in_a_case_pattern_reads_and_flags_a_later_comment(self):
+        self.assertLaterCommentFlagged("case $x in [)]) echo;; esac\n")
+
+    def test_bracket_without_a_paren_in_a_case_pattern_reads_and_flags_a_later_comment(self):
+        self.assertLaterCommentFlagged("case $x in [x]) echo;; esac\n")
+
+    def test_bracket_paren_arm_before_a_nested_case_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  [(]) case $y in\n    b) echo ;;\n  esac ;;\nesac\n")
+
+
+class RuleQuotes(Case):
+    DECISION = {"docs/decisions/hold-unsafe-after-round-3.md": "# hold-unsafe-after-round-3\n\nA held change stays parked until the owner decides.\n"}
+
+    def scan(self, files):
+        return super().scan(files, extra_base=self.DECISION)
+
+    def test_round_outside_the_gloss_stays_flagged_even_with_a_real_id(self):
+        rc, out = self.scan({"x.py": "# keeps the net value round 3 gave (decision hold-unsafe-after-round-3, net-value hold after round 3)\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round_inside_a_decision_gloss_is_clean(self):
+        rc, out = self.scan({"x.py": "# (decision hold-unsafe-after-round-3, net-value hold after round 3)\nx = 1\n"})
+        self.assertEqual(rc, 0, out)
+
+    def test_round_with_a_non_gloss_citation_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# (added in round 3, per hold-unsafe-after-round-3)\n# Added during round 3 (hold-unsafe-after-round-3)\n# Round 3 fix: x (hold-unsafe-after-round-3)\n# Round 2 fix (round-2 finding)\n# the round 2 reviewer asked (round-2 review)\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertHit(out, "x.py", 2)
+        self.assertHit(out, "x.py", 3)
+        self.assertHit(out, "x.py", 4)
+        self.assertHit(out, "x.py", 5)
+        self.assertEqual(rc, 1, out)
+
+    def test_id_before_a_gloss_is_clean(self):
+        rc, out = self.scan({"x.py": "# Decision hold-unsafe-after-round-3 (net-value hold after round 3)\n# `hold-unsafe-after-round-3` (net-value hold after round 3)\nx = 1\n"})
+        self.assertEqual(rc, 0, out)
+
+    def test_gloss_with_an_id_that_has_no_decision_file_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# (decision some-other-round-3, net-value hold after round 3)\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round_without_a_cited_id_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# fixed in round 2\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round_citing_an_id_with_another_number_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# fixed in round 2 (decision hold-unsafe-after-round-3)\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round_history_forms_citing_an_id_stay_flagged(self):
+        rc, out = self.scan({"x.py": "# Added in round 3 (hold-unsafe-after-round-3).\n# fixed in round 3; the round-3 trip is slow\n# Previously in round 3, see round-3\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertHit(out, "x.py", 2)
+        self.assertHit(out, "x.py", 3)
+        self.assertEqual(rc, 1, out)
+
+
+class SelfCheck(unittest.TestCase):
+    def test_check_file_comments_and_docstrings_hit_no_pattern(self):
+        import check_comment_narration as checker
+        hits = []
+        for line, text in checker.narrated_lines(MODULE):
+            for name, pat in checker.PATTERNS.items():
+                for m in pat.finditer(text):
+                    hits.append("%d: %s: %s" % (line, name, m.group(0)))
+        self.assertEqual(hits, [], "\n".join(hits))
 
 
 class Degraded(Case):
