@@ -30243,9 +30243,17 @@ cs_shell("chained_add_commit_allowed, a comment hides the commit", "allow",
 cs_shell("chained_add_record_commit_allowed", "allow", VCS + " add docs/todo.md && " + COMMIT, cwd=CS_CHAIN)
 cs_shell("chained_add_all_of_records_commit_allowed", "allow", VCS + " add -A && " + COMMIT, cwd=CS_CHAIN_RECORDS)
 
+# The refuter role is read-only and runs Opus by its own standing grant (decision plan-refuter). Its name is
+# guard_core's REFUTER_ROLE, the one home of the name, read here and never typed. A guard_core with no such name
+# reads as REFUTER_MISSING: a spawn of that name is then refused as a role with no grant, and refuter_name_check
+# fails on the missing name itself (the same reading as the PowerShellScript cases).
+REFUTER_MISSING = "<no REFUTER_ROLE in guard_core>"
+_load_guard_module()  # sets sys.modules["guard_core"] for the read below
+REFUTER = getattr(sys.modules["guard_core"], "REFUTER_ROLE", REFUTER_MISSING)
+
 # ---- coordinator acts (rule coordinator-scope, waiting-page item 111 a). In a coordinator
 # build only the batch runner merges, and the coordinator runs no build or review agent. A spawn passes only when its type is
-# Plan, Explore or claude-code-guide. A Workflow is judged by each agent() call it holds. A merge (the host's tool, `gh pr
+# Plan, Explore, claude-code-guide or the refuter. A Workflow is judged by each agent() call it holds. A merge (the host's tool, `gh pr
 # merge`, or the merge tool's --confirm) is refused before any read. create_session and start_session stay allowed.
 # The rows name no model: the test run's env sets the agent default, so the floor, cap and role-model rules stay quiet.
 # A refusal must not echo the brief, so every refused row carries a sentinel brief in `lacks`.
@@ -30285,9 +30293,16 @@ cs("coordinator_plan_spawn_allowed", "allow", tool="Agent", subagent_type="Plan"
 cs("coordinator_explore_spawn_allowed", "allow", tool="Agent", subagent_type="Explore", prompt="Read the repo.", cwd=NOGIT)
 cs("coordinator_guide_spawn_allowed", "allow", tool="Agent", subagent_type="claude-code-guide",
    prompt="How do hooks work?", cwd=NOGIT)
+# Decision plan-refuter (a refuter tries to refute a Plan agent's plan): a coordinator may spawn one.
+cs("coordinator_refuter_spawn_allowed", "allow", tool="Agent", subagent_type=REFUTER, prompt="Refute the plan.", cwd=NOGIT)
+cs("coordinator_refuter_workflow_allowed", "allow", tool="Workflow",
+   script='await agent("Refute the plan.", {agentType: "%s"})' % REFUTER, cwd=NOGIT)
 # Exact type only, since the host's case rule is unknown: a lowercase `explore` or `plan` is refused.
 cs("coordinator_explore_casing_spawn_denied", "deny", tool="Agent", subagent_type="explore", **CS_SPAWN)
 cs("coordinator_plan_casing_spawn_denied", "deny", tool="Agent", subagent_type="plan", **CS_SPAWN)
+# Near misses of the refuter name stay refused: a substring or case match must not pass.
+cs("coordinator_refuter_casing_spawn_denied", "deny", tool="Agent", subagent_type=REFUTER.title(), **CS_SPAWN)
+cs("coordinator_refuter_plural_spawn_denied", "deny", tool="Agent", subagent_type=REFUTER + "s", **CS_SPAWN)
 cs("coordinator_create_session_allowed", "allow", tool=CS_CREATE_SESSION, prompt="do the task", cwd=NOGIT)
 cs("coordinator_start_session_allowed", "allow", tool=CS_START_SESSION, prompt="do the task", cwd=NOGIT)
 cs("batch_runner_builder_spawn_allowed", "allow", role="batch-runner", tool="Agent", subagent_type="builder",
@@ -33700,13 +33715,6 @@ ROLE_TABLE_RULES = ROLE_TABLE_HEAD + (
 ROLE_RULES_WANT = {"Explore": "haiku", "claude-code-guide": "haiku", "test-author": "haiku",
                    "reviewer": "haiku", "builder": "sonnet", "planner": "sonnet",
                    "general-purpose": "sonnet", "claude": "sonnet"}
-# The refuter role is read-only and runs Opus by its own standing grant (decision plan-refuter). Its name is
-# guard_core's REFUTER_ROLE, the one home of the name, read here and never typed. A guard_core with no such name
-# reads as REFUTER_MISSING: a spawn of that name is then refused as a role with no grant, and refuter_name_check
-# fails on the missing name itself (the same reading as the PowerShellScript cases).
-REFUTER_MISSING = "<no REFUTER_ROLE in guard_core>"
-_load_guard_module()  # sets sys.modules["guard_core"] for the read below
-REFUTER = getattr(sys.modules["guard_core"], "REFUTER_ROLE", REFUTER_MISSING)
 
 
 def refuter_name_check():
