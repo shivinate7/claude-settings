@@ -17306,8 +17306,9 @@ def _u2_new_test(w):
 # ---- plumbing commits (decision builders-cannot-edit-tests). A role session that builds a commit from git
 # objects (write-tree, read-tree, update-index, commit-tree) gets past the porcelain judge, which reads `git
 # commit` and `git push` only. A `commit-tree <tree> [-p parent]...` call is judged on the tree it would commit:
-# each path that differs from the first parent (for a merge, from git's own merge of the parents) is judged
-# as that role's commit would be. The command names its tree by id, and tree_id computes that id here, so the
+# each path that differs from the first parent (for two parents, from git's own merge of them) is judged as
+# that role's commit would be. A merge git cannot make, and a call with three parents, is logged as unread.
+# The command names its tree by id, and tree_id computes that id here, so the
 # command text is fixed at import. The fixtures store each tree and check git's id against tree_id.
 PLUMB = "plumbing-commit-diff"
 PLUMB_TEST_NEW = "tests/test_plumb_new.py"
@@ -17470,7 +17471,8 @@ def plumb_unread_run(name, repo, command, what):
     never clear. `what` names the part git cannot read, for the message."""
     out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + name), repo, "builder", "bld1", commands=[command])
     if out:
-        return False, "expected a silent allow, got %r" % out[:60]
+        got, reason = read_decision(out)
+        return False, "expected a silent allow, got %s (%s)" % (got, reason[:80])
     if not any(len(r) == 6 and r[2] == "noted" and r[3] == "role-diff-unread" for r in rows):  # six: session last
         return False, "no role-diff-unread line for " + what
     return True, "allowed silently, and %s is logged role-diff-unread" % what
