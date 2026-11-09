@@ -110,7 +110,7 @@ parent, or miss a message while busy.
 - Never wait on the owner. A step that needs the owner's answer gets a note line
   `Deferred (owner, <date>): <why>`, and waits. All other work runs, in roadmap order.
 - A lane that hits a question for the owner parks that part, and goes on.
-- A lane posts its review record on its PR after each round, by running `merge <pr> --review-record ...`, which posts it (claude-settings record
+- A lane posts its review record on its PR after each round, by running `merge <pr> --review-record ... --confirm`, which posts it (claude-settings record
   `pr-review-record`). The batch runner finds it. The lane first runs `merge --lane-lint <pr>`. The batch
   runner runs it again on each lane head before the join, and refuses a red lane (claude-settings record
   `lanes-run-no-full-ci-job`). A lane never rebases onto main and never merges.
@@ -118,7 +118,7 @@ parent, or miss a message while busy.
 - Nobody pushes to a PR's head once a done review record is posted for that head, until the merge
   result is back. The exception is the fix that a FAIL round calls for, such as the round-1 fix on a
   `delete-only` change with Guard or check `no`, which reads done (claude-settings record
-  `pr-review-record`). That push makes the record stale, so the lane runs `merge <pr> --review-record ...` again for the
+  `pr-review-record`). That push makes the record stale, so the lane runs `merge <pr> --review-record ... --confirm` again for the
   new head. When the repo holds a standing merge grant, the batch runner merges under it. The owner is
   not asked.
 - A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart.

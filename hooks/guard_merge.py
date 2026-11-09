@@ -810,7 +810,7 @@ ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
     "If this session is the batch runner: run get_session (no argument) alone in its own "
-    "turn, then retry. Any other session, the coordinator too: post the review record on the PR for your branch; the batch runner finds it "
+    "turn, then retry. Any other session, the coordinator too: post the review record on the PR for your branch with `merge <pr> --review-record ... --confirm`; the batch runner finds it "
     "(list_sessions, tag cs-build:batch-runner, same cs-repo, names the runner)."
 )
 

@@ -37,8 +37,8 @@ CI: read live by merge --reviewed
   PR as `CI draft, no run`, because a draft has no CI run.
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
 - The newest record for a head counts. A record for an old head is stale.
-- `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints and posts no body, so a push after the review never relabels old rounds as current.
-- `merge <pr> --review-record` also posts the body, as one REST comment on the PR (`Host.post_review_comment`), with the attribution footer GitHub's own posts carry. It parses that exact text first and posts nothing when it does not parse. A failed post exits non-zero with the gh text. A lane runs it after each round, and posts no body by hand. `gh pr comment` uses GraphQL, which the cloud refuses (route graphql-gh-api-cloud).
+- `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read and posts nothing. When the PR's live head is another sha, it stops with exit 1 and prints and posts no body, so a push after the review never relabels old rounds as current.
+- `merge <pr> --review-record ... --confirm` posts the body, as one REST comment on the PR (`Host.post_review_comment`), with the tool's own attribution line as the footer (`REVIEW_FOOTER`). Without `--confirm` it prints and says nothing was posted (exit 0). It parses that exact text first and posts nothing when it does not parse, and every refusal runs before the post. A failed post exits non-zero with the gh text. The post is sent once and never retried: after a network error the comment may or may not exist, and a retry can post it twice, so the tool stops and says to read the PR comments with `merge --reviewed` before it runs again. A lane runs it after each round. `gh pr comment` uses GraphQL, which the cloud refuses (route graphql-gh-api-cloud).
 - The one home of the form is the merge tool (`merge/merge.py`). `review_body` writes the body, `parse_review` reads it, and `review_state` gives each record's state. `reviewed_lines` prints the `--reviewed` list, `round_arg` reads `--round`, and `Host.review_comments` makes the one list read.
 
 ## The done rules
@@ -64,7 +64,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
 - Each ready PR that has a record adds three reads: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
-- `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. The call ends with one comment POST.
+- `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. With `--confirm` the call ends with one comment POST, never retried.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
 
@@ -73,7 +73,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - Kind, Guard or check, and docs-only are the lane's own claims. The tool does not check paths. It does not tell a record that files an owner ruling from other docs. Kind stays the lane's claim. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`).
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
-- Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
+- `merge <pr> --review-record ... --confirm` runs under the cloud allow rules `merge * --confirm` and `merge * --confirm *` in `merge/cloud_allow.json`, which the post needs. Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and the print-only `merge <pr> --review-record`. Both are off that file.
 - One fix check per record. A second fix on a fixed head starts a new lane at round 1. `--fix-check` refuses unless its reviewed head equals the Head of the newest earlier record on the PR and that record has no Fix check line.
 
 ## Lane picks

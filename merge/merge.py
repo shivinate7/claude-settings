@@ -16,8 +16,8 @@
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
-                          [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
-                          print the review record for the head SHA that was reviewed, and post it as one comment on the PR. Stops (exit 1) when the PR's
+                          [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--confirm]
+                          print the review record for the head SHA that was reviewed. With --confirm, post it as one comment on the PR, sent once and never retried. Stops (exit 1) when the PR's
                           live head is another sha, and posts nothing then. A record that does not parse is not posted (exit 2). --fix-check adds
                           the optional `Fix check:` line after the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
@@ -761,9 +761,12 @@ class Host:
     commit_message = None  # set by confirm just before the merge: one line per reason flag that lifted a check. None leaves GitHub's default message
     before_wait = None  # lock.extend_for, set by confirm once the lock is held: runs before each rate wait. No gh call has one before
 
+    once = False  # post_review_comment sets it around its one POST: gh then sends no retry and returns a network error to its caller
+
     def gh(self, args, cwd=None):
         """-> (code, output). The one home of every Host `gh` call. A network error is retried NET_RETRIES times with
-        `self.pause`; after that NetStop. Any other failure returns at once. `self.net_retries` counts the retries
+        `self.pause`; after that NetStop. Any other failure returns at once. With `self.once`: no retry and no wait, and a network error returns
+        as (code, output) for the caller to judge with is_net, as GhLock.api does: a retried POST can post twice. `self.net_retries` counts the retries
         of the last call. A call that passes `-i` gets the reply with its header block, for a caller that reads a header. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
         raw = []
 
@@ -771,8 +774,8 @@ class Host:
             c, out = sh(["gh", *args], cwd=cwd)
             raw[:] = [out]
             return c, out
-        c, out, self.net_retries = retry_net(call, self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait)
-        if is_net(c, out):
+        c, out, self.net_retries = retry_net(call, self.pause, NET_RETRIES if _READ_DEADLINE is None and not self.once else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait)
+        if is_net(c, out) and not self.once:
             raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
         return c, raw[0] if "-i" in args else out
 
@@ -801,8 +804,15 @@ class Host:
                 os.unlink(tmp)
 
     def post_review_comment(self, n, body):
-        """-> (code, output) of one POST of `body` as a comment on pull request `n`. A nonzero code is a Stop carrying the gh text."""
-        c, out = self.api(f"issues/{n}/comments", method="POST", body={"body": body})
+        """-> (code, output) of one POST of `body` as a comment on pull request `n`. A nonzero code is a Stop carrying the gh text.
+        The POST is sent once and never retried: after a network error the comment may or may not exist, and a retry can post it twice."""
+        self.once = True
+        try:
+            c, out = self.api(f"issues/{n}/comments", method="POST", body={"body": body})
+        finally:
+            self.once = False
+        if c and is_net(c, out):
+            raise Stop(f"the post of the review record on pull request #{n} hit a network error, so the comment may or may not have posted. Read the comments with `merge --reviewed` before you run again: {out.strip()}")
         if c:
             raise Stop(f"posting the review record on pull request #{n} failed: {out.strip()}")
         return c, out
@@ -3484,7 +3494,7 @@ def write_merge_role(tier):
     if not sid:
         raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set. " + ROLE_CITE)
     if tier not in MERGE_ROLES:
-        raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first. Then run `merge <pr> --review-record ...`, which posts the review record on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
+        raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first. Then run `merge <pr> --review-record ... --confirm`, which posts the review record on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
     path = role_path()
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # replace, so a reader never sees half a file
     try:
@@ -3546,7 +3556,7 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
-    p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head and post it as a comment on the pull request")
+    p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head; with --confirm, post it as one comment on the pull request")
     p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it")
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
@@ -3583,8 +3593,8 @@ def main(argv, host=None, lock=None, hosts=None):
     elif a.review_record:
         if a.pr is None:
             p.error("--review-record needs a pull request number")
-        if a.confirm or a.unlock is not None:
-            p.error("--review-record takes no --confirm and no --unlock")
+        if a.unlock is not None:
+            p.error("--review-record takes no --unlock")
         if a.head is None or a.kind is None or a.guard is None:
             p.error("--review-record needs --head, --kind and --guard")
         if a.kind == "docs-only" and a.guard == "yes":
@@ -3612,8 +3622,8 @@ def main(argv, host=None, lock=None, hosts=None):
             lines, ok = reviewed_roots(a.root, hosts, a.config)
             say(*lines)
             return 0 if ok else 1
-        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
-            raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then run `merge <pr> --review-record ...`, which posts the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
+        if a.confirm and not a.review_record and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock; a review record post needs no merge role
+            raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then run `merge <pr> --review-record ... --confirm`, which posts the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
         if c:
             raise Stop("not in a git checkout")
@@ -3640,11 +3650,14 @@ def main(argv, host=None, lock=None, hosts=None):
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             record = review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)
-            body = record + REVIEW_FOOTER  # the footer GitHub's own posts carry; parse_review ignores it
+            body = record + REVIEW_FOOTER  # this tool's own attribution line; parse_review ignores it
             if parse_review(body) is None:  # the exact text that goes out, before it goes out
                 print("merge: the review record does not parse, so it was not posted. " + REVIEW_CITE, file=sys.stderr)
                 return 2
             say(record.rstrip("\n"))
+            if not a.confirm:
+                print("merge: nothing was posted. Run again with --confirm to post it.", file=sys.stderr)
+                return 0
             c, out = h.post_review_comment(a.pr, body)
             try:
                 url = json.loads(out).get("html_url")
