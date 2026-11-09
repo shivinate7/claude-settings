@@ -1054,14 +1054,29 @@ def shell_abs(path: str, base):
     return path
 
 
+def _read_cd_variable(segments, number: int, move: str) -> str:
+    """The folder a `cd` at `segments[number]` names, each variable read as the value an earlier
+    segment assigned. `move` unchanged when the segment reads no other way. The earlier segments
+    are joined by a marker so `_resolve_vars` sees the whole command, and the one segment is cut
+    back out. An empty read is not trusted: the resolver reads a variable set by backticks as
+    empty, and an empty `cd` would be taken for home. Imported late: guard_frozen imports this file."""
+    from guard_frozen import _resolve_vars
+    mark = " ;\x00; "
+    tokens = segment_tokens(_resolve_vars(mark.join(segments[:number + 1])).split(mark)[-1])
+    read = _segment_cd_move(tokens) if tokens else None
+    return read if isinstance(read, str) and read else move
+
+
 def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
     real shell keeps: `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes
-    back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
-    is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
-    where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
+    back, a `cd` inside `( ... )` ends with the parenthesis, and `popd` is not tracked. A `cd` to
+    `$VAR`, `"$VAR"` or `"${VAR}"` is read as the value an earlier segment assigned (`_resolve_vars`,
+    the one resolver). A path that still holds `$` after that (unassigned, a substitution), or holds
+    `%` or a backtick, is not tracked. A `cd` into a folder that does not exist is not trusted (the
+    shell stays where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
     in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
@@ -1093,6 +1108,8 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             where = None
         elif move is not None:
             old = where
+            if move is not CD_UNKNOWN and "$" in move:
+                move = _read_cd_variable(segments, at, move)
             if move is CD_UNKNOWN:
                 where = None
             elif move == "-":
