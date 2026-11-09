@@ -1101,10 +1101,10 @@ class LintCheckJoin(tm.CloudSession):
 
     def test_a_head_that_moves_after_the_lint_read_is_refused_before_the_merge(self):
         # The lint reads the head the PR shows first, and the PASS names it. The branch then moves in origin, and the first head read still
-        # shows the gated head (the lag). confirm reads the PR again under the lock, so the join must refuse the new head before any merge call.
-        gated = self.head("feat")
+        # shows the linted head (the lag). confirm reads the PR again under the lock, so the join must refuse the new head before any merge call.
+        linted = self.head("feat")
         self.competitor_push()
-        rc, out = self.join([lint_comment(2, gated)], lag={"n": 1, "prior": gated})
+        rc, out = self.join([lint_comment(2, linted)], lag={"n": 1, "prior": linted})
         self.assertEqual(rc, 1, "a join whose head moved after the lint read went ahead and merged the new head unchecked:\n" + out)
         self.assertNotIn("PUT pulls/7/merge", tm.GhHalf.calls(self), "the join merged a head the lint did not read:\n" + out)
 
