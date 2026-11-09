@@ -1,11 +1,11 @@
 {
   "title": "The waiting page's remaining narrow-screen faults that #2450 leaves out are fixed",
   "why": "Coordinator 11:36 CST Nov 9, from lane page-narrow-word-breaks (#2450): #2450 fixes part of step page-narrow-word-breaks and leaves these out: the .dcap caption size; the \"(permission|-denied)\" failure-line break; the \"Question|s\" tab labels; the sent panel scrolling 9 px sideways at 180 px (on the base); and part B, words wider than their box. Harm: the owner reads the page on a phone, and these still break or cut text at narrow widths with large text.",
-  "note": "Part B keeps the a11y.md rule. Measurements for each item are on step page-narrow-word-breaks. A screen lane: designer first, design reviewer after.",
+  "note": "Part B keeps the a11y.md rule. Measurements for each item are on step page-narrow-word-breaks. A screen lane: designer first, design reviewer after. Fix pick for the tab breaks (lane notes-fix-page 11:47 CST Nov 9, from #2423 design review round 2, 11:46): words that fit still break because the count chip shares the flex row; `.tabs a { flex-wrap: wrap; }` drops the chip to its own line. A scratch run removed every tab break at 200%, plus \"Questions\" at 260 px and \"Designs\" at 210-220 px at 300%; evidence in that lane's scratch folder dr6/out-exp-wrap. The failure line also breaks \"denie|d\" at 180 px with 200% text and 200-220 px at 300%.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "",
   "status": "todo",
   "order": 917,
-  "updatedAt": "2026-11-09T11:36:00-06:00"
+  "updatedAt": "2026-11-09T11:47:00-06:00"
 }
