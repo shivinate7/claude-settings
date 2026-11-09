@@ -1491,8 +1491,8 @@ def full_size_text():
 
 class SessionStartStopHookPatchTests(SessionStartAgentWorktreeNoticeTests):
     """The session-start hook patches the platform Stop-hook script once, so its unpushed-commits check skips a
-    branch already merged into origin/main (owner, page item 464 b, 2026-11-09 13:09 CST). Real git repos, the hook
-    run as the harness runs it. The platform script is a fixture file in the config folder, never the live one."""
+    branch already merged into origin/main. Real git repos, the hook run as the harness runs it. The platform
+    script is a fixture file in the config folder, never the live one."""
 
     def setUp(self):
         super().setUp()
@@ -1584,7 +1584,7 @@ class SessionStartStopHookPatchTests(SessionStartAgentWorktreeNoticeTests):
         work = self.make_work()
         self.write_platform(PLATFORM_TEXT)
         rc, err = self.run_stop(work)
-        # Control, green on main: the unpatched text names the merged branch as unpushed, so the fixture shows the defect.
+        # Control: the unpatched text names the merged branch as unpushed, so this fixture reaches the defect.
         self.assertEqual(rc, 2, "control: the unpatched check exits %d for the merged branch, want 2" % rc)
         self.assertIn("has 1 unpushed commit(s) and no remote branch", err,
                       "control: the unpatched check gave another message: %r" % err)
@@ -1632,7 +1632,7 @@ class SessionStartStopHookPatchTests(SessionStartAgentWorktreeNoticeTests):
                 self.assertEqual(self.last_stderr, "", "the hook wrote to stderr (%s): %r" % (label, self.last_stderr))
 
     def test_control_missing_platform_file_stays_silent(self):
-        """Green control, passes on main too: with no platform file the hook writes nothing, prints nothing about the
+        """Control: with no platform file the hook writes nothing, prints nothing about the
         patch and exits 0. It guards the new step's silence."""
         lines = self.run_hook()
         self.assertFalse(os.path.exists(self.platform), "the hook created the platform script")
