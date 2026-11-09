@@ -3893,13 +3893,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if role == BUILDER_ROLE:
         matched = builder_shell_test_hit(raw, stripped, cwd)
         if matched:
-            if matched.endswith(_TOO_LARGE_FILTERED_NOTE):
-                reason = BUILDER_TOO_LARGE_REASON + BUILDER_TOO_LARGE_REPORT
-            elif matched.endswith(_TOO_LARGE_NOTE):
-                reason = BUILDER_TOO_LARGE_REASON + BUILDER_TOO_LARGE_NAME_FILTER + BUILDER_TOO_LARGE_REPORT
-            else:
-                reason = BUILDER_TEST_REASON
-            refuse(tool, "deny", "builder-test-edit", reason, matched)
+            refuse(tool, "deny", "builder-test-edit",
+                   BUILDER_TOO_LARGE_REASON + BUILDER_TOO_LARGE_REPORT if matched.endswith(_TOO_LARGE_FILTERED_NOTE)
+                   else BUILDER_TOO_LARGE_REASON + BUILDER_TOO_LARGE_NAME_FILTER + BUILDER_TOO_LARGE_REPORT
+                   if matched.endswith(_TOO_LARGE_NOTE) else BUILDER_TEST_REASON, matched)
 
     # 8. The agent model cap. The PATH comes from the stripped command, the same machinery the
     # frozen path uses, so a redirect, a `tee`, a `sed -i` and a heredoc header all read as writes.
