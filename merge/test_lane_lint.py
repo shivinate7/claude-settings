@@ -1091,5 +1091,23 @@ class LintCheckJoin(tm.CloudSession):
         self.assertIn("lane lint unknown", out, "a failed comment read was refused with no line that reads `lane lint unknown`:\n" + out)
 
 
+    def test_the_join_reads_the_comment_list_once_a_page(self):
+        # one read per page of the comment list, and no second read: 101 comments are two pages at per_page 100
+        comments = [other_comment(i) for i in range(1, 101)] + [lint_comment(200, self.head("feat"))]
+        rc, out = self.join(comments)
+        self.assertEqual(rc, 0, out)
+        reads = [l for l in tm.GhHalf.calls(self).splitlines() if l.startswith("GET issues/comments ")]
+        self.assertEqual(len(reads), 2, "the join read the comment list %d times, want 2, one per page:\n%s" % (len(reads), "\n".join(reads)))
+
+    def test_a_head_that_moves_after_the_lint_read_is_refused_before_the_merge(self):
+        # The lint reads the head the PR shows first, and the PASS names it. The branch then moves in origin, and the first head read still
+        # shows the gated head (the lag). confirm reads the PR again under the lock, so the join must refuse the new head before any merge call.
+        gated = self.head("feat")
+        self.competitor_push()
+        rc, out = self.join([lint_comment(2, gated)], lag={"n": 1, "prior": gated})
+        self.assertEqual(rc, 1, "a join whose head moved after the lint read went ahead and merged the new head unchecked:\n" + out)
+        self.assertNotIn("PUT pulls/7/merge", tm.GhHalf.calls(self), "the join merged a head the lint did not read:\n" + out)
+
+
 if __name__ == "__main__":
     unittest.main()
