@@ -10735,6 +10735,10 @@ DUP_FILLER = 40  # the live lanes a full page holds before the carrier
 DUP_SECOND = "session_DUPSECOND01"  # a second live lane that carries the step, beside the target that carries it too
 DUP_SECOND_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:dup-step-a", "cs-repo:o/r"]
 DUP_UPPER_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:DUP-STEP-A", "cs-repo:o/r"]  # the carrier's step in capitals
+# The session that dup-step-a's step record names as its lane (build_dup_steps). Its rows in a list read decide the record.
+DUP_OTHER_LANE = "session_DUPOTHERLANE01"
+DUP_OTHER_STEP_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:dup-step-c", "cs-repo:o/r"]  # that session, on another step
+DUP_OTHER_STEER = (DUP_OTHER_LANE, "send")  # the reason names the live session that carries the step, and says to send it there
 UNARCHIVE_TOOL = "mcp__claude-code-remote__unarchive_session"
 
 
@@ -10829,7 +10833,7 @@ def build_dup_steps():
     """The two step repositories on origin/roadmap. The route repo holds each step under a lane that names no session;
     the other repo holds dup-step-a under a lane that names another session."""
     gs_repo("dupstep-route", dict(dup_step_file(step, "coordinator, to route the step") for step in DUP_ROUTE_STEPS))
-    gs_repo("dupstep-other", dict([dup_step_file("dup-step-a", "session_DUPOTHERLANE01")]))
+    gs_repo("dupstep-other", dict([dup_step_file("dup-step-a", DUP_OTHER_LANE)]))
 
 
 def build_dup_empty():
@@ -11077,6 +11081,22 @@ ROLE_LINES = {
     "dup-target-record-other": dup_get("t0", DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS) + dup_list("l1", []),
     # A target that carries the step, with no list_sessions call in the transcript: only its record and one Bash call.
     "dup-target-no-list": dup_get("t0", DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS) + dup_noise(1),
+    # The step record names DUP_OTHER_LANE. Each shape reads the target with get_session, then one list_sessions read whose
+    # rows say whether the named session is live, archived, or absent. "dup-named-get-only" holds the named session as a
+    # get_session sight, not as a list row.
+    "dup-named-archived": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                          + dup_list("l1", [dup_row(DUP_OTHER_LANE, DUP_ARCHIVED, DUP_CARRIER_TAGS)]),
+    "dup-named-other-step": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                            + dup_list("l1", [dup_row(DUP_OTHER_LANE, DUP_LIVE, DUP_OTHER_STEP_TAGS)]),
+    "dup-named-no-step": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                         + dup_list("l1", [dup_row(DUP_OTHER_LANE, DUP_LIVE, DUP_NEW_TAGS)]),
+    "dup-named-carrier": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                         + dup_list("l1", [dup_row(DUP_OTHER_LANE, DUP_LIVE, DUP_CARRIER_TAGS)]),
+    "dup-named-absent-full": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS) + dup_list("l1", dup_filler(DUP_FILLER)),
+    "dup-named-get-only": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                          + dup_get("g1", DUP_OTHER_LANE, DUP_LIVE, DUP_NEW_TAGS) + dup_list("l1", []),
+    "dup-named-archived-partial": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                                  + dup_list("l1", [dup_row(DUP_OTHER_LANE, DUP_ARCHIVED, DUP_CARRIER_TAGS)], more=True),
 }
 
 
@@ -11874,7 +11894,9 @@ FAMILY = "lane-step-dup"
 # only when it shares a cs-repo tag with the subject, the brief's target record or the create's tags; a subject with no
 # cs-repo tag is asked. A brief or a step-tagged create with no read of a carrier is asked, never allowed, except a brief
 # to a target that carries the step: it starts no new lane, so it passes before any read. A list read with has_more set
-# that finds no carrier is asked. A read that ran in full and found none allows.
+# that finds no carrier is asked. A read that ran in full and found none allows. After a whole read, a step record that
+# names a session the read's rows show, live or archived, gives no verdict: the read already shows whether that session
+# holds the step. A session the rows do not show is unknown, and is asked. A get_session sight is not a row of the read.
 # A message without the marker, and a create_session with no cs-step tag, read no transcript and pass.
 BRIEF_DUP = "Lane brief: dup-step-a. Topic: dup-topic.\n\nDo the step."
 DUP_STEER = (DUP_CARRIER, "send")  # the reason names the live carrier's id, and says to send the work there
@@ -11983,8 +12005,9 @@ dup_send("a pull request read that fails is asked, not allowed",
 dup_send("an open pull request on the slug is no refusal for the lane that carries the step: its own brief is allowed",
          "allow", role_path("dup-pr-carrier"), BRIEF_DUP, target=DUP_CARRIER, cwd=DUP_STEP_ROUTE,
          env_path=dup_gh_path(DUP_PRS_OPEN))
-# (iii) is asked: the step record names another session's lane, with no pull request on the slug.
-dup_send("a step record whose lane names another session is asked, with no open pull request on the slug",
+# (iii) is asked: the step record names a session that the whole read does not show, with no pull request on the slug.
+# The read is empty, so the named session is absent from every row: it is unknown, and unknown is asked.
+dup_send("a step record naming a session that no row of the whole read shows is asked, with no open pull request on the slug",
          "ask", role_path("dup-pr-open"), BRIEF_DUP, cwd=DUP_STEP_OTHER, env_path=dup_gh_path(DUP_PRS_NONE))
 # (iv) is allowed: the record's lane field names no session id, so it holds no lane to refuse for.
 dup_send("a step record whose lane names no session id is allowed, with no open pull request on the slug",
@@ -12071,6 +12094,32 @@ dup_send("a brief to a target that carries the step is allowed though the roadma
 dup_send("a brief to a target that carries the step is allowed with no list_sessions read in the transcript",
          "allow", role_path("dup-target-no-list"), BRIEF_DUP, target=DUP_CARRIER,
          cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
+
+# The step record names DUP_OTHER_LANE, and a whole read shows that session. The read judged it already, so the record gives
+# no verdict: a brief to a new lane is allowed. Each allow below is asked on the old code, so each is red there.
+dup_send("a step record naming a session the whole read shows archived is no verdict: a brief to a new lane is allowed",
+         "allow", role_path("dup-named-archived"), BRIEF_DUP, cwd=DUP_STEP_OTHER, env_path=dup_gh_path(DUP_PRS_NONE))
+dup_send("a step record naming a session the whole read shows live on another step is no verdict: a brief is allowed",
+         "allow", role_path("dup-named-other-step"), BRIEF_DUP, cwd=DUP_STEP_OTHER, env_path=dup_gh_path(DUP_PRS_NONE))
+dup_send("a step record naming a session the whole read shows live with no step tag is no verdict: a brief is allowed",
+         "allow", role_path("dup-named-no-step"), BRIEF_DUP, cwd=DUP_STEP_OTHER, env_path=dup_gh_path(DUP_PRS_NONE))
+dup_create("a create_session tagged cs-step:dup-step-a, where the step record names a session the whole read shows archived, is allowed",
+           "allow", role_path("dup-named-archived"), ["cs-build:lane", "cs-step:dup-step-a", "cs-repo:o/r"],
+           cwd=DUP_STEP_OTHER, env_path=dup_gh_path(DUP_PRS_NONE))
+# Controls, green on the old code. A live named session that carries the step in the shared repo is refused by the carrier
+# path, before the record check, and the reason names it.
+dup_send("a step record naming a session the whole read shows live carrying the step is refused, and names that session",
+         "deny", role_path("dup-named-carrier"), BRIEF_DUP, carries=DUP_OTHER_STEER,
+         cwd=DUP_STEP_OTHER, env_path=dup_gh_path(DUP_PRS_NONE))
+# A named session that no row of a whole read shows is unknown, and stays asked, even on a page of forty other lanes.
+dup_send("a step record naming a session absent from a full page of other lanes is asked, not allowed",
+         "ask", role_path("dup-named-absent-full"), BRIEF_DUP, cwd=DUP_STEP_OTHER, env_path=dup_gh_path(DUP_PRS_NONE))
+# A get_session sight is not a row of the list read: the named session seen only that way is unknown, so asked.
+dup_send("a step record naming a session that only a get_session record shows, not a list row, is asked",
+         "ask", role_path("dup-named-get-only"), BRIEF_DUP, cwd=DUP_STEP_OTHER, env_path=dup_gh_path(DUP_PRS_NONE))
+# A read with more pages is not whole, so the row it shows does not decide the record: asked.
+dup_send("a step record naming a session that a partial read shows archived is asked: the read is not whole",
+         "ask", role_path("dup-named-archived-partial"), BRIEF_DUP, cwd=DUP_STEP_OTHER, env_path=dup_gh_path(DUP_PRS_NONE))
 
 # =========================================================================== 5i. SendMessage to a cloud session
 FAMILY = "sendmessage-session-id"
