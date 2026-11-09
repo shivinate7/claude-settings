@@ -154,3 +154,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - pfr-powershell-block-create-miss (lane fix-push-needs-fail-record, via the coordinator 20:33 CST Nov 8; file after #2359 merges, for the next push-record lane): PowerShell { } blocks and Bash one-line case/function bodies around `gh pr create` read as no PR.
 - pfr-inner-commands-untested (same source and timing): no case for bash -c / sh -c / env wrapping a create; the inner_commands mutant survives.
 - pfr-powershell-create-untested (same source and timing): no PowerShell-tool create case; the PowerShellScript mutant survives.
+- archive-push-octopus-refused (#2366 round 3, via the coordinator 20:37 CST Nov 8; after #2366 merges): an archive push `branch:archive/branch` of a never-pushed octopus merge is refused; the owner's override lifts it.
+- octopus-notes-order (same source and timing): the four octopus notes in docs/debts/notes.md are out of alphabetical order.
