@@ -14839,6 +14839,40 @@ class ReviewedRootRepoReads(ReviewEnv):
         result, reads, pulls = self.counted(self.plain_run)
         self.assert_reads(result, reads, pulls, 1, "plain --reviewed with origin/HEAD missing")
 
+    def set_root_stamp(self, root, text):
+        """Commit `text` as .github/stamp.json on the root's own origin, from the root's other clone. put_base_config writes the Env's origin,
+        which a root's origin is not, so this repeats its commit steps for the root."""
+        other = os.path.join(os.path.dirname(root), "other")
+        sh(other, "git", "fetch", "-q", "origin")
+        sh(other, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(other, ".github/stamp.json"), text)
+        sh(other, "git", "commit", "-qam", "base config")
+        sh(other, "git", "push", "-q", "origin", "main")
+
+    def counted_root_run(self):
+        """root_run with its repo-record reads counted. -> the reads, after the run is shown to have succeeded and to have reached the batch."""
+        result, reads, pulls = self.counted(self.root_run)
+        rc, out, err = result
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(pulls, "the run read no pulls, so it did not reach the batch:\n" + out + err)  # scope: the run reached the batch
+        return reads
+
+    def test_a_stamp_without_defaultBranch_makes_one_more_repo_read_than_with_it(self):
+        # The same root, origin/HEAD set, read twice. First with defaultBranch in its base stamp.json. Then with the field left out, where
+        # load_config asks gh for the default branch: one more repo-record read, made from load_config.
+        self.fixture(self.alpha, origin_head=True)
+        with_field = self.counted_root_run()
+        self.set_root_stamp(self.alpha, json.dumps({k: v for k, v in CONFIG.items() if k != "defaultBranch"}))
+        # The first run filled this process's per-root caches of the default branch and the cutover. Clear them, so the second run reads both
+        # as a fresh process does.
+        merge._default_branch.clear()
+        merge._stamp_since.clear()
+        without_field = self.counted_root_run()
+        self.assertEqual(len(without_field), len(with_field) + 1,
+                         "without defaultBranch the root made %d repo-record reads, with it %d: want one more, %r" % (len(without_field), len(with_field), without_field))
+        self.assertEqual(sum("load_config" in names for names in with_field), 0, "the run with defaultBranch read the default branch in load_config:\n%r" % with_field)
+        self.assertEqual(sum("load_config" in names for names in without_field), 1, "the extra read is not load_config's default-branch read:\n%r" % without_field)
+
 
 class JudgeStub:
     """Stands in for decision_watch.invoke_model. `answer(prompt)` gives (verdict, error), or raises. Each call's prompt is
