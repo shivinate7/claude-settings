@@ -3,27 +3,41 @@
 
 README.md and lint/ste_lint.py state a floor of Python 3.9 for the guards and the lint. CI runs 3.11, so a
 3.10+ call passes CI and crashes a guard on a 3.9 install, where the guard fails open. The incident:
-`glob.iglob(root_dir=...)` (3.10). This check runs vermin (`-t=3.9-`, `--eval-annotations`) over the product files,
-so a newer feature fails the run that adds it. vermin reads the source with the host's `ast`, so the host Python
-must be 3.9 or newer.
+`glob.iglob(root_dir=...)` (3.10). Two passes read each product file. vermin (`-t=3.9-`, `--eval-annotations`)
+finds newer calls, modules and syntax. An ast pass finds a union type `int | None`, which vermin does not flag.
+Both read the source with the host's `ast`, so the host Python must be 3.9 or newer.
 
 A product file is a .py file under hooks/ or lint/ that is not a test: a path `is_test_rel` (hooks/guard.py, the
 one home of what a test path is) calls a test, or a name `_test*.py`. A `# novermin` line comment excuses its
-line, as vermin's marker does; the same text in a string does not. Use it on an import that a try/except
-ImportError guards.
+line, in both passes; the same text in a string does not. Use it on an import that a try/except ImportError
+guards.
+
+The ast pass flags a `|` when an operand is None, a builtin type name (int, str, list and the like) or a
+subscript of one, in a place that runs: an argument or return annotation, a module or class annotation, a module
+or class assignment value, or the second argument of isinstance or issubclass. Under
+`from __future__ import annotations` the annotations are exempt. A local annotation in a function body, a string
+annotation, a bit-flag OR and a union of plain names are not flagged.
 
     python3 lint/check_python_floor.py [--root DIR]
 
-DIR holds hooks/ and lint/ and defaults to the repo root. Needs vermin (`pip install vermin==1.9.2`). The vermin
-command defaults to this Python running vermin's `main`; env FLOOR_VERMIN_CMD overrides it (split like a shell line).
+DIR holds hooks/ and lint/ and defaults to the repo root. Needs vermin installed (the pin is in
+.github/workflows/checks.yml). The vermin command defaults to this Python running vermin's `main`; env
+FLOOR_VERMIN_CMD overrides it (split like a shell line).
 
-Exits 0 and prints nothing when clean. Exits 1 and prints one line per offending file, naming the file and the
-feature. Exits 2, naming the cause, when vermin cannot run, a product file cannot be read, or vermin cannot parse a
-file: an unread file is never clean.
+Exits 0 and prints nothing when clean. Exits 1 and prints one line per offending file for vermin (file and
+feature) and one line per union type (file:line). Exits 2, naming the cause, when vermin cannot run, a product
+file cannot be read, or a file cannot be parsed: an unread file is never clean.
+
+Limits: vermin's tables miss `subprocess.run(process_group=)` and `datetime.fromisoformat` with a "Z" suffix, both
+3.11 behaviour, so neither is caught. A symlinked folder under hooks/ or lint/ is not followed.
 """
+import ast
+import io
 import os
+import re
 import shlex
 import sys
+import tokenize
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -38,6 +52,10 @@ DEFAULT_CMD = [sys.executable, "-c", "import sys; from vermin import main; sys.e
 FLAGS = ["-t=" + TARGET, "--eval-annotations", "--no-tips", "--violations", "--quiet", "--no-make-paths-absolute"]
 CHUNK = 100  # files per vermin run, so a Windows command line stays short
 TIMEOUT = 300
+BUILTIN_TYPES = frozenset(("int", "str", "float", "bool", "bytes", "list", "dict", "set", "tuple", "frozenset",
+                           "type", "object"))
+MARKER = re.compile(r"#\s*(?:novermin|novm)\b")  # vermin's own marker words
+UNION_NEEDS = "union type `|` needs 3.10"
 
 
 class Unreadable(Exception):
@@ -102,6 +120,101 @@ def run_vermin(root, files):
     raise Unreadable("vermin failed (exit %d, is vermin installed?): %s" % (proc.returncode, detail))
 
 
+def is_type_operand(node):
+    """True for None, a builtin type name, or a subscript of one: an operand that makes `|` a union type."""
+    if isinstance(node, ast.Subscript):
+        node = node.value
+        return isinstance(node, ast.Name) and node.id in BUILTIN_TYPES
+    if isinstance(node, ast.Constant):
+        return node.value is None
+    return isinstance(node, ast.Name) and node.id in BUILTIN_TYPES
+
+
+def union_lines(expr):
+    """The line numbers of each union-type `|` inside the expression."""
+    return {node.lineno for node in ast.walk(expr)
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr)
+            and (is_type_operand(node.left) or is_type_operand(node.right))}
+
+
+def marker_lines(source):
+    """Line numbers that carry a real `# novermin` comment. A marker inside a string is no comment."""
+    lines = set()
+    for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+        if tok.type == tokenize.COMMENT and MARKER.match(tok.string):
+            lines.add(tok.start[0])
+    return lines
+
+
+class Unions(ast.NodeVisitor):
+    """Collects the lines where a union type runs at import or call time. `scope` is module, class or function."""
+
+    def __init__(self, future):
+        self.future = future  # `from __future__ import annotations`: annotations never run
+        self.scope = "module"
+        self.lines = set()
+
+    def take(self, expr):
+        if expr is not None:
+            self.lines |= union_lines(expr)
+
+    def function(self, node):
+        if not self.future:
+            args = node.args
+            every = args.posonlyargs + args.args + args.kwonlyargs + [args.vararg, args.kwarg]
+            for arg in every:
+                if arg is not None:
+                    self.take(arg.annotation)
+            self.take(node.returns)
+        outer, self.scope = self.scope, "function"
+        for child in node.body:
+            self.visit(child)
+        self.scope = outer
+
+    visit_FunctionDef = visit_AsyncFunctionDef = function
+
+    def visit_ClassDef(self, node):
+        outer, self.scope = self.scope, "class"
+        for child in node.body:
+            self.visit(child)
+        self.scope = outer
+
+    def visit_Assign(self, node):
+        if self.scope != "function":
+            self.take(node.value)
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node):
+        if self.scope != "function":
+            if not self.future:
+                self.take(node.annotation)
+            self.take(node.value)
+        self.generic_visit(node)
+
+    def visit_Call(self, node):
+        if isinstance(node.func, ast.Name) and node.func.id in ("isinstance", "issubclass") and len(node.args) > 1:
+            self.take(node.args[1])
+        self.generic_visit(node)
+
+
+def union_findings(root, rel):
+    """-> sorted [line, ...] of the unexcused union types in root/rel. Raises Unreadable when the file does not parse."""
+    path = os.path.join(root, *rel.split("/"))
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read()
+        tree = ast.parse(data, filename=rel)
+        source = data.decode(tokenize.detect_encoding(io.BytesIO(data).readline)[0])
+        excused = marker_lines(source)
+    except (OSError, SyntaxError, ValueError, UnicodeDecodeError, tokenize.TokenError) as err:
+        raise Unreadable("cannot parse %s: %s" % (rel, err))
+    future = any(isinstance(n, ast.ImportFrom) and n.module == "__future__"
+                 and any(a.name == "annotations" for a in n.names) for n in tree.body)
+    found = Unions(future)
+    found.visit(tree)
+    return sorted(found.lines - excused)
+
+
 def main(argv):
     root = ROOT
     args = list(argv)
@@ -115,13 +228,17 @@ def main(argv):
         problems = {}
         for start in range(0, len(files), CHUNK):
             problems.update(run_vermin(root, files[start:start + CHUNK]))
+        unions = {rel: union_findings(root, rel) for rel in files}
     except Unreadable as err:
         print("check_python_floor: cannot check: %s" % err)
         return 2
     for rel in sorted(problems):
         features = problems[rel] or ["needs more than 3.9"]
         print("%s: needs more than Python 3.9: %s" % (rel, "; ".join(features)))
-    return 1 if problems else 0
+    for rel in sorted(unions):
+        for lineno in unions[rel]:
+            print("%s:%d: %s" % (rel, lineno, UNION_NEEDS))
+    return 1 if problems or any(unions.values()) else 0
 
 
 if __name__ == "__main__":
