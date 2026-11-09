@@ -12,10 +12,15 @@ Interface the check must meet (the builder builds to it):
 - Exit 0 with no output when clean. Exit 1 with one line per offending file, naming the file and the
   feature, when a file needs more than 3.9. Exit 2, naming the cause, when vermin cannot run. The vermin
   command is FLOOR_VERMIN_CMD when set, so a test makes vermin missing or odd with that variable.
+- A `|` between types needs 3.10 when it runs. The check flags a `|` with an operand that is None, a builtin
+  type name or a subscript of one, in an annotation (not evaluated under `from __future__ import annotations`),
+  a module or class assignment value, or isinstance/issubclass's second argument. Its line names file:line
+  and says union type `|` needs 3.10. vermin does not flag these by default, so the check runs an ast pass.
 
 A case that expects a finding fails on a check that flags nothing. The controls expect silence.
 """
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -89,6 +94,12 @@ def run_check(root=None, env=None):
 def naming(out, name):
     """The output lines that name `name`."""
     return [line for line in out.splitlines() if name in line]
+
+
+def flagged_at(out, rel, lineno):
+    """The output lines that name rel:lineno. A line 1 does not match rel:10."""
+    pattern = re.compile(re.escape(rel) + r":%d(?!\d)" % lineno)
+    return [line for line in out.splitlines() if pattern.search(line)]
 
 
 class Incident(unittest.TestCase):
@@ -215,6 +226,129 @@ class Vermin(unittest.TestCase):
         self.assertEqual(code, 2, "a vermin that exited 1 with no finding gave exit %d, not 2: %r"
                          % (code, out))
         self.assertIn("exit 1", out, "the output does not name vermin's exit 1: %r" % out)
+
+
+# A `|` between types needs 3.10 when it runs. Each form evaluates one at module, class or call level.
+FUTURE = "from __future__ import annotations\n\n"
+UNION_FORMS = (
+    ("function argument annotation", "def f(x: str | None = None):\n    return x\n", 1),
+    ("function return annotation", "def f() -> int | None:\n    return None\n", 1),
+    ("module annotation", "x: int | None = None\n", 1),
+    ("class annotation", "class C:\n    x: int | None = None\n", 2),
+    ("module assignment value", "Alias = str | None\n", 1),
+    ("class assignment value", "class C:\n    Alias = str | None\n", 2),
+    ("isinstance second argument", "ok = isinstance(value, int | str)\n", 1),
+    ("issubclass second argument", "ok = issubclass(kind, int | str)\n", 1),
+    ("None on the left", "Alias = None | int\n", 1),
+    ("subscripted builtin operand", "Alias = list[str] | None\n", 1),
+    ("builtin beside a plain name", "Alias = int | Widget\n", 1),
+)
+
+
+class UnionForms(unittest.TestCase):
+    def test_each_form_is_flagged_and_named_by_file_and_line(self):
+        for label, text, lineno in UNION_FORMS:
+            with self.subTest(form=label):
+                code, out = run_check(tree({"hooks/x.py": text}))
+                self.assertEqual(code, 1, "%s: union type `|` at hooks/x.py:%d was not flagged: exit %d"
+                                 % (label, lineno, code))
+                named = flagged_at(out, "hooks/x.py", lineno)
+                self.assertTrue(any("union" in line and "3.10" in line for line in named),
+                                "%s: no line names hooks/x.py:%d as a union type needing 3.10: %r"
+                                % (label, lineno, out))
+
+    def test_novermin_text_in_a_string_does_not_excuse_the_line(self):
+        # Addition beyond the spec. As with vermin's marker, the text in a string is not a comment.
+        code, out = run_check(tree({"hooks/x.py": 'Alias = str | None; NOTE = "# novermin"\n'}))
+        self.assertEqual(code, 1, "a union type beside a marker in a string was not flagged: exit %d" % code)
+        self.assertTrue(flagged_at(out, "hooks/x.py", 1), "no output line names hooks/x.py:1: %r" % out)
+
+    def test_lint_folder_is_scanned_for_union_types(self):
+        # The floor covers lint/ as well as hooks/.
+        code, out = run_check(tree({"lint/union_probe.py": "Alias = str | None\n"}))
+        self.assertEqual(code, 1, "union type `|` in lint/union_probe.py was not flagged: exit %d" % code)
+        self.assertTrue(flagged_at(out, "lint/union_probe.py", 1),
+                        "no output line names lint/union_probe.py:1: %r" % out)
+
+
+class UnionFuture(unittest.TestCase):
+    def test_annotations_are_not_evaluated_under_the_future_import(self):
+        # No annotation runs under the future import, so a `|` in one is never evaluated.
+        text = FUTURE + "def f(x: str | None = None) -> int | None:\n    return None\n\n\ny: int | None = None\n"
+        code, out = run_check(tree({"hooks/x.py": text}))
+        self.assertEqual(code, 0, "annotations under the future import were flagged: exit %d, output %r"
+                         % (code, out))
+        self.assertEqual(out, "", "a clean run printed output: %r" % out)
+
+    def test_assignment_value_is_still_flagged_under_the_future_import(self):
+        # An assignment value runs at import time, so the future import does not cover it.
+        code, out = run_check(tree({"hooks/x.py": FUTURE + "Alias = str | None\n"}))
+        self.assertEqual(code, 1, "an assignment value under the future import was not flagged: exit %d" % code)
+        self.assertTrue(flagged_at(out, "hooks/x.py", 3), "no output line names hooks/x.py:3: %r" % out)
+
+    def test_isinstance_argument_is_still_flagged_under_the_future_import(self):
+        code, out = run_check(tree({"hooks/x.py": FUTURE + "ok = isinstance(value, int | str)\n"}))
+        self.assertEqual(code, 1, "an isinstance argument under the future import was not flagged: exit %d"
+                         % code)
+        self.assertTrue(flagged_at(out, "hooks/x.py", 3), "no output line names hooks/x.py:3: %r" % out)
+
+
+class UnionNegatives(unittest.TestCase):
+    def assert_silent(self, label, files):
+        code, out = run_check(tree(files))
+        self.assertEqual(code, 0, "%s was flagged: exit %d, output %r" % (label, code, out))
+        self.assertEqual(out, "", "%s printed output: %r" % (label, out))
+
+    def test_operands_that_are_not_types_are_not_flagged(self):
+        # Bit flags, set unions, plain names and an int are not types, so their `|` is no union type.
+        cases = (
+            ("bit flags", "import re\n\nFLAGS = re.MULTILINE | re.DOTALL\n"),
+            ("a flag with an int", "def combine(flags):\n    return flags | 0x2\n"),
+            ("plain names", "combined = a | b\n"),
+            ("set calls", "CHANGED = set(before) | set(after)\n"),
+        )
+        for label, text in cases:
+            with self.subTest(form=label):
+                self.assert_silent(label, {"hooks/x.py": text})
+
+    def test_local_variable_annotation_is_not_evaluated(self):
+        # A local annotation in a function body is never evaluated.
+        self.assert_silent("a local annotation", {"hooks/x.py": "def f():\n    x: int | None = None\n    return x\n"})
+
+    def test_string_annotations_are_not_flagged(self):
+        cases = (
+            ("a string argument annotation", 'def f(x: "str | None" = None):\n    return x\n'),
+            ("a string module annotation", 'x: "int | None" = None\n'),
+        )
+        for label, text in cases:
+            with self.subTest(form=label):
+                self.assert_silent(label, {"hooks/x.py": text})
+
+    def test_comment_and_docstring_text_is_not_flagged(self):
+        cases = (
+            ("a comment", "# Alias = str | None\n"),
+            ("a docstring", '"""Alias = str | None needs 3.10."""\n'),
+        )
+        for label, text in cases:
+            with self.subTest(form=label):
+                self.assert_silent(label, {"hooks/x.py": text})
+
+    def test_test_file_is_excluded_and_the_scope_control_is_named(self):
+        # Scope first: the same line in hooks/x.py is flagged in the same run, so the scan reached hooks/.
+        files = {"hooks/x.py": "Alias = str | None\n", "hooks/test_foo.py": "Alias = str | None\n"}
+        code, out = run_check(tree(files))
+        self.assertEqual(code, 1, "scope control hooks/x.py was not flagged: exit %d" % code)
+        self.assertTrue(flagged_at(out, "hooks/x.py", 1), "scope control is not named: %r" % out)
+        self.assertEqual(naming(out, "test_foo.py"), [], "hooks/test_foo.py, a test file, was named: %r" % out)
+
+    def test_novermin_on_the_line_excuses_it(self):
+        cases = (
+            ("an annotation line", "def f(x: str | None = None):  # novermin\n    return x\n"),
+            ("an assignment line", "Alias = str | None  # novermin\n"),
+        )
+        for label, text in cases:
+            with self.subTest(form=label):
+                self.assert_silent(label, {"hooks/x.py": text})
 
 
 if __name__ == "__main__":
