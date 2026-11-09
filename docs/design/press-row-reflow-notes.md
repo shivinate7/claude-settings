@@ -46,9 +46,9 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   The 19.5em and 16.5em floors above stay. At 100% text each box is the same as the 520 px rule drew it at 320, 390 and 1280.
 - Readable minimum: 8em of text column beside a press (128 px at 100%, 256 at 200%). 360 keeps 146 px, so it stays beside.
   A folded row with Dismiss or Restore beside it keeps that floor from 30.5em to 40em too (`askl (30.5em < width <= 40em)`): the date,
-  "Show answer" and the press leave the title 0 px at 530 wide and 65 px at 600. From 40em (640 px) the title has about 134 px or more
-  beside them. Measured at a 641 px list with the page's own date text ("Answered May 28, 17:08 CDT"; January to October tried): the least
-  is 134 px, beside Restore with a May date. Nov and Dec were not measured. Up to that width the row takes the phone arrangement, "Show answer" in the button's name only.
+  "Show answer" and the press leave the title 0 px at 530 wide and 65 px at 600. From 40em (640 px) the title has about 129 px or more
+  beside them. Measured at a 641 px list (673 px window) with the page's own date text: the least found is 129 px (129.4), beside Restore
+  with "Answered May 30, 00:00 CDT", 1.4 px over the 128 px floor. Not every date was tried. Up to that width the row takes the phone arrangement, "Show answer" in the button's name only.
 - Stacked row: the row button is two columns (glyph, text). Title up to 3 lines, then the date, then "Show answer" on a row
   with no side press. On a row with Dismiss or Restore, "Show answer" stays in the button's name only, as today's phone row.
   The glyph sits on the title's first line (`align-items: start`), not on the middle of the block.
@@ -120,23 +120,40 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
 - The tab bar is one row that scrolls on its own. A tab is never wider than the bar (`.tabs` is a size container, each tab has
   `max-inline-size: 100cqw` and `overflow-wrap: anywhere`), so at 180 wide with text doubled, or tripled up to 240 wide, a label
   wraps inside its tab. When the Designs sheet closes, `revealTab()` scrolls the selected tab fully into the bar, as a tab press does.
-- The Designs sheet's head wraps (`.dsh-head .in`, `flex-wrap: wrap`). The title's basis is 0 and its floor is 4em (`min-width: 4em`,
-  68 px: the title's text is 17 px at every root size), so the row breaks where the buttons leave the title under 4em. The title keeps
-  the first line, alone if no button fits beside it. Then the last buttons take a second line and Close sits at its end, inside the window.
-  At the default text the head is one row from 340 to 520 wide and takes two rows at 320 and under (title 66 px before, 114 px now at 320).
-  Above the 30.5em short-label floor the labels are long: at 540 and 560 the head already took two rows (title 65 and 85 px before,
-  199 and 85 px now), and from 580 to 620 it takes two rows now (title 19 to 59 px before, 105 to 145 px now). At 640 and over nothing
-  moves. At 220 and 240 wide Close was outside the window, or 2 px from its edge, before.
+- The Designs sheet's head wraps (`.dsh-head .in`, `flex-wrap: wrap`). The title's basis is 0 and its floor is 4em (`min-width: 4em`),
+  so the row breaks where the buttons leave the title under 4em. The title keeps the first line, alone if no button fits beside it.
+  Then the last buttons take a second line and Close sits at its end, inside the window. Prev and Next sit in one box (`.dnav`), so they
+  wrap as a pair, never one on each row.
+- The title's text grows with the root size, `min(1.0625rem, 24cqw)`: 17 px at the default text, 21.25 px at 125%, 25.5 px at 150%, 34 px
+  at 200%. The cap, 24% of the head's content width, keeps 4em of the title inside one line of the head. It sets the size only at large
+  text in a narrow window: at 300%, 35.5 px at 180 wide, 40.3 at 200, 45.1 at 220 and 49.9 at 240, not 51 px. There the title is
+  148, 168, 188 and 208 px wide, at least 4em (142, 161.2, 180.4 and 199.6 px).
+- Measured window widths, in steps of 10 px, at the default text: the head is two rows at 220 to 320 and 530 to 620, one row at 330 to 520
+  and from 630 to 1280. At 320 the title is 114 px (66 px on the page before this lane); at 580 to 620 it is 105 to 145 px (19 to 59 px
+  before). At 125% text it is two rows at 220 to 340 and 650 to 730; at 150%, at 220 to 360 and 770 to 840. At 220 and 240 wide Close
+  was outside the window, or 2 px from its edge, before.
 - The send bar's status has two numbers. The CSS floor is 2em (`.bar .st`, `min-width: 2em`): 27 px at 520 wide or less (13.5 px text),
-  29 px above (14.5 px text). The tests measure 4em (54 px, 58 px) at 180 and 390 wide at the default text: the status is that wide or
-  sits on its own line. Where the buttons would leave it under 2em, they wrap under it and it takes the line: at 180 and 200 wide at
-  the default text. At 220 it stays beside Send answers, 41 px wide, as before.
-- An answered thread has no column template (`.thread` is a grid with one implicit track), and its reply and filed path break anywhere
-  (`.askc .thread .reply`, `.askc .thread .filed`), so a long unbroken path never scrolls the page. No case needed its old
-  `minmax(0, 1fr)` track.
-- After a Restore, the "Restored." line (`.sline.dline > span`, `overflow-wrap: anywhere`) breaks inside the line. At 180 wide with text
-  doubled, and at 180 to 240 wide with text tripled, the word is wider than the line's column. It ran past the window and scrolled
-  the page sideways before. At the default text nothing moves.
-- Departs from: the Designs sheet's head at the default text takes a second row at 260 to 320 wide and at 580 to 620 wide, so the title
-  keeps 4em. The page before round 2 draws one row there, with a title of 6 to 66 px at 260 to 320 and 19 to 59 px at
-  580 to 620.
+  29 px above (14.5 px text). The tests measure 4em at 180 and 390 wide at the default text: 54 px at both widths (13.5 px text). The
+  status is that wide or sits on its own line. Where the buttons would leave it under 2em, they wrap under it and it takes the line:
+  at 180 and 200 wide at the default text, at 220 to 230 at 125% text, and at 220 to 260 at 150%. At 220 at the default text it stays
+  beside Send answers, 41 px wide, as before.
+- An answered thread has one `minmax(0, 1fr)` track (`.thread`), and its reply, filed path and the owner's note (`.rnote`) break
+  anywhere. So a long unbroken token stays inside the card and never scrolls the page. The track is needed: without it, a 60-character
+  token in the owner's note sets the thread's width, 477 px at 180 wide.
+- After a Restore, the "Restored." line keeps each word whole. Its text is the line's size (`.90625rem`), capped at the text column over
+  5.6 (`--dl-fs` on `.sline.dline`, a size container). "Restored." is 4.7em wide in Inter Bold and 5.5em in DejaVu Sans Bold, so it fits
+  one line in either. Atkinson Hyperlegible Next, first in the font stack, was not measured. `overflow-wrap: anywhere` stays as the last
+  resort, so a wider font breaks a word inside the window, never past it. The glyph sits on the first line: the line's items start at
+  the top, the glyph is moved to the middle of the first line box, and the row is centred in the 44 px floor, so a line that does not
+  wrap looks as before.
+- The cap sets the size at 180 to 250 wide with text doubled and at 180 to 330 wide with text tripled. It is the same at both: 16.1 px
+  at 180, 19.6 at 200, 23.2 at 220, 26.8 at 240, then 30.4 at 260, 33.9 at 280, 37.5 at 300 and 41.1 at 320 with text tripled (29 and
+  43.5 px uncapped). At the default text and at 125% and 150% it never sets the size from 180 wide up. On the page before this lane
+  the word was wider than its column at 180 to 225 wide doubled and 180 to 290 wide tripled. It ran past the window at 180 to 190
+  doubled and 180 to 260 tripled.
+- Departs from: the page before this lane in four places, as window widths. Folded rows with Dismiss or Restore take the phone
+  arrangement at 530 to 670 at the default text, 650 to 830 and 970 to 1100 at 125%, and 770 to 960 and from 1040 up to 1920 at 150%.
+  The Designs head takes a second row at 220 to 320 and 530 to 620 at the default text, 220 to 340 and 650 to 730 at 125%, and 220 to
+  360 and 770 to 840 at 150%; its title is larger at every width at 125% and 150%. The bar status takes its own line at 220 to 230 at
+  125% and 240 to 260 at 150% (at 220 to 230 at 150% it did before). The "Restored." line is smaller than its text at 180 to 250 doubled
+  and 180 to 330 tripled; from 220 wide at the default, 125% and 150% text it does not move.
