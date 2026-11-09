@@ -853,6 +853,13 @@ class Host:
             why = f": more than {PAGE_CEILING} pages of 100"
         raise Stop(f"reading {rel} from GitHub failed{why}")
 
+    def pr_files(self, n):
+        """-> the changed paths of pull request n. A rename lists its previous path too: the old path is a change to that file as well."""
+        paths = []
+        for f in self.pages(f"pulls/{self.pr_number(n)}/files"):
+            paths += [f["filename"], *([f["previous_filename"]] if f.get("previous_filename") else [])]
+        return paths
+
     # The old GraphQL values the rest of the tool reads, from the REST fields.
     MERGEABLE = {True: "MERGEABLE", False: "CONFLICTING", None: "UNKNOWN"}  # mergeable is null while GitHub works it out
 
@@ -3281,6 +3288,11 @@ REVIEW_SHA = r"[0-9a-f]{40}"
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
 REVIEW_FIX_GUARD_MODEL = "sonnet"  # every fix check runs on this model, whatever Guard or check says (owner item 444 a; decision pr-review-record)
 
+def non_doc_paths(paths):
+    """-> the paths that are not docs. A doc is a .md file that is not a rule file, which decision claude-md-change-is-flagged keeps out of a docs-only change."""
+    return [p for p in paths if not p.lower().endswith(".md") or p.lower() in RULE_FILES or p.lower().startswith(RULE_PREFIX)]
+
+
 def review_body(n, head, kind, guard, rounds, net, fix=None):
     """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict). `fix` is None or the
     fix check (reviewed head, role, model, verdict), printed after the rounds and before Net value."""
@@ -3696,6 +3708,14 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
             if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
+            if a.kind == "docs-only":  # the record claims a diff of docs only: read the diff, never take the claim
+                try:
+                    bad = non_doc_paths(h.pr_files(a.pr))
+                except Stop as e:  # an unreadable diff is unknown, not clear: refused, with the cite the read's own Stop lacks
+                    raise Stop(f"{e} " + REVIEW_CITE) from e
+                if bad:
+                    more = f" and {len(bad) - 5} more" if len(bad) > 5 else ""
+                    raise Stop(f"a docs-only record needs a diff of docs only, and this pull request changes {', '.join(bad[:5])}{more}. Use Kind: normal. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
                 earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
                 last = earlier[-1] if earlier else None
