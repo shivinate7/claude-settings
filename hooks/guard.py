@@ -372,11 +372,11 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, PowerShellScript, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
-            inner_commands, nested_script, norm, PowerShellScript,
+            inner_commands, nested_script, norm,
             _segment_cd_target, _strip_heredoc_bodies_unconditionally,
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
@@ -3035,12 +3035,18 @@ def _brief_prohibits(before: str) -> bool:
 def _brief_target(segment: str, moved):
     """(this segment's own target, the `cd` target in force after it): its `git -C` path, else the `cd` before it."""
     # A Windows brief carries `git -C C:\Users\me\scratchpad\repo`. Posix shlex eats its backslashes (`C:Users...`), so the
-    # target is no absolute path and the scratchpad pass misses it. On Windows the target is read with PowerShell's rules,
-    # where a backslash is a path character. Only the target reads this way: `shared_tree_match` judges the original text.
-    words = segment_tokens(PowerShellScript(segment) if os.name == "nt" else segment) if segment.strip() else None
+    # target is no absolute path and the scratchpad pass misses it. The code chooses by os.name, not by the shell the
+    # subagent will use: on Windows the `git -C` path is read with PowerShell's rules, where a backslash is a path
+    # character. The `cd` target stays posix-read on every platform. Git Bash eats the backslashes of a `cd` path, the `cd`
+    # fails, and the next command runs in the start folder, so a `cd` into a scratchpad must not clear the segments after it.
+    # `shared_tree_match` judges the original text.
+    words = segment_tokens(segment) if segment.strip() else None
     if not words:
         return moved, moved
-    own = _segment_git_c_target(words)
+    c_words = words
+    if os.name == "nt":
+        c_words = segment_tokens(PowerShellScript(segment)) or words
+    own = _segment_git_c_target(c_words)
     moved = _segment_cd_target(words) or moved
     return (moved if own is None else own), moved
 
