@@ -17541,6 +17541,86 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a three-parent commit-tree is allowed 
                                                   plumb_call(plumb_tree(PLUMB_MERGE_BAD), "HEAD", "lane", "main"),
                                                   "three parents")))
 
+
+# Review round 2 on the commit-tree judge. Each red case names its cause: a `-m` value that holds `<` or `>`
+# sends the segment to the whitespace split, so its words read as extra trees and the call is unread.
+def plumb_clean_run(name, repo, command, what):
+    """One `commit-tree` call the guard judges clean: silent, and no role-diff-unread row for it."""
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + name), repo, "builder", "bld1", commands=[command])
+    if out:
+        got, reason = read_decision(out)
+        return False, "expected a silent allow, got %s (%s)" % (got, reason[:80])
+    if any(len(r) == 6 and r[2] == "noted" and r[3] == "role-diff-unread" for r in rows):  # six: session last
+        return False, "allowed, but logged role-diff-unread: %s was not judged" % what
+    return True, "allowed silently, and judged clean: %s" % what
+
+
+def plumb_names_run(name, repo, command, path):
+    """One `commit-tree` call denied for a builder whose log row names `path`. The deny text names no path,
+    so the row is what shows which parent the guard judged the tree on."""
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + name), repo, "builder", "bld1", commands=[command])
+    got = [decision for decision, _reason in _guard_answers(out)]
+    if got != ["deny"]:
+        return False, "expected a deny, got %r" % got
+    hits = [r for r in rows if len(r) == 6 and r[2] == "deny" and r[3] == PLUMB]  # six: session last
+    if not hits:
+        return False, "no %s row for the deny" % PLUMB
+    if hits[0][4] != path:
+        return False, "the deny logs %s, not %s: the call was judged on the wrong parent" % (hits[0][4], path)
+    return True, "denied, and the row names %s" % path
+
+
+# A message with `<...>` (a Co-Authored-By trailer) is read whole, so no word of it becomes a tree.
+sh("builder-refuse: a commit-tree with a Co-Authored-By message, whose tree adds a test file, is denied for a builder",
+   VCS + " commit-tree " + plumb_tree(PLUMB_ADD) + ' -p HEAD -m "Add tests Co-Authored-By: Claude <noreply@anthropic.com>"',
+   "deny", rule=PLUMB, cwd=_plumb, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a commit-tree with two -m values, the second holding `<` and `>`, whose tree adds a test file, is denied for a builder",
+   VCS + " commit-tree " + plumb_tree(PLUMB_ADD) + ' -p HEAD -m "Add tests" -m "Co-Authored-By: Claude <noreply@anthropic.com>"',
+   "deny", rule=PLUMB, cwd=_plumb, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a commit-tree with an unquoted -m, whose tree adds a test file, is denied for a builder",
+   VCS + " commit-tree " + plumb_tree(PLUMB_ADD) + " -p HEAD -m Add tests",
+   "deny", rule=PLUMB, cwd=_plumb, agent_id="bld1", agent_type="builder")
+# Controls: the head already denies these, so they stay green.
+sh("builder-refuse: a commit-tree with a -m that holds `->`, whose tree adds a test file, is denied for a builder",
+   VCS + " commit-tree " + plumb_tree(PLUMB_ADD) + ' -p HEAD -m "red -> green and more"',
+   "deny", rule=PLUMB, cwd=_plumb, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a commit-tree with a plain -m, whose tree adds a test file, is denied for a builder",
+   VCS + " commit-tree " + plumb_tree(PLUMB_ADD) + ' -p HEAD -m "Add tests"',
+   "deny", rule=PLUMB, cwd=_plumb, agent_id="bld1", agent_type="builder")
+
+# A tree written inline as `$(git write-tree)` is the index's tree. The builder stages a test file, commits nothing.
+def _plumb_staged_change(w):
+    """The builder stages a test file in its index. HEAD holds none, so the index tree adds it."""
+    write_exact(os.path.join(w, PLUMB_TEST_NEW), PLUMB_ADD[PLUMB_TEST_NEW])
+    _must(w, "add", "-A")
+
+
+_plumb_staged = diff_repo("plumb-staged", _plumb_staged_change, exact=True)
+PLUMB_WRITE_TREE_CALL = VCS + " commit-tree $(" + VCS + " write-tree) -p HEAD -m x"
+sh("builder-refuse: a commit-tree whose tree is $(git write-tree), with a test file staged, is denied for a builder",
+   PLUMB_WRITE_TREE_CALL, "deny", rule=PLUMB, cwd=_plumb_staged, agent_id="bld1", agent_type="builder")
+# A tree that is an unknown shell variable names nothing git can read: a stated limit, allowed and logged.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a commit-tree whose tree is a shell variable is allowed and logs role-diff-unread, a stated limit",
+                         lambda: plumb_unread_run("plumb-tree-word", _plumb, VCS + " commit-tree $T -p HEAD -m x",
+                                                  "a tree that is a shell variable")))
+
+# A quoted `(` in a message opens no group: the words after it are not swallowed, so `-p HEAD` is read.
+PLUMB_PAREN_MSG = ' -m "wip (part 1" -p HEAD'
+LOG_CHECKS_EXTRA.append(("builder-refuse: a commit-tree whose message holds a quoted `(`, of a product-only tree, is judged clean against HEAD",
+                         lambda: plumb_clean_run("plumb-paren-clean", _plumb, VCS + " commit-tree " + plumb_tree(PLUMB_PRODUCT)
+                                                 + PLUMB_PAREN_MSG, "a product-only tree on HEAD")))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a commit-tree whose message holds a quoted `(`, of a tree that adds a test file, is denied on HEAD and names that file",
+                         lambda: plumb_names_run("plumb-paren-deny", _plumb, VCS + " commit-tree " + plumb_tree(PLUMB_ADD)
+                                                 + PLUMB_PAREN_MSG, PLUMB_TEST_NEW)))
+
+# `-p $(git rev-parse --verify HEAD)` and `-p $(git rev-parse -q HEAD)` name HEAD: a rev-parse flag is no ref name.
+sh("builder-refuse: a commit-tree whose parent is $(git rev-parse --verify HEAD), and whose tree adds a test file, is denied for a builder",
+   VCS + " commit-tree " + plumb_tree(PLUMB_ADD) + " -p $(" + VCS + " rev-parse --verify HEAD) -m x",
+   "deny", rule=PLUMB, cwd=_plumb, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a commit-tree whose parent is $(git rev-parse -q HEAD), and whose tree adds a test file, is denied for a builder",
+   VCS + " commit-tree " + plumb_tree(PLUMB_ADD) + " -p $(" + VCS + " rev-parse -q HEAD) -m x",
+   "deny", rule=PLUMB, cwd=_plumb, agent_id="bld1", agent_type="builder")
+
 _bd_inc = diff_repo("bd-incident", _incident)
 # Case 1: the incident. A reset to the lane tip, then a removed line, is refused at commit and push.
 sh("builder-refuse: a reset to the lane tip, then a removed test line, is denied at commit",
