@@ -142,9 +142,12 @@ class FakeHost:
         self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
         self.pr_calls = []  # each n the run read through pr(): a refusal before any host read leaves it empty
         self.readies, self.ready_refuse = [], None  # readies: each n a draft confirm asked to mark ready; ready_refuse: the reason the host refuses
+        self.prs, self.created, self.batch_pr_calls = {}, [], []  # prs: the pull requests add_pr and create_pr hold, by number; created: each create_pr; batch_pr_calls: each branch batch_pr read
 
     def pr(self, n):
         self.pr_calls.append(n)
+        if n in self.prs:  # a batch case's pull request, read from its own entry
+            return self.pr_info(n)
         head = merge.origin_head(self.root, self.branch)
         base = (self.base_seq.pop(0) if len(self.base_seq) > 1 else self.base_seq[0]) if self.base_seq else self.base
         return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
@@ -186,8 +189,35 @@ class FakeHost:
         self.readies.append(n)
         if self.ready_refuse:
             return False, self.ready_refuse
+        if n in self.prs:  # the batch cases: the pull request's own draft flag clears too
+            self.prs[n]["draft"] = False
         self.draft = False
         return True, ""
+
+    def add_pr(self, n, branch, base="main", state="OPEN", draft=False, body=""):  # a pull request by number, with its head branch on origin
+        self.prs[n] = {"branch": branch, "base": base, "state": state, "draft": draft, "body": body}
+
+    def pr_info(self, n):  # the same fields as pr(), read from the entry add_pr or create_pr made
+        p = self.prs[n]
+        return {"head": merge.origin_head(self.root, p["branch"]), "branch": p["branch"], "base": p["base"], "state": p["state"],
+                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": p["draft"], "body": p["body"]}
+
+    def batch_pr(self, branch):  # the open pull request whose head is `branch`, as (n, info), or None
+        self.batch_pr_calls.append(branch)
+        hits = [n for n, p in self.prs.items() if p["branch"] == branch and p["state"] == "OPEN"]
+        return (hits[0], self.pr_info(hits[0])) if hits else None
+
+    def open_prs(self):  # every open pull request as [(n, info)] in number order: a rebuild finds the on-batches among them
+        return [(n, self.pr_info(n)) for n in sorted(self.prs) if self.prs[n]["state"] == "OPEN"]
+
+    def create_pr(self, branch, base, title, body, draft=False):  # the real Host posts draft false: a build passes no draft
+        n = 900 + len(self.created)
+        self.created.append({"n": n, "branch": branch, "base": base, "title": title, "body": body, "draft": draft})
+        self.add_pr(n, branch, base=base, body=body)
+        return n
+
+    def set_body(self, n, body):
+        self.prs[n]["body"] = body
 
 def wait_sites(src):
     """-> (count, in_loop) over the `wait_checks` calls in a Python source. A call inside a for or while may run many
@@ -14979,6 +15009,548 @@ C0_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f]")  # C0 control characters, but n
 def controls(text):
     """The C0 control characters in `text`, in order."""
     return C0_CONTROL.findall(text)
+
+
+BATCH_BEGIN, BATCH_END = "<!-- batch-freeze:begin -->", "<!-- batch-freeze:end -->"  # the marker lines of a batch pull request's frozen block
+
+def freeze_inner(name, lanes, dropped=(), on=None):
+    """The lines between a frozen block's markers: `Batch:`, `On: BRANCH SHA` when the batch stacks on one, one `Lane:` line per (PR, head)
+    by PR number, then one `Dropped:` per dropped PR."""
+    return [f"Batch: {name}", *([f"On: {on[0]} {on[1]}"] if on else []), *(f"Lane: #{n} {sha}" for n, sha in sorted(lanes)),
+            *(f"Dropped: #{n}" for n in dropped)]
+
+def freeze_body(inner):
+    return "\n".join([BATCH_BEGIN, *inner, BATCH_END]) + "\n"
+
+def block_lines(body):
+    """The lines between a PR body's one begin marker line and its one end marker line, or None when it holds no single block."""
+    lines = body.split("\n")
+    if lines.count(BATCH_BEGIN) != 1 or lines.count(BATCH_END) != 1 or lines.index(BATCH_BEGIN) > lines.index(BATCH_END):
+        return None
+    return lines[lines.index(BATCH_BEGIN) + 1:lines.index(BATCH_END)]
+
+
+class BatchFreeze(CloudSession):
+    """merge --batch-build and --batch-drop: a batch's frozen lane set, kept in its pull request body between the markers.
+    Each refusal case asserts exit 1 and the refusal's words first. Main refuses every batch flag as an unknown argument with exit 2,
+    so those first asserts are the red. The build and the drop run no lane lint and no ready check: each case patches them to fail if called."""
+
+    def setUp(self):
+        super().setUp()
+        self.heads = {}  # lane PR number -> its head sha on origin, as lane() and advance() leave it
+
+    def lane(self, n, on=None):
+        """Lane PR #n: a branch on origin with one commit of its own, off origin/main (or, with `on`, off lane #on, so its head contains
+        that lane's head), and an open pull request in the host. -> its head sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", f"lane-{n}", f"origin/lane-{on}" if on else "origin/main")
+        put(os.path.join(o, "lanes", f"{n}.txt"), f"lane {n}\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", f"lane {n}")
+        sh(o, "git", "push", "-q", "origin", f"lane-{n}")
+        self.host.add_pr(n, f"lane-{n}")
+        self.heads[n] = self.head(f"lane-{n}")
+        return self.heads[n]
+
+    def advance(self, n):
+        """Lane PR #n gets one more commit, so its head on origin moves. -> the new head."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", f"lane-{n}", f"origin/lane-{n}")
+        put(os.path.join(o, "lanes", f"{n}-more.txt"), "more\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", f"lane {n}, second commit")
+        sh(o, "git", "push", "-q", "origin", f"lane-{n}")
+        self.heads[n] = self.head(f"lane-{n}")
+        return self.heads[n]
+
+    def bump(self, branch):
+        """One commit of its own on origin's `branch`, as a claim or a heal leaves it: the head moves. -> the new head."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{branch}")
+        put(os.path.join(o, "lanes", f"{branch.replace('/', '-')}-heal.txt"), "heal\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", f"{branch}: heal")
+        sh(o, "git", "push", "-q", "origin", branch)
+        return self.head(branch)
+
+    def frozen_batch(self, name, numbers, on=None):
+        """The batch a build made: origin's batch/NAME merges each lane in `numbers` no-ff onto origin/main (or, with `on`, onto
+        origin/<on>, and its block carries the On line), and one ready pull request carries the frozen block. -> the pull request's number."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", f"batch/{name}", f"origin/{on}" if on else "origin/main")
+        for n in numbers:
+            sh(o, "git", "merge", "-q", "--no-ff", "-m", f"merge lane {n}", self.heads[n])
+        sh(o, "git", "push", "-q", "origin", f"batch/{name}")
+        inner = freeze_inner(name, [(n, self.heads[n]) for n in numbers], on=(on, self.head(on)) if on else None)
+        return self.host.create_pr(f"batch/{name}", "main", f"Batch {name}", freeze_body(inner))
+
+    def ancestor(self, old, new):
+        """True when commit `old` is `new` or an ancestor of it. Both are shas on origin, or refs origin holds."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        r = subprocess.run(["git", "merge-base", "--is-ancestor", old, new], cwd=self.co, capture_output=True, text=True)
+        if r.returncode not in (0, 1):
+            raise AssertionError(f"{old[:9]} or {new} cannot be read: {r.stderr.strip()}")
+        return r.returncode == 0
+
+    def on_origin(self, sha, branch):
+        """True when origin's `branch` holds commit `sha`."""
+        return self.ancestor(sha, f"origin/{branch}")
+
+    def second_parents(self, branch):
+        """The second parent of each merge on origin's `branch`: the head that a no-ff merge brought in."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        out = sh(self.co, "git", "log", "--merges", "--format=%P", f"origin/{branch}")
+        return {line.split()[1] for line in out.splitlines() if len(line.split()) == 2}
+
+    def body(self, n):
+        return self.host.prs[n]["body"]
+
+    def snapshot(self, n):
+        """What a refused run must leave alone: origin's batch/nightly head, and the body of pull request n."""
+        return self.head("batch/nightly"), self.body(n)
+
+    def assert_untouched(self, n, snap, out):
+        """A refused run moved nothing: batch/nightly keeps its head, pull request n keeps its body, and origin got no push."""
+        self.assertEqual(self.head("batch/nightly"), snap[0], "the refused run moved batch/nightly: %s" % out)
+        self.assertEqual(self.body(n), snap[1], "the refused run changed the body of #%d: %s" % (n, out))
+        self.assertEqual(self.pushes(), [], "the refused run pushed: %s" % out)
+
+    def record_pushes(self):
+        """From here on the origin writes each ref update it receives to pushes.log in its folder, and accepts it."""
+        hook = os.path.join(self.bare, "hooks", "pre-receive")
+        put(hook, "#!/bin/sh\ncat >> pushes.log\n")
+        os.chmod(hook, 0o755)
+
+    def pushes(self):
+        """The ref updates the origin received since record_pushes, as "old new ref" lines. [] when none, or before the recorder."""
+        try:
+            with open(os.path.join(self.bare, "pushes.log"), encoding="utf-8") as f:
+                return f.read().splitlines()
+        except FileNotFoundError:
+            return []
+
+    def run_batch(self, *argv):
+        """-> (rc, output) of merge.main on argv, run in the clone. argparse exits 2 through SystemExit: that is the rc, and what it printed is kept."""
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            rc = self.run_merge(*argv, stdout=out, stderr=err)[0]
+        except SystemExit as e:
+            rc = e.code
+        return rc, out.getvalue() + err.getvalue()
+
+    @contextlib.contextmanager
+    def no_lint_or_ready_check(self):
+        """The lane lint and the ready checks, patched to fail the run if a batch build or drop calls one. Yields {name: mock}: read after the run."""
+        with contextlib.ExitStack() as stack:
+            mocks = {name: stack.enter_context(unittest.mock.patch.object(
+                         merge, name, side_effect=AssertionError(f"merge.{name} ran: a batch build or drop runs no lane lint and no ready check")))
+                     for name in ("lane_lint", "draft_step", "run_ready_checks")}
+            yield mocks
+
+    # Build: the branch, the pull request, the lock and the lint.
+
+    def test_build_merges_each_lane_no_ff_and_pushes_the_batch_branch(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        rc, out = self.run_batch("--batch-build", "nightly", "103", "101", "102")
+        self.assertTrue(self.head("batch/nightly"), "the build did not push batch/nightly: %s" % out)
+        self.assertEqual(self.second_parents("batch/nightly"), {self.heads[n] for n in (101, 102, 103)},
+                         "batch/nightly does not merge each lane's head no-ff: %s" % out)
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    def test_build_opens_one_ready_pr_holding_the_frozen_block(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        rc, out = self.run_batch("--batch-build", "nightly", "103", "101", "102")
+        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
+        pr = self.host.created[0]
+        self.assertEqual((pr["branch"], pr["base"], pr["title"]), ("batch/nightly", "main", "Batch nightly"),
+                         "the batch PR is not batch/nightly into main, titled Batch nightly")
+        self.assertFalse(pr["draft"], "the build opened the batch PR as a draft")
+        self.assertEqual(block_lines(pr["body"]), freeze_inner("nightly", [(n, self.heads[n]) for n in (101, 102, 103)]),
+                         "the batch PR body does not hold the frozen block: %s" % out)
+        self.assertIn("merge: batch nightly built: PR #%d ready, lanes #101 #102 #103" % pr["n"], out, "the verdict line is not the spec's")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    def test_build_takes_no_lock_and_runs_no_lane_lint_or_ready_check(self):
+        for n in (101, 102):
+            self.lane(n)
+        with self.no_lint_or_ready_check() as mocks:
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertTrue(self.head("batch/nightly"), "the build did not push batch/nightly: %s" % out)
+        self.assertFalse(self.lock_ref(), "the build took the merge lock: a batch build takes no lock")
+        for name, mock in mocks.items():
+            self.assertFalse(mock.called, "the build called merge.%s: a batch build runs no lane lint and no ready check" % name)
+
+    def test_full_size_set_lists_every_lane_once_in_pr_number_order(self):
+        numbers = [9, 10, 100, *range(101, 110)]  # twelve lanes; a text sort would put #10 and #100 before #9
+        for n in numbers:
+            self.lane(n)
+        rc, out = self.run_batch("--batch-build", "nightly", *(str(n) for n in reversed(numbers)))
+        self.assertTrue(self.head("batch/nightly"), "the build did not push batch/nightly for twelve lanes: %s" % out)
+        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request for twelve lanes: %s" % out)
+        self.assertEqual(block_lines(self.host.created[0]["body"]), freeze_inner("nightly", [(n, self.heads[n]) for n in numbers]),
+                         "the frozen block of twelve lanes is not one Lane line each, sorted by PR number: %s" % out)
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    # Build on a batch that exists: a set that differs is refused, the same set is allowed.
+
+    def test_a_late_pr_is_refused_and_the_frozen_batch_does_not_move(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
+        self.assertEqual(rc, 1, "a late PR was not refused with exit 1: %s" % out)
+        self.assertIn("#103 is not in batch nightly's frozen lane set; it goes to the next batch", out, "the late PR's refusal does not say so: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
+    def test_a_changed_lane_head_is_refused_and_the_frozen_batch_does_not_move(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])
+        snap = self.snapshot(pr)
+        self.advance(102)
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 1, "a moved lane head was not refused with exit 1: %s" % out)
+        self.assertIn("#102", out, "the refusal does not name the lane whose head moved: %s" % out)
+        self.assertIn("a frozen set never changes except by --batch-drop", out, "the refusal does not say the frozen set changes only by a drop: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
+    def test_a_frozen_lane_left_out_of_the_request_is_refused_and_named(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "101")
+        self.assertEqual(rc, 1, "a request missing a frozen lane was not refused with exit 1: %s" % out)
+        self.assertIn("#102", out, "the refusal does not name the frozen lane left out: %s" % out)
+        self.assertIn("a frozen set never changes except by --batch-drop", out, "the refusal does not say the frozen set changes only by a drop: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
+    def test_the_same_set_again_is_allowed_with_no_second_pr_and_no_push(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "102", "101")
+        self.assertEqual(rc, 0, "the same set again was refused: %s" % out)
+        self.assertEqual(len(self.host.created), 1, "the same set again opened a second pull request: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
+    # Ready: a build never leaves a draft.
+
+    def test_a_build_on_a_draft_marks_it_ready_once_and_opens_no_second_pr(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])
+        self.host.prs[pr]["draft"] = True
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(self.host.readies, [pr], "the build on a draft did not call ready once: %s" % out)
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+        self.assertFalse(self.host.prs[pr]["draft"], "the batch PR is still a draft after the build: %s" % out)
+        self.assertEqual(len(self.host.created), 1, "the build on a draft opened a second pull request: %s" % out)
+
+    def test_a_refused_ready_stops_the_build_with_its_reason_and_leaves_the_draft(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])
+        self.host.prs[pr]["draft"] = True
+        self.host.ready_refuse = "no mark-ready route is open to this session"
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 1, "a refused ready did not stop the build with exit 1: %s" % out)
+        self.assertIn(self.host.ready_refuse, out, "the refused ready's reason is not printed: %s" % out)
+        self.assertTrue(self.host.prs[pr]["draft"], "the batch PR went ready though the host refused it")
+
+    # Drop: one lane off the branch, the block rewritten, nothing else touched.
+
+    def test_drop_takes_one_lane_off_the_branch_and_runs_no_lint_or_ready_check(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        self.assertTrue(self.on_origin(self.heads[102], "batch/nightly"), "setup: lane #102 is not on batch/nightly before the drop")
+        with self.no_lint_or_ready_check() as mocks:
+            rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the drop did not take lane #102 off batch/nightly: %s" % out)
+        self.assertTrue(self.on_origin(self.heads[101], "batch/nightly") and self.on_origin(self.heads[103], "batch/nightly"),
+                        "the drop took a kept lane off batch/nightly: %s" % out)
+        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
+        self.assertEqual(block_lines(self.body(pr)), freeze_inner("nightly", [(101, self.heads[101]), (103, self.heads[103])], dropped=[102]),
+                         "the frozen block does not drop #102 with a Dropped line: %s" % out)
+        self.assertEqual(self.host.readies, [], "the drop marked a pull request ready")
+        for name, mock in mocks.items():
+            self.assertFalse(mock.called, "the drop called merge.%s: a drop runs no lane lint and no ready check" % name)
+
+    def test_drop_leaves_another_batchs_branch_and_pr_alone(self):
+        for n in (101, 102, 103, 104):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        other_pr = self.frozen_batch("other", [104])
+        other_head, other_body = self.head("batch/other"), self.body(other_pr)
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the drop did not take lane #102 off batch/nightly: %s" % out)
+        self.assertEqual(self.head("batch/other"), other_head, "the drop moved batch/other")
+        self.assertEqual(self.body(other_pr), other_body, "the drop changed the body of batch/other's pull request")
+        self.assertFalse(any("batch/other" in line for line in self.pushes()), "the drop pushed batch/other: %s" % self.pushes())
+
+    def test_drop_refuses_a_pr_outside_the_frozen_set_and_names_the_set(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-drop", "nightly", "103")
+        self.assertEqual(rc, 1, "a PR outside the frozen set was not refused with exit 1: %s" % out)
+        self.assertIn("#101", out, "the refusal does not name the frozen set: %s" % out)
+        self.assertIn("#102", out, "the refusal does not name the frozen set: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
+    def test_drop_refuses_the_only_lane_and_says_to_close_the_batch(self):
+        self.lane(101)
+        pr = self.frozen_batch("nightly", [101])
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-drop", "nightly", "101")
+        self.assertEqual(rc, 1, "dropping the only lane was not refused with exit 1: %s" % out)
+        self.assertIn("close", out, "the refusal does not say to close the batch instead: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
+    def test_drop_refuses_a_body_whose_markers_sit_in_a_fenced_code_block(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])
+        self.host.prs[pr]["body"] = "Notes kept by hand.\n\n```\n" + self.body(pr) + "```\n"
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertEqual(rc, 1, "a body whose markers sit in a fenced code block was not refused as having no block: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
+    def test_text_outside_the_markers_is_kept_when_a_lane_is_dropped(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        self.host.prs[pr]["body"] = "Notes kept by hand.\n\n" + self.body(pr) + "\nFooter kept.\n"
+        before = self.body(pr)
+        rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the drop did not take lane #102 off batch/nightly: %s" % out)
+        after = self.body(pr)
+        self.assertIsNotNone(block_lines(after), "the drop left no single frozen block in the body: %s" % out)
+        self.assertEqual(after.split(BATCH_BEGIN)[0], before.split(BATCH_BEGIN)[0], "the text above the block changed on drop: %s" % out)
+        self.assertEqual(after.split(BATCH_END)[1], before.split(BATCH_END)[1], "the text below the block changed on drop: %s" % out)
+
+    def test_a_body_with_two_begin_markers_is_refused_by_build_and_by_drop(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])
+        self.host.prs[pr]["body"] = self.body(pr) + self.body(pr)
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        for argv in (("--batch-build", "nightly", "101", "102"), ("--batch-drop", "nightly", "102")):
+            with self.subTest(argv=argv[0]):
+                rc, out = self.run_batch(*argv)
+                self.assertEqual(rc, 1, "a body with two begin markers was not refused with exit 1 by %s: %s" % (argv[0], out))
+                self.assert_untouched(pr, snap, out)
+
+    # --on: the batch stacks on a running batch's head.
+
+    def test_on_builds_from_the_running_head_and_records_it_with_the_lane(self):
+        for n in (101, 102):
+            self.lane(n)
+        self.frozen_batch("old", [101])
+        old = self.head("batch/old")
+        rc, out = self.run_batch("--batch-build", "nightly", "102", "--on", "batch/old")
+        self.assertTrue(self.head("batch/nightly"), "the --on build did not push batch/nightly: %s" % out)
+        self.assertTrue(self.on_origin(old, "batch/nightly"), "batch/nightly does not hold the running batch/old head %s" % old[:9])
+        self.assertEqual(rc, 0, "the --on build exited %s: %s" % (rc, out))
+        lines = block_lines(self.host.created[-1]["body"]) or []
+        self.assertIn(f"On: batch/old {old}", lines, "the new block does not record On: batch/old with the running head: %s" % out)
+        self.assertIn(f"Lane: #102 {self.heads[102]}", lines, "the new block does not list lane #102: %s" % out)
+
+    def test_on_refuses_a_branch_whose_open_pr_holds_no_freeze_block(self):
+        for n in (101, 102):
+            self.lane(n)  # lane-101's open pull request has an empty body: no freeze block
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "102", "--on", "lane-101")
+        self.assertEqual(rc, 1, "--on a branch with no freeze block was not refused with exit 1: %s" % out)
+        self.assertEqual(self.head("batch/nightly"), "", "the refused --on build pushed batch/nightly")
+        self.assertEqual(self.host.created, [], "the refused --on build opened a pull request")
+        self.assertEqual(self.pushes(), [], "the refused --on build pushed")
+
+    # Cloud: both flags need the batch-runner role, and a refusal reads no host.
+
+    def test_cloud_without_the_batch_runner_role_refuses_both_flags_before_any_host_read(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.cloud():
+            rc_build, out_build = self.run_batch("--batch-build", "nightly", "101", "102")
+            rc_drop, out_drop = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertEqual(rc_build, 1, "a cloud session with no batch-runner role was not refused the build with exit 1: %s" % out_build)
+        self.assertIn("may not", out_build, "the cloud refusal of the build does not say the session may not merge: %s" % out_build)
+        self.assertEqual(rc_drop, 1, "a cloud session with no batch-runner role was not refused the drop with exit 1: %s" % out_drop)
+        self.assertIn("may not", out_drop, "the cloud refusal of the drop does not say the session may not merge: %s" % out_drop)
+        self.assertEqual(self.host.pr_calls, [], "a refused cloud run read a pull request")
+        self.assertEqual(self.host.batch_pr_calls, [], "a refused cloud run read the batch pull request")
+        self.assert_untouched(pr, snap, out_build)
+
+    def test_cloud_batch_runner_role_builds_the_batch(self):
+        for n in (101, 102):
+            self.lane(n)
+        self.put_role("batch-runner")
+        with self.cloud():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertTrue(self.head("batch/nightly"), "a batch-runner session's build did not push batch/nightly: %s" % out)
+        self.assertEqual(rc, 0, "the batch-runner build exited %s: %s" % (rc, out))
+
+    # Arguments: the flags' own rules, refused before any host read or push.
+
+    def test_on_and_base_without_batch_build_are_refused_by_name(self):
+        self.lane(101)
+        self.record_pushes()
+        for argv in (("101", "--on", "batch/old"), ("101", "--base", "main")):
+            with self.subTest(argv=" ".join(argv)):
+                rc, out = self.run_batch(*argv)
+                self.assertIn("--batch-build", out, "the refusal does not name --batch-build: %s" % out)
+                self.assertNotEqual(rc, 0, "the refused arguments exited 0: %s" % out)
+                self.assertEqual(self.host.pr_calls, [], "the refused arguments read a pull request")
+                self.assertEqual(self.pushes(), [], "the refused arguments pushed")
+
+    def test_a_bad_batch_name_is_refused_by_name_before_any_host_read(self):
+        self.lane(101)
+        self.record_pushes()
+        for bad in ("Bad_Name", "x" * 33):  # uppercase and underscore; then one character past the 32 allowed
+            with self.subTest(name=bad):
+                rc, out = self.run_batch("--batch-build", bad, "101")
+                self.assertIn(bad, out, "the refusal does not name the NAME it refused: %s" % out)
+                self.assertNotEqual(rc, 0, "a bad NAME exited 0: %s" % out)
+                self.assertEqual(self.head("batch/" + bad), "", "a bad NAME pushed its batch branch")
+        self.assertEqual(self.host.batch_pr_calls, [], "a bad NAME read a batch pull request")
+        self.assertEqual(self.pushes(), [], "a bad NAME pushed")
+
+    def test_batch_build_with_no_pr_is_refused_by_name(self):
+        self.lane(101)
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly")
+        self.assertTrue("PR" in out or "pull request" in out, "the refusal does not say the build needs a PR: %s" % out)
+        self.assertNotEqual(rc, 0, "a build with no PR exited 0: %s" % out)
+        self.assertEqual(self.host.batch_pr_calls, [], "a build with no PR read a batch pull request")
+        self.assertEqual(self.pushes(), [], "a build with no PR pushed")
+
+    def test_a_lane_pr_that_is_not_open_is_refused_before_any_push(self):
+        for n in (101, 102):
+            self.lane(n)
+        self.host.prs[102]["state"] = "MERGED"
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 1, "a merged lane PR was not refused with exit 1: %s" % out)
+        self.assertIn("#102", out, "the refusal does not name the pull request that is not open: %s" % out)
+        self.assertEqual(self.host.created, [], "the refused build opened a pull request")
+        self.assertEqual(self.head("batch/nightly"), "", "the refused build pushed batch/nightly")
+        self.assertEqual(self.pushes(), [], "the refused build pushed")
+
+    # Dependents and on-batches: a drop takes its stacked dependents along, and a head that moves is rebuilt under the batches on it.
+
+    def test_drop_takes_a_stacked_dependent_along_and_names_it(self):
+        self.lane(101)
+        self.lane(102, on=101)  # stacked on lane #101: its head contains #101's head
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        self.assertTrue(self.ancestor(self.heads[101], self.heads[102]), "setup: lane #102 does not contain lane #101's head")
+        self.assertTrue(self.on_origin(self.heads[102], "batch/nightly"), "setup: lane #102 is not on batch/nightly before the drop")
+        with self.no_lint_or_ready_check() as mocks:
+            rc, out = self.run_batch("--batch-drop", "nightly", "101")
+        self.assertFalse(self.on_origin(self.heads[101], "batch/nightly"), "the drop did not take lane #101 off batch/nightly: %s" % out)
+        self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the drop kept lane #102, which stacks on the dropped #101: %s" % out)
+        self.assertTrue(self.on_origin(self.heads[103], "batch/nightly"), "the drop took unrelated lane #103 off batch/nightly: %s" % out)
+        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
+        self.assertTrue(any("#102" in line and "#101" in line for line in out.splitlines()),
+                        "the output does not name dependent #102 and say it stacks on #101: %s" % out)
+        lines = block_lines(self.body(pr)) or []
+        self.assertEqual([line for line in lines if not line.startswith("Dropped:")], freeze_inner("nightly", [(103, self.heads[103])]),
+                         "the block keeps other than lane #103: %s" % out)
+        self.assertEqual({line for line in lines if line.startswith("Dropped:")}, {"Dropped: #101", "Dropped: #102"},
+                         "the block does not carry one Dropped line per dropped PR: %s" % out)
+        for name, mock in mocks.items():
+            self.assertFalse(mock.called, "the drop called merge.%s: a drop runs no lane lint and no ready check" % name)
+
+    def test_a_drop_on_a_base_rebuilds_the_batch_stacked_on_it_and_leaves_others(self):
+        for n in (101, 102, 103, 104):
+            self.lane(n)
+        self.frozen_batch("x", [101, 102])
+        nightly_pr = self.frozen_batch("nightly", [103], on="batch/x")
+        self.frozen_batch("free", [104])
+        old_nightly, free_head = self.head("batch/nightly"), self.head("batch/free")
+        self.assertTrue(self.ancestor(self.head("batch/x"), old_nightly), "setup: batch/nightly does not stack on batch/x")
+        self.record_pushes()
+        with self.no_lint_or_ready_check() as mocks:
+            rc, out = self.run_batch("--batch-drop", "x", "102")
+        self.assertFalse(self.on_origin(self.heads[102], "batch/x"), "the drop did not take lane #102 off batch/x: %s" % out)
+        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
+        new_x, new_nightly = self.head("batch/x"), self.head("batch/nightly")
+        self.assertTrue(self.ancestor(new_x, new_nightly), "the drop on batch/x did not rebuild batch/nightly on its new head: %s" % out)
+        self.assertEqual(block_lines(self.body(nightly_pr)), freeze_inner("nightly", [(103, self.heads[103])], on=("batch/x", new_x)),
+                         "batch/nightly's block does not carry the new On sha with its own lanes: %s" % out)
+        self.assertTrue(any(line.split() == [old_nightly, new_nightly, "refs/heads/batch/nightly"] for line in self.pushes()),
+                        "batch/nightly was not pushed from its old head to the rebuilt one: %s" % self.pushes())
+        self.assertEqual(self.head("batch/free"), free_head, "the drop moved batch/free, which stacks on nothing")
+        self.assertFalse(any("batch/free" in line for line in self.pushes()), "the drop pushed batch/free: %s" % self.pushes())
+        self.assertEqual(len(self.host.created), 3, "the drop opened a pull request: %s" % out)
+        for name, mock in mocks.items():
+            self.assertFalse(mock.called, "the drop called merge.%s: a rebuild runs no lane lint and no ready check" % name)
+
+    def test_build_of_an_on_batch_whose_on_sha_is_behind_rebuilds_it_on_the_new_head(self):
+        self.lane(101)
+        self.lane(102)
+        self.frozen_batch("x", [101])
+        nightly_pr = self.frozen_batch("nightly", [102], on="batch/x")
+        new_x = self.bump("batch/x")  # batch/x moved on; batch/nightly's On sha is now behind it
+        rc, out = self.run_batch("--batch-build", "nightly", "102", "--on", "batch/x")
+        self.assertTrue(self.ancestor(new_x, self.head("batch/nightly")),
+                        "the on-batch build did not rebuild batch/nightly on the new batch/x head: %s" % out)
+        self.assertEqual(rc, 0, "the same-set on-batch build was refused: %s" % out)
+        self.assertEqual(block_lines(self.body(nightly_pr)), freeze_inner("nightly", [(102, self.heads[102])], on=("batch/x", new_x)),
+                         "the On sha was not updated to the new head with the same lane set: %s" % out)
+        self.assertEqual(len(self.host.created), 2, "the rebuild opened a second pull request: %s" % out)
+        self.assertNotIn("never changes except by --batch-drop", out, "a same-set rebuild was refused as a lane-set change: %s" % out)
+
+    def test_a_rebuild_keeps_every_lane_head_of_the_on_batch(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        self.frozen_batch("x", [101, 102])
+        self.frozen_batch("nightly", [103], on="batch/x")
+        new_x = self.bump("batch/x")
+        rc, out = self.run_batch("--batch-build", "nightly", "103", "--on", "batch/x")
+        nightly_new = self.head("batch/nightly")
+        self.assertTrue(self.ancestor(new_x, nightly_new), "the rebuild did not put batch/nightly on the new batch/x head: %s" % out)
+        for n in (101, 102, 103):
+            self.assertTrue(self.ancestor(self.heads[n], nightly_new), "the rebuild dropped lane #%d's head from batch/nightly: %s" % (n, out))
+        self.assertEqual(rc, 0, "the rebuild exited %s: %s" % (rc, out))
+
+    # Green control: the fixtures and the push recorder work on main, where no batch code exists.
+
+    def test_green_control_fixtures_hold_the_frozen_batch_and_the_recorder_logs_a_push(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101])
+        self.assertTrue(self.on_origin(self.heads[101], "batch/nightly"), "control: the fixture batch does not hold lane #101")
+        self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "control: the fixture batch holds lane #102, which it never merged")
+        self.assertEqual(block_lines(self.body(pr)), freeze_inner("nightly", [(101, self.heads[101])]), "control: the fixture body is not the frozen block")
+        self.record_pushes()
+        sha = self.advance(102)
+        self.assertTrue(any(line.split()[1:] == [sha, "refs/heads/lane-102"] for line in self.pushes()),
+                        "control: the push recorder logged no push of lane-102: %s" % self.pushes())
 
 
 if __name__ == "__main__":
