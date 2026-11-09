@@ -64,7 +64,7 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  git's tracked files under a folder, suites left out (testing/tracked_tree.py)
-GUARD =os.path.join(HERE, "guard.py")
+GUARD = os.path.join(HERE, "guard.py")
 SUITE = os.path.join(HERE, "test_guard.py")
 WATCH = os.path.join(HERE, "config_watch.py")
 WATCH_SUITE = os.path.join(HERE, "test_config_watch.py")
