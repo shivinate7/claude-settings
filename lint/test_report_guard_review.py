@@ -308,16 +308,13 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_two_rest_reads()
         self.assertIsNone(out, out)
 
-    def stop(self, records, env_id=True, script=None, block=(), no_cwd=False):
+    def stop(self, records, env_id=True, script=None, block=(), cwd=None):
         """Run the Stop hook on `records`. env_id is this session's remote id (a lane sets it). The stand-in
         comes first on PATH, and the call log is emptied first, so each run's calls are its own. `script` runs
-        another copy of the hook, and `block` names modules the run cannot import. `no_cwd` leaves the hook input's
-        cwd out."""
+        another copy of the hook, and `block` names modules the run cannot import. `cwd` is the hook's folder, the repo root when None."""
         open(self.count, "w", encoding="utf-8").close()
         path = trg.write_transcript(records, self.run_dir)
-        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
-        if not no_cwd:
-            hook["cwd"] = self.repo
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": cwd or self.repo}
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home,
                    PATH=self.gh_dir + os.pathsep + os.environ.get("PATH", ""))
         env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
@@ -489,6 +486,18 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertNotIn(LIVE, out["reason"], out)
         self.assertNotIn(LIVE[:7], out["reason"], out)
 
+    def stop_without_cwd(self, records):
+        """stop() with the hook input's cwd left out, the no-cutover state. stop() puts the cwd in the hook it builds,
+        so the runner it calls is wrapped to pop the key before the guard reads the input."""
+        run = trg.run_guard
+
+        def without_cwd(guard, hook, **kwargs):
+            hook.pop("cwd", None)
+            return run(guard, hook, **kwargs)
+
+        with mock.patch.object(trg, "run_guard", without_cwd):
+            return self.stop(records)
+
     def test_unstamped_record_with_no_cutover_is_refused_and_the_remedy_names_the_stamp_line(self):
         # Catches: the refusal of an unstamped record when the guard has no cutover, whose text names no Stamp line, so the
         # reviewer is not told what the record lacks. The render command stays in the remedy. The guard asks for a cutover
@@ -496,7 +505,7 @@ class ReviewRecordTests(unittest.TestCase):
         body = unstamped(record())
         self.assertIsNone(merge_mod.parse_review(body, None, None), "fixture: merge reads the unstamped record with no cutover")
         self.serve(comments=[body])
-        out = self.stop(self.lane_turn(report(CLAIM)), no_cwd=True)
+        out = self.stop_without_cwd(self.lane_turn(report(CLAIM)))
         self.assert_reads_of(PR)
         self.assert_blocked(out)
         self.assertIn("merge 12 --review-record", out["reason"], out)
