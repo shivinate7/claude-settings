@@ -13639,6 +13639,42 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
                 self.assert_refused_without_record(rc, out, err, f"a fix check after an earlier fix check {verdict}, with the top round's sha as its base")
                 self.assertIn("may not follow it", err, f"the refusal after an earlier fix check {verdict} does not name the chain:\n" + err)
 
+    def test_fix_base_top_round_plain_earlier_head_is_refused_when_the_top_round_names_another_head(self):
+        # the debt scenario: round 1 PASS read OWN, and an earlier record at OWN_TWO has no fix check. The read from OWN to OWN_TWO never happened,
+        # so OWN_TWO is no base, though it is the earlier record's Head
+        earlier = review_comment(1, 7, record_text(head=self.OWN_TWO, rounds=(f"Round 1: reviewer, haiku, PASS, {self.OWN}",)))
+        self.assertIsNotNone(review_fn(self, "parse_review")(earlier["body"]), "scope: the earlier record does not parse, so the case tests nothing")
+        host = self.record_host(earlier, diffs=self.own_replies(self.OWN))
+        rc, out, err = self.write_at(host, (f"1:reviewer:haiku:PASS:{self.OWN}",), extra=("--fix-check", f"{self.OWN_TWO}:reviewer:sonnet:PASS"))
+        self.assertTrue(any("comments" in rel for rel, _ in host.list_calls), "scope: the write did not read the comment list:\n" + err)
+        self.assert_refused_without_record(rc, out, err, "a fix base that is an earlier plain record's Head, when the top round names another head")
+
+    def test_fix_base_top_round_chain_link_with_a_passed_fix_check_is_written(self):
+        # control: the earlier record at OWN_TWO carries a passed fix check, so its Head is a chain link, and a fix check may start from it
+        earlier = review_comment(1, 7, record_text(head=self.OWN_TWO, rounds=(f"Round 1: reviewer, haiku, PASS, {self.OWN_THREE}",),
+                                                   fix=(fix_check_line(verdict="PASS", head=self.OWN, model="haiku"),)))
+        self.assertIsNotNone(review_fn(self, "parse_review")(earlier["body"]), "scope: the earlier record does not parse, so the case tests nothing")
+        host = self.record_host(earlier, diffs=self.own_replies(self.OWN_THREE, self.OWN_TWO))
+        rc, out, err = self.write_at(host, (f"1:reviewer:haiku:PASS:{self.OWN_THREE}",), extra=("--fix-check", f"{self.OWN_TWO}:reviewer:sonnet:PASS"))
+        self.assertTrue(any("comments" in rel for rel, _ in host.list_calls), "scope: the write did not read the comment list:\n" + err)
+        self.assertEqual(rc, 0, "control: a fix check from a chain link with a passed fix check was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.OWN_TWO, "reviewer", "sonnet", "PASS"),
+                         "the printed fix check does not start from the chain link")
+
+    def test_fix_base_top_round_old_form_record_keeps_the_earlier_head_as_its_base(self):
+        # control: an old-form record names no head, so today's rule holds: its fix base is the earlier record's Head, and another base is refused
+        earlier = review_comment(1, 7, record_text(head=self.OWN_TWO, rounds=("Round 1: reviewer, haiku, PASS",)))
+        self.assertIsNotNone(review_fn(self, "parse_review")(earlier["body"]), "scope: the earlier record does not parse, so the case tests nothing")
+        host = self.record_host(earlier)
+        rc, out, err = self.write_at(host, ("1:reviewer:haiku:PASS",), extra=("--fix-check", f"{self.OWN_TWO}:reviewer:sonnet:PASS"))
+        self.assertTrue(any("comments" in rel for rel, _ in host.list_calls), "scope: the write did not read the comment list:\n" + err)
+        self.assertEqual(rc, 0, "control: an old-form record whose fix base is the earlier record's Head was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.OWN_TWO, "reviewer", "sonnet", "PASS"),
+                         "the printed fix check does not start from the earlier record's Head")
+        host = self.record_host(earlier)
+        rc, out, err = self.write_at(host, ("1:reviewer:haiku:PASS",), extra=("--fix-check", f"{self.OWN}:reviewer:sonnet:PASS"))
+        self.assert_refused_without_record(rc, out, err, "an old-form record whose fix base is not the earlier record's Head")
+
 class ReviewRoundHeadsCheck(unittest.TestCase):
     """review_state reads a record whose Round lines name heads (decision pr-review-record). Its top round is done only when every line of that round
     names the live head by a sha prefix, or when a fix check PASS follows and the record's Head is live. A top round that names another head is stale
