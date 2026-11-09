@@ -59,6 +59,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
                        git's `-q`. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
+  hook-bypass          deny. A git commit, merge or push that skips the git hooks: `-c core.hooksPath`
+                       (key in any case), `--no-verify`, `-n` on commit alone (push -n and merge -n
+                       pass), or core.hooksPath set through GIT_CONFIG_COUNT or GIT_CONFIG_PARAMETERS.
+                       Read from the parsed words of a git command, so quoted text and a heredoc body
+                       pass. The reason says to run the act with the hooks on.
   hand-made-worktree   deny. A real worktree add whose new tree lands outside
                        `<primary>/.claude/worktrees/`. A repo under the temp folder passes.
                        (lanes-start-in-tool-worktrees)
@@ -408,7 +413,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            conflict_markers_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
@@ -3883,6 +3888,15 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "silent-write",
                    reason.format(command=live.index(number) + 1, total=len(live), kind=kind,
                                  program=kind if " " in kind else "git " + kind), matched)
+
+    # 1c1. A git commit, merge or push that skips the git hooks. Placed after silent-write, so a
+    # silenced commit is caught on that defect first. `texts` reads a command substitution as its own command.
+    for segment in (part for text in texts for part in split_segments(text)):
+        if segment.strip():
+            hit = hook_bypass_hit(segment)
+            if hit:
+                matched, verb, how = hit
+                refuse(tool, "deny", "hook-bypass", HOOK_BYPASS_REASON.format(verb=verb, how=how), matched)
 
     # 1c2. A worktree made by hand, outside the tool's own folder.
     for number, segment in enumerate(segments):

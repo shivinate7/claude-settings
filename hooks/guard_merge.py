@@ -1166,6 +1166,97 @@ def brief_hit(tool: str, tool_input, transcript: str):
     return None
 
 
+# ------------------------------------------------------------------ hook-bypass
+#
+# A git commit, merge or push that skips the git hooks. Read off the parsed tokens of a segment whose
+# COMMAND WORD is git, so a quoted mention, a commit message value and a heredoc body are never read.
+# Five spellings: `-c core.hooksPath=...` before the verb, `--no-verify` on commit, merge or push,
+# `-n` on commit alone (on push it is --dry-run, on merge --no-stat), and the key set in the
+# environment through GIT_CONFIG_COUNT/KEY_n/VALUE_n or GIT_CONFIG_PARAMETERS. The key is read without
+# case, as git reads it. hooks/mutate_shared.py sets the key inside Python, which no segment shows.
+HOOK_BYPASS_REASON = (
+    "Rule (Git): this {verb} skips the git hooks ({how}). The hooks are the checks that run before a "
+    "commit, merge or push lands, and a skipped hook lets a defect through unseen. "
+    "Remedy: run the {verb} with the hooks on. If a hook fails wrongly, fix the hook, or report "
+    "the hook to the owner. "
+    "(decision mistake-means-missing-guard, a mistake that skips a check gets a guard)"
+)
+_HOOKS_KEY = "core.hookspath"
+_HOOK_VERBS = ("commit", "merge", "push")
+_HOOK_VALUE_LETTERS = {"commit": "mFCct", "merge": "mFsX", "push": "o"}   # short flags that take a value
+_HOOK_VALUE_FLAGS = {
+    "commit": _COMMIT_VALUE_FLAGS,
+    "merge": {"--strategy", "--strategy-option", "--message", "--file", "--into-name"},
+    "push": {"--repo", "--receive-pack", "--exec", "--push-option"},
+}
+_HOOKS_PARAMETER = re.compile(r"(?:^|['\s])core\.hookspath(?:['=\s]|$)", re.IGNORECASE)
+
+
+def _env_hooks_path(assignments) -> bool:
+    """True when the `NAME=value` words name core.hooksPath through GIT_CONFIG_PARAMETERS or a
+    GIT_CONFIG_KEY_n whose value is that key."""
+    for word in assignments:
+        name, _, value = word.partition("=")
+        if name == "GIT_CONFIG_PARAMETERS" and _HOOKS_PARAMETER.search(value):
+            return True
+        if name.startswith("GIT_CONFIG_KEY_") and value.lower() == _HOOKS_KEY:
+            return True
+    return False
+
+
+def _verb_bypass_flag(verb: str, args) -> str:
+    """The flag in a commit, merge or push argument list that skips the hooks, else ''. A flag's value
+    is skipped, so `-m "-n"` and `-mn` name a message; `--` ends the flags."""
+    letters, value_flags = _HOOK_VALUE_LETTERS[verb], _HOOK_VALUE_FLAGS[verb]
+    skip = False
+    for arg in args:
+        if skip:
+            skip = False
+            continue
+        if arg == "--":
+            return ""
+        if arg.startswith("--"):
+            if arg.split("=", 1)[0] in value_flags:
+                skip = "=" not in arg
+            elif len(arg.split("=", 1)[0]) >= len("--no-v") and "--no-verify".startswith(arg.split("=", 1)[0]):
+                return "--no-verify"
+            continue
+        if arg.startswith("-") and len(arg) > 1:
+            for at, letter in enumerate(arg[1:], 1):
+                if letter in letters or letter in "uS":   # the rest of the cluster is the value
+                    skip = letter in letters and at == len(arg) - 1
+                    break
+                if letter == "n" and verb == "commit":
+                    return "-n"
+    return ""
+
+
+def hook_bypass_hit(segment: str):
+    """Return (matched text, verb, how) for a git commit, merge or push in `segment` that skips the git
+    hooks, else None. A segment shlex cannot parse judges nothing (the fail-open stance)."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return None
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) not in ("git", "git.exe"):
+        return None
+    cursor = _git_subcommand_index(tokens, index)
+    if cursor >= len(tokens) or tokens[cursor] not in _HOOK_VERBS:
+        return None
+    verb = tokens[cursor]
+    matched = " ".join(tokens[index:cursor + 1])
+    options = tokens[index + 1:cursor]
+    for at, word in enumerate(options):
+        if word == "-c" and at + 1 < len(options) and options[at + 1].partition("=")[0].lower() == _HOOKS_KEY:
+            return matched, verb, "core.hooksPath set on the command"
+    if _env_hooks_path(tokens[:index]):
+        return matched, verb, "core.hooksPath set in the environment"
+    flag = _verb_bypass_flag(verb, tokens[cursor + 1:])
+    if flag:
+        return matched + " " + flag, verb, flag + " given"
+    return None
+
+
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
 # ids across the modules it loads. In the repo it stays a comment, which counts as a match.
 # INSTALL_ID = "uninstalled"
