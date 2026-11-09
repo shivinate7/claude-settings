@@ -5466,9 +5466,10 @@ sh("git-after-cd: an if ! check whose then body is printf of a non-number && exi
 # so the `&&` after it reaches the push, and the push runs on the check's failure. A subshell of an echo, an echo piped
 # to cat, and a `cat log` of a file that may be missing read the same way. Bash runs each push here on a failed check,
 # so each one is refused.
+# The reason must not suggest `|| exit 1`: this command already holds one, and the `||` reason names it as the remedy.
 sh("git-after-cd: an echo of a make substitution, then || exit 1 and && a git push -u, is refused",
    "echo $(make x) || exit 1 && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
-   carries=("&&",))
+   carries=("&&",), lacks=("|| exit 1",))
 sh("git-after-cd: a make a, then || echo bad, then || exit 1 and ; a git push -u, is refused",
    "make a || echo bad || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&",))
@@ -5590,6 +5591,24 @@ sh("git-after-cd: an if test of a check after && and piped to tail, then a git p
 # the push runs only after a commit that succeeded. No check runs before it, so it passes.
 sh("git-after-cd: a printf piped to a git commit -F, then && a git push -u, passes",
    "printf '%s' \"$m\" | " + VCS + " commit -F - && " + VCS + " push -u origin b", "allow", cwd=NOGIT)
+# A PUSH IN AN ELSE OR AN UNTIL BODY, AND A PIPE THAT HIDES A CHECK BEFORE A PUSH. The else branch runs when the test
+# fails, and the until body runs while the test fails, so each push there runs on a failed check. The pipe's status is
+# tail's, so the push after `;` runs when pytest fails. Bash runs each push here on a failed check, so each is refused.
+sh("git-after-cd: a git push -u in the else branch of an if on a check, is refused",
+   "if pytest -q; then echo ok; else %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a git push -u in the body of an until on a check, is refused",
+   "until pytest -q; do %s push -u origin b; done" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check piped to tail, then ; a git push -u, is refused and names pipefail",
+   "pytest -q | tail -5; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("pipefail",))
+# A DATA SOURCE OR A LISTING PIPED TO A PUSH. Neither first stage runs a check, so no check hides behind the pipe, and
+# the push after it is no push on a failed check. Both are allowed.
+sh("git-after-cd: a cat piped to a while loop with a git push in its body, passes",
+   "cat f | while read b; do %s push origin $b; done" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: an ls piped to head, then && a git push -u, passes",
+   "ls | head -1 && %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
 # git-after-cd rule refuses the push after the cd, and the crash is logged as a guard crash. The planted copy
 # raises at that try. The intact copy, on the same landing cd, is the control, so the refusal can only come
