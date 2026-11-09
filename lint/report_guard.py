@@ -152,10 +152,11 @@ remedy as a missing record, with the post as a new comment), not as a missing re
 checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
 blocks: it adds a systemMessage that says UNKNOWN. The comment's last edit time and the cutover (merge/merge.py review_stamp_since, read on the default branch) go to parse_review, so an unstamped
-record from before the cutover reads done, as merge --reviewed reads it; with no cwd, or a cwd with no cutover, the Stamp line is required, and the refusal names it.
+record from before the cutover reads done, as merge --reviewed reads it; with no cwd, no cutover is read and the Stamp line is required, and the refusal names it.
+With a cwd, review_stamp_since returns a time or raises, never None, so a cwd never means "no cutover".
 A failed cutover read never refuses by itself. Only an unstamped record, otherwise well formed and done for the live head, gets the UNKNOWN note and no refusal.
-A Stamp line that does not match, or a malformed field, is refused as with a known cutover. Cost: 2 gh reads, and for the cutover one git log
-(review_stamp_since, cached per (repo top, base, default branch) in the process: one per distinct key per Stop; the default branch comes from the pull, never a third gh read),
+A Stamp line that does not match, or a malformed field, is refused as with a known cutover. Cost: 2 gh reads, and for the cutover up to two git log runs
+(the repo's salt read, plus the tool-checkout read when the repo has no salt commit; a deepen adds the passes counted below; review_stamp_since, cached per (repo top, base, default branch) in the process: one per distinct key per Stop; the default branch comes from the pull, never a third gh read),
 plus the guard_merge and merge module imports. A repo whose history holds no salt commit adds one git log of the merge tool's own checkout (tool_stamp_since), with no fetch. A full clone, or a shallow one whose boundary is not the first salt commit, runs that one git log and no fetch. In a shallow clone
 whose first salt commit is the shallow boundary, the read deepens first (this Stop keeps the deepen by the orchestrator's ruling, filed in decision pr-review-record): up to
 merge/merge.py REVIEW_DEEPEN_TRIES fetches of REVIEW_DEEPEN_STEP commits each, with a git log pass after each, so up to 4 git log passes and 3 fetches, more log calls when another

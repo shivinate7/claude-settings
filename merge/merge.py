@@ -3374,7 +3374,7 @@ def salt_cutover(root, ref, where=None):
     first = out.split()[:2]
     if first and first[0] in shallow_boundary(root):  # its parent is missing, so an older salt commit may exist: the cutover is unknown
         raise Stop(f"{where or ref} is a shallow history, too shallow to read the review stamp cutover: the first commit holding the salt, {first[0][:9]}, is the shallow boundary. "
-                   "Run `git fetch --unshallow origin`, then run the command again. " + REVIEW_CITE)
+                   f"In {root}, run `git fetch --unshallow origin`, then run the command again. " + REVIEW_CITE)
     return salt_stamp(first), 0, out
 
 _tool_stamp_since = {}
@@ -3402,7 +3402,7 @@ def tool_stamp_since():
     """-> the cutover read from the merge tool's own source checkout (the parent of the folder holding this file, as the other tool paths are found), HEAD's history.
     The salt commit is fixed history, and a checkout that runs code reading the salt holds it, so this fetches nothing. One read per tool root in a process.
     A read that cannot run, or a HEAD with no salt commit, raises Stop naming the checkout, never None: an unknown cutover must not read every unstamped
-    record as old (coordinator item 386, 2026-11-08 12:51 CST). Each such Stop also names the checkout launch.py started from, when it differs and the note can be built (tool_source_env, tool_source_note). A read that succeeds never imports launch."""
+    record as old (the coordinator's no-salt cutover pick, decision pr-review-record, The cutover). Each such Stop also names the checkout launch.py started from, when it differs and the note can be built (tool_source_env, tool_source_note). A read that succeeds never imports launch."""
     tool = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     if tool not in _tool_stamp_since:
         where = f"the merge tool's checkout {tool}"
@@ -3431,7 +3431,7 @@ def review_stamp_since(root, base, default=None):
     merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. A shallow clone whose first salt
     commit is the boundary deepens first, since an older salt commit may exist below it. When the caller's repo has no salt commit, whatever its history touched,
     the cutover comes from the merge tool's own source checkout (tool_stamp_since), which fetches and deepens nothing: the stamp rule then holds in every repo, not
-    only claude-settings (coordinator item 386, 2026-11-08 12:51 CST). A read that cannot run (git errors, no origin/<default branch> ref, a shallow clone whose
+    only claude-settings (the coordinator's no-salt cutover pick, decision pr-review-record, The cutover). A read that cannot run (git errors, no origin/<default branch> ref, a shallow clone whose
     first salt commit is still the boundary after REVIEW_DEEPEN_TRIES deepens of REVIEW_DEEPEN_STEP commits or whose deepen fetch fails, a boundary that changes on
     each of REVIEW_RACE_TRIES reads, a shallow file that cannot be read, no .git, or a tool checkout with no salt commit) raises Stop naming it, never None: an
     unknown cutover must not read every unstamped record as old (rule verification-report-unknown-reads). Inside `shared_deadline`, each deepen fetch gets the time

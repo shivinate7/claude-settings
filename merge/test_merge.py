@@ -15939,7 +15939,7 @@ class ReviewStampSince(unittest.TestCase):
         self.assertEqual(state, "bad", "an unstamped record created after the cutover reads %s in a repo with no merge.py: %s" % (state, why))
 
     def test_a_repo_whose_merge_py_has_no_salt_reads_an_unstamped_record_after_the_tool_cutover_as_bad(self):
-        # coordinator item 386 (2026-11-08 12:51 CST): the caller's merge/merge.py has history and no salt, so the merge tool's checkout gives the cutover
+        # the coordinator's no-salt cutover pick (decision pr-review-record, The cutover): the caller's merge/merge.py has history and no salt, so the merge tool's checkout gives the cutover
         root = self.repo(salt_at=None, branch="fixture")
         with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"), self.tool_checkout():
             cutover = review_fn(self, "review_stamp_since")(root, "fixture")
@@ -16201,7 +16201,7 @@ class ReviewStampSince(unittest.TestCase):
                          "review_stamp_since is not the committer time of the commit that adds the salt line")
 
     def test_without_a_salt_commit_the_cutover_is_the_tool_checkouts(self):
-        # coordinator item 386 (2026-11-08 12:51 CST): with no salt commit the merge tool's checkout gives the cutover, whatever the history touched
+        # the coordinator's no-salt cutover pick (decision pr-review-record, The cutover): with no salt commit the merge tool's checkout gives the cutover, whatever the history touched
         root = self.repo(salt_at=None)
         with self.tool_checkout():
             cutover = review_fn(self, "review_stamp_since")(root, "main")
