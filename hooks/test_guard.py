@@ -5610,13 +5610,38 @@ sh("git-after-cd: a git push -u in the else branch of an if on a check, is refus
 sh("git-after-cd: a git push -u in the body of an until on a check, is refused",
    "until pytest -q; do %s push -u origin b; done" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&",))
-sh("git-after-cd: a check piped to tail, then ; a git push -u, is refused and names pipefail",
+sh("git-after-cd: a check piped to tail, then ; a git push -u, is refused and names set -eo pipefail",
    "pytest -q | tail -5; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
-   carries=("pipefail",))
+   carries=("set -eo pipefail",))
 # A PIPE THAT ENDS IN true HIDES THE CHECK BEFORE IT. true is inert, so the pipe's status is true's, and the push after `;`
 # runs when pytest fails. The reason is the pipe's, which names pipefail.
-sh("git-after-cd: a check piped to true, then ; a git push -u, is refused and names pipefail",
-   "pytest | true; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("pipefail",))
+sh("git-after-cd: a check piped to true, then ; a git push -u, is refused and names set -eo pipefail",
+   "pytest | true; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("set -eo pipefail",))
+# A CHECK JOINED BY ; OR A NEWLINE TO A PIPE THAT ENDS IN tail, THEN && A PUSH. The && reads the pipe's status, which is
+# tail's, so the push runs when pytest fails. Real bash runs the push here.
+sh("git-after-cd: a check joined by ; to a pipe to tail, then && a git push -u, is refused",
+   "pytest -q; cat out.txt | tail -5 && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT)
+sh("git-after-cd: a check joined by a newline to a pipe to tail, then && a git push -u, is refused",
+   "pytest -q\ncat out.txt | tail -5 && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT)
+# A SUBSHELL THAT FAILS ON ITS CHECK, PIPED TO tail. The subshell's status is the check's, but the pipe after it takes
+# tail's status, so the && push runs when the check fails. Real bash runs the push here.
+sh("git-after-cd: a subshell check piped to tail, then && a git push -u, is refused",
+   "( pytest -q && cat out.txt ) | tail -5 && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT)
+# A CHECK JOINED BY ; TO A PIPE THAT ENDS IN head. head only reads, so the pipe's status is head's and the && push runs
+# when pytest fails. Real bash runs the push here.
+sh("git-after-cd: a check joined by ; to a pipe to head, then && a git push -u, is refused",
+   "pytest -q; ls | head -1 && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT)
+# A HEREDOC PIPED TO tee, THEN && A PUSH, WITH A CHECK IN ITS BODY. The body's $(make check) runs, but its status feeds
+# nothing, so tee's status alone decides the &&, and the push runs when make fails. Real bash runs the push here.
+sh("git-after-cd: a heredoc piped to tee with a make check in its body, then && a git push -u, is refused",
+   "cat <<EOF | tee r.md && %s push -u origin b\n$(make check)\nEOF" % VCS, "deny", "git-after-cd", cwd=NOGIT)
+# A NEGATED CHECK AS THE TEST OF AN if OR A while. The then branch and the loop body run on the failure, so a push there
+# runs on a failed check. Real bash runs each push here.
+sh("git-after-cd: a negated check as an if test, then a git push -u in the then branch, is refused",
+   "if ! pytest -q; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT)
+sh("git-after-cd: a negated check as a while test, then a git push -u in the body, is refused",
+   "while ! make check; do %s push -u origin b; done" % VCS, "deny", "git-after-cd", cwd=NOGIT)
 # A DATA SOURCE OR A LISTING PIPED TO A PUSH. Neither first stage runs a check, so no check hides behind the pipe, and
 # the push after it is no push on a failed check. Both are allowed.
 sh("git-after-cd: a cat piped to a while loop with a git push in its body, passes",
