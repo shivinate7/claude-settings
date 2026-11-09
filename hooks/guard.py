@@ -190,7 +190,9 @@ Other tools, in `judge` order:
                        pin and no default model is set. An Explore whose brief's first line
                        carries the `Audit:` marker, a reviewer on a later-round brief, a reviewer
                        whose brief's first non-blank line starts with `Fix check` (up to Sonnet;
-                       owner item 444 a) and every Opus spawn pass it. An unread record
+                       owner item 444 a) and every Opus spawn pass it. A reviewer's refusal names
+                       each of those forms, `Round N of 3 (fix check)` too, and says round 1 and
+                       the test-author run on their role's model. An unread record
                        passes and is noted as `agent-role-model-unread`. The general override lifts an
                        above-row refusal; no override lifts the no-model refusal. A Workflow
                        `agent()` call is judged as a spawn; one whose model or agentType the scan
@@ -3147,7 +3149,9 @@ ROLE_MODEL_REASON = (
 )
 # A reviewer has a second way past its row, so only its refusal names it. Rounds come from the constant at call time.
 ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
-ROLE_REVIEWER_FIX_CHECK_REMEDY = ", or, when this brief is a fix check, open its first line with the `%s` marker"
+ROLE_REVIEWER_FIX_CHECK_REMEDY = (", or, when this brief is a fix check, open its first line with the `%s` marker, "
+                                  "or with `Round N of 3 (fix check)` (N = %s)")
+ROLE_REVIEWER_FIRST_ROUND_NOTE = "; round 1 and the test-author run on their role's model"
 # An Explore has a second way past its row, so only its refusal names it, and only for a ranked model: the marker
 # does not lift a model the table does not rank.
 ROLE_EXPLORE_AUDIT_REMEDY = ", or, when this brief is an audit, open its first line with the `%s` marker"
@@ -3392,7 +3396,8 @@ def role_model_one(tool_input):
             if role == "reviewer":
                 extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(ROLE_REVIEWER_FREE_ROUNDS),
                                                     ", ".join("`Round %s of 3`" % n for n in ROLE_REVIEWER_FREE_ROUNDS))
-                extra += ROLE_REVIEWER_FIX_CHECK_REMEDY % FIX_CHECK_MARKER
+                extra += ROLE_REVIEWER_FIX_CHECK_REMEDY % (FIX_CHECK_MARKER, " or ".join(ROLE_REVIEWER_FREE_ROUNDS))
+                extra += ROLE_REVIEWER_FIRST_ROUND_NOTE
             if tool_input.get(BRIEF_UNREAD):
                 extra += ", or " + BRIEF_LITERAL_REMEDY
             return ROLE_MODEL_REASON % extra, model, False
