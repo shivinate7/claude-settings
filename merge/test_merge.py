@@ -12890,87 +12890,6 @@ class ReviewRecordForm(unittest.TestCase):
         with self.subTest(field="a malformed field above the CI line"):  # the footer does not rescue a malformed record part
             self.assertIsNone(review_fn(self, "parse_review")(record_text(kind="bogus").rstrip("\n") + REVIEW_FOOTER))
 
-class ReviewStampForm(unittest.TestCase):
-    """The Stamp line (decision pr-review-record): review_body prints one `Stamp: <16 hex>` line after Net value and just above the CI line. The
-    stamp hashes the lines above it, so parse_review refuses a body with no stamp (typed by hand, with no stamp) and a stamped body whose
-    lines were edited. Each refusal edits one field and sits beside a good record that parses."""
-
-    SIX_ROUNDS = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, FAIL",
-                  "Round 2: design-reviewer, opus, PASS", "Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, PASS")
-
-    def sizes(self):
-        """The empty record, the plain one and the full-size one, each with the stamp it prints."""
-        return (dict(rounds=(), kind="docs-only"), dict(rounds=REVIEW_PASS),
-                dict(rounds=self.SIX_ROUNDS, guard="yes", net="positive", fix=(fix_check_line(),)))
-
-    def test_a_body_from_review_body_parses_with_its_stamp_and_prints_back_the_same(self):
-        for case in self.sizes():
-            with self.subTest(case=case):
-                text = record_text(**case)
-                stamp_index(self, text)
-                rec = parse_text(self, text)
-                self.assertEqual(review_fn(self, "review_body")(**rec).splitlines(), text.splitlines())
-
-    def test_a_body_typed_without_a_stamp_is_not_a_record(self):
-        # A body typed by hand has no stamp, so the merge tool did not print it. Its fields are well formed, so only the stamp is missing.
-        parse_text(self, record_text(rounds=REVIEW_PASS))  # control: the stamped record parses
-        text = without_stamp(record_text(rounds=REVIEW_PASS))
-        self.assertIsNone(review_fn(self, "parse_review")(text), "parse_review accepted a body with no Stamp line:\n" + text)
-        self.assertEqual(review_fn(self, "review_state")(None, REVIEW_HEAD)[0], "bad")
-
-    def test_an_edited_head_in_a_stamped_body_is_not_a_record(self):
-        text = record_text(rounds=REVIEW_PASS)
-        parse_text(self, text)  # control
-        edited = replace_line(self, text, "Head: ", f"Head: {REVIEW_OLD_HEAD}")
-        self.assertIsNone(review_fn(self, "parse_review")(edited), "parse_review accepted a stamped record whose Head was edited:\n" + edited)
-
-    def test_an_edited_round_verdict_in_a_stamped_body_is_not_a_record(self):
-        text = record_text(rounds=REVIEW_PASS)
-        parse_text(self, text)  # control
-        edited = replace_line(self, text, "Round 1: ", "Round 1: reviewer, sonnet, FAIL")
-        self.assertIsNone(review_fn(self, "parse_review")(edited), "parse_review accepted a stamped record whose round verdict was edited:\n" + edited)
-
-    def test_an_edited_stamp_is_not_a_record(self):
-        text = record_text(rounds=REVIEW_PASS)
-        parse_text(self, text)  # control
-        value = text.splitlines()[stamp_index(self, text)].split(": ", 1)[1]
-        edited = replace_line(self, text, "Stamp: ", f"Stamp: {value[:-1]}{'0' if value[-1] != '0' else '1'}")
-        self.assertIsNone(review_fn(self, "parse_review")(edited), "parse_review accepted a record whose Stamp hex was edited:\n" + edited)
-
-    def test_the_stamp_is_review_stamp_of_the_lines_above_it(self):
-        text = record_text(rounds=REVIEW_PASS)
-        lines = text.splitlines()
-        i = stamp_index(self, text)
-        self.assertEqual(lines[i].split(": ", 1)[1], review_fn(self, "review_stamp")(lines[:i]),
-                         "the Stamp line is not review_stamp of the lines above it:\n" + text)
-
-    def test_trailing_spaces_on_the_body_lines_still_parse_to_the_same_fields(self):
-        # the MCP tool may add spaces at a line's end. This case spaces the body lines; the marker line has its own case below.
-        text = record_text(rounds=REVIEW_PASS)
-        lines = text.splitlines()
-        spaced = "\n".join([lines[0]] + [line + "  " for line in lines[1:]]) + "\n"
-        self.assertEqual(parse_text(self, spaced), parse_text(self, text), "trailing spaces changed what the record parses to")
-
-    def test_trailing_spaces_on_the_marker_line_still_make_a_record(self):
-        # the marker line is what makes a body a record, and the MCP tool may add spaces to it as to any other line
-        text = record_text(rounds=REVIEW_PASS)
-        lines = text.splitlines()
-        spaced = "\n".join([lines[0] + "  "] + lines[1:]) + "\n"
-        self.assertEqual(parse_text(self, spaced), parse_text(self, text), "trailing spaces on the marker line changed what the record parses to")
-
-    def test_crlf_line_ends_still_parse_to_the_same_fields(self):
-        text = record_text(rounds=REVIEW_PASS)
-        self.assertEqual(parse_text(self, text.replace("\n", "\r\n")), parse_text(self, text), "CRLF line ends changed what the record parses to")
-
-    def test_an_edited_guard_kind_pr_or_net_in_a_stamped_body_is_not_a_record(self):
-        text = record_text(rounds=REVIEW_PASS)
-        parse_text(self, text)  # control
-        for prefix, line in (("Guard or check: ", "Guard or check: yes"), ("Kind: ", "Kind: delete-only"), ("PR: ", "PR: #8"),
-                             ("Net value: ", "Net value: positive")):
-            with self.subTest(field=prefix):
-                edited = replace_line(self, text, prefix, line)
-                self.assertIsNone(review_fn(self, "parse_review")(edited), f"parse_review accepted a stamped record whose {prefix.rstrip(': ')} was edited:\n" + edited)
-
 class ReviewRecordRules(unittest.TestCase):
     """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS
     and the last design-reviewer line is PASS or absent, or the third round is done and Guard or check is no, or the third round is done
@@ -15448,6 +15367,88 @@ class ReviewStampSince(unittest.TestCase):
     def test_without_a_salt_commit_the_cutover_is_none(self):
         root = self.repo(salt_at=None)
         self.assertIsNone(review_fn(self, "review_stamp_since")(root, "main"), "a history with no salt commit gave a cutover")
+
+
+class ReviewStampForm(unittest.TestCase):
+    """The Stamp line (decision pr-review-record): review_body prints one `Stamp: <16 hex>` line after Net value and just above the CI line. The
+    stamp hashes the lines above it, so parse_review refuses a body with no stamp (typed by hand, with no stamp) and a stamped body whose
+    lines were edited. Each refusal edits one field and sits beside a good record that parses."""
+
+    SIX_ROUNDS = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, FAIL",
+                  "Round 2: design-reviewer, opus, PASS", "Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, PASS")
+
+    def sizes(self):
+        """The empty record, the plain one and the full-size one, each with the stamp it prints."""
+        return (dict(rounds=(), kind="docs-only"), dict(rounds=REVIEW_PASS),
+                dict(rounds=self.SIX_ROUNDS, guard="yes", net="positive", fix=(fix_check_line(),)))
+
+    def test_a_body_from_review_body_parses_with_its_stamp_and_prints_back_the_same(self):
+        for case in self.sizes():
+            with self.subTest(case=case):
+                text = record_text(**case)
+                stamp_index(self, text)
+                rec = parse_text(self, text)
+                self.assertEqual(review_fn(self, "review_body")(**rec).splitlines(), text.splitlines())
+
+    def test_a_body_typed_without_a_stamp_is_not_a_record(self):
+        # A body typed by hand has no stamp, so the merge tool did not print it. Its fields are well formed, so only the stamp is missing.
+        parse_text(self, record_text(rounds=REVIEW_PASS))  # control: the stamped record parses
+        text = without_stamp(record_text(rounds=REVIEW_PASS))
+        self.assertIsNone(review_fn(self, "parse_review")(text), "parse_review accepted a body with no Stamp line:\n" + text)
+        self.assertEqual(review_fn(self, "review_state")(None, REVIEW_HEAD)[0], "bad")
+
+    def test_an_edited_head_in_a_stamped_body_is_not_a_record(self):
+        text = record_text(rounds=REVIEW_PASS)
+        parse_text(self, text)  # control
+        edited = replace_line(self, text, "Head: ", f"Head: {REVIEW_OLD_HEAD}")
+        self.assertIsNone(review_fn(self, "parse_review")(edited), "parse_review accepted a stamped record whose Head was edited:\n" + edited)
+
+    def test_an_edited_round_verdict_in_a_stamped_body_is_not_a_record(self):
+        text = record_text(rounds=REVIEW_PASS)
+        parse_text(self, text)  # control
+        edited = replace_line(self, text, "Round 1: ", "Round 1: reviewer, sonnet, FAIL")
+        self.assertIsNone(review_fn(self, "parse_review")(edited), "parse_review accepted a stamped record whose round verdict was edited:\n" + edited)
+
+    def test_an_edited_stamp_is_not_a_record(self):
+        text = record_text(rounds=REVIEW_PASS)
+        parse_text(self, text)  # control
+        value = text.splitlines()[stamp_index(self, text)].split(": ", 1)[1]
+        edited = replace_line(self, text, "Stamp: ", f"Stamp: {value[:-1]}{'0' if value[-1] != '0' else '1'}")
+        self.assertIsNone(review_fn(self, "parse_review")(edited), "parse_review accepted a record whose Stamp hex was edited:\n" + edited)
+
+    def test_the_stamp_is_review_stamp_of_the_lines_above_it(self):
+        text = record_text(rounds=REVIEW_PASS)
+        lines = text.splitlines()
+        i = stamp_index(self, text)
+        self.assertEqual(lines[i].split(": ", 1)[1], review_fn(self, "review_stamp")(lines[:i]),
+                         "the Stamp line is not review_stamp of the lines above it:\n" + text)
+
+    def test_trailing_spaces_on_the_body_lines_still_parse_to_the_same_fields(self):
+        # the MCP tool may add spaces at a line's end. This case spaces the body lines; the marker line has its own case below.
+        text = record_text(rounds=REVIEW_PASS)
+        lines = text.splitlines()
+        spaced = "\n".join([lines[0]] + [line + "  " for line in lines[1:]]) + "\n"
+        self.assertEqual(parse_text(self, spaced), parse_text(self, text), "trailing spaces changed what the record parses to")
+
+    def test_trailing_spaces_on_the_marker_line_still_make_a_record(self):
+        # the marker line is what makes a body a record, and the MCP tool may add spaces to it as to any other line
+        text = record_text(rounds=REVIEW_PASS)
+        lines = text.splitlines()
+        spaced = "\n".join([lines[0] + "  "] + lines[1:]) + "\n"
+        self.assertEqual(parse_text(self, spaced), parse_text(self, text), "trailing spaces on the marker line changed what the record parses to")
+
+    def test_crlf_line_ends_still_parse_to_the_same_fields(self):
+        text = record_text(rounds=REVIEW_PASS)
+        self.assertEqual(parse_text(self, text.replace("\n", "\r\n")), parse_text(self, text), "CRLF line ends changed what the record parses to")
+
+    def test_an_edited_guard_kind_pr_or_net_in_a_stamped_body_is_not_a_record(self):
+        text = record_text(rounds=REVIEW_PASS)
+        parse_text(self, text)  # control
+        for prefix, line in (("Guard or check: ", "Guard or check: yes"), ("Kind: ", "Kind: delete-only"), ("PR: ", "PR: #8"),
+                             ("Net value: ", "Net value: positive")):
+            with self.subTest(field=prefix):
+                edited = replace_line(self, text, prefix, line)
+                self.assertIsNone(review_fn(self, "parse_review")(edited), f"parse_review accepted a stamped record whose {prefix.rstrip(': ')} was edited:\n" + edited)
 
 
 if __name__ == "__main__":
