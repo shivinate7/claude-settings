@@ -5489,12 +5489,12 @@ COORDINATOR_SCOPE_REASON = (
 # interpreter word; it adds no process. A spawn or Workflow call reads nothing else. A call to one of the five GitHub MCP names
 # (COORDINATOR_MCP_WRITE_TOOLS, COORDINATOR_MERGE_TOOLS) starts the guard once, in every session. A merge call adds the merge
 # tool's own gh reads under MERGE_READ_TIMEOUT: 9 for a green numbered head with no other ready PR. A test pins the count.
-COORDINATOR_AGENT_ROLES = ("Plan", "Explore", "claude-code-guide")
+COORDINATOR_AGENT_ROLES = ("Plan", "Explore", "claude-code-guide", REFUTER_ROLE)
 COORDINATOR_SPAWN_REASON = (
     "Rule (Roles): a coordinator briefs lanes and runs no build or review agent of its own "
-    "(decision session-tiers, Spawns and merges: a spawn of any type but Plan, Explore and claude-code-guide is refused). "
+    "(decision session-tiers, Spawns and merges: a spawn of any type but Plan, Explore, claude-code-guide and refuter is refused). "
     "Remedy: brief a lane session to do this work, with the files and the check that proves it. "
-    "Only Plan, Explore and claude-code-guide agents run in a coordinator session."
+    "Only Plan, Explore, claude-code-guide and refuter agents run in a coordinator session."
 )
 COORDINATOR_MERGE_REASON = (
     "Rule (Roles): in a coordinator build only the batch runner merges "
