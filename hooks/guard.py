@@ -2216,7 +2216,17 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         # Another session's scratchpad is neither this one's nor "outside a repository".
         if in_any_session_scratchpad(full):
             return target
-        return "" if repo_rel(target, cwd, outside=False) is None else target
+        if repo_rel(target, cwd, outside=False) is None:
+            return ""
+        # The merge route: a test-author resolves a whole merge that has a test conflict, so a product path git left
+        # conflicted is its own.
+        # Git runs only here, for a path refused so far, and the answer reads none of the target's text.
+        if role == AUTHOR_ROLE:
+            where = norm(os.path.normpath(full))
+            where = where[:len(where) - len(rel)] if rel and where.endswith(rel) else ""
+            if where and norm(rel).lstrip("/") in merge_route_paths(merge_conflicts(where) or ()):
+                return ""
+        return target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
     if builder_test_path(target, cwd):
@@ -2286,13 +2296,47 @@ def changed_paths(root: str, old: str, new=None, top: str = ""):
 
 
 def merge_tree(root: str, ours: str, theirs: str):
-    """The tree git's own merge of two commits makes, each conflict left as markers; None when git
-    failed. A path that differs from it is one the agent resolved or added. Needs git 2.38 or newer
-    (`merge-tree --write-tree`), and writes the merged objects to the object store."""
+    """`(tree, conflicts)` for git's own merge of two commits: the tree it makes, each conflict left as
+    markers, and the sorted paths it left conflicted. None when git failed. A path that differs from the
+    tree is one the agent resolved or added. This is the one home for "conflicted in this merge": the
+    index list goes empty after `git add`. Needs git 2.38 or newer (`merge-tree --write-tree`), and
+    writes the merged objects to the object store.
+
+    The `-z` output is the tree id, then one `<mode> <id> <stage>\\t<path>` entry per conflicted stage,
+    each ended by NUL, then an empty entry before any message (`--no-messages` leaves none)."""
     answer = guard_core._git(root, "merge-tree", "--write-tree", "--no-messages", "-z", ours, theirs)
     if answer is None or answer.returncode not in (0, 1):
         return None
-    return answer.stdout.split("\0", 1)[0].strip() or None
+    tree, *entries = answer.stdout.split("\0")
+    if not tree.strip():
+        return None
+    conflicts = set()
+    for entry in entries:
+        if not entry:
+            break
+        conflicts.add(entry.partition("\t")[2])
+    return tree.strip(), sorted(conflicts)
+
+
+def merge_route_paths(conflicts):
+    """The paths a test-author owns in a merge that left `conflicts` (decision builders-cannot-edit-tests).
+    The route needs a test path among the conflicts, and covers product paths only: a workflow, test
+    config or manifest keeps its own content check (`role_offences`), so it is no product path."""
+    if not any(is_test_rel(path) for path in conflicts):
+        return []
+    return [path for path in conflicts if not (is_workflow_rel(path) or author_path_ok(path))]
+
+
+def merge_conflicts(root: str):
+    """The paths git's own merge of HEAD and MERGE_HEAD left conflicted, for the merge in progress at
+    `root`; [] when no merge is in progress; None when git failed."""
+    merging = guard_core._git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+    if merging is None or merging.returncode not in (0, 1):
+        return None
+    if merging.returncode:
+        return []
+    merged = merge_tree(root, "HEAD", merging.stdout.strip())
+    return None if merged is None else merged[1]
 
 
 def upstream_kept(root: str, orig: str, onto: str):
@@ -2312,8 +2356,10 @@ def upstream_kept(root: str, orig: str, onto: str):
 
 
 def own_changes(root: str, top: str = ""):
-    """The agent's own change, as a list of `(old, new, paths, kind)`; None when git could not answer:
-    unknown, never clear. `new` None is the working tree, and `old` '' is no commit.
+    """The agent's own change, as a list of `(old, new, paths, kind, conflicts)`; None when git could not
+    answer: unknown, never clear. `new` None is the working tree, and `old` '' is no commit. `conflicts`
+    holds the paths git's own merge left conflicted, for a 2-parent merge commit and for the working tree
+    while a merge is in progress, and is empty for any other change.
 
     OWN (a builder's test path in it is refused):
       - each commit the agent made (HEAD reflog `commit`, `commit (amend)`, `commit (merge)`) that HEAD
@@ -2358,33 +2404,39 @@ def own_changes(root: str, top: str = ""):
         parents = parents.stdout.split()
         if len(parents) > 2:
             return None
-        old = merge_tree(root, *parents) if len(parents) == 2 else (parents[0] if parents else "")
-        if old is None:
-            return None
+        conflicts = ()
+        if len(parents) == 2:
+            merged = merge_tree(root, *parents)
+            if merged is None:
+                return None
+            old, conflicts = merged
+        else:
+            old = parents[0] if parents else ""
         paths = (changed_paths(root, old, sha) if old else
                  git_names(root, "diff-tree", "--no-relative", "--root", "-r", "--name-only",
                            "--no-commit-id", "-z", "--no-renames", sha))
         if paths is None:
             return None
-        changes.append((old, sha, paths, kind))
-    old = "HEAD"
+        changes.append((old, sha, paths, kind, conflicts))
+    old, conflicts = "HEAD", ()
     if merging.returncode == 0:
-        old = merge_tree(root, "HEAD", merging.stdout.strip())
-        if old is None:
+        merged = merge_tree(root, "HEAD", merging.stdout.strip())
+        if merged is None:
             return None
+        old, conflicts = merged
     paths = changed_paths(root, old, top=top)
     if paths is None:
         return None
     replaying = merging.returncode != 0 and any(
         os.path.exists(os.path.join(gitdir.stdout.strip(), mark)) for mark in REPLAY_MARKS)
-    changes.append((old, None, paths, NOTED if replaying else OWN))
+    changes.append((old, None, paths, NOTED if replaying else OWN, conflicts))
     for index, (sha, subject) in enumerate(entries):
         if index and entry_kind(subject) == "start":
             kept = upstream_kept(root, entries[index - 1][0], sha)
             if kept is None:
                 return None
             if kept:
-                changes.append((sha, None, kept, KEPT))
+                changes.append((sha, None, kept, KEPT, ()))
     return changes
 
 
@@ -2450,15 +2502,18 @@ def text_at(root: str, rev, rel: str, top: str = "") -> str:
     return answer.stdout if answer is not None and answer.returncode == 0 else ""
 
 
-def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
+def role_offences(root: str, top: str, role: str, paths, old: str, new=None, conflicts=()):
     """The paths among `paths`, changed from `old` to `new` (see `own_changes`), whose change the role
-    may not make. Each path is checked as spelled and as resolved through symlinks."""
+    may not make. Each path is checked as spelled and as resolved through symlinks. A test-author owns a
+    path in `conflicts`: it resolves the whole merge (decision builders-cannot-edit-tests)."""
     found = []
     for rel in paths:
         # `is_test_rel` is the one place a backslash becomes `/`. A path outside the repository
         # reads `../...`, which no role owns.
         real = os.path.realpath(os.path.join(top, rel))
         names = [rel, os.path.relpath(real, top)]
+        if role == AUTHOR_ROLE and all(norm(n) in merge_route_paths(conflicts) for n in names):
+            continue
         if role == AUTHOR_ROLE and is_workflow_rel(rel) and all(
                 is_workflow_rel(n) or author_path_ok(n) for n in names):
             bad = not workflow_test_steps_only(text_at(root, old, rel, top), text_at(root, new, rel, top))
@@ -2494,10 +2549,10 @@ def diff_violation(root: str, role: str):
         return None, []
     builder = role == BUILDER_ROLE
     noted = []
-    for old, new, paths, kind in changes:
+    for old, new, paths, kind, conflicts in changes:
         if kind == KEPT and not builder:
             continue
-        found = role_offences(root, top, role, paths, old, new)
+        found = role_offences(root, top, role, paths, old, new, conflicts)
         if found is None:
             return None, []
         for rel in found:
@@ -2519,7 +2574,7 @@ def builder_diff_reason() -> str:
         "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
         "you added. If a commit of yours holds the change, stop and report it. "
         "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
-        "and report the conflict to the orchestrator; a test-author resolves it. "
+        "and report it, so the orchestrator hands the whole merge to a test-author. "
         "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
     )
 
