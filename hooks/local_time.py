@@ -58,7 +58,8 @@ CST = timedelta(hours=-6)
 # The inbox heading and stamp, written here and read by feedback_guard.py.
 HEADING_PREFIX = "### "
 TIME_PREFIX = "Local time: "
-PRINTED_LINES = ("TIME_PREFIX",)  # lint/check_hook_output_pins.py: tests build the line from these
+OVERRIDE_ONCE_PREFIX = "Override: the next refused act goes through, once. "
+PRINTED_LINES = ("TIME_PREFIX", "OVERRIDE_ONCE_PREFIX")  # lint/check_hook_output_pins.py: tests build the line from these
 STAMP_FORMAT = "%Y-%m-%d %H:%M"
 STAMP_ZONES = {"CDT": "UTC-05:00", "CST": "UTC-06:00"}  # zone name -> offset text
 # Matches a stamp; groups 1 and 2 are its hour and minute. It mirrors STAMP_FORMAT.
@@ -110,7 +111,7 @@ def override_line(result):
         who = "%s spawns" % roles if roles else "spawns"
         return "Opus override: Opus %s go through without the ask until %s." % (who, central_hhmm(until))
     if kind == "once":
-        return "Override: the next refused act goes through, once. It ends at %s if unused." % central_hhmm(until)
+        return OVERRIDE_ONCE_PREFIX + "It ends at %s if unused." % central_hhmm(until)
     return "Override: every refused act goes through until %s." % central_hhmm(until)
 
 

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Fails when a test file holds a literal copy of a line a hook prints.
 
-A hook declares the text it prints: `PRINTED_LINES = ("NAME", ...)`, a module-level tuple that
-names module-level string constants of the hook. A test that spells that text out as a literal goes
+A hook declares the text it prints: `PRINTED_LINES = ("NAME", ...)`, a module-level tuple or list
+(annotated or not) of string literals that name module-level string constants of the hook. A hook with
+no PRINTED_LINES is not opted in and is skipped. A test that spells that text out as a literal goes
 stale when the hook changes the line. The test builds its line from the constant instead.
 
-A pin is a string token in `hooks/test_*.py` or `lint/test_*.py` that starts with a constant's text
-(the constant after `lstrip`). Not a pin: text in the middle of a string, a string that is a whole
-statement (a docstring), a comment, and the hook's own `hooks/test_<hook>.py`, which may pin its own
-hook. A constant under 8 characters (stripped) is ignored: it would match too much. An f-string
+A pin is a string token in `test_*.py` or `*_test.py` under `hooks/` or `lint/` that starts with a
+constant's text (both sides after `lstrip`). Not a pin: text in the middle of a string, a string that
+is a whole statement (a docstring), a comment, and the hook's own `hooks/test_<hook>.py` or
+`hooks/<hook>_test.py`, which may pin its own hook. A constant under 8 characters (stripped) is ignored: it would match too much. An f-string
 counts when its first literal part starts with the text.
 
 Scanned with `ast` for the hooks and `tokenize` for the tests, so a comment opener inside a string,
@@ -19,6 +20,9 @@ Cost: no process start. It reads each hooks/*.py and each test file once per run
     python3 lint/check_hook_output_pins.py [--root DIR]     # DIR defaults to this script's repo
 
 Exit 0 clean and silent, 1 on a FAIL line (one per pin), 2 when an input cannot be read (never green).
+Unknown (exit 2): a file that does not parse or decode; a PRINTED_LINES that is not a tuple or list
+(names the hook and PRINTED_LINES); a member that is not a string literal, or that names no module-level
+plain string constant of the hook, such as a missing name or a concatenation (names the hook and the member).
 """
 import ast
 import glob
@@ -39,6 +43,10 @@ LINE_START = (None, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT)
 
 class Unknown(Exception):
     pass
+
+
+def is_test_name(base):
+    return base.startswith("test_") or base.endswith("_test.py")
 
 
 def read_tree(path, rel):
@@ -66,13 +74,25 @@ def string_constants(tree):
     return out
 
 
-def declared_names(tree):
+def declared_names(tree, rel):
+    """Names listed in the hook's PRINTED_LINES, or [] when it declares none. Raises Unknown on a shape it cannot read."""
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == DECLARATION
                                                 for t in node.targets):
-            if isinstance(node.value, ast.Tuple):
-                return [e.value for e in node.value.elts
-                        if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+            value = node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
+                and node.target.id == DECLARATION and node.value is not None:
+            value = node.value
+        else:
+            continue
+        if not isinstance(value, (ast.Tuple, ast.List)):
+            raise Unknown("%s: %s is not a tuple or list of string literals" % (rel, DECLARATION))
+        for e in value.elts:
+            if not (isinstance(e, ast.Constant) and isinstance(e.value, str)):
+                member = e.id if isinstance(e, ast.Name) else ast.unparse(e)
+                raise Unknown("%s: %s member %s is not a string literal naming a constant"
+                              % (rel, DECLARATION, member))
+        return [e.value for e in value.elts]
     return []
 
 
@@ -85,14 +105,16 @@ def read_printed(root):
     # The folder is escaped so a root such as r[x] is read as a path, not as a glob pattern.
     for path in sorted(glob.glob(os.path.join(glob.escape(hooks), "*.py"))):
         base = os.path.basename(path)
-        if base.startswith("test_"):
+        if is_test_name(base):
             continue
         rel = "hooks/" + base
         scanned += 1
         tree = read_tree(path, rel)
         consts = string_constants(tree)
-        for name in declared_names(tree):
-            text = consts.get(name, "").lstrip()
+        for name in declared_names(tree, rel):
+            if name not in consts:
+                raise Unknown("%s: %s names %s, which is not a module-level string constant" % (rel, DECLARATION, name))
+            text = consts[name].lstrip()
             if len(text.strip()) >= MIN_LENGTH:
                 printed.append((rel, name, text))
     if not scanned:  # nothing scanned must never read as a pass
@@ -171,14 +193,17 @@ def find_pins(root):
     printed = read_printed(root)
     pins = []
     for folder in TEST_FOLDERS:
-        pattern = os.path.join(glob.escape(os.path.join(root, folder)), "test_*.py")
-        for path in sorted(glob.glob(pattern)):
+        folder_path = glob.escape(os.path.join(root, folder))
+        found = set(glob.glob(os.path.join(folder_path, "test_*.py")))
+        found.update(glob.glob(os.path.join(folder_path, "*_test.py")))
+        for path in sorted(found):
             rel = folder + "/" + os.path.basename(path)
             toks = read_tokens(path, rel)
             for line, text in string_starts(toks):
                 for hook, name, want in printed:
-                    own = rel == "hooks/test_" + hook[len("hooks/"):]
-                    if not own and text.startswith(want):
+                    stem = hook[len("hooks/"):-len(".py")]
+                    own = rel in ("hooks/test_%s.py" % stem, "hooks/%s_test.py" % stem)
+                    if not own and text.lstrip().startswith(want):
                         pins.append({"test": rel, "line": line, "hook": hook, "name": name})
     return sorted(pins, key=lambda p: (p["test"], p["line"], p["hook"], p["name"]))
 
