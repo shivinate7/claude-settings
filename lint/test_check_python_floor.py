@@ -21,6 +21,7 @@ Interface the check must meet (the builder builds to it):
 
 A case that expects a finding fails on a check that flags nothing. The controls expect silence.
 """
+import ast
 import os
 import re
 import shlex
@@ -122,6 +123,12 @@ def shared_cache():
 def fresh_cache():
     """A cache path that does not exist yet, under the run folder."""
     return os.path.join(tempfile.mkdtemp(prefix="cache_", dir=RUN_FOLDER), "vermin")
+
+
+def cache_python(cache):
+    """The python inside a cache venv, for fixtures that change what the cache holds."""
+    parts = ("Scripts", "python.exe") if os.name == "nt" else ("bin", "python")
+    return os.path.join(cache, *parts)
 
 
 def empty_index():
@@ -605,6 +612,43 @@ class Bootstrap(unittest.TestCase):
                          % (code, out))
         self.assertTrue(os.path.isfile(os.path.join(ours, ".ok")), "the pinned cache %s was not built" % ours)
 
+    def test_install_outside_the_venv_leaves_no_marker_and_a_later_run_rebuilds(self):
+        python = bare_python()
+        pin = require_pin()
+        cache = fresh_cache()
+        target = os.path.join(tempfile.mkdtemp(prefix="target_", dir=RUN_FOLDER), "lib")
+        code, out = run_check(tree({"hooks/x.py": IGLOB}),
+                              env={"FLOOR_VENV_DIR": cache, "PIP_TARGET": target}, python=python)
+        self.assertEqual(code, 2, "an install that put vermin outside the venv exited %d, not 2: %r" % (code, out))
+        self.assertFalse(os.path.exists(self.marker(cache)),
+                         "a valid .ok marker was written for a venv that cannot import vermin")
+        self.assertIn(pin, out, "the failed install does not name vermin %s: %r" % (pin, out))
+        code, out = run_check(tree({"hooks/x.py": IGLOB}), env={"FLOOR_VENV_DIR": cache, "PIP_TARGET": None},
+                              python=python)
+        self.assertEqual(code, 1, "a later run with PIP_TARGET unset did not rebuild and succeed: exit %d, output %r"
+                         % (code, out))
+        self.assertTrue(os.path.isfile(self.marker(cache)), "the rebuilt cache has no .ok marker")
+
+    def test_a_cache_with_a_marker_but_no_vermin_is_rebuilt(self):
+        python = bare_python()
+        cache = fresh_cache()
+        code, out = run_check(tree({"hooks/x.py": IGLOB}), env={"FLOOR_VENV_DIR": cache}, python=python)
+        self.assertEqual(code, 1, "the first run did not bootstrap: exit %d, output %r" % (code, out))
+        removed = subprocess.run([cache_python(cache), "-m", "pip", "uninstall", "-y", "vermin"],
+                                 capture_output=True, text=True, timeout=300)
+        self.assertEqual(removed.returncode, 0, "fixture: could not take vermin out of the cache: %s"
+                         % removed.stderr.strip()[-300:])
+        probe = subprocess.run([cache_python(cache), "-c", "import vermin"], capture_output=True, text=True,
+                               timeout=120)
+        self.assertNotEqual(probe.returncode, 0, "fixture: vermin still imports from the cache after uninstall")
+        self.assertTrue(os.path.isfile(self.marker(cache)), "fixture: the cache lost its .ok marker")
+        code, out = run_check(tree({"hooks/x.py": IGLOB}), env={"FLOOR_VENV_DIR": cache}, python=python)
+        self.assertEqual(code, 1, "a cache with .ok but no vermin was used, not rebuilt: exit %d, output %r"
+                         % (code, out))
+        self.assertTrue(any("iglob" in line for line in naming(out, "x.py")),
+                        "the rebuilt check did not flag hooks/x.py's iglob: %r" % out)
+        self.assertTrue(os.path.isfile(self.marker(cache)), "the rebuilt cache has no .ok marker")
+
 
 class OneHome(unittest.TestCase):
     """The pin is written in one place, and CI installs no vermin of its own."""
@@ -630,6 +674,63 @@ class OneHome(unittest.TestCase):
                             hits.add(os.path.relpath(path, REPO).replace(os.sep, "/"))
         self.assertEqual(hits, {"lint/check_python_floor.py"},
                          "the pin %s is written outside the check: %s" % (pin, sorted(hits)))
+
+
+class CacheFolder(unittest.TestCase):
+    """FLOOR_VENV_DIR may name a folder that already exists. The check refuses one that holds someone's files, and
+    builds in an empty one, in one that holds an old venv, and where nothing exists."""
+
+    def fixture_folder(self):
+        return os.path.join(tempfile.mkdtemp(prefix="folder_", dir=RUN_FOLDER), "vermin")
+
+    def test_a_non_empty_folder_with_no_marker_or_venv_is_refused_and_kept(self):
+        python = bare_python()
+        folder = self.fixture_folder()
+        os.makedirs(folder)
+        notes = os.path.join(folder, "notes.txt")
+        with open(notes, "w", encoding="utf-8") as handle:
+            handle.write("not the check's to delete\n")
+        code, out = run_check(tree({"hooks/x.py": IGLOB}), env={"FLOOR_VENV_DIR": folder}, python=python)
+        self.assertTrue(os.path.isfile(notes), "the check deleted notes.txt from a non-empty FLOOR_VENV_DIR")
+        self.assertEqual(code, 2, "a non-empty folder with no .ok and no pyvenv.cfg exited %d, not 2: %r"
+                         % (code, out))
+        self.assertIn(folder, out, "the refusal does not name the folder %s: %r" % (folder, out))
+
+    def test_an_empty_folder_is_built(self):
+        python = bare_python()
+        folder = self.fixture_folder()
+        os.makedirs(folder)
+        code, out = run_check(tree({"hooks/x.py": IGLOB}), env={"FLOOR_VENV_DIR": folder}, python=python)
+        self.assertEqual(code, 1, "an empty FLOOR_VENV_DIR was not built: exit %d, output %r" % (code, out))
+        self.assertTrue(os.path.isfile(os.path.join(folder, ".ok")),
+                        "the empty folder has no .ok marker after the build")
+
+    def test_a_folder_with_an_old_pyvenv_cfg_is_rebuilt(self):
+        python = bare_python()
+        folder = self.fixture_folder()
+        os.makedirs(folder)
+        with open(os.path.join(folder, "pyvenv.cfg"), "w", encoding="utf-8") as handle:
+            handle.write("home = /nowhere\n")
+        code, out = run_check(tree({"hooks/x.py": IGLOB}), env={"FLOOR_VENV_DIR": folder}, python=python)
+        self.assertEqual(code, 1, "a folder holding an old venv was not rebuilt: exit %d, output %r" % (code, out))
+        self.assertTrue(os.path.isfile(os.path.join(folder, ".ok")), "the rebuilt folder has no .ok marker")
+
+    def test_a_missing_folder_is_built(self):
+        python = bare_python()
+        folder = self.fixture_folder()
+        code, out = run_check(tree({"hooks/x.py": IGLOB}), env={"FLOOR_VENV_DIR": folder}, python=python)
+        self.assertEqual(code, 1, "a missing FLOOR_VENV_DIR was not built: exit %d, output %r" % (code, out))
+        self.assertTrue(os.path.isfile(os.path.join(folder, ".ok")), "the built folder has no .ok marker")
+
+
+class Docstring(unittest.TestCase):
+    def test_cost_line_says_three_process_starts_and_15_mb(self):
+        with open(CHECK, encoding="utf-8") as handle:
+            doc = " ".join((ast.get_docstring(ast.parse(handle.read())) or "").split())
+        self.assertIn("Cost:", doc, "the module docstring has no Cost: line")
+        self.assertIn("three process starts", doc,
+                      "the Cost line does not say three process starts (venv create, ensurepip child, pip install)")
+        self.assertIn("15 MB", doc, "the Cost line does not say about 15 MB")
 
 
 if __name__ == "__main__":
