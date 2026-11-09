@@ -1,0 +1,10 @@
+{
+  "title": "A merge of main keeps main's own lines verbatim; a lane's change to them goes in a lane commit",
+  "phase": "now",
+  "status": "todo",
+  "order": 932,
+  "owner": "coordinator",
+  "why": "Coordinator 15:55 CST Nov 9, three sightings today: a merge of main rewrote main's own lines and covered it with a `Drops-lines` trailer. #2463 reflowed main's push_calls import; #2385 renamed `_archive_transcripts` and rewrote `_archive_tags`; #1561 made four \"reworded, not lost\" drops. Harm: lane changes to main's code hide in a merge commit, which round 3 reads as a resolution, so they escape review as lane work.",
+  "note": "Check, the lane's plan picks one: (a) the silent-undo check (lint/check_silent_undo.py) refuses a merge-commit hunk that changes a line main added since the merge base, beyond conflict hunks, unless the change is in a later lane commit; or (b) at least it refuses a `Drops-lines` reason that says reworded, reflowed or renamed. Related: notes-trailer-per-slug (ready), no-undo-lane-commits (doing), merge-main-silent-undo-precheck (done). Unassigned.",
+  "updatedAt": "2026-11-09T15:55:00-06:00"
+}
