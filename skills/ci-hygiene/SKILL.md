@@ -60,29 +60,51 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
    `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
-   each lane head before the join. A red lane does not join. Before it marks the integration PR
+   each lane head before the build starts, once per lane. A red lane does not join. Before it marks the integration PR
    ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration branch>` on the batch
    head. A FAIL keeps it a draft. A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
+   **When the build starts, freeze the lane set** (decision `batch-freeze-lane-set`, a batch's lane set
+   freezes at its build). A release or a drop that arrives after that goes to the next batch. It never
+   triggers a rebuild. The one change after the freeze is the drop of a red run's blamed lane, with any
+   lane that depends on it. Build the batch as a draft,
+   run the batch-head lane lint, then mark the integration PR ready, with no rebuild between
+   (decision `draft-until-reviewed`). A draft run skips every job, so never rebuild a draft batch
+   only to close it. The
+   next batch builds and runs on top of the one in CI. While its head holds the running batch's head,
+   the running batch may merge (decision `no-merge-during-batch-ci`, the contains rule). A drop
+   changes the running batch's head, so the brake refuses that merge until the next batch is built
+   on the new head.
+   The merge tool will enforce the freeze (step `batch-freeze-lane-set-enforce`, not built yet). Until
+   it lands, the batch runner holds the freeze by hand.
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
    the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
    each lane PR closes as replaced.
-   When the integration run is red, read the failing job. Find the lane whose files it touches. Drop
-   that lane and any lane that depends on it. Rebuild the branch from main without them. Never
+   When the integration run is red, read the failing job. Find the lane whose files it touches.
+   Search one lane merge commit at a time: for each lane merge commit `M` on the integration branch,
+   run `git diff --name-only M^1 M` or `git log -1 -m -S<text> M` as its own command, and print the
+   lane's name on the line before its hits. Each hit then names exactly one lane. Never run one
+   search over the whole range, such as `git log -p -S<text> main..<integration>`, and never run
+   two searches in one command: their output joins and the hits blame the wrong lane. A hit in two
+   lanes is two names, so read each lane's diff before you drop either. Example: the failing job
+   reads `lint/foo.py`. Lane A's own search lists `lint/foo.py` and lane B's lists nothing. Blame A.
+   (At 17:10 CST on Nov 8 two searches printed together, so the runner blamed lane B for lane A's
+   red.) Drop that lane and any lane that depends on it. Rebuild the branch from main without them. Never
    revert. A lane dropped by a revert re-applies its diff after it merges main, and checks that each
    file is there. A job that ends at its cap with no red CI step is re-capped or split. That is not a
    reason to drop the lane.
-   A lane that is red on form (record format, version bump, lint), not on a behaviour test, is fixed
-   and re-merged instead. Do that for a fix of a few lines in its own files, and only for its
-   first such fix in this batch. A second red drops the lane.
+   A lane that is red on form (record format, version bump, lint) is dropped like any red lane. Its
+   fix goes in its own lane, and it joins the next batch.
    A lint red that `bin/ste-changed` passes, while it blames an old `ste-lint` pin, is not a strike
    (decision `action-pins-follow-sessions`, CI pins follow the session's tools). The session moves
    that pin to claude-settings main in a lane of its own, with no question. That lane's reviewer
    checks only that it changes pin lines alone, to a main commit that descends from the old pin.
    Put the fix on the lane branch, never on the integration branch. Run CI again, once, and merge the
-   rest. Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane
+   rest. A drop restarts CI at once and re-lints no lane that stays: each lane was linted at hand-off and
+   once at the join, before the build, and the batch head once, before ready (decision
+   `batch-freeze-lane-set`). Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane
    (rule `roles-review-cap-three`, three review rounds) is the exception. Drop it and park it. It
    gets no fix lane until the owner decides.
    No merge to main while a batch's run is in progress. The owner is included. Decision

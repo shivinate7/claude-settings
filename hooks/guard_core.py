@@ -114,6 +114,14 @@ class PosixScript(str):
     PowerShell call. `split_segments` keeps the type on each segment, as for PowerShellScript."""
 
 
+# PowerShell reads each of these as the ASCII quote beside it: the double family
+# opens and ends a `"` string, the single family a `'` string. Bash reads them as ordinary characters.
+PS_DOUBLE_QUOTES = "\u201c\u201d\u201e"
+PS_SINGLE_QUOTES = "\u2018\u2019\u201a\u201b"
+PS_STRAIGHT_QUOTES = str.maketrans({**dict.fromkeys(map(ord, PS_DOUBLE_QUOTES), '"'),
+                                    **dict.fromkeys(map(ord, PS_SINGLE_QUOTES), "'")})
+
+
 def is_powershell(text) -> bool:
     """True when `text` is read with PowerShell's rules: the tool is PowerShell, or the text is a
     script that pwsh or `cmd /c` runs. A PosixScript never is."""
@@ -443,11 +451,19 @@ def segment_tokens(segment: str):
     source = ""
     if is_powershell(segment):
         segment = segment.replace("\\", "\\\\")
-        if "''" in segment or '""' in segment or "`" in segment:
-            segment = _powershell_values(segment)
-    elif "`" in segment:
-        source = segment   # bash text: shlex keeps its backtick substitutions as they stand
-    found = _segment_tokens(segment)
+        # A smart quote is a quote, so read the text with each as its ASCII twin. A text that then
+        # fails shlex (a lone `\u2019` in `don\u2019t` that PowerShell would read as a quote too) is read as it stands.
+        found = None
+        for text in dict.fromkeys((segment.translate(PS_STRAIGHT_QUOTES), segment)):
+            if "''" in text or '""' in text or "`" in text:
+                text = _powershell_values(text)
+            found = _segment_tokens(text)
+            if found is not None:
+                break
+    else:
+        if "`" in segment:
+            source = segment   # bash text: shlex keeps its backtick substitutions as they stand
+        found = _segment_tokens(segment)
     if found is None:
         return None
     tokens, quoted = found
