@@ -10453,6 +10453,61 @@ for _cmd in (_BRACKET_NEGATED, _BRACKET_NEGATED_R, _BRACKET_ALPHA):
     sh("env: walk safety hole, a bracket class in grep's include picks the env file in sub, refused: " + _cmd, _cmd,
        "deny", "env-file", cwd=ENVWALK_NESTED)
 
+# A bracket class with `!` after a letter. Real grep reads `[x!]` as the members `x` and `!`, so `.en[x!]*` picks
+# `.enx` and `.en!`, never `.env`. The guard writes the class as `[!x]`, a negated class that matches `v`. So the
+# exclude `.en[x!]*` seems to exclude `.env`, which grep does not, and rg's include `.en[x!]*` seems to name it,
+# which rg does not. The deny row searches sub/.env, which ENVWALK_NESTED holds. Its control runs the same form over
+# ENVWALK_SUB_CLEAN, a sub folder with no env file. `.en[v!]*` gets no row: the guard refuses it on head by its
+# first member, so it is not a hole.
+_GLOB_EV_EXCLUDE = "grep -r --exclude='.en[x!]*' K sub"
+sh("env: glob safety hole, an exclude with `!` after a letter seems to drop the env file in sub, refused: "
+   + _GLOB_EV_EXCLUDE, _GLOB_EV_EXCLUDE, "deny", "env-file", cwd=ENVWALK_NESTED)
+sh("env: glob control, the same exclude over a sub folder with no env file, allowed: " + _GLOB_EV_EXCLUDE,
+   _GLOB_EV_EXCLUDE, "allow", cwd=ENVWALK_SUB_CLEAN)
+_GLOB_EX_RG = "rg -g '.en[x!]*' K sub"
+sh("env: glob false alarm, rg's include `.en[x!]*` names no env file, allowed: " + _GLOB_EX_RG, _GLOB_EX_RG, "allow",
+   cwd=ENVWALK_NESTED)
+
+# The find, brace and exclude-dir rows need env files under sub and abox. ENVWALK_NESTED keeps its one env file,
+# so the rows that use it keep their reasons. ENVGLOB_HELD holds sub/abc/.env and abox/abc/.env, and sub/y
+# holds only a README. The env file sits in sub/abc and nowhere else under sub. The exclude-dir control over sub is
+# allowed for the reason its row names: grep skips the command-line folder sub, so it reads nothing under sub.
+ENVGLOB_HELD = os.path.join(ROOT, "envglob-held")    # env files in sub/abc and abox/abc, and a README in each folder
+ENVGLOB_CLEAN = os.path.join(ROOT, "envglob-clean")  # the same folders, each with a README and no env file
+ENVGLOB_FOLDERS = (("sub", "abc"), ("sub", "y"), ("abox", "abc"))  # the folders under each fixture
+
+
+def build_envglob_folders():
+    for folder in ENVGLOB_FOLDERS:
+        write(os.path.join(ENVGLOB_CLEAN, *folder, "README.md"), "clean\n")
+        write(os.path.join(ENVGLOB_HELD, *folder, "README.md"), "held\n")
+    write(os.path.join(ENVGLOB_HELD, "sub", "abc", ENV), "FIXTURE=1\n")
+    write(os.path.join(ENVGLOB_HELD, "abox", "abc", ENV), "FIXTURE=1\n")
+
+
+lazy_fixture((ENVGLOB_HELD, ENVGLOB_CLEAN), build_envglob_folders)
+
+# A quoted word holds a brace list. Bash expands `"su"b/{abc,y}` to `sub/abc sub/y`, so grep reads the env file
+# in sub/abc. The guard reads the quoted word as it stands, and it names no folder.
+_FIND_NO_DOT = "find sub -name '[^.]*' | xargs grep -r K"
+_BRACE_QUOTED = 'grep -r K "su"b/{abc,y}'
+_EXDIR_BRACKET = "grep -r --exclude-dir='[^a]*' K abox"
+_EXDIR_SUB_ROOT = "grep -r --exclude-dir='[^a]*' K sub"
+sh("env: find safety hole, a folder that find names with `[^.]*` holds an env file, refused: " + _FIND_NO_DOT,
+   _FIND_NO_DOT, "deny", "env-file", cwd=ENVGLOB_HELD)
+sh("env: find control, the same find over folders with no env file, allowed: " + _FIND_NO_DOT, _FIND_NO_DOT,
+   "allow", cwd=ENVGLOB_CLEAN)
+sh("env: brace safety hole, a quoted word holds a brace list, the env file in sub/abc is read, refused: "
+   + _BRACE_QUOTED, _BRACE_QUOTED, "deny", "env-file", cwd=ENVGLOB_HELD)
+sh("env: brace control, the same word over folders with no env file, allowed: " + _BRACE_QUOTED, _BRACE_QUOTED,
+   "allow", cwd=ENVGLOB_CLEAN)
+sh("env: exclude-dir safety hole, `[^a]*` keeps abox/abc, which holds an env file, so grep reads it, refused: "
+   + _EXDIR_BRACKET, _EXDIR_BRACKET, "deny", "env-file", cwd=ENVGLOB_HELD)
+sh("env: exclude-dir control, the same glob over folders with no env file, allowed: " + _EXDIR_BRACKET,
+   _EXDIR_BRACKET, "allow", cwd=ENVGLOB_CLEAN)
+sh("env: exclude-dir control, `[^a]*` excludes the command-line folder sub, so grep reads nothing, allowed: "
+   + _EXDIR_SUB_ROOT, _EXDIR_SUB_ROOT, "allow", cwd=ENVGLOB_HELD)
+
 # An unquoted `\*` reaches grep as `*`, because bash removes the backslash. The guard reads the backslash as
 # an escape, so it takes `\*` for the one-letter class `[*]`, which picks no name, and it reads no env file.
 # The quoted form is a literal in grep and in the guard, and its allow row is above.
