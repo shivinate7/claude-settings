@@ -378,6 +378,9 @@ WRAPPER_VALUE_FLAGS.update({
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
     "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
 })
+# The flags of `docker|podman [compose] exec` that take no value. With WRAPPER_VALUE_FLAGS, they are every
+# flag `wrapped_commands(strict=True)` knows before the container.
+EXEC_BARE_FLAGS = {"-d", "-i", "-t", "-T", "--detach", "--interactive", "--tty", "--privileged"}
 # `timeout` and `python` unwrap only in their wrapper shape: `timeout [flags] DURATION cmd` (Windows
 # `timeout /t 5` is the waiter, not a wrapper) and `python bin/verdict cmd` (the repo's runner).
 DURATION = re.compile(r"^\d+(\.\d+)?[smhd]?$")
@@ -673,10 +676,11 @@ def _interpreter_header(words: str):
 # A launcher starts another command, and that CHILD is what runs the heredoc body: `docker exec -i c python3 -`,
 # `ssh host python3 -`, `uv run python -`. The child is read, never a later word of the launcher's line: a
 # container, pod, host, `-w` path, file or `tee` argument named `node` is no interpreter. docker, podman,
-# kubectl and ssh reuse `wrapped_commands` and `ssh_remote_script`. A package runner takes the first word after
-# its subcommand, and no flag stands before it, because its value flags are not known here: a flag value read as
-# the child would make a `tee` body read as that interpreter. A flag before the child leaves the launcher
-# unread, which costs a false alarm on prose and never lets a read through.
+# kubectl and ssh reuse `wrapped_commands` and `ssh_remote_script`. A launcher is read only when every flag
+# before its child is known: a package runner takes no flag there, and docker and podman take only the flags
+# of EXEC_BARE_FLAGS and WRAPPER_VALUE_FLAGS (`wrapped_commands(strict=True)`). An unknown flag may take a
+# value, and a value read as the container would make a `tee` body read as that interpreter. An unread launcher
+# costs a false alarm on prose and never lets a read through.
 _RUN_LAUNCHERS = {
     "uv": "run", "poetry": "run", "pipenv": "run", "pdm": "run", "rye": "run", "hatch": "run",
     "conda": "run", "mamba": "run", "pipx": "run", "volta": "run", "pyenv": "exec", "fnm": "exec",
@@ -690,7 +694,7 @@ def _launched_commands(tokens, at: int):
     if word == "ssh":
         return [text for text in [ssh_remote_script(tokens)] if text]
     if word not in _RUN_LAUNCHERS:
-        return wrapped_commands(list(tokens), at)   # it compares list slices
+        return wrapped_commands(list(tokens), at, strict=True)   # it compares list slices
     index, sub = at + 1, _RUN_LAUNCHERS[word]
     if sub:
         if tokens[index:index + 1] != (sub,):
@@ -834,8 +838,8 @@ def _own_headers(line: str, count: int):
     """For each of the `count` heredoc headers of one line, the text of the command that owns it: its
     segment, and the commands it pipes into when they hold no header (`cat <<A | sh`). Two commands on one
     line (`cat > go <<'A' && node - <<'B'`) so each body is classified by its own command. When the
-    segments do not account for every header (a quote carried over from the line before), every
-    header gets the whole line, as before."""
+    segments do not account for every header (an odd contraction quote doubles the segments), the line is
+    read no further: every owner is '', and a caller that blanks prose keeps the body whole."""
     ends = []
     segments = split_segments(line, ends)
     owners = []
@@ -848,7 +852,7 @@ def _own_headers(line: str, count: int):
             last += 1
             text += "|" + segments[last]
         owners += [text] * found
-    return owners if len(owners) == count else [line] * count
+    return owners if len(owners) == count else [""] * count
 
 
 def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool = False,
@@ -1912,10 +1916,12 @@ def ssh_remote_script(tokens) -> str:
     return " ".join(tokens[index + 1:])   # tokens[index] is the host
 
 
-def wrapped_commands(tokens, at: int):
+def wrapped_commands(tokens, at: int, strict: bool = False):
     """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
     `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `unbuffer`,
-    `caffeinate`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as `sh -c`."""
+    `caffeinate`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as `sh -c`.
+    With `strict`, a `docker|podman exec` that has a flag before the container the tables do not list reads
+    as no child: the flag may take a value, and the container is then misplaced."""
     word, rest = basename(tokens[at]), tokens[at + 1:]
     if word == "kubectl" and "exec" in rest and "--" in rest:
         return [shlex.join(rest[rest.index("--") + 1:])]
@@ -1939,7 +1945,11 @@ def wrapped_commands(tokens, at: int):
         skip = 1   # the lock file
     elif word not in ("stdbuf", "unbuffer", "caffeinate"):
         return []
-    index, _ = _wrapper_flags(word, rest, 0)
+    index, flags = _wrapper_flags(word, rest, 0)
+    if strict and word in ("docker", "podman"):
+        known = WRAPPER_VALUE_FLAGS[word] | EXEC_BARE_FLAGS
+        if any(flag not in known for flag, _ in flags):
+            return []
     inner = rest[index + skip:]
     return [shlex.join(inner)] if inner else []
 
