@@ -973,6 +973,17 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.posts, [], "a commit target posted a comment, and it has no pull request:\n" + out)
 
+    def test_a_failed_post_after_a_pass_prints_the_pass_and_a_reason_and_exits_zero(self):
+        tm.install_gh_shim(self)
+        tm.GhHalf.set(self, post_fail=tm.rest_err(502, "Bad Gateway"))
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", "7", host=merge.Host())
+        self.assertEqual(rc, 0, "a PASS whose comment failed to post did not exit 0:\n" + out)
+        self.assertTrue(pass_lines(out), "a PASS whose comment failed to post printed no PASS line:\n" + out)
+        reasons = [l for l in out.splitlines() if "lane-lint" in l.lower() and "comment" in l.lower() and not l.startswith("PASS:")]
+        self.assertTrue(reasons, "a PASS whose comment failed to post printed no reason line that names the lane-lint comment:\n" + out)
+        self.assertEqual(tm.GhHalf.gh_state(self, "posted") or [], [], "the failed post was kept as a posted comment")
+
 
 class LintGateReviewed(tm.ReviewEnv):
     """`merge --reviewed` leaves a pull request not done unless a lane-lint PASS names its live head (decision lanes-run-no-full-ci-job). The
@@ -990,6 +1001,14 @@ class LintGateReviewed(tm.ReviewEnv):
     def assert_not_ready(self, out):
         self.assertNotIn(" done: ", tm.list_line(self, out, 7), "#7 reads done with no lane-lint PASS at its live head:\n" + out)
         self.assertIn("merge --lane-lint 7", out, "#7 is not ready, and no line names `merge --lane-lint 7`:\n" + out)
+
+    def test_a_lint_result_with_no_readable_verdict_shows_lint_unknown_and_is_not_done(self):
+        unreadable = dict(lint_comment(2, tm.REVIEW_HEAD), body=f"{LANE_LINT_MARKER}\nPR: #7\nHead: {tm.REVIEW_HEAD}\n")  # no Result line
+        rc, out, host = self.listing([unreadable])
+        self.assertEqual(rc, 0, out)
+        line = tm.list_line(self, out, 7)
+        self.assertIn("lint unknown", line, "#7 does not read lint unknown when its lint comment at the live head has no readable result:\n" + out)
+        self.assertNotIn(" done: ", line, "#7 reads done with an unreadable lint result at its live head:\n" + out)
 
     def test_a_done_record_with_no_lint_pass_is_not_ready_and_names_the_lane_lint(self):
         rc, out, host = self.listing([])
@@ -1021,8 +1040,7 @@ class LintGateReviewed(tm.ReviewEnv):
 class LintGateJoin(tm.CloudSession):
     """The batch runner's join: `merge <pr> --confirm` in a cloud session with the batch-runner role refuses a pull request whose live head has
     no lane-lint PASS (decision lanes-run-no-full-ci-job). The refusal comes before any claim, push or merge, and names `merge --lane-lint <pr>`.
-    The comment list is read through the gh shim, the list the review record reads. A failed read of it lets the join go ahead, with a line that
-    names the failed read. GhHalf's helpers are called unbound and its setUp is mirrored: subclassing GhHalf would run its cases again."""
+    The comment list is read through the gh shim, the list the review record reads. A failed read of it refuses the join as lane lint unknown. GhHalf's helpers are called unbound and its setUp is mirrored: subclassing GhHalf would run its cases again."""
 
     def setUp(self):
         super().setUp()
@@ -1035,14 +1053,15 @@ class LintGateJoin(tm.CloudSession):
         with self.cloud():
             return self.run_merge("7", "--confirm", host=tm.GhHalf.gh_host(self))
 
-    def assert_refused(self, comments, cause):
-        """The join with `comments` is refused: rc 1, the remedy named, no merge call, no push. `cause` names the case in a failure."""
+    def assert_refused(self, comments, cause, **state):
+        """The join with `comments` and `state` is refused: rc 1, the remedy named, no merge call, no push. `cause` names the case in a failure. -> the output."""
         before = self.refs()
-        rc, out = self.join(comments)
+        rc, out = self.join(comments, **state)
         self.assertEqual(rc, 1, f"{cause}: the join went ahead:\n{out}")
         self.assertIn("merge --lane-lint 7", out, f"{cause}: the refusal does not name `merge --lane-lint 7`:\n{out}")
         self.assertNotIn("PUT pulls/7/merge", tm.GhHalf.calls(self), f"{cause}: the join merged #7")
         self.assertEqual(self.refs(), before, f"{cause}: the join pushed to origin before it refused")
+        return out
 
     def test_a_join_with_no_lint_pass_at_the_live_head_is_refused_before_any_push(self):
         self.assert_refused([], "no lane-lint PASS on the pull request")
@@ -1067,12 +1086,9 @@ class LintGateJoin(tm.CloudSession):
         self.assertEqual(rc, 0, out)
         self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), out)
 
-    def test_a_failed_comment_read_lets_the_join_go_ahead_and_prints_the_reason(self):
-        rc, out = self.join([], comments_fail=tm.rest_err(500, "Server Error"))
-        self.assertEqual(rc, 0, "a failed comment read stopped the join, and the join should go ahead with a reason line:\n" + out)
-        self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), "the join did not merge after a failed comment read:\n" + out)
-        reasons = [l for l in out.splitlines() if "lane-lint" in l and "comment" in l.lower()]
-        self.assertTrue(reasons, "the join passed a failed comment read with no line that names it:\n" + out)
+    def test_a_failed_comment_read_refuses_the_join_as_lane_lint_unknown(self):
+        out = self.assert_refused([], "a failed comment read", comments_fail=tm.rest_err(500, "Server Error"))
+        self.assertIn("lane lint unknown", out, "a failed comment read was refused with no line that reads `lane lint unknown`:\n" + out)
 
 
 if __name__ == "__main__":

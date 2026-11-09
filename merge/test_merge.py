@@ -3854,6 +3854,8 @@ try:
             answer_list(cur["check_runs"], "check_runs", {"total_count": len(cur["check_runs"])})
         answer_list(cur["statuses"], "statuses", {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])})
 
+    elif method == "POST" and re.fullmatch(r"issues/\d+/comments", rel) and S.get("post_fail"):  # a case's failed post: the text gh prints, and no comment kept
+        raise Refused(S["post_fail"])
     elif method == "POST" and re.fullmatch(r"issues/\d+/comments", rel):  # a comment a lane posts (Host.post_comment): kept in the state, as GitHub files it
         S.setdefault("posted", []).append({"n": int(rel.split("/")[1]), "body": params.get("body")}); save()
         finish(one({"id": 555, "body": params.get("body")}, jq), 0, include)
