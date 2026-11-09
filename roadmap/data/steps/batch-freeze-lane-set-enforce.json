@@ -1,11 +1,11 @@
 {
   "title": "The merge tool enforces the batch freeze: `merge --batch-build` freezes the lane set, `--batch-drop` drops one lane with no re-check",
   "why": "Owner, 20:30 CST Nov 8 in triage chat (\"mechanically enforce this\") and 20:31 CST to the coordinator (\"mechanize the batch freeze fix ASAP\"), on the batch freeze from step batch-freeze-lane-set.",
-  "note": "Filed by triage, Nov 8 20:32 CST. An owner ask. Builds merge --batch-build (freezes the set of lanes ready at first build; a later lane goes to the next batch) and --batch-drop (drops one lane on red with no re-check). Step batch-freeze-lane-set (#2367) stays prose. Sighting (coordinator, 05:46 CST Nov 9): the lane for #2199 and #2327 (session_013NEJL1YxsYqim39RK6JeZP) merged main into both and pushed new heads (39432db98, 63d71001a) while both sat in batch 68 (#2426) with CI running. Nothing refused a push to a branch inside a running batch.",
+  "note": "Filed by triage, Nov 8 20:32 CST. An owner ask. Builds merge --batch-build (freezes the set of lanes ready at first build; a later lane goes to the next batch) and --batch-drop (drops one lane on red with no re-check). Step batch-freeze-lane-set (#2367) stays prose. Sighting (coordinator, 05:46 CST Nov 9): the lane for #2199 and #2327 (session_013NEJL1YxsYqim39RK6JeZP) merged main into both and pushed new heads (39432db98, 63d71001a) while both sat in batch 68 (#2426) with CI running. Nothing refused a push to a branch inside a running batch. Owner pick on the waiting page (13:09 CST Nov 9): item 458 a. One settings edit adds `--batch-build`, `--batch-drop` and `--ready` to the merge tool's allow rule. The owner chose it although it carries the label \"Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo\", so the pick is the owner's word for this act only.",
   "phase": "now",
   "owner": "coordinator",
   "lane": "session_013NEJL1SSD89Hzb8ahrTmfs",
   "status": "doing",
   "order": 864,
-  "updatedAt": "2026-11-09T05:46:00-06:00"
+  "updatedAt": "2026-11-09T13:10:00-06:00"
 }
