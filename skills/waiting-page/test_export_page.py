@@ -38,6 +38,24 @@ Contract the page cases assume (the builder builds to it):
     named is unknown, exit 2, even one of the five waiting collections. Without --collections the five are allowed.
     --collections without --rebuild, or a name that is not a collection slug, is a usage error: exit 2, an argparse
     `error:` line, nothing written. The error for --collections without --rebuild names --rebuild.
+  --merge COPY --live LIVE --batches OUT [--collections NAME ...] [--live-page PATH]. COPY holds the --rebuild layout.
+    LIVE holds the --fetched layout: one folder per collection, each with its marker. OUT gets batch-NNN.json files of
+    `set` entries, one for each COPY doc whose (collection, doc_id) LIVE lacks. A doc LIVE holds is never written. A copy
+    answer (answers/<id>) is not written either when LIVE holds items/<id>: the live page wins on that item, open or
+    answered. Batches follow --rebuild: at most 50 entries and 900,000 bytes each, and a doc over the cap is unknown. A
+    copied item whose n a live item holds, or an earlier written copied item holds, takes the next free n above the highest
+    n in either folder. "Earlier" is the sorted doc_id order. The item's answer (answers/<doc_id>, with `item` set to the
+    item's id) takes the same n, so a page grant still matches. OUT/renumbered.json maps each old n to its new n, with
+    string keys, and is written even when empty. It holds items only. `renumbered` counts items, not answers.
+    `kept-live` counts the COPY docs that LIVE holds, and each answer kept for its live item. The last stdout line is
+    `batches K docs N kept-live S renumbered R designs D`, exit 0. D counts the design keys added, and is 0 when the copy
+    has no designData. Designs: when COPY holds page/designData.json, --live-page PATH (the live page's fetched html) is
+    required. OUT/designData.json then holds the live page's designData plus each copy key that LIVE lacks, and the live
+    value wins a shared key. Without --live-page, such a copy is unknown, exit 2. Unknown, exit 2: a missing or empty
+    COPY, a missing LIVE, a LIVE collection with no .complete marker (a cut-short fetch), a folder in either that is not a
+    collection (or a --collections name), a live page with no designData block (when the copy has designs), or nothing
+    left to write. The COPY needs no marker. --collections works as with --rebuild. A usage error, exit 2: --merge without
+    --live or --batches.
   Verdict words: `changed N`, `same`, `refused` (exit 1), `unknown` (exit 2), and a crash (exit 3, one line).
   Not pinned here: whether a supporting file no longer fetched is deleted.
 """
@@ -568,14 +586,16 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
         self.addCleanup(self.tmp.cleanup)
 
-    def fetch(self, items=None, answers=None, groups=None, asks=None, meta=None):
+    def fetch(self, items=None, answers=None, groups=None, asks=None, meta=None, folders=None):
         """A fetched folder: one folder per collection, each doc a JSON file, and the completeness marker. An empty
-        collection is an empty folder with its marker."""
+        collection is an empty folder with its marker. `folders`, when given, names the folders instead of the five:
+        {folder: {doc_id: data}}, for a page whose collections are named by --collections."""
         root = tempfile.mkdtemp(prefix="fetched-", dir=self.tmp.name)
-        docs = {"items": items, "answers": answers, "groups": groups, "asks": asks, "meta": meta}
-        for name in COLLECTIONS:
+        docs = folders if folders is not None else {"items": items, "answers": answers, "groups": groups,
+                                                     "asks": asks, "meta": meta}
+        for name, found in docs.items():
             os.makedirs(os.path.join(root, name))
-            for doc_id, data in (docs[name] or {}).items():
+            for doc_id, data in (found or {}).items():
                 write_text(os.path.join(root, name, doc_id + ".json"), canonical(data))
             write_text(os.path.join(root, name, MARKER), "")
         return root
@@ -960,6 +980,16 @@ class PageScan(Base):
         self.assertEqual(snapshot(out), {}, "a refused page wrote into the copy")
 
 
+def item_as(doc_id, n):
+    """`item(n)` under another doc id. The item's `id` field follows the doc id, as the page's own items do."""
+    return dict(item(n), id=doc_id)
+
+
+def answer_for(item_id, n):
+    """An answer keyed by its item's id, read as page_grant.py reads it: `item` is that id and `n` is the item's n."""
+    return {"item": item_id, "n": n, "pick": "a", "note": "Synthetic answer for %s" % item_id}
+
+
 class Rebuild(Base):
     def batch_entries(self, batches):
         files = sorted(glob.glob(os.path.join(batches, "batch-*.json")))
@@ -1177,6 +1207,425 @@ class Rebuild(Base):
                 self.assertIsNotNone(err, "--collections page has no usage error line. Output:\n" + shown(r))
                 self.assertIn("'page'", err, "the usage error does not name page: %s" % err)
                 self.assertEqual(os.listdir(batches), [], "--collections page still wrote files")
+
+
+    # --merge: the copy's docs that the live page lacks, as set entries. The contract is in the module docstring.
+    def merge_run(self, copy, live, batches, collections=(), live_page=None):
+        """`--merge COPY --live LIVE --batches OUT`, with --collections and --live-page when given. It makes no batch
+        folder itself."""
+        args = ["--merge", copy, "--live", live, "--batches", batches]
+        if collections:
+            args += ["--collections", *collections]
+        if live_page:
+            args += ["--live-page", live_page]
+        return self.run_cmd(*args)
+
+    def copy_with_designs(self, folders, design, name="copy"):
+        """A copy of `folders` that also holds the page's designData, as an export writes it at page/designData.json."""
+        copy = self.copy_of(folders, name=name)
+        write_text(os.path.join(copy, "page", "designData.json"), canonical(design))
+        return copy
+
+    def live_page_with(self, design, name="live.html"):
+        """The fixture page with its designData block holding `design`, written under the run folder."""
+        body = json.dumps(design, sort_keys=True).replace("<", "\\u003c").replace(">", "\\u003e")
+        text = DESIGN.sub(lambda m: m.group(1) + body + m.group(3), PAGE, count=1)
+        return write_text(os.path.join(self.tmp.name, name), text)
+
+    def batch_files(self, batches):
+        return sorted(glob.glob(os.path.join(batches, "batch-*.json")))
+
+    def assertNoBatches(self, batches, why):
+        self.assertEqual(self.batch_files(batches), [], "%s, yet it wrote batch files" % why)
+
+    def assertMergeSummary(self, r, k, n, kept, renumbered, designs=None):
+        """Exit 0, and the last stdout line is `batches K docs N kept-live S renumbered R`, then ` designs D`. The four
+        counts are checked in every merge. The design count is checked only when `designs` is given: then the suffix
+        must be on the line and read D."""
+        self.assertEqual(r.returncode, 0, "exit %d, not 0. Output:\n%s" % (r.returncode, shown(r)))
+        lines = r.stdout.splitlines()
+        last = lines[-1].strip() if lines else ""
+        found = re.fullmatch(r"batches (\d+) docs (\d+) kept-live (\d+) renumbered (\d+)(?: designs (\d+))?", last)
+        self.assertIsNotNone(found, "the last stdout line is not `batches K docs N kept-live S renumbered R designs D`; "
+                                    "it is %r. Output:\n%s" % (last, shown(r)))
+        self.assertEqual(tuple(int(g) for g in found.groups()[:4]), (k, n, kept, renumbered),
+                         "the summary counts (batches, docs, kept-live, renumbered) differ. Output:\n" + shown(r))
+        if designs is not None:
+            self.assertIsNotNone(found.group(5), "the last stdout line has no ` designs %d`: %r" % (designs, last))
+            self.assertEqual(int(found.group(5)), designs, "the design count differs. Output:\n" + shown(r))
+
+    def entry_of(self, entries, collection, doc_id):
+        found = [e for e in entries if e.get("collection") == collection and e.get("doc_id") == doc_id]
+        return found[0] if found else None
+
+    def unnumbered(self, data):
+        return {key: value for key, value in data.items() if key != "n"}
+
+    def copy_with_a_clash(self, name="copy"):
+        """A copy whose item-900 holds n 2, which live item-002 holds, with the item's answer. Items 001 to 003 match the
+        live page. Live holds n 1 to 3, so the highest n in either folder is 3."""
+        return self.copy_of({
+            "items": {"item-001": item(1), "item-002": item(2), "item-003": item(3), "item-900": item_as("item-900", 2)},
+            "answers": {"item-900": answer_for("item-900", 2)}}, name=name)
+
+    def test_merge_without_its_partner_flag_is_a_usage_error_that_names_it(self):
+        copy = self.copy_of({"items": {"item-001": item(1)}})
+        live = self.fetch()
+        batches = os.path.join(self.tmp.name, "batches")
+        forms = {
+            "no --live": (["--merge", copy, "--batches", batches], "--live"),
+            "no --batches": (["--merge", copy, "--live", live], "--batches"),
+        }
+        for label, (args, flag) in forms.items():
+            with self.subTest(form=label):
+                r = self.run_cmd(*args)
+                err = error_line(r)
+                self.assertIsNotNone(err, "no usage error line. Output:\n" + shown(r))
+                self.assertIn(flag, err, "the usage error does not name %s: %s" % (flag, err))
+                self.assertEqual(r.returncode, 2, shown(r))
+                self.assertNoBatches(batches, "a usage error")
+
+    def test_merge_with_a_missing_or_empty_copy_is_unknown_and_writes_nothing(self):
+        empty = self.out("empty-copy")
+        os.makedirs(empty)
+        live = self.fetch(items={"item-001": item(1)})
+        for label, copy in (("missing copy", self.out("no-copy")), ("empty copy", empty)):
+            batches = os.path.join(self.tmp.name, "batches-" + label.replace(" ", "-"))
+            with self.subTest(form=label):
+                r = self.merge_run(copy, live, batches)
+                self.assertVerdict(r, "unknown")
+                self.assertEqual(r.returncode, 2, shown(r))
+                self.assertNoBatches(batches, label)
+
+    def test_merge_with_a_missing_live_folder_is_unknown_and_writes_nothing(self):
+        copy = self.copy_of({"items": {"item-001": item(1)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, self.out("no-live"), batches)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertNoBatches(batches, "a missing live folder")
+
+    def test_a_live_collection_with_no_marker_is_unknown_and_writes_nothing(self):
+        # A fetch cut short leaves a folder with no marker. Its missing docs look absent, so a merge would `set` over
+        # live docs that the fetch never reached: item-002 here.
+        live = self.fetch(items={"item-001": item(1)})
+        os.remove(os.path.join(live, "items", MARKER))
+        copy = self.copy_of({"items": {"item-001": item(1), "item-002": item(2)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertNoBatches(batches, "a live collection with no marker")
+
+    def test_merge_with_a_folder_that_is_not_a_collection_on_either_side_is_unknown(self):
+        stray = {"x": {"n": 1}}
+        forms = {
+            "copy": (self.copy_of({"items": {"item-001": item(1)}, "stray": stray}), self.fetch()),
+            "live": (self.copy_of({"items": {"item-001": item(1)}}),
+                     self.fetch(folders=dict({name: {} for name in COLLECTIONS}, stray=stray))),
+        }
+        for label, (copy, live) in forms.items():
+            batches = os.path.join(self.tmp.name, "batches-" + label)
+            with self.subTest(form=label):
+                r = self.merge_run(copy, live, batches)
+                lines = [line for line in verdict_lines(r) if line.startswith("unknown")]
+                self.assertTrue(any("stray" in line for line in lines),
+                                "no unknown line names the stray folder in the %s. Output:\n%s" % (label, shown(r)))
+                self.assertEqual(r.returncode, 2, shown(r))
+                self.assertNoBatches(batches, "a stray folder in the " + label)
+
+    def test_merge_with_nothing_left_to_write_is_unknown_and_writes_nothing(self):
+        live = self.fetch(items={"item-001": item(1), "item-002": item(2)})
+        copy = self.copy_of({"items": {"item-001": item(1), "item-002": item(2)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertNoBatches(batches, "a copy the live page already holds")
+
+    def test_merge_of_a_full_size_copy_into_an_empty_live_page_writes_every_doc(self):
+        data = full_size()
+        copy = self.exported(data, page=False)  # no page, so no designData: the merge needs no --live-page here
+        live = self.fetch()  # five empty collections, each with its marker
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 3, 133, 0, 0)
+        _, entries, sizes = self.batch_entries(batches)
+        self.assertTrue(all(size <= 50 for size in sizes), "a batch holds more than 50 entries: %s" % sizes)
+        self.assertNotIn("page", {entry["collection"] for entry in entries}, "the page folder went into a batch")
+        want = collections.Counter((name, doc_id, canonical(doc)) for name, docs in data.items()
+                                   for doc_id, doc in docs.items())
+        got = collections.Counter((e["collection"], e["doc_id"], canonical(e["data"])) for e in entries)
+        self.assertEqual(got, want, "the batches do not hold the copy's 133 docs, each once")
+
+    def test_merge_writes_only_the_docs_the_live_page_lacks_and_never_a_live_one(self):
+        live = self.fetch(items={"item-001": dict(item(1), context="Live text for item 1."),
+                                 "item-002": dict(item(2), context="Live text for item 2.")})
+        copy = self.copy_of({"items": {"item-001": item(1), "item-002": item(2), "item-003": item(3)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 1, 2, 0)
+        _, entries, _ = self.batch_entries(batches)
+        self.assertEqual(sorted((e["collection"], e["doc_id"]) for e in entries), [("items", "item-003")],
+                         "the batches hold other docs than the one the live page lacks")
+        self.assertEqual(canonical(entries[0]["data"]), canonical(item(3)), "items/item-003 is not the copy's doc")
+
+    def test_a_doc_id_the_live_page_holds_in_one_collection_is_still_written_from_another(self):
+        group = {"name": "Copy group", "items": ["shared"]}
+        live = self.fetch(items={"shared": dict(item_as("shared", 1), context="Live text.")})
+        copy = self.copy_of({"items": {"shared": item_as("shared", 1)}, "groups": {"shared": group}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 1, 1, 0)
+        _, entries, _ = self.batch_entries(batches)
+        self.assertEqual(sorted((e["collection"], e["doc_id"]) for e in entries), [("groups", "shared")],
+                         "the key is not the (collection, doc_id) pair: groups/shared was not written")
+        self.assertEqual(canonical(entries[0]["data"]), canonical(group))
+
+    def test_a_copy_answer_whose_item_the_live_page_holds_is_not_written_and_counts_as_kept_live(self):
+        # The live page wins on the item, open or answered, so its copy answer is kept. The copy's item-002 is new.
+        forms = {
+            "open": {},
+            "answered": {"answers": {"item-001": dict(answer_for("item-001", 1), note="Owner's answer")}},
+        }
+        for label, live_answers in forms.items():
+            batches = os.path.join(self.tmp.name, "batches-" + label)
+            with self.subTest(form=label):
+                live = self.fetch(items={"item-001": item(1)}, **live_answers)
+                copy = self.copy_of({"items": {"item-001": item(1), "item-002": item(2)},
+                                     "answers": {"item-001": answer_for("item-001", 1)}})
+                r = self.merge_run(copy, live, batches)
+                self.assertMergeSummary(r, 1, 1, 2, 0)
+                _, entries, _ = self.batch_entries(batches)
+                self.assertEqual(sorted((e["collection"], e["doc_id"]) for e in entries), [("items", "item-002")],
+                                 "answers/item-001 was written though items/item-001 is live: the live page must win")
+
+    def test_merge_with_a_live_page_adds_the_copy_design_keys_the_live_page_lacks(self):
+        live = self.fetch(items={"item-001": item(1)})
+        live_page = self.live_page_with({"a": "live a", "b": "live b"})
+        copy = self.copy_with_designs({"items": {"item-002": item(2)}}, {"b": "copy b", "c": "copy c"})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches, live_page=live_page)
+        self.assertMergeSummary(r, 1, 1, 0, 0, designs=1)
+        design_file = os.path.join(batches, "designData.json")
+        self.assertTrue(os.path.isfile(design_file), "no designData.json in the batches folder")
+        self.assertEqual(json.loads(read_text(design_file)), {"a": "live a", "b": "live b", "c": "copy c"},
+                         "the live designData must win a shared key, and the copy's new key must be added")
+
+    def test_copy_designs_without_a_live_page_are_unknown_and_write_nothing(self):
+        live = self.fetch(items={"item-001": item(1)})
+        copy = self.copy_with_designs({"items": {"item-002": item(2)}}, {"c": "copy c"})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertNoBatches(batches, "a copy with designs and no --live-page")
+        self.assertFalse(os.path.exists(os.path.join(batches, "designData.json")), "designData.json was written")
+
+    def test_a_copy_without_designs_needs_no_live_page_and_reports_zero_designs(self):
+        live = self.fetch(items={"item-001": item(1)})
+        copy = self.copy_of({"items": {"item-002": item(2)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 1, 0, 0, designs=0)
+
+    def test_a_live_page_with_no_designdata_block_is_unknown_when_the_copy_has_designs(self):
+        live = self.fetch(items={"item-001": item(1)})
+        live_page = write_bytes(os.path.join(self.tmp.name, "queue.html"), QUEUE_PAGE)
+        copy = self.copy_with_designs({"items": {"item-002": item(2)}}, {"c": "copy c"})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches, live_page=live_page)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertNoBatches(batches, "a live page with no designData block")
+
+    def test_merge_writes_the_renumber_map_from_each_old_n_to_its_new_n(self):
+        live = self.fetch(items={"item-001": item(1), "item-002": item(2), "item-003": item(3)})
+        copy = self.copy_with_a_clash()
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 2, 3, 1)
+        renumbered = os.path.join(batches, "renumbered.json")
+        self.assertTrue(os.path.isfile(renumbered), "no renumbered.json in the batches folder")
+        self.assertEqual(json.loads(read_text(renumbered)), {"2": 4},
+                         "item-900 moved from n 2 to n 4: the map must read {\"2\": 4}, with string keys")
+
+    def test_the_renumber_map_is_written_empty_when_no_n_moves(self):
+        live = self.fetch(items={"item-009": item(9)})
+        copy = self.copy_of({"items": {"item-001": item(1), "item-002": item(2)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 2, 0, 0)
+        renumbered = os.path.join(batches, "renumbered.json")
+        self.assertTrue(os.path.isfile(renumbered), "renumbered.json is not written when no n moves: it must be, empty")
+        self.assertEqual(json.loads(read_text(renumbered)), {}, "the map of a merge with no moves must be {}")
+
+    def test_the_renumber_map_keys_only_the_item_that_moved_when_two_copies_share_an_n(self):
+        # item-a keeps 7 (no live clash). item-b, the later one, takes 8. The map keys item-b's old n and no other item.
+        copy = self.copy_of({"items": {"item-a": item_as("item-a", 7), "item-b": item_as("item-b", 7)}})
+        live = self.fetch()
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 2, 0, 1)
+        renumbered = os.path.join(batches, "renumbered.json")
+        self.assertTrue(os.path.isfile(renumbered), "no renumbered.json in the batches folder")
+        self.assertEqual(json.loads(read_text(renumbered)), {"7": 8},
+                         "only the mover is keyed, and its key maps to its own new n 8: the keeper must not appear")
+
+    def test_the_design_file_holds_no_raw_less_than_and_parses_to_the_same_values(self):
+        # The file is pasted into the page's script block as it is, so a "</script>" in a value must not reach it raw.
+        live = self.fetch(items={"item-001": item(1)})
+        live_page = self.live_page_with({"a": "live </script> a"})
+        copy = self.copy_with_designs({"items": {"item-002": item(2)}}, {"c": "copy <b>tag</b>"})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches, live_page=live_page)
+        self.assertMergeSummary(r, 1, 1, 0, 0, designs=1)
+        design_file = os.path.join(batches, "designData.json")
+        self.assertTrue(os.path.isfile(design_file), "no designData.json in the batches folder")
+        raw = read_text(design_file)
+        self.assertNotIn("<", raw, "designData.json holds a raw '<': every '<' must be written as the escape \\u003c")
+        ESCAPE = chr(92) + "u003c"  # the six characters of the JSON escape for '<'
+        self.assertIn(ESCAPE, raw, "designData.json has no escape for the '<' in its values")
+        self.assertEqual(json.loads(raw), {"a": "live </script> a", "c": "copy <b>tag</b>"},
+                         "designData.json must parse to the live values plus the copy's added key")
+
+    def test_fifty_one_missing_docs_with_one_live_make_one_batch_of_fifty(self):
+        live = self.fetch(items={"item-001": item(1)})
+        copy = self.copy_of({"items": {"item-%03d" % n: item(n) for n in range(1, 52)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 50, 1, 0)
+        _, entries, sizes = self.batch_entries(batches)
+        self.assertEqual(sizes, [50], "one batch of 50 entries, not %s" % sizes)
+        self.assertEqual(sorted(e["doc_id"] for e in entries), sorted("item-%03d" % n for n in range(2, 52)),
+                         "the batch does not hold the 50 docs the live page lacks")
+
+    def test_merge_batches_stay_under_900_kb(self):
+        # 100 docs of about 20 KB: the byte cap splits them, as it does for --rebuild.
+        big = {"item-%03d" % n: dict(item(n), context="word " * 4000) for n in range(1, 101)}
+        copy = self.copy_of({"items": big})
+        live = self.fetch()
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        files = self.batch_files(batches)
+        self.assertMergeSummary(r, len(files), 100, 0, 0)
+        self.assertGreaterEqual(len(files), 3, "2 MB of docs cannot fit in fewer than three 900 KB batches")
+        for path in files:
+            self.assertLessEqual(os.path.getsize(path), 900000, "%s is over 900 KB" % os.path.basename(path))
+        _, entries, _ = self.batch_entries(batches)
+        self.assertEqual(len(entries), 100, "the batches hold %d entries, not 100" % len(entries))
+
+    def test_a_doc_over_900_kb_is_unknown_for_a_merge(self):
+        copy = self.copy_of({"items": {"item-001": dict(item(1), context="word " * 200000)}})
+        live = self.fetch()
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertNoBatches(batches, "a doc over the byte cap")
+
+    def test_a_copied_item_with_a_live_n_takes_the_next_free_n_and_its_answer_follows(self):
+        live = self.fetch(items={"item-001": item(1), "item-002": item(2), "item-003": item(3)})
+        copy = self.copy_with_a_clash()
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 2, 3, 1)
+        _, entries, _ = self.batch_entries(batches)
+        moved = self.entry_of(entries, "items", "item-900")
+        answer = self.entry_of(entries, "answers", "item-900")
+        self.assertIsNotNone(moved, "items/item-900 is not in the batches")
+        self.assertIsNotNone(answer, "answers/item-900 is not in the batches: its item was renumbered, so its answer follows")
+        self.assertEqual(moved["data"].get("n"), 4, "items/item-900 has n %s, not the next free n above 3, which is 4"
+                         % moved["data"].get("n"))
+        self.assertEqual(answer["data"].get("n"), 4, "answers/item-900 has n %s, not its item's new n 4"
+                         % answer["data"].get("n"))
+        self.assertEqual(self.unnumbered(moved["data"]), self.unnumbered(item_as("item-900", 2)),
+                         "items/item-900 changed a field other than n")
+        self.assertEqual(self.unnumbered(answer["data"]), self.unnumbered(answer_for("item-900", 2)),
+                         "answers/item-900 changed a field other than n")
+
+    def test_copied_items_that_share_an_n_renumber_the_later_one_and_its_answer(self):
+        live = self.fetch()
+        copy = self.copy_of({
+            "items": {"item-a": item_as("item-a", 7), "item-b": item_as("item-b", 7)},
+            "answers": {"item-a": answer_for("item-a", 7), "item-b": answer_for("item-b", 7)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 4, 0, 1)
+        _, entries, _ = self.batch_entries(batches)
+        got = {(e["collection"], e["doc_id"]): e["data"].get("n") for e in entries}
+        self.assertEqual(got, {("items", "item-a"): 7, ("items", "item-b"): 8,
+                               ("answers", "item-a"): 7, ("answers", "item-b"): 8},
+                         "of two copied items with n 7, the earlier (sorted doc_id) keeps 7, and the later takes 8 with its answer")
+
+    def test_a_new_n_is_above_the_highest_n_in_either_folder(self):
+        # Live holds n 1 to 3. Copy's item-a clashes with live item-002, and copy's item-b holds 4. A new n of 4 would
+        # clash with item-b, so item-a takes 5: the next free n above the highest in either folder.
+        live = self.fetch(items={"item-001": item(1), "item-002": item(2), "item-003": item(3)})
+        copy = self.copy_of({"items": {"item-001": item(1), "item-002": item(2), "item-003": item(3),
+                                       "item-a": item_as("item-a", 2), "item-b": item_as("item-b", 4)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 2, 3, 1)
+        _, entries, _ = self.batch_entries(batches)
+        got = {e["doc_id"]: e["data"].get("n") for e in entries if e["collection"] == "items"}
+        self.assertEqual(got, {"item-a": 5, "item-b": 4},
+                         "item-a's n 2 is held live: the next free n above the highest in either folder is 5, and item-b keeps 4")
+
+    def test_merge_with_collections_writes_each_named_folder_under_its_name(self):
+        steps = {"step-%03d" % n: {"n": n, "title": "Step %d" % n} for n in range(1, 31)}
+        topics = {"topic-%03d" % n: {"n": n, "title": "Topic %d" % n} for n in range(1, 31)}
+        # `receipts` is named in the live page and absent from the copy: the copy holds none of it, which is fine.
+        live = self.fetch(folders={"steps": {"step-001": steps["step-001"]}, "topics": {}, "receipts": {}})
+        copy = self.copy_of({"steps": steps, "topics": topics})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches, collections=("steps", "topics", "receipts"))
+        self.assertMergeSummary(r, 2, 59, 1, 0)
+        _, entries, _ = self.batch_entries(batches)
+        want = collections.Counter(
+            [("steps", doc_id, canonical(doc)) for doc_id, doc in steps.items() if doc_id != "step-001"]
+            + [("topics", doc_id, canonical(doc)) for doc_id, doc in topics.items()])
+        got = collections.Counter((e["collection"], e["doc_id"], canonical(e["data"])) for e in entries)
+        self.assertEqual(got, want, "the batches do not hold the named folders' missing docs under their folder names")
+
+    def test_merge_with_collections_names_a_folder_not_named_as_unknown(self):
+        forms = {
+            "copy": (self.copy_of({"steps": {"step-001": {"n": 1}}, "items": {"item-001": item(1)}}),
+                     self.fetch(folders={"steps": {}, "topics": {}})),
+            "live": (self.copy_of({"steps": {"step-001": {"n": 1}}}),
+                     self.fetch(folders={"steps": {}, "topics": {}, "items": {"item-001": item(1)}})),
+        }
+        for label, (copy, live) in forms.items():
+            batches = os.path.join(self.tmp.name, "batches-" + label)
+            with self.subTest(form=label):
+                r = self.merge_run(copy, live, batches, collections=("steps", "topics"))
+                lines = [line for line in verdict_lines(r) if line.startswith("unknown")]
+                self.assertTrue(any("items" in line for line in lines),
+                                "no unknown line names items in the %s. Output:\n%s" % (label, shown(r)))
+                self.assertEqual(r.returncode, 2, shown(r))
+                self.assertNoBatches(batches, "an unnamed folder in the " + label)
+
+    def test_merge_collections_follow_the_rebuild_name_rules(self):
+        copy = self.copy_of({"steps": {"step-001": {"n": 1}}})
+        live = self.fetch(folders={"steps": {}})
+        for number, bad in enumerate(("page", "../steps")):
+            batches = os.path.join(self.tmp.name, "batches-%d" % number)
+            with self.subTest(name=bad):
+                r = self.merge_run(copy, live, batches, collections=(bad,))
+                err = error_line(r)
+                self.assertIsNotNone(err, "no usage error line for %r. Output:\n%s" % (bad, shown(r)))
+                self.assertNotIn("unrecognized arguments", err,
+                                 "argparse rejected the command before the name %r was checked: %s" % (bad, err))
+                self.assertIn(bad, err, "the usage error does not name %r: %s" % (bad, err))
+                self.assertEqual(r.returncode, 2, shown(r))
+                self.assertNoBatches(batches, "a usage error")
+
+    def test_a_control_rebuilds_the_clash_copy_so_its_fixture_is_well_formed(self):
+        """Green on the old code: the copy the renumber case merges also rebuilds, so a red there is the merge."""
+        copy = self.copy_with_a_clash(name="control")
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.rebuild(copy, batches)
+        self.assertBatches(r, 1, 5)
 
 
 class All(Base):
