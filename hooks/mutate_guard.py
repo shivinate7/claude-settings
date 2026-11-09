@@ -2919,6 +2919,7 @@ REPORT_TARGETS = [
                              "lint/test_report_guard_remedy.py",
                              "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
                              "lint/test_rule_audit.py", "lint/test_settings_matcher.py"]),
+    ("lint/_clause.py", ["lint/test_clause.py", "lint/test_report_guard_cannot.py", "lint/test_report_guard.py"]),
     ("hooks/feedback_guard.py", ["hooks/test_feedback_inbox.py", "lint/test_settings_matcher.py"]),
     ("hooks/stall_watch.py", ["hooks/test_stall_watch.py", "hooks/test_stall_watch_stop.py",
                               "hooks/test_wrappers.py", "lint/test_hook_platform_exit.py",
