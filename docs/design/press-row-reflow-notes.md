@@ -148,7 +148,7 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   29 px above (14.5 px text). The tests measure 4em at 180 and 390 wide at the default text: 54 px at both widths (13.5 px text). The
   status is that wide or sits on its own line. Where the buttons would leave it under 2em, they wrap under it and it takes the line
   (window widths in 5 px steps up to 225, then 10 px): at 180 to 205 wide at the default text, at 180 to 230 at 125% text, at 180
-  to 260 at 150%, at 180 to 300 at 200% and at 180 to 390 at 300% (measured at 10 to 40 px steps; 280 and 300 wide at 200%, 360 and 390 at 300%).
+  to 260 at 150%, at 180 to 300 at 200%. At 180 to 390 at 300% (measured at 10 to 40 px steps; 280 and 300 wide at 200%, 360 and 390 at 300%).
   At 220 at the default text it stays
   beside Send answers, 41 px wide, as before.
 - An answered thread has one `minmax(0, 1fr)` track (`.thread`), and its reply, filed path and the owner's note (`.rnote`) break
@@ -159,31 +159,30 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   text column over 4 (`--dl-fs` on `.sline.dline.dok`, a size container; the "Not restored" and "Not dismissed" lines are not `dok`, so
   they keep the reader's size). The word is written with a soft hyphen ("Re&shy;stored.") so it may break there and nowhere else.
   `overflow-wrap: anywhere` stays as the last resort, so a wider font breaks a word inside the window, never past it. The glyph sits on
-  the first line: the line's items start at the top, the glyph is moved to the middle of the first line box, and the row is centred in
+  the first line: the line's items start at the top, the glyph is moved to the middle of the first line box. The row is centred in
   the 44 px floor, so a line that does not wrap looks as before. On every status line that wraps (the Restored line and both failure
-  lines) the glyph moves up from the middle of the whole line to the first line. Measured against the page before this lane, the move
-  is 11 to 22 px for the Restored line and 11 to 34 px for the failure lines at 210 to 360 wide at the default text, 14 px or more at
+  lines) the glyph moves up from the middle of the whole line to the first line. Measured against the page before this lane, the move is 11 to 22 px for the Restored line.
+  For the failure lines at 210 to 360 wide at the default text, the move is 11 to 34 px. The move is 14 px or more at
   125%, and 33.7 px at 1280 wide at 300%. A line of one row does not move.
 - The cap sets the size at 180 to 205 wide with text doubled and at 180 to 260 wide with text tripled (window widths in 5 px steps).
-  At both it is 22.5 px at 180, 25 at 190 and 27.5 at 200; with text tripled it is then 30 at 210, 32.5 at 220, 35 at 230, 37.5 at 240,
+  At both it is 22.5 px at 180, 25 at 190 and 27.5 at 200. With text tripled it is then 30 at 210, 32.5 at 220, 35 at 230, 37.5 at 240,
   40 at 250 and 42.5 at 260 (29 and 43.5 px uncapped). At the default text, 125% and 150% it never sets the size from 180 wide up (21.75 px
   at 150%, against a 22.5 px cap at 180). The page before this lane drew the word wider than its column at 180 to 225 wide doubled and
-  180 to 290 wide tripled, and ran it past the window at 180 to 190 doubled and 180 to 260 tripled.
-- The failure line breaks inside "(permission|-denied)" at 180 wide at 100% text, 180 to 200 at 125%, 180 to 225 at 150%, 180 to 270 at
+  180 to 290 wide tripled. The word ran past the window at 180 to 190 doubled and 180 to 260 tripled.
+- The failure line breaks inside "(permission|-denied)" at 180 wide at 100% text, 180 to 200 at 125%, 180 to 225 at 150%. It breaks at 180 to 270 at
   200% and 180 to 360 at 300%. PR 2383 broke it after the hyphen. The cause is the 88 px `.sline.dline` column at 180 wide at 100%.
   A named limit; fix: step `page-narrow-breaks-rest`.
   The failure lines also break inside "denied" ("denie|d") at 180 wide at 200% and at 210 to 230 at 300% ("deni|ed" or "den|ied" at 180
-  to 205 at 300%), and inside "dismissed" ("Not dis|missed"), "restored" and "(permission" ("(per|mission") at 180 to 190 wide at
+  to 205 at 300%). They also break inside "dismissed" ("Not dis|missed"), "restored" and "(permission" ("(per|mission") at 180 to 190 wide at
   150%, 180 to 220 at 200% and 180 to 300 at 300% ("(permission" to 210 at 150%, 240 at 200% and 320 at 300%; "restored" at 180 at
   150%, 180 to 200 at 200% and 180 to 260 at 300%). The page before this lane did not break these words and ran past the window there:
   the page scrolled sideways at 180 to 190 at 150%, 180 to 220 at 200% and 180 to 320 at 300%.
 - Departs from: the page before this lane (PR 2383's head) in eight places, as window widths in 10 px steps (5 px under 225). Folded rows with Dismiss or Restore take the phone
-  arrangement at 530 to 670 at the default text, 650 to 830 and 970 to 1100 at 125%, and 770 to 960 and from 1040 up to 1920 at 150%.
-  The Designs head takes a second row at 220 to 320 and 530 to 620 at the default text, 220 to 340 and 650 to 730 at 125%, and 220 to
-  360 and 770 to 840 at 150%; its title is larger at every width at 125% and 150%. Its third row is new at 180 to 210 at the default text, at 125% and at
+  arrangement at 530 to 670 at the default text, 650 to 830 and 970 to 1100 at 125%. They take it at 770 to 960 and from 1040 up to 1920 at 150%.
+  The Designs head takes a second row at 220 to 320 and 530 to 620 at the default text, 220 to 340 and 650 to 730 at 125%. It takes a second row at 220 to 360 and 770 to 840 at 150%. Its title is larger at every width at 125% and 150%. Its third row is new at 180 to 210 at the default text, at 125% and at
   150%, 180 to 220 doubled and 180 to 280 tripled (Close alone, or with Open full size at 180 to 220 doubled and 180 to 240 tripled). The position "1/2" is smaller than before at 180 to 230 wide tripled (35.5
   to 47.5 px, not 48), where it takes the title's cap. The bar status takes its own line at 180 to 205 at
-  the default text, 210 to 230 at 125%, 240 to 260 at 150% and at 300 at 200% (it did before at 180 to 205 at 125%, 180 to 230 at 150% and 180 to 280 at 200%). The
+  the default text, 210 to 230 at 125%, 240 to 260 at 150% and at 300 at 200%. It did so before at 180 to 205 at 125%, 180 to 230 at 150% and 180 to 280 at 200%. The
   glyph of the Restored line and of both failure lines is on the first line of a wrapped line, not in the middle of it, at every text size. The
   "Restored." line is smaller than its text at 180 to 205 doubled and 180 to 260 tripled, and spells "Re-stored." with a soft hyphen; at
   the default text and 125% its size and spelling do not change. At 150% the line splits "Re-" and "stored." at 180 to 190 wide. A tab wraps
