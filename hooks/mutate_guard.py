@@ -3615,6 +3615,11 @@ def run_mutant(sources, work: str, entry):
                 handle.write(sources[target].replace(old, new, 1))
         else:
             shutil.copy(MERGE_TOOL, os.path.join(root, "merge"))
+        # The merge tool reads ../actions/ci-alarm/events.json at import and clear_rule.py beside it. Without them it does not load,
+        # every fix check chain fails open, and each chain case is red on every mutant, whatever was mutated.
+        os.makedirs(os.path.join(root, "actions", "ci-alarm"), exist_ok=True)
+        for name in ("events.json", "clear_rule.py"):
+            shutil.copy(os.path.join(HERE, "..", "actions", "ci-alarm", name), os.path.join(root, "actions", "ci-alarm"))
         copy_path = os.path.join(tree, "guard.py")
         os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
         for name in ("sweep.py", "temp_sweep.py"):
