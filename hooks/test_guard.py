@@ -10175,6 +10175,35 @@ sh("env: walk pin, find -type d names the start folder, refused: " + _PIN_FIND_D
 sh("env: walk control, find -type d, folder has no env file, allowed: " + _PIN_FIND_DIR, _PIN_FIND_DIR, "allow",
    cwd=ENVWALK_CLEAN)
 
+# find's -prune branch names no file, and -print sits only on the -name branch, so the names xargs reads are .js files.
+# The control drops the -name test, so -print names every file, the env file too.
+_FIND_PRUNE_JS = "find . -path ./node_modules -prune -o -name '*.js' -print | xargs grep K"
+sh("env: walk false alarm, find -prune names only .js files, the env file is at the start, allowed: " + _FIND_PRUNE_JS,
+   _FIND_PRUNE_JS, "allow", cwd=ENVWALK_HELD)
+_FIND_PRUNE_ALL = "find . -path ./node_modules -prune -o -print | xargs grep K"
+sh("env: walk pin, find -prune then -print names every file, refused: " + _FIND_PRUNE_ALL, _FIND_PRUNE_ALL, "deny",
+   "env-file", cwd=ENVWALK_HELD)
+
+# Each env file name starts with .env, so `! -name '.env*'` names no env file. The word check refuses the glob
+# `'.env*'` in any folder, since find is no pattern command, so this row is red on that check and not on the walk.
+# It runs in a folder with no env file to show that. The control negates a glob no env name fits, so the env file
+# stays in the names and the walk refuses it.
+_FIND_NOT_ENV = "find . -type f ! -name '.env*' | xargs grep K"
+sh("env: word check false alarm, find -name '.env*' pattern is judged as an env path, allowed: " + _FIND_NOT_ENV,
+   _FIND_NOT_ENV, "allow", cwd=ENVWALK_CLEAN)
+_FIND_NOT_JS = "find . -type f ! -name '*.js' | xargs grep K"
+sh("env: walk pin, find ! -name *.js keeps the env file in the names, refused: " + _FIND_NOT_JS, _FIND_NOT_JS, "deny",
+   "env-file", cwd=ENVWALK_HELD)
+
+# find's -maxdepth is not read, so the walk judges the whole tree. ENVWALK_NESTED holds its env file at sub/.env,
+# depth 2, and -maxdepth 1 names only its top files, so xargs reads no env file. The control runs the same form
+# where the env file is at depth 1.
+_FIND_MAXDEPTH = "find . -maxdepth 1 -type f | xargs rg K"
+sh("env: walk false alarm, find -maxdepth 1 names no env file, the env file is at depth 2, allowed: " + _FIND_MAXDEPTH,
+   _FIND_MAXDEPTH, "allow", cwd=ENVWALK_NESTED)
+sh("env: walk pin, find -maxdepth 1 names the env file at depth 1, refused: " + _FIND_MAXDEPTH, _FIND_MAXDEPTH, "deny",
+   "env-file", cwd=ENVWALK_HELD)
+
 # A cd in a branch or loop body may not run, so the search reaches the held folder when it does not. Each form is
 # refused over the held folder and allowed over a folder with no env file.
 for _label, _cmd in (
