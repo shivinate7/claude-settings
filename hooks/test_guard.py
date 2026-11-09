@@ -5609,7 +5609,7 @@ sh("git-after-cd: a git push -u in the else branch of an if on a check, is refus
    carries=("&&", "else"))
 sh("git-after-cd: a git push -u in the body of an until on a check, is refused",
    "until pytest -q; do %s push -u origin b; done" % VCS, "deny", "git-after-cd", cwd=NOGIT,
-   carries=("&&",))
+   carries=("&&", "`until`"))
 sh("git-after-cd: a check piped to tail, then ; a git push -u, is refused and names set -eo pipefail",
    "pytest -q | tail -5; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("set -eo pipefail",))
@@ -5636,12 +5636,30 @@ sh("git-after-cd: a check joined by ; to a pipe to head, then && a git push -u, 
 # nothing, so tee's status alone decides the &&, and the push runs when make fails. Real bash runs the push here.
 sh("git-after-cd: a heredoc piped to tee with a make check in its body, then && a git push -u, is refused",
    "cat <<EOF | tee r.md && %s push -u origin b\n$(make check)\nEOF" % VCS, "deny", "git-after-cd", cwd=NOGIT)
+# A BACKTICK SUBSTITUTION IN THE BODY, PIPED TO tee, THEN && A PUSH. A backtick runs its command as $( ) does: make check
+# runs, its status feeds nothing, and the push runs when make fails. Real bash runs the push here.
+sh("git-after-cd: a heredoc piped to tee with a make check in backticks in its body, then && a git push -u, is refused",
+   "cat <<EOF | tee r.md && %s push -u origin b\n`make check`\nEOF" % VCS, "deny", "git-after-cd", cwd=NOGIT)
+# A QUOTED DELIMITER STOPS THE SUBSTITUTION. Bash runs no $( ) in a body whose delimiter is quoted, so no check runs and the
+# push after tee passes. The second case puts a plain heredoc on the same header line: only the quote keeps that line
+# unmarked, so a reader that drops the quote check marks it and refuses the push. Real bash runs the push in both.
+sh("git-after-cd: a quoted heredoc piped to tee with a make check in its body, then && a git push -u, passes",
+   "cat <<'EOF' | tee r.md && %s push -u origin b\n$(make check)\nEOF" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a quoted heredoc and a plain heredoc on one line, the quoted body with a make check, then && a git push -u, passes",
+   "cat <<'EOF' <<X | tee r.md && %s push -u origin b\n$(make check)\nEOF\nok\nX" % VCS, "allow", cwd=NOGIT)
 # A NEGATED CHECK AS THE TEST OF AN if OR A while. The then branch and the loop body run on the failure, so a push there
 # runs on a failed check. Real bash runs each push here.
 sh("git-after-cd: a negated check as an if test, then a git push -u in the then branch, is refused",
-   "if ! pytest -q; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT)
+   "if ! pytest -q; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("`if !`",))
 sh("git-after-cd: a negated check as a while test, then a git push -u in the body, is refused",
-   "while ! make check; do %s push -u origin b; done" % VCS, "deny", "git-after-cd", cwd=NOGIT)
+   "while ! make check; do %s push -u origin b; done" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("`while !`",))
+# AN ELIF BODY AFTER A NEGATED CHECK. The elif test runs only when the negated test failed, so its then body runs only on a
+# passing check. Real bash runs the push only when make passes, so it is allowed. The negated test's found flag must reset
+# at the elif, or the push would read as one on a failed check.
+sh("git-after-cd: a negated check as an if test, then an elif body with a git push -u, passes",
+   "if ! make check; then :; elif true; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
 # A DATA SOURCE OR A LISTING PIPED TO A PUSH. Neither first stage runs a check, so no check hides behind the pipe, and
 # the push after it is no push on a failed check. Both are allowed.
 sh("git-after-cd: a cat piped to a while loop with a git push in its body, passes",
