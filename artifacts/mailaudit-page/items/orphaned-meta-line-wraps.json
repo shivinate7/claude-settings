@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-08T13:10:00-06:00",
+  "context": "Goal: the Orphaned candidates read clearly on the phone at every text size.\nProblem (rule): the line with the date, the untracked tag and the order id wraps at large text on the phone; the web keeps it on one line. One line with shrink-to-fit still made Apple's audit call it clipped (measured 2026-10-27). The debt closes only on your ruling or on a one-line version that passes.\nBased on (measured): the 2026-10-27 audit run on OrphanedView.\nBased on (read): OrphanedView.swift:406 still shrinks the seller to half size before it truncates.\nDeparts from: OrphanedView.swift:CandidateRow \u2014 the web keeps the meta line on one line; option a lets it wrap on the phone.\nMeanwhile: the phone ships the wrapping line.",
+  "group": "orphaned-line-departures",
+  "home": "debt native-candidate-lines-wrap",
+  "id": "orphaned-meta-line-wraps",
+  "kind": "decision",
+  "n": 56,
+  "options": [
+    {
+      "gain": "Every word stays readable, and the audit passes.",
+      "how": "The meta line wraps at large text, and the debt closes.",
+      "key": "a",
+      "label": "Wrapping is right on the phone",
+      "lose": "Candidate rows get taller at large text, unlike the web."
+    },
+    {
+      "gain": "The phone matches the web.",
+      "how": "A lane tries other one-line layouts until one passes the audit.",
+      "key": "b",
+      "label": "Keep looking for a one-line version",
+      "lose": "More test rounds, and no one-line version has passed yet."
+    }
+  ],
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "pick": "a",
+  "port": true,
+  "rank": 21,
+  "ref": "debt native-candidate-lines-wrap (the candidate meta line wraps); decision orphaned-colours-by-meaning",
+  "short": "Candidate line wraps",
+  "status": "open",
+  "title": "On the phone, a candidate's date and order line wraps at large text. Is wrapping right?",
+  "why": "The audit reads all the text only when it wraps, and large text is where readability matters most."
+}

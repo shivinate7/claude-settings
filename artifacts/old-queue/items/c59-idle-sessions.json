@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26",
+  "context": "Idle time is only reported after a merge. Nothing makes an orchestrator start the next ready item when a lane ends, so the queue waits for you. Proposed fix in three parts: (1) a global 'keep going' rule (home-app has one): start the next item whose questions are answered, stopping only for your decision, a test only you can run, or the load brake; (2) a final report lists ready items left unstarted, with a reason each; (3) later, only after a repeat, a check that refuses a turn end while ready work waits.",
+  "home": "roadmap step c59",
+  "id": "c59-idle-sessions",
+  "kind": "decision",
+  "n": 13,
+  "options": [
+    {
+      "gain": "Work keeps moving overnight.",
+      "how": "One rule line and one report line; no new guard.",
+      "key": "a",
+      "label": "Parts 1 and 2 now, part 3 only after a repeat",
+      "lose": "Sessions may run more lanes at once; the load brake still caps them."
+    },
+    {
+      "gain": "Hardest to slip.",
+      "how": "Also add the turn-end check.",
+      "key": "b",
+      "label": "All three now",
+      "lose": "A new guard with no incident yet, against your guard rules."
+    },
+    {
+      "gain": "No change.",
+      "how": "Nothing changes.",
+      "key": "c",
+      "label": "Leave as is",
+      "lose": "Overnight runs keep stopping early."
+    }
+  ],
+  "owner": "Triage the roadmap",
+  "pick": "a",
+  "ref": "c59 (no session sits idle while ready work waits)",
+  "status": "closed",
+  "title": "Make sessions start the next ready item instead of waiting",
+  "why": "It fixes the cause with rules alone, and your guard rule asks for an incident before a new check."
+}

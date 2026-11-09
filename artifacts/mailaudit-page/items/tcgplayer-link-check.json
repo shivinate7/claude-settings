@@ -1,0 +1,26 @@
+{
+  "added": "2026-11-08T13:12:00-06:00",
+  "context": "Goal: tapping an order id opens that order on TCGplayer.\nProblem: the link opens orderhistory?SearchString=<id>, the URL you gave on 2026-10-21. Nobody has checked whether the page applies the search and lands on the order, or just opens the plain order list.\nWhy yours: it needs your own TCGplayer sign-in and one of your real orders, and the safety rules keep a sign-in with your password for you.",
+  "home": "debt tcgplayer-link-opens-history-list; decision order-id-button-stops-propagate",
+  "id": "tcgplayer-link-check",
+  "kind": "task",
+  "links": [
+    {
+      "label": "TCGplayer order history",
+      "url": "https://store.tcgplayer.com/myaccount/orderhistory"
+    }
+  ],
+  "minutes": "2 min",
+  "n": 61,
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "rank": 24,
+  "ref": "debt tcgplayer-link-opens-history-list (the order link may not search by order id); src/view-rules.mjs tcgplayerOrderUrl",
+  "short": "Check order id link",
+  "status": "open",
+  "steps": [
+    "Sign in to TCGplayer in your browser.",
+    "In MANIFEST, tap the order id on any package.",
+    "Mark this done, and in the note say whether it opened that one order or the full order list."
+  ],
+  "title": "Tap an order id link while signed in to TCGplayer, and say what opens"
+}

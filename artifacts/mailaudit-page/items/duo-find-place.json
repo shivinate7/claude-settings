@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26T21:45:00-05:00",
+  "context": "Goal: MANIFEST uses both pages of the open Duo.\nProblem: the designer drew options, and only you pick the layout.\nMeanwhile: nothing is built; the restyle continues.",
+  "home": "a new mailaudit decision record on the Duo layout",
+  "id": "duo-find-place",
+  "kind": "decision",
+  "n": 8,
+  "options": [
+    {
+      "gain": "Stays in thumb reach, next to what it filters",
+      "how": "Over the page with the list",
+      "key": "d",
+      "label": "Over the page with the list",
+      "lose": "Covers the top of the list"
+    },
+    {
+      "gain": "Never covers the list",
+      "how": "Top of the right page",
+      "key": "e",
+      "label": "Top of the right page",
+      "lose": "Far from what it filters"
+    }
+  ],
+  "owner": "mailaudit orchestrator",
+  "pick": "d",
+  "ref": "Duo mockups chrome.html D and E, PR #135 (Duo ideas, draft)",
+  "status": "closed",
+  "title": "Where Find sits on two pages",
+  "why": "It stays in thumb reach."
+}

@@ -1,0 +1,536 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Roadmap Board Options</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one long read. A verdict up top, then three product "screens" framed like windows, each followed by how it plugs in, then the comparison table. */
+:root{
+  --bg:#f3f4f1; --paper:#ffffff; --ink:#1d2321; --muted:#5b6662; --line:#d8ddd8; --accent:#2f6b5a; --accent-soft:#e2eee9;
+  --good:#1f7a3f; --warn:#9a6200; --bad:#b4232c; --goodbg:#e3f3e8; --warnbg:#fbefd8; --badbg:#fbe4e5;
+  /* GitHub-look tokens */
+  --gh-bg:#ffffff; --gh-canvas:#f6f8fa; --gh-border:#d0d7de; --gh-fg:#1f2328; --gh-muted:#59636e; --gh-link:#0969da; --gh-green:#1a7f37; --gh-purple:#8250df; --gh-red:#cf222e; --gh-yellow:#9a6700; --gh-draft:#6e7781;
+  /* Jira-look tokens */
+  --j-bg:#ffffff; --j-col:#f4f5f7; --j-fg:#172b4d; --j-muted:#5e6c84; --j-blue:#0c66e4; --j-card:#ffffff; --j-border:#dfe1e6; --j-done:#216e4e; --j-doneBg:#dcfff1; --j-prog:#0055cc; --j-progBg:#e9f2ff;
+  /* Kong-look tokens */
+  --k-side:#0b172d; --k-sidefg:#c3cbd9; --k-bg:#f6f7f9; --k-fg:#0b172d; --k-muted:#52607a; --k-accent:#1155cb; --k-kai:#6c2bd9; --k-kaibg:#f3edff; --k-border:#e0e4ea;
+  --display:"Fraunces",Georgia,"Times New Roman",serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --ui:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121615; --paper:#1a201e; --ink:#e6ebe8; --muted:#9aa7a2; --line:#2e3734; --accent:#7cc4ad; --accent-soft:#1f3530;
+  --good:#6fd08f; --warn:#e6b45a; --bad:#f2838a; --goodbg:#16301f; --warnbg:#33280f; --badbg:#3a1a1d;
+  --gh-bg:#0d1117; --gh-canvas:#151b23; --gh-border:#3d444d; --gh-fg:#f0f6fc; --gh-muted:#9198a1; --gh-link:#4493f8; --gh-green:#3fb950; --gh-purple:#ab7df8; --gh-red:#f85149; --gh-yellow:#d29922; --gh-draft:#9198a1;
+  --j-bg:#1d2125; --j-col:#22272b; --j-fg:#dee4ea; --j-muted:#9fadbc; --j-blue:#579dff; --j-card:#2c333a; --j-border:#38414a; --j-done:#7ee2b8; --j-doneBg:#1c3329; --j-prog:#85b8ff; --j-progBg:#1c2b41;
+  --k-side:#070e1c; --k-sidefg:#aab4c6; --k-bg:#121826; --k-fg:#e4e9f2; --k-muted:#93a0b8; --k-accent:#7aa7ff; --k-kai:#b896ff; --k-kaibg:#241a3a; --k-border:#2a3346;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121615; --paper:#1a201e; --ink:#e6ebe8; --muted:#9aa7a2; --line:#2e3734; --accent:#7cc4ad; --accent-soft:#1f3530;
+  --good:#6fd08f; --warn:#e6b45a; --bad:#f2838a; --goodbg:#16301f; --warnbg:#33280f; --badbg:#3a1a1d;
+  --gh-bg:#0d1117; --gh-canvas:#151b23; --gh-border:#3d444d; --gh-fg:#f0f6fc; --gh-muted:#9198a1; --gh-link:#4493f8; --gh-green:#3fb950; --gh-purple:#ab7df8; --gh-red:#f85149; --gh-yellow:#d29922; --gh-draft:#9198a1;
+  --j-bg:#1d2125; --j-col:#22272b; --j-fg:#dee4ea; --j-muted:#9fadbc; --j-blue:#579dff; --j-card:#2c333a; --j-border:#38414a; --j-done:#7ee2b8; --j-doneBg:#1c3329; --j-prog:#85b8ff; --j-progBg:#1c2b41;
+  --k-side:#070e1c; --k-sidefg:#aab4c6; --k-bg:#121826; --k-fg:#e4e9f2; --k-muted:#93a0b8; --k-accent:#7aa7ff; --k-kai:#b896ff; --k-kaibg:#241a3a; --k-border:#2a3346;
+  color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.55}
+.wrap{max-width:1180px;margin:0 auto;padding-block:28px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:44px}
+h1,h2,h3{font-family:var(--display);font-weight:650;text-wrap:balance;margin:0;letter-spacing:-.01em}
+h1{font-size:clamp(30px,4.4vw,44px);line-height:1.08}
+h2{font-size:clamp(23px,3vw,30px);line-height:1.15}
+h3{font-size:18px;font-weight:500}
+p{margin:0;max-width:68ch}
+a{color:var(--accent)}
+.eyebrow{font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.lede{font-size:17px;color:var(--ink)}
+.asof{font:13px/1.5 var(--mono);color:var(--muted)}
+header.top{display:flex;flex-direction:column;gap:14px}
+nav.jump{display:flex;flex-wrap:wrap;gap:8px}
+nav.jump a{font:500 13px/1 var(--body);text-decoration:none;color:var(--ink);border:1px solid var(--line);background:var(--paper);padding:8px 12px;border-radius:999px}
+nav.jump a:hover,nav.jump a:focus-visible{border-color:var(--accent);outline:none}
+.verdict{background:var(--paper);border:1px solid var(--line);border-left:4px solid var(--accent);padding:20px 22px;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:18px}
+.verdict .v{display:flex;flex-direction:column;gap:6px;min-width:0}
+.pill{display:inline-flex;align-items:center;gap:6px;font:600 12px/1 var(--body);padding:5px 9px;border-radius:999px;width:max-content}
+.pill.good{background:var(--goodbg);color:var(--good)} .pill.warn{background:var(--warnbg);color:var(--warn)} .pill.bad{background:var(--badbg);color:var(--bad)}
+section.opt{display:flex;flex-direction:column;gap:18px;scroll-margin-top:16px}
+.opt-head{display:flex;flex-direction:column;gap:8px}
+.cap{font-size:13px;color:var(--muted)}
+/* window frame */
+.win{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--paper);box-shadow:0 1px 0 var(--line)}
+.win-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);font:12px var(--mono);color:var(--muted);background:var(--bg)}
+.dots{display:flex;gap:6px}.dots i{width:10px;height:10px;border-radius:50%;background:var(--line);display:block}
+.win-body{overflow-x:auto}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px}
+.panel{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.panel ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
+.panel h3{font-family:var(--body);font-weight:600;font-size:15px}
+.flow{font:13px/1.6 var(--mono);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:12px;overflow-x:auto;white-space:pre;color:var(--ink)}
+
+/* ---------- GitHub Projects mock ---------- */
+.gh{background:var(--gh-bg);color:var(--gh-fg);font:14px/1.45 var(--ui);min-width:940px}
+.gh-top{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--gh-border)}
+.gh-top b{font-size:16px}
+.gh-views{display:flex;gap:2px;padding:0 16px;border-bottom:1px solid var(--gh-border);background:var(--gh-bg)}
+.gh-views span{padding:9px 12px;font-size:13px;color:var(--gh-muted);border-bottom:2px solid transparent}
+.gh-views span.on{color:var(--gh-fg);font-weight:600;border-bottom-color:#fd8c73}
+.gh-filter{padding:10px 16px;font:12px var(--mono);color:var(--gh-muted);border-bottom:1px solid var(--gh-border);background:var(--gh-canvas)}
+.gh-board{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:12px;background:var(--gh-canvas)}
+.gh-col{background:var(--gh-bg);border:1px solid var(--gh-border);border-radius:8px;display:flex;flex-direction:column;min-width:0}
+.gh-colh{display:flex;align-items:center;gap:8px;padding:10px 12px;font-weight:600;font-size:14px}
+.gh-colh .n{font-weight:400;font-size:12px;color:var(--gh-muted);background:var(--gh-canvas);border:1px solid var(--gh-border);border-radius:999px;padding:0 7px}
+.gh-colh .sw{width:12px;height:12px;border-radius:50%;border:2px solid}
+.gh-coldesc{padding:0 12px 8px;font-size:12px;color:var(--gh-muted)}
+.gh-cards{display:flex;flex-direction:column;gap:8px;padding:0 8px 10px}
+.gh-card{border:1px solid var(--gh-border);border-radius:6px;padding:8px 10px;background:var(--gh-bg);display:flex;flex-direction:column;gap:6px}
+.gh-card .ref{font-size:12px;color:var(--gh-muted);display:flex;gap:6px;align-items:center}
+.gh-card .t{font-size:14px;color:var(--gh-fg);font-weight:500}
+.gh-card .meta{display:flex;flex-wrap:wrap;gap:4px}
+.lbl{font-size:11px;font-weight:500;border-radius:999px;padding:1px 7px;border:1px solid var(--gh-border);color:var(--gh-muted)}
+.lbl.now{color:var(--gh-link);border-color:var(--gh-link)} .lbl.clean{color:var(--gh-purple);border-color:var(--gh-purple)} .lbl.chk{color:var(--gh-yellow);border-color:var(--gh-yellow)}
+.ico{width:14px;height:14px;flex:none}
+.ci-ok{color:var(--gh-green)} .ci-bad{color:var(--gh-red)} .ci-run{color:var(--gh-yellow)} .draft{color:var(--gh-draft)} .merged{color:var(--gh-purple)}
+.gh-table{width:100%;border-collapse:collapse;font-size:13px}
+.gh-table th{text-align:left;font-weight:600;color:var(--gh-muted);padding:8px 10px;border-bottom:1px solid var(--gh-border);background:var(--gh-canvas);white-space:nowrap}
+.gh-table td{padding:7px 10px;border-bottom:1px solid var(--gh-border);vertical-align:top}
+.gh-table td.num{color:var(--gh-muted);font-variant-numeric:tabular-nums;width:32px}
+.gh-table .st{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.gh-table .st i{width:10px;height:10px;border-radius:50%;display:block}
+.gh-group td{background:var(--gh-canvas);font-weight:600;color:var(--gh-fg)}
+
+/* ---------- Jira mock ---------- */
+.jr{background:var(--j-bg);color:var(--j-fg);font:14px/1.42 var(--ui);min-width:940px}
+.jr-top{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--j-border)}
+.jr-crumb{font-size:12px;color:var(--j-muted)}
+.jr-head{padding:12px 18px;display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.jr-head h4{margin:0;font:600 20px var(--ui)}
+.jr-sub{font-size:12px;color:var(--j-muted)}
+.jr-btn{font-size:13px;font-weight:500;padding:6px 10px;border-radius:3px;background:var(--j-col);color:var(--j-fg)}
+.jr-btn.p{background:var(--j-blue);color:#fff}
+.jr-board{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:0 18px 18px}
+.jr-col{background:var(--j-col);border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.jr-colh{font-size:12px;font-weight:600;color:var(--j-muted);letter-spacing:.03em;padding:4px 4px 6px;text-transform:uppercase}
+.jr-card{background:var(--j-card);border-radius:4px;box-shadow:0 1px 1px rgba(9,30,66,.25),0 0 1px rgba(9,30,66,.31);padding:9px 10px;display:flex;flex-direction:column;gap:8px}
+.jr-card .t{font-size:14px}
+.jr-foot{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:12px;color:var(--j-muted)}
+.jr-foot .k{display:flex;align-items:center;gap:6px}
+.typ{width:14px;height:14px;border-radius:3px;display:inline-block;flex:none}
+.typ.story{background:#36b37e}.typ.task{background:#4bade8}.typ.bug{background:#e5493a}
+.sp{background:var(--j-col);border-radius:999px;padding:0 7px;font-size:11px}
+.av{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:700;color:#fff;background:#6554c0}
+.av.e{background:transparent;border:1px dashed var(--j-muted);color:var(--j-muted)}
+.jr-tag{font-size:11px;font-weight:600;padding:1px 5px;border-radius:3px;text-transform:uppercase}
+.jr-tag.prog{background:var(--j-progBg);color:var(--j-prog)} .jr-tag.done{background:var(--j-doneBg);color:var(--j-done)}
+.jr-issue{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:22px;padding:18px}
+.jr-issue h4{margin:0 0 10px;font:500 22px/1.25 var(--ui)}
+.jr-field{display:grid;grid-template-columns:120px minmax(0,1fr);gap:8px;font-size:13px;padding:6px 0}
+.jr-field span:first-child{color:var(--j-muted)}
+.jr-box{border:1px solid var(--j-border);border-radius:4px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.jr-act{font-size:13px;display:flex;flex-direction:column;gap:10px;margin-top:16px}
+.jr-act .c{display:flex;gap:10px}
+.jr-desc{font-size:14px;display:flex;flex-direction:column;gap:8px}
+.jr-desc .lab{font-weight:600;font-size:14px}
+
+/* ---------- Kong mock ---------- */
+.kg{display:grid;grid-template-columns:200px minmax(0,1fr) 300px;min-width:940px;font:14px/1.45 var(--ui);background:var(--k-bg);color:var(--k-fg)}
+.kg-side{background:var(--k-side);color:var(--k-sidefg);padding:14px 10px;display:flex;flex-direction:column;gap:2px;font-size:13px}
+.kg-side .brand{color:#fff;font-weight:700;padding:4px 8px 14px;letter-spacing:.02em}
+.kg-side span{padding:7px 8px;border-radius:5px}
+.kg-side span.on{background:rgba(255,255,255,.09);color:#fff}
+.kg-main{padding:18px 20px;display:flex;flex-direction:column;gap:14px}
+.kg-main h4{margin:0;font:600 20px var(--ui)}
+.kg-empty{border:1px dashed var(--k-border);border-radius:8px;padding:26px;display:flex;flex-direction:column;gap:10px;align-items:flex-start;background:var(--k-bg)}
+.kg-btn{background:var(--k-accent);color:#fff;font-size:13px;font-weight:600;padding:7px 12px;border-radius:5px}
+.kg-tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.kg-tile{border:1px solid var(--k-border);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:4px}
+.kg-tile b{font-size:22px;font-variant-numeric:tabular-nums}
+.kg-tile span{font-size:12px;color:var(--k-muted)}
+.kg-kai{border-left:1px solid var(--k-border);padding:14px;display:flex;flex-direction:column;gap:10px;background:var(--k-bg)}
+.kg-kai .h{display:flex;align-items:center;gap:8px;font-weight:700;color:var(--k-kai)}
+.bub{border-radius:10px;padding:9px 11px;font-size:13px}
+.bub.me{background:var(--k-accent);color:#fff;align-self:flex-end;max-width:90%}
+.bub.ai{background:var(--k-kaibg);color:var(--k-fg);max-width:96%}
+.kg-input{margin-top:auto;border:1px solid var(--k-border);border-radius:8px;padding:8px 10px;font-size:13px;color:var(--k-muted)}
+
+/* comparison */
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--paper)}
+table.cmp{border-collapse:collapse;width:100%;min-width:900px;font-size:14px}
+table.cmp th,table.cmp td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+table.cmp thead th{font:600 13px var(--body);background:var(--bg);position:sticky;top:0}
+table.cmp th[scope=row]{font-weight:600;width:170px}
+table.cmp td.target{background:var(--accent-soft)}
+.mk{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:1px}
+.mk.g{background:var(--good)}.mk.w{background:var(--warn)}.mk.b{background:var(--bad)}
+ol.src{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.note{font-size:13px;color:var(--muted)}
+footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:16px}
+@media (max-width:640px){.verdict{padding:16px} .jr-issue{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+html{scroll-behavior:smooth}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+ <symbol id="pr" viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 3.25a2.25 2.25 0 1 1 3 2.12v5.26a2.25 2.25 0 1 1-1.5 0V5.37a2.25 2.25 0 0 1-1.5-2.12Zm8.5-.75h1.25A2.75 2.75 0 0 1 14 5.25v5.38a2.25 2.25 0 1 1-1.5 0V5.25c0-.69-.56-1.25-1.25-1.25H10v1.69a.25.25 0 0 1-.43.18L7.32 3.62a.25.25 0 0 1 0-.36L9.57 1.01a.25.25 0 0 1 .43.18V2.5Z"/></symbol>
+ <symbol id="draftic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.4 2"/></symbol>
+ <symbol id="ok" viewBox="0 0 16 16"><path fill="currentColor" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></symbol>
+ <symbol id="x" viewBox="0 0 16 16"><path fill="currentColor" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"/></symbol>
+ <symbol id="dot" viewBox="0 0 16 16"><circle cx="8" cy="8" r="4" fill="currentColor"/></symbol>
+</svg>
+
+<div class="wrap">
+
+<header class="top">
+  <span class="eyebrow">claude-settings · board options</span>
+  <h1>What your roadmap would look like in GitHub Projects, Jira and Kong</h1>
+  <p class="lede">Each mockup below is filled with real steps and pull requests from claude-settings, read at 16:40 CST on Nov 2. Nothing was changed in any repo.</p>
+  <p class="asof">Roadmap branch at 40cf7cd0 (Nov 2 15:20 CST): 439 steps, 298 done, 60 doing, 81 todo. claude-settings main at 5a5f081e (batch 69, 13:12 CST). Open batch PR #1109 read at 16:40 CST.</p>
+  <nav class="jump" aria-label="Jump to">
+    <a href="#github">GitHub Projects</a><a href="#jira">Jira</a><a href="#kong">Kong Konnect and KAi</a><a href="#compare">Side by side</a><a href="#sources">Sources</a>
+  </nav>
+</header>
+
+<div class="verdict" role="note" aria-label="Verdict">
+  <div class="v"><span class="pill good">Best fit</span><h3>GitHub Projects, as a display only</h3><p>It sits next to your PRs and shows CI and review state on each card for free. The roadmap JSON stays the one record, and a script copies steps onto the board. It costs nothing and needs no new account.</p></div>
+  <div class="v"><span class="pill warn">Works, wrong size</span><h3>Jira</h3><p>A fine tool for a team handing work between people. For one person directing Claude sessions, it adds a second record that drifts from the roadmap, and its sprint and points features go unused.</p></div>
+  <div class="v"><span class="pill bad">Does not fit</span><h3>Kong Konnect and KAi</h3><p>Konnect manages API gateways, and KAi is its assistant for debugging gateway traffic. It has no place to put a roadmap step. It fits only if you one day run your own APIs behind a Kong gateway.</p></div>
+  <div class="v"><span class="pill good">My pick</span><h3>Keep the roadmap page. Add the GitHub board only if you want to click and drag.</h3><p>Even then, the board should only show the roadmap, never become a second place where steps get written.</p></div>
+</div>
+
+<!-- ================= GITHUB ================= -->
+<section class="opt" id="github">
+  <div class="opt-head">
+    <span class="eyebrow">Option 1</span>
+    <h2>GitHub Projects</h2>
+    <p>A project board that lives on your GitHub account, beside your repos. A card can be a real issue, a pull request, or a "draft" that exists only on the board. It has three layouts: board, table and timeline.</p>
+  </div>
+
+  <div class="win">
+    <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span>github.com/users/shivinate7/projects/1 · Board view</div>
+    <div class="win-body">
+      <div class="gh">
+        <div class="gh-top"><b>claude-settings roadmap</b><span style="color:var(--gh-muted);font-size:12px">Private · synced from roadmap branch 40cf7cd0</span></div>
+        <div class="gh-views"><span class="on">Board</span><span>Table</span><span>Timeline</span><span>Waiting on Shiv</span></div>
+        <div class="gh-filter">status:todo,doing,batch,done-today  repo:claude-settings</div>
+        <div class="gh-board">
+          <div class="gh-col">
+            <div class="gh-colh"><span class="sw" style="border-color:var(--gh-muted)"></span>Ready <span class="n">81</span></div>
+            <div class="gh-coldesc">todo steps, newest first</div>
+            <div class="gh-cards">
+              <div class="gh-card"><div class="ref"><svg class="ico draft"><use href="#draftic"/></svg>branch-cleanup</div><div class="t">claude-settings keeps only live branches</div><div class="meta"><span class="lbl now">now</span><span class="lbl">needs Mac</span></div></div>
+              <div class="gh-card"><div class="ref"><svg class="ico draft"><use href="#draftic"/></svg>mockup-homes</div><div class="t">Mockups have a home that outlives sessions and accounts</div><div class="meta"><span class="lbl now">now</span></div></div>
+              <div class="gh-card"><div class="ref"><svg class="ico draft"><use href="#pr"/></svg>#1104 draft</div><div class="t">Every clock time Claude shows names its time zone</div><div class="meta"><span class="lbl clean">cleanup</span></div></div>
+              <div class="gh-card"><div class="ref"><svg class="ico draft"><use href="#pr"/></svg>#1106 draft · plan</div><div class="t">The one-home rule is enforced by a check, both ways</div><div class="meta"><span class="lbl chk">checks</span></div></div>
+              <div class="gh-card"><div class="ref"><svg class="ico draft"><use href="#draftic"/></svg>red-main-same-sha-green</div><div class="t">Merge tool clears a red main run when a newer run on the same commit passed</div><div class="meta"><span class="lbl clean">cleanup</span></div></div>
+            </div>
+          </div>
+          <div class="gh-col">
+            <div class="gh-colh"><span class="sw" style="border-color:var(--gh-yellow)"></span>In progress <span class="n">60</span></div>
+            <div class="gh-coldesc">a lane is building it</div>
+            <div class="gh-cards">
+              <div class="gh-card"><div class="ref"><svg class="ico draft"><use href="#pr"/></svg>#1108 draft</div><div class="t">Every owner question reaches the page at once</div><div class="meta"><span class="lbl now">now</span></div></div>
+              <div class="gh-card"><div class="ref"><svg class="ico draft"><use href="#pr"/></svg>#1099 draft</div><div class="t">Builders never undo earlier lane work</div><div class="meta"><span class="lbl now">now</span></div></div>
+              <div class="gh-card"><div class="ref"><svg class="ico draft"><use href="#pr"/></svg>#1098 draft</div><div class="t">A child repo's CLAUDE.md names records, never copies them</div><div class="meta"><span class="lbl now">now</span></div></div>
+              <div class="gh-card"><div class="ref"><svg class="ico draft"><use href="#pr"/></svg>#1100 draft</div><div class="t">Each repo's page is titled "&lt;repo&gt; Cockpit"</div><div class="meta"><span class="lbl now">now</span></div></div>
+            </div>
+          </div>
+          <div class="gh-col">
+            <div class="gh-colh"><span class="sw" style="border-color:var(--gh-link)"></span>In the batch <span class="n">1</span></div>
+            <div class="gh-coldesc">integration PR, CI running</div>
+            <div class="gh-cards">
+              <div class="gh-card"><div class="ref"><svg class="ico ci-ok"><use href="#pr"/></svg>#1109 · open</div><div class="t">Batch: sitting rulings Nov 2, questions reach the page, waiting copy, child cites, Cockpit title</div>
+                <div class="meta"><span class="lbl" style="color:var(--gh-red);border-color:var(--gh-red)"><svg class="ico ci-bad" style="width:10px;height:10px;vertical-align:-1px"><use href="#x"/></svg> checks failed 16:39 CST</span><span class="lbl" style="color:var(--gh-yellow);border-color:var(--gh-yellow)">macOS running</span></div></div>
+            </div>
+          </div>
+          <div class="gh-col">
+            <div class="gh-colh"><span class="sw" style="border-color:var(--gh-purple)"></span>Done today <span class="n">11</span></div>
+            <div class="gh-coldesc">8 steps and 3 batches since 00:00 CST</div>
+            <div class="gh-cards">
+              <div class="gh-card"><div class="ref"><svg class="ico merged"><use href="#pr"/></svg>#1103 merged 13:12 CST</div><div class="t">Batch 69: 3 lanes</div></div>
+              <div class="gh-card"><div class="ref"><svg class="ico merged"><use href="#pr"/></svg>#1096 merged 11:47 CST</div><div class="t">Batch 68: 2 lanes</div></div>
+              <div class="gh-card"><div class="ref"><svg class="ico merged"><use href="#pr"/></svg>#1094 merged 09:47 CST</div><div class="t">Batch 67: 4 lanes</div></div>
+              <div class="gh-card"><div class="ref"><svg class="ico ci-ok"><use href="#ok"/></svg>step done</div><div class="t">The roadmap build goes red when a todo step has an open PR</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="cap">Board view. Each card with a PR number would show its CI and review state without anyone writing it down. The red mark on #1109 is the real state of its "checks" job at 16:39 CST.</p>
+
+  <div class="win">
+    <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span>github.com/users/shivinate7/projects/1 · Table view, grouped by phase</div>
+    <div class="win-body">
+      <div class="gh">
+        <div class="gh-views"><span>Board</span><span class="on">Table</span><span>Timeline</span><span>Waiting on Shiv</span></div>
+        <table class="gh-table">
+          <thead><tr><th></th><th>Title</th><th>Step</th><th>Status</th><th>Phase</th><th>PR</th><th>Why (from the step)</th><th>Updated</th></tr></thead>
+          <tbody>
+            <tr class="gh-group"><td colspan="8">now · 19 steps</td></tr>
+            <tr><td class="num">1</td><td>Every owner question reaches the page at once</td><td>questions-reach-page</td><td><span class="st"><i style="background:var(--gh-yellow)"></i>Doing</span></td><td>now</td><td>#1108</td><td>Owner pick a, Nov 1 23:31 CST: no 5-minute wait</td><td>Nov 1 23:36 CST</td></tr>
+            <tr><td class="num">2</td><td>Each repo's page is titled "&lt;repo&gt; Cockpit"</td><td>page-title-cockpit</td><td><span class="st"><i style="background:var(--gh-yellow)"></i>Doing</span></td><td>now</td><td>#1100</td><td>Owner ruling in chat, Nov 2 11:12 CST</td><td>Nov 2 11:16 CST</td></tr>
+            <tr><td class="num">3</td><td>Each repo keeps its waiting-page data in records/waiting/</td><td>waiting-data-in-repo</td><td><span class="st"><i style="background:var(--gh-muted)"></i>Todo</span></td><td>now</td><td>#1107</td><td>Owner ask, Nov 2 11:00 CST</td><td>Nov 2 13:10 CST</td></tr>
+            <tr><td class="num">4</td><td>claude-settings keeps only live branches</td><td>branch-cleanup</td><td><span class="st"><i style="background:var(--gh-muted)"></i>Todo</span></td><td>now</td><td>none</td><td>Owner ask, Nov 2 10:41 CST: 240 heads</td><td>Nov 2 13:10 CST</td></tr>
+            <tr class="gh-group"><td colspan="8">checks · 3 steps</td></tr>
+            <tr><td class="num">5</td><td>The one-home rule is enforced by a check, both ways</td><td>one-home-check</td><td><span class="st"><i style="background:var(--gh-muted)"></i>Todo</span></td><td>checks</td><td>#1106</td><td>Owner pick a, Nov 2 13:38 CST (page item 174)</td><td>Nov 2 13:50 CST</td></tr>
+            <tr><td class="num">6</td><td>The Stop report guard covers every landing tool</td><td>report-guard-landing-tools</td><td><span class="st"><i style="background:var(--gh-muted)"></i>Todo</span></td><td>checks</td><td>none</td><td>Changes a check: net-value test after round 3</td><td>Nov 2 13:50 CST</td></tr>
+            <tr class="gh-group"><td colspan="8">cleanup · 363 steps (263 done)</td></tr>
+            <tr><td class="num">7</td><td>Every clock time names its time zone</td><td>time-zone-every-time</td><td><span class="st"><i style="background:var(--gh-muted)"></i>Todo</span></td><td>cleanup</td><td>#1104</td><td>Owner ruling, Nov 2 13:10 CST</td><td>Nov 2 13:13 CST</td></tr>
+            <tr><td class="num">8</td><td>The plain-prose lint drops the STE name</td><td>ste-lint-rename</td><td><span class="st"><i style="background:var(--gh-muted)"></i>Todo</span></td><td>cleanup</td><td>#1105</td><td>Owner pick b, Nov 2 13:22 CST (page item 172)</td><td>Nov 2 13:50 CST</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <p class="cap">Table view. Rows 3, 7 and 8 say "Todo" while a PR is open. Your roadmap build already turns red on that (step roadmap-pr-without-step, "the build goes red when a todo step has an open PR"), and on a GitHub board you would see it at a glance too.</p>
+
+  <div class="two">
+    <div class="panel">
+      <h3>How it would plug in</h3>
+      <div class="flow">roadmap/data/steps/*.json   (the one record)
+        │  push to roadmap branch
+        ▼
+python roadmap/build.py      (already runs)
+        │  new: sync step
+        ▼
+GitHub Action, project token
+  addProjectV2DraftIssue     one card per step
+  updateProjectV2ItemFieldValue  status, phase, PR
+        ▼
+Project board  (read-only by habit)</div>
+      <p class="note">Drafts and field updates are real GitHub API calls. A board edit would be overwritten at the next sync, which keeps the roadmap the one record.</p>
+    </div>
+    <div class="panel">
+      <h3>What you gain</h3>
+      <ul>
+        <li>Views you can click through: board, table, timeline, and saved filters such as "Waiting on Shiv".</li>
+        <li>PR cards show CI, review and merge state live, with no Claude step writing it.</li>
+        <li>Works in the GitHub phone app. Free on your current plan.</li>
+      </ul>
+      <h3>What you lose or pay</h3>
+      <ul>
+        <li>A new sync script and a token with project access, which is one more thing to keep green.</li>
+        <li>The roadmap page's own extras (cull numbers, briefs in the ask field, gold-standard columns) do not show as nicely in a board. Field limit: 50 per project.</li>
+        <li>Moving a card on the board does nothing unless you also want two-way sync, which brings back the second-record problem.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= JIRA ================= -->
+<section class="opt" id="jira">
+  <div class="opt-head">
+    <span class="eyebrow">Option 2</span>
+    <h2>Jira</h2>
+    <p>Atlassian's ticket tracker. Each step becomes a ticket with a key such as CS-412. Work runs in sprints, with points, assignees and a burndown chart. The ticket keys below are made up, because Jira would assign them.</p>
+  </div>
+
+  <div class="win">
+    <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span>shivinate.atlassian.net/jira/software/projects/CS/boards/1</div>
+    <div class="win-body">
+      <div class="jr">
+        <div class="jr-top"><span class="jr-crumb">Projects / Claude Settings (CS)</span></div>
+        <div class="jr-head">
+          <div><h4>CS Sprint 12</h4><div class="jr-sub">Nov 2 – Nov 15 · 4 of 13 issues done · 18 of 41 points</div></div>
+          <div style="display:flex;gap:6px"><span class="jr-btn">Insights</span><span class="jr-btn p">Complete sprint</span></div>
+        </div>
+        <div class="jr-board">
+          <div class="jr-col"><div class="jr-colh">To do 5</div>
+            <div class="jr-card"><div class="t">claude-settings keeps only live branches</div><div class="jr-foot"><span class="k"><span class="typ task"></span>CS-484</span><span class="k"><span class="sp">5</span><span class="av e">?</span></span></div></div>
+            <div class="jr-card"><div class="t">Mockups have a home that outlives sessions and accounts</div><div class="jr-foot"><span class="k"><span class="typ story"></span>CS-489</span><span class="k"><span class="sp">3</span><span class="av e">?</span></span></div></div>
+            <div class="jr-card"><div class="t">Merge tool clears a red main run when a newer run on the same commit passed</div><div class="jr-foot"><span class="k"><span class="typ bug"></span>CS-471</span><span class="k"><span class="sp">2</span><span class="av e">?</span></span></div></div>
+          </div>
+          <div class="jr-col"><div class="jr-colh">In progress 4</div>
+            <div class="jr-card"><div class="t">Every owner question reaches the page at once</div><div class="jr-foot"><span class="k"><span class="typ story"></span>CS-479</span><span class="k"><span class="sp">5</span><span class="av">L1</span></span></div></div>
+            <div class="jr-card"><div class="t">Builders never undo earlier lane work</div><div class="jr-foot"><span class="k"><span class="typ story"></span>CS-485</span><span class="k"><span class="sp">8</span><span class="av" style="background:#00875a">L2</span></span></div></div>
+            <div class="jr-card"><div class="t">A child repo's CLAUDE.md names records, never copies them</div><div class="jr-foot"><span class="k"><span class="typ task"></span>CS-486</span><span class="k"><span class="sp">5</span><span class="av" style="background:#ff8b00">L3</span></span></div></div>
+          </div>
+          <div class="jr-col"><div class="jr-colh">Code review 1</div>
+            <div class="jr-card"><div class="t">Batch: sitting rulings Nov 2 (PR #1109)</div><div class="jr-foot"><span class="k"><span class="typ task"></span>CS-492</span><span class="k"><span class="jr-tag prog">CI failing</span></span></div></div>
+          </div>
+          <div class="jr-col"><div class="jr-colh">Done 4 ✓</div>
+            <div class="jr-card"><div class="t">Batch 69: 3 lanes</div><div class="jr-foot"><span class="k"><span class="typ task"></span>CS-482</span><span class="jr-tag done">Done</span></div></div>
+            <div class="jr-card"><div class="t">The roadmap build goes red when a todo step has an open PR</div><div class="jr-foot"><span class="k"><span class="typ story"></span>CS-466</span><span class="jr-tag done">Done</span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="cap">Sprint board. The points, the sprint dates and the "L1/L2/L3" lane assignees are invented to show the fields Jira asks for. You have none of these today, and someone would have to fill them in.</p>
+
+  <div class="win">
+    <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span>shivinate.atlassian.net/browse/CS-479</div>
+    <div class="win-body">
+      <div class="jr">
+        <div class="jr-issue">
+          <div>
+            <div class="jr-crumb">Claude Settings / CS-479</div>
+            <h4>Every owner question reaches the page at once</h4>
+            <div class="jr-desc">
+              <span class="lab">Description</span>
+              <p>Owner, chat, Nov 1 23:31 CST, pick a: every owner question goes to the page writer in the same turn it is asked, and an owner answer in chat closes the page item. No 5-minute wait. Logged as Queue item 158.</p>
+              <span class="lab">Note</span>
+              <p>A lane mechanizes it and rewrites rule questions-go-to-owner's 5-minute clause. Ready. Port: yes.</p>
+            </div>
+            <div class="jr-act">
+              <span class="lab" style="font-weight:600">Activity</span>
+              <div class="c"><span class="av">L1</span><div><b>Lane 1</b> · Nov 2 16:10 CST<br>Linked PR #1108, draft. Added to batch #1109.</div></div>
+              <div class="c"><span class="av" style="background:#0c66e4">CL</span><div><b>Claude (Atlassian connector)</b> · Nov 2 16:41 CST<br>Moved CS-479 from In progress to Code review.</div></div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <span class="jr-tag prog" style="width:max-content;font-size:12px;padding:4px 8px">In progress</span>
+            <div class="jr-box">
+              <div class="jr-field"><span>Assignee</span><span>Lane 1 (a Claude session)</span></div>
+              <div class="jr-field"><span>Sprint</span><span>CS Sprint 12</span></div>
+              <div class="jr-field"><span>Story points</span><span>5</span></div>
+              <div class="jr-field"><span>Epic</span><span>Waiting page</span></div>
+              <div class="jr-field"><span>Development</span><span style="color:var(--j-blue)">1 pull request · 1 branch</span></div>
+              <div class="jr-field"><span>Roadmap file</span><span style="color:var(--j-muted)">none. The ruling now lives here, not in git.</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="cap">Ticket view, filled from the real step "questions-reach-page" (every owner question reaches the page at once). The activity log is invented to show how sessions would write through the connector.</p>
+
+  <div class="two">
+    <div class="panel">
+      <h3>How it would plug in</h3>
+      <div class="flow">Claude session ──(Atlassian connector)──► Jira ticket
+        │
+        └── also edits roadmap JSON?  ← two records
+            or stops editing it?       ← build.py, the roadmap
+                                         page, cull numbers and
+                                         git history all go</div>
+      <p class="note">Either path breaks something you rely on. A one-way copy from build.py to Jira is possible, but then it is a worse version of the GitHub board above.</p>
+    </div>
+    <div class="panel">
+      <h3>What you gain</h3>
+      <ul>
+        <li>Strong filters, reports and dashboards.</li>
+        <li>A standard tool if others join you or an employer asks for it.</li>
+      </ul>
+      <h3>What you lose or pay</h3>
+      <ul>
+        <li>A second record, or the end of git history on the plan.</li>
+        <li>Every session write becomes a connector call, slower than a commit and harder to review.</li>
+        <li>Sprints, points and assignees are built for teams. Here they would be empty or made up.</li>
+        <li>Free plan covers up to 10 users. Atlassian's Rovo AI is not on the Free plan. Whether the official Atlassian connector works on Free is unknown; I could not confirm it.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= KONG ================= -->
+<section class="opt" id="kong">
+  <div class="opt-head">
+    <span class="eyebrow">Option 3</span>
+    <h2>Kong Konnect and KAi</h2>
+    <p>Kong Konnect is a hosted platform for running and governing API gateways: routing, security, analytics and developer portals for APIs and AI traffic. KAi is the AI assistant inside the Konnect console, in public beta. Since January 2026 it can open debug sessions on live gateway traffic, answer analytics questions such as "which consumers cause the most 5xx errors", and read gateway settings. Kong also ships a Konnect connector (an MCP server) that works with Claude Code.</p>
+    <p>None of that is a work tracker. To show you what you would actually see, the mockup below is your account on day one.</p>
+  </div>
+
+  <div class="win">
+    <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span>cloud.konghq.com/us/gateway-manager</div>
+    <div class="win-body">
+      <div class="kg">
+        <div class="kg-side">
+          <span class="brand">Konnect</span>
+          <span>Overview</span><span class="on">Gateway Manager</span><span>Mesh Manager</span><span>API Products</span><span>Dev Portal</span><span>Service Catalog</span><span>Analytics</span><span>AI Gateway</span><span>Organization</span>
+        </div>
+        <div class="kg-main">
+          <h4>Gateway Manager</h4>
+          <div class="kg-tiles">
+            <div class="kg-tile"><b>0</b><span>Control planes</span></div>
+            <div class="kg-tile"><b>0</b><span>Services</span></div>
+            <div class="kg-tile"><b>0</b><span>Requests, last 24 h</span></div>
+          </div>
+          <div class="kg-empty">
+            <b>Set up your first gateway</b>
+            <p style="font-size:13px;color:var(--k-muted)">Create a control plane, then run a data plane node in Docker, Kubernetes or Kong's cloud to start proxying traffic.</p>
+            <span class="kg-btn">New gateway</span>
+          </div>
+          <p style="font-size:12px;color:var(--k-muted)">Your repos have no API that runs behind a gateway today. The closest candidates are q_max's Express server, the joyous site and the Degen server on the HA Green, and none of them needs one.</p>
+        </div>
+        <div class="kg-kai">
+          <div class="h">✦ KAi</div>
+          <div class="bub me">What's left on my claude-settings roadmap?</div>
+          <div class="bub ai">I can help with gateways, services, routes, plugins, analytics and Kong docs in this organization. I don't see any control planes yet, and I can't read GitHub or your roadmap. Want help creating a gateway?</div>
+          <div class="bub me">Which Claude session merged batch 69?</div>
+          <div class="bub ai">I don't have access to that. I can only see traffic that passes through a Kong gateway.</div>
+          <div class="kg-input">Ask KAi about your APIs…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="cap">Illustrative. KAi's replies are my paraphrase of what Kong says it can see (gateway settings, traffic, analytics and docs, limited by your permissions), not a captured answer.</p>
+
+  <div class="two">
+    <div class="panel">
+      <h3>How it could plug in, if at all</h3>
+      <ul>
+        <li><b>As a roadmap or board:</b> it can't. Konnect has no tickets, steps or boards.</li>
+        <li><b>As a gateway for your own Claude API calls:</b> Kong's AI Gateway can sit between a program and the Claude API to log, limit and price calls. That helps only for code that uses your API key directly. Claude Code sessions on your Max plan don't route through it.</li>
+        <li><b>As a connector in Claude Code:</b> the Konnect MCP server would let a session ask about gateway traffic. With no gateways, it has nothing to answer.</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>What you gain</h3>
+      <ul>
+        <li>Nothing for the roadmap.</li>
+        <li>Later, if you publish an API (for example, a public q_max or Banchi endpoint), real rate limits, keys, analytics and an AI assistant to debug it.</li>
+      </ul>
+      <h3>What you lose or pay</h3>
+      <ul>
+        <li>Paid plans (Plus and Enterprise) after a 30-day trial with free credits. Third-party sites quote very different prices, so I could not confirm a figure.</li>
+        <li>A gateway to run and keep up, on a box that is already fragile (the HA Green holds rule).</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= COMPARE ================= -->
+<section class="opt" id="compare">
+  <div class="opt-head">
+    <span class="eyebrow">Side by side</span>
+    <h2>How each option scores against what you need</h2>
+    <p>The Target column is the gold standard for one person directing Claude sessions. Green meets it, amber partly meets it, red misses it.</p>
+  </div>
+  <div class="tbl-wrap">
+    <table class="cmp">
+      <thead><tr><th scope="col">Need</th><th scope="col">Target</th><th scope="col">Today: roadmap page</th><th scope="col">GitHub Projects, display only</th><th scope="col">Jira</th><th scope="col">Kong Konnect and KAi</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">One record of the plan</th><td class="target">Exactly one, in git</td><td><span class="mk g"></span>Roadmap JSON</td><td><span class="mk g"></span>Roadmap JSON; board is a copy</td><td><span class="mk b"></span>Two records, or plan leaves git</td><td><span class="mk b"></span>Has no place for a plan</td></tr>
+        <tr><th scope="row">History of every change</th><td class="target">Full diff per change</td><td><span class="mk g"></span>git log</td><td><span class="mk g"></span>git log; board keeps none</td><td><span class="mk w"></span>Ticket history, no diffs</td><td><span class="mk b"></span>n/a</td></tr>
+        <tr><th scope="row">PR, CI and review state on each item</th><td class="target">Live, with no one writing it</td><td><span class="mk w"></span>Written by sessions</td><td><span class="mk g"></span>Live on PR cards</td><td><span class="mk w"></span>Via GitHub app link</td><td><span class="mk b"></span>n/a</td></tr>
+        <tr><th scope="row">Claude sessions can write it</th><td class="target">Plain commit, reviewable</td><td><span class="mk g"></span>Commit and push</td><td><span class="mk g"></span>Same; sync script copies</td><td><span class="mk w"></span>Connector calls</td><td><span class="mk b"></span>n/a</td></tr>
+        <tr><th scope="row">Click, filter and drag</th><td class="target">Board, table, saved filters</td><td><span class="mk w"></span>Read-only page</td><td><span class="mk g"></span>All three views</td><td><span class="mk g"></span>Strongest filters</td><td><span class="mk b"></span>n/a</td></tr>
+        <tr><th scope="row">Works on the phone</th><td class="target">Readable, tappable</td><td><span class="mk g"></span>Artifact page</td><td><span class="mk g"></span>GitHub app</td><td><span class="mk g"></span>Jira app</td><td><span class="mk w"></span>Web console</td></tr>
+        <tr><th scope="row">New setup to keep green</th><td class="target">None</td><td><span class="mk g"></span>None</td><td><span class="mk w"></span>One sync job and a token</td><td><span class="mk b"></span>Account, connector, migration</td><td><span class="mk b"></span>Account and a gateway</td></tr>
+        <tr><th scope="row">Money</th><td class="target">$0</td><td><span class="mk g"></span>$0</td><td><span class="mk g"></span>$0</td><td><span class="mk g"></span>$0 up to 10 users; AI paid</td><td><span class="mk b"></span>Paid after trial</td></tr>
+        <tr><th scope="row">Fits a solo owner</th><td class="target">No team-only fields</td><td><span class="mk g"></span>Built for you</td><td><span class="mk g"></span>Fields are yours to pick</td><td><span class="mk w"></span>Sprints, points go unused</td><td><span class="mk b"></span>Built for API platform teams</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">Pick: keep the roadmap page as the record. If you want a board to click through, add GitHub Projects fed one way from build.py. Skip Jira unless other people join. Skip Kong unless you start publishing APIs.</p>
+</section>
+
+<section class="opt" id="sources">
+  <div class="opt-head"><span class="eyebrow">Sources</span><h2>Where the facts come from</h2></div>
+  <ol class="src">
+    <li><a href="https://konghq.com/blog/product-releases/kai-upgrade-powered-by-konnect-mcp-server" target="_blank" rel="noopener">Kong blog, Jan 21 2026: KAi upgrade powered by the Konnect MCP server</a>. What KAi can see and do, public beta, Claude Code support.</li>
+    <li><a href="https://konghq.com/konnect/" target="_blank" rel="noopener">Kong Konnect product page</a>. "The AI connectivity platform for platform builders"; modules listed. No prices on the page.</li>
+    <li><a href="https://docs.konghq.com/konnect/account-management" target="_blank" rel="noopener">Kong docs: Konnect plans</a>. Plus and Enterprise plans, 30-day trial with credits.</li>
+    <li><a href="https://docs.github.com/en/issues/planning-and-tracking-with-projects/learning-about-projects/about-projects" target="_blank" rel="noopener">GitHub docs: About Projects</a>. Board, table and roadmap layouts; field types; 50-field limit; built-in automations.</li>
+    <li><a href="https://docs.github.com/en/graphql/reference/projects" target="_blank" rel="noopener">GitHub GraphQL reference: Projects</a>. addProjectV2DraftIssue and field updates used by the sync sketch.</li>
+    <li><a href="https://support.atlassian.com/jira-cloud-administration/docs/explore-jira-cloud-plans/" target="_blank" rel="noopener">Atlassian support: Jira Cloud plans</a>. Free plan up to 10 users; Rovo AI starts on paid plans.</li>
+    <li>claude-settings roadmap branch 40cf7cd0 and pull requests #1094 to #1109, read Nov 2 16:40 CST.</li>
+  </ol>
+  <p class="note">Unknown: whether the official Atlassian connector works on Jira's Free plan, Konnect's current list price, and GitHub Projects' item cap (the docs page I read did not state one).</p>
+</section>
+
+<footer>Research only. No repo, branch or roadmap file was changed to make this page.</footer>
+</div>
+
+</body></html>

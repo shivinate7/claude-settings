@@ -1,0 +1,8 @@
+{
+  "order": 270,
+  "phase": "design",
+  "status": "todo",
+  "title": "Install a browser MCP for every session",
+  "updatedAt": "2026-10-17T17:30:00Z",
+  "why": "Playwright or Chrome DevTools MCP, set up globally, so any repo and any cloud session can render a page and look at it."
+}

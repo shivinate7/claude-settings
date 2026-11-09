@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-08T13:58:00-06:00",
+  "context": "Goal: the debt list shows only gaps that are still open.\nProblem (rule): the sweep found debts whose gaps are already fixed on main, but their files still read open. A records PR would add a Retire line to each, so their files can be deleted.\nBased on (read): the coordinator's sweep of 2026-11-08.\nDeparts from: main keeps those fixed debts' files open \u2014 option a adds Retire lines and deletes the stale files.\nUnvetted: the past-ruling check timed out.",
+  "home": "a records PR through the batch runner",
+  "id": "retire-fixed-debts",
+  "kind": "decision",
+  "n": 68,
+  "options": [
+    {
+      "gain": "The debt list matches the code.",
+      "how": "One records PR adds the Retire lines and deletes the stale files, through the batch runner.",
+      "key": "a",
+      "label": "Go",
+      "lose": "One small records PR."
+    },
+    {
+      "gain": "No work now.",
+      "how": "The fixed debts stay as they are.",
+      "key": "b",
+      "label": "Not now",
+      "lose": "Sessions keep reading fixed gaps as open."
+    }
+  ],
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "pick": "a",
+  "rank": 29,
+  "ref": "the coordinator's notes and debts sweep, 2026-11-08 (wf_fa43661b-922)",
+  "short": "Retire fixed debts",
+  "stands": true,
+  "status": "open",
+  "title": "Retire the debts the sweep found fixed, so their stale files can go?",
+  "why": "It is records cleanup with git keeping the history, so it can be undone."
+}

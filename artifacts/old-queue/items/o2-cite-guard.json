@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26",
+  "context": "The analysis you asked for, from o2's lane, measured in claude-settings history: 155 commit messages cite 542 record paths. 471 of those files no longer exist anywhere, because sweeps deleted them; they did not move. The other 71 still exist, and o2's folder move breaks all 71 paths, while their ids still resolve.\nWhere a path cite has helped: (1) the 'Drops-lines' line in 82 commits, which the silent-undo check reads (the guard already exempts it); (2) an agent can open a live path at once, with no search; (3) banchi records cite docs/decisions/ paths in 5 files. The guard reads only commit messages and PR text, so those files are untouched.\nWhat cite-by-id protects: a cite that still works after a move. o2's move is exactly that. Today the guard refuses only root decisions/ and debts/ paths, so after the move a docs/decisions/x.md cite passes, and the rule stops working here in practice.",
+  "home": "PR #607 body, 'Questions parked for the owner', item 1",
+  "id": "o2-cite-guard",
+  "kind": "decision",
+  "n": 11,
+  "options": [
+    {
+      "gain": "No new refusals.",
+      "how": "No change.",
+      "key": "a",
+      "label": "Leave the guard as it is",
+      "lose": "The rule goes unenforced after the move, and the next move breaks every new cite."
+    },
+    {
+      "gain": "The rule holds through this move and any later one.",
+      "how": "A small lane after o2's move refuses docs/decisions/ and docs/debts/ cites, keeps the Drops-lines exception, and reads both paths from the one layout file.",
+      "key": "b",
+      "label": "Refuse the new layout paths too",
+      "lose": "One extra refusal; it changes a guard, so it gets review rounds."
+    },
+    {
+      "gain": "Every cite can be opened directly.",
+      "how": "Delete the cite-by-id guard.",
+      "key": "c",
+      "label": "Retire the rule and allow path cites",
+      "lose": "Each move breaks them. A deletion breaks an id cite too, so this only helps for the 71 moved files."
+    }
+  ],
+  "owner": "Build advisor",
+  "pick": "b",
+  "ref": "o2 (one layout for every repo), PR #607",
+  "status": "closed",
+  "title": "Should the guard refuse docs/decisions/... path cites after the folder move?",
+  "why": "Most broken cites came from deletions, which no rule saves. A move is the one case where ids win, and o2 is that move. The exception keeps the one path use with a real reader."
+}

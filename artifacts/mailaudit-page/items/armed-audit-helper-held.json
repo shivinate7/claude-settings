@@ -1,0 +1,33 @@
+{
+  "added": "2026-10-29T00:13:00-05:00",
+  "closedNote": "Closed 2026-11-08 13:25 CST on the owner's note: rule roles-review-cap-three merges a change at zero or positive net value and holds only a negative one. The zero-score change was parked by mistake. Restyle revives it and sends it to batch.",
+  "context": "Goal: the checks see the armed \"Remove stamp?\" ask while it's on screen.\nProblem: the ask lasts 4 seconds, and the check takes 8, so the check never sees it. A change to the shared check helper tried to fix that. The last review scored it zero on safety: it closed no hole and opened none. By rule, a zero-score change is parked until you decide.\nBased on: step 6 review round 3 (read).\nBased on: rule roles-review-cap-three: a zero-score change is held (ruling).\nMeanwhile: step 6 merges without it. The gap is debt native-armed-audit-misses-ask.",
+  "home": "branch step6-armed-audit-live, revived from archive f5e138a, to batch after its fix check",
+  "id": "armed-audit-helper-held",
+  "kind": "decision",
+  "n": 40,
+  "options": [
+    {
+      "gain": "A clean fix with full review.",
+      "how": "Delete the parked change. A new lane fixes the gap from scratch, starting with a test that fails first.",
+      "key": "a",
+      "label": "Drop it; fix in a new lane",
+      "lose": "One more lane."
+    },
+    {
+      "gain": "No more work now.",
+      "how": "Delete the parked change and keep the debt open.",
+      "key": "b",
+      "label": "Drop it; leave the gap",
+      "lose": "The armed ask stays unchecked by the accessibility check."
+    }
+  ],
+  "owner": "restyle local_96bb7b5c-71b1-45b5-b222-2df64d74f80f",
+  "pick": "a",
+  "rank": 6,
+  "ref": "step 6 review round 3; archive/step6-armed-audit-live",
+  "short": "Held audit helper",
+  "status": "closed",
+  "title": "A step 6 test-helper change scored zero safety value and is parked. Drop it, or fix it?",
+  "why": "The ask is a real control on mail day, so it should be checked, and a fresh lane is cheaper than reviving a zero-score change."
+}

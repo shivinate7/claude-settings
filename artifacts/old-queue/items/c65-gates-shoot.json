@@ -1,0 +1,25 @@
+{
+  "added": "2026-10-26",
+  "context": "What you're adding, in plain words: gates-shoot is a CI job that tests the shared screenshot command (bin/shoot). GitHub's branch protection keeps a list of checks that must be green before anything can merge into main. merge.py already waits for gates-shoot, but GitHub's own list doesn't name it yet. So a merge done another way, such as the Merge button on github.com, could go in with gates-shoot red. Adding the name closes that gap. No code changes.",
+  "home": "roadmap step c65",
+  "id": "c65-gates-shoot",
+  "kind": "task",
+  "links": [
+    {
+      "label": "Branch settings",
+      "url": "https://github.com/shivinate7/claude-settings/settings/branches"
+    }
+  ],
+  "minutes": "1 min",
+  "n": 18,
+  "owner": "Triage the roadmap",
+  "ref": "c65 (main's branch protection requires gates-shoot)",
+  "status": "closed",
+  "steps": [
+    "Open the branch settings link below.",
+    "Next to the rule for main, press Edit.",
+    "Find 'Require status checks to pass'. In its search box, type gates-shoot and pick it.",
+    "Press Save changes at the bottom."
+  ],
+  "title": "Add gates-shoot to main's required checks in GitHub"
+}

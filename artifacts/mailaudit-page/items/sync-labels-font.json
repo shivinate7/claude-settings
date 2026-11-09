@@ -1,0 +1,42 @@
+{
+  "added": "2026-10-27T01:32:00-05:00",
+  "context": "Goal: the native Sync screen matches the web, and the type rule holds.\nProblem: the web Sync labels inherit Cochin. Decision typography-cochin-and-mono (Cochin for words, mono for numbers) says labels are monospace.\nBased on: the step 4 designer's read of the web code (read, 01:31).\nMeanwhile: step 4 builds to match the web as it ships (Cochin).",
+  "designs": [
+    {
+      "label": "a) Keep Cochin, record an exception",
+      "slug": "q17-a"
+    },
+    {
+      "label": "b) Move labels to mono",
+      "slug": "q17-b"
+    }
+  ],
+  "home": "decision typography-cochin-and-mono",
+  "id": "sync-labels-font",
+  "kind": "decision",
+  "n": 17,
+  "options": [
+    {
+      "design": "q17-a",
+      "gain": "No web change.",
+      "how": "The type record names Sync labels as Cochin.",
+      "key": "a",
+      "label": "Record an exception",
+      "lose": "The type rule has one exception."
+    },
+    {
+      "design": "q17-b",
+      "gain": "One rule, no exception.",
+      "how": "Change the web Sync labels to monospace; native follows.",
+      "key": "b",
+      "label": "Move web labels to mono",
+      "lose": "A web change and a screens re-check."
+    }
+  ],
+  "owner": "manifest-restyle",
+  "pick": "a",
+  "ref": "manifest-restyle step4-design notes",
+  "status": "closed",
+  "title": "Sync labels are in Cochin, but the type rule says labels are mono",
+  "why": "Cheapest; the screen already ships this way."
+}

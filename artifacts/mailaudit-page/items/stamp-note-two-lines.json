@@ -1,0 +1,95 @@
+{
+  "added": "2026-11-08T13:26:00-06:00",
+  "context": "You asked for visuals (10:55 CST). Each option now has its mockup, drawn on the folded Duo (466 pt wide), with extra pictures for a tap on \"0 stamped\" and for the open Duo.\nGoal: the phone's order stamps look and work like the web's.\nProblem (goal): step 6 ships two choices the mockup didn't have. The note field is two lines tall where the mockup shows one, so it fits the 44-point tap minimum at larger text sizes. And the \"0 stamped\" filter cell is disabled when nothing is stamped, but it is not greyed out: its button style dims only on press, so it looks active and does nothing. Both depart from the mockup, so they need your word.\nBased on (read): the step 6 design review.\nBased on (ruling): house rule ux-house-rules-govern: tap targets at least 44 points.\nBased on (read): the step 6 mockup is not in the repo, so option b is drawn from this item's own description and the web's one-line note field.\nDeparts from: main ships a two-line note field and a dead \"0 stamped\" cell \u2014 option b changes them to a one-line field and an always-active cell, as the step 6 mockup had.\nMeanwhile: step 6 ships with both. A change later is a small edit.",
+  "designs": [
+    {
+      "drawn": 466,
+      "file": "docs/design/item-39-stamp-editor/a.html",
+      "focus": "#stamp-choice",
+      "label": "a) Keep both",
+      "option": "a",
+      "slug": "d39-a",
+      "state": "editor"
+    },
+    {
+      "drawn": 466,
+      "file": "docs/design/item-39-stamp-editor/a.html",
+      "focus": "#stamp-choice",
+      "label": "a) Tapping \"0 stamped\"",
+      "option": "a",
+      "slug": "d39-a",
+      "state": "tap-cell",
+      "width": "Tap 0 stamped"
+    },
+    {
+      "drawn": 951,
+      "file": "docs/design/item-39-stamp-editor/a.html",
+      "focus": "#stamp-choice",
+      "label": "a) On the open Duo",
+      "option": "a",
+      "slug": "d39-a",
+      "state": "unfolded",
+      "width": "Open Duo"
+    },
+    {
+      "drawn": 466,
+      "file": "docs/design/item-39-stamp-editor/b.html",
+      "focus": "#stamp-choice",
+      "label": "b) Match the mockup",
+      "option": "b",
+      "slug": "d39-b",
+      "state": "editor"
+    },
+    {
+      "drawn": 466,
+      "file": "docs/design/item-39-stamp-editor/b.html",
+      "focus": "#stamp-choice",
+      "label": "b) Tapping \"0 stamped\"",
+      "option": "b",
+      "slug": "d39-b",
+      "state": "tap-cell",
+      "width": "Tap 0 stamped"
+    },
+    {
+      "drawn": 951,
+      "file": "docs/design/item-39-stamp-editor/b.html",
+      "focus": "#stamp-choice",
+      "label": "b) On the open Duo",
+      "option": "b",
+      "slug": "d39-b",
+      "state": "unfolded",
+      "width": "Open Duo"
+    }
+  ],
+  "home": "decision stamp-band-opens-the-editor (manifest-restyle)",
+  "id": "stamp-note-two-lines",
+  "kind": "decision",
+  "look": true,
+  "n": 39,
+  "options": [
+    {
+      "design": "d39-a",
+      "gain": "The note field is easy to tap, and the filter can't show an empty list.",
+      "how": "A two-line note field, and a \"0 stamped\" cell that looks active but does nothing.",
+      "key": "a",
+      "label": "Keep both",
+      "lose": "It differs a little from the mockup, and the dead cell gives no sign that it is off."
+    },
+    {
+      "design": "d39-b",
+      "gain": "It looks like the step 6 mockup and the web.",
+      "how": "A one-line note field with a taller tap area; \"0 stamped\" always active.",
+      "key": "b",
+      "label": "Match the mockup",
+      "lose": "More work. Tapping \"0 stamped\" shows an empty list."
+    }
+  ],
+  "owner": "restyle local_96bb7b5c-71b1-45b5-b222-2df64d74f80f",
+  "pick": "a",
+  "rank": 5,
+  "ref": "step 6 design review; decision stamp-band-opens-the-editor",
+  "short": "Stamp note field",
+  "status": "open",
+  "title": "The phone's stamp editor: a two-line note field and a \"0 stamped\" cell that looks active but does nothing. Keep both?",
+  "why": "Both follow the house tap-size rule, and neither can show you a dead end."
+}

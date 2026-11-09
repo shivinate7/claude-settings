@@ -1,0 +1,39 @@
+{
+  "added": "2026-10-28T21:08:00-05:00",
+  "context": "Goal: each row in the Sync panel says plainly what it shows, on the web and the phone.\nProblem: item 16b says to change the labels back to LEDGER, PHOTOS and KEY. The rows today show server status, last sync time and the sync key. A plain rename puts PHOTOS over a sync time that has nothing to do with photos.\nBased on: the web's Sync rows are Server, Last sync and Sync key (read, src/app.jsx partGrid).\nBased on: your ruling of 2026-10-27 12:25 CDT, in record sync-particulars-ruled-values (ruling).\nBased on: the web already tracks photo sync state (read: photoSync, photoUsage, lostPhotos).\nDeparts from: b and c change what the web's Sync rows show today.\nMeanwhile: the sync-labels lane waits. Step 5 goes on.",
+  "home": "record sync-particulars-ruled-values, which restyle rewrites in step 10 with option b",
+  "id": "sync-labels-pairing",
+  "kind": "decision",
+  "n": 36,
+  "options": [
+    {
+      "gain": "The literal ruling, and the smallest change.",
+      "how": "LEDGER over server status, PHOTOS over last sync, KEY over the sync key.",
+      "key": "a",
+      "label": "Rename only",
+      "lose": "PHOTOS sits over a time, so the label is wrong."
+    },
+    {
+      "gain": "Every label matches its value, as the old rows did.",
+      "how": "LEDGER shows server status and last sync, such as \"Connected \u00b7 2 min ago\". PHOTOS shows photo sync, such as \"synced\" or \"3 to send\". KEY shows the key.",
+      "key": "b",
+      "label": "LEDGER, PHOTOS, KEY with matching values",
+      "lose": "A bigger lane: a new photo value on web and phone, and a screen re-check."
+    },
+    {
+      "gain": "No wrong label, and a small change.",
+      "how": "Keep today's three rows, with uppercase labels.",
+      "key": "c",
+      "label": "SERVER, LAST SYNC, KEY",
+      "lose": "It isn't what 16b asked for."
+    }
+  ],
+  "owner": "restyle local_96bb7b5c-71b1-45b5-b222-2df64d74f80f",
+  "pick": "b",
+  "rank": 3,
+  "ref": "item 16b; decision sync-particulars-ruled-values; web src/app.jsx partGrid",
+  "short": "Sync panel labels",
+  "status": "closed",
+  "title": "The Sync panel's LEDGER, PHOTOS and KEY labels: which value goes under each?",
+  "why": "It's the only option where every label tells the truth and still follows 16b."
+}

@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26T21:45:00-05:00",
+  "context": "Goal: MANIFEST uses both pages of the open Duo.\nProblem: the designer drew options, and only you pick the layout.\nMeanwhile: nothing is built; the restyle continues.",
+  "home": "a new mailaudit decision record on the Duo layout",
+  "id": "duo-packages-split",
+  "kind": "decision",
+  "n": 3,
+  "options": [
+    {
+      "gain": "The package you check never scrolls away",
+      "how": "Package list left, open package right",
+      "key": "a",
+      "label": "Package list left, open package right",
+      "lose": "The list is narrower"
+    },
+    {
+      "gain": "Twice the cards on screen",
+      "how": "Two card columns",
+      "key": "b",
+      "label": "Two card columns",
+      "lose": "Cards reflow across the hinge"
+    },
+    {
+      "gain": "The letterhead always shows",
+      "how": "Masthead left, list right",
+      "key": "c",
+      "label": "Masthead left, list right",
+      "lose": "One page is mostly static"
+    }
+  ],
+  "owner": "mailaudit orchestrator",
+  "pick": "a",
+  "ref": "Duo mockups packages.html, PR #135 (Duo ideas, draft)",
+  "status": "closed",
+  "title": "Packages on two pages",
+  "why": "Checking in is the mail-day job, so the open package should stay put."
+}

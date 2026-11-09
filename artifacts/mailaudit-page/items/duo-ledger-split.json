@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26T21:45:00-05:00",
+  "context": "Goal: MANIFEST uses both pages of the open Duo.\nProblem: the designer drew options, and only you pick the layout.\nMeanwhile: nothing is built; the restyle continues.",
+  "home": "a new mailaudit decision record on the Duo layout",
+  "id": "duo-ledger-split",
+  "kind": "decision",
+  "n": 6,
+  "options": [
+    {
+      "gain": "Change a filter and see it",
+      "how": "Ledger left, working view right",
+      "key": "a",
+      "label": "Ledger left, working view right",
+      "lose": "Options squeezed"
+    },
+    {
+      "gain": "Panels stop pushing the list",
+      "how": "Groups left, open panel right",
+      "key": "b",
+      "label": "Groups left, open panel right",
+      "lose": "The working view is hidden while open"
+    },
+    {
+      "gain": "Everything at once",
+      "how": "View group left, Data group right",
+      "key": "c",
+      "label": "View group left, Data group right",
+      "lose": "Busy page"
+    }
+  ],
+  "owner": "mailaudit orchestrator",
+  "pick": "b",
+  "ref": "Duo mockups ledger.html, PR #135 (Duo ideas, draft)",
+  "status": "closed",
+  "title": "Ledger tab on two pages",
+  "why": "It also closes the panels-push-the-list problem on the Duo."
+}

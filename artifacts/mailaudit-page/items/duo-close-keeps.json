@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26T21:45:00-05:00",
+  "context": "Goal: MANIFEST uses both pages of the open Duo.\nProblem: the designer drew options, and only you pick the layout.\nMeanwhile: nothing is built; the restyle continues.",
+  "home": "a new mailaudit decision record on the Duo layout",
+  "id": "duo-close-keeps",
+  "kind": "decision",
+  "n": 7,
+  "options": [
+    {
+      "gain": "You keep the card you were checking",
+      "how": "The right page",
+      "key": "a",
+      "label": "The right page",
+      "lose": "You lose your list position on the outer screen"
+    },
+    {
+      "gain": "The list stays",
+      "how": "The left page",
+      "key": "b",
+      "label": "The left page",
+      "lose": "The open card closes"
+    }
+  ],
+  "owner": "mailaudit orchestrator",
+  "pick": "a",
+  "ref": "Duo mockups closed.html, PR #135 (Duo ideas, draft)",
+  "status": "closed",
+  "title": "What closing the phone keeps",
+  "why": "Matches degen, and keeps the thing you looked at."
+}

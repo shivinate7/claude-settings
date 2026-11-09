@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-27T01:32:00-05:00",
+  "context": "Goal: the records say what the web really does.\nProblem: decision orphaned-colours-by-meaning (Orphaned colour meanings) names \"the armed check-in confirm\". No such control exists: assigning an envelope is one tap. Rewriting a stale record waits for your word.\nBased on: the step 4 designer's read of the web code (read, 01:31).\nMeanwhile: step 4 builds to match the web as it ships; this doesn't block it.",
+  "home": "decision orphaned-colours-by-meaning",
+  "id": "stale-orphaned-confirm",
+  "kind": "decision",
+  "n": 15,
+  "options": [
+    {
+      "gain": "The record matches the app.",
+      "how": "Remove the confirm clause; keep the rest.",
+      "key": "a",
+      "label": "Delete the clause",
+      "lose": "Nothing; the control is gone."
+    },
+    {
+      "gain": "No edit.",
+      "how": "Keep the record as is.",
+      "key": "b",
+      "label": "Leave it",
+      "lose": "The record keeps describing a control that isn't there."
+    }
+  ],
+  "owner": "manifest-restyle",
+  "pick": "a",
+  "ref": "manifest-restyle step4-design notes",
+  "status": "closed",
+  "title": "Stale record: Orphaned colours name a confirm that doesn't exist",
+  "why": "The control is gone; the clause can only mislead."
+}

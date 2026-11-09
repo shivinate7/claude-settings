@@ -1,0 +1,8 @@
+{
+  "order": 410,
+  "phase": "later",
+  "status": "todo",
+  "title": "Track guard refusals per session",
+  "updatedAt": "2026-10-17T17:20:00Z",
+  "why": "Shows whether the experience improves as the system shrinks."
+}

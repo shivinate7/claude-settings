@@ -1,0 +1,134 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Shared iOS Kit Question</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+/* Layout: one reading column, a verdict band up top, comparison tables that scroll inside themselves. */
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --fg:#1b2230; --muted:#5a6475; --rule:#dde1e8;
+  --accent:#2f5bd3; --gold:#fbf3dc; --goldfg:#6b4e00; --ok:#1f7a4d; --warn:#a45a00; --bad:#b3261e;
+  --display:"Fraunces",Georgia,serif; --body:"Source Sans 3",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12161d; --panel:#1a2029; --fg:#e6e9ef; --muted:#9aa3b2; --rule:#2c3440;
+  --accent:#86a6ff; --gold:#2e2817; --goldfg:#f0cf7a; --ok:#5cc391; --warn:#e2a35a; --bad:#ff8a80; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12161d; --panel:#1a2029; --fg:#e6e9ef; --muted:#9aa3b2; --rule:#2c3440;
+  --accent:#86a6ff; --gold:#2e2817; --goldfg:#f0cf7a; --ok:#5cc391; --warn:#e2a35a; --bad:#ff8a80; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:16px/1.6 var(--body)}
+.wrap{max-width:1040px;margin:0 auto;padding-block:40px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:36px}
+h1,h2{font-family:var(--display);font-weight:600;text-wrap:balance;margin:0;line-height:1.2}
+h1{font-size:2rem} h2{font-size:1.35rem}
+p,ul{margin:0;max-width:72ch} ul{padding-left:1.2em;display:grid;gap:6px}
+section{display:grid;gap:14px}
+.meta{color:var(--muted);font-size:.9rem}
+code{font-family:var(--mono);font-size:.85em}
+.verdict{background:var(--panel);border:1px solid var(--rule);border-left:4px solid var(--accent);border-radius:6px;padding:20px;display:grid;gap:10px}
+.verdict strong{font-size:1.05rem}
+.tablebox{overflow-x:auto;border:1px solid var(--rule);border-radius:6px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;min-width:900px;font-size:.9rem}
+th,td{padding:9px 12px;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.04em}
+tr:last-child td{border-bottom:0}
+td:first-child{font-weight:600}
+.g{background:var(--gold);color:var(--fg)}
+th.g{color:var(--goldfg)}
+.y{color:var(--ok);font-weight:600} .n{color:var(--bad);font-weight:600} .p{color:var(--warn);font-weight:600}
+.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:.88rem;color:var(--muted)}
+.tag{display:inline-block;font-size:.75rem;font-weight:600;padding:1px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
+.fix{color:var(--bad)} .ok{color:var(--ok)} .meh{color:var(--warn)}
+.opts{display:grid;gap:14px}
+.opt{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:18px;display:grid;gap:8px}
+.opt.pick{border-color:var(--accent);border-width:2px}
+.opt h3{margin:0;font-size:1.05rem;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.gl{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.gl div{min-width:0}
+.gl b{display:block;font-size:.8rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+</style>
+
+<div class="wrap">
+<header style="display:grid;gap:8px">
+  <h1>Should your iOS apps share a kit repo?</h1>
+  <p class="meta">A consultation for shiv, Oct 27. Checked at claude-settings 54be9f1, home-app 360a31f, degen f0617bd, mailaudit 37d4e7d, ios-adblock 78fb749 (each repo's main).</p>
+</header>
+
+<div class="verdict">
+  <strong>Short answer: you want one standard, not a new repo. You're not doing anything wrong.</strong>
+  <p>You expect every iOS app to work the same way: the same build, tests, phone install and TestFlight path. Each app was built in its own session, so each one picked its own path. Each repo also got some things right, so the standard below takes the best habit from each repo and calls it the gold standard.</p>
+  <p>That standard belongs in claude-settings as one written page and a few checks, so every session in every iOS repo follows it. It does not need a new repo. The only code all four apps really share is the ship tool, and that already lives in claude-settings. Getting there is c47 ("one account file for iOS shipping"), plus one visit per repo to close the gaps in the table.</p>
+  <p>One thing is broken today: mailaudit's <code>make phone</code> calls an old script that refuses it, so installing MANIFEST from the Mac always fails.</p>
+</div>
+
+<section>
+  <h2>The gold standard, and where each app stands</h2>
+  <div class="legend"><span><span class="y">✓</span> meets it</span><span><span class="p">~</span> partly</span><span><span class="n">✗</span> doesn't</span><span>The shaded column is the target. "From" names the repo that already does it best.</span></div>
+  <div class="tablebox"><table>
+    <thead><tr><th>Area</th><th class="g">Gold standard</th><th>home-app</th><th>degen</th><th>mailaudit</th><th>ios-adblock</th><th>Matters?</th></tr></thead>
+    <tbody>
+      <tr><td>Your IDs (team, phone, key)</td><td class="g">Once, in <code>~/.config/ios-ship/account.json</code> on the Mac. Never in a repo. <br><span class="meta">From: c47</span></td><td><span class="n">✗</span> in repo config</td><td><span class="n">✗</span> in repo config</td><td><span class="n">✗</span> team ID in public project file</td><td><span class="n">✗</span> in repo config</td><td><span class="tag fix">yes, c47</span></td></tr>
+      <tr><td>Phone install and TestFlight</td><td class="g"><code>ios-ship install</code> first, <code>ios-ship testflight</code> if that fails. No scripts of the repo's own. <br><span class="meta">From: your Oct 22 ruling, for every app</span></td><td><span class="p">~</span> ios-ship, via 2 wrappers</td><td><span class="p">~</span> ios-ship, via 2 wrappers</td><td><span class="n">✗</span> broken install, own TestFlight script</td><td><span class="p">~</span> ios-ship, via 2 wrappers</td><td><span class="tag fix">yes, c47</span></td></tr>
+      <tr><td>Same commands everywhere</td><td class="g"><code>make phone</code>, <code>make testflight</code>, <code>make native-check</code> in every repo, doing the same thing. <br><span class="meta">From: degen's <code>native-check</code></span></td><td><span class="p">~</span> testflight only</td><td><span class="p">~</span> no <code>phone</code></td><td><span class="p">~</span> no <code>native-check</code></td><td><span class="n">✗</span> no Makefile</td><td><span class="tag fix">yes</span></td></tr>
+      <tr><td>Where app logic lives</td><td class="g">In a Swift package inside the repo (like DegenKit), so its tests run in seconds with no simulator. <br><span class="meta">From: degen, mailaudit</span></td><td><span class="n">✗</span> all in the app</td><td><span class="y">✓</span> DegenKit</td><td><span class="y">✓</span> ManifestKit</td><td><span class="p">~</span> tiny app, fine as is</td><td><span class="tag meh">home-app</span></td></tr>
+      <tr><td>Project file</td><td class="g">A short <code>project.yml</code>, generated by XcodeGen. Easy to read and fewer merge conflicts. <br><span class="meta">From: degen, mailaudit, ios-adblock</span></td><td><span class="n">✗</span> Xcode's own file</td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="tag meh">optional</span></td></tr>
+      <tr><td>Swift language mode</td><td class="g">6.0, which catches thread-safety bugs when the code builds.</td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="n">✗</span> 5.0</td><td><span class="tag meh">small</span></td></tr>
+      <tr><td>Lowest iOS</td><td class="g">iOS 26, unless a phone that must run the app is older. Write the reason down either way.</td><td><span class="p">~</span> 18.0, no reason recorded</td><td><span class="y">✓</span> 26</td><td><span class="y">✓</span> 26</td><td><span class="p">~</span> 17.2, likely for the blocker size limit</td><td><span class="tag meh">check family phones</span></td></tr>
+      <tr><td>Fast checks on every PR</td><td class="g">CI on a pinned <code>macos-26</code> runs the package tests and compiles every app. It skips drafts and changes to docs only. <br><span class="meta">From: mailaudit, ios-adblock</span></td><td><span class="p">~</span> floating <code>macos-latest</code></td><td><span class="n">✗</span> no Swift in CI (your rule)</td><td><span class="p">~</span> package tests only, no app compile</td><td><span class="y">✓</span></td><td><span class="tag fix">yes</span></td></tr>
+      <tr><td>Slow tests (UI, full suite)</td><td class="g">Once per batch, on the Mac, through one shared simulator tool. <br><span class="meta">From: degen's <code>native-check</code> and <code>sim-test</code></span></td><td><span class="p">~</span> in CI on each PR</td><td><span class="y">✓</span></td><td><span class="p">~</span> UI tests, no stated home</td><td><span class="p">~</span> in CI on each PR</td><td><span class="tag fix">yes</span></td></tr>
+      <tr><td>Simulator</td><td class="g">One tool in claude-settings that uses the one shared iPhone simulator, then shuts it down. <br><span class="meta">From: degen's <code>tools/sim-test</code></span></td><td><span class="p">~</span> written rule only</td><td><span class="p">~</span> own copy of the tool</td><td><span class="p">~</span> a decision record only</td><td><span class="n">✗</span> none</td><td><span class="tag fix">yes</span></td></tr>
+      <tr><td>Colours and fonts</td><td class="g">One <code>tokens.json</code> per app. The Swift (and web) code is generated from it, never typed by hand. <br><span class="meta">From: degen</span></td><td><span class="n">✗</span> planned (r3)</td><td><span class="y">✓</span> generated</td><td><span class="p">~</span> read at runtime</td><td>n/a</td><td><span class="tag meh">per app</span></td></tr>
+      <tr><td>Test style</td><td class="g">Swift Testing for new tests, XCTest for UI tests. No rewriting of old tests.</td><td><span class="y">✓</span></td><td><span class="y">✓</span> (old tests stay)</td><td><span class="y">✓</span> (old tests stay)</td><td><span class="y">✓</span> (old tests stay)</td><td><span class="tag ok">no work</span></td></tr>
+      <tr><td>Look of each app</td><td class="g">Different on purpose. Each app is its own product (your Oct 20 ruling).</td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="tag ok">no work</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="meta">Unknown: what's in mailaudit-data (it is outside this project's repos), and anything on the Mac that main doesn't hold. "Slow tests" for mailaudit: UI tests exist in <code>native/ManifestUITests</code>, but I found no stated rule on where they run.</p>
+</section>
+
+<section>
+  <h2>Your four options</h2>
+  <div class="opts">
+    <div class="opt pick">
+      <h3>A. One iOS standard in claude-settings, then one visit per repo <span class="tag ok">my pick</span></h3>
+      <p>How it works: claude-settings gets one page, "iOS apps", that holds the gold-standard column above, plus checks that flag a repo that drifts from it. The ship and simulator tools live beside it. c47 runs first. Then each app gets one visit that closes its gaps in the table.</p>
+      <div class="gl"><div><b>You gain</b>Every app behaves the same way for you. A new iOS app starts at the standard. Sessions stop inventing their own path.</div>
+      <div><b>You lose</b>Four repo visits of work. Swift helpers such as the keychain wrapper stay copied in each app, which is a small and known cost.</div></div>
+    </div>
+    <div class="opt">
+      <h3>B. A separate shared iOS kit repo</h3>
+      <p>How it works: a new repo holds a Swift package (keychain, sockets, maybe UI pieces) and project templates. Each app adds it as a pinned dependency.</p>
+      <div class="gl"><div><b>You gain</b>One copy of a few hundred lines of helper code, and a template for a fifth app.</div>
+      <div><b>You lose</b>A fifth repo, with its own CI and versions. Every kit change needs a version bump in four apps. mailaudit is public, so a private kit breaks its CI. The standard and the tools still have to live in claude-settings, because that is where sessions read their rules.</div></div>
+    </div>
+    <div class="opt">
+      <h3>C. A, plus a shared Swift package later</h3>
+      <p>How it works: A now. A shared package comes only when a fourth app needs the keychain wrapper, or the same bug turns up in two copies.</p>
+      <div class="gl"><div><b>You gain</b>Everything in A, and a written trigger for the kit.</div>
+      <div><b>You lose</b>Nothing now.</div></div>
+    </div>
+    <div class="opt">
+      <h3>D. No change</h3>
+      <div class="gl"><div><b>You gain</b>No work.</div>
+      <div><b>You lose</b>mailaudit stays broken, and each app keeps drifting its own way.</div></div>
+    </div>
+  </div>
+  <p>My pick is A, with C's trigger written down. You plan to build more apps, so A also gets a <strong>"new iOS app" starter</strong> in claude-settings. It sets up a fresh app at the gold standard on day one: a project.yml, the same make targets, a Kit package for the logic, the CI workflow and an ios-ship entry. C's trigger will likely come with the next app. When it does, the shared package is public and holds only small helpers (keychain, sockets, haptics), never screens or colours.</p>
+</section>
+
+<section>
+  <h2>Portability</h2>
+  <ul>
+    <li><strong>The iOS standard, ship tool and simulator tool:</strong> yes, to every repo that ships an iOS app (home-app, degen, mailaudit, ios-adblock). Not to q_max, banchi or joyous, which ship none.</li>
+    <li><strong>A Swift kit repo:</strong> no, not now. The overlap is too small to pay for a fifth repo.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Also found</h2>
+  <ul>
+    <li>mailaudit's decision "native-ships-via-testflight" depends on ios-adblock's old install script. That script now refuses mailaudit's call, so the decision's premise has rotted.</li>
+    <li>Your Oct 22 ruling "install from the Mac first, TestFlight as the fallback, for every app" is written down only in mailaudit. It belongs in the claude-settings standard.</li>
+    <li>mailaudit is public, and its project file holds your team ID. The ios-ship decision keeps IDs out of public repos. Settle this in c47's plan check.</li>
+  </ul>
+</section>
+</div>
+
+</body></html>

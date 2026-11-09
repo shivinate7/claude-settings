@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26",
+  "context": "You're right, and it changes the pick. The cleanup and the brake both live in the session's own turns. Each time an agent finishes, the session wakes up and does the housekeeping. It removes that agent's worktree and build output (your disk-floor rule), stops servers and simulators it started, checks free disk before the next build, and the brake checks the machine when it starts the next agent. While a question waits on you, none of that runs. Finished agents' worktrees, build folders and leftover processes pile up, and the one automatic cleanup that runs without the session (at each agent's end) keeps that agent's own worktree and clears others only after 30 idle minutes. Not measured: whether a waiting question also holds back the 'agent finished' notices. Your observation says it does.\n\nSo 'questions never block' is the main fix, and it is already being built as its own step (c84, PR #648). The per-write disk check (PR #642) is the backup. It stops agents at a full machine even when the session is busy or something else goes wrong.",
+  "home": "PR #642 (draft); thread 'Keep brakes working while a question waits'",
+  "id": "c77-brake-running",
+  "kind": "decision",
+  "n": 30,
+  "options": [
+    {
+      "gain": "The cause is fixed, and if cleanup ever falls behind, the disk still can't fill to a crash.",
+      "how": "PR #648 keeps the session doing its housekeeping while you're away. PR #642 goes in too, refusing only at a full machine (under 5 GB or memory over 95%), with a one-line exception in your 'never read on every tool call' rule for background agents' own writes.",
+      "key": "a",
+      "label": "Main fix plus backup: non-blocking questions (already in build) and the per-write disk check",
+      "lose": "A rule exception, and one small disk read per background-agent write."
+    },
+    {
+      "gain": "No rule exception, and less to maintain.",
+      "how": "PR #648 goes in. PR #642 is parked, and reopened only if the disk fills again with #648 in place.",
+      "key": "b",
+      "label": "Main fix only: non-blocking questions, park the disk check",
+      "lose": "No backstop. A busy session, or an agent that fills the disk faster than housekeeping runs, can still crash the machine."
+    }
+  ],
+  "owner": "Build advisor",
+  "pick": "a",
+  "ref": "c77 (keep brakes working while a question waits), PR #642",
+  "status": "closed",
+  "title": "Stop background agents filling the disk, and stop questions from hanging (blocks PR #642)",
+  "why": "Your observation points to the waiting session as the cause, and #648 fixes that. #642 is cheap insurance against the crash itself."
+}

@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-08T13:58:00-06:00",
+  "context": "Goal: the cloud plan is easy to find when it's needed.\nProblem (goal): the plan record and its setup script sit only on branch claude/cloud-feasibility-e01860. Merging it puts a plan on main that nobody has measured yet.\nBased on (read): the branch at 0a305e5.\nDeparts from: main has no docs/plans/cloud-sessions.md \u2014 option a adds it and its setup script, through the batch runner.\nUnvetted: the past-ruling check timed out.",
+  "group": "cloud-sessions-plan",
+  "home": "plan cloud-sessions (branch claude/cloud-feasibility-e01860 0a305e5)",
+  "id": "cloud-plan-merge",
+  "kind": "decision",
+  "n": 67,
+  "options": [
+    {
+      "gain": "The plan is findable on main.",
+      "how": "The batch runner merges the plan and script; docs/plans holds work not yet shipped.",
+      "key": "a",
+      "label": "Merge it as a plan",
+      "lose": "An unmeasured plan on main."
+    },
+    {
+      "gain": "Main holds nothing unmeasured.",
+      "how": "The branch stays as it is.",
+      "key": "b",
+      "label": "Leave it on its branch",
+      "lose": "The plan is easy to lose on a branch."
+    }
+  ],
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "pick": "a",
+  "rank": 28,
+  "ref": "plan docs/plans/cloud-sessions.md and its setup script, on branch claude/cloud-feasibility-e01860",
+  "short": "Merge cloud plan",
+  "status": "open",
+  "title": "Merge the cloud sessions plan and its setup script to main, as a plan?",
+  "why": "docs/plans is the home for work not yet shipped, so an unmeasured plan belongs there."
+}

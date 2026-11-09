@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-27",
+  "context": "On your PC and Mac, local sessions load a GitHub plugin that has no token, so its tools fail. claude-settings does not switch it on (checked main 54be9f1), so it is switched on somewhere else on each machine. Every PR step already works through the gh command.",
+  "home": "roadmap step c87",
+  "id": "c87-github-plugin",
+  "kind": "decision",
+  "n": 32,
+  "options": [
+    {
+      "gain": "Nothing fails, and there is no extra token to keep.",
+      "how": "A local session finds where it is switched on and turns it off; claude-settings records that it stays off.",
+      "key": "a",
+      "label": "Turn the plugin off",
+      "lose": "Nothing that gh does not already do."
+    },
+    {
+      "gain": "Sessions get the plugin's GitHub tools as well as gh.",
+      "how": "You create a GitHub token and set it on each machine.",
+      "key": "b",
+      "label": "Give it a token",
+      "lose": "One more token to rotate, on every machine."
+    }
+  ],
+  "owner": "Triage the roadmap",
+  "pick": "a",
+  "ref": "c87 (local sessions stop failing on the GitHub plugin's empty token)",
+  "status": "closed",
+  "title": "Local sessions fail on the GitHub plugin's empty token: turn the plugin off, or give it a token?",
+  "why": "gh covers every PR step, so (b) adds a token for no new outcome."
+}

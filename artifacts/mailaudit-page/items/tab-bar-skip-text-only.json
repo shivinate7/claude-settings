@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-28T21:35:00-05:00",
+  "context": "Goal: the checks catch real defects near the tab bar without flagging the bar itself.\nProblem: your item 34 answer says to skip text. Step 5's code skips every element that touches the tab bar or lies below the screen, including buttons and containers. A real defect on a control by the bar can now pass. Step 5's last review scored that a net loss, so that part is held until you decide.\nBased on: the skip code covers any element type (read, AuditSkippingTabBarUITests.swift lines 25-28 and 134).\nBased on: your item 34 answer, 2026-10-28 16:40 CDT, says text (ruling).\nBased on: the review found holes opened and none closed (read, step 5 review round 3).\nDeparts from: option a departs from your item 34 answer.\nMeanwhile: the held skip comes out of step 5, and the rest of step 5 goes on to its design review and merge.",
+  "home": "decision audit-skips-measured-flags (manifest-restyle)",
+  "id": "tab-bar-skip-text-only",
+  "kind": "decision",
+  "n": 37,
+  "options": [
+    {
+      "gain": "No more work. The skip goes back into the next batch as is.",
+      "how": "Keep the skip as built, for any element by the bar.",
+      "key": "a",
+      "label": "Every element was meant",
+      "lose": "A defect on a control touching the bar goes unseen."
+    },
+    {
+      "gain": "The skip matches your answer and opens no hole.",
+      "how": "A small test lane limits the skip to text, then one simulator run proves it.",
+      "key": "b",
+      "label": "Text only, as item 34 says",
+      "lose": "One more lane and one simulator run. The checks may find real problems near the bar."
+    }
+  ],
+  "owner": "manifest-restyle",
+  "pick": "b",
+  "rank": 1,
+  "ref": "item 34 (Off-screen rows audit); step 5 review round 3; commit 6556f0f",
+  "short": "Tab-bar skip scope",
+  "status": "closed",
+  "title": "The tab-bar skip in Apple's audit: text only, as item 34 says, or every element?",
+  "why": "It's what you already ruled, and it leaves no gap in the checks."
+}

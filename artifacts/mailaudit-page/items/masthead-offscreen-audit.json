@@ -1,0 +1,40 @@
+{
+  "added": "2026-10-27T21:37:00-05:00",
+  "context": "Goal: the phone's tabs carry the web's masthead, and the accessibility checks stay honest.\nProblem: the masthead pushes Tally and Orphaned rows about 330pt down. Apple's check now flags text you can't see there: rows below the bottom of the screen, and rows partly under the tab bar. Today's skip covers only text more than half under the bar. Widening it, or changing the list, needs your word.\nBased on: rows like \"Path to Exile\" sit below the 874pt screen or 8pt under the bar (read, step 5 review round 2).\nBased on: Tally builds every row at once, so off-screen rows stay in the check; Packages builds only visible rows and passes (read).\nMeanwhile: Restyle fixes step 5's other findings with the simulator off.",
+  "holds": "Step 5 can't pass review until this is settled.",
+  "home": "decision audit-skips-measured-flags (manifest-restyle)",
+  "id": "masthead-offscreen-audit",
+  "kind": "decision",
+  "n": 34,
+  "options": [
+    {
+      "gain": "A test-only change. You see no difference.",
+      "how": "The check also skips text wholly below the screen, and any text under the bar, not just over half.",
+      "key": "a",
+      "label": "Widen the tab-bar skip",
+      "lose": "A wider skip; half-hidden text goes unchecked."
+    },
+    {
+      "gain": "No wider skip.",
+      "how": "Tally builds rows as they scroll in, as Packages does.",
+      "key": "b",
+      "label": "Build Tally rows only when visible",
+      "lose": "A product change; Orphaned still needs (a) or its own change; off-screen rows are never checked."
+    },
+    {
+      "gain": "Every row is checked where you can see it.",
+      "how": "Each check scrolls and checks each screenful.",
+      "key": "c",
+      "label": "Check screen by screen",
+      "lose": "Much slower checks, already near their time limits under load."
+    }
+  ],
+  "owner": "manifest-restyle",
+  "pick": "a",
+  "rank": 1,
+  "ref": "step 5 masthead review round 2, must-fix 1b; decision audit-skips-measured-flags",
+  "short": "Off-screen rows audit",
+  "status": "closed",
+  "title": "Step 5's masthead pushes rows off screen. How should Apple's audit treat them?",
+  "why": "You see nothing different, and the skip covers only text you can't see anyway."
+}

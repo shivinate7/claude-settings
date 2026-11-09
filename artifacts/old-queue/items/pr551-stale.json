@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26",
+  "context": "The walkthrough you asked for:\n- What it was: in October, each tool call on Windows started about 6 bash and 2 python processes per hook. #551 holds tests for 'if' filters, so a hook such as ste_gate (the plain-English check) only starts when a matching file type is edited.\n- What happened: on Oct 21 a Windows probe found the filters unreliable. Paths with backslashes never match, matching is case-sensitive, and a miss silently skips the check. You ruled: filter only config_watch, on exact file names, and park the ste_gate and prose_judge filters.\n- Now: c19 (start fewer processes per tool call) shipped that and is done. #551 is the leftover draft for the parked part, untouched since.\nClosing it loses nothing: the branch stays and the PR can be reopened if the parked filters come back.",
+  "home": "PR #551",
+  "id": "pr551-stale",
+  "kind": "decision",
+  "n": 17,
+  "options": [
+    {
+      "gain": "One less stale draft.",
+      "how": "The build advisor closes #551 with a note pointing to c19's ruling; the branch stays for a reopen.",
+      "key": "a",
+      "label": "Close it, branch kept",
+      "lose": "None; it can be reopened."
+    },
+    {
+      "gain": "None.",
+      "how": "Nothing changes.",
+      "key": "b",
+      "label": "Leave it open",
+      "lose": "Clutter in the PR list."
+    }
+  ],
+  "owner": "Build advisor",
+  "pick": "a",
+  "ref": "PR #551 (settings: if filters so idle hooks start no shell), step c19",
+  "status": "closed",
+  "title": "Close the stale draft PR #551",
+  "why": "Your own ruling parked this work."
+}

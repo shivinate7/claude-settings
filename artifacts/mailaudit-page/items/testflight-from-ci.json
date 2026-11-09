@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-08T13:58:00-06:00",
+  "context": "Goal: the phone app can reach TestFlight even when the Mac is off.\nProblem (risk): today the App Store Connect key lives only on the Mac, so the TestFlight fallback needs the Mac. Moving it to CI means the key leaves the Mac, onto the Actions of a public repo.\nBased on (record): decision native-ships-via-testflight, the key lives only on the Mac.\nBased on (read): plan cloud-sessions, section Decisions for the owner.\nDeparts from: native-ships-via-testflight keeps the key on the Mac \u2014 option a makes it a GitHub Actions secret and lets a macOS job upload.\nUnvetted: the past-ruling check timed out.",
+  "group": "cloud-sessions-plan",
+  "home": "decision native-ships-via-testflight; plan cloud-sessions (branch claude/cloud-feasibility-e01860 0a305e5)",
+  "id": "testflight-from-ci",
+  "kind": "decision",
+  "n": 65,
+  "options": [
+    {
+      "gain": "No Mac is needed for the fallback.",
+      "how": "The key becomes a GitHub Actions secret, and a macOS job uploads each build.",
+      "key": "a",
+      "label": "Move the upload to CI",
+      "lose": "The key leaves the Mac, onto a public repo's Actions."
+    },
+    {
+      "gain": "The key stays local.",
+      "how": "No change: the Mac uploads TestFlight builds.",
+      "key": "b",
+      "label": "Keep the key on the Mac",
+      "lose": "The fallback still needs the Mac."
+    }
+  ],
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "pick": "b",
+  "rank": 26,
+  "ref": "plan docs/plans/cloud-sessions.md, section Decisions for the owner; decision native-ships-via-testflight",
+  "short": "TestFlight from CI",
+  "status": "open",
+  "title": "Should CI upload TestFlight builds, with the App Store Connect key as a GitHub secret?",
+  "why": "A publishing key on a public repo's CI is a bigger risk than needing the Mac for a fallback."
+}

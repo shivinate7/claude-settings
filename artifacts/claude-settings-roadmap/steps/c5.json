@@ -1,0 +1,10 @@
+{
+  "ask": "In claude-settings, PR #384 (claude-p) has been a draft since Oct 13. Check the handoffs, plans, debts and any session notes for why it was kept open. Did anything ever run bin/claude-p, from that branch or anywhere else? Report the reason, or say none was found, and whether closing it loses anything.",
+  "note": "Oct 19, 12:13 pm: #384 has no recorded reason to stay open; you approved closing it at 12:15 pm, keeping branch claude-p-fetch-key (still on origin Oct 20). Whether #384 is closed is unknown: the advisor chat cannot read PR state. #455 and #456 are moot: their content merged in #525 (see o6). Mark done once #384 is confirmed closed.",
+  "order": 50,
+  "phase": "cleanup",
+  "status": "active",
+  "title": "Close PRs #455 and #456, decide #384",
+  "updatedAt": "2026-10-20T16:55:00Z",
+  "why": "#457 replaces the two drafts. #384 has sat as a draft since Oct 13."
+}

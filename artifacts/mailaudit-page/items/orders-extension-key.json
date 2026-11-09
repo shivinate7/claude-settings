@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-08T15:26:00-06:00",
+  "closedNote": "Withdrawn 2026-11-08 15:58 CST: a past ruling answers it. Decision sync-revamp-cloudflare line 31 says \"one key per device\", so the extension gets its own key (option a). The new Keychain item and the DEVICE_KEY_HASHES change are still live acts, and the lane asks first at deploy time.",
+  "context": "Goal: orders reach the ledger from the extension with no CSV export.\nProblem (risk): the extension must hold a Worker device key. Which key it holds decides whether losing one browser profile also costs a phone or Mac re-key.\nBased on (measured): the Worker accepts any key whose hash is in the DEVICE_KEY_HASHES secret (worker/core.mjs keyAllowed).\nBased on (read): keys live in Keychain service mailaudit-sync, accounts iphone and macbook.\nDeparts from: main has two key holders \u2014 option a adds a third, the extension, with its own key.\nUnvetted: the past-ruling check was not run.\nMeanwhile: the build accepts any listed key, so nothing waits on this.",
+  "home": "the record the orders-extension lane writes for the extension's key (the-token-is-a-credential or sync-revamp-cloudflare)",
+  "id": "orders-extension-key",
+  "kind": "decision",
+  "n": 70,
+  "options": [
+    {
+      "gain": "You can revoke it alone.",
+      "how": "The extension gets a new key of its own, stored in Keychain, and its hash joins the Worker's list.",
+      "key": "a",
+      "label": "Its own key, \"extension\"",
+      "lose": "One new Keychain item, and a change to the DEVICE_KEY_HASHES Worker secret, which is a live change the lane asks about first."
+    },
+    {
+      "gain": "No secret change.",
+      "how": "The extension holds the Mac's existing key.",
+      "key": "b",
+      "label": "Reuse the macbook key",
+      "lose": "Revoking the extension also locks out the Mac web app."
+    }
+  ],
+  "owner": "orders-extension local_ebb91723-0535-414a-a6a6-88fd84220244",
+  "pick": "a",
+  "rank": 31,
+  "ref": "item 50 (orders extension plan); invariant the-token-is-a-credential; worker/core.mjs keyAllowed",
+  "short": "Extension device key",
+  "status": "closed",
+  "title": "Which Worker device key should the orders extension hold?",
+  "why": "One lost browser profile then costs only that one key."
+}

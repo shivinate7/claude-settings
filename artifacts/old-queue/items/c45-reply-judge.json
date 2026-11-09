@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26",
+  "context": "On Oct 13 you ruled that the reply judge checks 1 turn end in 5, for cost and speed. c45 widened it: it now also checks every reply with an Input Needed item. No word of yours on that change is recorded.",
+  "home": "roadmap step c45 (closed); your Oct 13 ruling",
+  "id": "c45-reply-judge",
+  "kind": "decision",
+  "n": 7,
+  "options": [
+    {
+      "gain": "The replies that cost your attention are always checked.",
+      "how": "Every reply that asks you something is judged, plus the 1-in-5 sample.",
+      "key": "a",
+      "label": "Keep the widening",
+      "lose": "One judge call per such reply: a few seconds and a little cost."
+    },
+    {
+      "gain": "Your Oct 13 cost and speed limits hold exactly.",
+      "how": "A small lane reverts the widening.",
+      "key": "b",
+      "label": "Back to 1 in 5",
+      "lose": "Most handed-off steps go unchecked."
+    }
+  ],
+  "owner": "Build advisor",
+  "pick": "a",
+  "ref": "c45 (a step handed to you says what check showed the session can't do it)",
+  "status": "closed",
+  "title": "Keep the reply judge on every reply that asks you for input",
+  "why": "Those replies are few and are exactly the ones that waste your time when wrong."
+}

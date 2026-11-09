@@ -1,0 +1,8 @@
+{
+  "order": 130,
+  "phase": "organize",
+  "status": "todo",
+  "title": "Shrink each CLAUDE.md toward 200 lines",
+  "updatedAt": "2026-10-17T17:20:00Z",
+  "why": "Long files cost context and lower how well rules are followed. Keep AGENTS.md as a symlink."
+}

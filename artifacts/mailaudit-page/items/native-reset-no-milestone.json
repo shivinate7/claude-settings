@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-06T15:50:00-06:00",
+  "context": "Goal: a Reset on the phone never destroys check-ins that can't be got back.\nProblem (cannot undo): when the saved-version copy can't be written, the web still runs Reset and shows a banner saying it can't be undone. The native app refuses the Reset. They differ, and only you can say which is right.\nBased on (read): debt native-milestone-needed-unpinned.\nBased on (read): decision unwritable-store-says-so.\nDeparts from: src/app.jsx:resetAll \u2014 the web goes ahead with a banner; option a keeps the phone refusing the Reset instead.\nMeanwhile: pins works on its other debts. Nothing waits on this.",
+  "home": "decision milestones-taken-before-risk (branch pin-reset-milestone 6c65379, landing at merge)",
+  "id": "native-reset-no-milestone",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-08T16:55:44.055Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 44,
+  "options": [
+    {
+      "gain": "A Reset can never wipe check-ins that have no saved copy.",
+      "how": "With no saved copy, the phone says the Reset can't run and changes nothing.",
+      "key": "a",
+      "label": "Keep the phone refusing",
+      "lose": "On a full or broken store, Reset doesn't work until the store is fixed."
+    },
+    {
+      "gain": "Both apps act the same, and Reset always works.",
+      "how": "The phone runs the Reset and shows the web's can't-be-undone banner.",
+      "key": "b",
+      "label": "Match the web: Reset runs with the banner",
+      "lose": "One tap can destroy months of check-ins with no way back."
+    }
+  ],
+  "owner": "pins local_a0a8c80f-3035-4cfe-b432-233579e560bc",
+  "pick": "a",
+  "port": true,
+  "rank": 8,
+  "ref": "debt native-milestone-needed-unpinned (the saved-copy rule before a Reset is unpinned); decision unwritable-store-says-so (an unwritable store says so)",
+  "short": "Reset with no saved copy",
+  "status": "closed",
+  "title": "When the saved copy can't be written, should a Reset on the phone still run?",
+  "why": "It keeps the one act that can't be undone behind its safety copy."
+}

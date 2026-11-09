@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-27T14:38:00-05:00",
+  "context": "Goal: build Card in Hand on the Duo with no surprises.\nProblem: today the late-mail flag skips packages that have tracking. The past-transit page could follow that rule or list them too.\nBased on: lostMail in src/view-rules.mjs skips tracked packages (read 14:35).\nMeanwhile: Duo files your earlier answers. No build lane starts.",
+  "group": "duo-round2",
+  "holds": "Duo's Card in Hand build waits on this.",
+  "home": "decision duo-card-in-hand (manifest-duo)",
+  "id": "duo-tracked-late-shown",
+  "kind": "decision",
+  "n": 30,
+  "options": [
+    {
+      "gain": "One rule everywhere.",
+      "how": "Tracked packages stay off the past-transit page.",
+      "key": "a",
+      "label": "No, same as the late flag today",
+      "lose": "A tracked package that's stuck isn't listed."
+    },
+    {
+      "gain": "Every late package shows.",
+      "how": "Every package past 14 days shows, tracked or not.",
+      "key": "b",
+      "label": "Yes, list them too",
+      "lose": "A rule change on the web and the phone."
+    }
+  ],
+  "owner": "manifest-duo",
+  "pick": "a",
+  "ref": "Duo build plan, duo-build-plan.md (8 lanes, 3 waves)",
+  "status": "closed",
+  "title": "Should a tracked package more than 14 days late show on the past-transit page?",
+  "why": "It keeps one late rule across the app."
+}

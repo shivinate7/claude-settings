@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26",
+  "context": "You asked for one place to answer what piles up after overnight runs, in all your sessions and not only this project. This page reads its items from its own small store, so the link never changes. Any session that can reach claude.ai's artifact tools can add an item or read your answer. The o10 test showed a local Mac session can publish a page; whether a local session can write to a page's store is not measured yet.\nIf you pick (a), a claude-settings step goes to triage: one rule and one skill that tell every session, cloud or local, in any repo, to add each deferred item here (with its home: a roadmap step, PR or decision) and to read your answers at its next turn.",
+  "home": "roadmap step c71; o10 plan on main 54f2dfd",
+  "id": "process-one-page",
+  "kind": "decision",
+  "n": 1,
+  "options": [
+    {
+      "gain": "One link forever, across all repos and machines. Answered items drop off on their own.",
+      "how": "Sessions add items to this page's store; you answer here; the owning session or the coordinator reads the answer, files it in its home and closes the item.",
+      "key": "a",
+      "label": "One shared page for every session (this one)",
+      "lose": "A saved answer wakes no session by itself; it is picked up at the session's next turn or by the coordinator. Local write access is unmeasured until tested."
+    },
+    {
+      "gain": "Each session owns its page and its plan view.",
+      "how": "Each session publishes its own page; this page only links them.",
+      "key": "b",
+      "label": "A page per session (o10's plan), with this page as an index",
+      "lose": "Many links; you still open each one to answer."
+    },
+    {
+      "gain": "Git history of every item.",
+      "how": "Sessions commit items to a JSON file; a build step republishes the page.",
+      "key": "c",
+      "label": "A file on the roadmap branch, built into this page",
+      "lose": "Only this project can push there; local sessions in other repos cannot, and should not."
+    }
+  ],
+  "owner": "Coordinator",
+  "pick": "a",
+  "ref": "c71 (one page for everything waiting on you) and o10 (a page per session for questions)",
+  "status": "closed",
+  "title": "Make this page the standing place for everything waiting on you, in every session",
+  "why": "It is the only option that reaches sessions in every repo with one link, and it costs no git pushes. It also makes o10's first two choices moot (when to publish, which return path)."
+}

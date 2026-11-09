@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26T21:45:00-05:00",
+  "context": "Goal: MANIFEST uses both pages of the open Duo.\nProblem: the designer drew options, and only you pick the layout.\nMeanwhile: nothing is built; the restyle continues.",
+  "home": "a new mailaudit decision record on the Duo layout",
+  "id": "duo-tally-split",
+  "kind": "decision",
+  "n": 4,
+  "options": [
+    {
+      "gain": "See every copy of one card at once",
+      "how": "Rows left, a row's copies right",
+      "key": "a",
+      "label": "Rows left, a row's copies right",
+      "lose": "A copy tap no longer jumps away"
+    },
+    {
+      "gain": "Jump straight to the package",
+      "how": "Tally left, package right",
+      "key": "b",
+      "label": "Tally left, package right",
+      "lose": "An order id tap changes target"
+    },
+    {
+      "gain": "Totals always show",
+      "how": "Masthead left, Tally right",
+      "key": "c",
+      "label": "Masthead left, Tally right",
+      "lose": "Less room for rows"
+    }
+  ],
+  "owner": "mailaudit orchestrator",
+  "pick": "a",
+  "ref": "Duo mockups tally.html, PR #135 (Duo ideas, draft)",
+  "status": "closed",
+  "title": "Tally on two pages",
+  "why": "B changes where an order id tap goes."
+}

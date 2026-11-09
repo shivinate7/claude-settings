@@ -1,0 +1,4 @@
+{
+  "title": "The web's merge rules on the phone",
+  "why": "Both ask whether the phone loads a rule from the web's merge-rules file or rewrites it in Swift, which the native build now keeps out of its bundle."
+}

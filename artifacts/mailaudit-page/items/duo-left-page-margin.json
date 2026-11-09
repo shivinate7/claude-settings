@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-07T20:04:00-06:00",
+  "context": "Goal: on the open Duo, the left page (Tally, Orphaned, Card in Hand) ends at its last row, with no blank strip, and nothing covers that row.\nProblem (rule): the zero-margin fix for debt duo-left-page-dead-margin failed review. The 76 pt margin also keeps the last row clear of the keys and of the error bar in Tally and Orphaned. A full fix edits Tally and Orphaned view files, which the Duo lane may not touch without a ruling.\nBased on (read): review round 1, reviewer haiku, 2026-11-07 20:00 CST (TallyView.swift:36, OrphanedView.swift:32; keys at about 405 pt per measurements/duo-fold-and-keyboard.md).\nBased on (read): the coordinator's lane plan gives TallyView to the Restyle lane.\nDeparts from: main, where every left page ends with a fixed 76 pt bar margin \u2014 the margin shrinks to 0, the error bar becomes a bottom inset, and room is made only while the keys are up.\nUnvetted: the past-ruling check timed out (model subprocess), so this was not checked against past rulings.\nClosed 2026-11-07 20:05 CST: the coordinator picked option b at 20:04 CST under its file-ownership rule (restyle owns TallyView and OrphanedView, and step 8 edits them). It was not the owner's answer. The fix is withdrawn, and the debt names the inset fix and stays open until step 8.",
+  "home": "debt duo-left-page-dead-margin (branch duo-left-margin-rec daf6318, landing at merge)",
+  "id": "duo-left-page-margin",
+  "kind": "decision",
+  "n": 49,
+  "options": [
+    {
+      "gain": "The blank strip goes, and nothing covers the last row.",
+      "how": "TallyView and OrphanedView show the error bar as a bottom inset, and the left page makes room only while the keys are up.",
+      "key": "a",
+      "label": "Move the error bar into a bottom inset, and let the margin follow the keys",
+      "lose": "The Duo lane edits the Tally and Orphaned view files."
+    },
+    {
+      "gain": "No edit outside the Duo files.",
+      "how": "The 76 pt margin stays, and the debt says it guards the keys and the error bar.",
+      "key": "b",
+      "label": "Withdraw the fix, and rewrite the debt",
+      "lose": "76 pt of blank scroll stays at the end of each left page while the keys are down."
+    }
+  ],
+  "owner": "duo local_ce9eac1d-fccf-498c-ae3b-66df4210b936",
+  "pick": "a",
+  "rank": 2,
+  "ref": "debt duo-left-page-dead-margin (blank strip under the Duo left page); review round 1, 2026-11-07 20:00 CST; TallyView.swift:36, OrphanedView.swift:32; measurements/duo-fold-and-keyboard.md",
+  "short": "Duo left-page margin",
+  "status": "closed",
+  "title": "The open Duo's left pages end in a 76 pt blank strip. Remove it by editing Tally and Orphaned, or keep it?",
+  "why": "It is the only option that removes the blank strip and still keeps the last row clear."
+}

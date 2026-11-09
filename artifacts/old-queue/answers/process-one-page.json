@@ -1,0 +1,7 @@
+{
+  "at": "2026-10-26T16:01:23.447Z",
+  "choice": "a",
+  "item": "process-one-page",
+  "n": 1,
+  "note": "One shared page for every session in a shared project/repo; note claude-settings is a little unique that it's a project repo and so I'd accept that i'd have two spots of claude-settings where sessions would pile their respectvie questions depending on if they were claude code or from the project, as i'm imagining they can't share? (If they can let me know)"
+}

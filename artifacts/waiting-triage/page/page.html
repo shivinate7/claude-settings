@@ -1,0 +1,663 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<meta charset="utf-8">
+<title>Waiting Triage</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;700;800&family=Atkinson+Hyperlegible+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a triage inbox. Left, the queue sorted by what each item blocks. Right, one item at a time:
+   what it blocks, the question, the options side by side, one Save. Phones show one pane at a time. */
+:root {
+  --bg: #eef1f6; --surface: #ffffff; --sunk: #f6f8fb; --ink: #141a26; --muted: #556074; --faint: #8a94a6; --line: #d6dce6;
+  --accent: #2443b8; --accent-ink: #ffffff; --accent-soft: #e6ebfb;
+  --block: #b42318; --block-soft: #fde8e6; --soon: #a15c00; --soon-soft: #fdf0dc; --calm: #5b6577; --calm-soft: #e9edf3;
+  --good: #1d7a46; --good-soft: #def3e6;
+  --repo: #2443b8;
+  --ui: "Atkinson Hyperlegible Next", "Segoe UI", system-ui, sans-serif;
+  --mono: "Atkinson Hyperlegible Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --r: 8px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d1118; --surface: #161c26; --sunk: #11161e; --ink: #e8ecf3; --muted: #a2adbf; --faint: #6f7a8d; --line: #283142;
+  --accent: #8ea4ff; --accent-ink: #0d1118; --accent-soft: #1e2847;
+  --block: #ff8a7a; --block-soft: #3a1714; --soon: #f2b45a; --soon-soft: #36260f; --calm: #a2adbf; --calm-soft: #1f2632;
+  --good: #6fd39a; --good-soft: #13301f; --repo: #8ea4ff; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0d1118; --surface: #161c26; --sunk: #11161e; --ink: #e8ecf3; --muted: #a2adbf; --faint: #6f7a8d; --line: #283142;
+  --accent: #8ea4ff; --accent-ink: #0d1118; --accent-soft: #1e2847;
+  --block: #ff8a7a; --block-soft: #3a1714; --soon: #f2b45a; --soon-soft: #36260f; --calm: #a2adbf; --calm-soft: #1f2632;
+  --good: #6fd39a; --good-soft: #13301f; --repo: #8ea4ff; color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.5 var(--ui); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--surface); }
+button, input, textarea { font: inherit; color: inherit; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--mono); }
+.sample { font: 600 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--soon); background: var(--soon-soft); padding: 4px 6px; border-radius: 4px; }
+
+/* Top bar: repo identity, what is left, the bulk action. */
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--surface); border-bottom: 1px solid var(--line); }
+.top::before { content: ""; display: block; height: 4px; background: var(--repo); }
+.top .in { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 10px; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.repo { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; }
+.repo i { width: 12px; height: 12px; border-radius: 3px; background: var(--repo); display: inline-block; }
+.left { display: flex; align-items: baseline; gap: 8px; }
+.left b { font: 800 22px/1 var(--ui); font-variant-numeric: tabular-nums; }
+.left span { color: var(--muted); font-size: 14px; }
+.prog { flex: 1 1 120px; min-width: 100px; height: 6px; background: var(--calm-soft); border-radius: 99px; overflow: hidden; }
+.prog i { display: block; height: 100%; width: 0; background: var(--good); border-radius: 99px; transition: width .5s cubic-bezier(.2,.8,.2,1); }
+.tabs { display: flex; gap: 4px; }
+.tabs a { text-decoration: none; color: var(--muted); font-size: 14px; padding: 6px 10px; border-radius: 6px; }
+.tabs a[aria-current="page"] { color: var(--ink); background: var(--calm-soft); font-weight: 700; }
+.btn { border: 1px solid var(--line); background: var(--surface); padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; display: inline-flex; gap: 8px; align-items: center; min-height: 40px; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.armed { background: var(--soon-soft); border-color: var(--soon); color: var(--soon); }
+.btn:disabled { opacity: .45; cursor: default; }
+kbd { font: 600 11px/1 var(--mono); padding: 3px 5px; border-radius: 4px; border: 1px solid var(--line); border-bottom-width: 2px; background: var(--sunk); color: var(--muted); }
+.btn.primary kbd { background: transparent; border-color: color-mix(in srgb, var(--accent-ink) 40%, transparent); color: var(--accent-ink); }
+.preview { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
+.preview select { font: inherit; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); }
+
+/* The two panes. */
+.app { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; min-height: calc(100vh - 70px); }
+.queue { border-right: 1px solid var(--line); background: var(--sunk); padding-block: 12px 120px; min-width: 0; }
+.detail { min-width: 0; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 24px 140px; }
+.detail > .in { max-width: 980px; margin: 0 auto; display: grid; gap: 20px; }
+
+/* Queue rows. Urgency is a shape and a word as well as a colour. */
+.group { padding: 10px 16px 4px; font: 700 12px/1.2 var(--ui); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; }
+.row { display: grid; grid-template-columns: 28px 1fr; gap: 2px 10px; padding: 10px 16px; margin: 0 8px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; text-align: left; width: calc(100% - 16px); background: none; }
+.row:hover { background: var(--surface); }
+.row[aria-current="true"] { background: var(--surface); border-color: var(--accent); }
+.row .n { font: 600 14px/1.4 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; grid-row: span 2; padding-top: 1px; }
+.row .t { font-weight: 700; font-size: 15px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.row .m { font-size: 13px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row.done .t { color: var(--muted); font-weight: 500; }
+.row.done .n { color: var(--good); }
+.row.arrive { animation: arrive .45s cubic-bezier(.2,.8,.2,1); }
+@keyframes arrive { from { transform: translateX(-12px); opacity: 0; } }
+.urg { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; }
+.urg::before { content: ""; width: 9px; height: 9px; display: inline-block; }
+.urg.blocking { color: var(--block); } .urg.blocking::before { background: var(--block); }
+.urg.soon { color: var(--soon); } .urg.soon::before { background: linear-gradient(90deg, var(--soon) 50%, transparent 50%); border: 1.5px solid var(--soon); }
+.urg.whenever { color: var(--calm); } .urg.whenever::before { border: 1.5px solid var(--calm); border-radius: 50%; }
+.kind { font: 600 11px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+
+/* The item. */
+.blocks { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: var(--r); font-size: 15px; }
+.blocks.blocking { background: var(--block-soft); color: var(--ink); }
+.blocks.soon { background: var(--soon-soft); }
+.blocks.whenever { background: var(--calm-soft); }
+.blocks .urg { flex: none; padding-top: 2px; }
+.head { display: grid; gap: 6px; }
+.head .k { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; color: var(--muted); font-size: 14px; }
+.head .k .num { font: 600 15px var(--mono); color: var(--ink); }
+h1 { font: 800 clamp(24px, 3vw, 32px)/1.15 var(--ui); margin: 0; text-wrap: balance; letter-spacing: -.01em; }
+.ref { font-size: 14px; color: var(--muted); }
+.ctx { margin: 0; max-width: 72ch; white-space: pre-line; color: var(--ink); }
+.ctx.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.more { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; font-size: 14px; font-weight: 700; justify-self: start; }
+
+/* Options side by side. Subgrid keeps How, Gain and Lose on one line across every card. */
+.opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.opt { position: relative; display: grid; grid-template-rows: subgrid; grid-row: span 5; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; transition: border-color .15s, background-color .15s, opacity .3s, transform .15s; }
+.opt:hover { border-color: var(--muted); }
+.opt.sel { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
+.opt .oh { display: flex; gap: 10px; align-items: flex-start; }
+.opt .key { flex: none; font: 600 13px/1 var(--mono); width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; border: 1px solid var(--line); background: var(--sunk); }
+.opt.sel .key { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.opt .lab { font-weight: 700; font-size: 16px; line-height: 1.3; }
+.opt .rec { font: 700 11px/1 var(--ui); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+.opt .f { font-size: 14px; line-height: 1.45; color: var(--muted); }
+.opt .f b { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); font-weight: 700; margin-bottom: 1px; }
+.opt .f.gain b { color: var(--good); } .opt .f.lose b { color: var(--block); }
+.opt .why { font-size: 14px; color: var(--ink); border-top: 1px dashed var(--line); padding-top: 8px; }
+.opt .why:empty { display: none; }
+.opts.locked .opt:not(.sel) { opacity: .4; }
+.opts.locked .opt.sel { border-color: var(--good); background: var(--good-soft); box-shadow: 0 0 0 1px var(--good); }
+.opts.locked .opt.sel .key { background: var(--good); border-color: var(--good); }
+.stamp { position: absolute; top: 10px; right: 10px; width: 34px; height: 34px; }
+.stamp circle { fill: var(--good); }
+.stamp path { fill: none; stroke: var(--surface); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 24; stroke-dashoffset: 24; animation: draw .35s .12s ease-out forwards; }
+.stamp { animation: pop .3s cubic-bezier(.3,1.6,.5,1); }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@keyframes pop { from { transform: scale(.4); opacity: 0; } }
+
+.steps { margin: 0; padding-left: 22px; display: grid; gap: 8px; max-width: 72ch; }
+.steps li::marker { font-family: var(--mono); color: var(--muted); }
+.links { display: flex; gap: 14px; flex-wrap: wrap; font-weight: 700; }
+.mins { font-size: 14px; color: var(--muted); }
+
+/* Answer bar under the options. */
+.answer { display: grid; gap: 10px; padding: 14px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line); }
+.answer .r1 { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.answer input[type=text] { flex: 1 1 260px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--sunk); font-size: 15px; min-height: 42px; }
+.answer input.need { border-color: var(--block); }
+.answer .r2 { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 13px; color: var(--muted); }
+.none { background: none; border: 0; padding: 0; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font-size: 14px; }
+.none[aria-pressed="true"] { color: var(--block); font-weight: 700; }
+.goes { margin-left: auto; }
+
+/* The receipt: what happened to a saved answer, step by step. */
+.receipt { display: grid; gap: 10px; padding: 14px 16px; border-radius: var(--r); background: var(--good-soft); border: 1px solid color-mix(in srgb, var(--good) 40%, transparent); }
+.receipt .rt { font-weight: 700; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.track { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; list-style: none; margin: 0; padding: 0; }
+.track li { font-size: 13px; color: var(--muted); padding-top: 10px; border-top: 3px solid var(--line); }
+.track li b { display: block; color: var(--ink); font-size: 14px; }
+.track li.on { border-top-color: var(--good); }
+.track li.on b::before { content: "✓ "; color: var(--good); }
+.sim { font-size: 12px; color: var(--faint); }
+
+/* Toast. */
+.toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 40; width: min(560px, calc(100% - 32px)); background: var(--ink); color: var(--bg); border-radius: 10px; padding: 12px 14px 0; display: grid; gap: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.toast .tr { display: flex; gap: 12px; align-items: center; }
+.toast .tr p { margin: 0; flex: 1; font-size: 14px; min-width: 0; }
+.toast .tr p b { font-weight: 700; }
+.toast button { background: none; border: 1px solid color-mix(in srgb, var(--bg) 40%, transparent); color: var(--bg); padding: 6px 10px; border-radius: 6px; cursor: pointer; font-weight: 700; font-size: 14px; }
+.toast .bar { height: 3px; background: color-mix(in srgb, var(--bg) 20%, transparent); margin: 0 -14px; border-radius: 0 0 10px 10px; overflow: hidden; }
+.toast .bar i { display: block; height: 100%; background: var(--good); width: 100%; }
+.toast.in { animation: up .3s cubic-bezier(.2,.8,.2,1); }
+@keyframes up { from { transform: translate(-50%, 20px); opacity: 0; } }
+
+/* Finished state. */
+.clear { display: grid; gap: 14px; justify-items: start; padding: 28px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line); }
+.clear h1 { font-size: 28px; }
+.clear ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+
+/* Shortcut sheet. */
+.keys { position: fixed; inset: 0; z-index: 50; background: rgba(10,14,22,.45); display: grid; place-items: center; padding: 16px; }
+.keys .card { background: var(--surface); border-radius: 12px; padding: 20px; width: min(440px, 100%); display: grid; gap: 10px; }
+.keys dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin: 0; font-size: 14px; }
+.keys dt { display: flex; gap: 4px; }
+.keys dd { margin: 0; color: var(--muted); }
+
+/* Notes view. */
+.notes { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 80px; }
+.notes .in { max-width: 860px; margin: 0 auto; display: grid; gap: 18px; }
+.notes h1 { font-size: 30px; }
+.notes h2 { font: 800 20px/1.25 var(--ui); margin: 14px 0 0; }
+.notes p, .notes li { max-width: 70ch; }
+.notes ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.tw { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 720px; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--sunk); }
+td:first-child { font-weight: 700; }
+td.gold, th.gold { background: var(--good-soft); }
+tr:last-child td { border-bottom: 0; }
+.callout { padding: 14px 16px; border-radius: var(--r); background: var(--accent-soft); }
+.callout p { margin: 0; }
+
+.back { display: none; }
+@media (max-width: 860px) {
+  .app { grid-template-columns: 1fr; }
+  .queue { border-right: 0; padding-bottom: 40px; }
+  .app[data-pane="detail"] .queue, .app[data-pane="queue"] .detail { display: none; }
+  .back { display: inline-flex; justify-self: start; }
+  .preview { display: none; }
+  .track { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; transition-duration: 1ms !important; }
+}
+</style>
+
+<header class="top"><div class="in">
+  <span class="repo"><i></i><span id="repoName">claude-settings</span></span>
+  <span class="left"><b id="leftN">7</b><span id="leftT">waiting on you</span></span>
+  <span class="prog" title="Answered this visit"><i id="progBar"></i></span>
+  <nav class="tabs"><a href="#" id="tabPage">Page</a><a href="#notes" id="tabNotes">Design notes</a></nav>
+  <label class="preview" for="repoPick">Preview as
+    <select id="repoPick">
+      <option value="claude-settings|#2443b8|#8ea4ff">claude-settings</option>
+      <option value="home-app|#0e7c66|#4fd1b0">home-app</option>
+      <option value="banchi|#b4235a|#ff86b0">banchi</option>
+      <option value="joyous|#b06a00|#ffbf5c">joyous</option>
+    </select>
+  </label>
+  <button class="btn" id="acceptAll" type="button">Accept every pick <kbd>⇧P</kbd></button>
+  <button class="btn" id="keysBtn" type="button" aria-label="Keyboard shortcuts"><kbd>?</kbd></button>
+</div></header>
+
+<main class="app" id="app" data-pane="detail">
+  <aside class="queue" id="queue" aria-label="Waiting items"></aside>
+  <section class="detail" id="detail" aria-live="polite"><div class="in" id="detailIn"></div></section>
+</main>
+
+<section class="notes" id="notes" hidden><div class="in">
+  <span class="sample" style="justify-self:start">Mockup 1 of 3: decision-first</span>
+  <h1>Why the page looks like a triage inbox</h1>
+  <p>You open this page after an overnight run with a pile of items. The job is to clear the pile fast, starting with whatever is holding work up, and to know each answer landed. Every choice below serves that job. The sample items are the pilot's real items from Oct 26, with urgency and "what it blocks" added by hand to show the new fields.</p>
+
+  <h2>The choices</h2>
+  <ul>
+    <li><b>Sorted by what it blocks, not by number.</b> Each item says what is stuck until you answer ("every batch waits for the Mac"). Items that hold up work sit at the top. The number stays, so "5 a" in the thread still works.</li>
+    <li><b>One item at a time, with the queue beside it.</b> The queue gives you the whole pile at a glance. The right pane gives one question your full attention. Long context folds to three lines, so the options are on screen without scrolling.</li>
+    <li><b>Options side by side.</b> Each option is a card with the same rows: how it works, what you gain, what you lose. The rows line up across cards, so you compare "lose" against "lose" by moving your eyes sideways. The pick is marked on its card, with the reason inside it.</li>
+    <li><b>Keyboard first, thumb friendly.</b> <kbd>1</kbd> to <kbd>4</kbd> picks an option, <kbd>⏎</kbd> saves and moves to the next item, <kbd>J</kbd>/<kbd>K</kbd> moves, <kbd>Z</kbd> undoes. On a phone every control is 40px or more, and the queue and the item are two screens.</li>
+    <li><b>A visible reaction when you save.</b> The chosen card turns green with a stamped check, the others fade, a toast names your answer and who gets it with a six-second Undo, the item slides into "Answered", the counter and bar move, and the page goes to the next item. When the pile is empty you get a summary of where each answer went.</li>
+    <li><b>A receipt, not a promise.</b> Saving wakes no session today. So each answered item shows three steps: Saved, Picked up (the session read it), Filed (it reached its home and the item closed). On this mockup the last two steps are simulated with a timer.</li>
+    <li><b>Legibility.</b> Atkinson Hyperlegible, a face built to keep look-alike letters apart. Body text at 16px, lines under 72 characters, urgency shown by shape and word as well as colour, both themes tuned separately.</li>
+  </ul>
+
+  <h2>Uniform, with one repo mark</h2>
+  <p>Every repo gets the same page: same layout, same colours for state, same keys. Only one thing changes per repo: a 4px band and a small square in the repo's own colour, beside the repo's name. Try "Preview as" in the top bar to see it.</p>
+  <ul>
+    <li><b>Why uniform:</b> you move between nine pages. Red must mean "blocks work" and green must mean "saved" on all of them, or you stop trusting colour. Muscle memory for keys and button places only builds if they never move. One palette is checked for contrast once, in both themes.</li>
+    <li><b>Why still one mark:</b> with two tabs open, you need to know at a glance which repo you are answering for. A band does that without touching anything you act on.</li>
+    <li><b>What a repo colour may never do:</b> colour a button, an option, a state or text. Those stay on the shared palette.</li>
+  </ul>
+
+  <h2>Against the current template and the target</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Aspect</th><th>Current template</th><th>This mockup</th><th class="gold">Gold standard (target)</th></tr></thead>
+    <tbody>
+      <tr><td>Order</td><td>By number, decisions then tasks</td><td>By what it blocks, then age</td><td class="gold">Most costly wait first, and the reason it is first is shown</td></tr>
+      <tr><td>Overview</td><td>Three counts, then a long scroll</td><td>Queue pane with every title and its urgency</td><td class="gold">Whole pile visible in one screen, no scroll</td></tr>
+      <tr><td>Comparing options</td><td>Stacked rows; you read down and remember</td><td>Cards side by side; How, Gain, Lose rows line up</td><td class="gold">Each trade compared without reading back</td></tr>
+      <tr><td>The pick</td><td>A tag on the option, the reason below all options</td><td>Marked on its card, the reason inside the card</td><td class="gold">Pick and reason seen together, in one look</td></tr>
+      <tr><td>Answer speed</td><td>Mouse: radio, then Save, then scroll</td><td>Two keys per item: a number, then Enter</td><td class="gold">One or two keystrokes per item, as in a mail triage tool</td></tr>
+      <tr><td>Reaction on save</td><td>Grey text: "Saved 19:46. Goes to: …"</td><td>Stamp, toast with Undo, row moves, counter moves, next item opens</td><td class="gold">You feel the save and can take it back for a few seconds</td></tr>
+      <tr><td>After save</td><td>Nothing until the item disappears</td><td>Receipt: Saved, Picked up, Filed</td><td class="gold">You see when your answer reached its home</td></tr>
+      <tr><td>Context length</td><td>Full text, always open</td><td>Three lines, "More" opens the rest</td><td class="gold">Question and options in the first screen</td></tr>
+      <tr><td>Phone</td><td>One column, sticky bar takes space</td><td>Queue and item as two screens, 40px targets</td><td class="gold">One-thumb answers, nothing hidden behind a bar</td></tr>
+      <tr><td>Repo look</td><td>Same everywhere, no repo mark</td><td>Same everywhere, one repo band</td><td class="gold">Shared meaning, repo still known at a glance</td></tr>
+      <tr><td>Legibility</td><td>15px, serif headings, mono refs</td><td>16px Atkinson Hyperlegible, shape plus colour</td><td class="gold">Readable tired, at night, on a phone</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>What I would change in the template</h2>
+  <ul>
+    <li><b>Two new optional item fields:</b> <span class="mono">urgency</span> (<span class="mono">blocking</span>, <span class="mono">soon</span> or <span class="mono">whenever</span>) and <span class="mono">blocks</span> (one sentence: what waits on the answer). Old items without them sort as "whenever", so no page breaks.</li>
+    <li><b>One field a session writes on the item:</b> <span class="mono">seen</span> (time the session read the answer). The page shows it as "Picked up". "Filed" is the existing close. Sessions still never write <span class="mono">answers/</span>.</li>
+    <li><b>The skill:</b> "Add an item" asks for urgency and blocks. "Read the answers" adds one write of <span class="mono">seen</span>.</li>
+    <li><b>The page:</b> the layout above, the keys, the save reaction with Undo (Undo is the existing Clear), and the repo band read from <span class="mono">meta/page</span> (<span class="mono">repo</span>, <span class="mono">hue</span>).</li>
+    <li><b>Kept as is:</b> the item numbers, "None of these" with a required note, the two-press "Accept every pick", the copy-as-one-message fallback when the store is unreachable.</li>
+  </ul>
+
+  <h2>Is it too late?</h2>
+  <div class="callout"><p>No. Every repo's page is the same fixed file, and all the content lives in the page's store. A new template can be republished to each existing link, so the links and the saved items stay. The data change above only adds fields, so older items still show. One check is still owed: that a republish to the same link keeps the store. I expect it does, but I have not measured it.</p></div>
+</div></section>
+
+<div id="toastHost"></div>
+<div class="keys" id="keys" hidden><div class="card" role="dialog" aria-labelledby="keysT">
+  <strong id="keysT">Keyboard</strong>
+  <dl>
+    <dt><kbd>1</kbd>–<kbd>4</kbd></dt><dd>Choose an option (or A to D)</dd>
+    <dt><kbd>P</kbd></dt><dd>Choose the recommended option</dd>
+    <dt><kbd>⏎</kbd></dt><dd>Save and go to the next item</dd>
+    <dt><kbd>X</kbd></dt><dd>None of these (then write what you want)</dd>
+    <dt><kbd>N</kbd></dt><dd>Write a note</dd>
+    <dt><kbd>J</kbd> <kbd>K</kbd></dt><dd>Next and previous item</dd>
+    <dt><kbd>Z</kbd></dt><dd>Undo the last save</dd>
+    <dt><kbd>⇧P</kbd></dt><dd>Accept every pick (press twice)</dd>
+    <dt><kbd>Esc</kbd></dt><dd>Leave a text field, close this sheet</dd>
+  </dl>
+  <button class="btn" type="button" id="keysClose">Close</button>
+</div></div>
+
+<script>
+// Sample items: the pilot's real items from Oct 26, with urgency and blocks added by hand (new fields).
+const ITEMS = [
+ { id:"c53-cloud-merge", n:5, kind:"decision", urgency:"blocking", blocks:"Every batch waits for your Mac to be awake to merge.", added:"2026-10-26T14:05:00Z",
+   ref:"c53, the merge tool works from a cloud session", title:"Let a cloud session run merge.py for a batch", owner:"Build advisor", home:"roadmap step c53",
+   context:"merge.py now uses REST calls that work through the cloud proxy (landed in batch #603, the October 26 batch). It has never run live from the cloud. Your instructions say the Mac merge hand merges until c53 works, and the build advisor reads that as not yet granted.",
+   options:[
+    {key:"a", label:"Yes: the next batch merges from the cloud", how:"The build advisor runs merge.py from a cloud thread for the next green batch. If it fails, the Mac merges it.", gain:"Merges stop depending on your Mac being awake.", lose:"The first live run might stop partway. merge.py refuses a moved head, so the risk is a retry, not a bad merge."},
+    {key:"b", label:"Not yet: one dry run first", how:"A cloud session runs merge.py's preview (no --confirm) on a batch and reports.", gain:"Proof before a real merge.", lose:"One more batch waits on the Mac."}],
+   pick:"a", why:"merge.py's own checks (green CI, unmoved head) already guard the merge, and the Mac stays as fallback." },
+ { id:"other-repo-rollout", n:16, kind:"decision", urgency:"blocking", blocks:"home-app merges are stuck until c42 lands; nine roll-out steps wait behind this.", added:"2026-10-26T16:20:00Z",
+   ref:"o13, d6, o3, r1 to r4, c33 and c42: roll-outs to your other repos", title:"Choose how claude-settings work rolls out to your other repos", owner:"Triage the roadmap", home:"roadmap steps o13, d6, o3, r1 to r4, c33, c42",
+   context:"Several ready steps change other repos: each repo's own glossary (o13), the screenshot command's config per repo (d6), shrinking long CLAUDE.md files (o3), compliance checks and token clean-ups in q_max and home-app (r1 to r4), a small CI for home (c33), and a two-line fix so home-app's merge tool finds its checks (c42).\nThis project may not push to those repos, so local sessions do the work from briefs.",
+   options:[
+    {key:"a", label:"One visit per repo, after the layout move, c42 first", how:"The liaison writes one brief per repo that bundles its items. c42 goes now because it blocks home-app merges.", gain:"Each repo is touched once, on the new layout.", lose:"Most roll-outs wait for o2, the shared layout move."},
+    {key:"b", label:"Each step as it comes", how:"Briefs go out step by step.", gain:"Earlier progress on some items.", lose:"Many visits per repo, and work on the old layout that o2 then moves."},
+    {key:"c", label:"Keep all parked", how:"Nothing goes out.", gain:"No change in other repos.", lose:"The gaps stay, and home-app merges stay stuck."}],
+   pick:"a", why:"o2 moves folders in every repo anyway, so bundling saves repeat visits. c42 is tiny and unblocks merges now." },
+ { id:"c59-idle-sessions", n:13, kind:"decision", urgency:"soon", blocks:"Overnight runs stop early until this lands.", added:"2026-10-26T15:40:00Z",
+   ref:"c59, no session sits idle while ready work waits", title:"Make sessions start the next ready item instead of waiting", owner:"Triage the roadmap", home:"roadmap step c59",
+   context:"Idle time is only reported after a merge. Nothing makes an orchestrator start the next ready item when a lane ends, so the queue waits for you.\nProposed fix in three parts: (1) a global 'keep going' rule, as home-app has; (2) the final report lists ready items left unstarted, with a reason each; (3) later, only after a repeat, a check that refuses a turn end while ready work waits.",
+   options:[
+    {key:"a", label:"Parts 1 and 2 now, part 3 after a repeat", how:"One rule line and one report line. No new guard.", gain:"Work keeps moving overnight.", lose:"Sessions may run more lanes at once. The load brake still caps them."},
+    {key:"b", label:"All three now", how:"Also add the turn-end check.", gain:"Hardest to slip.", lose:"A new guard with no incident yet, against your guard rules."},
+    {key:"c", label:"Leave as is", how:"Nothing changes.", gain:"No change.", lose:"Overnight runs keep stopping early."}],
+   pick:"a", why:"It fixes the cause with rules alone, and your guard rule asks for an incident before a new check." },
+ { id:"c65-gates-shoot", n:18, kind:"task", urgency:"soon", blocks:"GitHub does not yet enforce the new screenshot check on main.", added:"2026-10-26T18:10:00Z",
+   ref:"c65, main's branch protection requires gates-shoot", title:"Add gates-shoot to main's required checks in GitHub", owner:"Triage the roadmap", home:"roadmap step c65",
+   context:"merge.py already blocks on the new gates-shoot job. GitHub's own branch protection does not list it yet. Branch protection needs your login.",
+   steps:["Open the branch settings for claude-settings.","Edit the rule for main.","Under required status checks, add gates-shoot. Save."],
+   links:[{label:"Branch settings", url:"https://github.com/shivinate7/claude-settings/settings/branches"}], minutes:"1 min" },
+ { id:"process-one-page", n:1, kind:"decision", urgency:"soon", blocks:"The waiting-page rule for every repo is drafted but not filed.", added:"2026-10-26T12:30:00Z",
+   ref:"c71, one page for everything waiting on you", title:"Make this page the standing place for everything waiting on you", owner:"Coordinator", home:"roadmap step c71",
+   context:"You asked for one place to answer what piles up after overnight runs, in all your sessions. This page reads its items from its own small store, so the link never changes. Any session that can reach claude.ai's artifact tools can add an item or read your answer.",
+   options:[
+    {key:"a", label:"One shared page per repo (this one)", how:"Sessions add items to this page's store. You answer here. The owning session files the answer and closes the item.", gain:"One link per repo, forever. Answered items drop off.", lose:"A save wakes no session; it is read at the session's next turn."},
+    {key:"b", label:"A page per session, with an index", how:"Each session publishes its own page. This page only links them.", gain:"Each session owns its page.", lose:"Many links, and you still open each one to answer."},
+    {key:"c", label:"A file on the roadmap branch", how:"Sessions commit items to a JSON file. A build step republishes the page.", gain:"Git history of every item.", lose:"Only this project can push there. Local sessions in other repos cannot."}],
+   pick:"a", why:"It is the only option that reaches sessions in every repo with one link, and it costs no git pushes." },
+ { id:"pr551-stale", n:17, kind:"decision", urgency:"whenever", blocks:"Nothing waits. One stale draft sits in the PR list.", added:"2026-10-26T17:00:00Z",
+   ref:"PR #551, hook filters so idle hooks start no shell", title:"Close the stale draft PR #551", owner:"Build advisor", home:"PR #551",
+   context:"#551 holds tests for hook filters on two hooks. Step c19 is done, and your Oct 21 ruling filtered one hook only and parked the rest. The draft has sat open since.",
+   options:[
+    {key:"a", label:"Close it, keep the branch", how:"The build advisor closes #551 with a note pointing to c19's ruling.", gain:"One less stale draft.", lose:"Nothing; it can be reopened."},
+    {key:"b", label:"Leave it open", how:"Nothing changes.", gain:"Nothing.", lose:"Clutter in the PR list."}],
+   pick:"a", why:"Your own ruling parked this work." },
+ { id:"c40-idle-desktop", n:22, kind:"task", urgency:"whenever", blocks:"Idle sessions keep about 19 of 24 CPU cores busy.", added:"2026-10-26T19:15:00Z",
+   ref:"c40, idle desktop sessions each burn a full CPU core", title:"Archive the idle desktop sessions that spin a CPU core each", owner:"Triage the roadmap", home:"roadmap step c40",
+   context:"On Oct 23, 17 idle Claude Desktop sessions each used about one full core. You said you handle this one yourself. Transcripts stay when a session is archived.",
+   steps:["In Claude Desktop, archive or stop sessions you are not using (most date from Oct 19 to 22).","Optional: report it to Anthropic with Claude Desktop 3.1623.0.0 and claude-code 2.1.304."], links:[], minutes:"5 min" }
+];
+const NOW = new Date("2026-10-27T00:45:00Z"); // fixed so sample ages read the same for everyone
+const RANK = { blocking: 0, soon: 1, whenever: 2 };
+const URG_WORD = { blocking: "Blocks work", soon: "Soon", whenever: "When you can" };
+const GROUPS = [["blocking", "Holding up work"], ["soon", "Soon"], ["whenever", "When you can"]];
+const S = { cur: null, draft: {}, answers: {}, receipts: {}, more: {}, order: [], pane: "detail", undo: null, armed: false, answeredOrder: [] };
+const $ = (id) => document.getElementById(id);
+const el = (t, c, txt) => { const n = document.createElement(t); if (c) n.className = c; if (txt != null) n.textContent = txt; return n; };
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function cdt(d) {
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" }).formatToParts(d);
+  const g = (k) => (p.find((x) => x.type === k) || {}).value;
+  return g("month") + " " + g("day") + ", " + g("hour") + ":" + g("minute") + " " + g("timeZoneName");
+}
+function age(iso) { const m = Math.round((NOW - new Date(iso)) / 60000); return m < 60 ? m + " min" : Math.round(m / 60) + " h"; }
+function sorted() { return ITEMS.slice().sort((a, b) => RANK[a.urgency] - RANK[b.urgency] || new Date(a.added) - new Date(b.added)); }
+const open = () => sorted().filter((i) => !S.answers[i.id]);
+const byId = (id) => ITEMS.find((i) => i.id === id);
+
+function renderQueue() {
+  const q = $("queue"); q.replaceChildren();
+  GROUPS.forEach(([u, name]) => {
+    const items = open().filter((i) => i.urgency === u);
+    if (!items.length) return;
+    const h = el("div", "group"); h.append(el("span", null, name), el("span", "mono", String(items.length))); q.append(h);
+    items.forEach((i) => q.append(row(i)));
+  });
+  const done = S.answeredOrder.map(byId);
+  if (done.length) {
+    const h = el("div", "group"); h.append(el("span", null, "Answered this visit"), el("span", "mono", String(done.length))); q.append(h);
+    done.forEach((i, k) => q.append(row(i, k === 0 && S.justAnswered === i.id)));
+  }
+  if (!open().length && !done.length) q.append(el("p", "group", "Nothing here."));
+}
+function row(i, arrive) {
+  const done = !!S.answers[i.id];
+  const b = el("button", "row" + (done ? " done" : "") + (arrive && !reduce ? " arrive" : "")); b.type = "button";
+  b.setAttribute("aria-current", S.cur === i.id ? "true" : "false");
+  b.append(el("span", "n", done ? "✓" : String(i.n)), el("span", "t", i.title));
+  const m = el("span", "m");
+  if (done) { const a = S.answers[i.id]; m.append(el("span", null, (i.kind === "task" ? "Done" : "Answer " + (a.choice === "none" ? "none of these" : a.choice)) + ", to " + i.owner)); }
+  else { m.append(el("span", "urg " + i.urgency, URG_WORD[i.urgency]), el("span", "kind", i.kind === "task" ? "Task" : "Decision"), el("span", null, age(i.added))); }
+  b.append(m);
+  b.addEventListener("click", () => { go(i.id); S.pane = "detail"; $("app").dataset.pane = "detail"; });
+  return b;
+}
+
+function renderDetail() {
+  const d = $("detailIn"); d.replaceChildren();
+  const back = el("button", "btn back", "← All items"); back.type = "button";
+  back.addEventListener("click", () => { S.pane = "queue"; $("app").dataset.pane = "queue"; });
+  d.append(back);
+  const it = byId(S.cur);
+  if (!it) { d.append(finished()); return; }
+  const ans = S.answers[it.id], dr = S.draft[it.id] || {};
+
+  const bl = el("div", "blocks " + it.urgency);
+  bl.append(el("span", "urg " + it.urgency, URG_WORD[it.urgency]), el("span", null, it.blocks));
+  d.append(bl);
+
+  const head = el("div", "head");
+  const k = el("div", "k");
+  k.append(el("span", "num", "#" + it.n), el("span", null, (it.kind === "task" ? "Task for you" : "Decision") + ", from " + it.owner), el("span", null, "added " + cdt(new Date(it.added))));
+  if (it.minutes) k.append(el("span", null, "about " + it.minutes));
+  head.append(k, el("h1", null, it.title), el("div", "ref", it.ref));
+  d.append(head);
+
+  const ctx = el("p", "ctx" + (S.more[it.id] ? "" : " clamp"), it.context); d.append(ctx);
+  if (it.context.length > 220) {
+    const mb = el("button", "more", S.more[it.id] ? "Less" : "More context"); mb.type = "button";
+    mb.addEventListener("click", () => { S.more[it.id] = !S.more[it.id]; renderDetail(); });
+    d.append(mb);
+  }
+
+  if (it.kind === "decision") {
+    const opts = el("div", "opts" + (ans ? " locked" : ""));
+    it.options.forEach((o, idx) => {
+      const chosen = (ans ? ans.choice : dr.choice) === o.key;
+      const c = el("button", "opt" + (chosen ? " sel" : "")); c.type = "button";
+      c.setAttribute("aria-pressed", chosen ? "true" : "false");
+      c.disabled = !!ans;
+      const oh = el("span", "oh"); const lb = el("span");
+      if (o.key === it.pick) lb.append(el("span", "rec", "Recommended"), el("br"));
+      lb.append(el("span", "lab", o.label));
+      oh.append(el("span", "key", String(idx + 1)), lb);
+      const f = (cls, t, v) => { const s = el("span", "f " + cls); s.append(el("b", null, t), document.createTextNode(v)); return s; };
+      c.append(oh, f("how", "How it works", o.how), f("gain", "You gain", o.gain), f("lose", "You lose", o.lose), el("span", "why", o.key === it.pick ? "Why: " + it.why : ""));
+      if (chosen && ans) c.append(stamp());
+      c.addEventListener("click", () => choose(it, o.key));
+      opts.append(c);
+    });
+    d.append(opts);
+  } else {
+    const ol = el("ol", "steps"); it.steps.forEach((s) => ol.append(el("li", null, s))); d.append(ol);
+    if (it.links.length) { const l = el("div", "links"); it.links.forEach((x) => { const a = el("a", null, x.label + " ↗"); a.href = x.url; a.target = "_blank"; a.rel = "noopener"; l.append(a); }); d.append(l); }
+  }
+
+  d.append(ans ? receipt(it, ans) : answerBox(it, dr));
+}
+
+function stamp() {
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("viewBox", "0 0 34 34"); s.setAttribute("class", "stamp"); s.setAttribute("aria-hidden", "true");
+  s.innerHTML = '<circle cx="17" cy="17" r="17"/><path d="M10 17.5l4.6 4.6L24.5 12"/>';
+  return s;
+}
+
+function answerBox(it, dr) {
+  const box = el("div", "answer");
+  const r1 = el("div", "r1");
+  const note = document.createElement("input"); note.type = "text"; note.id = "note"; note.value = dr.note || "";
+  const isNone = dr.choice === "none";
+  note.placeholder = it.kind === "task" ? "Optional: what you saw" : isNone ? "Required: say what you want instead" : "Optional note, or your own answer";
+  if (isNone && !note.value.trim()) note.classList.add("need");
+  note.setAttribute("aria-label", "Note");
+  note.addEventListener("input", () => { S.draft[it.id] = Object.assign({}, S.draft[it.id], { note: note.value }); sv.disabled = !canSave(it); note.classList.toggle("need", S.draft[it.id].choice === "none" && !note.value.trim()); });
+  const sv = el("button", "btn primary"); sv.type = "button"; sv.id = "saveBtn";
+  sv.append(document.createTextNode(it.kind === "task" ? "Mark done" : "Save answer"), el("kbd", null, "⏎"));
+  sv.disabled = !canSave(it);
+  sv.addEventListener("click", () => save(it));
+  r1.append(note, sv);
+  const r2 = el("div", "r2");
+  if (it.kind === "decision") {
+    const nb = el("button", "none", "None of these"); nb.type = "button"; nb.setAttribute("aria-pressed", isNone ? "true" : "false");
+    nb.addEventListener("click", () => choose(it, "none"));
+    r2.append(nb);
+    if (dr.choice && dr.choice !== "none") { const o = it.options.find((x) => x.key === dr.choice); r2.append(el("span", null, "Chosen: " + (it.options.indexOf(o) + 1) + ", " + o.label)); }
+  }
+  const sk = el("button", "none", "Skip for now"); sk.type = "button"; sk.addEventListener("click", () => step(1)); r2.append(sk);
+  r2.append(el("span", "goes", "Goes to " + it.owner + ", filed in " + it.home));
+  box.append(r1, r2);
+  return box;
+}
+function canSave(it) {
+  const d = S.draft[it.id] || {};
+  if (it.kind === "task") return true;
+  if (d.choice === "none") return !!(d.note || "").trim();
+  return !!d.choice || !!(d.note || "").trim();
+}
+
+function receipt(it, ans) {
+  const r = S.receipts[it.id] || 0;
+  const box = el("div", "receipt");
+  const t = el("div", "rt"); t.append(document.createTextNode("Saved " + cdt(new Date(ans.at)) + ". " + it.owner + " gets it at its next turn."));
+  const u = el("button", "btn", "Undo"); u.type = "button"; u.addEventListener("click", () => undo(it.id)); t.append(u);
+  box.append(t);
+  const tr = el("ol", "track");
+  [["Saved", "on this page"], ["Picked up", "the session read it"], ["Filed", "in " + it.home]].forEach(([a, b], k) => {
+    const li = el("li", k <= r ? "on" : ""); li.append(el("b", null, a), document.createTextNode(b)); tr.append(li);
+  });
+  box.append(tr, el("span", "sim", "Mockup: Picked up and Filed are simulated with a timer."));
+  return box;
+}
+
+function finished() {
+  const c = el("div", "clear");
+  c.append(el("span", "sample", "Example answers"), el("h1", null, "Nothing is waiting on you"));
+  if (S.answeredOrder.length) {
+    c.append(el("p", null, "You answered " + S.answeredOrder.length + " this visit. Each goes to its owner at its next turn:"));
+    const ul = el("ul");
+    S.answeredOrder.forEach((id) => { const i = byId(id), a = S.answers[id]; ul.append(el("li", null, "#" + i.n + " " + (i.kind === "task" ? "done" : a.choice) + ", to " + i.owner + " (" + i.home + ")")); });
+    c.append(ul);
+    const cp = el("button", "btn", "Copy answers as one message"); cp.type = "button";
+    cp.addEventListener("click", async () => {
+      const txt = S.answeredOrder.map((id) => { const i = byId(id), a = S.answers[id]; return i.n + " " + (i.kind === "task" ? "done" : a.choice === "none" ? "none of these" : a.choice) + (a.note ? " (" + a.note + ")" : ""); }).join(", ");
+      try { await navigator.clipboard.writeText(txt); cp.textContent = "Copied"; } catch (e) { const ta = el("textarea"); ta.value = txt; ta.rows = 2; ta.readOnly = true; c.append(ta); ta.select(); }
+    });
+    c.append(cp);
+  } else c.append(el("p", null, "Sessions add items here when they park something for your word."));
+  const rs = el("button", "btn", "Reset the sample"); rs.type = "button";
+  rs.addEventListener("click", () => { S.answers = {}; S.receipts = {}; S.answeredOrder = []; S.draft = {}; go(open()[0].id); });
+  c.append(rs);
+  return c;
+}
+
+function choose(it, key) {
+  if (S.answers[it.id]) return;
+  S.draft[it.id] = Object.assign({}, S.draft[it.id], { choice: key });
+  renderDetail();
+  if (key === "none") setTimeout(() => $("note") && $("note").focus(), 0);
+}
+
+function save(it) {
+  if (!canSave(it)) { const n = $("note"); if (n) { n.classList.add("need"); n.focus(); } return; }
+  const d = S.draft[it.id] || {};
+  const a = { item: it.id, n: it.n, at: new Date().toISOString(), note: d.note || "" };
+  if (it.kind === "decision") a.choice = d.choice || ""; else a.done = true;
+  S.answers[it.id] = a; S.receipts[it.id] = 0; S.answeredOrder.unshift(it.id); S.justAnswered = it.id;
+  delete S.draft[it.id];
+  renderAll();
+  const label = it.kind === "task" ? "done" : a.choice === "none" ? "none of these" : a.choice + ") " + it.options.find((o) => o.key === a.choice).label;
+  toast(it, "Saved #" + it.n + ": " + label + ".", "Goes to " + it.owner + ".");
+  // Simulated pick-up and filing, to show the receipt.
+  setTimeout(() => { if (S.answers[it.id]) { S.receipts[it.id] = 1; if (S.cur === it.id) renderDetail(); } }, 3500);
+  setTimeout(() => { if (S.answers[it.id]) { S.receipts[it.id] = 2; if (S.cur === it.id) renderDetail(); } }, 7000);
+  const next = open()[0];
+  setTimeout(() => { if (S.cur === it.id) go(next ? next.id : null); }, reduce ? 0 : 750);
+}
+
+function undo(id) {
+  if (!S.answers[id]) return;
+  const a = S.answers[id];
+  S.draft[id] = { choice: a.choice, note: a.note };
+  delete S.answers[id]; delete S.receipts[id];
+  S.answeredOrder = S.answeredOrder.filter((x) => x !== id);
+  clearToast();
+  go(id);
+}
+
+let toastTimer = null;
+function clearToast() { clearTimeout(toastTimer); $("toastHost").replaceChildren(); }
+function toast(it, main, sub) {
+  clearToast();
+  const t = el("div", "toast" + (reduce ? "" : " in")); t.setAttribute("role", "status");
+  const tr = el("div", "tr"); const p = el("p"); p.append(el("b", null, main), document.createTextNode(" " + sub));
+  const u = el("button", null, "Undo"); u.type = "button"; u.addEventListener("click", () => undo(it.id));
+  tr.append(p, u); t.append(tr);
+  const bar = el("div", "bar"); const i = el("i"); bar.append(i); t.append(bar);
+  $("toastHost").append(t);
+  if (!reduce) i.animate([{ width: "100%" }, { width: "0%" }], { duration: 6000, easing: "linear", fill: "forwards" });
+  toastTimer = setTimeout(clearToast, 6000);
+  S.undo = it.id;
+}
+
+function go(id) { S.cur = id; S.armed = false; renderAll(); const d = $("detail"); if (d) d.scrollTop = 0; window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" }); }
+function step(dir) {
+  const list = open(); if (!list.length) return;
+  const i = list.findIndex((x) => x.id === S.cur);
+  const n = list[(i + dir + list.length) % list.length]; go(n.id);
+}
+
+function renderTop() {
+  const left = open().length, total = ITEMS.length;
+  $("leftN").textContent = String(left);
+  $("leftT").textContent = left === 1 ? "item waiting on you" : "items waiting on you";
+  $("progBar").style.width = ((total - left) / total * 100) + "%";
+  const ab = $("acceptAll"); const todo = open().filter((i) => i.kind === "decision");
+  ab.disabled = !todo.length;
+  ab.classList.toggle("armed", S.armed);
+  ab.firstChild.textContent = S.armed ? "Press again to save " + todo.length + " picks " : "Accept every pick ";
+}
+function renderAll() { renderTop(); renderQueue(); renderDetail(); S.justAnswered = null; }
+
+$("acceptAll").addEventListener("click", acceptAll);
+function acceptAll() {
+  const todo = open().filter((i) => i.kind === "decision");
+  if (!todo.length) return;
+  if (!S.armed) { S.armed = true; renderTop(); return; }
+  S.armed = false;
+  todo.forEach((it) => { S.answers[it.id] = { item: it.id, n: it.n, at: new Date().toISOString(), choice: it.pick, note: "accepted pick" }; S.receipts[it.id] = 0; S.answeredOrder.unshift(it.id); });
+  clearToast();
+  const t = el("div", "toast" + (reduce ? "" : " in")); const tr = el("div", "tr"); const p = el("p"); p.append(el("b", null, "Saved " + todo.length + " picks."), document.createTextNode(" Tasks are left."));
+  tr.append(p); t.append(tr, el("div", "bar")); $("toastHost").append(t); toastTimer = setTimeout(clearToast, 5000);
+  const next = open()[0]; go(next ? next.id : null);
+}
+
+// Keys. Off while typing, except Enter (saves) and Escape (leaves the field).
+document.addEventListener("keydown", (e) => {
+  if (!$("notes").hidden) return;
+  if (!$("keys").hidden) { if (e.key === "Escape" || e.key === "?") { $("keys").hidden = true; e.preventDefault(); } return; }
+  const typing = e.target.matches("input, textarea, select");
+  const it = byId(S.cur);
+  if (typing) {
+    if (e.key === "Enter" && it && !S.answers[it.id] && e.target.id === "note") { e.preventDefault(); save(it); }
+    if (e.key === "Escape") e.target.blur();
+    return;
+  }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key;
+  if (k === "?") { $("keys").hidden = false; $("keysClose").focus(); e.preventDefault(); return; }
+  if (k === "P" && e.shiftKey) { acceptAll(); e.preventDefault(); return; }
+  if (k === "j" || k === "ArrowDown") { step(1); e.preventDefault(); return; }
+  if (k === "k" || k === "ArrowUp") { step(-1); e.preventDefault(); return; }
+  if (k === "z") { if (S.undo) undo(S.undo); return; }
+  if (!it || S.answers[it.id]) return;
+  if (k === "Enter") { if (e.target.closest && e.target.closest("button, a")) return; save(it); e.preventDefault(); return; }
+  if (k === "n") { $("note") && $("note").focus(); e.preventDefault(); return; }
+  if (it.kind !== "decision") return;
+  if (k === "x") { choose(it, "none"); e.preventDefault(); return; }
+  if (k === "p") { choose(it, it.pick); return; }
+  const idx = "1234".indexOf(k) >= 0 ? "1234".indexOf(k) : "abcd".indexOf(k.toLowerCase());
+  if (idx >= 0 && it.options[idx]) choose(it, it.options[idx].key);
+});
+$("keysBtn").addEventListener("click", () => { $("keys").hidden = false; $("keysClose").focus(); });
+$("keysClose").addEventListener("click", () => { $("keys").hidden = true; });
+$("keys").addEventListener("click", (e) => { if (e.target === $("keys")) $("keys").hidden = true; });
+
+// Repo preview: only the band and the square change.
+$("repoPick").addEventListener("change", (e) => {
+  const [name, light, dark] = e.target.value.split("|");
+  $("repoName").textContent = name;
+  const isDark = document.documentElement.dataset.theme === "dark" || (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.style.setProperty("--repo", isDark ? dark : light);
+});
+
+function route() {
+  const notes = location.hash === "#notes";
+  $("notes").hidden = !notes; $("app").hidden = notes;
+  $("tabNotes").setAttribute("aria-current", notes ? "page" : "false");
+  $("tabPage").setAttribute("aria-current", notes ? "false" : "page");
+}
+window.addEventListener("hashchange", route);
+$("tabPage").addEventListener("click", (e) => { e.preventDefault(); history.replaceState(null, "", location.pathname + location.search); route(); });
+
+if (matchMedia("(max-width: 860px)").matches) { S.pane = "queue"; $("app").dataset.pane = "queue"; }
+route();
+go(open()[0].id);
+</script>
+
+</body></html>

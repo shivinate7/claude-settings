@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-29T00:26:00-05:00",
+  "context": "Goal: Mark all received and Clear check-ins work on the phone as they do on the web.\nProblem: on the web, both run on one tap, with no ask and no Undo. The house rule wants each such control guarded by an ask or an Undo, so the phone departs from the web either way. Which guard each gets is your call.\nBased on: the web runs both on one tap (read, src/app.jsx 1173-1182).\nBased on: house rule ux-ask-or-undo (ruling).\nDeparts from: the web's unguarded one-tap buttons.\nMeanwhile: the step 7 builder takes option a.",
+  "home": "roadmap step restyle-7-bulk (restyle builds a in step 7)",
+  "id": "stamp-bulk-guard",
+  "kind": "decision",
+  "n": 41,
+  "options": [
+    {
+      "gain": "A mis-tap can't wipe your check-ins.",
+      "how": "Clear check-ins needs a second tap to confirm. Mark all received runs at once and shows Undo.",
+      "key": "a",
+      "label": "Clear asks; Mark all offers Undo",
+      "lose": "One extra tap on Clear."
+    },
+    {
+      "gain": "Clear is one tap.",
+      "how": "Both run at once and show Undo.",
+      "key": "b",
+      "label": "Both offer Undo",
+      "lose": "If you miss the Undo, the check-ins are gone."
+    }
+  ],
+  "owner": "restyle local_96bb7b5c-71b1-45b5-b222-2df64d74f80f",
+  "pick": "a",
+  "rank": 7,
+  "ref": "web src/app.jsx 1173-1182; house rule ux-ask-or-undo",
+  "short": "Bulk button guard",
+  "status": "closed",
+  "title": "On the phone, how should Mark all received and Clear check-ins guard against a mis-tap?",
+  "why": "Clearing check-ins is the costly mistake, so it gets the stronger guard."
+}

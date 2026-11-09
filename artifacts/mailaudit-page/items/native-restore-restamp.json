@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-06T15:50:00-06:00",
+  "context": "Goal: a restore on the phone stays restored after the next sync.\nProblem (risk): the web gives every restored key the restore time (restampRestore in src/merge-rules.mjs), but the native app keeps the old times. So a later Worker reply can undo part of a phone restore. The fix needs your choice, because the native build keeps the merge rules out of its bundle.\nBased on (read): debt native-restore-keeps-old-times.\nBased on (read): the native pull reached the live Worker (PR #185).\nDeparts from: build.mjs:RULES_OUT \u2014 the merge rules stay out of native rules.js; option a bundles restampRestore into it.\nMeanwhile: pins works on its other debts. Nothing waits on this.",
+  "group": "merge-rules-in-native",
+  "home": "decision a-restore-is-not-local (on main, bda5388, PR 229)",
+  "id": "native-restore-restamp",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-08T16:55:44.055Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 43,
+  "options": [
+    {
+      "gain": "The phone restores exactly like the web, from one shared rule.",
+      "how": "The native rules.js gains the web's restampRestore, and the phone calls it on every restore.",
+      "key": "a",
+      "label": "Bundle restampRestore into the phone's rules",
+      "lose": "The phone's rules bundle grows by the merge rules file."
+    },
+    {
+      "gain": "The bundle stays as it is.",
+      "how": "A Swift copy of the rule restamps each restored key.",
+      "key": "b",
+      "label": "Rewrite restampRestore in Swift",
+      "lose": "Two copies of one rule, which can drift apart."
+    },
+    {
+      "gain": "No app change now.",
+      "how": "No app change now. Lane W3b, which is blocked, makes the Worker restamp.",
+      "key": "c",
+      "label": "Leave it until the Worker restamps",
+      "lose": "A phone restore can be partly undone in the meantime."
+    }
+  ],
+  "owner": "pins local_a0a8c80f-3035-4cfe-b432-233579e560bc",
+  "pick": "a",
+  "port": true,
+  "rank": 9,
+  "ref": "debt native-restore-keeps-old-times (a phone restore keeps the old times); decision a-restore-is-not-local (a restore is not a local edit); PR #185 (the native pull reached the live Worker)",
+  "short": "Phone restore restamp",
+  "status": "closed",
+  "title": "A restore on the phone keeps the old times, so a sync can undo part of it. How should the phone restamp?",
+  "why": "It is the only option that keeps one home for the rule and closes the gap now."
+}

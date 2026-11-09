@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-27T01:18:00-05:00",
+  "context": "Goal: the past-transit page flags late mail at the right time.\nProblem: this only matters if item 11 keeps the Sorting Frame's past-transit page. The mockups assumed 10 days. The app already shows an amber warning at 14 days.\nMeanwhile: manifest-duo waits for item 11.",
+  "home": "the Duo decision record",
+  "id": "duo-usual-transit",
+  "kind": "decision",
+  "n": 13,
+  "options": [
+    {
+      "gain": "One threshold everywhere.",
+      "how": "Past transit starts where the amber flag starts.",
+      "key": "a",
+      "label": "Reuse 14 days",
+      "lose": "Late mail shows 4 days later than the mockup."
+    },
+    {
+      "gain": "Earlier nudge.",
+      "how": "A new, earlier threshold for the Duo page.",
+      "key": "b",
+      "label": "Use 10 days",
+      "lose": "Two different 'late' meanings in one app."
+    }
+  ],
+  "owner": "manifest-duo",
+  "pick": "a",
+  "ref": "Duo concepts PR #139 (Sorting Frame's past-transit page); the existing 14-day amber flag",
+  "status": "closed",
+  "title": "Duo: when is mail 'past usual transit'?",
+  "why": "Keeps one meaning of 'late'."
+}

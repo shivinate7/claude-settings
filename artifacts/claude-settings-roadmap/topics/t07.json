@@ -1,0 +1,12 @@
+{
+  "order": 70,
+  "points": [
+    "The sweep never fetches. Its pushed check passes every remote head to git rev-list. If one head isn't in the local clone, git fails with 'bad object', and the sweep keeps every worktree in that repo as unreadable-subject. This was tested.",
+    "GitHub merge commits and cloud-session pushes mean a clone almost always lacks some remote head until a session happens to fetch.",
+    "Remote heads: claude-settings 244 (188 already merged), banchi 313, q_max 1,017, home-app 54. Lane branches merged into a batch never get cut.",
+    "Fix: run git fetch --prune at the start of a sweep; drop remote heads still missing instead of failing (that can only add keeps, never a wrong reap); delete merged remote branches once; have the merge step cut each lane branch a batch absorbed.",
+    "Not yet confirmed on your machine: run the sweep's preview in q_max and count its keep reasons. unreadable-subject should dominate."
+  ],
+  "summary": "The janitor sweep's root cause, and the fix.",
+  "title": "Why worktrees pile up"
+}

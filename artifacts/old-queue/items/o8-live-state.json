@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26",
+  "context": "Each repo's roadmap page will show what every session is doing right now. A published page can't run git, so it can only show what was read when the page was built.",
+  "home": "roadmap step o8 note; plans/o8-living-roadmap-plan.md section 7 (roadmap 6651d48)",
+  "id": "o8-live-state",
+  "kind": "decision",
+  "n": 25,
+  "options": [
+    {
+      "gain": "Works in the cloud today, with no new writes.",
+      "how": "The publisher reads each thread's state (working, blocked, review ready) plus open branches and PRs.",
+      "key": "a",
+      "label": "Project threads and GitHub, read at build",
+      "lose": "Sessions running locally on your PC and Mac don't show."
+    },
+    {
+      "gain": "The richest state: agents, context, whether an update is ready.",
+      "how": "A build on the machine reads each session's small record from the session board.",
+      "key": "b",
+      "label": "The session-board mod's records",
+      "lose": "Lives on one machine, so it only shows when the page is built there."
+    },
+    {
+      "gain": "Every session shows, local ones too.",
+      "how": "The same pattern as this waiting page.",
+      "key": "c",
+      "label": "Each session writes one line to the page's store at turn end",
+      "lose": "One write every turn, and whether a local session can write a page's store is still unmeasured (c71)."
+    }
+  ],
+  "owner": "Build advisor",
+  "pick": "a",
+  "ref": "o8 (a living roadmap page for every repo)",
+  "status": "closed",
+  "title": "Living roadmap page: where each session's live state comes from",
+  "why": "It works today. Switch to (c) once c71 shows that local sessions can write to a page's store."
+}

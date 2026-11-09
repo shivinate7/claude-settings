@@ -1,0 +1,8 @@
+{
+  "order": 255,
+  "phase": "design",
+  "status": "todo",
+  "title": "Space with containers, not margins",
+  "updatedAt": "2026-10-17T17:30:00Z",
+  "why": "gap on parents, a few layout primitives, clamp() tokens for fluid spacing, and banchi's per-file ratchet. This is the direct fix for centering and gap problems."
+}

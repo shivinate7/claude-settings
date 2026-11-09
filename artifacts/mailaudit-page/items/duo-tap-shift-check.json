@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-07T16:42:00-06:00",
+  "context": "Goal: ship the Card in Hand tap fix with a test that proves no row moves under the finger.\nProblem (rule): the tapped row's label moved 10 pt sideways; it is fixed (3ea0bdc). No check of its horizontal position can go red: a static-text read fails on every build, and a pixel scan (307f3cf) passed a mutant with the shift. The reviewer calls deleting the check a weakened test, which needs your ruling.\nBased on (measured): Duo 1 runs on 2026-11-07 at 14:46 and 16:35 CST.\nBased on (read): the rule that a test is never weakened to reach green.\nBased on (read): the design review (design-reviewer opus, 18:04 CST) passes the label from screenshots on Duo 1. When a match is tapped, the name stays in place and only the accent bar appears in the gutter. That holds for the open pose in light theme only.\nDeparts from: main has no Card in Hand tap-hold \u2014 adds the tap-hold fix without a test of the label's horizontal position.\nUnvetted: the past-ruling check timed out (model subprocess), so this was not checked against past rulings.\nAlso sent to the coordinator at 16:38 CST; an answer there counts the same.",
+  "holds": "Both Duo lanes wait to reach the batch until this is answered.",
+  "home": "decision duo-card-in-hand; debt hand-tap-label-unpinned (branch hand-tap-shift 6a1ae0c, landing at merge)",
+  "id": "duo-tap-shift-check",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-07T18:35:00-06:00",
+    "choice": "a",
+    "note": "ok (owner in chat with the coordinator)"
+  },
+  "n": 48,
+  "options": [
+    {
+      "gain": "Both Duo lanes reach the batch now.",
+      "how": "The fix ships, a debt names the missing check, and the design review judges the label from screenshots.",
+      "key": "a",
+      "label": "Ship without that check, and open a debt",
+      "lose": "A later sideways label shift would pass the tests."
+    },
+    {
+      "gain": "The shift is pinned by a test.",
+      "how": "The lane keeps trying new checks until one catches the shift.",
+      "key": "b",
+      "label": "Keep building a check that goes red",
+      "lose": "More test rounds and Duo slots with no end date; both lanes wait."
+    }
+  ],
+  "owner": "duo local_ce9eac1d-fccf-498c-ae3b-66df4210b936",
+  "pick": "a",
+  "rank": 1,
+  "ref": "fix 3ea0bdc (tapped row's label no longer moves); pixel-scan check 307f3cf (passed a mutant with the shift); Duo 1 runs 2026-11-07 14:46 and 16:35 CST",
+  "short": "Tap-shift check",
+  "status": "closed",
+  "title": "No test can catch Card in Hand's 10 pt label shift. Ship the fix without that check?",
+  "why": "The fix is in and the design review still sees the label; two kinds of check have already failed to go red."
+}

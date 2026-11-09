@@ -1,0 +1,52 @@
+{
+  "added": "2026-10-27T12:58:00-05:00",
+  "context": "Goal: settle Card in Hand's open choices, so Duo can plan the build.\nProblem: we don't know if the iPhone keyboard fits inside one page of the open Duo (case A) or spans both (case B). Case A needs nothing. This is only for case B.\nNew at 14:06: the fold run measured the keyboard frame at 951 x 263 pt on the open inner screen. That's the full width, so it spans the fold: case B (measured). The keys themselves didn't show in the screenshots, so this rests on the frame size alone.\nBased on: decision duo-card-in-hand, your 12:25 picks (ruling); the fold and keyboard are unmeasured (measured: the runs failed at load 157).\nMeanwhile: Duo plans the build and starts nothing until you answer.",
+  "designs": [
+    {
+      "label": "Case A for reference: keys fit the left page",
+      "slug": "d22-a"
+    },
+    {
+      "label": "a) In-app key pad (B1)",
+      "slug": "d22-b1"
+    },
+    {
+      "label": "b) System keys across both pages (B2)",
+      "slug": "d22-b2"
+    },
+    {
+      "label": "a) in laptop pose",
+      "slug": "d22-lapb"
+    }
+  ],
+  "group": "duo-round2",
+  "holds": "Duo's build plan for Card in Hand waits on this.",
+  "home": "decision duo-card-in-hand (manifest-duo)",
+  "id": "duo-keys-span-fold",
+  "kind": "decision",
+  "n": 22,
+  "options": [
+    {
+      "design": "d22-b1",
+      "gain": "The keys stay on the left page, and the answer stays visible on the right.",
+      "how": "Our own keys on the left page, with a System keys switch to the real keyboard.",
+      "key": "a",
+      "label": "In-app key pad (B1)",
+      "lose": "No autocorrect, dictation or swipe typing; keys are 42pt, under the 44pt floor."
+    },
+    {
+      "design": "d22-b2",
+      "gain": "Normal iPhone typing.",
+      "how": "Use the real keyboard; the query moves down onto it.",
+      "key": "b",
+      "label": "System keys across both pages (B2)",
+      "lose": "The right page keeps only 3 lines."
+    }
+  ],
+  "owner": "manifest-duo",
+  "pick": "a",
+  "ref": "Duo design round 2, draft PR #144 (Card in Hand screens)",
+  "status": "closed",
+  "title": "If the keyboard spans the fold, which keys does Card in Hand use?",
+  "why": "The answer page stays readable. Build for case A first, since it's the likely one."
+}

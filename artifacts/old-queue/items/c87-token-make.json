@@ -1,0 +1,21 @@
+{
+  "added": "2026-10-27T17:15:00Z",
+  "context": "Withdrawn (triage, Oct 27 12:10 CDT): the GitHub plugin is not on the Mac at all, so the failure is on Windows. The local liaison asked you in its own thread where to test. Make no token until that is chosen.",
+  "home": "roadmap step c87",
+  "id": "c87-token-make",
+  "kind": "task",
+  "links": [
+    "https://github.com/settings/personal-access-tokens/new"
+  ],
+  "minutes": "5 min",
+  "n": 36,
+  "owner": "Triage the roadmap",
+  "ref": "c87 (local sessions stop failing on the GitHub plugin's empty token)",
+  "status": "closed",
+  "steps": [
+    "Open the link and make a fine-grained token: Read-only on Contents, Pull requests and Actions, for your repos, expiring in 7 days.",
+    "Keep it in your clipboard or password manager. Do not paste it here.",
+    "Reply 'done' here. The Mac session will ask you to paste it into its terminal yourself."
+  ],
+  "title": "Make a read-only GitHub token for the one-time plugin try on the Mac"
+}

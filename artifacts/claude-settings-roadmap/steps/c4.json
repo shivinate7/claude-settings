@@ -1,0 +1,10 @@
+{
+  "ask": "Give me a safe one-time cleanup for merged remote branches, and the change so the merge step cuts lane branches.",
+  "note": "Checked Oct 20 at 84d4076: 26 remote heads remain (240 on Oct 19). Kept: batch-map, claude-p-fetch-key and recent lanes. map-format-version and map-skill-move are gone, but safely: their work merged to main in #525 first. New decision merge-deletes-batch-lanes; merge/merge.py cut_branch deletes a merged head on origin. Not seen here: where the session saved the list of deleted names and tips. q_max (1,017 heads) not done yet; that belongs to Roll out.",
+  "order": 40,
+  "phase": "cleanup",
+  "status": "done",
+  "title": "Delete merged remote branches",
+  "updatedAt": "2026-10-20T16:55:00Z",
+  "why": "188 of 244 remote branches in claude-settings are already merged. q_max has 1,017 remote heads. Then have each merge cut the lane branches its batch absorbed."
+}

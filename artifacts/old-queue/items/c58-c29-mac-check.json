@@ -1,0 +1,20 @@
+{
+  "added": "2026-10-26",
+  "context": "Both fixes are on main. Each machine needs one catch-up update, then one turn to prove the decision watch judges it.",
+  "home": "roadmap steps c58 and c29",
+  "id": "c58-c29-mac-check",
+  "kind": "task",
+  "links": [],
+  "minutes": "5 min per machine",
+  "n": 20,
+  "owner": "Triage the roadmap",
+  "ref": "c58 (mods update themselves) and c29 (the decision watch runs again)",
+  "status": "closed",
+  "steps": [
+    "In a terminal: claude plugin marketplace update claude-settings",
+    "Then: claude plugin update <mod>@claude-settings for each mod (claude plugin list shows them).",
+    "Restart the app, take one turn, and check that shadow.log has a new line.",
+    "Reply with each machine's mod versions, or just 'done'."
+  ],
+  "title": "Update the claude-settings mods and check the decision watch on the Mac and Windows"
+}

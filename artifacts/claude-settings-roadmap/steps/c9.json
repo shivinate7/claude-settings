@@ -1,0 +1,8 @@
+{
+  "order": 90,
+  "phase": "cleanup",
+  "status": "todo",
+  "title": "Optional: fail a guard rule with no test",
+  "updatedAt": "2026-10-17T17:20:00Z",
+  "why": "One new rule_audit case keeps future prose deletions honest."
+}

@@ -1,0 +1,42 @@
+{
+  "added": "2026-10-27T01:32:00-05:00",
+  "context": "Goal: the records say what the web really does.\nProblem: decision sync-particulars-ruled-values (Sync label pairs) says the labels are LEDGER, PHOTOS and KEY. The web shows Server, Last sync and Sync key.\nBased on: the step 4 designer's read of the web code (read, 01:31).\nMeanwhile: step 4 builds to match the web as it ships.",
+  "designs": [
+    {
+      "label": "a) Rewrite to match the code",
+      "slug": "q16-a"
+    },
+    {
+      "label": "b) Change the web back",
+      "slug": "q16-b"
+    }
+  ],
+  "home": "decision sync-particulars-ruled-values",
+  "id": "stale-sync-labels",
+  "kind": "decision",
+  "n": 16,
+  "options": [
+    {
+      "design": "q16-a",
+      "gain": "The record matches the app.",
+      "how": "The record names Server, Last sync and Sync key.",
+      "key": "a",
+      "label": "Rewrite to match the code",
+      "lose": "Nothing."
+    },
+    {
+      "design": "q16-b",
+      "gain": "Keeps the old wording.",
+      "how": "Rename the web labels to LEDGER, PHOTOS, KEY.",
+      "key": "b",
+      "label": "Change the web back",
+      "lose": "A web change and a screens re-check; the old labels predate the Cloudflare sync."
+    }
+  ],
+  "owner": "manifest-restyle",
+  "pick": "a",
+  "ref": "manifest-restyle step4-design notes",
+  "status": "closed",
+  "title": "Stale record: Sync label names",
+  "why": "The code's labels fit today's sync."
+}

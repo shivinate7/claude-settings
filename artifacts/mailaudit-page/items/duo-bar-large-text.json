@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-08T08:17:00-06:00",
+  "context": "Goal: the open Duo's tab bar stays readable at every text size.\nProblem (goal): at every accessibility text size, all four tab labels clip, running 4.5\u201312 pt past the 64 pt pill and up to 20 pt past its sides. How to fix it is a design call.\nBased on (measured): DuoMeasureUITests on Duo 1, 2026-11-08 06:57 CST (debt duo-bar-dynamic-type-clips).\nBased on (read): the web bar is a fixed 64 px pill with 10 px labels that do not follow the phone's text size (src/app.jsx:5663-5679, decision phone-nav-is-bottom-bar).\nDeparts from: main, where the Duo bar's labels grow with Dynamic Type inside a fixed 64 pt pill \u2014 at accessibility sizes the labels change, per the option picked.\nUnvetted: the past-ruling check was not run for this question.\nClosed 2026-11-08 08:17 CST: the coordinator ruled under decision port-keeps-behaviour (the web's fixed labels answer it), so it was not the owner's answer. The labels are capped at a fixed size that never clips, and each tab gets the large content viewer. That is close to option c; option a is out.",
+  "home": "the Duo bar's decision record, filed by the lane that builds it",
+  "id": "duo-bar-large-text",
+  "kind": "decision",
+  "n": 52,
+  "options": [
+    {
+      "gain": "Nothing clips, and it matches the web's fixed bar.",
+      "how": "The pill stays 64 pt. At accessibility sizes each tab shows only its symbol, and its label becomes the VoiceOver name.",
+      "key": "a",
+      "label": "Symbols only at large text",
+      "lose": "No visible words on the tabs at large text."
+    },
+    {
+      "gain": "Words stay at every size.",
+      "how": "The bar gets taller as the text grows, so every label fits.",
+      "key": "b",
+      "label": "The pill grows with its labels",
+      "lose": "A taller bar covers more of the right page."
+    },
+    {
+      "gain": "Words stay, and the pill stays the same.",
+      "how": "The labels stop growing at the largest standard text size, and the pill stays as it is.",
+      "key": "c",
+      "label": "Cap the labels at the largest standard size",
+      "lose": "The labels stop growing for readers who need large text."
+    }
+  ],
+  "owner": "duo local_ce9eac1d-fccf-498c-ae3b-66df4210b936",
+  "pick": "a",
+  "rank": 15,
+  "ref": "debt duo-bar-dynamic-type-clips (Duo tab labels clip at large text); DuoMeasureUITests on Duo 1, 2026-11-08 06:57 CST; decision phone-nav-is-bottom-bar",
+  "short": "Duo bar at large text",
+  "status": "closed",
+  "title": "At large text sizes the open Duo's tab labels clip out of the bar. How should the bar handle them?",
+  "why": "Nothing clips, the bar keeps the web's fixed shape, and VoiceOver still reads every tab name."
+}

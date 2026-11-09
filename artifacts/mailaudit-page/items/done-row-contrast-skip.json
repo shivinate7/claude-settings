@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-08T13:26:00-06:00",
+  "context": "Your question (10:55 CST): who runs this accessibility audit, and does it come from claude-settings? It is Apple's own check, XCUITest performAccessibilityAudit. mailaudit's own phone UI tests call it (AuditSkippingTabBarUITests.swift:141, MastheadBackupUITests.swift:581). claude-settings does not run it.\nGoal: the phone's Packages card looks like the web, and its audits pass.\nProblem (rule): four step 7 audits flag \"Contrast failed\" on a checked-off row's detail line, such as \"Test Set \u00b7 Near Mint\". The colour pair measures 4.51:1 by the tokens, which is above the 4.5 floor, and it is the web's own colour. Decision audit-skips-measured-flags allows only skips you name, so a new skip needs your word.\nBased on (record): debt tally-audit-contrast-flags; the audit samples pixels and flags pairs above 4.5:1 some of the time.\nBased on (ruling): audit-skips-measured-flags, owner 2026-10-27 12:25 CDT; you named a skip for the same kind of flag on the Tally \"left\" line.\nDeparts from: main audit-skips-measured-flags names four contrast skips \u2014 adds a fifth, the done-row detail line, contrast check only.\nMeanwhile: step 7 is otherwise ready, and waits only on this.",
+  "holds": "Step 7 (Packages bulk check-in) cannot go to batch until this is answered.",
+  "home": "decision audit-skips-measured-flags, written by restyle with step 7",
+  "id": "done-row-contrast-skip",
+  "kind": "decision",
+  "n": 45,
+  "options": [
+    {
+      "gain": "The audits go green, and the web colour stays.",
+      "how": "The four audits skip only the contrast check, only on that line. Every other check stays on.",
+      "key": "a",
+      "label": "Add a named contrast skip for the done-row detail line",
+      "lose": "The audit stops checking that one line's contrast."
+    },
+    {
+      "gain": "No new skip.",
+      "how": "Step 7 merges with the four audits failing, logged in the debt, as step 5 did.",
+      "key": "b",
+      "label": "Merge step 7 with those four audits red",
+      "lose": "Four red audits on main that readers learn to ignore."
+    }
+  ],
+  "owner": "restyle local_96bb7b5c-71b1-45b5-b222-2df64d74f80f",
+  "pick": "a",
+  "rank": 10,
+  "ref": "decision audit-skips-measured-flags (audit skips only for measured false flags); debt tally-audit-contrast-flags (the audit flags pairs above 4.5:1)",
+  "short": "Done-row contrast skip",
+  "status": "closed",
+  "title": "Step 7's audits flag a checked-off row's detail line that measures 4.51:1. Add a named skip?",
+  "why": "The pair clears the floor by the tokens, and you ruled the same way for the same kind of flag."
+}

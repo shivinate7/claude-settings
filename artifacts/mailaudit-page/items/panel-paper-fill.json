@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-08T13:14:00-06:00",
+  "context": "Goal: an open panel reads cleanly over the list behind it.\nProblem (rule): on 2026-10-11 an orchestrator set the default that an overlay panel takes the paper fill. You never confirmed or overruled it, and it was never built: panelWrap in src/app.jsx has padding and a top border, and no background. Whether the square edges look right with the fill is unmeasured.\nBased on (read): src/app.jsx:1713-1716 panelWrap.\nBased on (record): decision ruled-head-panels-carry-no-fill says you should check it on a screen.\nDeparts from: main panelWrap has no background \u2014 option a adds the paper fill.\nMeanwhile: panels ship with no fill.",
+  "home": "debt panel-paper-fill-unbuilt; decision ruled-head-panels-carry-no-fill",
+  "id": "panel-paper-fill",
+  "kind": "decision",
+  "n": 63,
+  "options": [
+    {
+      "gain": "An open panel stands apart from the list behind it.",
+      "how": "Overlay panels get the paper background, then a screen check shows you the edges.",
+      "key": "a",
+      "label": "Confirm the paper fill",
+      "lose": "A web change and a screens re-check."
+    },
+    {
+      "gain": "No change to the web.",
+      "how": "The default is dropped, and the debt closes.",
+      "key": "b",
+      "label": "Overrule it: panels stay with no fill",
+      "lose": "The list behind can show through an open panel."
+    }
+  ],
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "pick": "a",
+  "rank": 25,
+  "ref": "debt panel-paper-fill-unbuilt (overlay panels carry no paper fill); src/app.jsx panelWrap",
+  "short": "Panel paper fill",
+  "status": "open",
+  "title": "Should the web's overlay panels get the paper fill? It's a default from 10-11 you never confirmed.",
+  "why": "It is the standing default, and a screen check before it ships lets you see the edges."
+}

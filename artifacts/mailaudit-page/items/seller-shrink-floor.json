@@ -1,0 +1,38 @@
+{
+  "added": "2026-10-27T02:49:00-05:00",
+  "answer": "a (owner in chat, 02:49 CDT 10-27)",
+  "context": "Goal: the native package card looks like the web card, and the seller name stays selectable and on one line.\nProblem: the fix that passes the accessibility audit lets the 15pt seller shrink to 7.5pt, below your 10px type floor. The round-3 reviewer found the audit's \"Text clipped\" cause unmeasured: \"Alpha Cards\" fails at 90% though it fills only 82pt of a 238pt column. So the shrink hides an audit quirk rather than fixing it.\nBased on: the round-3 reviewer's report and the builder's logs (read, 02:48); PackagesView.swift:70 sets Cochin 15 with a 0.5 floor (read).\nMeanwhile: step 3 has passed review round 3 and waits only on this and the design review.",
+  "home": "decision order-id-button-stops-propagate",
+  "id": "seller-shrink-floor",
+  "kind": "decision",
+  "n": 18,
+  "options": [
+    {
+      "gain": "Cards on your phone now.",
+      "how": "Batch step 3 with the shrink; file a debt to measure the audit cause.",
+      "key": "a",
+      "label": "Ship cards now, 0.5 floor",
+      "lose": "Sellers of about 37-50 characters read below 10pt until a later lane fixes it."
+    },
+    {
+      "gain": "The type floor holds.",
+      "how": "A new lane sets the floor to 0.67 and measures the audit at each size before batching.",
+      "key": "b",
+      "label": "Floor at 10pt first",
+      "lose": "Step 3 waits, and 0.67 may still fail the audit."
+    },
+    {
+      "gain": "Exact match with the web type.",
+      "how": "The seller becomes plain text at full size.",
+      "key": "c",
+      "label": "Drop seller selection",
+      "lose": "Reverses your ruling that the seller stays selectable."
+    }
+  ],
+  "owner": "manifest-restyle",
+  "pick": "a",
+  "ref": "PR #138, native/Manifest/PackagesView.swift:70",
+  "status": "closed",
+  "title": "Native cards: the seller shrink goes below your 10px type floor",
+  "why": "Gets cards on the phone now; only long sellers are affected, and the debt names the fix."
+}

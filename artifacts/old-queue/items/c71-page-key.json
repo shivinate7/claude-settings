@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26",
+  "context": "You were right: the premise was wrong. Checked Oct 27 11:55 CDT: degen and mailaudit already made waiting pages and put each address in a .claude/layout-extras.json file. degen's file holds only the address. Your note: \"repos have already started making their waiting on you pages without their repo visit occuring yet\".\nThe catch: that same file also tells the shared tools \"this repo has moved to the new folder layout\" (lint/layout.py, rolled_out). So degen and mailaudit are now read as if they had been reorganized, though nobody moved their folders. Whether that misreads anything there today is unmeasured.\nThe question: how should a repo keep its page address so any repo can have a page now, without that side effect?",
+  "home": "PR #636; roadmap step o2 (one layout for every repo)",
+  "id": "c71-page-key",
+  "kind": "decision",
+  "n": 29,
+  "options": [
+    {
+      "gain": "Every repo can get a page today. One small file per repo. Nothing in degen or mailaudit has to change.",
+      "how": "The address stays in .claude/layout-extras.json. A new line in that file, \"layout\": \"rolled-out\", is what marks a reorganized repo, so a file with only an address no longer does. degen and mailaudit keep their pages as they are.",
+      "key": "a",
+      "label": "Same file, separate 'moved' mark",
+      "lose": "One more line to set at each repo's visit, and a small change to the shared tools."
+    },
+    {
+      "gain": "No change to the shared tools.",
+      "how": "A repo gets the file, and its page, only at its visit. degen and mailaudit count as moved; their visit checks that their folders really match.",
+      "key": "b",
+      "label": "Keep today's rule: the file means 'moved'",
+      "lose": "Other repos wait for their visit to get a page, and degen and mailaudit may be misread until then."
+    },
+    {
+      "gain": "Each file means one thing.",
+      "how": "Each repo keeps the address in .claude/waiting-page.json. The layout file is left for the visit. degen's and mailaudit's addresses move there.",
+      "key": "c",
+      "label": "Address in its own file",
+      "lose": "A second small file in every repo, and two repos to change."
+    }
+  ],
+  "owner": "Build advisor",
+  "pick": "a",
+  "ref": "c71 (one waiting page for every session), PR #636; o2 (one layout for every repo)",
+  "status": "open",
+  "title": "Your other repos already make their own waiting pages: how should a page's address be kept?",
+  "why": "It matches what your repos already did, gives every repo a page now, and stops a page address from silently counting as a reorganization."
+}

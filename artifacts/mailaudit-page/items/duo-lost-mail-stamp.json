@@ -1,0 +1,44 @@
+{
+  "added": "2026-10-27T14:30:00-05:00",
+  "context": "Goal: settle Card in Hand's open choices, so Duo can plan the build.\nProblem: the round-2 drawing offered one stamp button on the past-transit page. You expected two, Claim filed and Lost. The app today has six stamp kinds (Claim filed, Seller contacted, Refunded, Reshipped, Partial refund, Other) and no Lost.\nBased on: STAMP_KINDS in the web app's src/app.jsx (read).\nMeanwhile: Duo plans the build and starts nothing until you answer.",
+  "designs": [
+    {
+      "label": "Claim filed button (both options)",
+      "slug": "d25-a"
+    },
+    {
+      "label": "Lost button (option a)",
+      "slug": "d25-b"
+    }
+  ],
+  "group": "duo-round2",
+  "holds": "Duo's build plan for Card in Hand waits on this.",
+  "home": "decision duo-card-in-hand (manifest-duo)",
+  "id": "duo-lost-mail-stamp",
+  "kind": "decision",
+  "n": 25,
+  "options": [
+    {
+      "design": "d25-b",
+      "gain": "The two you expect, one tap each.",
+      "how": "Add Lost as a new stamp kind. Both buttons sit on each late package.",
+      "key": "a",
+      "label": "Two buttons: Claim filed and Lost",
+      "lose": "Lost is new data: the web app and the phone app both have to learn it."
+    },
+    {
+      "design": "d25-a",
+      "gain": "No new data; it works like Packages.",
+      "how": "The past-transit page offers the same stamp list as Packages.",
+      "key": "b",
+      "label": "The six stamps the app already has",
+      "lose": "No Lost stamp, and six buttons where you expected two."
+    }
+  ],
+  "owner": "manifest-duo",
+  "pick": "a",
+  "ref": "Duo design round 2, draft PR #144 (Card in Hand screens)",
+  "status": "closed",
+  "title": "Which stamps can you put on a late package from the past-transit page?",
+  "why": "It matches what you asked for. The new kind is a small addition to one list."
+}

@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-27",
+  "context": "The plan named /board as the first test. /board is now the session-board mod, a text pane in the terminal or app, not a page, so it is a poor test of a flow built on HTML mockups. You said on Oct 26 you would decide later; this item holds the question until you do.",
+  "home": "roadmap step d4",
+  "id": "d4-first-design-test",
+  "kind": "decision",
+  "n": 33,
+  "options": [
+    {
+      "gain": "The flow is tested on a real screen with real users.",
+      "how": "The designer mocks up one real home-app screen, and a design reviewer checks it before any build.",
+      "key": "a",
+      "label": "A home-app screen",
+      "lose": "home-app is another repo, so its build needs a local session."
+    },
+    {
+      "gain": "It stays in claude-settings.",
+      "how": "The designer mocks up the session-board pane.",
+      "key": "b",
+      "label": "Keep /board",
+      "lose": "A text pane tests little of a mockup flow."
+    },
+    {
+      "gain": "Nothing to decide now.",
+      "how": "d4 stays parked.",
+      "key": "c",
+      "label": "Decide later",
+      "lose": "The mockup flow stays untested."
+    }
+  ],
+  "owner": "Triage the roadmap",
+  "pick": "a",
+  "ref": "d4 (redesign /board as the first test)",
+  "status": "closed",
+  "title": "Which screen should be the first test of the design mockup flow?",
+  "why": "A real screen is the only test that shows whether the flow works."
+}

@@ -1,0 +1,52 @@
+{
+  "added": "2026-10-27T12:58:00-05:00",
+  "context": "Goal: settle Card in Hand's open choices, so Duo can plan the build.\nProblem: Tally and Orphaned spread cleanly; Ledger could spread or stay one wide page.\nBased on: decision duo-card-in-hand, your 12:25 picks (ruling); the fold and keyboard are unmeasured (measured: the runs failed at load 157).\nMeanwhile: Duo plans the build and starts nothing until you answer.",
+  "designs": [
+    {
+      "label": "a) Tally spread",
+      "slug": "d24-tally"
+    },
+    {
+      "label": "a) Orphaned spread",
+      "slug": "d24-orph"
+    },
+    {
+      "label": "a) Ledger spread",
+      "slug": "d24-ls"
+    },
+    {
+      "label": "b) Ledger full width",
+      "slug": "d24-lf"
+    }
+  ],
+  "group": "duo-round2",
+  "holds": "Duo's build plan for Card in Hand waits on this.",
+  "home": "decision duo-card-in-hand (manifest-duo)",
+  "id": "duo-other-tabs-spread",
+  "kind": "decision",
+  "n": 24,
+  "options": [
+    {
+      "design": "d24-ls",
+      "gain": "One shape for every tab; no row crosses the fold.",
+      "how": "Ledger rows on the left, the open panel (History, Sync) on the right.",
+      "key": "a",
+      "label": "All three spread",
+      "lose": "Ledger looks unlike degen's Settings."
+    },
+    {
+      "design": "d24-lf",
+      "gain": "Matches degen.",
+      "how": "Tally and Orphaned spread; Ledger stays one page wide, as degen keeps Settings.",
+      "key": "b",
+      "label": "Ledger stays full width",
+      "lose": "Every Ledger row crosses the fold."
+    }
+  ],
+  "owner": "manifest-duo",
+  "pick": "a",
+  "ref": "Duo design round 2, draft PR #144 (Card in Hand screens)",
+  "status": "closed",
+  "title": "Do Tally, Orphaned and Ledger spread over both pages?",
+  "why": "Nothing sits on the hinge."
+}

@@ -1,0 +1,519 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Calm Waiting Page</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;600;700&family=Atkinson+Hyperlegible+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a quiet queue on the left, one question in focus on the right; a list view for scanning; notes as a second view. */
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --ink: #1b2430; --muted: #576272; --faint: #8a94a2; --line: #dde2e8;
+  --accent: #2b5c8a; --accent-soft: #e9f0f7; --on-accent: #ffffff;
+  --good: #2c704d; --good-soft: #e4f1e9; --warn: #8f5500; --warn-soft: #faefdc;
+  --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Atkinson Hyperlegible Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12161b; --surface: #1a2028; --ink: #e6eaef; --muted: #a0aab6; --faint: #6f7a87; --line: #2b333d;
+  --accent: #86b4e2; --accent-soft: #1c2b3b; --on-accent: #0e1925;
+  --good: #79c79a; --good-soft: #17301f; --warn: #e3ab55; --warn-soft: #33260f; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12161b; --surface: #1a2028; --ink: #e6eaef; --muted: #a0aab6; --faint: #6f7a87; --line: #2b333d;
+  --accent: #86b4e2; --accent-soft: #1c2b3b; --on-accent: #0e1925;
+  --good: #79c79a; --good-soft: #17301f; --warn: #e3ab55; --warn-soft: #33260f; color-scheme: dark }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.6 var(--body); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+button, input, textarea { font: inherit; color: inherit; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Mockup strip: says what this page is, and lets you preview other repo names. */
+.strip { background: var(--accent-soft); color: var(--ink); font-size: 14px; }
+.strip .in { max-width: 1120px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 8px; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+.strip select { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+
+/* Top bar: the repo name is the only thing that changes between repos. */
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+.top .in { max-width: 1120px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 12px; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
+.who { display: grid; gap: 0; min-width: 0; }
+.who .eyebrow { font-size: 13px; color: var(--muted); }
+.who .repo { font: 700 20px/1.2 var(--body); overflow-wrap: anywhere; }
+.progress { flex: 1 1 220px; display: grid; gap: 4px; min-width: 0; }
+.progress .txt { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.progress .track { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; }
+.progress .fill { height: 100%; background: var(--good); border-radius: 99px; width: 0; }
+@media (prefers-reduced-motion: no-preference) { .progress .fill { transition: width .4s ease; } }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 8px 14px; min-height: 40px; cursor: pointer; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--ink); font-weight: 600; }
+
+/* Main grid */
+.main { max-width: 1120px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 24px 64px; display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 32px; align-items: start; }
+@media (max-width: 820px) { .main { grid-template-columns: minmax(0, 1fr); gap: 16px; padding-block: 16px 48px; } }
+
+/* Queue */
+.queue { position: sticky; top: 96px; display: grid; gap: 18px; }
+@media (max-width: 820px) { .queue { position: static; } }
+.queue details > summary { display: none; }
+@media (max-width: 820px) {
+  .queue details > summary { display: flex; justify-content: space-between; align-items: center; cursor: pointer; padding: 10px 14px; min-height: 44px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); list-style: none; font-size: 15px; }
+  .queue details > summary::-webkit-details-marker { display: none; }
+  .queue details[open] > summary { border-radius: var(--r) var(--r) 0 0; }
+  .queue details .qbody { background: var(--surface); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--r) var(--r); padding: 8px; }
+}
+.qbody { display: grid; gap: 18px; }
+.qgroup h2 { font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px 10px; }
+.qlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.qitem { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; width: 100%; text-align: left; border: 0; background: transparent; padding: 7px 10px; border-radius: 8px; cursor: pointer; font-size: 15px; line-height: 1.35; color: var(--ink); min-height: 40px; }
+.qitem:hover { background: var(--accent-soft); }
+.qitem[aria-current="true"] { background: var(--accent-soft); font-weight: 600; }
+.qitem .n { font: 500 13px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.qitem .t { min-width: 0; overflow-wrap: anywhere; }
+.qitem .st { font-size: 13px; color: var(--faint); white-space: nowrap; }
+.qitem.done .t { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
+.qitem.done .st { color: var(--good); }
+
+/* Focus card */
+.focus { min-width: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: clamp(18px, 3vw, 32px); display: grid; gap: 20px; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 14px; color: var(--muted); }
+.meta .kind { font-weight: 600; color: var(--ink); }
+h1.q { font: 700 clamp(22px, 2.6vw, 27px)/1.25 var(--body); margin: 0; text-wrap: balance; max-width: 34ch; }
+.ctx { margin: 0; white-space: pre-line; max-width: 64ch; }
+.about { font-size: 14px; color: var(--muted); margin: 0; }
+.about b { font-weight: 600; color: var(--ink); }
+
+.opts { display: grid; gap: 10px; border: 0; padding: 0; margin: 0; }
+.opts legend { font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 0; margin-bottom: 8px; }
+.opt { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 6px 12px; padding: 14px 16px; border: 1.5px solid var(--line); border-radius: var(--r); cursor: pointer; background: var(--surface); }
+.opt:hover { border-color: var(--faint); }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.opt.sel { border-color: var(--accent); background: var(--accent-soft); }
+.key { width: 30px; height: 30px; border-radius: 8px; border: 1.5px solid var(--line); display: grid; place-items: center; font: 600 15px var(--mono); color: var(--muted); }
+.opt.sel .key { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.olab { font-weight: 600; align-self: center; }
+.rec { display: inline-block; margin-left: 8px; font-size: 13px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+.rec::before { content: "★ "; }
+.ohow { grid-column: 2; font-size: 15px; color: var(--muted); margin: 0; }
+.otrade { grid-column: 2; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; font-size: 15px; margin: 2px 0 0; }
+@media (max-width: 560px) { .otrade { grid-template-columns: 1fr; } }
+.otrade dt { font-size: 13px; font-weight: 600; color: var(--muted); }
+.otrade dd { margin: 0; }
+.opt.none { border-style: dashed; }
+.opt.none .olab { font-weight: 500; color: var(--muted); }
+.why { margin: 0; padding: 12px 16px; border-radius: var(--r); background: var(--bg); font-size: 15px; }
+.why b { font-weight: 600; }
+
+ol.steps { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 10px; counter-reset: s; }
+ol.steps li { counter-increment: s; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 12px; align-items: start; overflow-wrap: anywhere; }
+ol.steps li::before { content: counter(s); width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid var(--line); display: grid; place-items: center; font: 600 14px var(--mono); color: var(--muted); }
+code { font: 14px var(--mono); background: var(--bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.links { display: flex; flex-wrap: wrap; gap: 12px; }
+
+.note { display: grid; gap: 6px; }
+.note label { font-size: 14px; color: var(--muted); }
+.note textarea { width: 100%; min-height: 64px; resize: vertical; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--bg); }
+.note.need label { color: var(--warn); font-weight: 600; }
+.note.need textarea { border-color: var(--warn); }
+
+.actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding-top: 4px; }
+.btn { min-height: 44px; padding: 10px 18px; border-radius: var(--r); border: 1.5px solid var(--accent); background: var(--accent); color: var(--on-accent); font-weight: 600; cursor: pointer; }
+.btn.alt { background: transparent; color: var(--accent); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
+.btn:disabled { opacity: .45; cursor: default; }
+.spacer { flex: 1; }
+.dest { font-size: 14px; color: var(--muted); margin: 0; border-top: 1px solid var(--line); padding-top: 14px; }
+.dest b { color: var(--ink); font-weight: 600; }
+.saved { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 12px 16px; border-radius: var(--r); background: var(--good-soft); color: var(--ink); font-size: 15px; }
+.saved b { color: var(--good); }
+.hint { font-size: 13px; color: var(--faint); margin: 12px 4px 0; }
+.hint kbd { font: 12px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--muted); background: var(--surface); }
+@media (hover: none) { .hint { display: none; } }
+.clear { text-align: center; padding: 56px 20px; display: grid; gap: 8px; justify-items: center; }
+.clear h1 { font-size: 24px; margin: 0; }
+.clear p { margin: 0; color: var(--muted); max-width: 44ch; }
+
+/* List view */
+.list { display: grid; gap: 10px; }
+.lrow { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 4px 12px; }
+.lrow .n { font: 500 14px var(--mono); color: var(--muted); padding-top: 2px; }
+.lrow .t { font-weight: 600; cursor: pointer; background: none; border: 0; padding: 0; text-align: left; color: var(--ink); }
+.lrow .t:hover { text-decoration: underline; }
+.lrow .sub { grid-column: 2; font-size: 14px; color: var(--muted); }
+.lrow .chips { grid-column: 2; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.chip { min-height: 40px; padding: 6px 12px; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); cursor: pointer; font-size: 15px; text-align: left; }
+.chip.pick { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.chip.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.lrow.done { opacity: .6; }
+.lhead { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.lhead h2 { font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0; }
+
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: var(--r); font-size: 15px; display: flex; gap: 14px; align-items: center; z-index: 20; max-width: calc(100% - 32px); }
+.toast button { background: none; border: 0; color: inherit; text-decoration: underline; cursor: pointer; font-weight: 600; min-height: 32px; }
+
+/* Notes view */
+.notes { max-width: 860px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 80px; display: grid; gap: 28px; }
+.notes h1 { font-size: 30px; line-height: 1.2; margin: 0; text-wrap: balance; }
+.notes h2 { font-size: 21px; margin: 0 0 8px; text-wrap: balance; }
+.notes p, .notes li { max-width: 68ch; }
+.notes section { display: grid; gap: 8px; }
+.notes ul, .notes ol { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
+.verdict { background: var(--good-soft); border-radius: var(--r); padding: 16px 20px; }
+.verdict p { margin: 0; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 14.5px; line-height: 1.45; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+thead th { font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); background: var(--bg); }
+tbody th { font-weight: 600; width: 15%; }
+td.gold { background: var(--good-soft); }
+thead th.gold { color: var(--good); }
+tr:last-child th, tr:last-child td { border-bottom: 0; }
+.src { font-size: 14px; color: var(--muted); }
+</style>
+
+<div class="strip"><div class="in">
+  <span><b>Mockup</b> with sample items from Oct 26. Nothing you press here is saved.</span>
+  <label>Preview as repo <select id="repoPick"><option>claude-settings</option><option>home-app</option><option>banchi</option><option>q_max</option><option>mailaudit</option><option>joyous</option></select></label>
+  <a href="#notes" id="notesLink">Design notes and comparison</a>
+</div></div>
+
+<div id="appView">
+  <header class="top"><div class="in">
+    <div class="who"><span class="eyebrow">Waiting on you in</span><span class="repo" id="repoName">claude-settings</span></div>
+    <div class="progress"><span class="txt" id="progTxt"></span><div class="track"><div class="fill" id="progFill"></div></div></div>
+    <div class="seg" role="group" aria-label="View">
+      <button type="button" id="vFocus" aria-pressed="true">One at a time</button>
+      <button type="button" id="vList" aria-pressed="false">All</button>
+    </div>
+  </div></header>
+
+  <div class="main" id="focusView">
+    <aside class="queue"><details id="qd" open><summary><span id="qsum">All items</span><span aria-hidden="true">▾</span></summary><div class="qbody" id="qbody"></div></details></aside>
+    <section class="focus" aria-live="polite"><div id="focusCard"></div>
+      <p class="hint"><kbd>A</kbd> <kbd>B</kbd> <kbd>C</kbd> choose · <kbd>R</kbd> take my recommendation · <kbd>Enter</kbd> save · <kbd>J</kbd> <kbd>K</kbd> next and previous</p>
+    </section>
+  </div>
+  <div class="main" id="listView" hidden style="grid-template-columns:minmax(0,1fr);max-width:860px"></div>
+</div>
+
+<article class="notes" id="notesView" hidden>
+  <p><a href="#">← Back to the mockup</a></p>
+  <h1>Calm and uniform: one look in every repo</h1>
+  <div class="verdict"><p><b>You are not cooked.</b> Every repo's page is the same file published from one template, and all its questions and answers live in the page's own store, not in the page. So a new look ships by changing <code>page.html</code> once in claude-settings and republishing it to each repo's existing link. The link stays the same, and the open items and saved answers should stay with it, since the store belongs to the artifact and not to one version of the page. Prove that with one republish of the home app's page before the others. Today only the home app has a copy, so the fix costs one republish.</p></div>
+
+  <section>
+    <h2>The direction</h2>
+    <p>One quiet look everywhere, with one question in front of you at a time. The repo shows only as its name, at the top and in the browser tab. Everything else, from colours to type to where the buttons sit, is the same in every repo, so the habit you build answering home-app questions works on banchi the next night.</p>
+  </section>
+
+  <section>
+    <h2>The choices, and why</h2>
+    <ul>
+      <li><b>One question at a time by default, with "All" one tap away.</b> A long scroll of 22 cards asks you to hold the whole pile in your head. A single question with a quiet queue beside it shows how much is left without making you read it. "All" stays for the nights you want to sweep through fast.</li>
+      <li><b>Save moves you to the next open item, with Undo.</b> No hunting for where you were. Undo shows at the bottom of the screen for five seconds, and Clear stays on the saved item.</li>
+      <li><b>"Take my recommendation" on each item, not one button for the whole page.</b> One press per item keeps each save your word for that item only, which is how the skill already reads an answer. The page-wide "accept every pick" moves to the All view, where you can see what it covers.</li>
+      <li><b>The question leads, the reference follows.</b> The current card opens with a number and a line of ids. Here the title is the largest text, then the context, then a muted "About" line that names the ids with their plain names.</li>
+      <li><b>Gain and lose sit side by side.</b> You compare options by their trade, so the trade gets two short columns. "How it works" is one muted line above.</li>
+      <li><b>One typeface: Atkinson Hyperlegible.</b> The Braille Institute drew it so similar letters (I, l, 1; O, 0) never blur. It has a matching mono for ids and numbers. One family is calmer than the current serif, sans and mono mix.</li>
+      <li><b>One accent, used only for "you can press this" and "this is my pick".</b> Green means saved. Amber appears only when the page needs something from you, such as a note for "None of these". Nothing else carries colour.</li>
+      <li><b>Every item says where the answer goes, how long it has waited and, for a task, how long it takes.</b> The data already holds <code>home</code>, <code>added</code> and <code>minutes</code>; the current page never shows them. Times are in CDT with the zone named.</li>
+      <li><b>Keys for the desk, 44-pixel targets for the phone.</b> A, B, C choose; R takes the recommendation; Enter saves; J and K move. On a phone the queue folds into one "8 left" row above the question.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Should repo colours bleed in? No.</h2>
+    <ul>
+      <li><b>Colour already has a job here.</b> It says "my pick", "saved" and "needs your note". A repo's brand colour would compete with those three meanings, and on a page you skim at midnight that costs you mistakes.</li>
+      <li><b>The habit is the product.</b> You answer the same kind of question in nine repos. A page that looks the same everywhere lets your hands learn it once. A themed page feels like a new tool each time.</li>
+      <li><b>Nine palettes in two themes means 18 contrast checks</b>, and a repo with no palette (home, the ops records) needs one invented for it. Uniform means one check.</li>
+      <li><b>The name does the identifying.</b> Each repo has its own link, its own browser-tab title ("Waiting: home-app") and its name as the largest word in the header. Try the repo picker in the strip at the top: only the name changes, and it is enough.</li>
+      <li><b>If you ever want a cue anyway</b>, a small coloured mark beside the name is the most I would allow, never in buttons or states. I would not build it until you find yourself on the wrong page.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Side by side</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Aspect</th><th>Current template</th><th>This mockup</th><th class="gold">Gold standard</th></tr></thead>
+      <tbody>
+        <tr><th>Unit of attention</th><td>Every card on one long scroll</td><td>One question, queue beside it; "All" for a sweep</td><td class="gold">One thing per page (GOV.UK question pages); keyboard triage one item at a time (Superhuman, Linear inbox)</td></tr>
+        <tr><th>What leads a card</th><td>Number, then title, then a line of ids</td><td>The question, then context, then a muted "About" line</td><td class="gold">The question is the heading; supporting detail follows it (GOV.UK)</td></tr>
+        <tr><th>Typeface</th><td>Newsreader serif, Plex Sans, Plex Mono</td><td>Atkinson Hyperlegible Next and its Mono</td><td class="gold">A face drawn for legibility, one family, body at 16px or more</td></tr>
+        <tr><th>Colour</th><td>Amber accent for links, buttons, numbers and picks</td><td>Blue only for pressable and "my pick"; green saved; amber needs you</td><td class="gold">Accent separate from state colours; colour never the only cue (WCAG 1.4.1)</td></tr>
+        <tr><th>Repo identity</th><td>None: every page is titled "Waiting on Shiv"</td><td>Repo name in the header and tab; no repo colour</td><td class="gold">Same tool everywhere; context shown by name (Slack, Linear workspaces)</td></tr>
+        <tr><th>Taking the pick</th><td>One page-wide "accept every pick", armed twice</td><td>"Take my recommendation" on each item; page-wide action only in All</td><td class="gold">A one-key default per item, with bulk acts shown before they apply</td></tr>
+        <tr><th>After saving</th><td>Card stays; you scroll on</td><td>Next open item comes up; Undo for five seconds</td><td class="gold">Auto-advance with undo (Gmail, Superhuman)</td></tr>
+        <tr><th>Where it goes, age, effort</th><td>Shows the owner only; <code>home</code>, <code>added</code>, <code>minutes</code> unshown</td><td>Shows destination, "waiting 1 day" and "about 3 min"</td><td class="gold">Every task shows its cost before you start it</td></tr>
+        <tr><th>Times</th><td>Browser's local format, no zone named</td><td>24-hour CDT, zone named</td><td class="gold">Your ruling, Oct 27: 24-hour US Central, zone named</td></tr>
+        <tr><th>Keyboard</th><td>Tab only</td><td>A–C, R, Enter, J, K, with a hint line on desktop</td><td class="gold">Every frequent act has one key (Superhuman, Linear)</td></tr>
+        <tr><th>Phone</th><td>Fixed bottom bar takes about a sixth of the screen</td><td>No fixed bar; queue folds to one row; 44px targets</td><td class="gold">Targets 44pt (Apple HIG); at least 24px (WCAG 2.5.8)</td></tr>
+        <tr><th>"None of these"</th><td>Same weight as real options</td><td>Dashed and muted; the note box asks for words in amber</td><td class="gold">The escape hatch is present but quieter than the choices</td></tr>
+      </tbody>
+    </table></div>
+    <p class="src">Sources, from published guidance: GOV.UK Design System, "Question pages" pattern; WCAG 2.2 success criteria 1.4.1 (use of colour) and 2.5.8 (target size, minimum); Apple Human Interface Guidelines, 44 by 44 point hit targets; Braille Institute, Atkinson Hyperlegible. The product comparisons describe how those apps work and are not measured here.</p>
+  </section>
+
+  <section>
+    <h2>What I would change in the template</h2>
+    <p>All of these are in <code>skills/waiting-page/page.html</code>. Only the first touches the data contract in <code>SKILL.md</code>.</p>
+    <ol>
+      <li>Add a <code>repo</code> field to <code>meta/page</code>. The page puts it in the header and the tab title. Without it the page cannot name its repo, because the skill says to publish the page unchanged.</li>
+      <li>Make "one at a time" the default view, with the queue, and keep a list view for sweeps.</li>
+      <li>Move to the next open item after a save, with a five-second Undo that does the same as Clear.</li>
+      <li>Add "Take my recommendation" to each decision. Move "accept every pick" into the list view and show the items it covers before it saves.</li>
+      <li>Show <code>home</code>, the age from <code>added</code>, and a task's <code>minutes</code>.</li>
+      <li>Format every time in America/Chicago, 24-hour, with CDT or CST.</li>
+      <li>Swap the three fonts for Atkinson Hyperlegible Next and Mono, at 16px body.</li>
+      <li>Split the accent from state: one blue for action and pick, green for saved, amber for "needs you".</li>
+      <li>Put gain and lose side by side, make "None of these" visibly quieter, and open the note box only on demand.</li>
+      <li>Add the keys, and drop the fixed bottom bar.</li>
+      <li>Keep "Copy answers as one message" in the list view. It is the recovery path when the store cannot be reached, so it must not depend on the store.</li>
+    </ol>
+    <p>The page tests in <code>skills/waiting-page/tests/</code> would need new cases for the auto-advance, per-item accept and CDT time format. Port to other repos: yes, by republishing to each repo's existing link, because every repo uses the same template.</p>
+  </section>
+</article>
+
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const ITEMS = [{"id": "c60-stall-watch", "n": 4, "kind": "decision", "ref": "c60 (the stall watch does not cry wolf), PR #598", "title": "Stop the stall watch's false alarm on a command that writes to its own log", "owner": "Build advisor", "home": "PR #598 (draft, head 481eda6); decision stall-watch", "context": "The stall watch flagged merge.py as stuck on Oct 26 while it was working. Its output went to a log file, so the screen stayed quiet past 300 seconds. The recorded decision says the watcher never changes; quiet tools print a line every 120 seconds instead. PR #598 is built, red-first, reviewed and green.", "options": [{"key": "a", "label": "Merge #598 and rewrite the decision", "how": "The watcher also checks whether a log file the command names is growing (one file check a second).", "gain": "Every command that logs to a file stops raising false alarms, with no change to each tool.", "lose": "A file that something else writes could hide a real stall. Claude is unlikely to cause that by mistake."}, {"key": "b", "label": "Keep the decision and close #598", "how": "merge.py already prints 'merge: waiting on ...'; the Mac merge hand now runs it without the redirect.", "gain": "The watcher stays simple.", "lose": "Each tool that logs to a file needs its own fix; until then it cries wolf."}], "pick": "a", "why": "Sending output to a log is a normal way to run a long job; fixing one tool at a time leaves the alarm crying wolf elsewhere.", "status": "open", "added": "2026-10-26T09:12:00-05:00", "short": "Stall watch false alarm", "addedAt": "2026-10-26T09:12:00-05:00"}, {"id": "c53-cloud-merge", "n": 5, "kind": "decision", "ref": "c53 (the merge tool works from a cloud session)", "title": "Let a cloud session run merge.py for a batch", "owner": "Build advisor", "home": "roadmap step c53", "context": "merge.py now uses REST calls that work through the cloud proxy (landed in batch #603). It has never run live from the cloud. Your instructions say the Mac merge hand merges until c53 works, and the build advisor reads that as not yet granted. Until you answer, every batch waits for the Mac.", "options": [{"key": "a", "label": "Yes: the next batch merges from the cloud, the Mac stays as fallback", "how": "The build advisor runs merge.py from a cloud thread for the next green batch; if it fails, the Mac merge hand merges it.", "gain": "Merges stop depending on your Mac being awake.", "lose": "The first live run might stop partway; merge.py refuses a moved head, so the risk is a retry, not a bad merge."}, {"key": "b", "label": "Not yet: one dry run first", "how": "A cloud session runs merge.py's preview (no --confirm) on a batch and reports.", "gain": "Proof before a real merge.", "lose": "One more batch waits on the Mac."}], "pick": "a", "why": "merge.py's own checks (green CI, unmoved head) already guard the merge, and the Mac stays as fallback.", "status": "open", "added": "2026-10-25T22:40:00-05:00", "short": "Merge batches from the cloud", "addedAt": "2026-10-25T22:40:00-05:00"}, {"id": "c44-sweep-locks", "n": 6, "kind": "decision", "ref": "c44 (merged work leaves no worktrees behind), PR #590", "title": "Let a mid-session cleanup sweep free its own session's locks", "owner": "Build advisor", "home": "PR #590 body, 'Parked for the owner'", "context": "The cleanup sweep can now free the calling session's own agent lock on a work tree that is clean, merged into main and quiet for 30 minutes. It ships this way (merged in batch #586). The reviewer worried that a mid-session sweep could free a still-running agent's tree under those conditions.", "options": [{"key": "a", "label": "Yes, keep it as built", "how": "Any sweep, mid-session or at session end, may free its own session's lock under the clean, merged, idle-30-minutes test.", "gain": "The offered fast cleanup after a merge actually cleans.", "lose": "A quiet agent's tree can go; it is clean and merged, so no work is lost."}, {"key": "b", "label": "Only the session-end sweep", "how": "A follow-up lane limits the own-lock rule to the sweep that runs at session end.", "gain": "No tree goes while its session runs.", "lose": "Trees stay until the session ends, which is the leftover-tree problem c44 set out to fix."}], "pick": "a", "why": "The tree must be clean and merged, so nothing can be lost; the cost is at most a rebuild of a work tree.", "status": "open", "added": "2026-10-25T16:05:00-05:00", "short": "Sweep frees its own locks", "addedAt": "2026-10-25T16:05:00-05:00"}, {"id": "c45-reply-judge", "n": 7, "kind": "decision", "ref": "c45 (a step handed to you says what check showed the session can't do it)", "title": "Keep the reply judge on every reply that asks you for input", "owner": "Build advisor", "home": "roadmap step c45 (closed); your Oct 13 ruling", "context": "On Oct 13 you ruled that the reply judge checks 1 turn end in 5, for cost and speed. c45 widened it: it now also checks every reply with an Input Needed item. No word of yours on that change is recorded.", "options": [{"key": "a", "label": "Keep the widening", "how": "Every reply that asks you something is judged, plus the 1-in-5 sample.", "gain": "The replies that cost your attention are always checked.", "lose": "One judge call per such reply: a few seconds and a little cost."}, {"key": "b", "label": "Back to 1 in 5", "how": "A small lane reverts the widening.", "gain": "Your Oct 13 cost and speed limits hold exactly.", "lose": "Most handed-off steps go unchecked."}], "pick": "a", "why": "Those replies are few and are exactly the ones that waste your time when wrong.", "status": "open", "added": "2026-10-24T11:30:00-05:00", "short": "Reply judge on every ask", "addedAt": "2026-10-24T11:30:00-05:00"}, {"id": "c48-phone-profile", "n": 8, "kind": "decision", "ref": "c48 (phone profiling waits until the phone is free)", "title": "Choose the next design for phone profiling", "owner": "Local liaison", "home": "roadmap step c48; briefs/c48-ios-ship-profile-job.md", "context": "Recording a profile on the phone over the network fails with 'Timed out waiting for device to boot' even when the phone shows as available. A recording 5 minutes later passed. The wait-until-available design was withdrawn, because 'available' is not a ready signal. A cable was never tried.", "options": [{"key": "a", "label": "Try a cable first", "how": "Plug the phone into the Mac; a Mac session records a few profiles in a row and reports.", "gain": "Five minutes of measurement may remove the problem entirely.", "lose": "Needs you to plug in the phone."}, {"key": "b", "label": "Retry on the known failure", "how": "ios-ship's profile job retries once after a wait (about 5 minutes) when it sees that error.", "gain": "Works over the network.", "lose": "A slow profile; the cause stays unknown."}, {"key": "c", "label": "Park it", "how": "Leave profiling by hand.", "gain": "No work.", "lose": "Profiles stay unreliable."}], "pick": "a", "why": "The cheapest measurement first; if the cable works, nothing needs building.", "status": "open", "added": "2026-10-26T13:48:00-05:00", "short": "Next try for phone profiling", "addedAt": "2026-10-26T13:48:00-05:00"}, {"id": "o2-cite-guard", "n": 11, "kind": "decision", "ref": "o2 (one layout for every repo), PR #607", "title": "Have the guard also refuse docs/decisions/... cites", "owner": "Build advisor", "home": "PR #607 body, 'Questions parked for the owner', item 1", "context": "o2 moves records under docs/. The guard refuses a cite by path to a root decisions/ or debts/ folder. After the move, a path cite into docs/decisions/ would pass unless the guard learns the new folder. This would also add a refusal in banchi and q_max, which already use docs/decisions/.", "options": [{"key": "a", "label": "Yes, in o2's folder-move lane", "how": "The guard refuses a path cite to docs/decisions/ too, as it does today for decisions/.", "gain": "The cite-by-id rule keeps its hold after the move.", "lose": "banchi and q_max sessions get a new refusal where they cite by path."}, {"key": "b", "label": "No", "how": "The guard stays on root folders only.", "gain": "No new refusals.", "lose": "The rule silently stops working in claude-settings after the move."}], "pick": "a", "why": "Without it, the move quietly switches off an existing rule.", "status": "open", "added": "2026-10-26T15:20:00-05:00", "short": "Guard refuses docs/decisions cites", "addedAt": "2026-10-26T15:20:00-05:00"}, {"id": "pr551-stale", "n": 17, "kind": "decision", "ref": "PR #551 (settings: if filters so idle hooks start no shell), step c19", "title": "Close the stale draft PR #551", "owner": "Build advisor", "home": "PR #551", "context": "#551 holds tests for hook filters on ste_gate and prose_judge. Step c19 is done, and your Oct 21 ruling filtered config_watch only and parked the other filters. The draft has sat open since.", "options": [{"key": "a", "label": "Close it, branch kept", "how": "The build advisor closes #551 with a note pointing to c19's ruling; the branch stays for a reopen.", "gain": "One less stale draft.", "lose": "None; it can be reopened."}, {"key": "b", "label": "Leave it open", "how": "Nothing changes.", "gain": "None.", "lose": "Clutter in the PR list."}], "pick": "a", "why": "Your own ruling parked this work.", "status": "open", "added": "2026-10-26T18:55:00-05:00", "short": "Close stale draft #551", "addedAt": "2026-10-26T18:55:00-05:00"}, {"id": "c65-gates-shoot", "n": 18, "kind": "task", "ref": "c65 (main's branch protection requires gates-shoot)", "title": "Add gates-shoot to main's required checks in GitHub", "owner": "Triage the roadmap", "home": "roadmap step c65", "context": "merge.py already blocks on the new gates-shoot job; GitHub's own branch protection does not list it yet. Branch protection needs your login.", "steps": ["Open github.com/shivinate7/claude-settings/settings/branches.", "Edit the rule for main.", "Under required status checks, add gates-shoot. Save."], "links": [{"label": "Branch settings", "url": "https://github.com/shivinate7/claude-settings/settings/branches"}], "minutes": "1 min", "status": "open", "added": "2026-10-26T10:02:00-05:00", "short": "Add gates-shoot to required checks", "addedAt": "2026-10-26T10:02:00-05:00"}, {"id": "o10-test-clicks", "n": 19, "kind": "task", "ref": "o10 (a page per session for questions), local test part 2", "title": "Try the four answer paths on the o10 test page", "owner": "Local liaison", "home": "roadmap step o10", "context": "A local Mac session published a test page. Your clicks show whether a local session hears a page save or a comment. This decides whether item 1 works for local sessions without a paste. The Mac session reports by 09:45 CDT on Oct 27.", "steps": ["Open the test page.", "Press Copy, then Save.", "Leave one plain comment.", "Leave one comment sent to Claude."], "links": [{"label": "o10 test page", "url": "https://claude.ai/artifact/5YrejFue3ocB1PfRNobNsR"}], "minutes": "3 min", "status": "open", "added": "2026-10-26T17:31:00-05:00", "short": "Try the four answer paths", "addedAt": "2026-10-26T17:31:00-05:00"}, {"id": "c51-windows-cleanup", "n": 21, "kind": "task", "ref": "c51 (retire the terminal advisor)", "title": "Delete the old advisor leftovers on Windows", "owner": "Triage the roadmap", "home": "roadmap step c51", "context": "The terminal advisor is retired. Three leftovers remain on your PC. Nothing depends on them.", "steps": ["Delete the Start Advisor shortcut.", "Delete C:\\advisor\\start-advisor.ps1 if it is still there.", "Delete the folder %USERPROFILE%\\.claude-advisor."], "links": [], "minutes": "1 min", "status": "open", "added": "2026-10-26T08:15:00-05:00", "short": "Delete advisor leftovers on Windows", "addedAt": "2026-10-26T08:15:00-05:00"}, {"id": "c40-idle-desktop", "n": 22, "kind": "task", "ref": "c40 (idle desktop sessions each burn a full CPU core)", "title": "Archive the idle desktop sessions that spin a CPU core each", "owner": "Triage the roadmap", "home": "roadmap step c40", "context": "On Oct 23, 17 idle Claude Desktop sessions each used about one full core (19 of 24 cores). You said you handle this one yourself. Transcripts stay when a session is archived.", "steps": ["In Claude Desktop, archive or stop sessions you are not using (most date from Oct 19 to 22).", "Optional: report it to Anthropic with Claude Desktop 3.1623.0.0 and claude-code 2.1.304."], "links": [], "minutes": "5 min", "status": "open", "added": "2026-10-23T21:10:00-05:00", "short": "Archive idle desktop sessions", "addedAt": "2026-10-23T21:10:00-05:00"}];
+const NOW = Date.parse("2026-10-26T19:45:00-05:00");
+const state = { cur: null, view: "focus", draft: {}, saved: {}, noteOpen: {} };
+const $ = (id) => document.getElementById(id);
+function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+
+const order = ITEMS.slice().sort((a, b) => (a.kind === b.kind ? a.n - b.n : a.kind === "decision" ? -1 : 1));
+const isDone = (it) => !!state.saved[it.id];
+const open = () => order.filter((it) => !isDone(it));
+function fmtCDT(iso) {
+  const d = new Date(iso);
+  const s = d.toLocaleString("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZoneName: "short" });
+  return s.replace(",", "").replace(/ (\d)/, " $1");
+}
+function age(iso) {
+  const h = Math.round((NOW - Date.parse(iso)) / 36e5);
+  if (h < 1) return "waiting under an hour";
+  if (h < 24) return "waiting " + h + (h === 1 ? " hour" : " hours");
+  const d = Math.round(h / 24); return "waiting " + d + (d === 1 ? " day" : " days");
+}
+
+function renderTop() {
+  const total = order.length, done = order.filter(isDone).length;
+  $("progTxt").textContent = done === total ? "All " + total + " answered" : (total - done) + " of " + total + " left · " + done + " answered";
+  $("progFill").style.width = (done / total * 100) + "%";
+  $("qsum").textContent = (total - done) + " left of " + total + ", tap to see them";
+}
+
+function renderQueue() {
+  const body = $("qbody"); body.replaceChildren();
+  [["decision", "Decisions"], ["task", "Things only you can do"]].forEach(([k, lab]) => {
+    const g = el("div", "qgroup"); g.append(el("h2", null, lab));
+    const ul = el("ul", "qlist");
+    order.filter((i) => i.kind === k).forEach((it) => {
+      const li = el("li");
+      const b = el("button", "qitem" + (isDone(it) ? " done" : "")); b.type = "button";
+      if (state.cur === it.id) b.setAttribute("aria-current", "true");
+      b.append(el("span", "n", String(it.n)), el("span", "t", it.short || it.title), el("span", "st", isDone(it) ? "Saved" : (it.kind === "task" ? it.minutes : "")));
+      b.addEventListener("click", () => { go(it.id); if (matchMedia("(max-width: 820px)").matches) $("qd").open = false; });
+      li.append(b); ul.append(li);
+    });
+    g.append(ul); body.append(g);
+  });
+}
+
+function optRow(it, o, chosen) {
+  const lab = el("label", "opt" + (chosen === o.key ? " sel" : ""));
+  const r = document.createElement("input"); r.type = "radio"; r.name = "o-" + it.id; r.id = "o-" + it.id + "-" + o.key; r.value = o.key; r.checked = chosen === o.key;
+  r.addEventListener("change", () => choose(it, o.key));
+  const key = el("span", "key", o.key.toUpperCase());
+  const l = el("span", "olab", o.label); if (o.key === it.pick) l.append(el("span", "rec", "My recommendation"));
+  lab.append(r, key, l);
+  if (o.how) lab.append(el("p", "ohow", o.how));
+  const dl = el("dl", "otrade");
+  [["You gain", o.gain], ["You lose", o.lose]].forEach(([k, v]) => { const d = el("div"); d.append(el("dt", null, k), el("dd", null, v)); dl.append(d); });
+  lab.append(dl);
+  return lab;
+}
+
+function renderFocus() {
+  const box = $("focusCard"); box.replaceChildren();
+  const it = order.find((i) => i.id === state.cur);
+  if (!it) {
+    const c = el("div", "card clear");
+    c.append(el("h1", null, "Nothing else is waiting on you"), el("p", null, "Every item in " + $("repoName").textContent + " has an answer. Sessions read them at their next turn, and new questions appear here when they come."));
+    box.append(c); return;
+  }
+  const d = state.draft[it.id] || {}, sv = state.saved[it.id];
+  const c = el("article", "card");
+  const meta = el("div", "meta");
+  meta.append(el("span", "kind", it.kind === "decision" ? "Decision" : "Task"), el("span", null, "Item " + it.n), el("span", null, "from " + it.owner), el("span", null, age(it.added)));
+  if (it.kind === "task" && it.minutes) meta.append(el("span", null, "about " + it.minutes));
+  c.append(meta);
+  const h = el("h1", "q", it.title); h.id = "qtitle"; c.append(h);
+  c.append(el("p", "ctx", it.context));
+  const ab = el("p", "about"); ab.append(el("b", null, "About: "), document.createTextNode(it.ref)); c.append(ab);
+
+  if (it.kind === "decision") {
+    const fs = el("fieldset", "opts"); fs.append(el("legend", null, "Your options"));
+    const chosen = d.choice || (sv && sv.choice) || "";
+    it.options.forEach((o) => fs.append(optRow(it, o, chosen)));
+    fs.append(optRow(it, { key: "none", label: "None of these. I'll say what I want instead.", how: "", gain: "The session comes back with new options.", lose: "The item stays open until then." }, chosen));
+    fs.lastChild.classList.add("none"); fs.lastChild.querySelector(".key").textContent = "–";
+    c.append(fs);
+    const w = el("p", "why"); w.append(el("b", null, "Why I recommend " + it.pick.toUpperCase() + ": "), document.createTextNode(it.why)); c.append(w);
+  } else {
+    const ol = el("ol", "steps"); it.steps.forEach((s) => ol.append(el("li", null, s))); c.append(ol);
+    if (it.links && it.links.length) { const l = el("div", "links"); it.links.forEach((k) => { const a = el("a", null, k.label + " ↗"); a.href = k.url; a.target = "_blank"; a.rel = "noopener"; l.append(a); }); c.append(l); }
+  }
+
+  const needNote = d.choice === "none";
+  if (state.noteOpen[it.id] || needNote || d.note) {
+    const nb = el("div", "note" + (needNote && !(d.note || "").trim() ? " need" : ""));
+    const lab = el("label", null, needNote ? "What do you want instead? (needed)" : "Note to the session (optional)"); lab.htmlFor = "n-" + it.id;
+    const ta = document.createElement("textarea"); ta.id = "n-" + it.id; ta.value = d.note || ""; ta.placeholder = it.kind === "task" ? "What you saw, if anything" : "Anything the session should know";
+    ta.addEventListener("input", () => { state.draft[it.id] = Object.assign({}, state.draft[it.id], { note: ta.value }); nb.classList.toggle("need", needNote && !ta.value.trim()); syncSave(it); });
+    nb.append(lab, ta); c.append(nb);
+  }
+
+  if (sv) {
+    const s = el("div", "saved"); s.append(el("b", null, "Saved " + fmtCDT(sv.at) + "."), document.createTextNode(sv.choice ? " You chose " + (sv.choice === "none" ? "none of these" : sv.choice.toUpperCase()) + "." : " Marked done."));
+    const clr = el("button", "btn quiet", "Clear my answer"); clr.type = "button"; clr.addEventListener("click", () => { delete state.saved[it.id]; delete state.draft[it.id]; renderAll(); });
+    s.append(clr); c.append(s);
+  } else {
+    const act = el("div", "actions");
+    const save = el("button", "btn", it.kind === "task" ? "Mark done" : "Save answer"); save.type = "button"; save.id = "saveBtn";
+    save.addEventListener("click", () => doSave(it));
+    act.append(save);
+    if (it.kind === "decision") { const r = el("button", "btn alt", "Take my recommendation (" + it.pick.toUpperCase() + ")"); r.type = "button"; r.addEventListener("click", () => { choose(it, it.pick, true); doSave(it); }); act.append(r); }
+    act.append(el("span", "spacer"));
+    if (!state.noteOpen[it.id] && !needNote && !d.note) { const nb = el("button", "btn quiet", "Add a note"); nb.type = "button"; nb.addEventListener("click", () => { state.noteOpen[it.id] = true; renderFocus(); const t = $("n-" + it.id); if (t) t.focus(); }); act.append(nb); }
+    const sk = el("button", "btn quiet", "Skip for now"); sk.type = "button"; sk.addEventListener("click", () => step(1)); act.append(sk);
+    c.append(act);
+  }
+  const dest = el("p", "dest"); dest.append(document.createTextNode("Your answer goes to "), el("b", null, it.owner), document.createTextNode(", and lands in " + it.home + ". Added " + fmtCDT(it.addedAt) + ".")); c.append(dest);
+  box.append(c);
+  syncSave(it);
+}
+
+function syncSave(it) {
+  const b = $("saveBtn"); if (!b) return;
+  const d = state.draft[it.id] || {};
+  if (it.kind === "task") { b.disabled = false; return; }
+  b.disabled = !d.choice || (d.choice === "none" && !(d.note || "").trim());
+}
+
+function choose(it, key, quiet) {
+  state.draft[it.id] = Object.assign({}, state.draft[it.id], { choice: key });
+  if (!quiet) { renderFocus(); if (key === "none") { const t = $("n-" + it.id); if (t) t.focus(); } else { const r = $("o-" + it.id + "-" + key); if (r) r.focus(); } }
+}
+
+let toastT = null;
+function doSave(it) {
+  const d = state.draft[it.id] || {};
+  if (it.kind === "decision" && (!d.choice || (d.choice === "none" && !(d.note || "").trim()))) return;
+  state.saved[it.id] = { at: new Date(NOW + 60000 * Object.keys(state.saved).length).toISOString(), choice: d.choice, note: d.note || "" };
+  const nxt = open()[0];
+  showToast("Saved No. " + it.n + ". It goes to " + it.owner + ".", () => { delete state.saved[it.id]; state.cur = it.id; renderAll(); });
+  state.cur = nxt ? nxt.id : null;
+  renderAll();
+  const t = $("qtitle"); if (t) { t.tabIndex = -1; t.focus({ preventScroll: true }); }
+  window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+function showToast(msg, undo) {
+  const t = $("toast"); t.replaceChildren(el("span", null, msg));
+  const u = el("button", null, "Undo"); u.type = "button"; u.addEventListener("click", () => { t.hidden = true; undo(); }); t.append(u);
+  t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, 5000);
+}
+
+function go(id) { state.cur = id; renderAll(); window.scrollTo({ top: 0 }); }
+function step(dir) {
+  const list = open(); if (!list.length) return;
+  let i = list.findIndex((x) => x.id === state.cur);
+  i = i < 0 ? 0 : (i + dir + list.length) % list.length;
+  go(list[i].id);
+}
+
+function renderList() {
+  const box = $("listView"); box.replaceChildren();
+  const head = el("div", "lhead"); head.append(el("h2", null, open().length + " open"));
+  const bar = el("div", "actions");
+  const acc = el("button", "btn alt", "Take every recommendation I haven't answered"); acc.type = "button";
+  acc.addEventListener("click", () => {
+    const todo = order.filter((i) => i.kind === "decision" && !isDone(i));
+    if (!todo.length) return;
+    if (acc.dataset.armed !== "1") { acc.dataset.armed = "1"; acc.textContent = "Save " + todo.map((i) => i.n + " " + i.pick.toUpperCase()).join(", ") + "?"; acc.classList.remove("alt"); return; }
+    todo.forEach((i) => { state.saved[i.id] = { at: new Date(NOW).toISOString(), choice: i.pick, note: "accepted pick" }; });
+    showToast("Saved " + todo.length + " recommendations.", () => { todo.forEach((i) => delete state.saved[i.id]); renderAll(); });
+    renderAll();
+  });
+  const copy = el("button", "btn quiet", "Copy answers as one message"); copy.type = "button";
+  copy.addEventListener("click", async () => {
+    const line = order.filter(isDone).map((i) => i.n + " " + (state.saved[i.id].choice || "done")).join(", ") || "No answers yet.";
+    try { await navigator.clipboard.writeText(line); showToast("Copied: " + line, () => {}); } catch (e) { showToast(line, () => {}); }
+  });
+  bar.append(acc, copy); head.append(bar); box.append(head);
+  const list = el("div", "list");
+  order.forEach((it) => {
+    const r = el("div", "lrow" + (isDone(it) ? " done" : ""));
+    r.append(el("span", "n", String(it.n)));
+    const t = el("button", "t", it.title); t.type = "button"; t.addEventListener("click", () => { setView("focus"); go(it.id); }); r.append(t);
+    r.append(el("span", "sub", (it.kind === "decision" ? "Decision" : "Task, about " + it.minutes) + " · from " + it.owner + " · " + age(it.added)));
+    if (it.kind === "decision") {
+      const ch = el("div", "chips");
+      it.options.forEach((o) => {
+        const sv = state.saved[it.id];
+        const b = el("button", "chip" + (o.key === it.pick ? " pick" : "") + (sv && sv.choice === o.key ? " on" : ""), o.key.toUpperCase() + "  " + o.label + (o.key === it.pick ? "  ★" : ""));
+        b.type = "button"; b.addEventListener("click", () => { state.saved[it.id] = { at: new Date(NOW).toISOString(), choice: o.key }; renderAll(); });
+        ch.append(b);
+      });
+      r.append(ch);
+    } else if (!isDone(it)) {
+      const ch = el("div", "chips"); const b = el("button", "chip", "Open the steps"); b.type = "button"; b.addEventListener("click", () => { setView("focus"); go(it.id); }); ch.append(b); r.append(ch);
+    }
+    list.append(r);
+  });
+  box.append(list);
+}
+
+function setView(v) {
+  state.view = v;
+  $("vFocus").setAttribute("aria-pressed", v === "focus"); $("vList").setAttribute("aria-pressed", v === "list");
+  $("focusView").hidden = v !== "focus"; $("listView").hidden = v !== "list";
+  renderAll();
+}
+function renderAll() { renderTop(); if (state.view === "focus") { renderQueue(); renderFocus(); } else renderList(); }
+
+$("vFocus").addEventListener("click", () => setView("focus"));
+$("vList").addEventListener("click", () => setView("list"));
+$("repoPick").addEventListener("change", (e) => { $("repoName").textContent = e.target.value; document.title = "Waiting: " + e.target.value; renderAll(); });
+
+document.addEventListener("keydown", (e) => {
+  if (state.view !== "focus" || !$("notesView").hidden) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const tag = (e.target.tagName || "").toLowerCase(); if (tag === "textarea" || tag === "input" && e.target.type !== "radio" || tag === "select") return;
+  const it = order.find((i) => i.id === state.cur); if (!it) return;
+  const k = e.key.toLowerCase();
+  if (k === "j") { step(1); e.preventDefault(); }
+  else if (k === "k") { step(-1); e.preventDefault(); }
+  else if (it.kind === "decision" && it.options.some((o) => o.key === k) && !isDone(it)) { choose(it, k); e.preventDefault(); }
+  else if (k === "r" && it.kind === "decision" && !isDone(it)) { choose(it, it.pick, true); doSave(it); e.preventDefault(); }
+  else if (k === "enter" && !isDone(it) && !(e.target.tagName === "BUTTON")) { const b = $("saveBtn"); if (b && !b.disabled) { doSave(it); e.preventDefault(); } }
+});
+
+function route() {
+  const notes = location.hash === "#notes";
+  $("notesView").hidden = !notes; $("appView").hidden = notes;
+  if (notes) window.scrollTo({ top: 0 });
+}
+window.addEventListener("hashchange", route);
+if (matchMedia("(max-width: 820px)").matches) $("qd").open = false;
+state.cur = open()[0].id;
+document.title = "Waiting: claude-settings";
+route(); renderAll();
+</script>
+
+</body></html>

@@ -1,0 +1,21 @@
+{
+  "checked": "roadmap a6197e3, claude-settings main 2ca8925, Oct 27 11:30 CDT",
+  "identity": {
+    "face": "sans",
+    "name": "claude-settings"
+  },
+  "parked": [
+    {
+      "note": "You said leave it deferred.",
+      "ref": "l3 (try Grok)"
+    },
+    {
+      "note": "Case by case, at the design phase.",
+      "ref": "d5 (which design ideas go in ux/)"
+    },
+    {
+      "note": "Held by your Oct 26 ruling.",
+      "ref": "c54 part 3 (install claude-settings into cloud containers)"
+    }
+  ]
+}

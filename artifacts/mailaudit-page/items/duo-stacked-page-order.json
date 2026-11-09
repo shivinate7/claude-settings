@@ -1,0 +1,44 @@
+{
+  "added": "2026-10-27T12:58:00-05:00",
+  "context": "Goal: settle Card in Hand's open choices, so Duo can plan the build.\nProblem: degen puts the left page (where you are) on top. Here the keys need the bottom.\nBased on: decision duo-card-in-hand, your 12:25 picks (ruling); the fold and keyboard are unmeasured (measured: the runs failed at load 157).\nMeanwhile: Duo plans the build and starts nothing until you answer.",
+  "designs": [
+    {
+      "label": "a) Answer on top",
+      "slug": "d28-a"
+    },
+    {
+      "label": "b) Degen's order",
+      "slug": "d28-b"
+    }
+  ],
+  "group": "duo-round2",
+  "holds": "Duo's build plan for Card in Hand waits on this.",
+  "home": "decision duo-card-in-hand (manifest-duo)",
+  "id": "duo-stacked-page-order",
+  "kind": "decision",
+  "n": 28,
+  "options": [
+    {
+      "design": "d28-a",
+      "gain": "The keys get the bottom, and the answer shows in full.",
+      "how": "The answer page goes on top; the query and keys go below.",
+      "key": "a",
+      "label": "Answer on top",
+      "lose": "Differs from degen."
+    },
+    {
+      "design": "d28-b",
+      "gain": "Matches degen.",
+      "how": "The query page on top.",
+      "key": "b",
+      "label": "Degen's order",
+      "lose": "The keys cover most of the envelope; one line shows."
+    }
+  ],
+  "owner": "manifest-duo",
+  "pick": "a",
+  "ref": "Duo design round 2, draft PR #144 (Card in Hand screens)",
+  "status": "closed",
+  "title": "When the Duo is stacked (laptop or held tall), which page is on top?",
+  "why": "The keys need the bottom page."
+}

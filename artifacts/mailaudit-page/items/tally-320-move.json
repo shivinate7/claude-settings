@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-08T13:14:00-06:00",
+  "context": "Goal: nothing moves under your finger, on any phone width.\nProblem (rule): at 320 px wide, the Tally card moves 14 px on check-ins 1 and 6, which breaks invariant no-layout-shift-under-pointer. No shipped check reads 320 px; the screens check runs at 375 and 760 px only. The record's fix keeps all three buttons in place and hides the one that does not apply, which changes how the card looks.\nBased on (read): debt tally-card-moves-at-320px and test/screens.mjs widths.\nDeparts from: main lets the Tally card's buttons come and go \u2014 option a keeps all three in place and hides the one that does not apply.\nMeanwhile: nothing waits on this.",
+  "home": "debt tally-card-moves-at-320px; decision card-reserved-geometry",
+  "id": "tally-320-move",
+  "kind": "decision",
+  "n": 62,
+  "options": [
+    {
+      "gain": "Nothing moves under your finger at any width.",
+      "how": "Every Tally card holds room for all three buttons and hides the one that does not apply, then the screens check adds 320 px.",
+      "key": "a",
+      "label": "Keep all three buttons in place",
+      "lose": "The card looks a little different: a gap where the hidden button sits."
+    },
+    {
+      "gain": "The card keeps its look.",
+      "how": "No change; the debt records 320 px as a known gap.",
+      "key": "b",
+      "label": "Accept the move at 320 px",
+      "lose": "On the narrowest phones a tap can land on the wrong button."
+    }
+  ],
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "pick": "a",
+  "rank": 19,
+  "ref": "debt tally-card-moves-at-320px (the Tally card moves at 320px); invariant no-layout-shift-under-pointer; decision card-reserved-geometry",
+  "short": "Tally card at 320 px",
+  "status": "open",
+  "title": "At a 320 px screen, the Tally card jumps 14 px when you check in. Fix it, though the look changes?",
+  "why": "The no-shift rule is one of the eight that must not break, and a mis-tap there checks in the wrong card."
+}

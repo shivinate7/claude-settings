@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26T21:45:00-05:00",
+  "context": "Goal: MANIFEST uses both pages of the open Duo.\nProblem: the designer drew options, and only you pick the layout.\nMeanwhile: nothing is built; the restyle continues.",
+  "home": "a new mailaudit decision record on the Duo layout",
+  "id": "duo-tab-bar",
+  "kind": "decision",
+  "n": 2,
+  "options": [
+    {
+      "gain": "Clear of the fold, thumb reach on the left",
+      "how": "Custom bar under the left page",
+      "key": "a",
+      "label": "Custom bar under the left page",
+      "lose": "Replaces the native bottom bar ruling (phone-nav-is-bottom-bar) on the Duo"
+    },
+    {
+      "gain": "No custom code",
+      "how": "System bar across the fold",
+      "key": "b",
+      "label": "System bar across the fold",
+      "lose": "A bar that crosses the hinge"
+    },
+    {
+      "gain": "Each page has its own tabs",
+      "how": "Two half bars",
+      "key": "c",
+      "label": "Two half bars",
+      "lose": "Two controls for one choice"
+    }
+  ],
+  "owner": "mailaudit orchestrator",
+  "pick": "a",
+  "ref": "Duo mockups chrome.html, PR #135 (Duo ideas, draft)",
+  "status": "closed",
+  "title": "Tab bar on two pages",
+  "why": "The system bar crosses the fold (degen measured 29-71% of the width)."
+}

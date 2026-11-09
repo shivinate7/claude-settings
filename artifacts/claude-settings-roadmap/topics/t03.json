@@ -1,0 +1,31 @@
+{
+  "order": 30,
+  "points": [
+    "Frontend Code Arena, blind human votes, Sep 22, 2026: GPT-6 Astra first, Claude Fable 5.1 second, Grok 4.7 tenth.",
+    "There is no single best model: one tester across four briefs split the wins between GPT-5.6 Sol and Claude Opus 5. The tooling around a model (rendering the page, a design system, references) matters about as much.",
+    "Antigravity's strength is a built-in browser that renders and checks the UI. Reviews of its design output are mixed.",
+    "Grok: Grok Build is a terminal coding agent (1.0 on Aug 7, 2026). No official desktop app; community GUIs exist. Grokbot is xAI's general agent app, not a coding tool. grok-plugin-cc runs Grok inside Claude Code for reviews and hand-offs.",
+    "Tools by output: Figma Make and Google Stitch for editable mockups; UX Pilot for screens plus UX critique; v0 or Subframe for React; Relume and Uizard for wireframes; Midjourney or Firefly for images only.",
+    "A good split: explore visual directions in one of those, then build and stress-test flows, states and copy with Claude."
+  ],
+  "sources": [
+    {
+      "label": "Morph coding rankings",
+      "url": "https://www.morphllm.com/best-ai-model-for-coding"
+    },
+    {
+      "label": "Thomas Wiegold on frontend LLMs",
+      "url": "https://thomas-wiegold.com/blog/best-llm-frontend-design/"
+    },
+    {
+      "label": "Frontman tool roundup",
+      "url": "https://frontman.sh/blog/best-ai-tools-ui-ux-designers-2026/"
+    },
+    {
+      "label": "Grok Build",
+      "url": "https://en.wikipedia.org/wiki/Grok_Build"
+    }
+  ],
+  "summary": "Rankings, Antigravity, Grok, and which tool fits which output.",
+  "title": "Models and tools for UI work"
+}

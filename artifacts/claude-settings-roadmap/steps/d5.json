@@ -1,0 +1,8 @@
+{
+  "order": 250,
+  "phase": "design",
+  "status": "todo",
+  "title": "Promote banchi's design specs into ux/",
+  "updatedAt": "2026-10-17T17:20:00Z",
+  "why": "Spacing by relationship, the four jobs of motion, the icon rule, a named reference screen. Settle the 4px rule against banchi's 2, 3 and 6px steps."
+}

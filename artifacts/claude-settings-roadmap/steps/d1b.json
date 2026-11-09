@@ -1,0 +1,9 @@
+{
+  "note": "Fits the designer step: mockup published, you comment, the builder session reads the threads before building. Comments work for sessions signed in to your Enterprise account, with the artifact shared within the organization. On your Max account, use a copy-as-prompt button instead.",
+  "order": 215,
+  "phase": "design",
+  "status": "todo",
+  "title": "Critique mockups with artifact comments",
+  "updatedAt": "2026-10-17T17:50:00Z",
+  "why": "Publish each designer mockup as an artifact. You select an element and comment on it, then use Send to Claude. A session can read those threads, reply, resolve them, and be woken when one is sent. Feedback lands on the exact button or gap, not 'the thing on the left'."
+}

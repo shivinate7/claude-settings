@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26",
+  "context": "Recording a profile on the phone over the network fails with 'Timed out waiting for device to boot' even when the phone shows as available. A recording 5 minutes later passed. The wait-until-available design was withdrawn, because 'available' is not a ready signal. A cable was never tried.",
+  "home": "roadmap step c48; briefs/c48-ios-ship-profile-job.md",
+  "id": "c48-phone-profile",
+  "kind": "decision",
+  "n": 8,
+  "options": [
+    {
+      "gain": "Five minutes of measurement may remove the problem entirely.",
+      "how": "Plug the phone into the Mac; a Mac session records a few profiles in a row and reports.",
+      "key": "a",
+      "label": "Try a cable first",
+      "lose": "Needs you to plug in the phone."
+    },
+    {
+      "gain": "Works over the network.",
+      "how": "ios-ship's profile job retries once after a wait (about 5 minutes) when it sees that error.",
+      "key": "b",
+      "label": "Retry on the known failure",
+      "lose": "A slow profile; the cause stays unknown."
+    },
+    {
+      "gain": "No work.",
+      "how": "Leave profiling by hand.",
+      "key": "c",
+      "label": "Park it",
+      "lose": "Profiles stay unreliable."
+    }
+  ],
+  "owner": "Local liaison",
+  "pick": "a",
+  "ref": "c48 (phone profiling waits until the phone is free)",
+  "status": "closed",
+  "title": "Choose the next design for phone profiling",
+  "why": "The cheapest measurement first; if the cable works, nothing needs building."
+}

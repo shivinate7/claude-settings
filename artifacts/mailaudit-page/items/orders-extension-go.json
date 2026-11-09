@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-07T22:05:00-06:00",
+  "context": "Goal: orders reach the ledger without a manual CSV export.\nProblem (goal): draft PR #154 builds a nightly Worker cron that signs in to TCGplayer with a stored cookie. On 2026-10-28 that cookie was measured expiring after 1 hour, so the cron can't run on its own. An extension plan reuses #154's parser and merge code without the cron. It has had no answer since 10-28, and the question was never on this page.\nStale record: decision sync-revamp-cloudflare line 46 rules the cookie cron (your 10-27 20:19 CDT \"Yea let's do A\"). It rests on the cookie lasting; that was measured false on 10-28. The outcome it protected, orders arriving with no export, has nothing protecting it now.\nBased on (measured): handoff 0bb58e2e premises P3 and P4, BuyerRevalidationKey expired after 1 h; sign-in loads hCaptcha.\nBased on (read): main has no worker/orders.mjs or mergeIntoStore. sync-revamp-cloudflare lines 43-47 and csv-import-stays-web line 13 still describe the cookie cron.\nDeparts from: main plans a cookie cron (orders-job-unbuilt) \u2014 option a replaces it with a browser extension plus a Worker POST /orders.\nAfter the answer: on a or b, the branch b/orders-cron is archived and #154 closed, the three records are rewritten, and the TCG_COOKIE Worker secret and the Keychain item mailaudit-tcg-cookie are removed. Whether the secret is still set is unchecked.",
+  "home": "lane orders-extension (local_ebb91723-0535-414a-a6a6-88fd84220244), started 15:02 CST 2026-11-08; it rewrites sync-revamp-cloudflare, orders-job-unbuilt and csv-import-stays-web",
+  "id": "orders-extension-go",
+  "kind": "decision",
+  "n": 50,
+  "options": [
+    {
+      "gain": "Orders arrive with no CSV step, built on #154's parser.",
+      "how": "A browser extension reads your TCGplayer orders while you are signed in and sends them to the Worker, reusing #154's parser and merge code.",
+      "key": "a",
+      "label": "Go on the extension plan",
+      "lose": "Two new lanes, a server lane and an extension lane, and a browser extension to keep up."
+    },
+    {
+      "gain": "No new parts to keep up.",
+      "how": "Orders keep coming in through the CSV export, as today.",
+      "key": "b",
+      "label": "Stay on the OrderWand CSV import",
+      "lose": "Every order still needs a manual export."
+    },
+    {
+      "gain": "No extension.",
+      "how": "The nightly Worker cron signs in with the stored cookie.",
+      "key": "c",
+      "label": "Keep the cookie cron",
+      "lose": "It stops working an hour after each sign-in."
+    }
+  ],
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "pick": "a",
+  "rank": 13,
+  "ref": "draft PR #154 (nightly orders cron, branch b/orders-cron); handoff 0bb58e2e premises P3 and P4; decision csv-import-stays-web",
+  "short": "Orders extension plan",
+  "status": "closed",
+  "title": "Orders without a CSV export: go on the browser-extension plan?",
+  "why": "Only option a needs no manual step and actually works."
+}
