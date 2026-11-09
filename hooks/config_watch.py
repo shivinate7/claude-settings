@@ -743,7 +743,7 @@ def _test_clock():
 # `~/.claude/hooks/*` and `~/.claude/lint/*` are symlinks into the pointer checkout, so a branch
 # left checked out there makes unreviewed work live in every session on the machine. A session
 # that started on main never sees a move made mid-session, so the Stop reads HEAD once per turn.
-# The read runs before the fast exit, on Stop only, and costs at most POINTER_GIT_MAX
+# The read runs after the cap check and the sweep, on Stop only, and costs at most POINTER_GIT_MAX
 # `git rev-parse` calls: no file, no process left running, no timer. The off-main rule is
 # hooks/session_start.sh's: detached at local main's commit or at origin/main's tip counts as main.
 POINTER_GIT_MAX = 4
@@ -752,8 +752,10 @@ POINTER_FLAG = "claude-settings: {where} is on {state}, not main; global rules a
 POINTER_UNKNOWN = "claude-settings: the branch of {where} is unknown: its HEAD could not be read"
 
 
-def _pointer_git(folder: str, *args):
+def _pointer_git(folder: str, *args, absent_ok: bool = False):
     """Stdout of one `git rev-parse` in `folder`, or None when it fails or times out.
+
+    With `absent_ok`, exit 1 is a normal answer for a ref that does not exist (`--verify -q`) and gives ''.
 
     The git directory search stops at the folder's parent, so a plain folder inside another repo
     never answers with that repo's HEAD.
@@ -768,6 +770,8 @@ def _pointer_git(folder: str, *args):
                              text=True, env=env, timeout=POINTER_GIT_TIMEOUT)
     except Exception:
         return None
+    if absent_ok and done.returncode == 1:
+        return ""
     return done.stdout.strip() if done.returncode == 0 else None
 
 
@@ -781,8 +785,10 @@ def pointer_line() -> str:
     if target is None:
         return ""
     where = _plain(target)
-    if not os.path.isdir(target) or not os.path.exists(os.path.join(target, ".git")):
+    if not os.path.isdir(target):
         return POINTER_UNKNOWN.format(where=where)
+    if not os.path.exists(os.path.join(target, ".git")):
+        return ""  # a tarball install has no checkout to be off main; hooks/session_start.sh is silent there too
     branch = _pointer_git(target, "--abbrev-ref", "HEAD")
     if not branch:
         return POINTER_UNKNOWN.format(where=where)
@@ -793,8 +799,10 @@ def pointer_line() -> str:
     head = _pointer_git(target, "HEAD")
     if not head:
         return POINTER_UNKNOWN.format(where=where)
-    main_head = _pointer_git(target, "--verify", "-q", "refs/heads/main")
-    origin_head = _pointer_git(target, "--verify", "-q", "refs/remotes/origin/main")
+    main_head = _pointer_git(target, "--verify", "-q", "refs/heads/main", absent_ok=True)
+    origin_head = _pointer_git(target, "--verify", "-q", "refs/remotes/origin/main", absent_ok=True)
+    if main_head is None or origin_head is None:
+        return POINTER_UNKNOWN.format(where=where)  # a failed read must not read as off main
     if head in (main_head, origin_head):
         return ""
     return POINTER_FLAG.format(where=where, state="a detached HEAD")
@@ -817,7 +825,6 @@ def main() -> None:
         sys.exit(0)  # fail open on unreadable input
     if not isinstance(payload, dict):
         sys.exit(0)  # fail open on a payload that is not an object
-    flag = _stop_pointer_line(payload)
     try:
         fast_exit = unchanged(payload, _test_clock())
     except Exception:
@@ -830,6 +837,7 @@ def main() -> None:
             messages = sweep(payload, _test_clock())
         except Exception:
             messages = []  # fail open on a watch defect
+    flag = _stop_pointer_line(payload)  # after the cap revert, so a stalled read cannot hold it up
     if flag:
         messages.append(flag)
     if messages:
