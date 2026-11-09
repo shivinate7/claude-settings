@@ -1598,6 +1598,14 @@ def _api_endpoint(args):
     return ""
 
 
+_GRAPHQL_ENDPOINT = re.compile(r"(https?://[^/\s]+)?/?graphql")
+
+
+def _is_graphql_endpoint(args) -> bool:
+    """True when a `gh api` call names the GraphQL endpoint: `graphql`, `/graphql`, or a full URL to it."""
+    return _GRAPHQL_ENDPOINT.fullmatch(_api_endpoint(args)) is not None
+
+
 def _api_method(args) -> str:
     """Return the method a `gh api` call names, upper case (`-X PATCH`, `-XPATCH`, `--method PATCH`, `--method=PATCH`), else ''."""
     for index, arg in enumerate(args):
@@ -1704,6 +1712,7 @@ _GRAPHQL_COMMENT = re.compile(r"\b(addComment|updateIssueComment)\b")
 # tried first, as its opener starts with the empty string `""`.
 _GRAPHQL_BODY = re.compile(r'\bbody\s*:\s*(?:"""(?P<block>(?:\\"""|(?!""").)*)"""|"(?P<plain>(?:[^"\\]|\\.)*)")', re.DOTALL)
 _GRAPHQL_NODE = re.compile(r'\bid\s*:\s*"([^"\\]*)"')   # the `id:` of an updateIssueComment input, a literal node id
+_GRAPHQL_INPUT_VARIABLE = re.compile(r'\binput\s*:\s*\$(\w+)')   # `input: $name`, the input object whose `id` names the node
 _GRAPHQL_NODE_VARIABLE = re.compile(r'\bid\s*:\s*\$(\w+)')   # the same `id:` given as a variable, whose value is a `-f` field or a request variable
 
 
@@ -1745,12 +1754,26 @@ def _read_text_file(name: str, where: str):
         return None
 
 
-def _graphql_file_queries(rest, where: str):
-    """Return (queries, read, variables) for the query files of a `gh api graphql` call: `-F query=@file`, and the `query` of a JSON request
-    body read by `--input` (a body that is no JSON object is the query itself). `variables` is the `variables` object of that request body.
-    `read` names the files that were read; a file that cannot be read is left out, and the caller reports it."""
+def _graphql_query_sources(rest):
+    """Return (texts, files, stdin) for the `query` field of a `gh api graphql` call: literal text, the files it reads (`-F query=@file`,
+    and a query of exactly `$(cat FILE)`, which the shell fills from FILE), and whether `-F query=@-` takes it from stdin."""
+    texts, files, stdin = _api_bodies(rest, ("query",))
+    literal = []
+    for text in texts:
+        named = _cat_file(text)
+        if named:
+            files.append(named)
+        else:
+            literal.append(text)
+    return literal, files, stdin
+
+
+def _graphql_file_queries(rest, where: str, query_files=()):
+    """Return (queries, read, variables) for the query files of a `gh api graphql` call: `query_files` (`_graphql_query_sources`), and the
+    `query` of a JSON request body read by `--input` (a body that is no JSON object is the query itself). `variables` is the `variables`
+    object of that request body. `read` names the files that were read; a file that cannot be read is left out, and the caller reports it."""
     queries, read, variables = [], [], {}
-    for name in _api_bodies(rest, ("query",))[1] + [_api_input_file(rest)]:
+    for name in list(query_files) + [_api_input_file(rest)]:
         text = _read_text_file(name, where) if name else None
         if text is None:
             continue
@@ -1774,10 +1797,18 @@ def _json_strings(value):
     return [text for item in value for text in _json_strings(item)] if isinstance(value, list) else []
 
 
+def _graphql_node_value(rest, field: str, requested):
+    """Return (node id, True) for the value a `-f`/`-F` field named `field` gives, else the request variable `requested` (None when the
+    request holds none). A field that names a file is `@file`, which is no literal id. ('', False) when nothing gives a value."""
+    texts, files, _stdin = _api_bodies(rest, (field,))
+    values = texts + ["@" + name for name in files] + ([str(requested)] if requested is not None else [])
+    return (values[0], True) if values else ("", False)
+
+
 def _graphql_node_of(queries, rest, variables):
-    """Return (node id, named by a field) for the updateIssueComment in `queries`: the literal `id: "..."`, else the value of the
-    variable `id: $name` names, from a `-f`/`-F` field or a request variable. A field that names a file is `@file`, which is no
-    literal id. ('', False) when no id is named."""
+    """Return (node id, named by a field) for the updateIssueComment in `queries`: the literal `id: "..."`, else the value the variable
+    `id: $name` names, or the `id` of the input object `input: $name` names, from a `-f`/`-F` field (`name`, `name[id]`) or a request
+    variable (`name`, `name.id`). ('', False) when no id is named."""
     for query in queries:
         if "updateIssueComment" not in query:
             continue
@@ -1787,9 +1818,11 @@ def _graphql_node_of(queries, rest, variables):
             return literal[1], False
         named = _GRAPHQL_NODE_VARIABLE.search(query, start)
         if named:
-            texts, files, _stdin = _api_bodies(rest, (named[1],))
-            values = texts + ["@" + name for name in files] + ([str(variables[named[1]])] if named[1] in variables else [])
-            return (values[0], True) if values else ("", False)
+            return _graphql_node_value(rest, named[1], variables.get(named[1]))
+        given = _GRAPHQL_INPUT_VARIABLE.search(query, start)
+        if given:
+            nested = variables.get(given[1])
+            return _graphql_node_value(rest, given[1] + "[id]", nested.get("id") if isinstance(nested, dict) else None)
     return "", False
 
 
@@ -1799,11 +1832,11 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
     each with the bodies of the heredocs its own header holds. A body of exactly `$(cat FILE)`, and a stdin body piped from
     `cat FILE` (`previous` is the segment piped in), are read from FILE. A file that cannot be read allows, with a note. No body
     whose first line is the marker: no read. A GraphQL `addComment` or `updateIssueComment` names its comment by node id, so no
-    word of the call names the pull request: a marked body is refused with no read. The mutation is read from `-f query=`, from
-    `-F query=@file` and from a JSON file of `--input`, and its body from a quoted or a block string, a field, or a request
+    word of the call names the pull request: a marked body is refused with no read. The endpoint is `graphql`, `/graphql` or a full URL to it. The mutation is read from `-f query=`, from `-f query="$(cat FILE)"`, from
+    `-F query=@file`, from `-F query=@-` fed by a heredoc, and from a JSON file of `--input`, and its body from a quoted or a block string, a field, or a request
     variable. An `updateIssueComment` with no marked body reads the old body of its node, one GraphQL read, and is refused when that
-    holds a record or cannot be read. Its node id is the literal in the query or the value of the `-f` field (or request variable)
-    it names; a field value that is a shell expansion is refused as unreadable, with no read. A node id that is a variable no
+    holds a record or cannot be read. Its node id is the literal in the query, the value of the `-f` field (or request variable) it names, or the `id` of the input
+    object it names (`-F input[id]=`, `variables.input.id`); a field value that is a shell expansion is refused as unreadable, with no read. A node id that is a variable no
     field names is left alone."""
     rest = gh_call_of(ansi_c_decoded(segment))   # bash sends a `$'...'` body decoded
     if rest is None:
@@ -1818,15 +1851,19 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
         texts, files, stdin = message_sources(args, "comment")
     elif rest[:1] == ["api"]:
         rest = gh_call_of(_joined_substitutions(ansi_c_decoded(segment))) or rest
-        if _api_endpoint(rest) == "graphql":
-            file_queries, read, request_variables = _graphql_file_queries(rest, where)
-            queries = _api_bodies(rest, ("query",))[0] + file_queries
+        if _is_graphql_endpoint(rest):
+            query_texts, query_files, query_stdin = _graphql_query_sources(rest)
+            file_queries, read, request_variables = _graphql_file_queries(rest, where, query_files)
+            queries = query_texts + file_queries
+            if query_stdin and "<<" in segment and not _api_input_named(rest):   # `-F query=@-` fed by a heredoc: its text is the query
+                queries += own_heredoc_bodies(segment, raw, before)
             mutation = _GRAPHQL_COMMENT.search(" ".join(queries))
             if mutation is None:
                 return None
             texts, files, stdin = _api_bodies(rest, None)   # a variable body has any key
+            texts = [text for text in texts if not (_cat_file(text) and _cat_file(text) in query_files)]   # a `$(cat FILE)` query is read above
             files = [name for name in files if name not in read]   # a query file was read above; an unread one stays for the note below
-            texts += [text for query in list(texts) + file_queries for text in _graphql_bodies(query)]
+            texts += [text for query in texts + queries[len(query_texts):] for text in _graphql_bodies(query)]
             texts += _json_strings(request_variables)   # a body held in the `variables` of a request file
             repo, selector, variable, graphql = "", "", ("graphql",), True
             if mutation.group(1) == "updateIssueComment":
