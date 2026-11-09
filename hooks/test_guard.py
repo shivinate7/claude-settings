@@ -11061,9 +11061,9 @@ sh("env: walk control, find names sub, grep's *.md include reads the env file th
 
 # A search's own glob reads `\.` as a literal dot, so `\.md` picks the env file that ends .md in sub. The guard must
 # read the same escape (`_glob_unescaped`): one that keeps the backslash picks no file and allows the form.
-_ESCAPED_DOT_MD_DENY = (r"grep -r --include='*\.md' K sub", r"rg -g '*\.md' K sub",
+_ESCAPED_DOT_MD_REFUSE = (r"grep -r --include='*\.md' K sub", r"rg -g '*\.md' K sub",
                         r"find . -name 'sub' | xargs rg -g '*\.md' K")
-for _cmd in _ESCAPED_DOT_MD_DENY:
+for _cmd in _ESCAPED_DOT_MD_REFUSE:
     sh("env: escaped dot glob, picks the env file that ends .md in sub, refused: " + _cmd, _cmd, "deny", "env-file",
        cwd=ENVWALK_MD_SUFFIX)
 # `\*`, `\?` and `\[` are literals, so no name in sub matches them. The env file there ends in `d`, so the bracket pin
