@@ -19,6 +19,11 @@ from guard_core import (
 # `-o` is read in the short-flag loop, where its value may be glued on.
 PUSH_VALUE_OPTS = {"--receive-pack", "--exec", "--push-option"}
 DEFAULT_BRANCH_FALLBACK = ("main", "master")
+# Rule push-agent-branch. push-stray-branch is silent on a branch with no upstream, and an agent-worktree
+# branch (`claude/agent-<hex>`) has none. The three shapes the tools name a worktree branch by, with 8 or more
+# lowercase hex characters after the prefix. Cost: a string match, and a bare push reads one more config key in
+# the spawn it already makes.
+AGENT_BRANCH = re.compile(r"(?:claude/|worktree-)?agent-[0-9a-f]{8,}")
 
 
 def _push_config(cwd: str, key: str, overrides=None):
@@ -262,43 +267,108 @@ def _push_tags_only(args) -> bool:
 
 
 def _push_branch_config(cwd: str, current: str, with_default: bool, overrides=None):
-    """(remote, merge, push.default) of `current`: '' for a key that is unset, None for all three when git
-    cannot answer. One `git config --get-regexp` spawn answers all of them. A `git -c push.default=`
-    override wins, as in `_push_config`."""
-    pattern = r"^(branch\.|push\.default$)" if with_default else r"^branch\."
+    """(remote, merge, push.default, push.autoSetupRemote) of `current`: '' for a key that is unset, None for
+    all four when git cannot answer. The last two are read only with `with_default`. One
+    `git config --get-regexp` spawn answers all of them. A `git -c` override of either wins, as in
+    `_push_config`."""
+    pattern = r"^(branch\.|push\.(default|autosetupremote)$)" if with_default else r"^branch\."
     answer = guard_core._git(cwd, "config", "--get-regexp", pattern) if cwd else None
     if answer is None or answer.returncode not in (0, 1):
-        return None, None, None
+        return None, None, None, None
     found = {}
     for line in answer.stdout.splitlines():
         key, _, value = line.partition(" ")
         found.setdefault(key, value.strip())
-    default = overrides["push.default"] if overrides and "push.default" in overrides else found.get(
-        "push.default", "")
+    def key(name):
+        return overrides[name] if overrides and name in overrides else found.get(name, "")
+
     return (found.get("branch." + current + ".remote", ""),
-            found.get("branch." + current + ".merge", "").removeprefix("refs/heads/"), default)
+            found.get("branch." + current + ".merge", "").removeprefix("refs/heads/"),
+            key("push.default"), key("push.autosetupremote"))
+
+
+# Rule push-main judges the remote a push goes to. A URL is a network remote when it carries a scheme
+# (`https://`, `ssh://`, `git://`) or is scp-like (`host:path`, `user@host:path`).
+_PUSH_URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+_PUSH_URL_SCP = re.compile(r"[^/:\\]+:")
+# A remote token the shell expands at run time: a variable, a `$( )` or a backtick substitution.
+_PUSH_SHELL_EXPANSION = re.compile(r"[$`]")
+_PUSH_LOCAL_PATH = re.compile(r"(?:/|\.{1,2}(?:[/\\]|$)|~|[A-Za-z]:[/\\]|file://)", re.I)
+_PUSH_REMOTE_KEYS = (r"^(branch\..+\.(remote|pushremote)|remote\.pushdefault"
+                     r"|remote\.[^ ]+\.(url|pushurl))$")
+
+
+def _is_local_path(url: str) -> bool:
+    """True for a path on this machine: absolute, `./` or `../` relative, `~`, a Windows drive path or `file://`."""
+    return bool(_PUSH_LOCAL_PATH.match(url))
+
+
+def _push_url_is_network(url: str) -> bool:
+    """True when a remote URL reaches the network. An empty URL and a local path do not."""
+    if not url:
+        return False
+    if _is_local_path(url):
+        return False
+    return bool(_PUSH_URL_SCHEME.match(url) or _PUSH_URL_SCP.match(url))
+
+
+def _push_goes_to_network(remote: str, cwd: str, current, overrides=None) -> bool:
+    """True when a push to `remote` ('' for a bare push) writes to a network remote.
+
+    A remote argument that is itself a URL or path is judged directly. A name is resolved to
+    `remote.<name>.pushurl`, else `remote.<name>.url`. A bare push names `branch.<cur>.pushRemote`, else
+    `remote.pushDefault`, else `branch.<cur>.remote`, else origin. A name with no URL is no remote at all, and
+    git refuses that push itself. Unreadable config is unknown, and unknown is never safe. A `git -c` override wins.
+    A remote the shell has not expanded (`$`, a backtick, `$(`) cannot be resolved, so it is unknown too.
+    """
+    if _PUSH_SHELL_EXPANSION.search(remote):
+        return True
+    if remote and (_is_local_path(remote) or ":" in remote):
+        return _push_url_is_network(remote)
+    answer = guard_core._git(cwd, "config", "--get-regexp", _PUSH_REMOTE_KEYS) if cwd else None
+    if answer is None or answer.returncode not in (0, 1):
+        return True
+    found = {}
+    for line in answer.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        found.setdefault(key, value.strip())
+
+    def get(key):
+        return overrides[key.lower()] if overrides and key.lower() in overrides else found.get(key, "")
+
+    if not remote:
+        cur = current() or ""
+        remote = (get("branch." + cur + ".pushremote") or get("remote.pushdefault")
+                  or get("branch." + cur + ".remote") or "origin")
+    return _push_url_is_network(get("remote." + remote + ".pushurl") or get("remote." + remote + ".url"))
 
 
 def push_ask_hit(args, cwd: str, overrides=None) -> str:
-    """'main', 'stray' or '' for the `git push` arguments `args`, a push `push_verdict` let through.
+    """'main', 'agent', 'stray' or '' for the `git push` arguments `args`, a push `push_verdict` let through.
+
+    'agent' (rule push-agent-branch): a push whose destination name is an agent-worktree branch name
+    (`AGENT_BRANCH`), with or without `-u`, checked before 'stray'. An implied destination is the current
+    branch (a bare push with no upstream too, under push.autoSetupRemote); an explicit one is the part
+    after `:`, `refs/heads/` stripped; a colon-less refspec is its own name. A destination after `:` adds
+    no read. A colon-less refspec other than `main` or `master` reads the current branch once
+    (`symbolic-ref`), to tell an implied destination from a literal one.
 
     'main' (rule push-main): a non-forced push whose destination is literally `main` or `master`, `--all`
-    included. The remote's HEAD is never read. 'stray' (rule push-stray-branch): a push with an implied
+    included, to a network remote (`_push_goes_to_network`): a push to a path, a `file://` URL or a remote
+    with no URL is silent. The remote's HEAD is never read. 'stray' (rule push-stray-branch): a push with an implied
     destination (a bare push, `HEAD`, `@`, or a colon-less refspec naming the current branch) that writes a
     name other than the branch's upstream. It needs an upstream, the pushed remote equal to
     branch.<cur>.remote, and an upstream that is not main or master. A `-u` push is silent here: its
     implied destination is the local name, which becomes the new upstream. A bare push under push.default
     simple writes the current branch only when the upstream carries its name, else git refuses it. A
     deletion, a forced push, a mirror, and a push of tags alone are never judged here. A destination that
-    cannot be read is allowed. Reads: none for a literal destination; the current branch for an implied
-    one; one `git config --get-regexp` when the upstream is needed.
+    cannot be read is allowed. Reads: none for a destination after `:`; one `symbolic-ref` for the current
+    branch for a bare push or a colon-less refspec; one `git config --get-regexp` when the upstream is
+    needed; one more `git config --get-regexp` on the main path only, for the remote's URL (none when the
+    remote argument is itself a URL or path).
     """
     force, mirror, every, includes, unpinned, leased, delete, upstream, remote, plain = _push_parse(args)
     if force or leased or mirror or delete or any(spec.startswith(("+", ":")) for spec in plain):
-        return ""
-    if every:
-        return "main"
-    if not plain and _push_tags_only(args):
         return ""
     state = {}
 
@@ -306,6 +376,16 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
         if "cur" not in state:
             state["cur"] = _push_current_branch(cwd)
         return state["cur"]
+
+    def main():
+        if "main" not in state:
+            state["main"] = "main" if _push_goes_to_network(remote, cwd, current, overrides) else ""
+        return state["main"]
+
+    if every:
+        return main()
+    if not plain and _push_tags_only(args):
+        return ""
 
     def config():
         if "cfg" not in state:
@@ -315,11 +395,12 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     implied = False
     if not plain:
         cur = current()
-        merge, mode = config()[1:] if cur else (None, None)
+        merge, mode, auto = config()[1:] if cur else (None, None, None)
         if cur is None or mode is None:
             return ""
         if mode in ("", "simple"):
-            dest = cur if merge == cur else None
+            # With no upstream, autoSetupRemote makes git push the current name and set it as the upstream.
+            dest = cur if merge == cur or (not merge and auto.lower() in ("true", "yes", "on", "1")) else None
         elif mode == "current":
             dest = cur
             implied = True
@@ -328,22 +409,32 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
         else:
             dest = None
         if dest in DEFAULT_BRANCH_FALLBACK:
-            return "main"
+            return main()
+        agent = bool(dest and AGENT_BRANCH.fullmatch(dest))
     else:
+        agent = False
         for spec in plain:
             source, colon, target = spec.partition(":")
             if colon:
-                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
+                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK and main():
                     return "main"
+                agent = agent or bool(AGENT_BRANCH.fullmatch(target.removeprefix("refs/heads/")))
             elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
-                return "main"
+                # A local origin makes main() empty; the other refspecs are still read for agent and stray.
+                if main():
+                    return "main"
             elif source in ("HEAD", "@") or (current() is not None and source == current()):
                 implied = True
-        if implied and current() in DEFAULT_BRANCH_FALLBACK:
+                agent = agent or bool(current() and AGENT_BRANCH.fullmatch(current()))
+            else:
+                agent = agent or bool(AGENT_BRANCH.fullmatch(source.removeprefix("refs/heads/")))
+        if implied and current() in DEFAULT_BRANCH_FALLBACK and main():
             return "main"
+    if agent:
+        return "agent"
     if not implied or current() is None:
         return ""
-    remote_cfg, merge, _mode = config()
+    remote_cfg, merge = config()[:2]
     pushed = remote or remote_cfg
     if not merge or not remote_cfg or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:
         return ""
@@ -923,6 +1014,12 @@ PUSH_MAIN_REASON = (
 PUSH_STRAY_REASON = (
     "Rule (Git): this push writes a branch name other than the one this branch tracks (its upstream), "
     "so it may land on a stray branch. Check the destination (decision plain-push-asks). "
+    "Approving the prompt lets this one push through; it is not a grant."
+)
+PUSH_AGENT_REASON = (
+    "Rule (Git): this push writes a branch named like an agent worktree (agent-<hex>, claude/agent-<hex> or "
+    "worktree-agent-<hex>), not a lane branch (decision plain-push-asks). Push the lane branch by name: "
+    "`git push origin HEAD:<lane-branch>`. "
     "Approving the prompt lets this one push through; it is not a grant."
 )
 PUSH_ASK_REASON = (
