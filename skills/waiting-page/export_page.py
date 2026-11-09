@@ -85,17 +85,20 @@ STREET_WORDS = ("Street", "St", "Avenue", "Ave", "Road", "Rd", "Drive", "Dr", "L
                 "Highway", "Hwy")
 STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND"
                "|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY")
-# The user part of a URL credential holds no quote, bracket, paren or `|`, so minified code cannot start a match. A whole
-# `{name}` is the one exception: a templated user (`{user}`, `${USER}`) is still a user. The password holds any character
-# but `@`, `/`, `?`, `#` and blanks: a real password may hold a lone `)`, `}`, `+` or `||`.
-URL_USER = r"(?:[^/?#\s@:\"'`()\[\]{}|]|\{\w+\})+"
-URL_PASSWORD = r"[^/?#\s@]+"
-# A password with no quote or backtick is a literal, even with a `+`, `|`, bracket or paren in it. The `@` after it is a
-# credential, whatever follows, a quoted or templated host included (`"postgres://u:pw@" + host`, `u:pw@{db_host}`).
-# Two string literals joined (`"http://h:"+port+"@"`) always leave a quote inside the password.
-URL_PLAIN_PASSWORD = r"[^/?#\s@\"'`]+"
-# What may follow the `@` of a password that holds a quote: a bracketed IPv6 host (`[::1]`), or anything but a quote,
-# bracket or `|`, which is code.
+# The user part of a URL credential holds no quote, bracket, paren or `|`, so minified code cannot start a match. Two
+# template forms are the exceptions, since a templated user is still a user: a braced field with no quote or blank in it
+# (`{user}`, `${USER}`, `{{user}}`, `{cfg.user}`, `{user!r}`, `{cfg[user]}`, `${var.db_user}`) and a percent field
+# (`%(user)s`).
+URL_USER = r"(?:[^/?#\s@:\"'`()\[\]{}|]|\{+[^{}\"'`\s/?#@]*\}+|%\(\w+\)[sd])+"
+# A password that starts with anything but a quote or backtick is a literal, even with a `+`, `|`, bracket, paren or a
+# later quote in it (`O'Neil2020`). The `@` after it is a credential, whatever follows, a quoted or templated host
+# included (`"postgres://u:pw@" + host`, `u:pw@{db_host}`).
+URL_PLAIN_PASSWORD = r"[^/?#\s@\"'`][^/?#\s@]*"
+# A password that starts with a quote or backtick is the join of two string literals (`"http://h:"+port+"@"`), so it is
+# a credential only when a host starts after its `@`.
+URL_QUOTED_PASSWORD = r"[\"'`][^/?#\s@]*"
+# What may follow the `@` of a quote-led password: a bracketed IPv6 host (`[::1]`), or anything but a quote, bracket or
+# `|`, which is code.
 URL_HOST_START = r"(?:(?=\[[0-9A-Fa-f.]*:)|(?![\"'`()\[\]{}|]))"
 # Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
 # from starting inside a longer word ("risk-" and "btn-sk-" are not "sk-").
@@ -117,11 +120,12 @@ SECRET_SHAPES = (
     ("session-cookie", re.compile(r"(?<![A-Za-z0-9_.])connect\.sid=\S+")),
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
     # `scheme://user:password@host`, on any host: a version pin after the `@` is blanked, so an IP host is caught here.
-    # The user part holds no quote, bracket or `|`: minified code runs `"https://a"})];x||y:z@` together. The password
-    # may hold them. A password with a quote is code when a quote, bracket or `|` follows the `@`, unless an IPv6 host
-    # opens there: `"http://h:"+port+"@"`. A password with no quote is a literal and always refuses.
+    # The user part holds no quote, bracket or `|`, except inside a template field: minified code runs
+    # `"https://a"})];x||y:z@` together. The password may hold them. A quote-led password is code when a quote, bracket
+    # or `|` follows the `@`, unless an IPv6 host opens there: `"http://h:"+port+"@"`. Any other password is a literal
+    # and always refuses.
     ("url-credentials", re.compile(
-        r"://" + URL_USER + r":(?:" + URL_PLAIN_PASSWORD + r"@|" + URL_PASSWORD + r"@" + URL_HOST_START + r")")),
+        r"://" + URL_USER + r":(?:" + URL_PLAIN_PASSWORD + r"@|" + URL_QUOTED_PASSWORD + r"@" + URL_HOST_START + r")")),
     # The value is captured in a lookahead, so a match ends at the separator and a later password word on the same line
     # (`password:!0};pwd=hunter2`) is a match of its own. found.end(2) is the end of the value.
     ("password", re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(?=(\S+))", re.I)),
