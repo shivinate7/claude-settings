@@ -140,10 +140,20 @@ class Case(unittest.TestCase):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_comment_narration.py")
         self.tree = tempfile.mkdtemp(prefix="cnl_", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, self.tree, True)
-        tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # the module imports hooks/ and reads its standard from lint/
-        shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_comment_narration.py"))
+        self.checker_tree(self.tree)
         self.git("init", "-q")
         self.git("symbolic-ref", "HEAD", "refs/heads/main")
+
+    def checker_tree(self, root, files=None):
+        """Place the check at root/lint with the folders it imports, and write the given files. Returns the check's path."""
+        tracked_tree.copy_tracked(root, "lint", "hooks")  # the module imports hooks/ and reads its standard from lint/
+        shutil.copyfile(MODULE, os.path.join(root, "lint", "check_comment_narration.py"))
+        for rel, text in (files or {}).items():
+            path = os.path.join(root, *rel.split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+        return os.path.join(root, "lint", "check_comment_narration.py")
 
     def git(self, *args):
         subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.com",
@@ -169,13 +179,14 @@ class Case(unittest.TestCase):
     def change(self, files):
         self.commit("change", files)
 
-    def lint(self, *args, path_tools=False, env=None):
+    def lint(self, *args, path_tools=False, env=None, checker_root=None):
         args = args or ("--base", "origin/main")
         run_env = dict(GIT_ENV, **(env or {}))
         run_env.pop("CODE_CHECK_TOOLS", None)
         if path_tools:
             run_env["CODE_CHECK_TOOLS"] = "path"
-        r = subprocess.run([sys.executable, os.path.join(self.tree, "lint", "check_comment_narration.py"), *args],
+        script = os.path.join(checker_root or self.tree, "lint", "check_comment_narration.py")
+        r = subprocess.run([sys.executable, script, *args],
                            cwd=self.tree, capture_output=True, text=True, encoding="utf-8", errors="replace",
                            env=run_env)
         return r.returncode, r.stdout + r.stderr
@@ -1382,6 +1393,94 @@ class RuleQuotes(Case):
 
     def test_gloss_that_opens_with_the_bare_id_still_flags_the_round(self):
         rc, out = self.scan({"x.py": "# (hold-unsafe-after-round-3, round 3)\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_bare_id_before_round_parentheses_still_flags_the_round(self):
+        rc, out = self.scan({"x.py": "# hold-unsafe-after-round-3 (added in round 3)\nx = 1\n"})
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, "docs", "decisions", "hold-unsafe-after-round-3.md")))
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_rule_name_before_bare_id_round_parentheses_still_flags_the_round(self):
+        rc, out = self.scan({"x.py": "# Rule hold-unsafe-after-round-3 (fixed in round 3)\nx = 1\n"})
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, "docs", "decisions", "hold-unsafe-after-round-3.md")))
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def home_tree(self, files):
+        """A checker tree that is its own git repo, holding the given files. Returns its root."""
+        root = tempfile.mkdtemp(prefix="cnl_", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, root, True)
+        self.checker_tree(root, files)
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True, capture_output=True, env=GIT_ENV)
+        return root
+
+    def test_review_round_form_inside_a_decision_gloss_is_clean(self):
+        rc, out = self.scan({"x.py": "# (decision hold-unsafe-after-round-3, review round 3)\nx = 1\n"})
+        self.assertEqual(rc, 0, out)
+
+    def test_see_decision_gloss_with_a_round_number_is_clean(self):
+        rc, out = self.scan({"x.py": "# (see decision hold-unsafe-after-round-3, round 3)\nx = 1\n"})
+        self.assertEqual(rc, 0, out)
+
+    def test_decision_gloss_with_a_colon_after_the_id_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# (decision hold-unsafe-after-round-3: the net-value hold after round 3)\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round_directly_before_a_decision_gloss_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# Holds a change after round 3 (decision hold-unsafe-after-round-3).\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_decision_pinned_in_the_checker_tree_counts_for_a_gloss(self):
+        checker_root = self.home_tree(self.DECISION)
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"x.py": "# (decision hold-unsafe-after-round-3, round 3)\nx = 1\n"})
+        # Scope first: the scanned repo has no decisions folder, and the check's own tree holds the decision.
+        self.assertFalse(os.path.isdir(os.path.join(self.tree, "docs")))
+        self.assertTrue(os.path.isfile(os.path.join(checker_root, "docs", "decisions", "hold-unsafe-after-round-3.md")))
+        rc, out = self.lint(checker_root=checker_root)
+        self.assertEqual(rc, 0, out)
+
+    def test_decision_absent_from_the_checker_tree_stays_flagged(self):
+        checker_root = self.home_tree({})
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"x.py": "# (decision hold-unsafe-after-round-3, round 3)\nx = 1\n"})
+        self.assertFalse(os.path.isdir(os.path.join(self.tree, "docs")))
+        self.assertFalse(os.path.isdir(os.path.join(checker_root, "docs")))
+        rc, out = self.lint(checker_root=checker_root)
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_fixed_in_round_before_a_real_decision_gloss_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# fixed in round 3 (decision hold-unsafe-after-round-3)\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round_with_an_unknown_decision_id_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# Holds a change after round 3 (decision some-unknown-round-3).\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round_then_a_verb_before_a_real_decision_gloss_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# round 3 fixed it (decision hold-unsafe-after-round-3)\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_colon_opener_with_added_after_a_round_before_a_decision_gloss_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# Added the colon opener after round 3 (decision hold-unsafe-after-round-3).\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round_before_a_decision_gloss_with_a_word_between_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# In round 3 (decision hold-unsafe-after-round-3), we added the net-value line.\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_colon_opener_with_added_after_a_round_inside_the_gloss_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# (decision hold-unsafe-after-round-3: added after round 3)\nx = 1\n"})
         self.assertHit(out, "x.py", 1)
         self.assertEqual(rc, 1, out)
 

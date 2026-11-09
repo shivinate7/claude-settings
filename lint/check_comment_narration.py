@@ -29,6 +29,7 @@ import re
 import sys
 import tokenize
 HERE = os.path.dirname(os.path.abspath(__file__))
+PINNED_ROOT = os.path.normpath(os.path.join(HERE, ".."))  # the claude-settings copy that holds this check
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 sys.path.insert(0, HERE)
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
@@ -49,25 +50,31 @@ class DatedText:
 class ReviewRound:
     """The pattern group for round numbers, kept as a class for its exemption. A round number after "in", "after" or
     "from" is narration, and a bare one is narration unless a numeric unit follows it, as in "2 decimals",
-    which is arithmetic. A comment that quotes a rule glosses a decision id holding `round-N`, such as
-    hold-unsafe-after-round-N. A round number with the same N passes only inside that gloss, and only when
-    a decisions folder that the layout gives for the checked repo holds <id>.md. The gloss is the parentheses that open with the id, as in
-    "(decision <id>, ...)" or "(`<id>`, ...)", or the parentheses right after the id, as in "Decision <id> (...)".
+    which is arithmetic. The word "review" before "round", "finding" or "point" is narration too.
+    A comment that quotes a rule glosses a decision id holding `round-N`, such as hold-unsafe-after-round-N.
+    A round number with the same N passes only in a gloss, and only when the id names a decision file. That file is
+    in a decisions folder that the layout gives for the checked repo, or in the one of the claude-settings copy that
+    holds this check, so a pinning repo can cite a claude-settings decision. A folder that cannot be read holds nothing.
+    The gloss is one of two forms. The parentheses open with the id and a comma, as in "(decision <id>, ...)",
+    "(see decision <id>, ...)" or "(`<id>`, ...)". Or the parentheses come right after the id, as in
+    "Decision <id> (...)". The "review" form passes inside either one.
     Anything else stays flagged: the same words outside the gloss, an id with no decision file, an id holding
-    another number, and parentheses that hold the id later on."""
+    another number, a bare id with no marker, a colon after the id, a round number right before parentheses that
+    hold the id, and parentheses that hold the id later on."""
     ROUND = re.compile(r"\b(?:in|after|from)\s+round\s*\d+"
                        r"|\bround\s*\d+(?!\d)(?!\s*(?:decimals?|places?|digits?)\b)"
                        r"|\breview\s+(?:round|finding|points?)\b", re.I)
     ID = r"(?P<id>[a-z0-9][a-z0-9-]*)"
-    # Form (i) needs a marker: "decision" with optional backticks, or backticks alone.
-    OPENS = re.compile(r"\s*(?:decision\s+(?P<q>`?)|`)" + ID + r"(?(q)(?P=q)|`)\s*,", re.I)
-    BEFORE = re.compile(r"(?<![\w`-])(`?)" + ID + r"\1\s*$", re.I)
+    # The opening form needs a marker: "decision" with optional backticks, or backticks alone.
+    OPENS = re.compile(r"\s*(?:(?:see\s+)?decision\s+(?P<q>`?)|`)" + ID + r"(?(q)(?P=q)|`)\s*,", re.I)
+    BEFORE = re.compile(r"(?:\b(?:see\s+)?decision\s+(?P<q>`?)|(?<![\w`-])`)" + ID + r"(?(q)(?P=q)|`)\s*$", re.I)
+    NUMBER_AFTER = re.compile(r"\s*(\d+)")
 
     def __init__(self):
         self.top, self.known = None, {}
 
     def real(self, ident, n):
-        """True when ident holds `round-n` and names a decision file in the repo being checked."""
+        """True when ident holds `round-n` and names a decision file in the repo being checked or in claude-settings."""
         if not re.search(r"(?:^|-)round-%s(?:-|$)" % n, ident, re.I):
             return False
         if ident not in self.known:
@@ -76,17 +83,25 @@ class ReviewRound:
                     self.top = git("rev-parse", "--show-toplevel").strip()
                 except Unread:
                     self.top = ""
-            self.known[ident] = bool(self.top) and self.has_decision(ident)
+            self.known[ident] = any(root and self.has_decision(root, ident) for root in (self.top, PINNED_ROOT))
         return self.known[ident]
 
-    def has_decision(self, ident):
-        """True when any decisions folder the layout allows for the repo at self.top holds ident.md. A layout
+    @staticmethod
+    def has_decision(root, ident):
+        """True when any decisions folder the layout allows for the repo at root holds ident.md. A layout
         that does not read says nothing is real, so the round stays flagged."""
         try:
-            return any(os.path.isfile(os.path.join(self.top, *folder.split("/"), ident + ".md"))
-                       for folder in layout.candidates(self.top, "decisions"))
+            return any(os.path.isfile(os.path.join(root, *folder.split("/"), ident + ".md"))
+                       for folder in layout.candidates(root, "decisions"))
         except (layout.LayoutError, KeyError, OSError):
             return False
+
+    def number(self, text, m):
+        """The round number a match names: its own digits, or the digits after the "review" form. None for the rest."""
+        found = re.search(r"round\s*(\d+)", m.group(0), re.I)
+        if not found and re.fullmatch(r"review\s+round", m.group(0), re.I):
+            found = self.NUMBER_AFTER.match(text, m.end())
+        return found.group(1) if found else None
 
     @staticmethod
     def paren_spans(text):
@@ -107,8 +122,8 @@ class ReviewRound:
     def finditer(self, text):
         spans = self.paren_spans(text)
         for m in self.ROUND.finditer(text):
-            n = re.search(r"round\s*(\d+)", m.group(0), re.I)
-            if n and any(lo < m.start() < hi and self.real(ident, n.group(1))
+            n = self.number(text, m)
+            if n and any(lo < m.start() < hi and self.real(ident, n)
                          for lo, hi in spans for ident in self.gloss_ids(text, lo)):
                 continue
             yield m
