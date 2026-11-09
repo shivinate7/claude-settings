@@ -8,7 +8,8 @@ Stop: when this turn ran `git commit`, `git push`, `git merge`, `git revert` or 
 (not with --abort, --quit, -n, --no-commit, -h or --help; --skip and --continue commit), `gh pr merge`,
 `gh pr create` or `gh pr update-branch` (not with --help or -h, nor `--disable-auto` on merge or `--web` on create),
 or a landing GitHub MCP tool (LANDING_TOOLS, which includes delete_file, update_pull_request_branch
-and enable_pr_auto_merge) after the last human message, block once unless the reply ends with one blockquote holding
+and enable_pr_auto_merge) after the last human message, or after a later peer message that arrives once a
+reply has ended its turn (a peer message mid-turn keeps the window), block once unless the reply ends with one blockquote holding
 the bold labels Done, Deviations, Input Needed, Next, in that order (CLAUDE.md, "Reports, in
 order"; the blockquote and no-fence rule lives in the `shiv-stylisms` output style). Prose may sit above the report on any turn. Nothing may follow the report.
 When stop_hook_active is set, the reply is already a rewrite, so the guard stays quiet, with one
@@ -3082,6 +3083,16 @@ def main():
     incoming = last_incoming_index(records)
     turn = records if incoming is None else records[incoming + 1:]
     after = [] if last_human_idx is None else records[last_human_idx + 1:]
+    landing = after
+    if incoming is not None and last_human_idx is not None and incoming > last_human_idx:
+        # A peer message after a reply that ended its turn starts a new turn: its landing window holds
+        # no commit from before it. One that arrives mid-turn (a tool result came last) leaves the window whole.
+        # The prior record is the last user or assistant message: an allow list, so a harness record of any other
+        # type (stop summary, queue, last-prompt, attachment, or one not yet seen) never hides the reset.
+        prior = [r for r in records[:incoming]
+                 if not r.get("isSidechain") and r.get("type") in ("user", "assistant")]
+        if prior and prior[-1].get("type") == "assistant" and not list(tool_uses(prior[-1])):
+            landing = records[incoming + 1:]
     route += success_route_flags(hook, after)
     note = ""
     pick_reason = ""
@@ -3114,7 +3125,7 @@ def main():
         except Exception as exc:
             print("cannot-claim guard: UNKNOWN, the check did not run (%s), so the claims went unchecked."
                   % type(exc).__name__, file=sys.stderr)
-    if last_human_idx is None or not turn_landed(after):
+    if last_human_idx is None or not turn_landed(landing):
         # An unlanded turn is judged on the question check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the question refusal.
         pick = [pick_reason]

@@ -34,6 +34,7 @@ import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (on
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
+from test_stall_watch_stop import atis_latch, hook_success, last_prompt, queue_op, stop_summary, tools_used  # noqa: E402  the harness's record builders (one home)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 # The correction step's words (decision guard-remedy-not-to-owner, shared tails). A refusal holds none of them; the
@@ -122,9 +123,11 @@ def tool_result_msg(tool_use_id="tu_1", content="ok", is_error=False):
     return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": [block]}}
 
 
-def assistant_text(text):
-    return {"type": "assistant", "isSidechain": False,
-            "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
+def assistant_text(text, stop_reason=None):
+    message = {"role": "assistant", "content": [{"type": "text", "text": text}]}
+    if stop_reason:
+        message["stop_reason"] = stop_reason  # a reply that ends its turn carries "end_turn", as a real one does
+    return {"type": "assistant", "isSidechain": False, "message": message}
 
 
 def background_agent_launch(spawn, n=0):
@@ -616,6 +619,59 @@ class ReportGuardTests(unittest.TestCase):
         run = run_guard(REPORT_GUARD, self.hook_for(path))
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
+
+    def test_rg_red_a_turn_after_a_peer_message_is_not_judged_by_an_earlier_commit(self):
+        # Catches: a reply that lands nothing, after a peer's fix-check message, is asked for a report because a
+        # commit earlier in the same human message landed. The landing check starts at the last human message, which
+        # a peer never is, so the earlier commit stays in its window; the pick check starts at the peer message.
+        # Scope first: the same commit followed by a reply with no report blocks.
+        with tempfile.TemporaryDirectory() as tmp:
+            witness = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}),
+                       tool_result_msg(), assistant_text("Landed it.")]
+            run = run_guard(REPORT_GUARD, self.hook_for(write_transcript(witness, tmp)))
+            self.assertEqual(json.loads(run.stdout).get("decision"), "block", "scope: the witness did not block")
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}),
+                       tool_result_msg(), assistant_text(GOOD_REPORT),
+                       peer_msg("fix check: 0 findings on abc1234"),
+                       assistant_text("Fix check passed; nothing to land.")]
+            run = run_guard(REPORT_GUARD, self.hook_for(write_transcript(records, tmp)))
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stdout.strip(), "",
+                             "a turn that lands nothing was asked for a report: " + run.stdout[:200])
+        # Catches: a record that ends no turn and starts none, between the reply and the peer message, stops the peer
+        # message from starting a new turn, so the earlier commit still counts and "nothing to land" is asked for a
+        # report. The stop summary and queue rows are green before the fix. The last-prompt, atis-latch, tools-used and
+        # hook_success rows, and the measured order from a real transcript, are red. The row with no record is the control.
+        measured = [queue_op("enqueue", 0), stop_summary(0), queue_op("remove", 0), queue_op("enqueue", 0),
+                    last_prompt(), atis_latch(), queue_op("dequeue", 0)]
+        ends_no_turn = [("stop_hook_summary", [stop_summary(0)]), ("queue-operation", [queue_op("enqueue", 0)]),
+                        ("last-prompt", [last_prompt()]), ("atis-latch", [atis_latch()]),
+                        ("tools-used", [tools_used(["Bash"])]), ("hook_success attachment", [hook_success()]),
+                        ("measured order", measured)]
+        for label, extra in [("no record", [])] + ends_no_turn:
+            with self.subTest(between=label), tempfile.TemporaryDirectory() as tmp:
+                records = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}),
+                           tool_result_msg(), assistant_text(GOOD_REPORT, "end_turn"), *extra,
+                           peer_msg("fix check: 0 findings on abc1234"),
+                           assistant_text("Fix check passed; nothing to land.", "end_turn")]
+                run = run_guard(REPORT_GUARD, self.hook_for(write_transcript(records, tmp)))
+                self.assertEqual(run.returncode, 0)
+                self.assertEqual(run.stdout.strip(), "",
+                                 "%s between the reply and the peer message: the peer message did not start a new "
+                                 "turn, so the earlier commit still counts: %s" % (label, run.stdout[:200]))
+        # Pin (green before the fix): a peer message that arrives mid-turn, after a tool result and a record that ends
+        # no turn, keeps the earlier commit in its window and the reply must still block. A fix that resets on any
+        # record but a tool result passes these replies and fails here.
+        for label, extra in ends_no_turn:
+            with self.subTest(mid_turn=label), tempfile.TemporaryDirectory() as tmp:
+                records = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}),
+                           tool_result_msg(), *extra,
+                           peer_msg("Answer: yes, rename it."), assistant_text("Renamed it and committed.")]
+                run = run_guard(REPORT_GUARD, self.hook_for(write_transcript(records, tmp)))
+                self.assertEqual(run.returncode, 0)
+                self.assertNotEqual(run.stdout.strip(), "", "a mid-turn peer message after %s reset the window" % label)
+                self.assertEqual(json.loads(run.stdout).get("decision"), "block")
 
     def test_67_every_github_landing_tool_with_no_report_blocks(self):
         # Pinned by hand, not read from report_guard.LANDING_TOOLS: an emptied set must fail here.
@@ -1369,6 +1425,24 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertEqual(self.stop(bad, True)["decision"], "block")
         self.assertIsNone(self.stop(bad, True))
 
+    def test_rw_three_stops_block_once_and_leave_no_marker(self):
+        # Catches: a report marker that is not written, or that a correction leaves behind. Stop 1 blocks for the
+        # missing report and writes the marker, Stop 2 gives a correction block and consumes it, Stop 3 stays quiet.
+        # The shared step missing_report_block() is the first stop. test_rw_second_rewrite_stays_quiet checks the
+        # outputs only, so this case reads the marker file too: a correction that re-arms it would loop.
+        import local_time  # hooks/ is on sys.path; the same path helper the guard writes through
+        marker = local_time.report_marker_path(self.sid)
+        self.assertIsNotNone(marker, "no marker path for the test session")
+        self.missing_report_block()
+        self.assertTrue(os.path.exists(marker), "Stop 1 blocked for the missing report but wrote no marker")
+        bad = "> **Done** BUILT the guard, PR #5\n> **Next** merge"
+        out = self.stop(bad, True)
+        self.assertIsNotNone(out, "Stop 2, a flawed rewrite, gave no correction block")
+        self.assertEqual(out["decision"], "block")
+        self.assertFalse(os.path.exists(marker), "the correction block left the marker")
+        self.assertIsNone(self.stop(bad, True), "Stop 3 re-checked a flawed rewrite after the correction")
+        self.assertFalse(os.path.exists(marker), "Stop 3 left a marker")
+
     def test_rw_correct_rewrite_passes(self):
         self.missing_report_block()
         self.assertIsNone(self.stop(self.GOOD, True))
@@ -1733,8 +1807,9 @@ class CompactionCarryTests(unittest.TestCase):
         # Catches: a PR with no "#" passes as a source: "PR2", "PR3", "PR   <n>" (spaces), "PR <n>", "GitHub PR <n>",
         # "pr 2 of the plan", "the PR 3 times", and a bare PR beside a page or git word, which that word does not
         # rescue: "PR <n> on the page", "PR <n> (page)", "PRs <n> (page)", "PR no. <n> (page)", "PR-<n> on the page",
-        # "PR: 978 (git)", "PR number 978 (git)". The "#" form is the source
-        # (test_cc_green_recovered_item_naming_a_commit_pr_or_url_passes).
+        # "PR: 97 (git)", "PR number 97 (git)". The coordinator's pick: a PR source needs
+        # "#<n>". The "#" form is the source (test_cc_green_recovered_item_naming_a_commit_pr_or_url_passes), and the
+        # green controls are "PR #3" and "PR #97 on the page" (test_cc_green_spaced_pr_hash_is_a_source).
         items = ["ruling X from PR2", "ruling X from PR3", "ruling X from PR   3", "ruling X from PR 978",
                  "ruling X from GitHub PR 978", "ruling X from pr 2 of the plan", "ruling X from the PR 3 times",
                  "ruling X from PR 978 on the page", "ruling X from PRs 978 (page)", "ruling X from PR no. 978 (page)",
@@ -1754,7 +1829,9 @@ class CompactionCarryTests(unittest.TestCase):
         reply = report_lines("Recovered: ruling X from PR 978 (git)", "Handoff gave: none")
         out = self.stop(self.compacted_turn(reply))
         self.assertBlocksNaming(out, "ruling X from PR 978 (git)")
-        self.assertIn("PR #<n>", out["reason"], "the refusal for a PR with no # does not name PR #<n> as the fix")
+        self.assertIn("Recovered guard: the Recovered item 'ruling X from PR 978 (git)' names a PR with no #, "
+                      "which is no source (the form is PR #<n>)", out["reason"],
+                      "the refusal for a PR with no # does not name the PR #<n> form")
 
     def test_cc_red_pr_past_sixty_characters_still_names_the_hash_fix(self):
         # Catches: a bare PR past character 60 of a Recovered item is judged on the cut-off text, so the refusal
@@ -1803,7 +1880,7 @@ class CompactionCarryTests(unittest.TestCase):
 
     def test_cc_green_spaced_pr_hash_is_a_source(self):
         # Catches: "PR #<n>" refused as sourceless. It is the control for the cases above: a narrowing that drops
-        # only the no-space forms must leave it a source. "PR #<n> on the page" is the control for the page-word case.
+        # only the no-space forms must leave it a source. "PR #97 on the page" is the control for the page-word case.
         for item in ("ruling X from PR #3", "ruling X from PR #978 on the page"):
             with self.subTest(item=item):
                 reply = report_lines("Recovered: " + item, "Handoff gave: none")
