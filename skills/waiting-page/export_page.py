@@ -30,8 +30,9 @@ Every doc is scanned, as parsed JSON, before the first write: each string value,
 shapes, except that a version pin such as `react@18.3.1` and a retina name such as `logo@2x.png` are not emails.
 Credentials in a URL, `scheme://user:password@host`, refuse on any host, an IP host too. A file that is not UTF-8 is
 read as latin-1; only a file with a NUL byte is binary and not scanned, whatever its name. Only the shape counts:
-words such as "token budget" or "password manager" pass. So do a password word with a
-placeholder, a mask or a plain word as the whole rest of its line, `PWD=<path>`, a no-reply address and an ssh remote of a public git host.
+words such as "token budget" or "password manager" pass. So do a password word with a placeholder, a mask or a plain
+word as its value and only blanks or plain prose (a function word, then letter words) after it on its line,
+`PWD=<path>`, a no-reply address and an ssh remote of a public git host.
 A personal fact in plain words passes too. A postal address (street, PO box, "City, ST ZIP") is a shape.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
 longer fetched is deleted from its collection folder; a truncated fetch deletes docs, and git history keeps them.
@@ -114,6 +115,15 @@ STREET_WORDS = ("Street", "St", "Avenue", "Ave", "Road", "Rd", "Drive", "Dr", "L
                 "Highway", "Hwy")
 STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND"
                "|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY")
+# Everyday words that end in `key`. A lookbehind on the letters before `key` in each (`mon`, `whis`) makes a `key`
+# right after them no key word, so `monkey: Banana12345` passes. The stem must start the word (string start or a
+# non-letter before it): `commonKey` and `returnKey` hold the stems `mon` and `turn` but are credential names. Any
+# other `key`, `secret`, `token` or `cookie` in a name counts, however it is glued to the word before it.
+EVERYDAY_KEY_WORDS = ("monkey", "hotkey", "turkey", "turnkey", "donkey", "whiskey", "jockey", "hockey", "lackey")
+KEY_WORD = r"(?:secret|token|cookie|" + "".join("(?<!(?<![A-Za-z])%s)" % w[:-3] for w in EVERYDAY_KEY_WORDS) + r"key)"
+# The letter and the digit of a random-looking value are looked for in its first characters only: a lookahead to the
+# end of a long run, from each key word in it (`key=key=...`), makes the scan quadratic.
+VALUE_LOOKAHEAD_MAX = 256
 # Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
 # from starting inside a longer word ("risk-" and "btn-sk-" are not "sk-").
 SECRET_SHAPES = (
@@ -135,22 +145,28 @@ SECRET_SHAPES = (
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
     # `scheme://user:password@host`, on any host: a version pin after the `@` is blanked, so an IP host is caught here.
     ("url-credentials", re.compile(r"://[^/?#\s@:]+:[^/?#\s@]+@")),
-    ("password", re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(\S+)", re.I)),
-    ("email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
+    # The lookbehind takes `_` too, so a name starts at its run's first character and a long run is read once.
+    ("password", re.compile(r"(?<![A-Za-z0-9_])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(\S+)", re.I)),
+    # The lookbehind starts the local part at its run's first character only: a start at each character re-reads a long run.
+    ("email", re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
     # Bare "Bearer <token>" or "Basic <credential>" with no header name: 20 or more token characters, so prose such as
     # "Bearer tokens" or "Basic idea" passes.
     ("bearer", re.compile(r"(?<![A-Za-z0-9])(?:Bearer|Basic)[ \t]+[A-Za-z0-9._~+/=-]{20,}")),
-    # A name that holds secret, token, key or cookie in any case form (API_SECRET, X-API-Key, apiKey, authtoken,
+    # A name that holds secret, token, key or cookie in any case form (API_SECRET, X-API-Key, apiKey, authtoken, NPMTOKEN,
     # SECRET_KEY_BASE, "clientSecret") set to a literal that looks random: 8 or more characters with a letter and a
-    # digit. A number, a "$VAR" or "${{ ... }}" reference and a plain word pass, and so does a label with a word between,
-    # as in "token budget: 200000". A second branch takes a value with no digit: 12 or more of [A-Za-z_-] that end the
-    # value (end of line, a closing quote, `,`, `;` or `}`) and have no camelCase hump (3 lower-case letters then a capital;
-    # a hump after 1 or 2, as in `QwErTy`, is random), so `accessTokenValue`, `localStorage.getItem(` and prose such as
-    # "Token: Authorization needed" pass. A letters-only value set with `:` that reads as words (letters_are_words)
-    # passes too.
+    # digit. The key word may sit anywhere in the name; only the everyday words of EVERYDAY_KEY_WORDS are no key word.
+    # A match starts at a key word and takes name characters up to the next key word, so each name character is read
+    # once and a long name or a long run scans in linear time; the last key word of a name is the one that reaches the
+    # `=` or `:`. A number, a "$VAR" or "${{ ... }}" reference and a plain word pass, and so does a label with a word
+    # between, as in "token budget: 200000". A second branch takes a value with no digit: 12 or more of [A-Za-z_-] that
+    # end the value (end of line, a closing quote, `,`, `;` or `}`) and have no camelCase hump (3 lower-case letters
+    # then a capital; a hump after 1 or 2, as in `QwErTy`, is random), so `accessTokenValue`,
+    # `localStorage.getItem(` and prose such as "Token: Authorization needed" pass. A letters-only value that reads as
+    # words (letters_are_words) passes too, after a `:` only.
     ("credential-name", re.compile(
-        r"[A-Za-z0-9_-]*(?:secret|token|key|cookie)[A-Za-z0-9_-]*[\"']?[ \t]*(?P<sep>[=:])[ \t]*[\"']?(?:"
-        r"(?=[A-Za-z0-9+/_.~%=-]*[A-Za-z])(?=[A-Za-z0-9+/_.~%=-]*\d)[A-Za-z0-9+/_.~%=-]{8,}"
+        KEY_WORD + r"(?:(?!" + KEY_WORD + r")[A-Za-z0-9_-])*[\"']?[ \t]*(?P<sep>[=:])[ \t]*[\"']?(?:"
+        r"(?=[A-Za-z0-9+/_.~%=-]{0," + str(VALUE_LOOKAHEAD_MAX) + r"}[A-Za-z])"
+        r"(?=[A-Za-z0-9+/_.~%=-]{0," + str(VALUE_LOOKAHEAD_MAX) + r"}\d)[A-Za-z0-9+/_.~%=-]{8,}"
         r"|(?!(?-i:[A-Za-z_-]*[a-z]{3}[A-Z]))(?P<letters>[A-Za-z_-]{12,})(?=[\"']?[ \t]*(?:[,;}\r\n]|\Z)))", re.I)),
     # A well-known cookie name set with "=" to a value of 8 or more characters with a digit in it.
     ("cookie-value", re.compile(
@@ -168,15 +184,29 @@ SECRET_SHAPES = (
     ("address", re.compile(
         r"(?<![A-Za-z0-9])[A-Z][A-Za-z.]*(?:[ \t][A-Z][A-Za-z.]*)*,[ \t]*(?:" + STATE_CODES + r")[ \t]+\d{5}(?:-\d{4})?(?!\d)")),
 )
-# A value after a password word that names no secret: a word, a mask, a template placeholder or (after PWD) a path. Each
-# must be the whole rest of its line, after one pair of wrapping quotes or brackets and trailing `.,;` are taken off:
-# a word after it on the same line may be the secret (`none hunter2`). Anything else is refused.
+# A value after a password word that names no secret: a word, a mask, a template placeholder or (after PWD) a path,
+# after trailing `.,;`, a closing backtick, a `)` or `]` that closes a wrapper opened before the match, and one pair of
+# wrapping quotes or brackets are taken off (bare_value). Only blanks or plain prose (PROSE_REST)
+# may follow it on its line: another word there may be the secret (`none hunter2`). Anything else is refused.
 PLAIN_VALUES = frozenset(("optional", "required", "none", "null", "empty", "unset", "hidden", "redacted", "omitted"))
 MASK_VALUE = re.compile(r"[*•#]{3,}|[xX]{3,}")
 # `<placeholder words>` has no digits. A variable reference has an ALL_CAPS name, so `$Tr0ub4dor` and `${hunter2}` refuse.
 PLACEHOLDER_VALUE = re.compile(
     r"<[A-Za-z_ -]+>|\$\{[A-Z][A-Z_]*\}|\{\{[A-Z][A-Z_]*\}\}|\$[A-Z][A-Z_]*|%[A-Z][A-Z_]*%")
 REST_OF_LINE = re.compile(r"[^\r\n]*")  # the text after a password value, up to its line end
+# Prose after a value: a function word first, then only letter words. A digit, a symbol or a word that is no function
+# word right after the value (`none hunter2`, `none, hunter2`) is not prose, and a value must not hide a secret after a
+# plain word. A `,` `;` or `.` that the value takes (`none,`) never reaches the separator test below, so
+# `password: none, then swordfish` passes: the rest is a function word then letter words.
+PROSE_FUNCTION_WORDS = ("a", "an", "the", "for", "to", "in", "on", "at", "of", "by", "with", "from", "as", "if", "when",
+                        "while", "until", "unless", "and", "or", "but", "is", "are", "since", "because", "so", "then")
+PROSE_REST = re.compile(
+    r"[ \t]+(?:" + "|".join(PROSE_FUNCTION_WORDS) + r")"
+    r"(?:[ \t,;]+[A-Za-z][A-Za-z'-]*)*[.,;:!?]*[ \t]*", re.I)
+# After a `;`, a `,` or one of these words, a word that is no function word may be a second value (`default is
+# swordfish`, `none and swordfish`), so the prose is refused. Only function words may follow such a separator.
+PROSE_SEPARATORS = frozenset(("and", "or", "but", "is", "are"))
+PROSE_TOKEN = re.compile(r"[A-Za-z][A-Za-z'-]*|[;,]")  # one pass over the line: bounded, no nested repeat
 WRAP_PAIRS = frozenset(('""', "''", "[]", "()"))  # one pair around the value is no part of it
 SHELL_PATH = re.compile(r"[~/][\w./~-]*")  # path characters only: no `;`, `&`, `=` or space can hide a second keyword
 SHELL_PWD = "PWD"  # the shell's working-directory variable; with a path value it is no password
@@ -215,9 +245,12 @@ def is_phone(text):
 
 
 def bare_value(value):
-    """`value` without trailing punctuation, a `)` or `]` that closes a wrapper opened before the match, and one
-    pair of wrapping quotes or brackets."""
+    """`value` without trailing punctuation, a closing backtick, a `)` or `]` that closes a wrapper opened before the
+    match, and one pair of wrapping quotes or brackets."""
     value = value.rstrip(".,;")
+    if value[-1:] == "`":  # a code span around the value; its opening backtick is no part of the value
+        value = value[:-1].rstrip(".,;")
+        value = value[1:] if value[:1] == "`" else value
     if value[-1:] in (")", "]") and ("(" if value[-1] == ")" else "[") not in value:
         value = value[:-1].rstrip(".,;")
     if value[:1] + value[-1:] in WRAP_PAIRS:
@@ -225,10 +258,25 @@ def bare_value(value):
     return value
 
 
+def rest_is_prose(rest):
+    """True when `rest` is plain prose after a password value and holds no second value after a separator."""
+    if not PROSE_REST.fullmatch(rest):
+        return False
+    after_separator = False
+    for token in PROSE_TOKEN.findall(rest):
+        token = token.lower()
+        if token in PROSE_SEPARATORS or token in ";,":
+            after_separator = True
+        elif after_separator and token not in PROSE_FUNCTION_WORDS:
+            return False
+    return True
+
+
 def password_is_no_secret(found):
     """True when the value after a password word is a plain word, a mask or a placeholder, or `found` is
-    `PWD=<path>`, and nothing but blanks follows it on its line."""
-    if REST_OF_LINE.match(found.string, found.end()).group(0).strip():
+    `PWD=<path>`, and nothing but blanks or plain prose follows it on its line."""
+    rest = REST_OF_LINE.match(found.string, found.end()).group(0)
+    if rest.strip() and not rest_is_prose(rest):
         return False
     value = bare_value(found.group(2))
     if found.group(1) == SHELL_PWD and SHELL_PATH.fullmatch(value):
