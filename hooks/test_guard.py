@@ -29621,11 +29621,14 @@ def fix_brief(head=FIX_H1, pr_line="PR 12", pre=(), extra=()):
     return lines
 
 
-def fix_check_judged(lines, records=(), live=FIX_H3, read_error=None, model="sonnet", config=None):
+def fix_check_judged(lines, records=(), live=FIX_H3, read_error=None, model="sonnet", config=None, default=None, host=None):
     """(reason, unread, reads) for one reviewer spawn whose brief is `lines`, judged in this process by role_model_check
     against the rules fixture's pointer, or against `config`. `model` None leaves the model field out, as a spawn with no
     model. The chain read is replaced by `fix_check_read`: it records each PR it is asked for, then returns (`records`,
-    `live`), or raises `read_error`. The environment is restored after the call."""
+    `live`), or raises `read_error`. `default` sets CLAUDE_CODE_SUBAGENT_MODEL for the call, as an owner's default does; None
+    leaves it unset. `host` is a merge tool Host class (fix_check_host): the real `fix_check_read` runs unpatched through it,
+    `records` and `read_error` are then unused, and `reads` is the list the class records its PR reads in.
+    The environment is restored after the call."""
     module = _load_guard_module()
     reads = []
 
@@ -29640,8 +29643,18 @@ def fix_check_judged(lines, records=(), live=FIX_H3, read_error=None, model="son
     with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config or role_config("fixcheck", ROLE_RULES_POINTER)}):
         for name in FIX_JUDGE_ENV_OFF:
             os.environ.pop(name, None)
-        with mock.patch.object(module, FIX_CHAIN_READ, fake_read, create=True):
-            reason, _matched, unread = module.role_model_check("Agent", spawn)
+        if default is not None:
+            os.environ["CLAUDE_CODE_SUBAGENT_MODEL"] = default
+        if host is None:
+            with mock.patch.object(module, FIX_CHAIN_READ, fake_read, create=True):
+                reason, _matched, unread = module.role_model_check("Agent", spawn)
+        else:
+            tool = module.merge_module()
+            if tool is None:
+                raise RuntimeError("the merge tool did not load, so the real chain read cannot run")
+            reads = host.reads
+            with mock.patch.object(tool, "Host", host):
+                reason, _matched, unread = module.role_model_check("Agent", spawn)
     return reason, unread, reads
 
 
@@ -29959,6 +29972,203 @@ LOG_CHECKS_EXTRA.append(("role-model: fix check chain: an empty fix diff's remed
                          fix_check_empty_diff_remedy_pushes_the_fix))
 LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a chain refusal still briefs the newest earlier record's Head (control)",
                          fix_check_chain_remedy_still_briefs_the_newest_head))
+
+
+# ---- B5: the real chain read runs unpatched through a fake merge tool Host. A fix check with no model is refused with the no-model
+# reason when no pin or default allows it, even on an eligible chain. A default that is not Opus judges a no-model fix check on its
+# chain; an Opus default leaves it to the ceiling.
+def fix_check_body(head, fix=None, verdict="FAIL"):
+    """One review record body on pull request 12 at `head`, as the merge tool's Host returns it from review_comments."""
+    return fix_check_merge().review_body(12, head, "normal", "yes", [(1, "reviewer", "sonnet", verdict)], "not owed", fix=fix)
+
+
+def fix_check_host(bodies, live):
+    """A merge tool Host class in place of its gh reads. pr() answers `live` as the head, and each pull request it is asked for is one
+    entry in the class's `reads`, so one chain read is one entry. review_comments() answers `bodies` for pull request 12."""
+    class FakeChainHost:
+        reads = []
+
+        def pr(self, number):
+            FakeChainHost.reads.append(number)
+            return {"created": "2026-11-01T00:00:00Z", "head": live}
+
+        def review_comments(self, since):
+            return {12: list(bodies)}
+    return FakeChainHost
+
+
+def fix_check_real_read_allows_an_eligible_chain():
+    """Control. It fails on a fix_check_read that returns no records, since the real chain read must feed the verdict."""
+    scope = fix_check_scope_problem()
+    if scope:
+        return False, scope
+    host = fix_check_host([fix_check_body(FIX_H0), fix_check_body(FIX_H1)], FIX_H2)
+    reason, unread, reads = fix_check_judged(fix_brief(head=FIX_H1), host=host)
+    if reads != [12]:
+        return False, "the real chain read ran for %r, want PR 12 once" % (reads,)
+    if reason:
+        return False, "an eligible fix check on the real chain read was refused: %s" % reason
+    if unread:
+        return False, "an eligible fix check on the real chain read was logged as unread"
+    return True, "the real chain read runs once, unpatched, and an eligible fix check on it is allowed (the control)"
+
+
+def fix_check_real_read_refuses_a_fixed_chain():
+    """It fails on a fix_check_read that returns no records: the real read's records must reach the verdict and refuse a fixed chain."""
+    scope = fix_check_scope_problem()
+    if scope:
+        return False, scope
+    host = fix_check_host([fix_check_body(FIX_H1), fix_check_body(FIX_H2, fix=(FIX_H1, "reviewer", "sonnet", "PASS"))], FIX_H3)
+    reason, unread, reads = fix_check_judged(fix_brief(head=FIX_H2), host=host)
+    if reads != [12]:
+        return False, "the real chain read ran for %r, want PR 12 once" % (reads,)
+    if FIX_CHAIN_SENTENCE not in reason:
+        return False, "a fix check on a fixed chain, read through the real read, was not refused with the tool's reason: %r" % reason
+    if unread:
+        return False, "a refused fix check on the real chain read was also logged as unread"
+    return True, "the real chain read runs once, unpatched, and a fix check on a fixed chain is refused with the tool's reason"
+
+
+def fix_check_real_read_refuses_an_empty_chain():
+    """The empty state of the real read: no earlier record, so the fix check is refused with the chain reason and reads once."""
+    scope = fix_check_scope_problem()
+    if scope:
+        return False, scope
+    host = fix_check_host([], FIX_H2)
+    reason, unread, reads = fix_check_judged(fix_brief(head=FIX_H1), host=host)
+    if reads != [12]:
+        return False, "the real chain read ran for %r, want PR 12 once" % (reads,)
+    if FIX_CHAIN_SENTENCE not in reason:
+        return False, "a fix check on an empty chain, read through the real read, was not refused with the tool's reason: %r" % reason
+    if unread:
+        return False, "a refused fix check on an empty chain was also logged as unread"
+    return True, "the real chain read runs once, unpatched, and a fix check on an empty chain is refused with the tool's reason"
+
+
+# The agent file names the reviewer with no model line, so its pin reads False: a spawn with no model has no pin to run on.
+ROLE_FIX_NOPIN_CFG = role_config("fixcheck-nopin", role_table("fixcheck-nopin", ROLE_TABLE_RULES, agents=("reviewer",)))
+
+
+def no_model_reason_prefix():
+    """The no-model refusal's text before its remedy, read from the guard's own constant, so no case types a copy of it."""
+    return _load_guard_module().ROLE_NO_MODEL_REASON.split("%s")[0]
+
+
+def fix_check_nopin_scope_problem():
+    """None when the no-pin fixture reads the reviewer's agent file as unpinned: a plain reviewer with no model is refused with the
+    no-model reason, not allowed and not logged unread. Else the cause."""
+    reason, unread, reads = fix_check_judged(["Check the diff for typos.", "PR 12", "Reviewed head: " + FIX_H1],
+                                             model=None, config=ROLE_FIX_NOPIN_CFG)
+    if not reason or no_model_reason_prefix() not in reason:
+        return "the no-pin fixture did not refuse a plain reviewer with no model with the no-model reason: %r" % (reason,)
+    if unread:
+        return "the no-pin fixture logged a plain reviewer with no model unread: the agent file did not read as unpinned"
+    if reads:
+        return "a plain reviewer with no model read a chain for %r" % (reads,)
+    return None
+
+
+def fix_check_no_pin_refuses_an_eligible_chain():
+    """A fix check with no model, no default and no pin is refused with the no-model reason, even on an eligible chain. A chain that
+    passes must not return before the pin check."""
+    scope = fix_check_nopin_scope_problem()
+    if scope:
+        return False, scope
+    chain = [fix_check_record(FIX_H0), fix_check_record(FIX_H1)]
+    reason, unread, reads = fix_check_judged(fix_brief(head=FIX_H1), chain, live=FIX_H2, model=None, config=ROLE_FIX_NOPIN_CFG)
+    if not reason:
+        return False, "an eligible fix check with no model, no default and no pin was allowed, so the chain allow returned before the pin check"
+    if no_model_reason_prefix() not in reason:
+        return False, "an eligible fix check with no pin was refused, but not with the no-model reason: %s" % reason
+    if unread:
+        return False, "an eligible fix check with no pin was logged as unread"
+    return True, "a fix check with no model, no default and no pin is refused with the no-model reason, even on an eligible chain"
+
+
+def fix_check_no_pin_refuses_a_fixed_chain_with_the_chain_reason():
+    """Control: a fixed chain refuses first, so the no-model reason does not replace the chain reason. The chain verdict wins."""
+    scope = fix_check_nopin_scope_problem()
+    if scope:
+        return False, scope
+    chain = [fix_check_record(FIX_H1), fix_check_record(FIX_H2, fix=(FIX_H1, "reviewer", "sonnet", "PASS"))]
+    reason, unread, reads = fix_check_judged(fix_brief(head=FIX_H2), chain, model=None, config=ROLE_FIX_NOPIN_CFG)
+    if reads != [12]:
+        return False, "a fix check with no pin on a fixed chain was judged without its chain: reads %r, want PR 12 once" % (reads,)
+    if FIX_CHAIN_SENTENCE not in reason:
+        return False, "a fix check with no pin on a fixed chain was not refused with the chain reason: %r" % reason
+    if unread:
+        return False, "a refused fix check with no pin was also logged as unread"
+    return True, "a fix check with no model, no default and no pin on a fixed chain is refused with the chain reason (the control)"
+
+
+def fix_check_default_refuses_a_fixed_chain(default):
+    """A fix check with no model under a default that is not Opus is judged on its chain: a fixed chain is refused with the chain reason."""
+    scope = fix_check_scope_problem()
+    if scope:
+        return False, scope
+    chain = [fix_check_record(FIX_H1), fix_check_record(FIX_H2, fix=(FIX_H1, "reviewer", "sonnet", "PASS"))]
+    reason, unread, reads = fix_check_judged(fix_brief(head=FIX_H2), chain, model=None, default=default)
+    if reads != [12]:
+        return False, "a fix check with no model under a %s default read its chain %r, want PR 12 once" % (default, reads)
+    if FIX_CHAIN_SENTENCE not in reason:
+        return False, "a fix check with no model under a %s default on a fixed chain was not refused with the chain reason: %r" % (default, reason)
+    if unread:
+        return False, "a refused fix check with no model under a %s default was also logged as unread" % default
+    return True, "a fix check with no model under a %s default is judged on its chain, and a fixed chain is refused with one read" % default
+
+
+def fix_check_default_allows_an_eligible_chain(default):
+    """A fix check with no model under a default that is not Opus is allowed on an eligible chain, after one read."""
+    scope = fix_check_scope_problem()
+    if scope:
+        return False, scope
+    chain = [fix_check_record(FIX_H0), fix_check_record(FIX_H1)]
+    reason, unread, reads = fix_check_judged(fix_brief(head=FIX_H1), chain, live=FIX_H2, model=None, default=default)
+    if reads != [12]:
+        return False, "a fix check with no model under a %s default read its chain %r, want PR 12 once" % (default, reads)
+    if reason:
+        return False, "an eligible fix check with no model under a %s default was refused: %s" % (default, reason)
+    if unread:
+        return False, "an eligible fix check with no model under a %s default was logged as unread" % default
+    return True, "a fix check with no model under a %s default is allowed on an eligible chain, after one read" % default
+
+
+def fix_check_default_opus_control():
+    """Control: under an Opus default a fix check with no model is left to the ceiling. It reads no chain, so a fixed chain is allowed."""
+    scope = fix_check_scope_problem()
+    if scope:
+        return False, scope
+    chain = [fix_check_record(FIX_H1), fix_check_record(FIX_H2, fix=(FIX_H1, "reviewer", "sonnet", "PASS"))]
+    reason, unread, reads = fix_check_judged(fix_brief(head=FIX_H2), chain, model=None, default="opus")
+    if reads:
+        return False, "under an opus default a fix check with no model read its chain for %r, which the ceiling leaves unread" % (reads,)
+    if reason:
+        return False, "under an opus default a fix check with no model was refused: %s" % reason
+    if unread:
+        return False, "under an opus default a fix check with no model was logged as unread"
+    return True, "under an opus default a fix check with no model reads no chain and is allowed (the control)"
+
+
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: the real chain read, unpatched, allows an eligible fix check with one read (control)",
+                         fix_check_real_read_allows_an_eligible_chain))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: the real chain read, unpatched, refuses a fix check on a fixed chain with one read",
+                         fix_check_real_read_refuses_a_fixed_chain))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: the real chain read, unpatched, refuses a fix check on an empty chain with one read",
+                         fix_check_real_read_refuses_an_empty_chain))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a fix check with no model, no default and no pin is refused with the no-model reason on an eligible chain",
+                         fix_check_no_pin_refuses_an_eligible_chain))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a fix check with no model, no default and no pin on a fixed chain is refused with the chain reason (control)",
+                         fix_check_no_pin_refuses_a_fixed_chain_with_the_chain_reason))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a fix check with no model under a haiku default on a fixed chain is refused with one read",
+                         lambda: fix_check_default_refuses_a_fixed_chain("haiku")))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a fix check with no model under a sonnet default on a fixed chain is refused with one read",
+                         lambda: fix_check_default_refuses_a_fixed_chain("sonnet")))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a fix check with no model under a haiku default on an eligible chain is allowed after one read",
+                         lambda: fix_check_default_allows_an_eligible_chain("haiku")))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a fix check with no model under a sonnet default on an eligible chain is allowed after one read",
+                         lambda: fix_check_default_allows_an_eligible_chain("sonnet")))
+LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a fix check with no model under an opus default reads no chain and is allowed (control)",
+                         fix_check_default_opus_control))
 
 
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
