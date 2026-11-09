@@ -377,7 +377,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .bar .st { flex: 1 1 0; font-size: 14.5px; color: var(--muted); min-width: 0; }
 .bar .st b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .bar textarea { flex: 1 1 100%; font: 13px var(--mono); background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
-.btn.send { min-height: 48px; padding-inline: 18px; max-inline-size: 100%; overflow-wrap: anywhere; }
+.btn.send { min-height: 48px; padding-inline: 18px; max-inline-size: 100%; overflow-wrap: break-word; hyphens: manual; }
 .sent { background: var(--surface); border-bottom: 1px solid var(--line); }
 .sent .in { padding-block: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; font-size: 15px; }
 .sent-head { flex: 1 1 320px; min-width: 0; display: flex; gap: 16px; align-items: center; }
@@ -763,7 +763,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .unfold .uf-labels { display: grid; min-width: 0; }
 /* The Show dismissed toggle's words break inside a box narrower than one of them, so the toggle never sets the page's width. */
 .older .uf-labels { grid-template-columns: minmax(0, 1fr); }
-.older .uf-labels > span { overflow-wrap: anywhere; }
+.older .uf-labels > span { overflow-wrap: break-word; hyphens: manual; }
 .unfold .uf-labels > span { grid-area: 1 / 1; visibility: hidden; }
 .unfold[aria-expanded="false"] .uf-show, .unfold[aria-expanded="true"]:not([aria-disabled="true"]) .uf-hide, .unfold[aria-disabled="true"] .uf-lock { visibility: visible; }
 /* Locked open: the card holds an answer Send would submit, so the fold cannot close. */
@@ -805,7 +805,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .btn.fixw > .sz { visibility: hidden; }
 /* A press never runs past the box that holds it: its one track may shrink below the widest label, whose words then break. */
 .btn.fixw { grid-template-columns: minmax(0, max-content); max-inline-size: 100%; }
-.btn.fixw > span { min-width: 0; overflow-wrap: anywhere; }
+.btn.fixw > span { min-width: 0; overflow-wrap: break-word; hyphens: manual; }
 /* The ask list's busy label ("Dismissing…") and its hidden sizer only set the press's width: where the track is narrower each clips on one line, so neither sets the press's height. */
 .asklist .btn.fixw > :is(.sz, .busy) { white-space: nowrap; overflow: hidden; max-inline-size: 100%; }
 .asklist .btn.fixw > .busy { text-overflow: ellipsis; }
@@ -882,8 +882,8 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askc.folded { padding: 0; }
 .frow { width: 100%; min-height: 48px; padding: 4px 16px; background: none; border: 0; border-radius: 12px; text-align: left; cursor: pointer; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 4px 12px; color: var(--ink); }
 .frow:hover { background: var(--acc-soft); }
-.frow .ftext { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.frow .fwhen { font-size: .875rem; color: var(--muted); white-space: nowrap; overflow-wrap: anywhere; }
+.frow .ftext { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: anywhere; }
+.frow .fwhen { font-size: .875rem; color: var(--muted); white-space: nowrap; overflow-wrap: break-word; hyphens: manual; }
 .frow .fgo { color: var(--acc); font-weight: 600; font-size: .90625rem; white-space: nowrap; }
 /* The ask list reads its own width in em: a row takes its phone arrangement when the list is as narrow as the 520px window's, 30.5em at the default size. */
 @container askl (width <= 30.5em) {
@@ -891,7 +891,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   .frow .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .frow .fwhen { grid-column: 2; grid-row: 2; white-space: normal; min-width: 0; }
   .frow .fdate { display: inline-block; }
-  .frow .fgo { grid-column: 3; grid-row: 1 / span 2; white-space: normal; overflow-wrap: anywhere; min-width: 0; }
+  .frow .fgo { grid-column: 3; grid-row: 1 / span 2; white-space: normal; overflow-wrap: break-word; hyphens: manual; min-width: 0; }
 }
 .older { justify-self: start; width: auto; max-inline-size: 100%; }
 /* The owner's reply sits inside the thread it follows, on the surface ground of "You asked", so his words and a session's differ by ground. */
@@ -917,12 +917,12 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 /* A folded thread with a reply that waits or a new answer to one: the row stays one button; the reply shows under it, outside the fold. */
 .askc.folded .fwait { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 2px 12px; margin: 0; padding: 8px 16px 12px; border-top: 1px solid var(--line); }
 .askc.folded .fwait > .g { margin-top: 5px; }
-.askc.folded .fwait .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.askc.folded .fwait .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: anywhere; }
 .askc.folded .fwait .astate { grid-column: 2; }
 @container askl (width <= 30.5em) { .askc.folded .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
 /* Dismiss: it shares the thread's end with Reply, Reply first. It is the quieter act, kept 44 px. Off while a reply waits: a dashed edge, with the reason beside it. */
 .replyend .endrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
-.replyend .endrow > .btn { min-height: 44px; max-inline-size: 100%; overflow-wrap: anywhere; }
+.replyend .endrow > .btn { min-height: 44px; max-inline-size: 100%; overflow-wrap: break-word; hyphens: manual; }
 .btn.dismiss, .btn.restore { min-height: 44px; }
 .btn.dismiss[aria-disabled="true"] { border: 1.5px dashed var(--faint); color: var(--muted); cursor: default; }
 .endrow .dwhy { font-size: .875rem; color: var(--muted); min-width: 0; }
@@ -954,10 +954,11 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   .frow { grid-template-columns: auto minmax(0, 1fr); padding-block: 8px; align-items: start; }
   .frow > .g { margin-block-start: calc((1.55em - 12px) / 2); }
   .frow .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+  .askc.folded .fwait .ftext { -webkit-line-clamp: 3; }
   .frow .fwhen { grid-column: 2; grid-row: 2; white-space: normal; min-width: 0; }
   .frow .fdate { display: inline-block; }
   /* A row with no side press (a reply waits): Show answer goes under the date, at the text's start. */
-  .frow .fgo { grid-column: 2; grid-row: 3; justify-self: start; white-space: normal; overflow-wrap: anywhere; min-width: 0; }
+  .frow .fgo { grid-column: 2; grid-row: 3; justify-self: start; white-space: normal; overflow-wrap: break-word; hyphens: manual; min-width: 0; }
   /* The words need 94 px at the default size and the text column is 90 px at 180 wide, so the label takes 12 px of the row's 16 px end padding to stay on one line.
      At larger text the column is far too narrow either way and the words wrap inside the window. A bandaid for one narrow width, kept because it moves nothing else. */
   .frow .fgo { margin-inline-end: -12px; }
@@ -988,7 +989,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   .askrow .btn.askgo { grid-column: 1; grid-row: 3; }
   .askrow .slot { grid-column: 1; grid-row: 4; }
   /* Send ask's sizer ("Send 99 asks") may wrap, and a word wider than the box breaks inside it, so no press or label runs past the box. */
-  .askrow .btn { white-space: normal; max-inline-size: 100%; overflow-wrap: anywhere; justify-self: start; }
+  .askrow .btn { white-space: normal; max-inline-size: 100%; overflow-wrap: break-word; hyphens: manual; justify-self: start; }
 }
 /* A reply form in the same box keeps the arrangement the 520px rule gives it: the hint on its own line, then Close at the start and
    Send reply at the end of one line. Where those two no longer fit side by side, Send reply takes the first line and Close the next. */
