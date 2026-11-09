@@ -1,11 +1,11 @@
 {
   "title": "iOS builds ship to TestFlight from GitHub Actions, with the App Store key as a protected GitHub environment secret",
   "why": "Proposal from the mailaudit coordinator (session_01MVD32RMmHxq9LhRNihx66B), after mailaudit owner answer 65 a; the home, degen and mailaudit coordinators agreed one shared reusable macOS workflow on 2026-11-08 (page ask ask-mw8lneqo26).",
-  "note": "Filed by triage, Nov 8 19:46 CST. Waits on page item 452 testflight-from-actions: it departs from decision ios-ship-is-one-shared-tool (key only on the Mac). On a: one claude-settings record plus the shared workflow; each repo keeps its own ruling on where builds ship. Related: steps c47, c91. Parked (owner's word via the home cloud coordinator, 19:49 CST Nov 8, page ask ask-mw8lt9pjm7): home builds the shared iPhone CI pieces first (screen check with simctl content sizes and video; TestFlight workflow with repo secrets ASC_KEY_P8, ASC_KEY_ID, ASC_ISSUER_ID, now set in home, degen and mailaudit, then `bin/ios-ship testflight` on a macOS runner), keeping the generic parts separate, then hands them to claude-settings to lift into one shared action beside the ios-apps skill (home's docs/plans/plan-shared-screen-check.md). Item 452 closed as overtaken. The lift rewrites decision ios-ship-is-one-shared-tool, which still says the .p8 lives only on the Mac.",
+  "note": "Filed by triage, Nov 8 19:46 CST. Waits on page item 452 testflight-from-actions: it departs from decision ios-ship-is-one-shared-tool (key only on the Mac). On a: one claude-settings record plus the shared workflow; each repo keeps its own ruling on where builds ship. Related: steps c47, c91. Parked (owner's word via the home cloud coordinator, 19:49 CST Nov 8, page ask ask-mw8lt9pjm7): home builds the shared iPhone CI pieces first (screen check with simctl content sizes and video; TestFlight workflow with repo secrets ASC_KEY_P8, ASC_KEY_ID, ASC_ISSUER_ID, now set in home, degen and mailaudit, then `bin/ios-ship testflight` on a macOS runner), keeping the generic parts separate, then hands them to claude-settings to lift into one shared action beside the ios-apps skill (home's docs/plans/plan-shared-screen-check.md). Item 452 closed as overtaken. The lift rewrites decision ios-ship-is-one-shared-tool, which still says the .p8 lives only on the Mac. Item 452 closed as a (coordinator reconcile 19:52 CST): the owner's word puts the key in repo secrets and ships from Actions. Blocked on home's pieces landing, not on the owner; claude-settings owns the shared rule's home once home's version proves out.",
   "phase": "next",
-  "owner": "home coordinator hand-off",
+  "owner": "coordinator",
   "lane": "",
   "status": "blocked",
   "order": 859,
-  "updatedAt": "2026-11-08T19:51:00-06:00"
+  "updatedAt": "2026-11-08T19:53:00-06:00"
 }
