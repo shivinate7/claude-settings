@@ -11783,7 +11783,7 @@ for _label, _target in VARIABLE_TARGET_ROUTES:
     bash_post("review-record: an unmarked edit whose endpoint is a substitution is refused as a read that could not run, %s" % _label,
               "gh api -X PATCH %s -f 'body=%s'" % (_target, UNMARKED_BODY), "deny", rule=REVIEW_RULE, carries=("could not run",))
 
-# Decision pr-review-record, the variable route: an endpoint that is a substitution, with no PATCH or PUT, is a post. An unmarked body is
+# Decision pr-review-record, the variable route: an endpoint that is a substitution, with no PATCH, is a post. An unmarked body is
 # allowed with no read, since a post with no marker makes none. A marked body is refused with no read, since the endpoint names no pull
 # request the guard can read.
 for _label, _target in VARIABLE_TARGET_ROUTES:
@@ -11871,6 +11871,39 @@ for _label, _command in (
 # call after `&&` joins the substitution and is never judged on its own. The `rm` after it is still refused under its own rule.
 bash_post("review-record: a quoted parenthesis in a substitution does not hide a call after && from its own rule, gh api post then rm",
           "gh api repos/y/x/issues/$(echo '(' 12)/comments -f 'body=%s' && rm -rf $HOME" % UNMARKED_BODY, "deny", rule="destructive-delete")
+
+# SCANNER PINS. Decision pr-review-record. `review_segments` and `_open_substitutions` (hooks/guard.py) read what is code. A lone
+# apostrophe in text, and a `#`, a `//` or a `/*` inside quotes, are text: they neither cut a line nor open a substitution. Each pin
+# holds its verdict on both sides: prose after the CI line is refused, and a footer after `---` is allowed. All green on the head.
+PIN_OPENERS = ("#", "//", "/*")
+for _opener in PIN_OPENERS:
+    bash_post("review-record: prose after the CI line with %s in single quotes is refused, gh pr comment --body" % _opener,
+              "%s --body '%s'" % (PR_CMD, review_record() + "Lane note: keep %s as text.\n" % _opener), "deny", rule=REVIEW_RULE,
+              carries=FORM_TEXT)
+    bash_post("review-record: prose after the CI line with %s in single quotes is refused, gh api -f body=" % _opener,
+              "%s -f 'body=%s'" % (API_CMD, review_record() + "Lane note: keep %s as text.\n" % _opener), "deny", rule=REVIEW_RULE,
+              carries=FORM_TEXT)
+    bash_post("review-record: a record with a footer that holds %s in single quotes is allowed, gh pr comment --body" % _opener,
+              "%s --body '%s'" % (PR_CMD, review_record() + "---\nGenerated with Claude Code, keep %s as text\n" % _opener), "allow")
+    bash_post("review-record: a record with a footer that holds %s in single quotes is allowed, gh api -f body=" % _opener,
+              "%s -f 'body=%s'" % (API_CMD, review_record() + "---\nGenerated with Claude Code, keep %s as text\n" % _opener), "allow")
+# A `#` that opens a line after the CI line is prose, not a comment the splitter may drop: the refusal holds.
+bash_post("review-record: prose after the CI line that opens with # is refused, gh pr comment --body",
+          "%s --body '%s'" % (PR_CMD, review_record() + "# Lane note after the record.\n"), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
+# A lone apostrophe in double quotes: the prose after the CI line is refused, and a footer with an apostrophe is allowed.
+bash_post("review-record: prose after the CI line with a lone apostrophe in double quotes is refused, gh pr comment --body",
+          '%s --body "%s"' % (PR_CMD, review_record() + "Lane note: Don't merge yet.\n"), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
+bash_post("review-record: prose after the CI line with a lone apostrophe is refused, gh api -f body= in double quotes",
+          '%s -f "body=%s"' % (API_CMD, review_record() + "Lane note: Don't merge yet.\n"), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
+bash_post("review-record: a record with a footer that holds a lone apostrophe in double quotes is allowed, gh pr comment --body",
+          '%s --body "%s"' % (PR_CMD, review_record() + "---\nDon't edit by hand, it's generated\n"), "allow")
+# The same texts inside a substitution: the quoted opener or apostrophe is text, so the substitution still opens and closes, and the
+# route is judged. A marked edit or post on each is refused under the rule, with no read.
+for _label, _word in (("#", "'#'"), ("//", "'//'"), ("/*", "'/*'"), ("a lone apostrophe", "\"Don't\"")):
+    bash_post("review-record: a marked edit whose id is a substitution with %s in quotes is refused, gh api -X PATCH" % _label,
+              "gh api -X PATCH repos/y/x/issues/comments/$(echo %s 4417) -f 'body=%s'" % (_word, review_record()), "deny", rule=REVIEW_RULE)
+    bash_post("review-record: a marked post whose number is a substitution with %s in quotes is refused, gh api post" % _label,
+              "gh api repos/y/x/issues/$(echo %s 12)/comments -f 'body=%s'" % (_word, review_record()), "deny", rule=REVIEW_RULE)
 
 # THE REMEDY NAMES WHAT IS A VARIABLE. A post to a literal number in a variable repo is told to name the repo, not to write the PR number
 # literally, which is the remedy for a variable number. A variable number keeps its remedy: write the number literally.
@@ -12154,6 +12187,26 @@ for _what, _route in UNREADABLE_ROUTE_FORMS:
               carries=("the read of the comment's current body could not run",))
 
 
+# A SPACED SUBSTITUTION BESIDE LITERAL REPO TEXT. Decision pr-review-record, the variable forms. The repo holds literal text, then a
+# `$(...)` with a space in it. The shell word splits at that space, and `_joined_substitutions` joins the pieces back, but the route
+# pattern (`_ROUTE_REPO`, hooks/guard.py) takes a repo that starts with `$(`, not one with literal text before it. So no route matches,
+# and a marked body in the call is never judged. Each case is red on the head, where the call is allowed.
+bash_post("review-record: a marked edit whose repo is literal text beside a spaced substitution is refused, gh api -X PATCH, $(basename \"$PWD\")",
+          'gh api -X PATCH repos/OWNER/$(basename "$PWD")/issues/comments/5 -f body="%s"' % REVIEW_MARKER_TEXT, "deny", rule=REVIEW_RULE)
+bash_post("review-record: an unmarked edit whose repo is a spaced substitution beside literal text is refused as a read that could not run, gh api -X PATCH",
+          "gh api -X PATCH repos/$(cat owner)/r/issues/comments/5 -f body=x", "deny", rule=REVIEW_RULE, carries=("could not run",))
+bash_post("review-record: a marked post whose repo is a spaced substitution beside literal text is refused, gh api post, repos/o/$(cat name)/issues/12/comments",
+          "gh api repos/o/$(cat name)/issues/12/comments -f 'body=%s'" % review_record(), "deny", rule=REVIEW_RULE)
+bash_post("review-record: a marked post whose repo is a spaced substitution beside literal text is refused, gh api post, $(basename \"$PWD\")",
+          'gh api repos/OWNER/$(basename "$PWD")/issues/12/comments -f \'body=%s\'' % review_record(), "deny", rule=REVIEW_RULE)
+
+# A PUT IS NOT AN EDIT. Decision pr-review-record: the edit route is PATCH, in any spelling `_api_method` reads, so a PUT to an expansion
+# endpoint is a post. Its body comes from `--input`, which the guard does not read, so no marker is judged and the call is allowed. On the
+# head, `_comment_route` (hooks/guard.py) counts PUT as an edit, so the call is refused as a read that could not run.
+bash_post("review-record: a PUT to a shell-expanded endpoint with an --input body is allowed, it is not an edit, gh api -X PUT",
+          'gh api -X PUT "$EP" --input prot.json', "allow")
+
+
 def remedy_of(reason):
     """The remedy of a refusal: the text from `Remedy:` to the decision's cite. '' when the reason names none."""
     found = re.search(r"Remedy: (.*?)\s*\(decision", reason, re.S)
@@ -12242,6 +12295,38 @@ for _what, _command in (
 # number. This command has no comment id and no `{owner}/{repo}` route, so its remedy names neither.
 REVIEW_LOG_CHECKS.append(("review-record:an edit whose repo is a shell variable has a remedy that names the gh pr comment form, not a comment id or {owner}/{repo}, gh pr comment -R $REPO --edit-last",
                          literal_repo_remedy_check))
+
+
+def guard_merge_constant(name):
+    """The value of the top-level assignment `name` in guard_merge.py beside the guard under test, or None when the file or the
+    assignment is not there, or its value is no plain literal. Read by parse, not import: an import would run the module. Adjacent
+    string literals in one assignment are one value, as the interpreter joins them."""
+    path = os.path.join(os.path.dirname(os.path.realpath(GUARD)), "guard_merge.py")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+    except (OSError, SyntaxError, ValueError):
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            try:
+                return ast.literal_eval(node.value)
+            except (ValueError, TypeError, SyntaxError):
+                return None
+    return None
+
+
+# THE TWO REMEDIES OF A PULL REQUEST EDIT. Decision pr-review-record: `gh pr comment --edit-last` with a shell-expanded number and a
+# shell-expanded repo names both literal remedies: the PR number (REVIEW_LITERAL_PR_REMEDY) and the `-R owner/repo` (REVIEW_LITERAL_REPO_REMEDY),
+# as #2161 did. The old-body read checks the repo first and names only the repo remedy, so the PR remedy is missing. The two texts are the
+# constants of guard_merge.py, read from that file, so a case cannot drift from them.
+REVIEW_PR_REMEDY = guard_merge_constant("REVIEW_LITERAL_PR_REMEDY")
+REVIEW_REPO_REMEDY = guard_merge_constant("REVIEW_LITERAL_REPO_REMEDY")
+if not (isinstance(REVIEW_PR_REMEDY, str) and isinstance(REVIEW_REPO_REMEDY, str)):
+    sys.exit("the remedy texts REVIEW_LITERAL_PR_REMEDY and REVIEW_LITERAL_REPO_REMEDY cannot be read as text from the guard_merge.py "
+             "beside the guard under test")
+bash_post("review-record: an unmarked edit with a shell-expanded PR number and repo names both literal remedies, gh pr comment \"$PR\" -R \"$REPO\" --edit-last",
+          'gh pr comment "$PR" -R "$REPO" --edit-last --body x', "deny", rule=REVIEW_RULE, carries=(REVIEW_PR_REMEDY, REVIEW_REPO_REMEDY))
 
 # THE PLACEHOLDER THE REMEDY OFFERS IS READ. A route with `{owner}/{repo}` reads the comment an edit replaces, as a literal route does. The
 # stamped old body shows the read: the edit is refused over the record it reads.
@@ -23795,19 +23880,10 @@ def merge_import_exits_case():
 
 
 def guard_merge_read_timeout():
-    """MERGE_READ_TIMEOUT of the guard under test, parsed from the guard_merge.py beside it (an import
-    would run the module). None when the file or the assignment is not there or is not a plain number."""
-    path = os.path.join(os.path.dirname(os.path.realpath(GUARD)), "guard_merge.py")
-    try:
-        with open(path, encoding="utf-8") as handle:
-            tree = ast.parse(handle.read())
-    except (OSError, SyntaxError, ValueError):
-        return None
-    for node in tree.body:
-        if (isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "MERGE_READ_TIMEOUT" for t in node.targets)
-                and isinstance(node.value, ast.Constant) and isinstance(node.value.value, (int, float))
-                and not isinstance(node.value.value, bool)):
-            return float(node.value.value)
+    """MERGE_READ_TIMEOUT of the guard under test, read through guard_merge_constant. None when it is not a plain number."""
+    value = guard_merge_constant("MERGE_READ_TIMEOUT")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
     return None
 
 
