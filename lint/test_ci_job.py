@@ -11,12 +11,15 @@ StepMaps reads a step's with: and env: values: a block scalar as its lines, an i
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
 Lint mode: a --lint run that picks no lint step is unknown, exit 2; a lint step that a pull-request run would run reads
 unknown when it is skipped; a lint step that runs only off a pull request reads skipped, and the run still exits 0.
+HeavyBrake: in a cloud session (CLAUDE_CODE_REMOTE=true) a second heavy run is refused while one holds the lock, and the
+lock frees at the holder's death; --plan is never refused; with the variable unset nothing locks.
 Run: python3 lint/test_ci_job.py
 """
 import functools
 import json
 import os
 import re
+import select
 import shutil
 import signal
 import subprocess
@@ -75,10 +78,10 @@ class Job(unittest.TestCase):
         subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True, env=ENV)
         self.log = os.path.join(self.root, "verdict.log")
 
-    def job_call(self, *steps, args=(), env=None, script=CI_JOB, launch=()):
-        """argv and env of one run of the job: its workflow is written into the throwaway repo. launch: python's own flags
-        before the script, such as `-c` with a launcher's code."""
-        path = os.path.join(self.root, "wf.yml")
+    def job_call(self, *steps, args=(), env=None, script=CI_JOB, launch=(), wf="wf.yml"):
+        """argv and env of one run of the job: its workflow is written into the throwaway repo, as the file `wf`.
+        launch: python's own flags before the script, such as `-c` with a launcher's code."""
+        path = os.path.join(self.root, wf)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(workflow(*steps))
         env = {**ENV, "VERDICT_LOG": self.log, **{k: v for k, v in os.environ.items() if k == "VERDICT_HEARTBEAT"},
@@ -1701,6 +1704,178 @@ class QuietStepKeepsTheStallWatchFed(Job):
         self.assertEqual((done.returncode, self.verdicts(lines)), (0, ["PASS"]), done.stdout + done.stderr)
         self.assertNotIn("still running", done.stdout)
         self.assertIn("still running", done.stderr, done.stdout + done.stderr)
+
+
+@unittest.skipUnless(os.name == "posix", "the lock is an flock: POSIX only")
+class HeavyBrake(Job):
+    """The cloud brake on heavy runs (roadmap step cloud-heavy-check-brake). With CLAUDE_CODE_REMOTE=true, a run other than
+    --plan takes a non-blocking exclusive flock on one file in the temp dir before its first step. A run that finds the lock
+    held starts no step: one `unknown` line that names the holder's pid and command line, exit 2. --plan never locks and never
+    refuses. With the variable unset or not "true", nothing locks and parallel runs both run. The slow step reads a FIFO that
+    the test writes, so no case waits on a clock: each case holds the lock until it says to let go."""
+
+    kill_group = staticmethod(QuietStepKeepsTheStallWatchFed.kill_group)  # the process-group kill: its one home is that class
+    SLOW = step("slow", "read -r go < gate")  # blocks until the test writes the FIFO `gate` in the run's folder
+    QUICK = step("quick", "touch quick-ran.txt")
+
+    def setUp(self):
+        super().setUp()
+        self.tmp = tempfile.mkdtemp(prefix="heavy-tmp-", dir=RUN_FOLDER)  # the runs' TMPDIR: the lock's file is the only one left here
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        os.mkfifo(os.path.join(self.root, "gate"))
+
+    def start(self, name, *steps, remote="true", args=()):
+        """One run in its own session (cleanup kills its group), its log `<name>.log`, its workflow `<name>.yml`, its temp dir
+        this test's own. remote: the value of CLAUDE_CODE_REMOTE, or None to unset it, as a laptop's run has it."""
+        argv, env = self.job_call(*steps, args=args, wf="%s.yml" % name,
+                                  env={"TMPDIR": self.tmp, "VERDICT_LOG": os.path.join(self.root, "%s.log" % name)})
+        if remote is None:
+            env.pop("CLAUDE_CODE_REMOTE", None)  # ENV copies the session's own value, which is "true" in a cloud session
+        else:
+            env["CLAUDE_CODE_REMOTE"] = remote
+        proc = subprocess.Popen(argv, cwd=self.root, env=env, text=True, start_new_session=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.addCleanup(self.kill_group, proc)
+        return proc
+
+    def wait_started(self, proc):
+        """Block until the run prints `start: slow` on stderr. ci-job takes its lock before its first step starts, so the lock
+        is held from here. stderr is read raw from the pipe, so no wrapper's buffer hides what the run wrote."""
+        seen = b""
+        while b"start: slow\n" not in seen:
+            ready, _, _ = select.select([proc.stderr], [], [], 60)
+            if not ready:
+                self.fail("the run did not reach its slow step within 60 s: %r" % seen)
+            chunk = os.read(proc.stderr.fileno(), 4096)
+            if not chunk:
+                self.fail("the run ended before its slow step started: %r" % seen)
+            seen += chunk
+
+    def release(self):
+        """Let the slow step go. Linux opens a FIFO read-write without blocking, and the test keeps that descriptor open until
+        the test ends, so the step reads the line whenever it reaches its read."""
+        fd = os.open(os.path.join(self.root, "gate"), os.O_RDWR)
+        self.addCleanup(os.close, fd)
+        os.write(fd, b"go\n")
+
+    def finish(self, proc):
+        """The run's end -> (rc, verdict lines, output)."""
+        out, err = proc.communicate(timeout=120)
+        return proc.returncode, [ln for ln in out.splitlines() if not ln.startswith("log=")], out + err
+
+    def run_to_end(self, name, *steps, remote="true", args=()):
+        """One run, start to end -> (rc, verdict lines, output)."""
+        return self.finish(self.start(name, *steps, remote=remote, args=args))
+
+    @staticmethod
+    def names(text, pid):
+        """True when `text` holds `pid` as a whole number."""
+        return re.search(r"(?<!\d)%d(?!\d)" % pid, text) is not None
+
+    def files_naming(self, pid):
+        """The names of the files in this test's temp dir whose text holds `pid`."""
+        found = []
+        for name in os.listdir(self.tmp):
+            path = os.path.join(self.tmp, name)
+            if os.path.isfile(path):
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    if self.names(f.read(), pid):
+                        found.append(name)
+        return found
+
+    def test_a_heavy_run_is_refused_while_another_holds_the_lock(self):
+        holder = self.start("holder", self.SLOW)
+        self.wait_started(holder)
+        rc, lines, out = self.run_to_end("waiter", self.QUICK)
+        self.assertEqual(self.verdicts(lines), ["unknown"], "the second run was not refused, so no lock was held: %s" % out)
+        self.assertEqual(rc, 2, out)
+        self.assertTrue(self.names(lines[0], holder.pid), "the refusal does not name the holder's pid %d: %s" % (holder.pid, out))
+        self.assertFalse(os.path.exists(os.path.join(self.root, "quick-ran.txt")), "the refused run started its step: %s" % out)
+        self.release()
+        holder_rc, holder_lines, holder_out = self.finish(holder)
+        self.assertEqual((holder_rc, self.verdicts(holder_lines)), (0, ["PASS"]), "the holder did not pass after the refusal: %s" % holder_out)
+
+    def test_the_refusal_names_the_holders_command_line(self):
+        holder = self.start("holder", self.SLOW)
+        self.wait_started(holder)
+        rc, lines, out = self.run_to_end("waiter", self.QUICK)
+        self.assertEqual(self.verdicts(lines), ["unknown"], "the second run was not refused: %s" % out)
+        self.assertIn("holder.yml", lines[0], "the refusal does not name the holder's command line: %s" % out)
+        self.release()
+        self.finish(holder)
+
+    def test_a_run_started_after_the_holder_ends_is_not_refused(self):
+        holder = self.start("holder", self.SLOW)
+        self.wait_started(holder)
+        self.release()
+        holder_rc, holder_lines, holder_out = self.finish(holder)  # the holder ends first, and its lock goes with it
+        self.assertEqual((holder_rc, self.verdicts(holder_lines)), (0, ["PASS"]), holder_out)
+        rc, lines, out = self.run_to_end("waiter", self.QUICK)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the run after the holder ended was refused or failed: %s" % out)
+        self.assertTrue(os.path.exists(os.path.join(self.root, "quick-ran.txt")), out)
+
+    def test_a_killed_holder_frees_the_lock(self):
+        holder = self.start("holder", self.SLOW)
+        self.wait_started(holder)
+        rc, lines, out = self.run_to_end("waiter", self.QUICK)
+        self.assertEqual(self.verdicts(lines), ["unknown"], "the second run was not refused while the holder ran: %s" % out)
+        os.kill(holder.pid, signal.SIGKILL)  # the holder alone: its step is left running, and cleanup ends it
+        holder.wait()
+        rc, lines, out = self.run_to_end("third", self.QUICK)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the run after the holder was killed was refused or failed: %s" % out)
+
+    def test_with_the_variable_unset_parallel_runs_both_run(self):
+        self.assert_parallel_runs_both_run(remote=None)
+
+    def test_with_the_variable_not_true_parallel_runs_both_run(self):
+        self.assert_parallel_runs_both_run(remote="false")
+
+    def assert_parallel_runs_both_run(self, remote):
+        holder = self.start("holder", self.SLOW, remote=remote)
+        self.wait_started(holder)
+        self.assertEqual(self.files_naming(holder.pid), [], "a lock file names the holder although CLAUDE_CODE_REMOTE is not true")
+        rc, lines, out = self.run_to_end("waiter", self.QUICK, remote=remote)
+        self.assertIsNone(holder.poll(), "the holder had ended before the second run, so the runs were not parallel")
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the second run was refused or failed: %s" % out)
+        self.release()
+        holder_rc, holder_lines, holder_out = self.finish(holder)
+        self.assertEqual((holder_rc, self.verdicts(holder_lines)), (0, ["PASS"]), holder_out)
+
+    def test_plan_is_never_refused_while_a_heavy_run_holds_the_lock(self):
+        holder = self.start("holder", self.SLOW)
+        self.wait_started(holder)
+        rc, lines, out = self.run_to_end("waiter", self.QUICK)
+        self.assertEqual(self.verdicts(lines), ["unknown"], "the lock was not held: a heavy run was not refused: %s" % out)
+        rc, lines, out = self.run_to_end("planner", self.QUICK, args=("--plan",))
+        self.assertEqual((rc, lines), (0, ["would run       quick"]), "--plan was refused or changed while the lock was held: %s" % out)
+        self.release()
+        self.finish(holder)
+
+    def test_while_a_run_holds_the_lock_one_file_in_the_temp_dir_names_the_holder(self):
+        holder = self.start("holder", self.SLOW)
+        self.wait_started(holder)
+        named = self.files_naming(holder.pid)
+        self.assertEqual(len(named), 1, "the temp dir holds %d files that name the holder, want the one lock file: %s" % (len(named), named))
+        self.release()
+        self.finish(holder)
+
+    def test_a_finished_run_leaves_at_most_the_lock_file_in_the_temp_dir(self):
+        holder = self.start("holder", self.SLOW)
+        self.wait_started(holder)
+        named = self.files_naming(holder.pid)
+        self.release()
+        self.finish(holder)
+        left = os.listdir(self.tmp)
+        self.assertEqual([name for name in left if name not in named], [], "the run left a file that is not the lock file: %s" % left)
+        self.assertLessEqual(len(left), 1, "the run left more than one file in the temp dir: %s" % left)
+
+    def test_no_process_of_a_run_is_left_after_it_ends(self):
+        holder = self.start("holder", self.SLOW)
+        self.wait_started(holder)
+        self.release()
+        self.finish(holder)
+        with self.assertRaises(ProcessLookupError, msg="a process of the run is still running after the run ended"):
+            os.killpg(holder.pid, 0)  # the run's own group: ci-job and the children it started
 
 
 def load_ci_job():
