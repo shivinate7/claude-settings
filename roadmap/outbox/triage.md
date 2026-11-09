@@ -186,3 +186,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - nested-commands-named-any-way (same source): hooks/guard_push_delete.py `_nested_commands` comment "named any way" overstates. The lane folds it into the same PR.
 - three-way-apply-not-compared (lane compare-files-missing-key, #1616, via the coordinator 04:45 CST Nov 9): a diff applied with a 3-way merge is not compared against the new base before the push.
 - fix-check-brief-merge-base (same source): fix-check briefs diff against the merge base.
+- merge-copy-step7-names-step (lane artifact-pages-other-account, #2424 round 3, 05:28 CST Nov 9): SKILL.md "Merge a copy into a live page" step 7 says "copy steps"; it should name "Keep the page on main's code" step 3, run on a fresh fetch, because the live folder is stale after the batches land.
+- merge-copy-step7-unknown (same source): step 7 does not say what to do when `stale_pages.py --write` prints unknown, or when the out folder has no designData.json because the copy holds no designs.
+- export-merge-escape-doc (same source): the `--merge` docstring in export_page.py does not say designData.json is written with each less-than sign escaped; a test pins it, but no case covers a backslash right before the sign (a probe passed).
