@@ -3477,6 +3477,40 @@ for (const pct of [100, 200, 300]) for (const width of SHEET_TITLE_WIDTHS) for (
   });
 }
 
+// ---------------------------------------------------------------- the Designs title's cap at 300% text: the title's text ends inside the window
+// The cap (24cqw) keeps the title's 4em floor inside the head. Without it the floor is 204 px at 300% text, and "Option a" ends at 225 px:
+// red at 180, 200 and 220 wide. 240 is the control: the text ends at 225 px, inside the window, with or without the cap.
+// The edge is a Range on the text node, so it is the text's own. "Option a" fits its box on a0a0e5904 here, so the Range is the visible text.
+// Each width runs with the default font and with CI's wider fallback font, the stand-in the viewer's caption case uses.
+const WIDE_FONT = ".dsh-head { letter-spacing: 1.2px }";
+const TITLE_RED_300 = [180, 200, 220];
+const TITLE_CONTROL_300 = [240];
+const titleTextEnd = (page) => page.evaluate(() => { const h = document.getElementById("dTitle"), r = document.createRange(); r.selectNodeContents(h.firstChild); return { right: r.getBoundingClientRect().right, vw: innerWidth, text: h.textContent }; });
+for (const [set, note] of [[TITLE_RED_300, ""], [TITLE_CONTROL_300, " (control)"]]) for (const width of set) for (const wide of [false, true]) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, 300) + (wide ? ", with CI's wider font" : "");
+  test(`Designs sheet, ${scheme}: ${where}: the title's text ends inside the window${note}`, async (t) => {
+    const page = await tabSetPage(t, { width, pct: 300, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    if (wide) await page.addStyleTag({ content: WIDE_FONT });
+    await openDesigns(page);
+    const g = await titleTextEnd(page);
+    assert.ok(g.right <= g.vw + 0.5, `the Designs title ${JSON.stringify(g.text)} ends at ${Math.round(g.right)} px in a ${g.vw} px window, ${where}`);
+  });
+}
+// The Close button at 300% text stays inside the window from 180 to 240 wide. A control, not a red: the title takes the first line alone,
+// so Close wraps inside the head on a0a0e5904 and on a copy with the cap removed.
+for (const width of [180, 200, 220, 240]) for (const wide of [false, true]) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, 300) + (wide ? ", with CI's wider font" : "");
+  test(`Designs sheet, ${scheme}: ${where}: the Close button sits inside the window (control)`, async (t) => {
+    const page = await tabSetPage(t, { width, pct: 300, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    if (wide) await page.addStyleTag({ content: WIDE_FONT });
+    await openDesigns(page);
+    const b = await page.locator("#dClose").boundingBox();
+    const vw = await page.evaluate(() => window.innerWidth);
+    assert.ok(b, "the Designs sheet's Close has no box");
+    assert.ok(b.x >= -0.5 && b.x + b.width <= vw + 0.5, `the Designs sheet's Close runs from ${Math.round(b.x)} to ${Math.round(b.x + b.width)} px in a ${vw} px window, ${where}`);
+  });
+}
+
 // ---------------------------------------------------------------- the Designs head: Prev and Next share a row, and the title grows with the text
 // The integers a width sweep visits: from, from + step, up to and including to.
 const widthsFrom = (from, to, step) => Array.from({ length: Math.floor((to - from) / step) + 1 }, (_, i) => from + i * step);
