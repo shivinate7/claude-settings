@@ -10,7 +10,7 @@ The guard allows a WSL command only when every condition holds:
   - `pwsh -NoProfile -File <file>.test.ps1`
   - `python3 <dir>/test_<name>.py`
 - Its test path is relative. It has no `..`, no dot-led glob and no absolute path.
-- It can run as `python bin/verdict wsl -e ...`.
+- It can run behind `verdict` (`verdict wsl -e ...`), as the remedy shows, or `python bin/verdict wsl -e ...` in this repo.
 
 Plain `node <file>.test.mjs` takes one literal path, because node runs only its first file argument and more would give a false green. Any other plain node script, or an eval flag, stays refused.
 
