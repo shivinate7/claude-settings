@@ -1805,7 +1805,7 @@ def write_marker(hook, idx):
 # A relayed question (spec past-rulings): a coordinator puts a lane's question in its reply, under Input Needed or as
 # a prose line that ends in `?`, so neither check in hooks/call_judge.py sees it. This Stop hook checks it, SYNC, with
 # the same candidates and the same item 8 as the question judge, and one more rule: option keys (question-keys).
-# Cost: one git process and one Sonnet call (15 s) on a Stop whose reply asks something; none on any other Stop.
+# Cost: one git process and one Sonnet call (60 s) on a Stop whose reply asks something; none on any other Stop.
 RELAY_RULE_REASON = owner_line("Past-ruling guard (rule past-ruling)", "%s")
 UNVETTED_REASON = owner_line(
     "Unvetted guard (rule past-ruling)",
