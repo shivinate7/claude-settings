@@ -12977,6 +12977,70 @@ sh("frozen shell: the same case arm with the body line esac, then the second arm
    "from outside, allows [case arm heredoc body notes control]",
    "case x in a) bash <<EOF\nesac\nEOF\n;; b) bash -c 'cd " + slash(CFG) + "; sed -i s/a/b/ notes.txt' ;; esac",
    "allow", cwd=NOGIT)
+# A case arm whose subshell ends `;` + newline + `make)`. The guard reads the `;` + newline as `;;`, so the arm closes
+# before `make)`, the subshell never closes, and its cd into the config folder leaks past esac. Bash closes the
+# subshell on `make)`, so the sed after esac runs in the folder the agent is in, outside the config folder: allowed.
+sh("frozen shell: a case arm with (cd config folder;, a newline, make) > log, a ;;, then esac and sed -i on "
+   "settings.json, from outside, allows [case arm semicolon newline subshell red]",
+   "case x in\na) (cd " + slash(CFG) + ";\nmake) > log\n;;\nesac; sed -i s/a/b/ settings.json", "allow", cwd=NOGIT)
+# A case arm that cds into the config folder and shares a line with the case header, a do or then, a nested case, or a
+# ;& fall-through. Each control moves the case header onto its own line, and after ;& also the second arm's cd, and it
+# denies. Moving only the arm down still misses after do, then or ;&, so the do and then red rows keep the header
+# on their do or then line.
+sh("frozen shell: a one-line case with a|b) on the header, a cd into the config folder, then esac and sed -i on "
+   "settings.json, from outside, denies [one-line alternation red]",
+   "case x in a|b) cd " + slash(CFG) + " ;; esac; sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: the same case with the arm on a later line, then esac and sed -i on settings.json, from outside, "
+   "denies [one-line alternation control]",
+   "case x in\na|b) cd " + slash(CFG) + " ;;\nesac; sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: for i in 1; do a one-line case arm that cds into the config folder, then esac and sed -i on "
+   "settings.json in the loop, from outside, denies [one-line do red]",
+   "for i in 1; do case x in a) cd " + slash(CFG) + " ;; esac; sed -i s/a/b/ settings.json; done", "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen shell: for i in 1; do with the case header on the do line and the arm on a later line, from outside, "
+   "denies [do line header red]",
+   "for i in 1; do case x in\na) cd " + slash(CFG) + " ;;\nesac; sed -i s/a/b/ settings.json; done", "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen shell: the same loop with the case header alone on its line, from outside, denies [do line control]",
+   "for i in 1; do\ncase x in\na) cd " + slash(CFG) + " ;;\nesac; sed -i s/a/b/ settings.json; done", "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen shell: if true; then a one-line case arm that cds into the config folder, then esac and sed -i on "
+   "settings.json, from outside, denies [one-line then red]",
+   "if true; then case x in a) cd " + slash(CFG) + " ;; esac; sed -i s/a/b/ settings.json; fi", "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen shell: if true; then with the case header on the then line and the arm on a later line, from outside, "
+   "denies [then line header red]",
+   "if true; then case x in\na) cd " + slash(CFG) + " ;;\nesac; sed -i s/a/b/ settings.json; fi", "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen shell: the same if with the case header alone on its line, from outside, denies [then line control]",
+   "if true; then\ncase x in\na) cd " + slash(CFG) + " ;;\nesac; sed -i s/a/b/ settings.json; fi", "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen shell: a one-line nested case whose inner arm cds into the config folder, then esac and sed -i on "
+   "settings.json, from outside, denies [one-line nested case red]",
+   "case x in a) case y in b) cd " + slash(CFG) + " ;; esac ;; esac; sed -i s/a/b/ settings.json", "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen shell: the same nested case with the arms on later lines, from outside, denies [nested case control]",
+   "case x in\na) case y in\nb) cd " + slash(CFG) + " ;;\nesac ;;\nesac; sed -i s/a/b/ settings.json", "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen shell: a case whose second arm follows ;& on one line and cds into the config folder, then esac and "
+   "sed -i on settings.json, from outside, denies [case arm fall-through red]",
+   "case x in a) echo hi ;& b) cd " + slash(CFG) + " ;; esac; sed -i s/a/b/ settings.json", "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen shell: a case whose first arm falls through with ;& on its own line and whose second arm's pattern and cd "
+   "share a line, from outside, then esac and sed -i on settings.json, denies [case arm fall-through pattern line red]",
+   "case x in\na) echo hi\n;&\nb) cd " + slash(CFG) + " ;;\nesac; sed -i s/a/b/ settings.json", "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen shell: the same ;& case with the second arm's cd on its own line, from outside, denies "
+   "[case arm fall-through control]",
+   "case x in\na) echo hi\n;&\nb)\ncd " + slash(CFG) + "\n;;\nesac; sed -i s/a/b/ settings.json", "deny",
+   "frozen-path", cwd=NOGIT)
+# The two controls that keep today's verdict: the pattern alone on its line, and the pattern on the header line.
+sh("frozen shell: a case with the pattern alone on its line, a cd into the config folder, then esac and sed -i on "
+   "settings.json, from outside, denies [pattern alone control]",
+   "case x in\na)\ncd " + slash(CFG) + "\n;;\nesac; sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a case with a) on the header line and the cd on a later line, then esac and sed -i on "
+   "settings.json, from outside, denies [header pattern control]",
+   "case x in a)\ncd " + slash(CFG) + "\n;;\nesac; sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
 # Five cds, then a frozen write. The absolute chain is refused. The `../` chain reaches the same folders, and the walk
 # normalises each `..` step, so it is refused too. Both chains end on the config folder, and the notes.txt rows are the
 # same chains on a file that is not frozen.
