@@ -9,6 +9,8 @@ fixture come from merge/test_merge.py: a case extends that fixture, it does not 
 (class ReadyChecks) runs the same stub, through CiJobStub.
 The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
 BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four CI step runs, 0.5 s measured (3 runs of 2 cases). Its two lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
+StepCites: the step cite check. A `step:<slug>` cite in a record the pull request changes, or in its body, must name a step file on origin/roadmap;
+git_spy counts the roadmap fetches (one with cites, none without).
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -1009,6 +1011,289 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         notes = [line for line in out.splitlines() if "declares no ready checks" in line.lower()]
         self.assertEqual(len(notes), 1, out)
         self.assertEqual(rc, 0, out)
+
+
+STEP_FOLDER = "roadmap/data/steps"  # origin's roadmap branch holds each step as a file; a step cite names one by its stem
+STEP_JSON = {"title": "t", "status": "todo", "phase": "cleanup", "order": 1, "note": "n", "updatedAt": "2026-10-26T00:00:00Z"}
+ROADMAP_NAME = re.compile(r"(?:^|[/:+ ])roadmap(?=$|[/:])")  # the branch, its remote ref or its step folder, as one git argument
+
+
+def names_roadmap(argv):
+    """True when a git call names origin's roadmap branch or its step folder. The -C path is no name."""
+    rest = argv[3:] if argv[1:2] == ["-C"] else argv[1:]
+    return any(ROADMAP_NAME.search(arg) for arg in rest)
+
+
+def roadmap_fetches(calls):
+    return [argv for argv in calls if "fetch" in argv and names_roadmap(argv)]
+
+
+def roadmap_reads(calls):
+    return [argv for argv in calls if "fetch" not in argv and names_roadmap(argv)]
+
+
+def decision_text(slug, body):
+    """A decision record of the fixture: the frontmatter record() writes, then `body`."""
+    return "---\nid: D-010\nslug: %s\ntitle: %s\n---\n%s\n" % (slug, slug.title(), body)
+
+
+def debt_text(slug):
+    """A debt record of the fixture that cites the step `slug`."""
+    return "# Gap one\n\n- **What.** Cites `step:%s`.\n" % slug
+
+
+class StepCites(CiJobStub, tm.CloudSession):
+    """merge --lane-lint's step cite check. A `step:<slug>` cite in a record the pull request changes (docs/decisions/*.md, docs/debts/*.md,
+    a CLAUDE.md), or for a pull request number in its body, must name a step file on origin's roadmap branch. Each case writes origin's roadmap
+    (put_roadmap) and its pull request head (push_feat, push_main) from the second clone, and runs the lint stub of CiJobStub, so no real lint runs.
+    git_spy logs each git call merge makes, so a case reads how often the roadmap is fetched."""
+
+    @classmethod
+    def setUpClass(cls):
+        unittest.TestCase.setUpClass()  # not CloudSession's: it would make a second run folder
+        cls.run_dir = RUN_FOLDER
+
+    def setUp(self):
+        with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):  # Env.setUp makes its repos in the temp dir: keep them in this run's folder
+            super().setUp()
+        self.lock = NoLock()
+        self.init_stub()
+        self.use_ci_job(PASSING, 0)
+
+    run_lane = LaneLint.run_lane  # the run and its refusal read, as LaneLint reads them
+    lint_run = LaneLint.lint_run
+
+    def put_roadmap(self, slugs):
+        """origin's roadmap branch: an orphan holding roadmap/data/steps/<slug>.json for each of `slugs`."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "--orphan", "roadmap")
+        tm.sh(o, "git", "rm", "-rq", "-f", ".")
+        for slug in slugs:
+            tm.put(os.path.join(o, STEP_FOLDER, slug + ".json"), json.dumps(STEP_JSON))
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-qm", "roadmap steps")
+        tm.sh(o, "git", "push", "-q", "origin", "roadmap")
+
+    def push_main(self, files):
+        """One commit on origin's main holding `files` ({path: text}), pushed from the second clone."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        for rel, text in files.items():
+            tm.put_lf(os.path.join(o, rel), text)
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-qm", "main moves")
+        tm.sh(o, "git", "push", "-q", "origin", "main")
+
+    def push_feat(self, files):
+        """The pull request head: one commit on origin's feat holding `files` ({path: text}), made after origin/main is merged in. -> the pushed head."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        tm.sh(o, "git", "merge", "-q", "--no-edit", "origin/main")
+        for rel, text in files.items():
+            tm.put_lf(os.path.join(o, rel), text)
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-qm", "feat: step cites")
+        tm.sh(o, "git", "push", "-q", "origin", "feat")
+        return self.head("feat")
+
+    @contextlib.contextmanager
+    def git_spy(self, fail=lambda argv: False):
+        """Log each git call merge makes and fail each call `fail` picks, with rc 128. Yields the list of logged argvs."""
+        calls, real = [], merge.sh
+
+        def spy(args, *rest, **kwargs):
+            if args and args[0] == "git":
+                calls.append(list(args))
+                if fail(args):
+                    return 128, "fatal: refused by the test"
+            return real(args, *rest, **kwargs)
+
+        with unittest.mock.patch.object(merge, "sh", spy):
+            yield calls
+
+    def test_a_missing_step_cited_inline_in_a_changed_decision_refuses_and_names_it(self):
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "Builds on `step:ghost-alpha`.")})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a changed decision's missing step cite passed the lint: " + text)
+        self.assertIn("ghost-alpha", text, "the refusal does not name the missing step: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed PASS over a missing step: " + text)
+
+    def test_a_step_cited_in_a_changed_decision_that_is_on_the_roadmap_passes(self):  # the control
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "Builds on `step:real-step`.")})
+        rc, text = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a cite of a step on the roadmap refused the lint: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+
+    def test_a_missing_step_cited_in_the_pr_body_refuses_and_names_it(self):
+        self.put_roadmap(["real-step"])
+        self.host.body = "Lane summary. Builds on `step:body-ghost`.\n"
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a missing step cite in the pull request body passed the lint: " + text)
+        self.assertIn("body-ghost", text, "the refusal does not name the missing step in the body: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed PASS over a missing step: " + text)
+
+    def test_a_step_cited_in_the_pr_body_that_is_on_the_roadmap_passes(self):  # the control
+        self.put_roadmap(["real-step"])
+        self.host.body = "Builds on `step:real-step`.\n"
+        rc, text = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a body cite of a step on the roadmap refused the lint: " + text)
+
+    def test_a_missing_step_cited_in_a_changed_debt_or_the_claude_md_refuses_and_names_both(self):
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/debts/gap-one.md": debt_text("debt-ghost"), "CLAUDE.md": "# Rules\n\nSee `step:claude-ghost`.\n"})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a missing step cite in a changed debt or CLAUDE.md passed the lint: " + text)
+        self.assertIn("debt-ghost", text, "the refusal does not name the debt's missing step: " + text)
+        self.assertIn("claude-ghost", text, "the refusal does not name the CLAUDE.md's missing step: " + text)
+
+    def test_a_missing_step_cited_by_two_records_is_printed_once(self):
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "See `step:twice-ghost`."),
+                        "docs/debts/gap-one.md": debt_text("twice-ghost")})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a missing step cited by two records did not refuse: " + text)
+        self.assertEqual(text.count("twice-ghost"), 1, "the one missing step is printed %d times, want once: %s" % (text.count("twice-ghost"), text))
+
+    def test_the_missing_steps_print_in_sorted_order(self):
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "Cites `step:zulu-ghost` then `step:alpha-ghost`.")})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "two missing steps did not refuse: " + text)
+        self.assertIn("alpha-ghost", text, "the refusal does not name alpha-ghost: " + text)
+        self.assertIn("zulu-ghost", text, text)
+        self.assertLess(text.index("alpha-ghost"), text.index("zulu-ghost"), "the missing steps are not printed in sorted order: " + text)
+
+    def test_a_cite_inside_a_fenced_block_is_ignored_and_a_cite_after_the_fences_refuses(self):
+        self.put_roadmap(["real-step"])
+        body = "```\nstep:fenced-ghost\n```\n~~~\nstep:tilde-ghost\n~~~\nAfter both fences: `step:after-ghost`.\n"
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", body)})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the cite after the fences passed the lint: " + text)
+        self.assertIn("after-ghost", text, "the refusal does not name the cite after the fences: " + text)
+        self.assertNotIn("fenced-ghost", text, "a cite inside a backtick fence was counted: " + text)
+        self.assertNotIn("tilde-ghost", text, "a cite inside a tilde fence was counted: " + text)
+
+    def test_the_placeholder_step_slug_is_no_cite_and_a_real_missing_cite_still_refuses(self):
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "Write the cite as `step:<slug>`. Real: `step:placeholder-ghost`.")})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a real missing cite beside a placeholder did not refuse: " + text)
+        self.assertIn("placeholder-ghost", text, "the refusal does not name the real missing step: " + text)
+        self.assertNotIn("step:<slug>", text, "the placeholder was read as a cite: " + text)
+
+    def test_prose_next_step_is_no_cite_and_a_real_missing_cite_still_refuses(self):
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "The next step: prose-word is open. Real: `step:prose-ghost`.")})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a real missing cite beside prose did not refuse: " + text)
+        self.assertIn("prose-ghost", text, "the refusal does not name the real missing step: " + text)
+        self.assertNotIn("prose-word", text, "prose 'next step: foo' was read as a cite: " + text)
+
+    def test_a_lone_quote_or_a_comment_opener_before_a_cite_does_not_hide_it(self):
+        lines = ["Don't: `step:lone-ghost`.", "Note // `step:slash-ghost`.", "Note # `step:hash-ghost`.",
+                 "Note /* `step:block-ghost`.", 'He said "`step:double-ghost`".']
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "\n".join(lines))})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a missing cite after a quote or a comment opener did not refuse: " + text)
+        for slug in ("lone-ghost", "slash-ghost", "hash-ghost", "block-ghost", "double-ghost"):
+            self.assertIn(slug, text, "a cite after a quote or an opener was hidden, so %s is not named: %s" % (slug, text))
+
+    def test_a_missing_cite_in_a_record_the_pull_request_did_not_change_is_ignored(self):
+        self.put_roadmap(["real-step"])
+        self.push_main({"docs/decisions/old-bad.md": decision_text("old-bad", "Old: `step:main-only-ghost`.")})
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "New: `step:changed-ghost`.")})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the changed record's missing cite passed the lint: " + text)
+        self.assertIn("changed-ghost", text, "the refusal does not name the changed record's missing step: " + text)
+        self.assertNotIn("main-only-ghost", text, "a record the pull request did not change was scanned: " + text)
+
+    def test_a_missing_cite_in_a_changed_file_outside_the_record_homes_is_ignored(self):
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/plans/plan-one.md": "Plan: `step:plan-ghost`.\n",
+                        "docs/decisions/cites-one.md": decision_text("cites-one", "Real: `step:decision-ghost`.")})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a changed decision's missing cite did not refuse: " + text)
+        self.assertIn("decision-ghost", text, "the refusal does not name the decision's missing step: " + text)
+        self.assertNotIn("plan-ghost", text, "a changed file outside the record homes was scanned: " + text)
+
+    def test_a_ref_target_reads_no_pr_body_and_refuses_only_for_its_changed_records(self):
+        self.put_roadmap(["real-step"])
+        sha = self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "Real: `step:ref-record-ghost`.")})
+        self.host.body = "Body: `step:ref-body-ghost`.\n"
+        rc, text = self.run_lane("--lane-lint", sha)
+        self.assertEqual(rc, 1, "a ref target's missing record cite passed the lint: " + text)
+        self.assertIn("ref-record-ghost", text, "the refusal does not name the changed record's missing step: " + text)
+        self.assertNotIn("ref-body-ghost", text, "a ref target scanned a pull request body: " + text)
+        self.assertEqual(self.host.pr_calls, [], "a ref target read the pull request")
+
+    def test_a_step_file_only_on_main_does_not_count_as_on_the_roadmap(self):
+        self.put_roadmap(["real-step"])
+        self.push_main({"roadmap/data/steps/main-only-step.json": json.dumps(STEP_JSON)})
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "Real: `step:main-only-step`.")})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a step file on main, not on origin's roadmap, passed the lint: " + text)
+        self.assertIn("main-only-step", text, "the refusal does not name the step missing from the roadmap: " + text)
+
+    def test_the_roadmap_is_fetched_once_for_every_cite_of_the_run(self):
+        self.put_roadmap(["one-real", "two-real"])
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "See `step:one-real`."),
+                        "docs/decisions/cites-two.md": decision_text("cites-two", "See `step:two-real` and `step:one-real`.")})
+        self.host.body = "Builds on `step:two-real`.\n"
+        with self.git_spy() as calls:
+            rc, text = self.lint_run("--lane-lint", "7")
+        self.assertTrue(calls, "the spy saw no git call, so the case proves nothing")
+        self.assertEqual(rc, 0, text)
+        fetches = roadmap_fetches(calls)
+        self.assertEqual(len(fetches), 1, "origin's roadmap was fetched %d times for the run's cites, want once: %s" % (len(fetches), fetches))
+
+    def test_a_run_with_no_cite_never_fetches_or_reads_the_roadmap(self):  # the control
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "No cite here.")})
+        with self.git_spy() as calls:
+            rc, text = self.lint_run("--lane-lint", "7")
+        self.assertTrue(calls, "the spy saw no git call, so the case proves nothing")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(roadmap_fetches(calls), [], "a run with no cite fetched the roadmap: %s" % roadmap_fetches(calls))
+        self.assertEqual(roadmap_reads(calls), [], "a run with no cite read the roadmap: %s" % roadmap_reads(calls))
+
+    def test_a_failed_roadmap_fetch_refuses_as_unknown_and_never_passes(self):
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "See `step:real-step`.")})
+        with self.git_spy(fail=lambda argv: "fetch" in argv and names_roadmap(argv)) as calls:
+            rc, text = self.run_lane("--lane-lint", "7")
+        self.assertTrue(roadmap_fetches(calls), "the roadmap fetch never ran, so the case proves nothing: " + text)
+        self.assertNotEqual(rc, 0, "a failed roadmap fetch read as a pass: " + text)
+        self.assertIn("unknown", text.lower(), "a failed roadmap fetch is not reported as unknown: " + text)
+        self.assertEqual(pass_lines(text), [], "a failed roadmap fetch printed PASS: " + text)
+
+    def test_a_failed_read_of_the_roadmap_refuses_as_unknown_and_never_passes(self):
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "See `step:real-step`.")})
+        with self.git_spy(fail=lambda argv: "fetch" not in argv and names_roadmap(argv)) as calls:
+            rc, text = self.run_lane("--lane-lint", "7")
+        self.assertTrue(roadmap_reads(calls), "no read of the roadmap ran, so the case proves nothing: " + text)
+        self.assertNotEqual(rc, 0, "a failed read of the roadmap read as a pass: " + text)
+        self.assertIn("unknown", text.lower(), "a failed read of the roadmap is not reported as unknown: " + text)
+        self.assertEqual(pass_lines(text), [], "a failed read of the roadmap printed PASS: " + text)
+
+    def test_a_roadmap_of_many_steps_refuses_only_the_one_cite_that_is_missing(self):
+        slugs = ["bulk-step-%03d" % i for i in range(120)]
+        self.put_roadmap(slugs)
+        cites = " ".join("`step:%s`" % slug for slug in slugs[:60]) + " and `step:bulk-ghost`."
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", cites)})
+        with self.git_spy() as calls:
+            rc, text = self.run_lane("--lane-lint", "7")
+        self.assertTrue(calls, "the spy saw no git call, so the case proves nothing")
+        self.assertEqual(rc, 1, "a run citing one missing step among many did not refuse: " + text)
+        self.assertEqual(text.count("bulk-ghost"), 1, "the missing step is printed %d times, want once: %s" % (text.count("bulk-ghost"), text))
+        self.assertNotIn("bulk-step-", text, "a step on the roadmap was named as missing: " + text)
+        self.assertEqual(len(roadmap_fetches(calls)), 1, "origin's roadmap was fetched %d times, want once" % len(roadmap_fetches(calls)))
 
 
 class RunFolderSweep(unittest.TestCase):
