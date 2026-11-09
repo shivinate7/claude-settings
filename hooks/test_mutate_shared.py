@@ -424,7 +424,7 @@ def verdict_seen(code, red, seen):
 
 
 class SeenNeverChangesTheVerdictTests(unittest.TestCase):
-    """Controls, green on the head. `seen` is diagnostics only: the verdict reads `red` alone, so an ERROR
+    """Pins that `seen` is diagnostics only: the verdict reads `red` alone, so an ERROR
     block that names the required case must not turn a WRONG CAUSE into a kill."""
 
     def test_an_error_in_the_required_case_with_no_fail_line_is_wrong_cause(self):
