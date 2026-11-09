@@ -232,3 +232,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - gh-rerun-unpinned (same source): no test pins that `gh run rerun` is allowed in the cloud. Fix: add an allow case.
 - gh-body-h-hides-write (same source): `--body -h` hides a write from the reader. Fix: treat a value after --body as a value, not a flag.
 - notes-cite-closed-2153 (coordinator 12:59 CST Nov 9, lane time-from-one-helper): rows in docs/debts/notes.md cite the closed #2153; they should cite #2258, its replacement. Fix: a docs PR rewrites those cites.
+- test-guard-tiers-cite (coordinator 13:04 CST Nov 9, from #1674): a hooks/test_guard.py comment near line 12268 cites decision session-tiers for a sentence that decision does not hold. Fix: cite the record that holds the sentence, or drop the cite.
