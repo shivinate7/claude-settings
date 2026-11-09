@@ -21417,6 +21417,9 @@ ORCH_TESTMIX_DONE = diff_repo("orch-testmix-done",
 ORCH_MIXED_DONE = diff_repo("orch-mixed-done",
                             lambda w: _orch_mid_merge(w, [ORCH_DOCS, ORCH_SRC], [ORCH_CLEAN], resolve=True),
                             files=ORCH_FILES)
+ORCH_NB = "notebooks/analysis.ipynb"
+ORCH_NB_OPEN = diff_repo("orch-nb-open", lambda w: _orch_mid_merge(w, [ORCH_NB], [ORCH_CLEAN]),
+                         files={**ORCH_FILES, ORCH_NB: '{"cells": []}\n'})
 
 
 def orch_write_input(cwd, rel, tool="Edit"):
@@ -21424,6 +21427,10 @@ def orch_write_input(cwd, rel, tool="Edit"):
     target = os.path.join(cwd, rel)
     if tool == "Write":
         return {"file_path": target, "content": "x = 7\n"}
+    if tool == "MultiEdit":
+        return {"file_path": target, "edits": [{"old_string": "x = 1\n", "new_string": "x = 7\n"}]}
+    if tool == "NotebookEdit":
+        return {"notebook_path": target, "new_source": "x = 7\n"}
     return {"file_path": target, "new_string": "x = 7\n"}
 
 
@@ -21493,6 +21500,15 @@ orch_allow("orchestrator-merge-write: a general-purpose agent's Edit of a produc
 orch_write("orchestrator-merge-write: a record-writer's Edit of a product file is refused by record-writer-scope, not by this rule",
            "deny", ORCH_PROD_OPEN, ORCH_SRC, rule="record-writer-scope", lacks=(ORCH_RULE,),
            agent=("rw-orch", "record-writer"))
+# MultiEdit and NotebookEdit take the same route: write_targets reads every path field of the call.
+orch_refuse("orchestrator-merge-write: a lane's MultiEdit of a product file its merge conflicts is refused",
+            ORCH_PROD_OPEN, ORCH_SRC, tool="MultiEdit")
+orch_refuse("orchestrator-merge-write: a lane's NotebookEdit of a notebook its merge conflicts is refused",
+            ORCH_NB_OPEN, ORCH_NB, tool="NotebookEdit")
+orch_allow("orchestrator-merge-write: a lane's MultiEdit of a doc its merge conflicts is allowed",
+           ORCH_DOCS_OPEN, ORCH_DOCS, tool="MultiEdit")
+orch_allow("orchestrator-merge-write: a builder's MultiEdit of a product file its merge conflicts is allowed",
+           ORCH_PROD_OPEN, ORCH_SRC, tool="MultiEdit", agent=("bld-orch", "builder"))
 
 
 def orch_log_rules(config):
