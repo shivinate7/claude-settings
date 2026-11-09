@@ -604,6 +604,10 @@ REPLACING_HEAD = "%040d" % 24     # the head of the merged pull request that rep
 NEW_TIP = "%040d" % 99            # the branch tip after a new commit, past the head of its merged pull request
 ARCH_SLOW_A = "claude/slow-behind-a"                           # the first slow branch: behind main in q_max
 ARCH_SLOW_B = "claude/slow-behind-b"                           # the second slow branch: behind main in q_max
+ARCH_COPY_BRANCH = "claude/x"                                  # a lane's branch in o/r, ahead of main, on no pull request
+ARCH_COPY_TIP = "%040d" % 31                                   # that branch's tip: the archive copy's compare is keyed by this sha
+ARCHCOPY_IDENT = os.path.join(ROOT, "archcopy-identical")      # the branch's archive/ copy holds its tip
+ARCHCOPY_AHEAD = os.path.join(ROOT, "archcopy-ahead")          # the branch's archive/ copy is at an older tip: the tip is ahead of it
 
 
 def arch_pair(qmax=None, settings=None):
@@ -632,6 +636,18 @@ def arch_replaced(containment):
         "tips": {"lane/" + slug: REPLACED_TIP, "lane/" + slug + "-r2": REPLACING_HEAD},
         "compares": {"main...lane/" + slug: "ahead", "main...lane/" + slug + "-r2": "ahead",
                      REPLACING_HEAD + "..." + REPLACED_TIP: containment},
+    }
+
+
+def arch_copy(archive, others=()):
+    """The repo of a lane whose branch ARCH_COPY_BRANCH is ahead of main on no pull request, or on the rows given. Its tip is
+    ARCH_COPY_TIP, and the compare of archive/<branch> with that sha reads `archive`: "identical" when the copy holds the tip,
+    "ahead" when the copy is older. The key names the tip by sha, as the guard reads it, never by the branch name."""
+    return {
+        "tips": {ARCH_COPY_BRANCH: ARCH_COPY_TIP},
+        "compares": {"main..." + ARCH_COPY_BRANCH: "ahead",
+                     "archive/" + ARCH_COPY_BRANCH + "..." + ARCH_COPY_TIP: archive},
+        "others": list(others),
     }
 
 
@@ -1581,6 +1597,9 @@ def build_fixtures():
     # A closed pull request on lane/<slug>, replaced by a merged one on lane/<slug>-r2: contained in the replacing head, or not.
     make_fake_gh(ARCHLEFT_REPLACED, "main", repos={"o/r": arch_replaced("behind")})
     make_fake_gh(ARCHLEFT_REPLACED_AHEAD, "main", repos={"o/r": arch_replaced("ahead")})
+    # A lane branch ahead of main on no pull request, whose archive/ copy holds its tip (identical) or is older (ahead).
+    make_fake_gh(ARCHCOPY_IDENT, "main", repos={"o/r": arch_copy("identical")})
+    make_fake_gh(ARCHCOPY_AHEAD, "main", repos={"o/r": arch_copy("ahead")})
     make_fake_gh(ARCHINC_OPEN, "main", repos=arch_pair(qmax={"others": [arch_row(ARCH_BRANCH, 24)]}))
     make_fake_gh(ARCHINC_BEHIND, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "behind"}}))
     make_fake_gh(ARCHINC_IDENT, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "identical"}}))
@@ -11099,6 +11118,9 @@ ROLE_LINES = {
         ARCH_INC_TAGS, {"": {"name": ARCH_BRANCH}}, [ARCH_QMAX_SOURCE]))),
     "archive-inc-source-gitlab": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
         ARCH_INC_TAGS, {"": ARCH_BRANCH}, [{"git_repository": {"url": "https://gitlab.com/" + ARCH_REPO_QMAX}}]))),
+    # The lane in o/r alone, whose record names the branch ARCH_COPY_BRANCH. Its repo is judged by arch_copy's answers.
+    "archive-copy-lane": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_LANE_TAGS, {"": ARCH_COPY_BRANCH}))),
 }
 
 
@@ -11778,6 +11800,14 @@ archive_allow("a lane branch closed unmerged, replaced by a merged pull request 
 archive_refuse("a lane branch closed unmerged, replaced by a merged pull request whose head does not hold the tip, is refused",
                role_path("archive-lane"), fake_gh_path(ARCHLEFT_REPLACED_AHEAD), carries=("open a pull request", "push an archive copy"),
                lacks=("could not be read",))
+# A lane branch ahead of main on no pull request is covered by its archive/ copy when the copy holds the tip. The two cases
+# differ in one value: the copy's compare with the tip. The control's refusal is the plain no-pull-request one, so it shows
+# the fixture reads cleanly, and the case's red is the copy the guard does not read.
+archive_allow("a lane branch ahead on no pull request, whose archive/ copy holds its tip, is allowed",
+              role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_IDENT))
+archive_refuse("a lane branch ahead on no pull request, whose archive/ copy is at an older tip, is refused as no pull request",
+               role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_AHEAD), carries=ARCHIVE_NOPR_PIN,
+               lacks=(ARCH_COPY_BRANCH, "could not be read"))
 archive_refuse("a current_branches value that is an int is refused, and the reason says the read failed",
                role_path("archive-inc-branch-int"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN,
                lacks=ARCHIVE_BRANCH_READ_LACKS)
@@ -16610,6 +16640,37 @@ def archive_branch_reads_case():
 
 LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane whose record names a branch reads its repos in eleven gh calls",
                          archive_branch_reads_case))
+
+
+def archive_copy_reads_case():
+    """The archive copy of a stranded branch is read once, on the refusal path. A branch ahead on no pull request reads its
+    archive/ copy once, as one compare of archive/<branch> with the tip, and the copy at an older tip refuses on that
+    branch. A branch on an open pull request reads no copy, because that pull request covers it before any copy is read.
+    Each run takes its own call log, and a copy read is a call whose route names archive/."""
+    stranded = archive_counted_gh(repos={"o/r": arch_copy("ahead")}, name="archcount-copy-stranded")
+    gh_calls_taken(stranded)
+    decision, reason = archive_judged(role_path("archive-copy-lane"), stranded)
+    calls = gh_calls_taken(stranded)
+    if decision != "deny" or ARCHIVE_NOPR_PIN[0] not in (reason or ""):
+        return False, "the older-tip copy: %s (%r), want a refusal for no pull request" % (decision, reason)
+    copies = [call for call in calls if "/compare/archive/" in _gh_route(call)]
+    if len(copies) != 1:
+        return False, "the refusal path read the archive copy %d times, want once: %r" % (len(copies), copies)
+    covered = archive_counted_gh(repos={"o/r": arch_copy("identical", others=[arch_row(ARCH_COPY_BRANCH, 41)])},
+                                 name="archcount-copy-covered")
+    gh_calls_taken(covered)
+    decision, reason = archive_judged(role_path("archive-copy-lane"), covered)
+    calls = gh_calls_taken(covered)
+    if decision != "allow" or reason:
+        return False, "a branch on an open pull request: %s (%r), want allowed" % (decision, reason)
+    copies = [call for call in calls if "/compare/archive/" in _gh_route(call)]
+    if copies:
+        return False, "a branch on an open pull request read its archive copy %d times, want none: %r" % (len(copies), copies)
+    return True, "the refusal path reads the archive copy once; a branch on an open pull request reads none"
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an archive copy of a stranded branch is read once, and not on an open pull request",
+                         archive_copy_reads_case))
 
 
 # The cost of archive_hit's transcript reads: one open of each transcript of the archive (the target's main transcript,
