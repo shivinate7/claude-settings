@@ -9998,6 +9998,41 @@ def env_substitution_places_case():
 FIXTURELESS_CHECKS.update((env_cap_include_suffix_case, env_substitution_places_case))
 
 
+# find prints the folder zsub, and grep -r reads every file below it. Past the cap the walk judges the folder find
+# prints, so the env file below zsub must be refused whatever the size of the folder that holds zsub. The big folder
+# holds more entries than the cap, so the cap trips at its top, before the walk enters zsub. The small folder is under
+# the cap and holds zsub alone.
+ENVCAP_FIND_ZSUB = "find . -name 'zsub' | xargs grep -r K"
+# grep without -r reads no folder it is given, so the same find is allowed past the cap.
+ENVCAP_FIND_ZSUB_NO_R = "find . -name 'zsub' | xargs grep K"
+
+
+def env_cap_printed_folder_case():
+    """Past the cap, a folder that find prints and that holds an env file is refused for grep -r, which reads it. The
+    walk stops at the cap before it reaches zsub, so the cap is the only reason the search is allowed. The control runs
+    the same find without -r over the big folder, and it is allowed. A small folder with the same env file is refused,
+    so the big folder fails only for the cap."""
+    big = envcap_folder("envcap-printed-big", ENVCAP_LOW + 1, {"zsub/" + ENV: "FIXTURE=1\n"})
+    if len(os.listdir(big)) <= ENVCAP_LOW:
+        return False, "the fixture folder is not past the lowered cap"
+    if not os.path.isfile(os.path.join(big, "zsub", ENV)):
+        return False, "the fixture folder holds no env file under zsub"
+    got = envcap_reason(ENVCAP_FIND_ZSUB, big)
+    if not got:
+        return False, "%s past the cap, over an env file in a folder find prints, was allowed" % ENVCAP_FIND_ZSUB
+    if envcap_reason(ENVCAP_FIND_ZSUB_NO_R, big):
+        return False, "%s past the cap was refused, though grep without -r reads no folder" % ENVCAP_FIND_ZSUB_NO_R
+    small = envcap_folder("envcap-printed-small", 0, {"zsub/" + ENV: "FIXTURE=1\n"})
+    if len(os.listdir(small)) > ENVCAP_LOW:
+        return False, "the control fixture is past the lowered cap"
+    if not envcap_reason(ENVCAP_FIND_ZSUB, small):
+        return False, "%s under the cap, over an env file in a folder find prints, was allowed" % ENVCAP_FIND_ZSUB
+    return True, "past the cap the printed folder that holds an env file is refused; grep without -r is allowed"
+
+
+FIXTURELESS_CHECKS.add(env_cap_printed_folder_case)
+
+
 # ---- env walk: the shapes the walk leaves open or over-refuses. Each deny row searches a folder that holds an env
 # file, and its control is the same form over a folder with no env file, which stays allowed. A form that reaches
 # an env file by a shape the walk misses is a safety hole, and a clean form the walk refuses is a false alarm.
@@ -10238,6 +10273,34 @@ sh("env: walk pin, find -maxdepth 1 names sub, rg --hidden reads the env file be
 _MAXDEPTH_ONE_GREP = "find . -maxdepth 1 | xargs grep K"
 sh("env: walk false alarm, find -maxdepth 1 names sub, grep without -r reads no folder, allowed: " + _MAXDEPTH_ONE_GREP,
    _MAXDEPTH_ONE_GREP, "allow", cwd=ENVWALK_NESTED)
+
+# rg's -t type picks a file by the type's globs, and a positive glob reads a dotfile it names (_env_walk reads a type
+# as its globs). The md type names *.mdx, so the env file that ENVWALK_TYPE_MD holds under sub is picked. find
+# -maxdepth 1 prints sub, and rg reads it. SUB_CLEAN holds no env file, so the same form is allowed there. --hidden
+# reads the file as well, so that form stays refused.
+_MAXDEPTH_ONE_RG_TYPE = "find . -maxdepth 1 | xargs rg -t md K"
+sh("env: walk safety hole, find -maxdepth 1 names sub, rg -t md reads the env file below it, refused: "
+   + _MAXDEPTH_ONE_RG_TYPE, _MAXDEPTH_ONE_RG_TYPE, "deny", "env-file", cwd=ENVWALK_TYPE_MD)
+sh("env: walk control, find -maxdepth 1 names sub, rg -t md, folder has no env file, allowed: "
+   + _MAXDEPTH_ONE_RG_TYPE, _MAXDEPTH_ONE_RG_TYPE, "allow", cwd=ENVWALK_SUB_CLEAN)
+_MAXDEPTH_ONE_RG_TYPE_HIDDEN = "find . -maxdepth 1 | xargs rg --hidden K"
+sh("env: walk control, find -maxdepth 1 names sub, rg --hidden reads the env file below it, refused: "
+   + _MAXDEPTH_ONE_RG_TYPE_HIDDEN, _MAXDEPTH_ONE_RG_TYPE_HIDDEN, "deny", "env-file", cwd=ENVWALK_TYPE_MD)
+
+# A search's own narrowing (grep --include, rg -g) judges each file of a folder that find prints, as it does for a folder
+# the search names. sub/ holds one env file with no suffix, which *.md does not pick, so the narrowed search reads no env
+# file and is allowed, as the direct forms are. Without the narrowing, the find forms read sub and are refused.
+_FIND_INCLUDE_MD = "find . -name 'sub' | xargs grep -r --include='*.md' K"
+_FIND_GLOB_MD = "find . -name 'sub' | xargs rg -g '*.md' K"
+for _cmd in (_FIND_INCLUDE_MD, _FIND_GLOB_MD):
+    sh("env: walk false alarm, find prints sub, the search's *.md narrowing picks no env file in it, allowed: " + _cmd,
+       _cmd, "allow", cwd=ENVWALK_NESTED)
+for _cmd in ("grep -r --include='*.md' K sub", "rg -g '*.md' K sub"):
+    sh("env: walk control, the search names sub with its *.md narrowing, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVWALK_NESTED)
+for _cmd in ("find . -name 'sub' | xargs grep -r K", "find . -name 'sub' | xargs rg --hidden K"):
+    sh("env: walk control, find prints sub with no narrowing, reads the env file in it, refused: " + _cmd, _cmd,
+       "deny", "env-file", cwd=ENVWALK_NESTED)
 
 # A -print prints each name before a later test runs, so a name test after -print does not bound the names printed.
 _PRINT_THEN_NAME = "find . -print -name '*.js' | xargs grep K"
@@ -15575,13 +15638,15 @@ for _constant in REMEDY_CONSTANTS:
     _remedy_label = "wait-until remedy: every command form the %s names is allowed" % _constant
     LOG_CHECKS_EXTRA.append((_remedy_label, remedy_check(_constant)))
     LOG_FAMILY[_remedy_label] = "stream"
-# The env walk's two in-process checks are defined in the env section, which comes before this list exists. Their
+# The env walk's in-process checks are defined in the env section, which comes before this list exists. Their
 # family is set in LOG_RULE_FAMILY, the one home for a log check's family by its label.
 for _label, _check in (
         ("env: walk cap, an include glob picks an env file ending .yaml, refused past the cap",
          env_cap_include_suffix_case),
         ("env: walk, _substitutions gives one place per text for nested, backtick and mixed input",
-         env_substitution_places_case)):
+         env_substitution_places_case),
+        ("env: walk cap, find prints a folder that holds an env file, grep -r refused past the cap",
+         env_cap_printed_folder_case)):
     LOG_CHECKS_EXTRA.append((_label, _check))
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
@@ -30982,6 +31047,7 @@ LOG_RULE_FAMILY = (
     ("env: walk cap, the same glob past the cap in a gitignored node_modules", "env"),
     ("env: walk cap, a positive glob that names an env file is refused too large", "env"),
     ("env: walk cap, an include glob picks an env file ending .yaml, refused past the cap", "env"),
+    ("env: walk cap, find prints a folder that holds an env file, grep -r refused past the cap", "env"),
     ("env: walk, _substitutions gives one place per text for nested, backtick and mixed input", "env"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
