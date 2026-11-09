@@ -9500,9 +9500,9 @@ sh("env: grep walk safety hole, exclude before include, refused: grep -r --exclu
 sh("env: grep walk control, include before exclude, allowed: grep -r --include='*' --exclude=.env K .",
    "grep -r --include='*' --exclude=.env K .", "allow", cwd=ENVWALK_HELD)
 
-# False alarms, allowed: a whole exclude word in quotes, an unquoted brace list that bash expands to folder
-# names, and a file type or glob that picks no env file. Owner ruling 2026-11-08 06:03 CST: bash expands an
-# unquoted brace list and a quoted one stays literal, so the quoted form is not expanded and is refused.
+# False alarms, allowed. A whole exclude word in quotes is one option, and its glob .env* skips the env files.
+# Bash expands an unquoted brace list into folder names, so node_modules is skipped. A quoted brace list stays
+# literal: grep matches no folder, node_modules is walked, and the walk is refused.
 sh("env: false alarm, whole exclude word quoted, allowed: grep -r '--exclude=.env*' K .",
    "grep -r '--exclude=.env*' K .", "allow", cwd=ENVWALK_HELD)
 sh("env: false alarm, unquoted brace list skips node_modules, allowed: grep -rn K --exclude-dir={node_modules,.git} .",
