@@ -818,7 +818,6 @@ REFUSAL_UNCITED_EXEMPT = {
     "merge:base_job_caps: cannot read to look for .github/workflows": ("refusal-matches-rule", "the workflow folder on the base could not be listed, and the stop prints git's output"),
     "merge:base_verdict: cannot read origin/ to look for .github/workflows": ("refusal-matches-rule", "the workflow folder on the base could not be listed, and the stop prints git's output"),
     "merge:confirm: the pull request is": ("refusal-matches-rule", "the pull request is closed or conflicting, and the stop names GitHub's state"),
-    "merge:confirm: moved: gh says": ("refusal-matches-rule", "the branch moved during the run, and the stop prints both heads; nothing was claimed"),
     "merge:confirm: the push of was refused": ("refusal-matches-rule", "a plain push was refused, so nothing reaches origin, and the stop prints only that", 2),
     "merge:confirm: why": ("refusal-matches-rule", "the check wait's reason is a Host method's return, which the reader cannot follow"),
     "merge:confirm: merge: the worktree is gone": ("refusal-matches-rule", "the worktree is gone, so the claim cannot be reverted, and the stop names the claim and the branch"),
@@ -827,13 +826,11 @@ REFUSAL_UNCITED_EXEMPT = {
     "merge:confirm: the local main did not move in": ("refusal-matches-rule", "the local main cannot fast-forward in that tree, so the stop names the fix by hand"),
     "merge:confirm: is not on . Nothing was moved": ("refusal-matches-rule", "the commit is not on origin, so no local move was made, and the stop names only that"),
     "merge:confirm: is not on origin/. Nothing was moved": ("refusal-matches-rule", "the commit is not on origin's base, so no local move was made, and the stop names only that"),
-    "merge:draft_step: moved: gh says": ("refusal-matches-rule", "the branch moved during the run, and the stop prints both heads; nothing was claimed"),
     "merge:draft_step: the push of was refused": ("refusal-matches-rule", "a plain push was refused, so nothing reaches origin, and the stop prints only that"),
     "merge:ff_main: git fetch origin failed, so the local main": ("refusal-matches-rule", "git fetch failed, so the local main cannot be moved, and the stop prints git's output"),
     "merge:host_default_branch: network error from `gh api repos`": ("refusal-matches-rule", "gh failed on a network error after its retries, and the stop says to run again"),
     "merge:host_default_branch: the default branch cannot be read from gh": ("refusal-matches-rule", "gh could not give the default branch, and the stop prints the error"),
     "merge:ignore_checks: merge.ignoreChecks entry needs a name": ("refusal-matches-rule", "a merge.ignoreChecks entry has no name or no reason, and the stop names the config entry"),
-    "merge:lane_lint: moved: gh says": ("refusal-matches-rule", "the branch moved during the run, and the stop prints both heads; nothing was claimed"),
     "merge:load_config: cannot read on origin/":("refusal-matches-rule", "a config or workflow file cannot be read on the base, and the stop prints the read's error"),
     "merge:main: not in a git checkout": ("refusal-matches-rule", "the run is not in a git checkout, so no merge can start, and the stop names no decision"),
     "merge:main: the pull request is": ("refusal-matches-rule", "the pull request is closed or conflicting, and the stop names GitHub's state"),
@@ -845,10 +842,8 @@ REFUSAL_UNCITED_EXEMPT = {
     "merge:main: cannot read the config on origin/": ("refusal-matches-rule", "the config file cannot be read on the base, and the stop prints the read's error"),
     "merge:main: cannot read origin/ to look for": ("refusal-matches-rule", "the config folder on the base cannot be listed, and the stop prints git's output"),
     "merge:main: git fetch origin failed": ("refusal-matches-rule", "git fetch failed, so the base cannot be read, and the stop prints git's output"),
-    "merge:open_worktree: git fetch origin failed": ("refusal-matches-rule", "git fetch failed, so the worktree cannot open, and the stop prints git's output"),
     "merge:add_worktree: cannot make the worktree": ("refusal-matches-rule", "git could not add the worktree, and the stop prints git's output"),
     "merge:preview: the pull request is": ("refusal-matches-rule", "the pull request is closed or conflicting, and the stop names GitHub's state"),
-    "merge:preview: moved: gh says": ("refusal-matches-rule", "the branch moved during the run, and the stop prints both heads; nothing was claimed"),
     "merge:prove: network error on the fetch of origin": ("refusal-matches-rule", "a network error hit the fetch of the base after its retries, and the claim stays on the branch"),
 }
 
@@ -1030,12 +1025,14 @@ def _locals(fdef, mod):
 
 
 def _caught_as_stop(node, name, mod):
-    """True when the nearest `except` clause above `node`, in its own def, binds `name` and catches a Stop class.
-    Another clause that binds the same name does not count: its exception is not a Stop."""
+    """True when the nearest `except` clause above `node`, in its own def, binds `name` and catches only Stop
+    classes, alone or in a tuple whose every member is a Stop class name. Another clause that binds the same name
+    does not count: its exception is not a Stop."""
     cur = mod.parents.get(id(node))
     while cur is not None and not isinstance(cur, ast.FunctionDef):
         if isinstance(cur, ast.ExceptHandler) and cur.name == name:
-            return isinstance(cur.type, ast.Name) and cur.type.id in mod.stops
+            caught = cur.type.elts if isinstance(cur.type, ast.Tuple) else [cur.type]
+            return bool(caught) and all(isinstance(c, ast.Name) and c.id in mod.stops for c in caught)
         cur = mod.parents.get(id(cur))
     return False
 
@@ -2531,6 +2528,34 @@ class RefusalCiteHelperTests(unittest.TestCase):
     def test_a_caught_stop_re_raised_through_a_helper_is_read_as_cited(self):
         body = '    try:\n        pass\n    except Stop as e:\n        fail(str(e))\n'
         self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["cited"])
+
+    def test_a_tuple_handler_with_a_non_stop_member_re_raised_through_a_helper_is_not_resolved(self):
+        # `except (X, Stop) as e` may bind an X, whose text no origin prints, so its text is not carried.
+        for names in ("(OSError, Stop)", "(Stop, OSError)", "(subprocess.TimeoutExpired, Stop)"):
+            with self.subTest(names=names):
+                body = '    try:\n        pass\n    except %s as e:\n        fail(str(e))\n' % names
+                self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["not resolved"],
+                                 "a tuple except with a member that is no Stop name reads as cited")
+
+    def test_a_tuple_handler_of_stop_names_re_raised_through_a_helper_is_read_as_cited(self):
+        # Every member is a Stop class, so the bound `e` is always a Stop: its text is printed by its origin.
+        for names in ("(Stop, NetStop)", "(NetStop, Dropped)"):
+            with self.subTest(names=names):
+                body = '    try:\n        pass\n    except %s as e:\n        fail(str(e))\n' % names
+                self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["cited"],
+                                 "a tuple except of Stop classes reads as not resolved")
+
+    def test_a_tuple_handler_of_no_stop_re_raised_through_a_helper_is_not_resolved(self):
+        body = '    try:\n        pass\n    except (OSError, ValueError) as e:\n        fail(str(e))\n'
+        self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["not resolved"])
+
+    def test_a_tuple_handler_with_a_broad_class_beside_a_stop_re_raised_through_a_helper_is_not_resolved(self):
+        # A broad class catches any exception, so the bound `e` is not known to be a Stop.
+        for names in ("(Exception, Stop)", "(BaseException, Stop)"):
+            with self.subTest(names=names):
+                body = '    try:\n        pass\n    except %s as e:\n        fail(str(e))\n' % names
+                self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["not resolved"],
+                                 "a tuple handler with a broad class reads as a caught Stop")
 
     def test_a_caught_generic_exception_re_raised_through_a_helper_is_not_resolved(self):
         body = '    try:\n        pass\n    except Exception as e:\n        fail(str(e))\n'
