@@ -314,15 +314,16 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .receipt .line .changebtn { grid-column: 3; grid-row: 1; }
 .receipt .line:has(.read) .changebtn { grid-row: 1 / span 2; }
 .receipt .line b { overflow-wrap: anywhere; color: var(--good); }
-.receipt .rnote, .foldbody > .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
+.receipt .rnote, .foldbody > .rnote { margin: 0; color: var(--muted); font-size: 14.5px; overflow-wrap: anywhere; }
 /* A multi answer lists each pick with its letter and title, in order. */
 .receipt .picks { margin: 0; padding: 0 0 0 20px; list-style: none; display: grid; gap: 6px; counter-reset: pk; }
 .receipt .picks li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; min-height: 32px; font-size: 15.5px; }
 .receipt ol.picks li { grid-template-columns: 2ch auto minmax(0, 1fr); }
 .receipt ol.picks li::before { counter-increment: pk; content: counter(pk) "."; font: 600 14px var(--mono); color: var(--muted); text-align: end; }
 .receipt .picks .key { color: var(--ink); }
-/* The thread: the owner's last answer, then the writer's reply, in one calm panel with the shape of .stake. */
-.thread { display: grid; gap: 8px; padding: 12px; border-radius: 8px; background: var(--chip); min-width: 0; }
+/* The thread: the owner's last answer, then the writer's reply, in one calm panel with the shape of .stake. Its one track may shrink
+   below its widest word, so a long token in the owner's note breaks inside the card. */
+.thread { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px; border-radius: 8px; background: var(--chip); min-width: 0; }
 .thread > .last:has(+ .reply) { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 /* The last answer extends the receipt: muted head, ink answer, no done mark, no Change button. */
 .receipt.last { gap: 4px; }
@@ -424,10 +425,13 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 @media (prefers-reduced-motion: no-preference) { .dfitwrap.scroll .dcue, .dfitwrap.scroll .dtop { transition: opacity 150ms linear; } }
 .dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
 .dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
-/* The title's basis is 0 and its floor is 4em, so the row breaks where the buttons leave the title under 4em: then the title keeps the first line, alone if no button fits beside it, and the last buttons take a second line, inside the window, Close at its end. */
+/* The title's basis is 0 and its floor is 4em, so the row breaks where the buttons leave the title under 4em: then the title keeps the first line, alone if no button fits beside it, and the last buttons take a second line, inside the window, Close at its end.
+   Prev and Next sit in one box (.dnav), so they wrap as a pair. */
 .dsh-head .in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-block: 8px; container: dsh / inline-size; }
-.dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 0; min-width: 4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The title grows with the text (1.0625rem, 17px at the default size), but never past 24% of the head (24cqw): 4em of it then still fits one line of the head. */
+.dsh-head h2 { font: 700 min(1.0625rem, 24cqw)/1.25 var(--body); flex: 1 1 0; min-width: 4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsh-head .btn { flex: none; white-space: nowrap; }
+.dsh-head .dnav { flex: none; display: flex; gap: 8px; }
 #dClose { margin-inline-start: auto; }
 .dsh-head .sm { display: none; }
 #dPos { --pos-short: 0; }
@@ -835,8 +839,16 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .sline b { color: var(--good); }
 .sline .bad { color: var(--due); font-weight: 600; }
 .sline .btn { font-variant-numeric: tabular-nums; }
-/* A long word in the line ("Restored." at large text in a narrow window) breaks inside the line, never past the window. */
-.sline.dline > span { overflow-wrap: anywhere; }
+/* The line's words never break: its text is the line's own size (.90625rem), but never larger than the text column (the line's width,
+   less the glyph and the gap, 24px) over 5.6, so "Restored." (5.5em wide in DejaVu Sans Bold, the widest fallback measured) fits one line.
+   overflow-wrap stays as the last resort, so a wider font breaks a word inside the window, never past it. The line reads its own width
+   (container), so --dl-fs is set at the glyph and the text, inside it.
+   The glyph sits on the first line: the items start at the row's top, the glyph is moved to the middle of the first line box, and the row
+   itself is centred in the line's 44px floor, so a line that does not wrap looks as before. */
+.sline.dline { container-type: inline-size; --dl-fs: min(.90625rem, calc((100cqw - 24px) / 5.6)); align-items: start; align-content: center; }
+.sline.dline > span { overflow-wrap: anywhere; font-size: var(--dl-fs); }
+/* The second selector outranks a dismissed row's own glyph rule (.askc.dropped .sline > .g), whose em is the line's size, not the text's. */
+.sline.dline > .g, .askc.dropped .sline.dline > .g { margin-block-start: calc((1.55 * var(--dl-fs) - 12px) / 2); }
 /* When the count ends the Undo keeps its box, hidden, so the line does not move. */
 .sline .btn.spent { visibility: hidden; }
 @media (max-width: 520px) { .sline { grid-template-columns: auto minmax(0, 1fr); } .sline .btn { grid-column: 2; justify-self: start; } }
@@ -1073,7 +1085,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <div class="dsheet" id="dsheet" role="dialog" aria-modal="true" aria-labelledby="dTitle" hidden>
   <div class="dsh-head"><div class="in">
     <h2 id="dTitle"></h2><span id="dPos"></span>
-    <button class="btn quiet" type="button" id="dPrev" aria-label="Previous design"><span class="lg">Prev</span><span class="sm" aria-hidden="true">&#8249;</span></button><button class="btn quiet" type="button" id="dNext" aria-label="Next design"><span class="lg">Next</span><span class="sm" aria-hidden="true">&#8250;</span></button>
+    <span class="dnav" id="dNav"><button class="btn quiet" type="button" id="dPrev" aria-label="Previous design"><span class="lg">Prev</span><span class="sm" aria-hidden="true">&#8249;</span></button><button class="btn quiet" type="button" id="dNext" aria-label="Next design"><span class="lg">Next</span><span class="sm" aria-hidden="true">&#8250;</span></button></span>
     <button class="btn quiet" type="button" id="dBack"></button>
     <button class="btn quiet" type="button" id="dFull" aria-label="Open full size"><span class="lg">Open full size</span><span class="sm" aria-hidden="true">&#10530;</span></button>
     <button class="btn" type="button" id="dClose" aria-label="Close"><span class="lg">Close</span><span class="sm" aria-hidden="true">&#10005;</span></button>
@@ -3044,7 +3056,7 @@ function showDesign(i) {
   const vl = designTitle(d);
   $("dTitle").textContent = vl; setDPos();
   $("dCap").textContent = vl;
-  $("dPrev").hidden = $("dNext").hidden = dList.length < 2;
+  $("dNav").hidden = $("dPrev").hidden = $("dNext").hidden = dList.length < 2;
   $("dBack").textContent = "Answer No. " + d.it.n;
   const st = stateOf(d);
   $("dFull").querySelector(".lg").textContent = st ? "Open this state" : "Open full size"; $("dFull").setAttribute("aria-label", st ? openStateLabel(d) : "Open full size");
