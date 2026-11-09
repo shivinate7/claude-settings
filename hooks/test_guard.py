@@ -30508,7 +30508,8 @@ def shard_split_check():
             shards = [shard_of(items, (i, n)) for i in range(1, n + 1)]
             if sorted(sum(shards, [])) != items or max(map(len, shards)) - min(map(len, shards)) > 1:
                 return False, "%d items in %d shards split as %s" % (size, n, [len(x) for x in shards])
-    for good, want in (("1/3", (1, 3)), ("1-3", (1, 3)), ("2-3", (2, 3))):
+    for good, want in (("1/3", (1, 3)), ("1-3", (1, 3)), ("2-3", (2, 3)),
+                       ("3/3", (3, 3)), ("3-3", (3, 3)), ("1-1", (1, 1))):
         try:
             got = parse_shard(good)
         except SystemExit:
@@ -30516,7 +30517,8 @@ def shard_split_check():
         if got != want:
             return False, "GUARD_SHARD=%r read as %r, want %r" % (good, got, want)
     for bad in ("0/2", "3/2", "1", "1/0", "a/b", "1/2/3", " 1/2", "01/2",
-                "0-2", "3-2", "1-0", "a-b", "1-2-3", " 1-2", "1-2 ", "1-", "-2", "1/2-3", "1-2/3", "01-2"):
+                "0-2", "3-2", "1-0", "a-b", "1-2-3", " 1-2", "1-2 ", "1-", "-2", "1/2-3", "1-2/3", "01-2",
+                "1-2\n", "1/2\n", "12", "1.2", "1 2", "1--2"):
         try:
             parse_shard(bad)
         except SystemExit:
