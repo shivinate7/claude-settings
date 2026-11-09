@@ -46,7 +46,7 @@
                           A head whose diff against the base touches hooks/mutate_*.py or hooks/mutate_*.mjs also runs the command of
                           the head's checks-mutate-guard job (step "Guard mutation test") in that same worktree, after a passing lint.
                           It FAILs on any survivor, on more than MUTATE_UNKNOWN_MAX unknown mutants (the crashed column; a timeout lands
-                          there), on a run past that job's timeout-minutes, and on a report it cannot read at any exit (a readable report is judged by its counts, not its exit code). It prints
+                          there), on a run past that job's timeout-minutes, and on a report it cannot read at any exit, and on a tally at a nonzero exit (a table is judged by its counts, not its exit code). It prints
                           its wall time and killed, survived and unknown counts, on the PASS line or in the FAIL text. Extra cost, only
                           then: one run of that command (about 11 to 16 min); on any other head, one `git diff --name-only`. A tally
                           line (the command's own form) fails on any wrong cause; the table form allows MUTATE_UNKNOWN_MAX.
@@ -2611,7 +2611,7 @@ MUTATE_UNKNOWN_MAX = 5  # unknown (crashed or timed-out) mutants a lint tolerate
 MUTATE_TEST_FILE = re.compile(r"hooks/mutate_[^/]*\.(?:py|mjs)")
 
 def mutate_report_counts(out):
-    """-> (killed, survived, unknown, unread, tally) of a mutate run's stdout, or None when it holds no report. Two forms: the per-file table of
+    """-> (killed, survived, unknown, unread, tally) of a mutation test run's stdout, or None when it holds no report. Two forms: the per-file table of
     hooks/mutate_shared.format_report (columns file mutants killed crashed survived rate silent; unknown is the crashed column), and the tally line
     that run_mutants prints, which the job's own command ends with (`K of N mutations killed (S survived, W wrong cause, X skipped)`; unknown is
     the wrong-cause count, and `tally` is True). `unread` counts the table's `UNKNOWN (reason)` rows: a file that read no mutant."""
@@ -2634,12 +2634,12 @@ def mutate_run_check(wt):
         with open(os.path.join(wt, ".github", "workflows", "checks.yml"), encoding="utf-8") as f:
             text = f.read()
     except (OSError, UnicodeError) as e:
-        raise Stop(f"the head's checks.yml cannot be read ({type(e).__name__}), so its mutate run cannot start. {LANE_LINT_REMEDY}")
+        raise Stop(f"the head's checks.yml cannot be read ({type(e).__name__}), so its mutation test run cannot start. {LANE_LINT_REMEDY}")
     step = next((st for st in step_blocks(job_block(text, MUTATE_JOB)) if step_key(st, "name") == MUTATE_STEP), None)
     body = (run_body(step) or "").strip() if step else ""
     cap = job_caps([text]).get(MUTATE_JOB)
     if not body or "\n" in body or not cap:
-        raise Stop(f"the head's checks.yml has no one-line run: for step {MUTATE_STEP!r} of job {MUTATE_JOB}, or no timeout-minutes on that job, so its mutate run cannot start. {LANE_LINT_REMEDY}")
+        raise Stop(f"the head's checks.yml has no one-line run: for step {MUTATE_STEP!r} of job {MUTATE_JOB}, or no timeout-minutes on that job, so its mutation test run cannot start. {LANE_LINT_REMEDY}")
     start = time.monotonic()
     try:
         c, out = sh(shlex.split(body), cwd=wt, env=no_github_env(), timeout=cap * 60, live_stderr=True)
@@ -2650,10 +2650,12 @@ def mutate_run_check(wt):
     killed, survived, unknown, unread, tally = counts or (0, 0, 0, 0, False)
     failures = []
     if c is None or wall > cap * 60:
-        failures.append(f"the mutate run took {wall} s, past the {cap}-minute cap of job {MUTATE_JOB}")
+        failures.append(f"the mutation test run took {wall} s, past the {cap}-minute cap of job {MUTATE_JOB}")
     if counts is None:
-        failures.append(f"the mutate run exited {'at its timeout' if c is None else c} and printed no report that can be read")
-    # A readable report is judged on its counts, not the exit code. The tally is the command's own verdict, and run_mutants exits 1 on any wrong cause, so any fails.
+        failures.append(f"the mutation test run exited {'at its timeout' if c is None else c} and printed no report that can be read")
+    # A table is judged on its counts at any exit code. A tally is the command's own verdict, so CI is red on its nonzero exit, and run_mutants exits 1 on any wrong cause, so any fails.
+    if tally and c:
+        failures.append(f"the mutation test run exited {c} on a tally of killed {killed}, survived {survived}, wrong cause {unknown}, and CI fails the job on that exit")
     if survived:
         failures.append(f"{survived} mutant{'s' if survived != 1 else ''} survived")
     if tally and unknown:
@@ -2662,7 +2664,7 @@ def mutate_run_check(wt):
         failures.append(f"{unknown} mutants are unknown (crashed or timed out), more than the {MUTATE_UNKNOWN_MAX} the lint allows")
     if unread:
         failures.append(f"{unread} file{'s' if unread != 1 else ''} read no mutant (UNKNOWN row)")
-    return f"mutate run {wall} s, killed {killed}, survived {survived}, unknown {unknown}, {'fail' if failures else 'pass'}", failures
+    return f"mutation test run {wall} s, killed {killed}, survived {survived}, unknown {unknown}, {'fail' if failures else 'pass'}", failures
 
 def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
