@@ -1294,13 +1294,15 @@ def _glob_anchor(folder: str, cwd: str) -> str:
 
 
 def _env_file_in(folder: str, rules=(), exclude_dir=(), ignored=frozenset(), by_name=False,
-                 anchor="") -> str:
+                 anchor="", min_depth: int = 0, max_depth=None) -> str:
     """The first env file under `folder`, or ENV_TOO_LARGE past ENV_WALK_LIMIT entries, else ''. A symlink is not followed, as rg and ag do not.
     `.git` holds no env file and is skipped. `rules` narrow it, as `_glob_picked` reads them (`by_name` is grep's), on
     each path with `anchor` (`_glob_anchor`) in front, and a
     folder that matches an `exclude_dir` glob is not entered. `ignored` is `_ignored_paths`: a file
     or folder in it is skipped, except a file that a rule with `overrides` set picks. An ignored folder
-    that such a rule's glob picks by itself is entered, as rg enters it: `-g '*'` picks every folder."""
+    that such a rule's glob picks by itself is entered, as rg enters it: `-g '*'` picks every folder.
+    `min_depth` and `max_depth` (None for no limit) bound the depth of a file as find counts it: a file in
+    `folder` is at depth 1, and a file in a folder under it at depth 2."""
     seen = 0
     overriding = [rule for rule in rules if rule[3]]
     for top, dirs, files in os.walk(folder):
@@ -1311,9 +1313,12 @@ def _env_file_in(folder: str, rules=(), exclude_dir=(), ignored=frozenset(), by_
                    and (prefix + d + "/" not in ignored
                         or any(_glob_picks(d, anchor + prefix + d, glob_text, fold)
                                for _, glob_text, fold, _ in overriding))]
+        level = 0 if relative == "." else relative.count("/") + 1
+        if max_depth is not None and level + 1 >= max_depth:
+            dirs[:] = []
         seen += len(dirs) + len(files)
         for name in files:
-            if not names_env_file(name):
+            if not names_env_file(name) or level + 1 < min_depth or (max_depth is not None and level + 1 > max_depth):
                 continue
             read, overrides = _glob_picked(name, anchor + prefix + name, rules, by_name)
             if read and (overrides or prefix + name not in ignored):
@@ -1547,24 +1552,49 @@ def _find_names_no_env(expression) -> bool:
     """True when each name a find expression prints matches a `-name` or `-iname` glob that no env file name
     fits. The words are dequoted. Without a paren, find's `-a` binds tighter than `-o`, so each part between
     two top-level `-o` is one alternative. Each alternative needs a `-name` or `-iname` test that no `!` or
-    `-not` turns round. Any other test in it, negated or not, only narrows the names. A paren, or an action
-    that prints other text than the name, is not read, and the answer is False."""
+    `-not` turns round. Any other test in it, negated or not, only narrows the names. When an explicit
+    `-print` or `-print0` sits in the expression, only an alternative that holds one prints (a `-prune`
+    branch with none prints nothing), and only its tests before the first print narrow what it prints. A
+    paren, or an action that prints other text than the name, is not read, and the answer is False."""
     alternatives, current, at = [], [], 0
+    printing = []
+    printed = False
     while at < len(expression):
         word = expression[at]
         if word in ("(", ")") or word in ENV_FIND_OTHER_OUTPUT:
             return False
         if word in ("-o", "-or"):
             alternatives.append(current)
-            current = []
+            printing.append(printed)
+            current, printed = [], False
+        elif word in ("-print", "-print0"):
+            printed = True
         elif word in ("-name", "-iname") and at + 1 < len(expression):
             negated = at > 0 and expression[at - 1] in ("!", "-not")
-            if not negated:
+            if not negated and not printed:
                 current.append(not _glob_could_name_env(expression[at + 1], word == "-iname"))
             at += 1
         at += 1
     alternatives.append(current)
+    printing.append(printed)
+    if any(printing):
+        alternatives = [names for names, prints in zip(alternatives, printing) if prints]
     return all(any(names) for names in alternatives)
+
+
+def _find_depth_limits(expression):
+    """(min depth, max depth) that find's `-mindepth N` and `-maxdepth N` set, the max None for no limit. A
+    value that is not a number, or a missing one, sets no limit. With a repeat, the wider limit stands."""
+    low, high = None, None
+    for at, word in enumerate(expression[:-1]):
+        value = expression[at + 1]
+        if word not in ("-mindepth", "-maxdepth") or not value.isdigit():
+            continue
+        if word == "-mindepth":
+            low = int(value) if low is None else min(low, int(value))
+        else:
+            high = int(value) if high is None else max(high, int(value))
+    return low or 0, high
 
 
 def _xargs_source(pieces, ends, number: int, part: int, here: str):
@@ -1617,6 +1647,7 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str):
             return unknown
         if _find_names_no_env(bare[at:]):
             return "", False, []
+        low, high = _find_depth_limits(bare[at:])
         for word, start in starts or [(".", ".")]:
             if re.search(r"[$`]", start):
                 return unknown
@@ -1624,8 +1655,8 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str):
             # A quoted glob is no glob to the shell, so it is not expanded.
             expand = re.search(r"[*?\[]", start) and word == start
             for folder in glob.glob(target) if expand else [target]:
-                found = (_env_file_in(folder) if os.path.isdir(folder)
-                         else folder if names_env_file(os.path.basename(folder)) else "")
+                found = (_env_file_in(folder, min_depth=low, max_depth=high) if os.path.isdir(folder)
+                         else folder if names_env_file(os.path.basename(folder)) and not low else "")
                 if found:
                     return found, False, []
         return "", False, []
