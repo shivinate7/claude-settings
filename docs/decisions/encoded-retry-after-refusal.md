@@ -50,6 +50,7 @@ Not read:
 - A PowerShell call.
 - A decoded variable piped to a shell or to `source`: `s=$(base64 -d f); echo "$s" | sh`, `printf %s "$s" | bash`, `echo "$s" | source /dev/stdin`.
 - A decode run in a container or remote shell: `docker exec c sh -c "$(base64 -d f)"`, `ssh host "$(base64 -d f)"`.
+- A decode piped to `source /dev/stdin`, `. /dev/stdin` or `python3`, as `base64 -d f | source /dev/stdin`. The encoded-form rule does not match these on this head. Main has no such rule.
 
 Kind: process
 Home: hooks/guard_encoded.py
