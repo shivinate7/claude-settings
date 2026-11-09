@@ -88,6 +88,14 @@ class Matcher(unittest.TestCase):
         self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                         "no guard matcher covers %s: %r" % (tool, matchers))
 
+    def test_guard_matcher_covers_sendmessage(self):
+        # Rule sendmessage-session-id refuses a SendMessage that names a cloud session, so a guard matcher must see it.
+        matchers = guard_matchers()
+        self.assertTrue(matchers)
+        tool = "SendMessage"
+        self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                        "no guard matcher covers %s: %r" % (tool, matchers))
+
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
 # model only for Markdown and decision records. No prompt hook may sit on Edit or Write: it would call a
@@ -382,7 +390,7 @@ class QuestionReviewer(unittest.TestCase):
         self.assertEqual(gaps, [], "the question reviewer prompt does not name: %s" % gaps)
 
     def test_the_rubric_check_sees_each_missing_item(self):
-        # Green on main by design: it tests the check, not settings.json.
+        # It tests the check itself, not settings.json, so an edit to settings.json cannot change its result.
         self.assertEqual(set(SAMPLE), set(RUBRIC), "SAMPLE and RUBRIC name different items")
         self.assertEqual(rubric_gaps(" ".join(SAMPLE.values())), [])
         self.assertEqual(rubric_gaps(""), list(RUBRIC))
@@ -410,7 +418,7 @@ class QuestionReviewer(unittest.TestCase):
         self.assertEqual(listed, [], "the question reviewer prompt lists source kinds %s: code reads them" % listed)
 
     def test_the_kinds_readers_see_a_kind_added_or_dropped(self):
-        # Green on main by design: it tests the two readers, not settings.json.
+        # It tests the two readers, not settings.json, so an edit to settings.json cannot change its result.
         row = "| `%s` | means | Weak |\n"
         table = table_kinds("| Kind | Means |\n|---|---|\n" + row % "ruling" + row % "assumed")
         self.assertEqual(table, ["ruling", "assumed"])
