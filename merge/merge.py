@@ -38,7 +38,7 @@
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
-                          commit or ref is linted against --base (default main). A FAIL step refuses. An unknown refuses unless
+                          commit or ref is linted against --base (default main). A PR on a base other than main also FAILs when its head lacks that base's head (never lifted). A FAIL step refuses. An unknown refuses unless
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. A lint that ran no lint
                           CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock, merges
                           and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
@@ -2593,6 +2593,25 @@ def lane_head_and_base(root, target, base):
         raise Stop(f"cannot find {target} as a commit or ref in this clone or on origin {LANE_LINT_CITE}")
     return head, base
 
+def refuse_unstacked_head(root, head, base):
+    """A stacked PR (base other than main) whose head lacks its base's current head FAILs the lint before the long ci-job run. The caller
+    has fetched origin/<base> (open_worktree). In a shallow clone that cut the answer, the check fetches the full history once and asks
+    again. A read that still cannot say is a Stop, never a pass. Main moving on is not this check's job: a PR on main is not read."""
+    if base == "main":
+        return
+    c, tip = git(root, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{base}^{{commit}}")
+    held = None if c else ancestor(root, tip, head)
+    if held is None and not c:
+        import git_reads  # hooks/git_reads.py: the one shallow probe
+        if git_reads.is_shallow(root) is True:
+            git(root, "fetch", "-q", "--unshallow", "origin", "+refs/heads/*:refs/remotes/origin/*")  # a failed fetch leaves the read unknown below
+            held = ancestor(root, tip, head)
+    if held is None:
+        raise Stop(f"the stack check of {head[:9]} against {base} is unknown: git could not say whether the head holds origin/{base}. Run again. {LANE_LINT_CITE}")
+    if not held:
+        raise Stop(f"the lint of {head[:9]} FAILs: the head lacks {base}'s current head {tip[:9]}. "
+                   f"Merge {base} into the lane with an ordinary merge commit, push, and run `merge --lane-lint` again. {LANE_LINT_CITE}")
+
 def ci_job_run(wt, *args, notes=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
@@ -2621,8 +2640,8 @@ def ci_job_run(wt, *args, notes=None):
 def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
-    A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
-    ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
+    A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head FAILs first.
+    Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names."""
     if target.isdigit():
@@ -2638,6 +2657,8 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         tmp, wt = add_worktree(root, head)
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
         pin_notes = []
+        if target.isdigit():
+            refuse_unstacked_head(root, head, base)
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
     finally:
         drop_worktree(root, tmp, wt)
