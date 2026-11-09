@@ -1,4 +1,4 @@
-# A Mockup set check blocks the next builder
+# A Mockup set check refuses the next builder
 
 **What.** The design-review skill's Mockup set check spawns one design reviewer before any builder. That spawn counts as a reviewer round, so the next builder spawn is refused for a missing review record, though no round exists to record. A design lane hits this in normal work.
 
