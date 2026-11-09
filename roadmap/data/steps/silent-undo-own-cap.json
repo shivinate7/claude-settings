@@ -1,10 +1,10 @@
 {
   "title": "The silent-undo check reads all of a merge's lost lines as branch-own, not the first 25",
   "why": "Lane bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85), measured 23:05 CST Nov 8 on stack D (#1803 and up): lint/check_silent_undo.py reads at most 25 lines per merge as branch-own (OWN_LOOKUPS). Old merges 24b6c1423 (35 lines of hooks/guard_stream.py) and f1b102825 (45 lines) lose only the lane's own verdict-pipe-exit lines, which branch_only_lines confirms on the full lists, yet the check still reports 10 and 20 lines as undone main work.",
-  "note": "Bandaid in use: Drops-lines trailers on #1717 and stack D's base. A trailer also excuses any real drop of guard_stream.py later in the same range, so lifting the cap is the real fix. Red case first: a merge that loses 30 branch-own lines of one file.",
+  "note": "Bandaid in use: Drops-lines trailers on #1717 and stack D's base. A trailer also excuses any real drop of guard_stream.py later in the same range, so lifting the cap is the real fix. Red case first: a merge that loses 30 branch-own lines of one file. PR #2391, head 3890562bf (23:58 CST Nov 8); two notes in the outbox.",
   "phase": "next",
   "owner": "coordinator",
-  "status": "todo",
+  "status": "doing",
   "order": 872,
-  "updatedAt": "2026-11-08T23:09:00-06:00"
+  "updatedAt": "2026-11-08T23:58:00-06:00"
 }
