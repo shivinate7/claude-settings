@@ -15997,15 +15997,21 @@ class ReviewStampSince(unittest.TestCase):
             self.fail("shallow_boundary read a folder with no .git as full history and returned %r instead of stopping" % (got,))
 
     def test_two_default_branches_on_one_root_and_base_each_get_their_own_cutover(self):
-        # The cache is keyed by (root, base) and holds the first answer. A second call with another default branch must read that branch.
-        # origin/trunk here is commit 1, which has no salt line, so its cutover is none. main's is the salt commit's committer time.
+        # The cache key is (repo top, base, default branch). origin/trunk has no salt line, so its read falls back to the merge tool's
+        # checkout. A key without the default branch would return main's cached cutover to the trunk call instead.
         root = self.repo(salt_at=2)
         sh(root, "git", "update-ref", "refs/remotes/origin/trunk", sh(root, "git", "rev-parse", "HEAD~2"))
         self.assertNotIn("REVIEW_STAMP_SALT =", sh(root, "git", "show", "origin/trunk:merge/merge.py"), "fixture: origin/trunk holds the salt line")
         fn = review_fn(self, "review_stamp_since")
-        self.assertEqual(fn(root, "main", default="main"), "2026-10-21T15:04:05Z", "fixture: main's cutover is not the salt commit's time")
-        got = fn(root, "main", default="trunk")
-        self.assertIsNone(got, "the call with default trunk returned %r, the answer cached for main, not trunk's none" % (got,))
+        main = fn(root, "main", default="main")
+        self.assertEqual(main, "2026-10-21T15:04:05Z", "fixture: main's cutover is not the salt commit's time")
+        # The tool checkout's salt is at commit 3, so its cutover differs from main's. The trunk call must return the tool's cutover.
+        with self.tool_checkout(salt_at=3):
+            tool = merge.tool_stamp_since()
+            self.assertNotEqual(tool, main, "fixture: the merge tool checkout's cutover is main's, so the two reads cannot be told apart")
+            got = fn(root, "main", default="trunk")
+        self.assertEqual(got, tool, "the call with default trunk returned %r, not the merge tool checkout's cutover %r" % (got, tool))
+        self.assertNotEqual(got, main, "the call with default trunk returned main's cached cutover %r" % (got,))
 
     def test_a_subfolder_root_reads_the_same_cutover_as_the_repo_root(self):
         # merge/merge.py is a path from the repo root. `git -C <subfolder>` reads that path under the subfolder, finds no history, and
