@@ -205,3 +205,8 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - lane-mutate-tally-copy (same source): the tally regex in merge.py hand-copies mutate_shared.py's line (rule building-allow-list-is-the-constant). Fix: import the pattern from mutate_shared.py.
 - lane-mutate-record-drift (same source): the record says 21 cases where the file has 28, and the usage text says "step" where the glossary says "CI step". Fix: correct the count and the term.
 - lane-mutate-trigger-gaps (same source): the trigger omits hooks/guard.py, hooks/test_guard.py and bin/sim-lease. Fix: add them to the trigger, or state why each is out.
+- gh-write-repo-flag-gap (#2444 gh-write-cloud guard, step gh-search-only, via coordinator 10:03 CST Nov 9): `gh pr -R o/r comment` is allowed, a gh_call_of limit. Fix: teach gh_call_of to skip `-R`/`--repo` before the subcommand, in its own lane, since it changes the local verdict too.
+- gh-write-ansi-c-quote (same source): shlex fails open on `$'..'` bodies. Fix: on a shlex error in a gh command, refuse (fail closed) in cloud.
+- gh-write-graphql-refused (same source): `gh api graphql -f` is refused, though the proxy already 403s it. Fix: none needed unless a read query must pass; then allow a query with no `mutation`.
+- gh-write-workflow-release (same source): `gh workflow run` and `gh release create` stay allowed in cloud (`gh run rerun` stays allowed on purpose, for batch runners). Fix: add both to the cloud write list.
+- ci-hygiene-gh-pr-ready-cloud (same source): the ci-hygiene skill and its snippets still say `gh pr ready`, which gets 403 in cloud. Fix: name MCP update_pull_request (draft:false) for cloud sessions.
