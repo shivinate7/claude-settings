@@ -131,3 +131,9 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - report-guard-remedy-reviewer (#2355 round 3, same source, Decision: record-tool-posts-itself): lint/report_guard.py's remedy tells "the reviewer" to run the posting form, but the decision says the lane runs it.
 - cross-repo-repo-name-import (#2229 round 3, via the coordinator 19:09 CST Nov 8, Decision: cross-repo-question-checked): hooks/question_form.py cross_repo_hit imports stale_pages.REPO_NAME with no ImportError guard; with skills/ missing beside hooks the guard fails open and later page rules skip that write.
 - default-branch-export-page-id (same source and decision): hooks/feedback_guard.py export_check on a checkout with no extras gets page_id "", so an --all export never clears through "<id>: same"; one Stop is blocked, then stop_hook_active ends it.
+- merge-role-doc-stale (#1971 round 3, lane revive-1042 19:16 CST Nov 8; debt coordinator-tag-tier-fails-open covers the gap): docs/decisions/session-tiers.md:104 and the guard.py docstring (~181) still say `merge --role <tier>` writes the coordinator role file; write_merge_role refuses every tier but batch-runner.
+- todo-fb-1532-2-stays (same source): delete the docs/todo.md fb-1532-2 line after #1971 lands.
+- guard-merge-dead-while (same source): guard_merge.py:123-128 has a dead `while` for a repo flag before `pr`; gh_call_of already moves root flags.
+- coordinator-scope-missed-writes, add (same source): the `gh api -X PUT repos/o/r/contents/<path>` write is not read for coordinators.
+- shared-names-case-w-scope (same source): case (w) in test_shared_names.py tests _test_temp.sweep, not the role reader.
+- loop-var-literal-idioms (#2123 round 3, same lane; debt loop-var-redirect-literal does not name them): a part-word `$f` in a loop body (`echo "== $f =="`) and `$HOME` or `$D` in a for list stay literal, as on main, because _resolve_loops runs before _resolve_vars.
