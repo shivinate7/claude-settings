@@ -40,6 +40,10 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
 - Breakpoint, both options: the ask list and the Ask box become query containers. A folded row or a Dismissed line stacks at
   `@container (width < 19.5em)` (312 px at 100% text, 624 px at 200%). The Ask box stacks at `width < 16.5em` (264 px).
   In em, so larger text trips it sooner (ux-component-reads-its-box). No new media query.
+- The 520 px phone rules of the same parts read their box too, with each floor equal to the 520 px window's content at 100% text:
+  the folded row, `.fwait` and the Dismissed-row block at `askl (width <= 30.5em)` (488 px); the Ask box at `askf (width <= 28.375em)`
+  (454 px); the reply box's Close at `askf (width <= 26.75em)` (428 px); the Designs viewer's head at `dsh (width <= 30.5em)`.
+  The 19.5em and 16.5em floors above stay. At 100% text each box is the same as the 520 px rule drew it at 320, 390 and 1280.
 - Readable minimum: 8em of text column beside a press (128 px at 100%, 256 at 200%). 360 keeps 146 px, so it stays beside.
 - Stacked row: the row button is two columns (glyph, text). Title up to 3 lines, then the date, then "Show answer" on a row
   with no side press. On a row with Dismiss or Restore, "Show answer" stays in the button's name only, as today's phone row.
