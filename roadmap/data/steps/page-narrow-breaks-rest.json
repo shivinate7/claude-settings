@@ -1,0 +1,11 @@
+{
+  "title": "The waiting page's remaining narrow-screen faults that #2450 leaves out are fixed",
+  "why": "Coordinator 11:36 CST Nov 9, from lane page-narrow-word-breaks (#2450): #2450 fixes part of step page-narrow-word-breaks and leaves these out: the .dcap caption size; the \"(permission|-denied)\" failure-line break; the \"Question|s\" tab labels; the sent panel scrolling 9 px sideways at 180 px (on the base); and part B, words wider than their box. Harm: the owner reads the page on a phone, and these still break or cut text at narrow widths with large text.",
+  "note": "Part B keeps the a11y.md rule. Measurements for each item are on step page-narrow-word-breaks. A screen lane: designer first, design reviewer after.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 917,
+  "updatedAt": "2026-11-09T11:36:00-06:00"
+}
