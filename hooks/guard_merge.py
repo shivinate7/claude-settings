@@ -379,6 +379,11 @@ REVIEW_OLD_UNREAD_REASON = (
     "(decision pr-review-record, hooks fail closed on a read that cannot run)"
 )
 REVIEW_UNREAD_REMEDY = "run the edit again when `gh` can read the comment, or post a new comment."
+REVIEW_REST_EDIT = "`gh api -X PATCH repos/<owner>/<repo>/issues/comments/<id>`"   # the REST edit: the guard reads its comment without GraphQL
+REVIEW_NODE_UNREAD_REMEDY = ("edit the comment on the REST route, " + REVIEW_REST_EDIT + ", which the guard reads without GraphQL "
+                             "(GraphQL is refused in a cloud session), or post a new comment.")
+REVIEW_LITERAL_NODE_REMEDY = ("write the node id literally, such as `-f id=IC_...`, not a shell expansion; the guard then reads that comment. "
+                              "Or edit the comment on the REST route, " + REVIEW_REST_EDIT + ", or post a new comment.")
 REVIEW_LITERAL_ID_REMEDY = ("write the route with a literal `owner/repo` and a literal comment id, such as repos/owner/repo/issues/comments/<id>, "
                             "or with the `{owner}/{repo}` placeholder, not a shell variable or `$(...)`; the guard then reads that route. "
                             "Or post a new comment.")
@@ -486,12 +491,28 @@ def _edit_reason(module):
     return "edit of a review record comment", REVIEW_EDIT_REASON % _review_render(module, "<pr>", "<live head>")
 
 
+GRAPHQL_NODE_QUERY = 'query=query{node(id:"%s"){... on IssueComment{body}}}'   # the id is a literal the caller matched with GRAPHQL_NODE_ID
+GRAPHQL_NODE_ID = re.compile(r"[A-Za-z0-9_=+/-]{1,128}")
+
+
 def _old_body(host, edit):
-    """The one read of the body an edit replaces. `edit` is ("comment", id) for an edit that names a comment, or ("last", selector)
-    for `--edit-last`, which edits the caller's last comment on that pull request: the newest comment of the listing (the listing
-    names its authors, but the caller's login is a second read, so a newer comment by another user hides the record: a limit).
-    A read that fails raises."""
+    """The one read of the body an edit replaces. `edit` is ("comment", id) for an edit that names a comment, ("node", node id) for a
+    GraphQL mutation that names it by node id, or ("last", selector)
+    for `--edit-last`, which edits the caller's last comment on that pull request: the newest comment of the listing by the caller.
+    The caller's login is a second read, made only when the listing names more than one author, so a thread of one author costs
+    one read. A read that fails raises."""
     kind, ref = edit
+    if kind == "node":   # no REST route takes a node id, so this read is GraphQL
+        if not GRAPHQL_NODE_ID.fullmatch(str(ref)):   # a shell expansion or a file: no read names its comment
+            raise _LiteralIdNeeded("the comment node id is not a literal the guard can read", REVIEW_LITERAL_NODE_REMEDY)
+        code, out = host.gh(["api", "graphql", "-f", GRAPHQL_NODE_QUERY % ref], host.cwd)
+        try:   # a retry of this read fails the same way where GraphQL is refused, so no failure here says to run the edit again
+            node = (json.loads(out).get("data") or {}).get("node") if not code else None
+        except (ValueError, AttributeError):
+            node = None
+        if not isinstance(node, dict):
+            raise _LiteralIdNeeded("reading the comment node failed", REVIEW_NODE_UNREAD_REMEDY)
+        return str(node.get("body") or "")
     if kind == "comment":
         if isinstance(ref, str) and ref.isdigit():
             ref = int(ref)
@@ -504,7 +525,18 @@ def _old_body(host, edit):
     if shell_expanded(ref):   # a variable selector names no pull request, so no retry reads it
         raise _LiteralIdNeeded("the pull request number is a shell expansion the guard cannot read", REVIEW_LITERAL_PR_REMEDY)
     rows = host.pages("issues/%d/comments" % host.pr_number(ref))   # 100 a page, so a long thread stays inside MERGE_READ_TIMEOUT
+    if len({_comment_login(row) for row in rows}) > 1:   # a thread with one author needs no login: the newest is the caller's, or gh edits none
+        code, out = host.gh(["api", "user"], host.cwd)
+        if code:
+            raise RuntimeError("reading the caller's login failed")
+        login = str(json.loads(out).get("login") or "").lower()
+        rows = [row for row in rows if _comment_login(row) in ("", login)]   # a comment that names no author is judged, never skipped
     return str(rows[-1].get("body") or "") if rows else ""
+
+
+def _comment_login(row) -> str:
+    """The lower-case login of the author of a listed comment, '' when the row names none."""
+    return str(((row.get("user") if isinstance(row, dict) else None) or {}).get("login") or "").lower()
 
 
 def _old_body_hit(edit, repo: str, where: str, stdin_unseen: bool = False):
@@ -538,6 +570,7 @@ VARIABLE_REMEDIES = {
     "number": "write the PR number literally (`issues/12/comments`, `gh pr comment 12`)",
     "repo": "write the repo, OWNER/NAME, instead of a shell expansion (`repos/OWNER/NAME/issues/12/comments`, `-R OWNER/NAME`)",
     "endpoint": "write the route out in the call (`repos/OWNER/NAME/issues/12/comments`) instead of a substitution",
+    "graphql": "post it on the REST route instead (`gh api repos/OWNER/NAME/issues/12/comments`), which names the pull request",
 }
 
 
@@ -546,8 +579,9 @@ def _variable_reason(module, variable):
     arithmetic, a command substitution): its pull request cannot be checked. `variable` names the parts that are expansions
     ("number", "repo", "endpoint"), and each gets its own remedy. The refusal sits one call below its caller, so the rule audit
     reads its reason within its depth limit."""
+    held = "a GraphQL mutation names its comment by node id" if variable == ("graphql",) else "held in a shell expansion"
     return "review record posted to a variable issue number", REVIEW_REASON % (
-        "this record goes to a route the guard cannot read, held in a shell expansion; "
+        "this record goes to a route the guard cannot read, " + held + "; "
         + "; ".join(VARIABLE_REMEDIES[name] for name in variable), _review_render(module, "<pr>", "<live head>"))
 
 
@@ -558,7 +592,7 @@ def _body_file_reason(name):
 
 
 def review_record_hit(bodies, repo: str, selector, where: str, edit=None, variable=(), unseen: bool = False, unread: str = "",
-                      stdin_unseen: bool = False):
+                      stdin_unseen: bool = False, marked_only: bool = False):
     """Return (matched, reason) when a comment post must be refused, else None.
 
     `bodies` are the texts the post would send, `selector` names the pull request it goes to (a number, a URL, a branch,
@@ -568,10 +602,13 @@ def review_record_hit(bodies, repo: str, selector, where: str, edit=None, variab
     before any read, because an edited record was rendered by no run. Any other edit makes one read of the old body
     (`_old_body`) and is refused when that holds a record, or when the read could not run. `unseen` is true when the new body cannot be
     seen (`--input`, stdin): it is read like an unmarked body. `unread` names a body file that could not be read: refused, no read.
-    No new body named and none unseen: None, no read.
+    No new body named and none unseen: None, no read. `marked_only`: the old body of the comment cannot be named (a GraphQL
+    mutation whose node id is not a literal), so an edit with no marked body is left alone, with no read.
     `variable` names the route parts that are shell expansions (`_variable_reason`), empty for a literal route: a marked post is refused with no read, as its pull request cannot be checked."""
     found = _marked_bodies(bodies)
     if edit and not found:
+        if marked_only:
+            return None
         if unread:
             return _body_file_reason(unread)
         if not unseen and not any(isinstance(b, str) for b in bodies):

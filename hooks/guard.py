@@ -418,7 +418,7 @@ while True:
             conflict_markers_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_note, pr_call_target, ansi_c_decoded,
-            shell_expanded,
+            shell_expanded, GRAPHQL_NODE_ID,
             FILE_WRITE_TOOLS, UPDATE_COMMENT_TOOL,
         )
         _loading = "guard_frozen"
@@ -1502,25 +1502,23 @@ _ROUTE_NUMBER = r"(\d+|\$\w+|\$\{[^}\s]*\}|\$\(.*|`[^`]*`)"
 
 def _issue_route(middle: str, after: str, any_form: bool = False):
     """The pattern of `repos/<repo>/issues/<middle><number><after>`. With `any_form`, the route may also lead with a full URL host
-    and end in a query string or a fragment, the forms an edit takes (a post by full URL stays a named limit)."""
+    and end in a query string or a fragment, the forms a post and an edit both take."""
     head, tail = (r"(?:https?://[^/\s]+)?", r"(?:[?#].*)?") if any_form else ("", "")
     return re.compile(head + r"/?repos/" + _ROUTE_REPO + "/issues/" + middle + _ROUTE_NUMBER + after + tail, re.DOTALL)
 
 
-_COMMENTS_ROUTE = _issue_route("", "/comments/?")
+_COMMENTS_ROUTE = _issue_route("", "/comments/?", any_form=True)
 _COMMENT_EDIT_ROUTE = _issue_route("comments/", "/?", any_form=True)   # a comment edited in place, by comment id
 ENDPOINT_NUMBER = "<endpoint>"   # the number of a route whose whole endpoint is a shell expansion (`$URL`, `$(...)`)
 _API_VALUE_FLAGS = {"-X", "--method", "-H", "--header", "-q", "--jq", "-t", "--template", "--input", "--hostname", "--cache",
                     "-p", "--preview"} | set(GH_API_FIELD_FLAGS)
 
 
-def _open_substitutions(text: str, quotes: bool = True) -> int:
-    """Return how many `$(..)` and backtick substitutions `text` leaves open at its end, the one count both joins below read. With
-    `quotes`, a parenthesis or backtick inside quotes is text (`$(echo '(' 12)` closes); without, `text` is a word the tokenizer
-    already unquoted."""
+def _open_substitutions(text: str) -> int:
+    """Return how many `$(..)` and backtick substitutions `text` leaves open at its end, the one count both joins below read. A
+    parenthesis or backtick inside quotes is text (`$(echo '(' 12)` closes)."""
     depth, ticks = 0, 0
-    steps = walk_quotes(text) if quotes else ((index, char, "") for index, char in enumerate(text))
-    for index, char, quote in steps:
+    for index, char, quote in walk_quotes(text):
         if quote:
             continue
         if char == "(" and (depth or text[index - 1:index] == "$"):
@@ -1532,11 +1530,17 @@ def _open_substitutions(text: str, quotes: bool = True) -> int:
     return depth + ticks
 
 
-def review_segments(segments, ends, offsets):
-    """Yield (segment, before, piped) for the review-record loop. The splitter cuts at an unquoted `|`, `;`, `&&` or newline even
+_WRAPPED_DEPTH = 4   # nested `bash -c` scripts read; a deeper one is left unjudged
+
+
+def review_segments(segments, ends, offsets, raw, depth=0):
+    """Yield (segment, before, piped, raw) for the review-record loop. The splitter cuts at an unquoted `|`, `;`, `&&` or newline even
     inside a `$(..)`, so a gh call whose substitution it cut is joined with the segments up to the close, each cut put back as it
     was: the call is judged whole, and its inner call never stands alone. Only a gh call joins, so a stray `$(` in other text
-    hides no later call. `before` is the first segment's heredoc offset (`offsets`), and `piped` the group before, when it ends in `|`."""
+    hides no later call. `before` is the first segment's heredoc offset (`offsets`), and `piped` the group before, when it ends in `|`.
+    `raw` is the text the segments were cut from, which holds their heredoc bodies.
+    A call a shell, `eval` or a runner starts from text (`bash -c "gh ..."`, `eval "gh ..."`) is read by `inner_commands`: each script
+    is yielded after its segment as segments of its own, with itself as `raw`."""
     index, previous, previous_end = 0, "", ""
     while index < len(segments):
         text, before, last = segments[index], offsets[index], index
@@ -1544,24 +1548,61 @@ def review_segments(segments, ends, offsets):
             while last < len(segments) - 1 and ends[last] and _open_substitutions(text):
                 text += ends[last] + segments[last + 1]
                 last += 1
-        yield text, before, (previous if previous_end == "|" else "")
+        yield text, before, (previous if previous_end == "|" else ""), raw
+        tokens = segment_tokens(ansi_c_decoded(text)) if depth < _WRAPPED_DEPTH and "gh" in text else None
+        for script in inner_commands(tokens) if tokens else ():
+            inner_ends = []
+            inner = split_segments(script, inner_ends)
+            yield from review_segments(inner, inner_ends, heredoc_offsets(inner, inner_ends), script, depth + 1)
         previous, previous_end, index = text, ends[last], last + 1
 
 
-def _joined_substitutions(args):
-    """Return `args` with each route-shaped word that opens a `$(` or a backtick the tokenizer split at a space joined with the words
-    up to its close, so the inner call of a substitution is no word of its own. Only a word that starts a route or an endpoint
-    (`repos/`, `/repos/`, a full URL to one, `$(`, a backtick) is joined: a body field that holds `$(` as text is left alone."""
-    out, depth = [], 0
-    for arg in args:
-        if depth > 0:
-            out[-1] += " " + arg
-        else:
-            out.append(arg)
-            if not re.search(r"\$\(|`", arg) or not re.match(r"(https?://[^/\s]+)?(/?repos/|\$\(|`)", arg):
+_ROUTE_WORD_START = re.compile(r"(https?://[^/\s]+)?(/?repos/|\$\(|`)")
+
+
+def _joined_substitutions(text: str) -> str:
+    """Return the segment `text` with each space inside an open `$(..)` or backtick substitution escaped, so the tokenizer reads the
+    substitution as one word and its inner call is no word of its own. Only a word that starts a route or an endpoint (`repos/`,
+    `/repos/`, a full URL to one, `$(`, a backtick) is joined: a body field that holds `$(` as text is left alone. The count reads
+    the text, as `review_segments` does, so a quoted parenthesis is text."""
+    out, start, index = [], None, 0
+    for step, quote in _quote_steps(text):
+        if not quote and step in " \t\r\n":
+            word = text[start:index] if start is not None else ""
+            if _ROUTE_WORD_START.match(re.sub("['\"]", "", word)) and _open_substitutions(word):
+                out.append("\\ ")
+                index += 1
                 continue
-        depth = _open_substitutions(out[-1], quotes=False)
-    return out
+            start = None
+        elif start is None:
+            start = index
+        out.append(step)
+        index += len(step)
+    return "".join(out)
+
+
+def _quote_steps(text: str):
+    """Yield (step, quote open before it) over `text`: the whole text each `walk_quotes` step spans, so an escaped pair such as
+    `\\"` or `\\$` is one step and neither half is lost."""
+    marks = [(index, quote) for index, _char, quote in walk_quotes(text)]
+    for at, (index, quote) in enumerate(marks):
+        yield text[index:marks[at + 1][0] if at + 1 < len(marks) else len(text)], quote
+
+
+def _double_quote_value(text: str) -> str:
+    """Return `text` with the backslash escapes bash spends inside a double-quoted word spent: `\\$` and a backslash before a backtick
+    are the bare character, so a GraphQL variable (`\\$id`) reads as the name the query holds. `\\"` and `\\\\` are left for the
+    tokenizer, which spends them the same way, and any other backslash stays, as bash keeps it. An escape in single quotes or
+    outside quotes is left as it stands."""
+    return "".join(step[1] if quote == '"' and step in ("\\$", "\\`") else step for step, quote in _quote_steps(text))
+
+
+def _graphql_string(text: str) -> str:
+    """Return the text a GraphQL string literal holds, its escapes (`\\n`, `\\"`, `\\uHHHH`) decoded, else the text as it stands."""
+    try:
+        return json.loads('"' + text + '"')
+    except ValueError:
+        return text
 
 
 def _api_endpoint(args):
@@ -1573,6 +1614,14 @@ def _api_endpoint(args):
         if not arg.startswith("-"):
             return arg
     return ""
+
+
+_GRAPHQL_ENDPOINT = re.compile(r"(https?://[^/\s]+)?/?graphql")
+
+
+def _is_graphql_endpoint(args) -> bool:
+    """True when a `gh api` call names the GraphQL endpoint: `graphql`, `/graphql`, or a full URL to it."""
+    return _GRAPHQL_ENDPOINT.fullmatch(_api_endpoint(args)) is not None
 
 
 def _api_method(args) -> str:
@@ -1644,8 +1693,8 @@ def _api_input_named(args) -> bool:
     return any(a == "--input" or a.startswith("--input=") for a in args)
 
 
-def _api_bodies(args):
-    """Return (texts, files, stdin) for the `body` fields of a `gh api` call. A `body` field
+def _api_bodies(args, keys=("body",)):
+    """Return (texts, files, stdin) for the fields of a `gh api` call named in `keys` (every field when None). A `body` field
     is text for -f and --raw-field, and for -F and --field text too unless it starts with `@`, which names a file (`@-` is stdin)."""
     texts, files, stdin, index = [], [], False, 1
     while index < len(args):
@@ -1664,7 +1713,7 @@ def _api_bodies(args):
         if value is None:
             continue
         key, _, text = value.partition("=")
-        if key != "body":
+        if keys is not None and key not in keys:
             continue
         if typed and text.startswith("@"):
             if text == "@-":
@@ -1676,16 +1725,141 @@ def _api_bodies(args):
     return texts, files, stdin
 
 
+_GRAPHQL_COMMENT = re.compile(r"\b(addComment|updateIssueComment)\b")
+# A body is a quoted string (group `plain`, escapes) or a block string (group `block`, raw: only `\"""` is an escape). The block form is
+# tried first, as its opener starts with the empty string `""`.
+_GRAPHQL_BODY = re.compile(r'\bbody\s*:\s*(?:"""(?P<block>(?:\\"""|(?!""").)*)"""|"(?P<plain>(?:[^"\\]|\\.)*)")', re.DOTALL)
+_GRAPHQL_NODE = re.compile(r'\bid\s*:\s*"([^"\\]*)"')   # the `id:` of an updateIssueComment input, a literal node id
+_GRAPHQL_INPUT_VARIABLE = re.compile(r'\binput\s*:\s*\$(\w+)')   # `input: $name`, the input object whose `id` names the node
+_GRAPHQL_NODE_VARIABLE = re.compile(r'\bid\s*:\s*\$(\w+)')   # the same `id:` given as a variable, whose value is a `-f` field or a request variable
+
+
+def _graphql_block_string(text: str) -> str:
+    """Return the text a GraphQL block string holds, as the GraphQL spec reads it: an escaped triple quote is a triple quote, the indent
+    every line after the first shares is dropped, and so are the blank lines at both ends. The marker test reads the first line."""
+    lines = text.replace('\\"""', '"""').split("\n")
+    indents = [len(line) - len(line.lstrip(" \t")) for line in lines[1:] if line.strip()]
+    common = min(indents, default=0)
+    lines = lines[:1] + [line[common:] for line in lines[1:]]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines)
+
+
+def _graphql_bodies(query: str):
+    """Return the texts of the `body:` strings in a GraphQL query, quoted or block, each as GraphQL reads it."""
+    return [_graphql_block_string(found["block"]) if found["block"] is not None else _graphql_string(found["plain"])
+            for found in _GRAPHQL_BODY.finditer(query)]
+
+
+def _api_input_file(args) -> str:
+    """Return the file a `gh api` call takes its request body from, `--input FILE` or `--input=FILE`, else ''. `-` is stdin: ''."""
+    for index, arg in enumerate(args):
+        name = arg[len("--input="):] if arg.startswith("--input=") else (args[index + 1] if arg == "--input" and index + 1 < len(args) else "")
+        if name and name != "-":
+            return name
+    return ""
+
+
+def _read_text_file(name: str, where: str):
+    """Return the first MESSAGE_FILE_MAX characters of the file `name` names from `where`, else None when it cannot be read."""
+    try:
+        with open(os.path.normpath(_absolute(name, where)), encoding="utf-8", errors="replace") as handle:
+            return handle.read(MESSAGE_FILE_MAX)
+    except Exception:
+        return None
+
+
+def _graphql_query_sources(rest):
+    """Return (texts, files, stdin) for the `query` field of a `gh api graphql` call: literal text, the files it reads (`-F query=@file`,
+    and a query of exactly `$(cat FILE)`, which the shell fills from FILE), and whether `-F query=@-` takes it from stdin."""
+    texts, files, stdin = _api_bodies(rest, ("query",))
+    literal = []
+    for text in texts:
+        named = _cat_file(text)
+        if named:
+            files.append(named)
+        else:
+            literal.append(text)
+    return literal, files, stdin
+
+
+def _graphql_file_queries(rest, where: str, query_files=()):
+    """Return (queries, read, variables) for the query files of a `gh api graphql` call: `query_files` (`_graphql_query_sources`), and the
+    `query` of a JSON request body read by `--input` (a body that is no JSON object is the query itself). `variables` is the `variables`
+    object of that request body. `read` names the files that were read; a file that cannot be read is left out, and the caller reports it."""
+    queries, read, variables = [], [], {}
+    for name in list(query_files) + [_api_input_file(rest)]:
+        text = _read_text_file(name, where) if name else None
+        if text is None:
+            continue
+        read.append(name)
+        try:
+            request = json.loads(text)
+        except ValueError:
+            request = None
+        queries.append(str(request.get("query") or "") if isinstance(request, dict) else text)
+        if isinstance(request, dict) and isinstance(request.get("variables"), dict):
+            variables.update(request["variables"])
+    return queries, read, variables
+
+
+def _json_strings(value):
+    """Return every string a JSON value holds, at any depth, so a body nested in a request variable is judged."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        value = list(value.values())
+    return [text for item in value for text in _json_strings(item)] if isinstance(value, list) else []
+
+
+def _graphql_node_value(rest, field: str, requested):
+    """Return (node id, True) for the value a `-f`/`-F` field named `field` gives, else the request variable `requested` (None when the
+    request holds none). A field that names a file is `@file`, which is no literal id. ('', False) when nothing gives a value."""
+    texts, files, _stdin = _api_bodies(rest, (field,))
+    values = texts + ["@" + name for name in files] + ([str(requested)] if requested is not None else [])
+    return (values[0], True) if values else ("", False)
+
+
+def _graphql_node_of(queries, rest, variables):
+    """Return (node id, named by a field) for the updateIssueComment in `queries`: the literal `id: "..."`, else the value the variable
+    `id: $name` names, or the `id` of the input object `input: $name` names, from a `-f`/`-F` field (`name`, `name[id]`) or a request
+    variable (`name`, `name.id`). ('', False) when no id is named."""
+    for query in queries:
+        if "updateIssueComment" not in query:
+            continue
+        start = query.find("updateIssueComment")
+        literal = _GRAPHQL_NODE.search(query, start)
+        if literal:
+            return literal[1], False
+        named = _GRAPHQL_NODE_VARIABLE.search(query, start)
+        if named:
+            return _graphql_node_value(rest, named[1], variables.get(named[1]))
+        given = _GRAPHQL_INPUT_VARIABLE.search(query, start)
+        if given:
+            nested = variables.get(given[1])
+            return _graphql_node_value(rest, given[1] + "[id]", nested.get("id") if isinstance(nested, dict) else None)
+    return "", False
+
+
 def review_post_hit(segment: str, raw: str, where: str, before: int, previous: str = ""):
     """Return (matched, reason) when this segment posts a review record the guard must refuse, else None. Judges `gh pr comment` and `gh issue comment`
     (--body, -b, --body-file, -F) and `gh api repos/O/R/issues/<n>/comments` (-f, -F, --field, --raw-field `body=`, `body=@file`),
     each with the bodies of the heredocs its own header holds. A body of exactly `$(cat FILE)`, and a stdin body piped from
     `cat FILE` (`previous` is the segment piped in), are read from FILE. A file that cannot be read allows, with a note. No body
-    whose first line is the marker: no read."""
+    whose first line is the marker: no read. A GraphQL `addComment` or `updateIssueComment` names its comment by node id, so no
+    word of the call names the pull request: a marked body is refused with no read. The endpoint is `graphql`, `/graphql` or a full URL to it. The mutation is read from `-f query=`, from `-f query="$(cat FILE)"`, from
+    `-F query=@file`, from `-F query=@-` fed by a heredoc, and from a JSON file of `--input`, and its body from a quoted or a block string, a field, or a request
+    variable. An `updateIssueComment` with no marked body reads the old body of its node, one GraphQL read, and is refused when that
+    holds a record or cannot be read. Its node id is the literal in the query, the value of the `-f` field (or request variable) it names, or the `id` of the input
+    object it names (`-F input[id]=`, `variables.input.id`); a field value that is a shell expansion is refused as unreadable, with no read. A node id that is a variable no
+    field names is left alone."""
     rest = gh_call_of(ansi_c_decoded(segment))   # bash sends a `$'...'` body decoded
     if rest is None:
         return None
-    edit, variable = None, ()
+    edit, variable, graphql, input_read = None, (), False, False
     if rest[:2] in (["pr", "comment"], ["issue", "comment"]):   # an issue comment reaches the same pull request
         args = rest[2:]
         selector, repo = _comment_target(args)
@@ -1694,18 +1868,40 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
         variable = tuple(name for name, part in (("number", selector), ("repo", repo)) if shell_expanded(part))
         texts, files, stdin = message_sources(args, "comment")
     elif rest[:1] == ["api"]:
-        rest = _joined_substitutions(rest)
-        route = _comment_route(rest)
-        if route is None:
-            return None
-        routes, repo, number = route
-        texts, files, stdin = _api_bodies(rest)
-        variable = _variable_parts(repo, number)
-        if routes is _COMMENT_EDIT_ROUTE:   # an edit names a comment, not a pull request
-            edit = ("comment", "" if variable else number)
-            selector = ""
+        rest = gh_call_of(_double_quote_value(_joined_substitutions(ansi_c_decoded(segment)))) or rest
+        if _is_graphql_endpoint(rest):
+            query_texts, query_files, query_stdin = _graphql_query_sources(rest)
+            file_queries, read, request_variables = _graphql_file_queries(rest, where, query_files)
+            queries = query_texts + file_queries
+            if query_stdin and "<<" in segment and not _api_input_named(rest):   # `-F query=@-` fed by a heredoc: its text is the query
+                queries += own_heredoc_bodies(segment, raw, before)
+            mutation = _GRAPHQL_COMMENT.search(" ".join(queries))
+            if mutation is None:
+                return None
+            texts, files, stdin = _api_bodies(rest, None)   # a variable body has any key
+            texts = [text for text in texts if not (_cat_file(text) and _cat_file(text) in query_files)]   # a `$(cat FILE)` query is read above
+            files = [name for name in files if name not in read]   # a query file was read above; an unread one stays for the note below
+            texts += [text for query in texts + queries[len(query_texts):] for text in _graphql_bodies(query)]
+            texts += _json_strings(request_variables)   # a body held in the `variables` of a request file
+            repo, selector, variable, graphql = "", "", ("graphql",), True
+            if mutation.group(1) == "updateIssueComment":
+                node, by_field = _graphql_node_of(queries, rest, request_variables)
+                # A literal id in the query that is no node id is left alone. An id a field supplies is read, or refused as unreadable.
+                edit = ("node", node) if node and (by_field or GRAPHQL_NODE_ID.fullmatch(node)) else ("comment", "")
+                graphql = edit[0] != "node"   # a named node id names the old body to read; any other id leaves the edit alone
+            input_read = _api_input_file(rest) in read
         else:
-            selector = str(number)
+            route = _comment_route(rest)
+            if route is None:
+                return None
+            routes, repo, number = route
+            texts, files, stdin = _api_bodies(rest)
+            variable = _variable_parts(repo, number)
+            if routes is _COMMENT_EDIT_ROUTE:   # an edit names a comment, not a pull request
+                edit = ("comment", "" if variable else number)
+                selector = ""
+            else:
+                selector = str(number)
     else:
         return None
     texts, files = list(texts), list(files)
@@ -1726,19 +1922,19 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
             judged_stdin = True
     unread = ""
     for name in files:
-        try:
-            with open(os.path.normpath(_absolute(name, where)), encoding="utf-8", errors="replace") as handle:
-                texts.append(handle.read(MESSAGE_FILE_MAX))
-        except Exception:
+        text = _read_text_file(name, where)
+        if text is not None:
+            texts.append(text)
+        else:
             unread = unread or name
             if edit is None:   # the not-checked note is a post's fail-open line; an edit fails closed
                 review_note("the body file " + name + " could not be read")
-    unseen = (stdin and not judged_stdin) or _api_input_named(rest)   # an edit's new body the guard cannot see
+    unseen = (stdin and not judged_stdin) or (_api_input_named(rest) and not input_read)   # an edit's new body the guard cannot see
     unseen_stdin = stdin and not judged_stdin
     if unseen_stdin and edit is None:
         review_note("the body comes from stdin and cannot be read")
     return review_record_hit(texts, repo, selector, where, edit, variable=variable, unseen=bool(unseen), unread=unread,
-                             stdin_unseen=bool(unseen_stdin))
+                             stdin_unseen=bool(unseen_stdin), marked_only=graphql)
 
 
 def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
@@ -4346,8 +4542,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 6b2. A review record posted as a comment with a hand-typed head or number (rule pr-review-record).
     # Cost: one pull request read per post that holds the record marker, none for any other command.
-    for segment, before, piped in review_segments(segments, ends, heredoc_offsets(segments, ends, stripped == raw)):
-        hit = review_post_hit(segment, raw, cite_where, before, piped) if segment.strip() else None
+    for segment, before, piped, source in review_segments(segments, ends, heredoc_offsets(segments, ends, stripped == raw), raw):
+        hit = review_post_hit(segment, source, cite_where, before, piped) if segment.strip() else None
         if hit:
             refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
 
