@@ -1,11 +1,11 @@
 {
   "title": "The merge tool and the guard refuse a merge or push to main while an open integration PR's CI run is in progress",
   "why": "Rule git-no-merge-during-batch-ci held no one on Nov 8: #2352 (19:19 CST) and #2350 (19:53 CST) were merged from the owner's account by a local session while #2361's CI ran, and each cancelled a run about 30 minutes in (coordinator 20:26 CST Nov 8).",
-  "note": "Filed by triage, Nov 8 20:28 CST. A queue-landing fix. First check what main already enforces and why it did not fire. The refusal names the run and offers the owner's `override`.",
+  "note": "Filed by triage, Nov 8 20:28 CST. A queue-landing fix. First check what main already enforces and why it did not fire. The refusal names the run and offers the owner's `override`. Lane session_013NEJKynokbBE1W2BNcp7hX (coordinator 20:29 CST Nov 8); its brief covers what main enforces and why it did not fire on #2352 and #2350.",
   "phase": "now",
   "owner": "coordinator",
-  "lane": "",
-  "status": "todo",
+  "lane": "session_013NEJKynokbBE1W2BNcp7hX",
+  "status": "doing",
   "order": 862,
-  "updatedAt": "2026-11-08T20:28:00-06:00"
+  "updatedAt": "2026-11-08T20:32:00-06:00"
 }

@@ -5,7 +5,7 @@
   "order": 1.21,
   "owner": "coordinator",
   "why": "Coordinator, 14:23 CST Nov 7, from notes-keep-reverify's re-check of 146 rows.",
-  "note": "",
+  "note": " Possible false alarm (lane notes-fix-large-1, 20:29 CST Nov 8): the installed detached-launch guard refused a #2338 reviewer's read-only grep as 'starts a process and detaches it'; its only `&` was inside quotes or in `&&`. #2338 changes the glued-& reading in hooks/guard_kill.py; its round 2 adds rows with `&` inside quotes, a lone apostrophe and a `#` in text.",
   "lane": "session_013NEJL4AKgUjS1CWQvcdNwc",
-  "updatedAt": "2026-11-07T14:23:00-06:00"
+  "updatedAt": "2026-11-08T20:32:00-06:00"
 }

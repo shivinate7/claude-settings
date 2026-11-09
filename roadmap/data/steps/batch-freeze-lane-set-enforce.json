@@ -1,0 +1,11 @@
+{
+  "title": "The merge tool enforces the batch freeze: `merge --batch-build` freezes the lane set, `--batch-drop` drops one lane with no re-check",
+  "why": "Owner, 20:30 CST Nov 8 in triage chat (\"mechanically enforce this\") and 20:31 CST to the coordinator (\"mechanize the batch freeze fix ASAP\"), on the batch freeze from step batch-freeze-lane-set.",
+  "note": "Filed by triage, Nov 8 20:32 CST. An owner ask. Builds merge --batch-build (freezes the set of lanes ready at first build; a later lane goes to the next batch) and --batch-drop (drops one lane on red with no re-check). Step batch-freeze-lane-set (#2367) stays prose.",
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "session_013NEJL1SSD89Hzb8ahrTmfs",
+  "status": "doing",
+  "order": 864,
+  "updatedAt": "2026-11-08T20:32:00-06:00"
+}
