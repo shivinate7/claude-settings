@@ -5,11 +5,12 @@ Other files reach these names through `guard`.
 """
 import fnmatch
 import re
+import warnings
 
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
     POWERSHELL_CALL, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs,
-    _without_message_values, is_powershell, norm, split_segments,
+    _without_message_values, is_powershell, norm, segment_tokens, split_segments,
 )
 
 
@@ -78,8 +79,8 @@ ENV_RUNNER_VALUE_FLAGS = (
     "--env-file", "--env-file-if-exists", "-r", "--require", "--import", "--loader", "-C",
     "--conditions", "--input-type", "--experimental-loader", "--preload",
 )
-# A second copy of guard_frozen.py's `_NODE_EVAL_FLAG`, kept on purpose: this module reads the
-# `=` forms and the open rewrite of that one is not ours to touch.
+# A second copy of guard_frozen.py's `_NODE_EVAL_FLAG`, kept on purpose: this one also reads the
+# `=` forms (`--eval=code`), which that one does not.
 ENV_INLINE_FLAG = re.compile(r"^(?:-[ep]{1,2}|--eval|--print)(?:=.*)?$")
 
 # Commands that ask whether the file is THERE. They read no contents.
@@ -96,17 +97,59 @@ ENV_TEXT_COMMANDS = ("echo", "printf")
 # FILE of patterns or of a program (`-f`, `--file`) marks nothing: that file is read, so it is
 # judged. Once either one is met, every plain word is a file, and none is read as the pattern.
 ENV_PATTERN_LONG = ("--regexp", "--expression", "--source")
-ENV_FILE_LONG = ("--file",)
+ENV_FILE_LONG = ("--file", "--from-file")
 # A flag's own value stands before the pattern and is never it: a count, a glob, a file filter.
 ENV_VALUE_LONG = (
     "--max-count", "--context", "--after-context", "--before-context", "--include", "--exclude",
-    "--exclude-dir", "--glob", "--max-depth", "--max-filesize", "--type",
+    "--exclude-dir", "--exclude-from", "--glob", "--max-depth", "--max-filesize", "--type",
+    "--file-search-regex",
 )
+# The value of these flags is a glob that EXCLUDES files, so it reads nothing and is no path.
+# `--include`, `-g`, `--glob` and `--exclude-from` are not here: each names a file or a file of
+# names, or a glob that includes the file, and stays judged.
+ENV_EXCLUDE_LONG = ("--exclude", "--exclude-dir")
 ENV_VALUE_SHORT = "ABCmgd"
 # `sed` and `awk` read a script, and its first plain word is a regex, never a path. `awk -F` and
 # `-v` take a value of their own.
 ENV_SCRIPT_COMMANDS = ("sed", "awk", "gawk", "mawk", "nawk")
 ENV_SCRIPT_VALUE_SHORT = "Fv"
+# Per-command flag letters, for the letters that differ between the search tools. `-f` takes a file
+# of patterns in grep and rg, and is a plain switch in ag and ack. `-t` and `-T` take a file type in
+# rg only: in ag `-t` is a switch, so a `t` in the shared letters would swallow a path.
+ENV_BOOLEAN_F_COMMANDS = ("ag", "ack")
+# `ag -G` takes a regex that picks the files to search, and `ag -p` a file of ignore patterns, which
+# is judged as a path. In grep `-G` is a plain switch, so the letters are not shared.
+ENV_VALUE_SHORT_BY_COMMAND = {"rg": "tT", "ag": "Gp"}
+# The value of these letters is no path, so it is skipped: after rg `-t` or `-T` a file type name,
+# after ag `-G` a file regex, judged by `_ag_hidden_regex_refusal` instead.
+ENV_NO_PATH_SHORT_BY_COMMAND = {"rg": "tT", "ag": "G"}
+# A hidden flag makes a search read dotfiles: `--hidden`, `--unrestricted`, `-u`, and rg `-.`. rg
+# `-u` alone skips no hidden file, but it counts here: main refuses that form too.
+ENV_HIDDEN_LONG = ("--hidden", "--unrestricted")
+ENV_HIDDEN_SHORT = "u."
+# rg `-T` excludes a file type, so with a hidden flag the search still reaches the env file, and a
+# pattern that names one stays judged. `-t` searches only the named type, so its pattern is skipped.
+ENV_RG_TYPE_NOT_SHORT = "T"
+# With a hidden flag, ag searches dotfiles, so it reads each env file whose name its file regex
+# (`-G`, `--file-search-regex`) matches. The regex is tried on a sample of env file names, bare and
+# with the `./` that ag prefixes. Without a hidden flag ag skips dotfiles, so the regex is not judged.
+ENV_AG_REGEX_LONG = "--file-search-regex"
+ENV_SAMPLE_NAMES = tuple(ENV_PREFIX + suffix for suffix in (
+    "", "rc", ".local", ".production", ".development", ".test", ".staging"))
+# `jq`, `gojq` and `yq` take a program as the first plain word: a key path such as `.envs` is text.
+# Their file arguments stay judged. Their `-e` is an exit-status switch, not a pattern flag, and
+# `-f` / `--from-file` names a file of the program.
+ENV_PROGRAM_COMMANDS = ("jq", "gojq", "yq")
+# The program commands do not read flags as grep does: `-C` is a colour switch there, so a grep value
+# letter would swallow the next word and leave a file read as the program. Only jq's and gojq's `-L`
+# takes a value, a module directory, which is judged as a path. yq has no short value letter here.
+ENV_PROGRAM_VALUE_SHORT = {"jq": "L", "gojq": "L", "yq": ""}
+ENV_YQ_SUBCOMMANDS = ("e", "eval", "ea", "eval-all")
+# `mkdir` makes a folder and reads no contents, so an env-prefixed folder name (`.envs`) is no read.
+# `cd` and `pushd` stay refused: the shell keeps its folder between calls, so a later read in that
+# folder cannot be tied to the move. `git add` and `cat` stay refused: they cannot tell a folder
+# from a file. Not merged into ENV_EXISTENCE_COMMANDS, which ENV_RELAY_SAFE reuses.
+ENV_FOLDER_COMMANDS = ("mkdir",)
 
 # The message or body of a commit or a pull request is text. Its value is blanked before the words
 # are read, so an env name in prose reads no contents. A substitution in the value is cut out
@@ -137,6 +180,26 @@ ENV_ADVICE = (
     "A listing and a test for existence are allowed."
 )
 
+# Runners that start a child command. Their option words that take the next word as a value, by
+# runner family. DESIGN: the uv, docker and npm scans read an option off the list as a possible
+# value owner (`_child_starts`), so a missing value flag costs a false alarm at most; only the node
+# scan keeps a closed list. pnpm's `-r` and `-w` are bools there, so the pnpm walk drops them from
+# the list. `-c` of npm is the child, so it is never a value flag.
+ENV_NPM_RUNNERS = tuple(c for c in ENV_LOADER_COMMANDS if c.startswith(("npm", "npx", "pnpm")))
+_CONTAINER_FLAGS = (
+    "-e", "--env", "--name", "-v", "--volume", "-p", "--publish", "-w", "--workdir", "--network",
+    "--net", "-u", "--user", "-f", "--file", "--project-name", "--profile", "--mount", "--label",
+    "--hostname", "--platform", "-m", "--memory", "--gpus", "--restart", "--cpus", "--add-host",
+)
+ENV_CHILD_VALUE_FLAGS = {
+    "node": ENV_RUNNER_VALUE_FLAGS,
+    "npm": ENV_RUNNER_VALUE_FLAGS + ("-w", "--workspace", "-p", "--package", "--prefix"),
+    "uv": ENV_RUNNER_VALUE_FLAGS + (
+        "--with", "-p", "--python", "--project", "--directory", "--package", "--group"),
+    "docker": ENV_RUNNER_VALUE_FLAGS + _CONTAINER_FLAGS,
+}
+ENV_SHELL_C_FLAG = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")
+ENV_PRINT_PROGRAMS = ("env", "env.exe", "printenv", "printenv.exe")
 # THE PRINTED REASONS, AND NONE OF THEM NAMES A FILE. Each one says which shape of access fired,
 # so the reader knows what to change, and the log carries the file name for a person to read.
 ENV_REDIRECT_REASON = "a redirect would overwrite an environment file"
@@ -150,6 +213,10 @@ ENV_RUNNER_REASON = (
 )
 ENV_INLINE_REASON = (
     "a runner given an environment file may run a script file, not inline code"
+)
+ENV_CHILD_REASON = (
+    "a runner given an environment file may run a program, not a command that prints "
+    "its environment"
 )
 ENV_CONTENTS_REASON = (
     "this command would read, write or commit the contents of an environment file"
@@ -472,7 +539,11 @@ def _pattern_words(words, position: int, command: str):
     which stays judged as a path, so an error here only ever judges a word and never hides one.
     """
     skip, glued, plain, given, ended = set(), {}, [], False, False
-    value_short = ENV_VALUE_SHORT + (ENV_SCRIPT_VALUE_SHORT if command in ENV_SCRIPT_COMMANDS else "")
+    hidden, type_not = False, False
+    program = command in ENV_PROGRAM_COMMANDS
+    value_short = (ENV_PROGRAM_VALUE_SHORT[command] if program
+                   else ENV_VALUE_SHORT + ENV_VALUE_SHORT_BY_COMMAND.get(command, "")
+                   + (ENV_SCRIPT_VALUE_SHORT if command in ENV_SCRIPT_COMMANDS else ""))
     i = position + 1
     while i < len(words):
         word = words[i]
@@ -489,21 +560,27 @@ def _pattern_words(words, position: int, command: str):
             continue
         if word.startswith("--"):
             name, attached, _ = word.partition("=")
+            hidden = hidden or name in ENV_HIDDEN_LONG
             if name in ENV_PATTERN_LONG:
                 given = True
                 skip.update({i} if attached else {i + 1})
             elif name in ENV_FILE_LONG:
                 given = True
+            elif name in ENV_EXCLUDE_LONG or (command == "ag" and name == ENV_AG_REGEX_LONG):
+                skip.update({i} if attached else {i + 1})
             i += 1 if attached or name not in ENV_PATTERN_LONG + ENV_FILE_LONG + ENV_VALUE_LONG else 2
             continue
         step = 1
         for k, letter in enumerate(word[1:], 1):
             rest = word[k + 1:]
-            if letter == "e":
+            hidden = hidden or letter in ENV_HIDDEN_SHORT
+            if letter == "e" and not program:
                 given = True
                 skip.update({i} if rest else {i + 1})
                 step = 1 if rest else 2
                 break
+            if letter == "f" and command in ENV_BOOLEAN_F_COMMANDS:
+                continue  # a switch: the cluster goes on, and no pattern file is named
             if letter == "f":
                 given = True
                 if rest:
@@ -511,12 +588,78 @@ def _pattern_words(words, position: int, command: str):
                 step = 1 if rest else 2
                 break
             if letter in value_short:
+                if not rest and letter in ENV_NO_PATH_SHORT_BY_COMMAND.get(command, ""):
+                    skip.add(i + 1)  # a file type name or an ag file regex, never a path
+                type_not = type_not or (command == "rg" and letter in ENV_RG_TYPE_NOT_SHORT)
                 step = 1 if rest else 2
                 break
         i += step
-    if not given and plain:
+    if program and not given and plain:
+        # A yq subcommand leads the program, and is no path either. The program is skipped only
+        # when a file word follows it: a lone word reads stdin or is the file, so it is judged.
+        lead = 1 if command == "yq" and words[plain[0]] in ENV_YQ_SUBCOMMANDS else 0
+        if len(plain) > lead + 1:
+            skip.update(plain[:lead + 1])
+    elif not given and plain and not (hidden and type_not):
         skip.add(plain[0])
     return skip, glued
+
+
+def _ag_hidden_regex_refusal(words, position: int) -> str:
+    """Return a description of what an `ag` file regex picks while a hidden flag is set, else ''.
+
+    The regex is tried on sample env file names. One that will not compile as Python is refused:
+    the guard cannot tell what it matches. Only `-G` and `--file-search-regex` take a file regex;
+    `-p` names a file of ignore patterns.
+    """
+    hidden, regexes, i = False, [], position + 1
+    while i < len(words):
+        word = words[i]
+        i += 1
+        if word == "--":
+            break
+        if word.startswith("--"):
+            name, attached, value = word.partition("=")
+            hidden = hidden or name in ENV_HIDDEN_LONG
+            if name == ENV_AG_REGEX_LONG:
+                if attached:
+                    regexes.append(value)
+                elif i < len(words):
+                    regexes.append(words[i])
+                    i += 1
+            continue
+        if not word.startswith("-") or word == "-":
+            continue
+        for k, letter in enumerate(word[1:], 1):
+            if letter == "u":
+                hidden = True
+            elif letter == "G":
+                rest = word[k + 1:]
+                if rest:
+                    regexes.append(rest)
+                elif i < len(words):
+                    regexes.append(words[i])
+                    i += 1
+                break
+            elif letter in ENV_VALUE_SHORT + "p":
+                i += 0 if word[k + 1:] else 1
+                break
+    if not hidden:
+        return ""
+    for regex in regexes:
+        tokens = segment_tokens(regex)   # the value ag gets, after the shell's quote removal
+        regex = "".join(tokens) if tokens else regex.strip("\"'")
+        try:
+            with warnings.catch_warnings():
+                # A POSIX class such as `[[:alpha:]]` warns of a nested set on stderr. The verdict stands.
+                warnings.simplefilter("ignore", FutureWarning)
+                compiled = re.compile(regex)
+        except re.error:
+            return "a file regex the guard cannot compile"
+        for name in ENV_SAMPLE_NAMES:
+            if names_env_file(name) and (compiled.search(name) or compiled.search("./" + name)):
+                return "the file regex matches the name '%s'" % name
+    return ""
 
 
 def _assignment_end(words, position: int) -> int:
@@ -532,6 +675,15 @@ def _assignment_end(words, position: int) -> int:
     return end + 1
 
 
+# Words that run the next word as a command and are no command themselves.
+ENV_COMMAND_PREFIXES = ("exec", "command", "builtin", "nohup")
+# Wrappers that take options and run the rest as a command, with the option words that own the next word.
+ENV_WRAPPER_VALUE_FLAGS = {
+    "nice": ("-n", "--adjustment"),
+    "sudo": ("-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U", "--user", "--group", "--host"),
+    "stdbuf": ("-i", "-o", "-e"),
+    "env": ("-u", "--unset", "-C", "--chdir", "-S"),
+}
 TIMEOUT_FLAG_GLUED = re.compile(r"^(--(kill-after|signal)=\S+|-[ks]\S+)$")
 PY_LAUNCHER_FLAG = re.compile(r"^-(\d(\.\d+)?(-\d+)?|u)$")  # `py -3`, `py -3.12`, `python -u`
 
@@ -576,18 +728,12 @@ def _quoted_words(segment: str, keep_newlines=False):
     return [w.replace("\0", " ").replace("\1", "\n") for w in "".join(chunks).split()]
 
 
-def _env_words(segment: str):
-    """Return (words, command word) of one segment, redirects spaced into words of their own."""
-    words = _quoted_words(_blank_messages(segment))
-    # The command is the first word that is not a `VAR=value` assignment.
-    # A `(` glued to the first assignment is a subshell paren, not part of the name.
-    if words and words[0][:1] == "(" and ASSIGNMENT.match(words[0][1:]):
-        words[0] = words[0][1:]
-    position = 0
-    while position < len(words) and ASSIGNMENT.match(words[position]):
-        position = _assignment_end(words, position)
-    # Look through exactly these wrapper shapes, each by its exact form, so a flag value of some
-    # other wrapper (`env -u ls cat .env`) can never pose as the command word.
+def _skip_wrappers(words, position: int, runner_child: bool = False) -> int:
+    """Return the index of the command that the wrappers at `position` run. Looks through exactly
+    these wrapper shapes, each by its exact form, so a flag value of some other wrapper
+    (`env -u ls cat .env`) can never pose as the command word. `runner_child` adds the wrappers
+    that a runner's child or a shell-string segment may lead with (`nice`, `sudo`, `stdbuf`,
+    `env VAR=x`, and `exec`, `command`, `builtin`, `nohup`); the parent shell form leaves them."""
     while position < len(words):
         word = words[position].rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
         after = position + 1
@@ -610,8 +756,32 @@ def _env_words(segment: str):
                     words[after].rsplit("/", 1)[-1].rsplit("\\", 1)[-1]) == "verdict"):
                 break
             position = after + 1
+        elif runner_child and word in ENV_COMMAND_PREFIXES:
+            position = after
+        elif runner_child and word in ENV_WRAPPER_VALUE_FLAGS:
+            while after < len(words) and (words[after] in ENV_WRAPPER_VALUE_FLAGS[word]
+                                          or words[after].startswith("-")
+                                          or (word != "stdbuf" and ASSIGNMENT.match(words[after]))):
+                after += 2 if words[after] in ENV_WRAPPER_VALUE_FLAGS[word] else 1
+            if word == "env" and after >= len(words):
+                break  # `env VAR=x` alone prints the environment, so env is the command
+            position = after
         else:
             break
+    return position
+
+
+def _env_words(segment: str):
+    """Return (words, command word) of one segment, redirects spaced into words of their own."""
+    words = _quoted_words(_blank_messages(segment), keep_newlines=True)
+    # The command is the first word that is not a `VAR=value` assignment.
+    # A `(` glued to the first assignment is a subshell paren, not part of the name.
+    if words and words[0][:1] == "(" and ASSIGNMENT.match(words[0][1:]):
+        words[0] = words[0][1:]
+    position = 0
+    while position < len(words) and ASSIGNMENT.match(words[position]):
+        position = _assignment_end(words, position)
+    position = _skip_wrappers(words, position)
     head = words[position] if position < len(words) else ""
     command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     if command in ENV_TEXT_COMMANDS:
@@ -667,13 +837,10 @@ def _env_relay(texts):
     return "", ""
 
 
-def _runner_inline_code(words, position: int, command: str, stdin_fed: bool = False) -> bool:
-    """True when a node, bun or deno command runs inline code: an eval or print flag, a stdin
-    script (`-`, or no script word with stdin fed by a pipe or a heredoc), or deno's `eval`.
-    The option words after the runner are read up to the first positional word or `--`, so the
-    `-e` of a script's own arguments (`node app.js -e x`) is not inline code."""
-    if command.lower() not in ENV_INLINE_RUNNERS:
-        return False
+def _runner_scan(words, position: int, stdin_fed: bool, is_flag, eval_word: bool = False):
+    """Read the option words after a runner, up to the first positional word or `--`. Returns
+    (index of the first flag that `is_flag` accepts, a `-` stdin word, or deno's `eval`; else -1,
+    whether stdin feeds a script: fed with no script word). A script's own `-e` is no hit."""
     fed = stdin_fed
     script = False
     i = position + 1
@@ -693,16 +860,221 @@ def _runner_inline_code(words, position: int, command: str, stdin_fed: bool = Fa
             break
         elif word in ENV_RUNNER_VALUE_FLAGS:
             i += 2
-        elif ENV_INLINE_FLAG.match(word) or word == "-":
-            return True
+        elif is_flag(word) or word == "-":
+            return i, True
         elif word.startswith("-"):
             i += 1
         else:
-            if command.lower().startswith("deno") and word == "eval":
-                return True
+            if eval_word and word == "eval":
+                return i, True
             script = True
             break
-    return fed and not script
+    return -1, fed and not script
+
+
+def _runner_inline_code(words, position: int, command: str, stdin_fed: bool = False) -> bool:
+    """True when a node, bun or deno command runs inline code: an eval or print flag, a stdin
+    script (`-`, or no script word with stdin fed by a pipe or a heredoc), or deno's `eval`.
+    The option words after the runner are read up to the first positional word or `--`, so the
+    `-e` of a script's own arguments (`node app.js -e x`) is not inline code."""
+    if command.lower() not in ENV_INLINE_RUNNERS:
+        return False
+    hit, stdin = _runner_scan(words, position, stdin_fed, ENV_INLINE_FLAG.match,
+                              command.lower().startswith("deno"))
+    return hit >= 0 or stdin
+
+
+def _base(word: str) -> str:
+    """The program name of a word: no quote marks, no directory, lower case."""
+    return re.split(r"[\\/]", word.replace('"', "").replace("'", ""))[-1].lower()
+
+
+def _first_positional(words, i: int, flags) -> int:
+    """The index of the first word from `i` that is no option. An option that takes a value owns
+    the next word."""
+    while i < len(words):
+        if words[i] in flags:
+            i += 2
+        elif words[i].startswith("-"):
+            i += 1
+        else:
+            break
+    return min(i, len(words))
+
+
+
+
+def _shell_string_prints(text: str, depth: int = 0) -> bool:
+    """A shell string (`sh -c "<s>"`, `npm exec -c "<s>"`) is judged segment by segment, the way the
+    parent shell form reads a command: `_env_flat` is its one reader of a file name. A segment
+    prints the environment when its command is a printing child (`_child_prints`) or it prints a
+    `$` variable: its command is `echo` or `printf` and it expands a `$`. A `$` in any other
+    segment is an ordinary argument (`cd $APP_DIR && npm start`). A string nested past
+    ENV_MAX_DEPTH counts as printing."""
+    if depth > ENV_MAX_DEPTH:
+        return True
+    text = text.strip()
+    if len(text) > 1 and text[0] == text[-1] and text[0] in "'\"":
+        text = text[1:-1]
+    if _env_flat(text, True)[0]:
+        return True
+    for piece in split_segments(text):
+        for segment in _env_parts(piece):
+            words, position, _ = _env_words(segment)
+            if position < len(words):
+                words[position] = words[position].lstrip("({").rstrip(")};")  # glued `(env)`, `{env;}` only
+                at = _skip_wrappers(words, position, True)
+                if "$" in segment and at < len(words) and _base(words[at]) in ENV_TEXT_COMMANDS:
+                    return True
+                if _child_prints(words, position, False, depth + 1):
+                    return True
+    return False
+
+
+def _child_prints(words, at: int, fed: bool = False, depth: int = 0) -> bool:
+    """True when the child command at words[at], past its wrappers (`_skip_wrappers`), prints its
+    environment: env or printenv; a shell string that does (`sh -c`); python `-c`; python or a shell
+    with no script word and stdin fed; or node, bun or deno inline code."""
+    at = _skip_wrappers(words, at, True)
+    if at >= len(words):
+        return False
+    name = _base(words[at])
+    if name in ENV_PRINT_PROGRAMS:
+        return True
+    shell = re.fullmatch(r"(ba|z|da)?sh", name)
+    if shell or re.fullmatch(r"python[\d.]*(\.exe)?", name):
+        hit, stdin = _runner_scan(words, at, fed, ENV_SHELL_C_FLAG.match)
+        if hit < 0 or not shell or words[hit] == "-":
+            return hit >= 0 or stdin
+        return hit + 1 >= len(words) or _shell_string_prints(words[hit + 1], depth)
+    return _runner_inline_code(words, at, name, fed)
+
+
+# Options known to take no value. An unlisted option is read as a possible value owner, and these
+# are the common ones that are not, so `docker run --rm myimage serve env` has one start, not two.
+ENV_CHILD_BOOL_FLAG = re.compile(
+    r"^(-[ditqy]+|-v+|-P|--(rm|detach|interactive|tty|privileged|init|read-only|frozen|locked|isolated"
+    r"|offline|all-extras|quiet|verbose|yes|active|reinstall|upgrade|refresh|dev|all-packages|sig-proxy|exact|all-groups|silent|stream|no-[a-z-]+))$")
+
+
+def _may_own_value(word: str) -> bool:
+    """True when an option word that is not in the runner's value-flag list may still own the next
+    word: it has no `=`, is not `--` and is not a known bool flag."""
+    return (word.startswith("-") and word != "--" and "=" not in word
+            and not ENV_CHILD_BOOL_FLAG.match(word))
+
+
+def _child_starts(words, i: int, flags):
+    """The indexes from `i` where a child command may start, past the runner's options. An option
+    in `flags` owns the next word. Each positional word is a start. When it sits right after an
+    unlisted option it may be that option's value, so the scan goes on past every option, listed,
+    bool or unlisted, to the next positional word, which is a start too: `--cap-add X --pull always
+    alpine env` starts at `X`, `always` and `alpine`. A positional word that follows no unlisted
+    option ends the scan, so a program's own arguments (`docker run --rm myimage serve env`,
+    `uv run -q pytest -k env`, `uv run --exact pytest -k env`) are not starts. A start that is no
+    child costs nothing, since `_child_prints` reads only env, printenv, shells, python and inline
+    runners, except a start that is `env` or `printenv`. One false alarm stays: after an option
+    that is neither listed nor in `ENV_CHILD_BOOL_FLAG`, `env` or `printenv` right after the
+    program word or after the program's own option is a start (`uv run --foo pytest env` has
+    starts `pytest` and `env`; so does `uv run --foo pytest -k env`).
+    `--` ends the runner's options, so the word after it is the one start."""
+    while i < len(words):
+        word = words[i]
+        if word == "--":
+            if i + 1 < len(words):
+                yield i + 1
+            return
+        if word in flags:
+            i += 2
+        elif word.startswith("-"):
+            i += 1
+        else:
+            yield i
+            if not (i and _may_own_value(words[i - 1])):
+                return
+            i += 1
+
+
+def _container_child_prints(words, at: int, fed: bool) -> bool:
+    """words[at] is `run` or `exec`. The child is the `--entrypoint` program with the words after
+    the image, or just the words after the image or container word. Each start that `_child_starts`
+    finds is tried as the image."""
+    flags = ENV_CHILD_VALUE_FLAGS["docker"] + ("--entrypoint",)
+    starts = list(_child_starts(words, at + 1, flags))
+    entry = ""
+    for i in range(at + 1, starts[-1] if starts else len(words)):
+        if words[i] == "--entrypoint" and i + 1 < len(words):
+            entry = words[i + 1]
+        elif words[i].startswith("--entrypoint="):
+            entry = words[i][13:]
+    entry = entry.strip("'\"")  # `--entrypoint ""` is the image's own command
+    return any(_child_prints(([entry] if entry else []) + words[c + 1:], 0, fed) for c in starts)
+
+
+def _runner_child_prints(words, position: int, command: str, fed: bool = False) -> bool:
+    """True when a runner given the file starts a child command that prints it: `uv run`,
+    `docker`/`podman` `run`, `compose run` and `exec` (the child follows the image word), and
+    `npm exec -c`, `npx -c` and `pnpm exec`. The npm walk reads `-c` up to `--` or the child; the
+    child of `exec`, `x`, `dlx` and `npx` is found by `_child_starts`."""
+    name = _base(command)
+    flags = ENV_CHILD_VALUE_FLAGS["node"]
+    if name in ENV_INLINE_RUNNERS:  # `node --env-file=F npm-cli.js exec -c env`
+        at = _first_positional(words, position + 1, flags)
+        if at >= len(words):
+            return False
+        if name.startswith("bun") and words[at] == "x":  # bun's `x` is the npx form
+            return any(_child_prints(words, c, fed)
+                       for c in _child_starts(words, at + 1, ENV_CHILD_VALUE_FLAGS["npm"]))
+        if _base(words[at]) not in ENV_NPM_RUNNERS:
+            return False
+        position, name = at, _base(words[at])
+    if name in ENV_NPM_RUNNERS:
+        flags = ENV_CHILD_VALUE_FLAGS["npm"]
+        if name.startswith("pnpm"):  # pnpm's -r and -w are bools, not node's --require or npm's --workspace
+            flags = tuple(f for f in flags if f not in ("-r", "-w"))
+        exec_at = position if name.startswith("npx") else -1  # npx's child follows its options
+        i = position + 1
+
+        def child_prints() -> bool:
+            return exec_at >= 0 and any(
+                _child_prints(words, c, fed) for c in _child_starts(words, exec_at + 1, flags))
+
+        while i < len(words):
+            word = words[i]
+            if word == "--" and exec_at >= 0:  # the rest is the child's
+                break
+            if word in ("-c", "--call"):  # past `pnpm exec`, `-c` may be the child's own flag
+                return child_prints() or (
+                    i + 1 < len(words) and _shell_string_prints(words[i + 1]))
+            if word.startswith("--call="):
+                return child_prints() or _shell_string_prints(word[7:])
+            if word in flags:
+                i += 2
+            elif word.startswith("-"):
+                i += 1
+            elif not name.startswith("npx") and word in ("exec", "x", "dlx"):
+                exec_at = i  # `x` may be an option value, so it never ends the walk
+                i += 1
+            elif _may_own_value(words[i - 1]):  # may be an unlisted option's value
+                i += 1
+            else:
+                break
+        return child_prints()
+    if name.startswith("uv"):
+        flags = ENV_CHILD_VALUE_FLAGS["uv"]
+        return any(
+            words[at] == "run" and any(_child_prints(words, c, fed)
+                                       for c in _child_starts(words, at + 1, flags))
+            for at in _child_starts(words, position + 1, flags))
+    if name.startswith(("docker", "podman")):
+        flags = ENV_CHILD_VALUE_FLAGS["docker"]
+        for at in _child_starts(words, position + 1, flags):
+            if words[at] == "compose":
+                return any(words[c] in ("run", "exec") and _container_child_prints(words, c, fed)
+                           for c in _child_starts(words, at + 1, flags))
+            if words[at] in ("run", "exec"):
+                return _container_child_prints(words, at, fed)
+    return False
 
 
 def _env_flat(cmd: str, text_ok: bool = False):
@@ -731,8 +1103,14 @@ def _env_flat(cmd: str, text_ok: bool = False):
             # A text command's arguments are data. A redirect onto an environment file is refused
             # below, first.
             text_to_file = command in ENV_TEXT_COMMANDS and text_ok and not piped
+            if command == "ag":
+                hit = _ag_hidden_regex_refusal(words, position)
+                if hit:
+                    return (ENV_CONTENTS_REASON,
+                            "'ag' with a hidden flag would read an environment file: %s" % hit)
             patterns, glued = (_pattern_words(words, position, command)
-                               if command in ENV_PATTERN_COMMANDS + ENV_SCRIPT_COMMANDS
+                               if command in (ENV_PATTERN_COMMANDS + ENV_SCRIPT_COMMANDS
+                                              + ENV_PROGRAM_COMMANDS)
                                else (set(), {}))
             # An awk `-v name=value` value that holds a glob is a regex, as a pattern is. A plain
             # env name there stays judged: awk can open it. ACCEPTED LIMIT: a glob value that
@@ -765,6 +1143,10 @@ def _env_flat(cmd: str, text_ok: bool = False):
                     if _runner_inline_code(words, position, command, stdin_piped):
                         return (ENV_INLINE_REASON,
                                 "'%s' runs inline code with '%s' loaded" % (command, named))
+                    if _runner_child_prints(words, position, command, stdin_piped):
+                        return (ENV_CHILD_REASON,
+                                "'%s' runs a child command that prints its environment with "
+                                "'%s' loaded" % (command, named))
                     continue  # a runner loading it into its own environment prints nothing
                 if loaded:
                     return (ENV_RUNNER_REASON,
@@ -774,6 +1156,8 @@ def _env_flat(cmd: str, text_ok: bool = False):
                     continue  # the name is data, and no contents are read or written
                 if command in ENV_EXISTENCE_COMMANDS:
                     continue  # asking whether the file is there reads none of it
+                if command in ENV_FOLDER_COMMANDS:
+                    continue  # a folder is made, and none of it is read
                 actor = "'%s'" % command if command else "this command"
                 return (ENV_CONTENTS_REASON,
                         "%s would read, write or commit the contents of '%s'" % (actor, named))
