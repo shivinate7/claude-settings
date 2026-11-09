@@ -44,6 +44,7 @@ import json
 import math
 import os
 import re
+import shlex
 import shutil
 import signal
 import stat
@@ -1054,6 +1055,7 @@ RUN_OF = {"pass": ("completed", "success"), "fail": ("completed", "failure"), "p
 STATUS_OF = {"pass": "success", "fail": "failure", "pending": "pending", "error": "error"}
 
 path, fields, flags = parse(args[1:]) if args[:1] == ["api"] else ("", {}, set())
+NODES = [w for w in re.findall(r"IC_kwDO\d+", " ".join(args)) if w[len("IC_kwDO"):] in state["comments"]]  # comments named by node id
 if any("&" in a for a in args):  # the Windows .cmd form of this fake lets cmd.exe split the command at '&': send query values with -f
     print("fake gh: an argument holds '&'"); sys.exit(1)
 if path:
@@ -1078,6 +1080,9 @@ elif args[:1] != ["api"]:
     sys.exit(1)
 elif path == "user":   # gh api user: the caller's login, the author of every comment that comment_logins does not name
     print(json.dumps({"login": "claude-bot"}))
+elif path == "graphql" and NODES:   # a GraphQL read naming a comment by node id: the node's body, as the node query answers it
+    comment = NODES[0][len("IC_kwDO"):]
+    print(json.dumps({"data": {"node": {"id": NODES[0], "body": state["comment_bodies"].get(comment, "")}}}))
 else:
     # The repo is a literal owner/repo slug or the placeholder. A shell substitution or variable in its place is no owner: GitHub
     # answers 404 for such a path, as it does for any name it does not hold.
@@ -1138,6 +1143,10 @@ else:
         if status == "server":  # the read fails, as a server error: the guard cannot tell whether the commits landed
             api_error(500, "compare read broke")
         print(json.dumps({"status": status}))
+    elif re.fullmatch(r"nodes/IC_kwDO\d+", path) and path[len("nodes/IC_kwDO"):] in state["comments"]:
+        # GET of a comment by node id (IC_kwDO<comment id> in these fakes): the comment's body, as the node route gives it.
+        comment = path[len("nodes/IC_kwDO"):]
+        print(json.dumps({"id": "IC_kwDO" + comment, "body": state["comment_bodies"].get(comment, "")}))
     else:
         api_error(404, "Not Found")
 '''
@@ -1164,7 +1173,8 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     stand-in is a `.cmd` file to keep the case honest on this machine.
 
     The stand-in speaks the REST API the way `gh api` does (c53: a Claude Code cloud session answers
-    GraphQL with HTTP 403, and so does this stand-in): the pull request, the open pull requests, the
+    GraphQL with HTTP 403, and so does this stand-in, except a read that names a comment by its node id, IC_kwDO<comment id>:
+    GET nodes/<id>, or a GraphQL query with the id in it, answers the comment's body): the pull request, the open pull requests, the
     check runs of its head and the commit statuses of its head. `statuses` are commit statuses in
     the check-row form; a head with none has the combined state "pending" on GitHub, as here.
     `page_cap` is the page size GitHub gives: a list read takes one page unless it asks for all. A pull request's comment
@@ -11073,6 +11083,8 @@ GHRECORDDIR = os.path.join(ROOT, "record-bodies")        # the body files the Ba
 GHRECORDBRANCH = os.path.join(ROOT, "ghrecordbranch")    # a checkout on `feat`, the head branch of the fake's pull request 12
 GHLOGINRECORD = os.path.join(ROOT, "ghloginrecord")      # the caller's last comment is a record; another login's unmarked comment is newer
 GHLOGINNOTE = os.path.join(ROOT, "ghloginnote")          # the same, and the caller's last comment is an unmarked note
+GHNODEPLAIN = os.path.join(ROOT, "ghnodeplain")          # the same, and comment 4417 holds a plain body: a node read of it is allowed
+GRAPHQL_DIR = os.path.join(ROOT, "graphql-bodies")       # the GraphQL request files the Bash forms read (build_graphql_fixtures)
 OTHER_LOGIN = "other-login"                              # the author of a comment the caller did not write
 PR_CMD = "gh pr comment %d" % REVIEW_PR
 API_CMD = "gh api repos/y/x/issues/%d/comments" % REVIEW_PR
@@ -11151,6 +11163,8 @@ def build_record_fixtures():
     make_fake_gh(GHLOGINNOTE, "main", head_sha=REVIEW_LIVE, comments=REVIEW_OLD_COMMENTS,
                  comment_bodies={REVIEW_COMMENT: UNMARKED_BODY, REVIEW_COMMENT_ID: UNMARKED_BODY},
                  comment_logins={REVIEW_COMMENT_ID: OTHER_LOGIN})
+    make_fake_gh(GHNODEPLAIN, "main", need=["12"], head_sha=REVIEW_LIVE, comments=REVIEW_OLD_COMMENTS,
+                 comment_bodies={REVIEW_COMMENT_ID: UNMARKED_BODY})
     write(os.path.join(GHRECORDDIR, "ok.md"), review_record())
     write(os.path.join(GHRECORDDIR, "wrong_tail.md"), review_record(head=REVIEW_TAIL))
     write(os.path.join(GHRECORDDIR, "stale.md"), review_record(head=REVIEW_OLD))
@@ -11165,7 +11179,7 @@ def build_record_fixtures():
 
 
 lazy_fixture([GHRECORD, GHRECORDREPO, GHRECORDBROKEN, GHRECORDOLD, GHRECORDPAGES, GHRECORDDIR, GHRECORDBRANCH,
-              GHLOGINRECORD, GHLOGINNOTE], build_record_fixtures)
+              GHLOGINRECORD, GHLOGINNOTE, GHNODEPLAIN], build_record_fixtures)
 
 
 def mcp_input(body, number=REVIEW_PR, comment_id=None):
@@ -11486,8 +11500,8 @@ bash_post("review-record: a body in a shell variable is allowed, a named limit, 
           "%s --body \"$BODY\"" % PR_CMD, "allow")
 
 # MORE NAMED LIMITS. The guard judges a body written in the command, or in a file a form names. Two forms keep the body out of
-# its reach, so a malformed record is allowed on each: a command substitution and a JSON file read by --input. A full-URL post is
-# judged (the wrapped and GraphQL block below).
+# its reach, so a malformed record is allowed on each: a command substitution and a JSON file read by --input. Decision
+# pr-review-record, the gap list: a full-URL post is judged, and so are the wrapped and GraphQL forms below.
 bash_post("review-record: a body from a command substitution is allowed, a named limit, gh pr comment --body \"$(printf ...)\"",
           PR_CMD + " --body \"$(printf '%s' '" + REVIEW_TRAILING + "')\"", "allow")
 bash_post("review-record: a body in a JSON file read by --input is allowed, a named limit, gh api --input",
@@ -11496,11 +11510,13 @@ bash_post("review-record: a full-URL gh api post with a malformed record is refu
           "gh api https://api.github.com/repos/y/x/issues/%d/comments -f 'body=%s'" % (REVIEW_PR, REVIEW_TRAILING), "deny", rule=REVIEW_RULE)
 
 
-def review_counted_fake(folder=GHRECORDCOUNT, bodies=None):
+def review_counted_fake(folder=GHRECORDCOUNT, bodies=None, comments=None, logins=None):
     """The counted pull request tool, with its log emptied. Each call it answers is logged. `bodies` maps a comment id to the body
-    it holds, the old body an edit replaces. `edit.json` in the folder is an edit body the guard is not shown: it holds no marker."""
-    make_fake_gh(folder, "main", need=["12"], head_sha=REVIEW_LIVE, comments=REVIEW_COMMENTS,
-                 count_file=os.path.join(folder, REVIEW_CALLS), comment_bodies=bodies)
+    it holds, the old body an edit replaces. `logins` maps a comment id to its author; a comment it does not name is the caller's.
+    `comments` lists the pull request's comments, REVIEW_COMMENTS when not given. `edit.json` in the folder is an edit body the
+    guard is not shown: it holds no marker."""
+    make_fake_gh(folder, "main", need=["12"], head_sha=REVIEW_LIVE, comments=comments or REVIEW_COMMENTS,
+                 count_file=os.path.join(folder, REVIEW_CALLS), comment_bodies=bodies, comment_logins=logins)
     write(os.path.join(folder, "edit.json"), json.dumps({"body": UNMARKED_BODY}))
     gh_calls_taken(folder, REVIEW_CALLS)
 
@@ -11526,17 +11542,19 @@ def review_counter_works():
     return True, "the counter logs a direct call"
 
 
-def review_reads(tool, tool_input, want, reads, cwd=NOGIT, path_dirs=(), folder=GHRECORDCOUNT, bodies=None, carries=(), remedy=None):
+def review_reads(tool, tool_input, want, reads, cwd=NOGIT, path_dirs=(), folder=GHRECORDCOUNT, bodies=None, carries=(), remedy=None,
+                 comments=None, logins=None, user_reads=None):
     """A checker for one post: the guard says `want`, and the post makes `reads` gh calls, the one live-head read. `cwd` is the
     folder the post runs in. `path_dirs` are folders the guard's PATH adds after the fake gh's, such as git's for a post with no number.
-    `folder` is the counted fake the post runs against, with the comment `bodies` it names. `carries` are fragments the reason must hold.
+    `folder` is the counted fake the post runs against, with the comment `bodies`, `logins` and `comments` it names. `carries` are
+    fragments the reason must hold. `user_reads`, when given, is how many of those calls read the caller's login (`gh api user`).
     `remedy` is a checker of the refusal's remedy text, run after the read count."""
     def check():
         if reads == 0:
             ok, note = review_counter_works()
             if not ok:
                 return False, note
-        review_counted_fake(folder, bodies)
+        review_counted_fake(folder, bodies, comments, logins)
         env_path = os.pathsep.join((folder,) + tuple(path_dirs) + (PY_PATH,))
         decision, reason = decide(review_case(tool, tool_input, env_path, cwd))
         calls = gh_calls_taken(folder, REVIEW_CALLS)
@@ -11547,6 +11565,10 @@ def review_reads(tool, tool_input, want, reads, cwd=NOGIT, path_dirs=(), folder=
             return False, "refused, but the reason lacks %s: %s" % (missing, reason[:90])
         if len(calls) != reads:
             return False, "%d gh call(s) wanted for the live head, %d seen: %r" % (reads, len(calls), calls)
+        if user_reads is not None:
+            login_reads = sum(1 for line in calls if json.loads(line) == ["api", "user"])
+            if login_reads != user_reads:
+                return False, "%d login read(s) wanted, %d seen: %r" % (user_reads, login_reads, calls)
         if remedy is not None:
             ok, why = remedy(remedy_of(reason))
             if not ok:
@@ -12136,6 +12158,113 @@ bash_post("review-record: an unmarked --edit-last under a variable pull request 
 REVIEW_LOG_CHECKS.append(("review-record:an unmarked --edit-last with a variable repo is refused with no gh read, and its remedy writes the repo literally, gh pr comment 12 --edit-last -R \"$REPO\"",
                          review_reads("Bash", {"command": 'gh pr comment 12 --edit-last -R "$REPO" -b x'}, "deny", 0,
                                       carries=("could not run", "OWNER/NAME, literally"))))
+
+# THE GRAPHQL FORMS. Decision pr-review-record, the gap list. A GraphQL addComment with a marked body is refused with no read, in
+# every string form. An updateIssueComment reads the old body of its node, as a REST edit reads it by comment id. The block-string
+# and file forms below are the cases the judge must read. The quoted-body cases in the GraphQL block further down are their controls.
+def graphql_add(body):
+    """An addComment mutation on subject X, its body the GraphQL string `body` as written."""
+    return 'mutation { addComment(input:{subjectId:"X", body: %s}) { clientMutationId } }' % body
+
+
+def graphql_update(node, body):
+    """An updateIssueComment mutation on the comment with node id `node`, its body the plain GraphQL string of `body`."""
+    return 'mutation { updateIssueComment(input:{id:"%s", body: %s}) { clientMutationId } }' % (node, json.dumps(body))
+
+
+def graphql_block(text):
+    """`text` as a GraphQL block string: its newlines and quotes stand as they are written."""
+    return '"""%s"""' % text
+
+
+def gh_graphql(query):
+    """The `gh api graphql` call that sends `query` as its -f value, quoted for the shell."""
+    return "gh api graphql -f %s" % shlex.quote("query=" + query)
+
+
+GRAPHQL_NODE = "IC_kwDO%d" % REVIEW_COMMENT_ID   # the node id of comment 4417, which the fakes answer
+GRAPHQL_PLAIN = "Round 1 ran. No review record yet."
+GRAPHQL_QUERY = os.path.join(GRAPHQL_DIR, "query.graphql")     # the query `-F query=@` names
+GRAPHQL_REQUEST = os.path.join(GRAPHQL_DIR, "request.json")    # the request body `--input` names: a JSON object that holds the query
+
+
+def build_graphql_fixtures():
+    """The two request files: a marked addComment as a query, and the same mutation inside a JSON request body."""
+    write(GRAPHQL_QUERY, graphql_add(graphql_block(review_record())))
+    write(GRAPHQL_REQUEST, json.dumps({"query": graphql_add(graphql_block(review_record()))}))
+
+
+lazy_fixture([GRAPHQL_DIR], build_graphql_fixtures)
+
+bash_post("review-record: a marked addComment in a GraphQL block string is refused, gh api graphql -f query=",
+          gh_graphql(graphql_add(graphql_block(review_record()))), "deny", rule=REVIEW_RULE, carries=("node id",))
+bash_post("review-record: a marked addComment in a block string is refused, a full-size record, then a footer with comment openers and a lone quote",
+          gh_graphql(graphql_add(graphql_block(REVIEW_FULL + '# a note "quoted" // and /* open\n'))), "deny", rule=REVIEW_RULE,
+          carries=("node id",))
+bash_post("review-record: a marked addComment in a query file is refused, gh api graphql -F query=@file",
+          "gh api graphql -F query=@%s" % GRAPHQL_QUERY, "deny", rule=REVIEW_RULE, carries=("node id",))
+bash_post("review-record: a marked addComment in a request body read by --input is refused, gh api graphql --input file",
+          "gh api graphql --input %s" % GRAPHQL_REQUEST, "deny", rule=REVIEW_RULE, carries=("node id",))
+
+bash_post("review-record: an unmarked addComment in a block string is allowed, gh api graphql -f query=",
+          gh_graphql(graphql_add(graphql_block(GRAPHQL_PLAIN))), "allow")
+bash_post("review-record: an empty addComment body is allowed, gh api graphql -f query=",
+          gh_graphql(graphql_add('""')), "allow")
+
+# An unmarked updateIssueComment reads the old body of its node once. Over a stamped record it is refused after that read. Over a plain
+# comment it is allowed, on a read of the same node, so the refusal turns on the body and not on the read.
+REVIEW_LOG_CHECKS.append(("review-record:an unmarked updateIssueComment over a stamped record is refused after one gh read of its node, gh api graphql -f query=",
+                         review_reads("Bash", {"command": gh_graphql(graphql_update(GRAPHQL_NODE, GRAPHQL_PLAIN))}, "deny", 1,
+                                      folder=GHRECORDCOUNT, bodies=REVIEW_OLD_RECORD, carries=(REVIEW_RULE,) + WITHDRAW_REMEDY)))
+sh("review-record: an unmarked updateIssueComment over a plain comment is allowed, gh api graphql -f query=",
+   gh_graphql(graphql_update(GRAPHQL_NODE, GRAPHQL_PLAIN)), "allow", cwd=NOGIT, env_path=GHNODEPLAIN + os.pathsep + PY_PATH)
+
+# THE LOGIN READ. `--edit-last` reads the caller's login only when its listing names more than one author. Decision pr-review-record,
+# the cost paragraph. The one-author case makes the listing read and no other; the two-author case makes the login read too.
+EDIT_LAST_CMD = "gh pr comment %d --edit-last --body x" % REVIEW_PR
+REVIEW_LOG_CHECKS.append(("review-record:a --edit-last over a one-author thread makes its listing read and no login read, and refuses the record it edits, gh pr comment --edit-last",
+                         review_reads("Bash", {"command": EDIT_LAST_CMD}, "deny", 1, folder=GHRECORDCOUNT, bodies=REVIEW_OLD_RECORD,
+                                      comments=REVIEW_OLD_COMMENTS, carries=WITHDRAW_REMEDY, user_reads=0)))
+REVIEW_LOG_CHECKS.append(("review-record:a --edit-last over a two-author thread makes its listing read and one login read, and refuses the caller's record, gh pr comment --edit-last",
+                         review_reads("Bash", {"command": EDIT_LAST_CMD}, "deny", 2, folder=GHRECORDCOUNT,
+                                      bodies={REVIEW_COMMENT: review_record(), REVIEW_COMMENT_ID: UNMARKED_BODY},
+                                      comments=REVIEW_OLD_COMMENTS, logins={REVIEW_COMMENT_ID: OTHER_LOGIN},
+                                      carries=WITHDRAW_REMEDY, user_reads=1)))
+# A comment that names no author is judged with the caller's comments, never skipped. Here it is the newest, and plain, so the edit is
+# allowed. Skipping it would judge the older record instead, and refuse.
+REVIEW_LOG_CHECKS.append(("review-record:a --edit-last over a thread whose newest comment names no author judges that comment, and allows its plain body, gh pr comment --edit-last",
+                         review_reads("Bash", {"command": EDIT_LAST_CMD}, "allow", 2, folder=GHRECORDCOUNT,
+                                      bodies={REVIEW_COMMENT: review_record(), REVIEW_COMMENT_ID: UNMARKED_BODY},
+                                      comments=REVIEW_OLD_COMMENTS, logins={REVIEW_COMMENT_ID: ""}, user_reads=1)))
+
+# THE WRAPPED FORMS. Decision pr-review-record, the gap list: a record inside `bash -c` is read to depth 4 (_WRAPPED_DEPTH, hooks/guard.py).
+def in_bash_c(command, layers):
+    """`command` run through `layers` nested `bash -c` scripts, each one quoted as the shell reads it."""
+    for _ in range(layers):
+        command = "bash -c " + shlex.quote(command)
+    return command
+
+
+def heredoc_script(body):
+    """A `gh pr comment` whose body is a heredoc, as the script that `bash -c` runs."""
+    return "%s --body-file - <<'EOF'\n%s\nEOF\n" % (PR_CMD, body.rstrip("\n"))
+
+
+TRAILING_FILE_CMD = "%s --body-file %s" % (PR_CMD, TRAILING_PATH)
+bash_post("review-record: a malformed record four bash -c scripts deep is refused, gh pr comment --body-file",
+          in_bash_c(TRAILING_FILE_CMD, 4), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
+bash_post("review-record: a malformed record five bash -c scripts deep is allowed, a named limit: the nesting is read to depth 4",
+          in_bash_c(TRAILING_FILE_CMD, 5), "allow")
+bash_post("review-record: a record for another head in a heredoc inside bash -c is refused, gh pr comment --body-file -",
+          "bash -c %s" % shlex.quote(heredoc_script(WRONG_HEAD_RECORD)), "deny", rule=REVIEW_RULE, carries=(REVIEW_RENDER,))
+bash_post("review-record: a live-head record in a heredoc inside bash -c is allowed, gh pr comment --body-file -",
+          "bash -c %s" % shlex.quote(heredoc_script(review_record())), "allow")
+bash_post("review-record: a record for another head posted through docker exec is refused, docker exec c gh api -f body=",
+          "docker exec c %s -f %s" % (API_CMD, shlex.quote("body=" + WRONG_HEAD_RECORD)), "deny", rule=REVIEW_RULE,
+          carries=(REVIEW_RENDER,))
+bash_post("review-record: a live-head record posted through docker exec is allowed, docker exec c gh api -f body=",
+          "docker exec c %s -f %s" % (API_CMD, shlex.quote("body=" + review_record())), "allow")
+
 
 # A bare edit names no pull request. This pins the count the code makes today, not a ruling: the open-PR list, then the comment listing.
 REVIEW_LOG_CHECKS.append(("review-record:a bare edit with no pull request number makes two gh reads today, the open-PR list and the listing, gh pr comment --edit-last",
