@@ -7615,6 +7615,20 @@ sh("push: nested quote printer pin, bash -c sudo echo prints a forced push, allo
    r'bash -c "sudo echo \"' + VCS + r' push -f origin x\""', "allow", cwd=PUSHFEAT)
 sh("push: nested quote printer pin, bash -c command printf prints a forced push, allows",
    r'bash -c "command printf \"%s\" \"' + VCS + r' push -f origin x\""', "allow", cwd=PUSHFEAT)
+# A git `-c NAME=VALUE` option whose value holds escaped quotes. No runner runs that span, so it is a
+# value, not a command, and the push after it keeps its `git` head. Each forced push here denies, as
+# the same push denies without the option. The echo is the control: an escaped-quote span that prints
+# no push allows.
+sh("push: git -c with an escaped-quote value, then a forced push, denies",
+   VCS + r' -c "k=\"v\"" push -f origin x', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: git -c with an escaped-quote user.name, then a forced push, denies",
+   VCS + r' -c "user.name=\"a b\"" push --force origin x', "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY)
+sh("push: bash -c runs git -c with an escaped-quote value, then a forced push, denies",
+   "bash -c '" + VCS + r' -c "k=\"v\"" push -f origin x' + "'", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY)
+sh("push: echo quotes an escaped-quote span with no push, allows",
+   r'echo "k=\"v\""', "allow", cwd=PUSHFEAT)
 # GAPS. php -r runs its string as a script, and a Deno.Command call names git as an argument. Each one
 # denies: php -r is an INTERPRETER_RUNNER runner, and the pairs of an argv call join into one command line.
 sh("push: nested quote gap, php -r shell_exec runs a forced push, denies",
