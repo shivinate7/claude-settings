@@ -3434,6 +3434,18 @@ for (const [set, note] of [[CLOSE_RED, ""], [CLOSE_CONTROL, " (control)"]]) for 
     assert.ok(b.x >= -0.5 && b.x + b.width <= vw + 0.5, `the Designs sheet's Close runs from ${Math.round(b.x)} to ${Math.round(b.x + b.width)} px in a ${vw} px window, ${where}`);
   });
 }
+// The Designs sheet's title is a readable name: at least 4 em of its own text wide, at 180 to 390 wide at the default text and at 200% and 300%.
+// The title's text is 17 px, so 4 em is 68 px. The old page cuts the title to "O…" at 180 wide.
+const SHEET_TITLE_WIDTHS = [180, 200, 220, 240, 320, 360, 390];
+for (const pct of [100, 200, 300]) for (const width of SHEET_TITLE_WIDTHS) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, pct);
+  test(`Designs sheet, ${scheme}: ${where}: the title is at least 4 em wide`, async (t) => {
+    const page = await tabSetPage(t, { width, pct, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    await openDesigns(page);
+    const g = await page.evaluate(() => { const h = document.getElementById("dTitle"); return { w: h.getBoundingClientRect().width, em: parseFloat(getComputedStyle(h).fontSize), text: h.textContent }; });
+    assert.ok(g.w >= 4 * g.em, `the Designs sheet title ${JSON.stringify(g.text)} is ${Math.round(g.w)} px wide, under 4 em of its ${Math.round(g.em)} px text (${Math.round(4 * g.em)} px), ${where}`);
+  });
+}
 
 // ---------------------------------------------------------------- an answered row at large text: its presses sit in the row, and the page does not scroll sideways
 // The row with Dismiss, unfolded (not seen before its answer, so the answer is new and the row stays open, with Reply and Dismiss at its
@@ -3489,15 +3501,45 @@ for (const [set, note] of [[ROW_RED, ""], [ROW_CONTROL, " (control)"]]) for (con
 
 // The title column of a folded row with Dismiss, at 600 wide at the default text, is at least 8 em of its own text. The old page leaves the
 // press beside it too little room there. Each control is a width the old page passes.
+// The folded row's title column, its width against its own text size, with the row folded and Dismiss beside it. `where` names the claim.
+const titleColumnCheck = async (page, where) => {
+  const g = await page.evaluate((id) => { const li = document.getElementById("row-" + id), ft = li.querySelector(".frow .ftext"), dis = document.getElementById("dis-" + id); return { folded: li.classList.contains("folded"), dis: !!dis && dis.checkVisibility(), w: ft ? ft.getBoundingClientRect().width : 0, em: ft ? parseFloat(getComputedStyle(ft).fontSize) : 0 }; }, DIS_ROW);
+  assert.ok(g.folded, `the row is not folded ${where}`);
+  assert.ok(g.dis, `Dismiss is not shown beside the folded row ${where}`);
+  assert.ok(g.w >= 8 * g.em, `the title column is ${Math.round(g.w)} px wide, under 8 em of its ${Math.round(g.em)} px text (${Math.round(8 * g.em)} px), ${where}`);
+};
 for (const [set, note] of [[[600], ""], [[1280], " (control)"]]) for (const width of set) for (const scheme of SCHEMES) {
   test(`folded answered row with Dismiss, ${scheme}: at ${width} wide at the default text, its title column is at least 8 em${note}`, async (t) => {
     const page = await foldedRowPage(t, "dismiss", width, scheme); if (!page) return;
-    const g = await page.evaluate((id) => { const li = document.getElementById("row-" + id), ft = li.querySelector(".frow .ftext"), dis = document.getElementById("dis-" + id); return { folded: li.classList.contains("folded"), dis: !!dis && dis.checkVisibility(), w: ft ? ft.getBoundingClientRect().width : 0, em: ft ? parseFloat(getComputedStyle(ft).fontSize) : 0 }; }, DIS_ROW);
-    assert.ok(g.folded, `the row is not folded at ${width} wide`);
-    assert.ok(g.dis, `Dismiss is not shown beside the folded row at ${width} wide`);
-    assert.ok(g.w >= 8 * g.em, `the title column is ${Math.round(g.w)} px wide, under 8 em of its ${Math.round(g.em)} px text (${Math.round(8 * g.em)} px), ${sizeWhere(width, 100)}`);
+    await titleColumnCheck(page, sizeWhere(width, 100));
   });
 }
+// The same column with the root font size at 150%, at 1100 and 1280 wide. The page passes it as it is, so it pins the column there.
+for (const width of [1100, 1280]) for (const scheme of SCHEMES) {
+  test(`folded answered row with Dismiss, ${scheme}: at ${width} wide with the root font size at 150%, its title column is at least 8 em`, async (t) => {
+    const page = await foldedRowPage(t, "dismiss", width, scheme); if (!page) return;
+    await zoomedTo(page, 150);
+    await titleColumnCheck(page, `at ${width} wide with the root font size at 150%`);
+  });
+}
+// An answered thread whose reply holds a 60-character unbroken token: its text stays inside the card at 360 and 390 wide at the default text.
+// The token sits in the reply, a child of the thread other than the filed line.
+const THREAD_TOKEN = "abcdefghij".repeat(6);
+for (const width of [360, 390]) for (const scheme of SCHEMES) {
+  test(`answered thread, ${scheme}: at ${width} wide at the default text, a 60-character token in the reply stays inside its card`, async (t) => {
+    const ask = { ...ASK_ANSWERED, id: "ask-thread-tok", reply: THREAD_TOKEN };
+    const page = await open(t, { dbExtra: { asks: { [ask.id]: ask } }, storage: RPL_NEW, viewport: { width, height: 800 }, scheme }); if (!page) return;
+    await mustHave(page, `li#row-${ask.id} .thread .reply`, "the answer's reply in its thread");
+    const g = await page.evaluate((id) => {
+      const card = document.getElementById("row-" + id), thread = card.querySelector(".thread"), walk = document.createTreeWalker(thread, NodeFilter.SHOW_TEXT);
+      let right = 0;
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) { const rg = document.createRange(); rg.selectNodeContents(n); for (const b of rg.getClientRects()) if (b.width > 0.5) right = Math.max(right, b.right); }
+      return { card: card.getBoundingClientRect().right, text: right };
+    }, ask.id);
+    assert.ok(g.text <= g.card + 0.5, `the thread's text runs to ${Math.round(g.text)} px, past the card's edge at ${Math.round(g.card)} px, at ${width} wide at the default text`);
+  });
+}
+
 // The bar status at 180 wide at the default text, beside the Send answers press, reads the open count. The old page squeezes it to 1 px
 // beside the buttons. It passes when it is at least 4 em of its own text wide, or sits on a line of its own. 390 is the control.
 for (const [set, note] of [[[180], ""], [[390], " (control)"]]) for (const width of set) for (const scheme of SCHEMES) {
@@ -3720,21 +3762,25 @@ for (const [set, note] of [[HELD_RED, ""], [HELD_CONTROL, " (control)"]]) for (c
     assert.ok(Math.abs(now - r.rest) <= 1, `the Dismiss press is ${Math.round(now)} px tall while its write waits, not its resting ${Math.round(r.rest)} px, ${where}`);
   });
 }
-// Whether assistive tech can read a press as busy: aria-busy="true" on the press, or a live region (aria-live, role status or alert) that
-// holds the busy word. Empty when neither is there. The old press names itself "Dismiss: ..." and nothing more while it waits.
+// Whether the press itself says it is busy: "aria-busy" when it is aria-busy="true", or "name" when its own accessible name holds the busy
+// word. The name is aria-label when set, else the press's text without its hidden copies of the label. Empty when neither is there. Live
+// text elsewhere on the page does not count, since it is not the press. The old press names itself "Dismiss: ..." and nothing more.
 const busyExposed = (page, id, word) => page.evaluate(({ id, word }) => {
   const b = document.getElementById(id);
-  if (b && b.getAttribute("aria-busy") === "true") return "aria-busy";
-  const live = [...document.querySelectorAll('[aria-live], [role="status"], [role="alert"]')];
-  return live.some((el) => el.textContent.includes(word)) ? "live text" : "";
+  if (!b) return "";
+  if (b.getAttribute("aria-busy") === "true") return "aria-busy";
+  const text = b.cloneNode(true);
+  text.querySelectorAll('[aria-hidden="true"]').forEach((el) => el.remove());
+  const name = b.getAttribute("aria-label") ?? text.textContent;
+  return name.includes(word) ? "name" : "";
 }, { id, word });
 for (const kind of ["dismiss", "restore"]) for (const [width, pct] of HELD_RED) for (const scheme of SCHEMES) {
   const where = sizeWhere(width, pct);
-  test(`ask list, ${scheme}: ${where}: a ${HELD[kind].verb} press whose write waits is exposed as busy to assistive tech`, async (t) => {
+  test(`ask list, ${scheme}: ${where}: a ${HELD[kind].verb} press whose write waits is aria-busy="true", or its own name holds "${HELD[kind].word}"`, async (t) => {
     const r = await heldPress(t, { kind, width, pct, scheme }); if (!r) return;
     const how = await busyExposed(r.page, r.id, r.word);
     await r.page.evaluate(() => window.__release());
-    assert.ok(how, `the ${r.verb} press says nothing to assistive tech while its write waits: no aria-busy="true" on it, and no live text holds "${r.word}"`);
+    assert.ok(how, `the ${r.verb} press is not busy to assistive tech while its write waits: no aria-busy="true" on it, and its own name does not hold "${r.word}"`);
   });
 }
 
@@ -3754,6 +3800,24 @@ const toggleHit = (page) => page.evaluate(() => {
   const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
   return { ok: !!el && (el === t || t.contains(el)), what: el ? (el.id ? "#" + el.id : el.tagName.toLowerCase()) : "nothing (the point is outside the window)" };
 });
+// After a Restore in the dismissed list, the "Restored." line stays inside the window, and the page does not scroll sideways: at 180 wide
+// at 200%, and at 180 to 240 wide at 300%.
+const RESTORED_LINE = [[180, 200], [180, 300], [200, 300], [220, 300], [240, 300]];
+for (const [width, pct] of RESTORED_LINE) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, pct);
+  test(`ask list, ${scheme}: ${where}: after a Restore in the dismissed list, the Restored. line stays inside the window with no sideways scroll`, async (t) => {
+    const page = await pressListPage(t, { width, pct, scheme, showDismissed: true }); if (!page) return;
+    await mustHave(page, "#res-ask-fold-res", "Restore press of the dismissed row");
+    await page.click("#res-ask-fold-res");
+    await mustHave(page, "#row-ask-fold-res p.sline.dline > span > b", "the Restored. line");
+    const g = await page.evaluate(() => { const b = document.querySelector("#row-ask-fold-res p.sline.dline > span > b"), r = b.getBoundingClientRect(); return { text: b.textContent, left: r.left, right: r.right, iw: window.innerWidth }; });
+    assert.equal(g.text, "Restored.", `the line's bold word reads ${JSON.stringify(g.text)}, not "Restored.", ${where}`);
+    assert.ok(g.left >= -0.5 && g.right <= g.iw + 0.5, `the Restored. line runs from ${Math.round(g.left)} to ${Math.round(g.right)} px in a ${g.iw} px window, ${where}`);
+    const fault = await sidewaysFault(page);
+    assert.ok(!fault, fault && `${fault}, ${where}`);
+  });
+}
+
 const BAR_SIZES = [[180, 200], [220, 200], [240, 200], [180, 300], [240, 300], [300, 300], [360, 300]];
 for (const [width, pct] of BAR_SIZES) for (const scheme of SCHEMES) {
   const where = `${sizeWhere(width, pct)}, scrolled to the end`;
@@ -4601,6 +4665,7 @@ test("dismiss: when the write is refused, the thread stays on the list, Dismiss 
   assert.equal(await rplLineHas(page, "The ask stays on the list."), true, "the refused Dismiss does not say The ask stays on the list.");
   await shownBox(page, ASK_ANSWERED.text, DIS_SHOWN);
   assert.notEqual(await page.getAttribute(`#dis-${root}`, "aria-disabled"), "true", "Dismiss is off after a refused write, so it cannot try again");
+  assert.equal(await page.getAttribute(`#dis-${root}`, "aria-busy"), null, "the Dismiss press is still aria-busy after the refused write");
 });
 
 test("dismiss: when Restore is refused, the thread stays dismissed and the line says it stays dismissed", async (t) => {
@@ -4612,6 +4677,7 @@ test("dismiss: when Restore is refused, the thread stays dismissed and the line 
   const said = await page.waitForFunction(() => document.body.textContent.includes("Not restored (permission-denied). It stays dismissed."), null, { timeout: 3000 }).then(() => true, () => false);
   assert.equal(said, true, "the refused Restore does not say Not restored (permission-denied). It stays dismissed.");
   await mustHave(page, `ol#askDList #res-${DIS_HIDDEN.id}`, "the thread still in the dismissed list after the refused Restore");
+  assert.equal(await page.getAttribute(`ol#askDList #res-${DIS_HIDDEN.id}`, "aria-busy"), null, "the Restore press is still aria-busy after the refused write");
 });
 
 test("dismiss: with every ask dismissed, the list says No ask on the list, and the Show dismissed unfold stays", async (t) => {
