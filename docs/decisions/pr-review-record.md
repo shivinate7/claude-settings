@@ -32,19 +32,19 @@ CI: read live by merge --reviewed
 
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
-- The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. A PASS counts as its round passing in any round; after round 3 it keeps the net value round 3 gave; with no round recorded it reads open.
-- The comment never stores CI state. `merge --reviewed` reads no CI per PR. It reads the base's latest run once, when a batch line exists. The form's CI line keeps its old wording, because posted records carry it (`REVIEW_CI_LINE` in `merge/merge.py`).
+- The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. On every record, a Fix check whose model is not exactly `sonnet` (any letter case; `claude-sonnet-5-5` is not) is open, and `--fix-check` refuses it, whatever Guard or check says (owner item 444 a, 2026-11-08 15:04 CST; it widens item 351 a, 2026-11-07 14:44 CST). A fix check PASS counts as its round passing in any round when Guard or check is `no`. When Guard or check is `yes`, a fix check PASS before round 3 does not end review (item 402 a, owner, 2026-11-08 06:08 CST). After round 3, a PASS keeps the net value round 3 gave; with no round recorded it reads open.
+- The comment never stores CI state. `merge --reviewed` reads no CI per PR. It reads the base's latest run once, when a batch line exists. The form's CI line keeps its old wording, because posted records carry it (`REVIEW_CI_LINE` in `merge/merge.py`). The `--reviewed --root DIR` form is the one exception. It reads each ready PR's CI to keep `open batch now:` off a busy base (record `session-tiers`), until the batch label is live on PRs.
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
 - The newest record for a head counts. A record for an old head is stale.
 - `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a push after the review never relabels old rounds as current.
 - A lane posts the body with the GitHub MCP comment tool after each round. `gh pr comment` uses GraphQL, which the cloud refuses (route graphql-gh-api-cloud).
-- The one home of the form is the merge tool (`merge/merge.py`). `review_body` writes the body, `parse_review` reads it, and `review_state` gives each record's state. `reviewed_lines` builds the `--reviewed` ledger: one next act per open PR, with its age limit in `merge/merge.py` `PR_STATE_AGE_HOURS` (design: the PR ledger, record `pr-ledger`, draft PR #1419). `round_arg` reads `--round`. `Host.issue_comments` makes the one comment list read, which `reviewed_lines` and `Host.review_comments` (`--fix-check`) both use.
+- The one home of the form is the merge tool (`merge/merge.py`). `review_body` writes the body, `parse_review` reads it, and `review_state` gives each record's state. `reviewed_lines` builds the `--reviewed` ledger: one next act per open PR, with its age limit in `merge/merge.py` `PR_STATE_AGE_HOURS` (design: the PR ledger, record `pr-ledger`). `round_arg` reads `--round`. `Host.issue_comments` makes the one comment list read, which `reviewed_lines` and `Host.review_comments` (`--fix-check`) both use.
 
 ## The done rules
 
 A change is done when one of these holds (rule `roles-review-cap-three`):
 
-- round 1 or 2 is its last round, that round is PASS or a fix check PASSes after its FAIL, and the last `design-reviewer` line (across all rounds) is PASS or absent;
+- round 1 or 2 is its last round, and that round is PASS (or, for Guard or check `no`, a fix check PASSes after its FAIL), and the last `design-reviewer` line (across all rounds) is PASS or absent;
 - round 3 is done, and Guard or check is `no`;
 - round 3 is done, Guard or check is `yes`, and Net value is zero or positive;
 - Kind is `delete-only`, Guard or check is `no`, and round 1 is done;
@@ -52,8 +52,28 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 
 - A last `design-reviewer` line of FAIL or PARTIAL keeps a record open on the PASS rule. The round 3 and `delete-only` done rules stay done, and their reason names the design failure.
 - A round 3 verdict does not decide done. When Guard or check is `yes`, Net value does, even after a round 3 PASS: `not owed` is open, and `negative` holds the change (record `hold-unsafe-after-round-3`).
-- A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open unless a fix check PASSes. The rule owes rounds 2 and 3 when round 1 finds a safety hole.
+- A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open until round 3 is done, even after a fix check PASSes (item 402 a, owner, 2026-11-08 06:08 CST). The rule owes rounds 2 and 3 when round 1 finds a safety hole.
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
+
+The review a changed head owes. Coordinator pick (owner session coordinator, 2026-11-08 to 2026-11-09). Process-only, not the owner's words. A lane reads it instead of asking.
+
+- A chain gets one fix check.
+- The PR gets one fresh full review at the live head when any of these holds:
+  - the newest record already holds a fix check;
+  - a fix check failed;
+  - a round read an older head than the live one;
+  - the record was made or edited by hand;
+  - the head moved after round 3.
+- The fresh review has these parts:
+  - its brief line 1 is `Round 3 of 3`;
+  - it runs on Sonnet;
+  - it reads the whole diff against main;
+  - it runs the net-value test (record `hold-unsafe-after-round-3`, hold a change with negative net value after round 3).
+- Post it with the lines the merge tool prints: the real round 1 and round 2 lines, the new round 3 line, and no `Fix check` line.
+- Free text goes only below `---`. A record is never edited or deleted.
+- A round 3 FAIL with net value at or above zero merges (round 3 done rule above).
+- A lane merges origin/main once, after the pending batch lands. It uses an ordinary merge commit. It never replays, rebases or force-pushes.
+- A merge with both test and product conflicts waits for the mixed-merge route (decision `mixed-merge-resolver`, not on main yet).
 
 ## The cost
 
@@ -61,14 +81,23 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 
 - `merge --reviewed` reads the open PRs (one call per page) and the repo's issue comments since the oldest open PR (one call per page, every comment, not only review records). It reads one `issues/<n>/events` list per PR that reaches the hold rule. When a batch line exists, it reads one page of the base's `actions/runs`. For a run that did not succeed, it also reads that run's jobs, and the jobs and workflow files of runs that may clear it. `Host.base_state` in merge/merge.py holds that count. It reads no head and no check run. The comment list grows with the repo's comment traffic and with the age of the oldest open PR.
 - Each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads. With no `.github/stamp.json` on main, `load_config` adds one `gh api` repo read.
+- `merge --reviewed --root DIR`, per root: main's per-root read. When the base has a done PR, each ready PR with a record adds three reads: the check runs, the commit statuses and the branch protection. Class `ReviewedRoots` in `merge/test_merge.py` pins the read.
 - One ready PR with a record (a batch line), each list on one page, on a base with no run that did not succeed: three calls, the open PRs, the comments and the base's runs. With a pinned `merge.requiredChecks` list, four: one branch protection read at the start of the run compares the pin. A held PR adds one events read.
-- `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
+- `merge <pr> --review-record`: one PR read, plus one read per page of 100 changed files: two reads for a PR of 100 files or fewer. The tests `ReviewGuardCost` and `ReviewGuardHostFiles` pin them. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList.test_one_ready_pr_with_a_record_costs_three_gh_calls` in `merge/test_merge.py` pins the three calls. `ReviewedLedger.test_reads_one_comment_list_no_head_and_at_most_one_event_list_per_held_pr` pins the list reads.
 
 ## The limits
 
-- Kind, Guard or check, and docs-only are the lane's own claims. The tool does not check paths. It does not tell a record that files an owner ruling from other docs. Kind stays the lane's claim. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`).
+- `--review-record` reads the PR's changed files. A moved file counts at its old path too.
+  - It refuses Guard or check `no` when a path starts with an entry of `GUARD_PATHS` or equals one of `GUARD_FILES`. `GUARD_PATHS` is `stale_cites.RULE_DIRS` plus `merge/` and `githooks/`. `GUARD_FILES` is `settings.json`. A test path (`hooks/guard.py` `is_test_rel`) never counts, because test files alone never count (record `hold-unsafe-after-round-3`).
+  - It refuses a files list shorter than the PR's changed-file count, and a PR read that gives no count. GitHub lists at most 3000 files.
+  - `agents/*.md` is not on the list. Only its `tools` lines are a guard, and a path cannot tell those apart from prompt text.
+  - It refuses Kind `docs-only` when a path does not end in `.md`. It refuses Kind `delete-only` when a path adds lines, or is added, renamed or copied. A file that only loses lines passes, because delete-only "only deletes and adds nothing" (record `hold-unsafe-after-round-3`).
+  - Guard or check `yes` stays allowed with no hit, because a guard can live outside those paths.
+- The path check runs only when `--review-record` writes a record. `merge --reviewed` still trusts a record posted by hand. A read there would add one call per PR.
+- In another repo, a change under `hooks/`, `lint/`, `bin/`, `actions/`, `.github/`, `merge/` or `githooks/`, or to a root `settings.json`, must say Guard or check `yes`. It then owes the net-value test after round 3. A `.claude/settings.json` or `.claude/hooks/` path is not on the list.
+- The tool does not tell a record that files an owner ruling from other docs. Kind `normal` stays the lane's claim. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`).
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
