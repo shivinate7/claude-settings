@@ -7606,6 +7606,38 @@ sh("push: heredoc into python3 -, os.system runs a forced push, denies",
 sh("push: heredoc into deno run -A -, an argv call runs a forced push, denies",
    "deno run -A - <<'EOF'\nnew Deno.Command(\"" + VCS + "\", {args: [\"push\", \"-f\", \"origin\", \"x\"]}).outputSync()\nEOF",
    "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# PRINTER WRAPS A FORMATTER. json.dumps, str.format and repr build a string and print it, so the forced push in
+# that string is data and runs nothing. Each allows, in double quotes and in single quotes.
+sh("push: nested quote, json.dumps prints a forced push in a dict, allows",
+   r'python3 -c "print(json.dumps({\"cmd\": \"' + VCS + r' push -f\"}))"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote, str.format prints a forced push, allows",
+   r'python3 -c "print(\"{}\".format(\"' + VCS + r' push -f origin x\"))"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote, repr prints a forced push, allows",
+   r'python3 -c "print(repr(\"' + VCS + r' push -f origin x\"))"', "allow", cwd=PUSHFEAT)
+sh("push: single-quoted python -c, json.dumps prints a forced push in a dict, allows",
+   "python3 -c 'print(json.dumps({\"cmd\": \"" + VCS + " push -f\"}))'", "allow", cwd=PUSHFEAT)
+sh("push: single-quoted python -c, str.format prints a forced push, allows",
+   "python3 -c 'print(\"{}\".format(\"" + VCS + " push -f origin x\"))'", "allow", cwd=PUSHFEAT)
+sh("push: single-quoted python -c, repr prints a forced push, allows",
+   "python3 -c 'print(repr(\"" + VCS + " push -f origin x\"))'", "allow", cwd=PUSHFEAT)
+# WRITTEN, NOT RUN. sys.stdout.write puts its string on the output as print does, so a forced push in it allows.
+sh("push: single-quoted python -c, sys.stdout.write prints a forced push, allows",
+   "python3 -c 'import sys; sys.stdout.write(\"" + VCS + " push -f origin x\")'", "allow", cwd=PUSHFEAT)
+sh("push: nested quote, sys.stdout.write prints a forced push, allows",
+   r'python3 -c "import sys; sys.stdout.write(\"' + VCS + r' push -f origin x\")"', "allow", cwd=PUSHFEAT)
+# ARGV LIST RUN. subprocess.run and check_call run the words of their list, so a forced push written as a list
+# runs, and denies the way a plain force-push does.
+sh("push: single-quoted python -c, subprocess.run takes a list of a forced push, denies",
+   "python3 -c 'import subprocess; subprocess.run([\"" + VCS + "\",\"push\",\"-f\",\"origin\",\"x\"])'",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: single-quoted python -c, subprocess.check_call takes a list of a forced push, denies",
+   "python3 -c 'import subprocess; subprocess.check_call([\"" + VCS + "\",\"push\",\"-f\",\"origin\",\"x\"])'",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote, subprocess.run takes a list of a forced push, denies",
+   r'python3 -c "import subprocess; subprocess.run([\"' + VCS + r'\",\"push\",\"-f\",\"origin\",\"x\"])"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# CONTROL. Printed text with no escaped quote allows.
+sh("push: python -c prints hello, allows (control)", r'python3 -c "print(\"hello\")"', "allow", cwd=PUSHFEAT)
 # ARGV CALLS. A Deno.Command call names its program and its arguments as separate strings, and the pairs
 # of one call are joined into one command line. The join keeps each argument's bounds: a quoted "my repo"
 # is one argument, so -C takes that whole path and push is the subcommand.
