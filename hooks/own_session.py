@@ -76,7 +76,29 @@ def own_session_read(transcript, own_id, created=False, applied=False):
     made after a record call and before its result, as in one assistant message, counts after that
     record; the default counts it before, so tagged_after stays False. The record's tags keep their
     meaning, and the default keeps the shape the callers rely on."""
-    uses, newest, parent, tagged_after = set(), None, None, False
+    return _scan(transcript, own_id, created, applied)[:3]
+
+
+def own_session_ccr(transcript, own_id):
+    """The whole `ccr` dict of the newest get_session result whose ccr.id is own_id, else None. The
+    branch and source fields of the record are read from it (lane-closes-after-records).
+
+    Never raises, because the guard's checks must not crash on any input. A transcript it cannot read
+    (no path, a missing file, a folder, bad text) is None, the same as "no record"; a caller that needs
+    the record treats None as no record. The type check comes first because open() reads an int as a file
+    descriptor and would open, then close, a descriptor the caller owns."""
+    if not isinstance(transcript, (str, os.PathLike)):
+        return None
+    try:
+        return _scan(transcript, own_id, False)[3]
+    except (OSError, TypeError, ValueError, RecursionError):
+        return None
+
+
+def _scan(transcript, own_id, created, applied=False):
+    """(tags, tagged_after, parent, ccr): the one pass over the transcript behind both readers.
+    `applied` is own_session_read's: it passes it, and own_session_ccr leaves it False."""
+    uses, newest, parent, tagged_after, newest_ccr = set(), None, None, False, None
     added = []  # tags the own set_session_tags calls added since the newest record, in order
     creates = {}  # tool_use id -> (tags, parent) a create_session call set
     pending = {}  # tool_use id of a record call with no result yet -> the own tag calls made since, in order
@@ -130,7 +152,7 @@ def own_session_read(transcript, own_id, created=False, applied=False):
                         body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
                     if block.get("tool_use_id") in creates:
                         if _created_session_id(body) == own_id:
-                            (newest, parent), tagged_after, added = creates[block.get("tool_use_id")], False, []
+                            (newest, parent), tagged_after, newest_ccr, added = creates[block.get("tool_use_id")], False, None, []
                             for given in held:
                                 note_tag_call(given)
                         continue
@@ -139,7 +161,7 @@ def own_session_read(transcript, own_id, created=False, applied=False):
                     try:
                         ccr = _record_json(body)["ccr"]
                         if ccr["id"] == own_id and isinstance(ccr["tags"], list):
-                            newest, tagged_after, added = ccr["tags"], False, []
+                            newest, tagged_after, newest_ccr, added = ccr["tags"], False, ccr, []
                             for given in held:
                                 note_tag_call(given)
                             found = ccr.get("parent_session_id")
@@ -148,4 +170,4 @@ def own_session_read(transcript, own_id, created=False, applied=False):
                         continue
     if applied and added:
         newest = [*(newest or []), *(tag for tag in added if tag not in (newest or []))]
-    return newest, tagged_after, parent
+    return newest, tagged_after, parent, newest_ccr
