@@ -1253,10 +1253,9 @@ jobs:
     # The step grew from 193 s to 400 s (batch 4), then ran 580 s or more before the 10 min cap cut it (run 41786084869).
     # Faster slow kills cut the local run 710 s to 651 s (4 jobs). Batch 7's lanes add mutants. On main, the coordinator
     # measured lane PR 1163 alone at 946 s locally (+236 s) and lane PR 1157 at 768 s (+58 s). If those add up and the
-    # speed-ups carry over, the set nears 945 s locally, about 16 min. A cap-cut step has no upper bound, so 25 min is a stopgap
-    # (ci-job-caps) until the split (debt mutate-guard-split); the next green run gives the figure.
+    # speed-ups carry over, the set nears 945 s locally, about 16 min. A cap-cut step has no upper bound.
     # Batch 68 run 42608474160 was cancelled at the 25 min cap with 616 of 694 mutants killed and none surviving, so the
-    # cap is 45, a stopgap until step mutate-guard-split (shards).
+    # cap is 45, a stopgap (ci-job-caps) until the split (debt mutate-guard-split, shards); the next green run gives the figure.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
