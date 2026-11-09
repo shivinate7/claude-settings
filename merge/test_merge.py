@@ -13142,7 +13142,7 @@ class ReviewEnv(Env):
 
 class ReviewArgs(ReviewEnv):
     """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
-    --confirm or --unlock. Each refusal has a control: the same flag with good values exits 0, so a parser that never learned the flag fails here too."""
+    --unlock. --confirm posts the record (ReviewRecordConfirmGate). Each refusal has a control: the same flag with good values exits 0, so a parser that never learned the flag fails here too."""
 
     def test_reviewed_stands_alone(self):
         for argv in (("--reviewed", "--confirm"), ("--reviewed", "7"), ("--role", "coordinator", "--reviewed")):
@@ -13156,12 +13156,12 @@ class ReviewArgs(ReviewEnv):
         rc, out, err = self.run_args("7", "--review-record", *self.flags())
         self.assertEqual(rc, 0, out + err)
 
-    def test_review_record_takes_no_confirm_or_unlock(self):
-        for extra in (("--confirm",), ("--unlock",)):
-            with self.subTest(extra=extra):
-                self.assert_usage_error("7", "--review-record", *self.flags(), *extra)
+    def test_review_record_takes_no_unlock(self):
+        self.assert_usage_error("7", "--review-record", *self.flags(), "--unlock")
         rc, out, err = self.run_args("7", "--review-record", *self.flags())
         self.assertEqual(rc, 0, out + err)
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--confirm")
+        self.assertEqual(rc, 0, "--confirm was refused with --review-record:\n" + out + err)
 
     def test_review_record_needs_a_head(self):
         _out, err = self.assert_usage_error("7", "--review-record", *REVIEW_FLAGS)
@@ -13200,11 +13200,11 @@ class ReviewArgs(ReviewEnv):
         self.assertTrue(getattr(self.host, "merged", False), out + err)
 
 class ReviewRecordWrite(ReviewEnv):
-    """`merge <pr> --review-record` prints the record for the pull request's live head and posts it as a comment. It pushes nothing and takes no lock."""
+    """`merge <pr> --review-record` prints the record for the pull request's live head. With --confirm it also posts it as a comment. It pushes nothing and takes no lock."""
 
     def test_the_record_is_printed_and_nothing_is_pushed(self):
         before, locked = self.refs(), self.lock_ref()
-        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--confirm")
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(len(self.host.posted_comments), 1, "the record was not posted:\n" + out + err)  # the control of the refusal cases below
         body = posted_body(self, out)
@@ -13250,13 +13250,13 @@ class ReviewRecordWrite(ReviewEnv):
                 self.assertNotIn(REVIEW_MARKER, out)
 
 class ReviewRecordPost(ReviewEnv):
-    """`merge <pr> --review-record` posts the record as one comment on the pull request and prints it too. A body that does not parse is never
-    posted. A failed post exits non-zero, says so on stderr, and prints no success line. The post goes through Host.post_review_comment, so
+    """`merge <pr> --review-record --confirm` posts the record as one comment on the pull request and prints it too. A body that does not parse is
+    never posted. A failed post exits non-zero, says so on stderr, and prints no success line. The post goes through Host.post_review_comment, so
     these cases read the real route, method and JSON body from the fake gh."""
 
     def test_a_valid_record_posts_one_comment_and_is_printed(self):
         host = self.record_host(head=self.head())
-        rc, out, err = self.run_args("7", "--review-record", *self.flags(), host=host)
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--confirm", host=host)
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(len(host.posted_comments), 1, "the record was not posted:\n" + out + err)
         n, body = host.posted_comments[0]
@@ -13280,21 +13280,104 @@ class ReviewRecordPost(ReviewEnv):
 
         host = self.record_host(head=self.head())
         with unittest.mock.patch.object(merge, "review_body", stub):
-            rc, out, err = self.run_args("7", "--review-record", *self.flags(), host=host)
+            rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--confirm", host=host)
         self.assertGreaterEqual(len(calls), 2, "the record was not built past the argument check:\n" + out + err)
         self.assertEqual(rc, 2, "a body that does not parse was not refused:\n" + out + err)
+        self.assertIn("does not parse", err, "the refusal of a bad body with --confirm did not run:\n" + err)
         self.assertEqual(host.posted_comments, [], "a body that does not parse was posted")
         self.assertNotIn("Traceback", err)
 
     def test_a_failed_post_exits_nonzero_and_says_so(self):
         host = self.record_host(head=self.head())
         host.post_error = (1, "gh: Validation Failed (HTTP 422)")
-        rc, out, err = self.run_args("7", "--review-record", *self.flags(), host=host)
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--confirm", host=host)
         self.assertEqual(len(host.posted_comments), 1, "the record was not posted, so the failed post was never reached:\n" + out + err)
         self.assertNotIn(rc, (0, None), "a failed post exited 0:\n" + out + err)
         self.assertIn("HTTP 422", err, "the reason of the failed post is not on stderr:\n" + err)
         self.assertNotIn("Traceback", err)
         self.assertFalse([l for l in (out + err).splitlines() if l.startswith("merge: posted")], "a failed post printed a success line:\n" + out + err)
+
+class RealPostHost(merge.Host):
+    """The real Host. Its one read, pr, is scripted: pull request 7 is OPEN at `head`. Its comment POST runs Host.post_review_comment over the real retry_net."""
+
+    def __init__(self, head):
+        super().__init__(required=["checks"], base="main", minute=60, pause=lambda s: None, repo="o/r")
+        self.live = head
+
+    def pr(self, n):
+        return {"number": n, "state": "OPEN", "head": self.live, "branch": "feat", "base": "main", "draft": False, "body": "",
+                "mergeable": "MERGEABLE", "merge_state": "CLEAN"}
+
+class ReviewRecordConfirmGate(ReviewEnv):
+    """`merge <pr> --review-record` prints the record and posts nothing. With --confirm it posts the record once. The good-value post with --confirm is
+    ReviewRecordPost.test_a_valid_record_posts_one_comment_and_is_printed, and a bad body with --confirm is ReviewRecordPost.test_a_body_that_does_not_parse_is_never_posted.
+    Here: without --confirm nothing is posted, and every refusal that runs with --confirm posts nothing and says its own cause."""
+
+    def test_without_confirm_the_record_is_printed_and_nothing_is_posted(self):
+        host = self.record_host(head=self.head())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn(REVIEW_MARKER, out, "the record was not printed:\n" + out + err)
+        self.assertEqual(host.posted_comments, [], "the record was posted without --confirm")
+
+    def test_every_refusal_with_confirm_posts_nothing(self):
+        # Each refusal runs with --confirm. Its own message must reach stderr, so each case also fails while --confirm is refused at the argument check.
+        old = self.head()
+        pushed = FakeHost(self.co, self.other)
+        pushed.head_override = "f" * 40
+        closed = FakeHost(self.co, self.other)
+        closed.pr_state = "MERGED"
+        cases = (
+            ("the live head moved after the review", pushed,
+             ("7", "--review-record", *REVIEW_FLAGS, "--head", old, "--confirm"), "the pull request head is"),
+            ("the pull request is not open", closed,
+             ("7", "--review-record", *self.flags(), "--confirm"), "the pull request is MERGED"),
+            ("--fix-check names no earlier record head", self.record_host(head=old),
+             ("7", "--review-record", *self.flags(), "--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:haiku:PASS", "--confirm"),
+             "the reviewed head must be the Head of the newest earlier review record"),
+            ("--head is missing", FakeHost(self.co, self.other),
+             ("7", "--review-record", *REVIEW_FLAGS, "--confirm"), "needs --head"),
+        )
+        for label, host, argv, cause in cases:
+            with self.subTest(refusal=label):
+                rc, out, err = self.run_args(*argv, host=host)
+                self.assertNotEqual(rc, 0, label + ": a refusal with --confirm exited 0:\n" + out + err)
+                self.assertIn(cause, out + err, label + ": its refusal did not run with --confirm:\n" + out + err)
+                self.assertEqual(host.posted_comments, [], label + ": a refusal with --confirm posted a record")
+
+class ReviewRecordPostNetError(ReviewEnv):
+    """The review record's comment POST is never retried. A network error after the request went out can still mean the comment was posted,
+    so a retry can post a duplicate. The POST runs the real Host.post_review_comment, Host.api, Host.gh and retry_net. merge.sh is patched only
+    for the `gh api` POST: each one answers the next of the replies (the last repeats), and its argv is kept in self.posts. Every other call is the real sh."""
+
+    def answer_posts(self, *replies):
+        seq, self.posts = list(replies), []
+        real = merge.sh
+
+        def sh_post(args, cwd=None, input=None, env=None, **kw):
+            if args[:2] == ["gh", "api"] and "POST" in args:
+                self.posts.append(list(args))
+                return seq.pop(0) if len(seq) > 1 else seq[0]
+            return real(args, cwd=cwd, input=input, env=env, **kw)
+
+        p = unittest.mock.patch.object(merge, "sh", sh_post)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_a_network_error_on_the_comment_post_is_one_post_and_a_stop(self):
+        self.answer_posts((1, "gh: Server Error (HTTP 502)"))
+        host = merge.Host(required=["checks"], base="main", minute=60, pause=lambda s: None, repo="o/r")
+        with self.assertRaises(merge.Stop):
+            host.post_review_comment(7, REVIEW_MARKER + "\n")
+        self.assertEqual(len(self.posts), 1, "a network error on the comment POST was retried: %d POSTs" % len(self.posts))
+
+    def test_two_network_errors_then_a_success_post_once_and_exit_nonzero(self):
+        eof = (1, 'Post "https://api.github.com/repos/o/r/issues/7/comments": EOF')
+        self.answer_posts(eof, eof, (0, '{"html_url": "https://github.com/o/r/pull/7#issuecomment"}'))
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--confirm", host=RealPostHost(self.head()))
+        self.assertTrue(self.posts, "--confirm did not reach the comment POST, so no retry was tested:\n" + out + err)
+        self.assertEqual(len(self.posts), 1, "the comment POST was retried after a network error: %d POSTs\n" % len(self.posts) + out + err)
+        self.assertNotEqual(rc, 0, "a failed post exited 0 after two retries:\n" + out + err)
 
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
@@ -13352,8 +13435,8 @@ class ReviewFixBase(ReviewEnv):
     EARLIER_HEAD = "1e" * 20  # a head that an earlier record reviewed, and that is not the newest record's
     OTHER_HEAD = "2e" * 20  # a head that no record reviewed
 
-    def review_with_base(self, base, host):
-        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:haiku:PASS", host=host)
+    def review_with_base(self, base, host, *extra):
+        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:haiku:PASS", *extra, host=host)
 
     def assert_refused(self, rc, out, err, host):
         self.assertEqual(rc, 2, "the fix check was not refused:\n" + out + err)
@@ -13365,7 +13448,7 @@ class ReviewFixBase(ReviewEnv):
         # control: the fix diff starts from the head the newest earlier record reviewed, and that record has no fix line. It posts once, so the
         # zero-post checks of the refusals below count a post that did not happen, and not a host that cannot post.
         host = self.record_host(review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))
-        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host, "--confirm")
         self.assertEqual(rc, 0, "a base that is the newest record's head was refused:\n" + out + err)
         self.assertEqual(len(host.posted_comments), 1, "the fix check was not posted:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
@@ -13401,7 +13484,7 @@ class ReviewFixBase(ReviewEnv):
         older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.OTHER_HEAD),)))
         newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         host = self.record_host(older, newest)
-        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host, "--confirm")
         self.assertEqual(rc, 0, "a base on the newest record, which has no fix line, was refused:\n" + out + err)
         self.assertEqual(len(host.posted_comments), 1, "the fix check was not posted:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
