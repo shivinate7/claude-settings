@@ -3571,6 +3571,9 @@ def holds(root, head, ref):
     import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
     got = ancestor(root, head, ref)
     if got is None and git_reads.is_shallow(root) is True:
+        # Host.holds_head would read this without changing the clone, but one REST compare per lane pair costs more than one fetch, and a run
+        # in a clone that cannot reach GitHub's API has no other read. So the clone is deepened, and the run says so.
+        say("merge: the clone is shallow; its history is fetched in full once (git fetch --unshallow), so the clone is no longer shallow.")
         c, out = git(root, "fetch", "-q", "--unshallow", "origin")
         if c:
             raise Stop(f"cannot read whether {ref} holds {head[:9]}: the clone is shallow and `git fetch --unshallow` failed: {out} {FREEZE_CITE}")
@@ -3656,20 +3659,76 @@ def restack(root, h, moved, new_head, gone=None, seen=frozenset()):
             failed += 1
     return failed
 
-def stacked_without_base(root, h, name, base, infos, running):
-    """Refuse (Stop) a request in which a lane's head contains the head of another open pull request on `base` that the request leaves out: merging the lane
-    would put that pull request's commits into the batch unfrozen. `infos` is {PR: pr() fields} of the request; `running` is the head of the batch it stacks
-    on, or None, and a head that holds is already in."""
+def fetch_heads(root, shas):
+    """Bring each commit of `shas` into the clone by its sha. -> the ones it could not get. By sha, not by branch: a fork's branch is not on origin,
+    and a fork's `main` would name origin's main, while GitHub serves each open pull request's head by its sha."""
+    def missing(s):
+        return not re.fullmatch(r"[0-9a-f]{40}", s or "") or git(root, "cat-file", "-e", f"{s}^{{commit}}")[0] != 0
+    want = [s for s in dict.fromkeys(shas) if missing(s) and s]
+    if want and git(root, "fetch", "-q", "origin", *want)[0]:
+        for s in want:  # one head that origin will not serve fails the whole fetch: get the rest one by one
+            git(root, "fetch", "-q", "origin", s)
+    return [s for s in dict.fromkeys(shas) if missing(s)]
+
+def holds_commit_of(root, lane, other, kept):
+    """True when commit `lane` holds a commit of `other` that no commit of `kept` holds. A pull request whose head holds the whole lane (one stacked on it)
+    brings nothing of its own into it, so that is False."""
+    if holds(root, lane, other):
+        return False
+    c, out = git(root, "merge-base", "--all", lane, other)
+    if c and out:
+        raise Stop(f"cannot read the common commits of {lane[:9]} and {other[:9]}: {out} {FREEZE_CITE}")
+    return any(not any(holds(root, b, k) for k in kept) for b in out.split())
+
+def stacked_without_base(root, h, base, heads, running, own=None):
+    """Refuse (Stop) a request in which a lane holds a commit of another open pull request on `base` that the request leaves out: merging the lane
+    would put that pull request's commits into the batch unfrozen, an old commit of it as much as its head. `heads` is {PR: head} of the request;
+    `running` is the head of the integration branch it stacks on, or None; a commit that it or the base tip holds is already in. `own` is the batch's
+    own pull request. Each other head is the sha the open list gives."""
+    kept = [fetch_branch(root, base), *([running] if running else [])]
+    others = [(n, info["head"]) for n, info in h.open_prs() if n not in heads and n != own and info["base"] == base]
+    unread = fetch_heads(root, [s for _, s in others])
     found = []
-    for n, info in h.open_prs():
-        if n in infos or info["base"] != base:
+    for n, head in others:
+        if head in unread:
+            say(f"merge: #{n}'s head {head[:9] or '(none)'} cannot be fetched from origin, so this request was not checked against its commits.")
             continue
-        head = fetch_branch(root, info["branch"])
-        if running and holds(root, head, running):
-            continue
-        found += [f"#{m} contains the head of #{n}, which is not in this request" for m in sorted(infos) if infos[m]["head"] != head and holds(root, head, infos[m]["head"])]
+        found += [f"#{m} holds a commit of #{n}, which is not in this request" for m in sorted(heads) if holds_commit_of(root, heads[m], head, kept)]
     if found:
         raise Stop("\n".join(found) + f"\nAdd the missing pull request, or leave the stacked lane out. Nothing was pushed. {FREEZE_CITE}")
+
+def stray_heads(root, tip, block, stops, kept):
+    """-> the heads a no-ff merge put on the integration branch at `tip`, along its first parents down to any commit of `stops`, that its frozen block
+    does not list as a lane and no commit of `kept` (the base tip, the head it stacks on) holds: a lane a drop took off the block but a kill kept on
+    the branch. A merge of the base into the branch is not a lane, and the base tip holds it."""
+    c, out = git(root, "log", "--first-parent", "--merges", "--format=%P", tip, "--not", *stops)
+    if c:
+        raise Stop(f"cannot read the merges on batch/{block['name']}: {out} {FREEZE_CITE}")
+    frozen = set(block["lanes"].values())
+    seconds = [p[1] for p in (line.split() for line in out.splitlines()) if len(p) == 2 and p[1] not in frozen]
+    return [s for s in dict.fromkeys(seconds) if not any(holds(root, s, k) for k in kept)]
+
+def sync_batch(root, h, pr, info, block, on, base):
+    """Make the integration branch batch/NAME match its frozen block. It is rebuilt when it lacks a frozen lane head, when it holds a lane head the block does
+    not list, or when its On branch moved; else nothing moves. Before a rebuild, the frozen lanes pass the stacked check, so a rebuild never brings in a
+    commit of a pull request outside the set. -> 0, or 1 when a batch stacked on it could not be rebuilt."""
+    name, heads = block["name"], block["lanes"]
+    branch = f"batch/{name}"
+    tip = fetch_branch(root, branch)
+    now_on = fetch_branch(root, on) if on else None  # a running batch's head moves on a drop, a claim or a heal
+    kept = [fetch_branch(root, base), *([now_on] if on else [])]
+    stops = [*kept, *([block["on"][1]] if block["on"] else []), *([block["base"]] if block["base"] else [])]
+    strays = stray_heads(root, tip, block, stops, kept)
+    if not strays and all(holds(root, heads[n], tip) for n in sorted(heads)) and not (on and not holds(root, now_on, tip)):
+        return 0
+    stacked_without_base(root, h, base, heads, now_on, own=pr)
+    start, recorded = batch_start(root, block, base)
+    start = now_on or start
+    text = freeze_rewrite(info["body"], block, freeze_lines(name, heads, block["dropped"], (on, now_on) if on else None, recorded))
+    new = build_batch_branch(root, name, start, sorted(heads.items()), lease=tip, body=(h, pr, info["body"], text))
+    say(f"merge: batch {name} rebuilt on {on or base}, lanes {lane_list(heads)}"
+        + (f"; it held {len(strays)} lane head(s) its frozen set does not list, which are now off." if strays else "."))
+    return 1 if restack(root, h, branch, new, {s: s for s in strays}) else 0
 
 def batch_build(root, h, name, numbers, on, base):
     """merge --batch-build NAME PR... [--on BRANCH] [--base BRANCH]: the batch branch and its one ready pull request, or the same set again.
@@ -3693,7 +3752,7 @@ def batch_build(root, h, name, numbers, on, base):
         for n in numbers:
             if fetch_branch(root, infos[n]["branch"]) != heads[n]:
                 raise Stop(f"{infos[n]['branch']} moved while #{n} was read. Nothing was pushed. Run again.")
-        stacked_without_base(root, h, name, base, infos, start if on else None)
+        stacked_without_base(root, h, base, heads, start if on else None)
         build_batch_branch(root, name, start, sorted(heads.items()))
         try:
             pr = h.create_pr(branch, base, f"Batch {name}", "\n".join(freeze_lines(name, heads, on=(on, start) if on else None, base=None if on else start)) + "\n")
@@ -3720,16 +3779,7 @@ def batch_build(root, h, name, numbers, on, base):
     for n in numbers:
         if fetch_branch(root, infos[n]["branch"]) != heads[n]:
             raise Stop(f"{infos[n]['branch']} moved while #{n} was read. Nothing was pushed. Run again.")
-    tip = fetch_branch(root, branch)
-    now_on = fetch_branch(root, on) if on else None  # a running batch's head moves on a drop, a claim or a heal
-    rc = 0
-    if any(not holds(root, heads[n], f"origin/{branch}") for n in sorted(heads)) or (on and not holds(root, now_on, f"origin/{branch}")):
-        start, recorded = batch_start(root, block, base)
-        start = now_on or start
-        text = freeze_rewrite(info["body"], block, freeze_lines(name, heads, block["dropped"], (on, now_on) if on else None, recorded))
-        new = build_batch_branch(root, name, start, sorted(heads.items()), lease=tip, body=(h, pr, info["body"], text))
-        say(f"merge: batch {name} rebuilt on {on or base}, the same lanes.")
-        rc = 1 if restack(root, h, branch, new) else 0
+    rc = sync_batch(root, h, pr, info, block, on, base)
     if info["draft"]:
         ok, why = h.ready(pr)
         if not ok:
@@ -3750,6 +3800,12 @@ def batch_drop(root, h, name, number):
     if block["name"] != name:
         raise Stop(f"the frozen block of #{pr} names batch {block['name']}, not {name}. {FREEZE_CITE}")
     lanes = block["lanes"]
+    if number not in lanes and number in block["dropped"]:
+        # a rerun: a kill after the body write leaves the branch holding the lane the body already drops
+        say(f"merge: #{number} was dropped from batch {name} already; {branch} is checked against its frozen set.")
+        rc = sync_batch(root, h, pr, info, block, block["on"][0] if block["on"] else None, info["base"])
+        say(f"merge: batch {name} holds lanes {lane_list(lanes)}.")
+        return rc
     if number not in lanes:
         raise Stop(f"#{number} is not in batch {name}'s frozen lane set, which is {lane_list(lanes)}. {FREEZE_CITE}")
     tip = fetch_branch(root, branch)  # holds every frozen lane head and the recorded On sha, so no lane branch is read
