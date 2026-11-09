@@ -9248,6 +9248,8 @@ ENVWALK_TYPE_JAVA = os.path.join(ROOT, "envwalk-type-java")    # a sub folder wi
 ENVWALK_LOCAL_TOP = os.path.join(ROOT, "envwalk-localtop")    # a top folder with a .env.local file, and a README
 ENVWALK_LOCAL_SUB = os.path.join(ROOT, "envwalk-localsub")    # a folder with a sub/.env.local file, and a README
 ENVWALK_SECRETS = os.path.join(ROOT, "envwalk-secrets")       # a git repo whose .gitignore lists secrets/, with a file in it
+ENVWALK_PARENT = os.path.join(ROOT, "envwalk-parent")         # an env file in this folder, and a child folder to run in
+ENVWALK_PARENT_CHILD = os.path.join(ENVWALK_PARENT, "child")  # the child folder: a README, and no env file
 
 
 def build_envwalk_folders():
@@ -9268,6 +9270,7 @@ def build_envwalk_repos():
     make_repo(ENVWALK_UNIGNORED, {".gitignore": "*.log\n", ENV: "FIXTURE=1\n", "README.md": "kept\n"})
     write(os.path.join(ENVWALK_NESTED, "sub", ENV), "FIXTURE=1\n")
     write(os.path.join(ENVWALK_NESTED, "README.md"), "nested\n")
+    write(os.path.join(ENVWALK_NESTED, "app.ts"), "export {}\n")  # a .ts file the find cases name
 
 
 def build_envwalk_large():
@@ -10099,6 +10102,102 @@ for _cmd in (_THEN_CD_INLINE, _THEN_CD_OWN_LINE):
        + repr(_cmd), _cmd, "deny", "env-file", cwd=ENVWALK_HELD)
     sh("env: walk control, cd is not the first word of a then branch, folder has no env file, allowed: "
        + repr(_cmd), _cmd, "allow", cwd=ENVWALK_CLEAN)
+
+
+# ---- env walk: find names, a wrapper under a subshell, the start of a find, and the folders a body cd reaches. Each
+# deny row runs over a folder that holds an env file, and its control is the same form over a folder with no env file.
+
+def build_envwalk_parent():
+    write(os.path.join(ENVWALK_PARENT, ENV), "FIXTURE=1\n")
+    write(os.path.join(ENVWALK_PARENT_CHILD, "README.md"), "child\n")
+
+
+lazy_fixture((ENVWALK_PARENT,), build_envwalk_parent)
+
+# find names only .ts files, and no name it lists is an env file, even with a .env in a subfolder. The names xargs
+# reads are not env names, so these forms are allowed. The second form has no parentheses, so its -o names both globs.
+_FIND_TS = "find . -name '*.ts' -not -path '*/node_modules/*' | xargs grep -l K"
+_FIND_TS_OR_TSX = "find . -name '*.ts' -o -name '*.tsx' | xargs grep -l K"
+for _cmd in (_FIND_TS, _FIND_TS_OR_TSX):
+    sh("env: walk false alarm, find names only .ts files, a subfolder holds an env file, allowed: " + _cmd, _cmd,
+       "allow", cwd=ENVWALK_NESTED)
+
+# The same find with an env glob in its names does reach the env file in the subfolder, so it is refused.
+_FIND_ENV_GLOB = "find . -name '*.ts' -o -name '.env*' | xargs grep -l K"
+sh("env: walk pin, find names a .env* file in a subfolder, refused: " + _FIND_ENV_GLOB, _FIND_ENV_GLOB,
+   "deny", "env-file", cwd=ENVWALK_NESTED)
+# A .env* glob is refused by its name in any folder, so the same form over a folder with no env file is refused too.
+sh("env: walk pin, find names a .env* glob, refused in a folder with no env file: " + _FIND_ENV_GLOB, _FIND_ENV_GLOB,
+   "deny", "env-file", cwd=ENVWALK_CLEAN)
+
+# A shell string runs its text as a command, even under a wrapper or a subshell, so a string that names the env file
+# reads it. Each form is refused over the held folder and allowed over a folder with no env file.
+for _cmd in ("nohup bash -c 'cat .env'", "sudo bash -c 'cat .env'", "env X=1 bash -c 'cat .env'",
+             "( bash -c 'cat .env' )"):
+    sh("env: shell string safety hole, under a wrapper or subshell, names an env file, refused: " + _cmd, _cmd,
+       "deny", "env-file", cwd=ENVWALK_HELD)
+    sh("env: shell string control, under a wrapper or subshell, no env file, allowed: "
+       + _cmd.replace(".env", "README.md"), _cmd.replace(".env", "README.md"), "allow", cwd=ENVWALK_CLEAN)
+
+# find's start path may be quoted, and the walk must read the quotes away to name the start folder, which holds the env
+# file. The same start folder is refused unquoted, so the quoted form is refused over the held folder too.
+_FIND_QUOTED_START = 'find "." -type f | xargs grep -l K'
+sh("env: walk safety hole, find's quoted start folder holds an env file, refused: " + _FIND_QUOTED_START,
+   _FIND_QUOTED_START, "deny", "env-file", cwd=ENVWALK_HELD)
+sh("env: walk control, find's quoted start has no env file, allowed: " + _FIND_QUOTED_START, _FIND_QUOTED_START,
+   "allow", cwd=ENVWALK_CLEAN)
+# A -L before the start names the same folder, and that form is refused already.
+_FIND_L_START = "find -L . -type f | xargs grep -l K"
+sh("env: walk pin, find -L names the held start folder, refused: " + _FIND_L_START, _FIND_L_START, "deny", "env-file",
+   cwd=ENVWALK_HELD)
+sh("env: walk control, find -L, folder has no env file, allowed: " + _FIND_L_START, _FIND_L_START, "allow",
+   cwd=ENVWALK_CLEAN)
+
+# ls -a names .., the parent folder, and xargs hands it to the search, so the parent's env file is read. The parent
+# fixture holds only its env file and the child folder the search runs in.
+_LS_PARENT = "ls -a | xargs rg --hidden K"
+sh("env: walk safety hole, ls -a names .. and the parent holds an env file, refused: " + _LS_PARENT, _LS_PARENT,
+   "deny", "env-file", cwd=ENVWALK_PARENT_CHILD)
+
+# Green pins at their current verdicts. The find -name shortcut allows a glob no env name matches. A -type d find names
+# the start folder, so the walk reads it.
+_PIN_FIND_NAME = "find . -name '*.ts' | xargs grep -l K"
+sh("env: walk pin, find -name shortcut allows a glob no env name matches, allowed: " + _PIN_FIND_NAME, _PIN_FIND_NAME,
+   "allow", cwd=ENVWALK_HELD)
+_PIN_FIND_DIR = "find . -type d | xargs rg --hidden K"
+sh("env: walk pin, find -type d names the start folder, refused: " + _PIN_FIND_DIR, _PIN_FIND_DIR, "deny",
+   "env-file", cwd=ENVWALK_HELD)
+sh("env: walk control, find -type d, folder has no env file, allowed: " + _PIN_FIND_DIR, _PIN_FIND_DIR, "allow",
+   cwd=ENVWALK_CLEAN)
+
+# A cd in a branch or loop body may not run, so the search reaches the held folder when it does not. Each form is
+# refused over the held folder and allowed over a folder with no env file.
+for _label, _cmd in (
+    ("elif body cd", "if [ -d sub ]; then echo a; elif [ -d src ]; then cd src; fi; rg --hidden K"),
+    ("nested if body cd", "if [ -d sub ]; then if [ -d src ]; then cd src; fi; fi; rg --hidden K"),
+    ("while-do body cd", "while [ -d sub ]; do cd src; break; done; rg --hidden K"),
+):
+    sh("env: walk pin, " + _label + ", refused over the held folder: " + _cmd, _cmd, "deny", "env-file",
+       cwd=ENVWALK_HELD)
+    sh("env: walk control, " + _label + ", folder has no env file, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_CLEAN)
+
+# More than six conditional cds leave the walk the all-run, all-skipped and each-one-skipped combinations. Here every
+# cd goes to src, so only the all-skipped combination reaches the held folder, and the walk does try it.
+_SEVEN_CDS = "; ".join("test -f a%d && cd src" % number for number in range(1, 8)) + "; rg --hidden K"
+sh("env: walk pin, seven conditional cds, all-skipped reaches the held folder, refused: " + _SEVEN_CDS, _SEVEN_CDS,
+   "deny", "env-file", cwd=ENVWALK_HELD)
+sh("env: walk control, seven conditional cds, folder has no env file, allowed: " + _SEVEN_CDS, _SEVEN_CDS, "allow",
+   cwd=ENVWALK_CLEAN)
+
+# The first cd runs into the held folder and the six after it are skipped, so the search reaches the held folder by a
+# combination the walk does not list. The walk refuses it, and the control is the same form over a folder with no env
+# file.
+_SEVEN_CDS_FIRST_RUNS = ("cd src; test -f a1 && cd ..; "
+                         + "; ".join("test -f a%d && cd src" % number for number in range(2, 8)) + "; rg --hidden K")
+sh("env: walk pin, seven conditional cds, first runs and six skipped reach the held folder, refused: "
+   + _SEVEN_CDS_FIRST_RUNS, _SEVEN_CDS_FIRST_RUNS, "deny", "env-file", cwd=ENVWALK_HELD)
+sh("env: walk control, seven conditional cds, first runs and six skipped, folder has no env file, allowed: "
+   + _SEVEN_CDS_FIRST_RUNS, _SEVEN_CDS_FIRST_RUNS, "allow", cwd=ENVWALK_CLEAN)
 
 
 # =========================================================================== git env set
