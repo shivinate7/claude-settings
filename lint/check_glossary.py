@@ -5,19 +5,24 @@ GLOSSARY.md holds one table under the `## Terms` heading: term, meaning, home, n
 
 - Each row's home is an existing file, or `rule:<id>` that names a rule marker in RULE_FILES, and
   each tagged "not" name uses the one tag, `(this sense)`.
-- Each file the change adds (against origin/main, renames counted as adds) has no path segment
+- Each file the change adds (renames counted as adds) has no path segment
   that holds a name from a row's "not" cell. A name matches whole lowercase words inside one
   segment. Words split on any character that is not a letter or a digit, and the segment is read
   both with and without a split at each lower-to-upper case step. The last word may take a
   plural `s` or `es`. `handover` matches `hooks/handover_note.py`, `docs/handovers.md` and
   `HandoverNote.py`, not `docs/handoverly.md`.
 
-- Each line the change adds (against origin/main) has no "not" name in a name of code, read by the
+- Each line the change adds has no "not" name in a name of code, read by the
   same word rule as a path segment:
   - an identifier: a Python name, a bare word of a JS, shell, PowerShell or YAML file, or a JSON key;
   - a rule anchor: `rule:<id>`, in a comment too;
   - a record slug: a backticked id of three hyphen words or more in a Markdown file;
   - a hook message: a string with a space in a `.py` file under `hooks/`, a test file apart.
+
+The change is the tree as it will be pushed: the diff from the merge base with origin/main to the work
+tree (committed, staged and unstaged changes), and each untracked, not ignored file in a top-level
+folder that already holds tracked files, added whole. A root file and a new top-level folder are not
+part of the change.
 
 Comments, docstrings and every other string are prose, and a reviewer reads prose. A sentence that
 names a "not" word passes. A "not" word inside its own term, plural too (`hole` in `safety_holes`),
@@ -522,20 +527,31 @@ def code_problems(rel, text, table, lines=None, spans=()):
     return out
 
 
-def git_diff(*opts):
-    # Fixed prefixes and no external diff, so diff.noprefix, diff.mnemonicPrefix or a diff tool
-    # in the user's config cannot change the `+++ b/<path>` headers that added_lines reads.
-    cmd = ["git", "diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", *opts,
-           "origin/main...HEAD"]
-    r = _nowindow.run(cmd, cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace")
+def git(*args):
+    r = _nowindow.run(["git", *args], cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace")
     if r.returncode:
-        print("check_glossary: UNKNOWN, git diff failed: " + r.stderr.strip())
+        print("check_glossary: UNKNOWN, git %s failed: %s" % (args[0], r.stderr.strip()))
         sys.exit(1 if os.environ.get("CI") else 0)  # CI exit code is a verdict: unknown is red there
     return r.stdout
 
 
+def git_diff(*opts):
+    # Fixed prefixes and no external diff, so diff.noprefix, diff.mnemonicPrefix or a diff tool
+    # in the user's config cannot change the `+++ b/<path>` headers that added_lines reads.
+    # One commit and no second end: the diff runs from the merge base to the work tree.
+    base = git("merge-base", "origin/main", "HEAD").strip()
+    return git("diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", *opts, base)
+
+
+def untracked():
+    """The untracked, not ignored files in a top-level folder that already holds tracked files."""
+    tracked = {p.split("/")[0] for p in git("ls-files", "-z").split("\0") if "/" in p}
+    found = git("ls-files", "-z", "--others", "--exclude-standard").split("\0")
+    return [p for p in found if "/" in p and p.split("/")[0] in tracked]
+
+
 def added():
-    return git_diff("--name-only", "--no-renames", "--diff-filter=A").split("\n")
+    return git_diff("--name-only", "--no-renames", "--diff-filter=A").split("\n") + untracked()
 
 
 def diff_path(header):
@@ -553,7 +569,7 @@ def diff_path(header):
 
 def added_lines():
     """({path: set of added line numbers}, unknowns) for each file the change adds or edits, renames
-    followed. A `+++ ` header that yields no path is an unknown, never a skip.
+    followed, and each untracked file whole. A `+++ ` header that yields no path is an unknown, never a skip.
 
     A `+++ ` row is a header only between `diff --git` and the first `@@`: past that, it is an
     added line that starts with `++`."""
@@ -573,6 +589,8 @@ def added_lines():
             if m and path:
                 start, count = int(m.group(1)), int(m.group(2) or 1)
                 out[path].update(range(start, start + count))
+    for path in untracked():  # a new file is added whole
+        out[path] = set(range(1, (read(path) or "").count("\n") + 2))
     return out, unknown
 
 
