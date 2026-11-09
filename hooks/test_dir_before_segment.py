@@ -139,7 +139,7 @@ case("a variable built from an unknown one is unknown: None",
 
 # --- A variable is read only from a plain NAME=value that runs in this shell. The cases that expect
 # None fail a walk that takes a value no shell at that position holds. The literal
-# apostrophe form, the comment cases and the controls pass on a correct walk and must keep passing.
+# apostrophe form, the comment cases and the controls pass on that walk too, and must keep passing.
 # A walk that reads no variable passes the None cases and fails the controls.
 case("a prefix assignment, D=<dir> true, is not the shell's variable: cd \"$D\" reads None",
      'D=%s true; cd "$D" && git status' % TARGET, "git status", None)
@@ -193,8 +193,8 @@ case("control: true && R=<B>, then cd \"$R\": either answer, the assignment may 
 
 # --- A cd after an `&&` whose left side may fail is not known to run: the shell may stay where it was, so the
 # folder the next command runs in is None. A walk that reads the cd's variable as run fails these rows; the
-# controls pass either way. The literal twin (`ls <missing> &&`, a newline, `cd <A>`) reads A in every walk,
-# so that is a known gap, not a failure here: the right answer is None, so the row takes A or None
+# controls pass either way. The literal twin (`ls <missing> &&`, a newline, `cd <A>`) reads A in the current walk.
+# That is a known gap, not a failure here: the right answer is None, so the row takes A or None
 # and does not pin A as the only answer.
 case("R=<A>; ls <missing> && cd \"$R\": the cd may not run, so the next command reads None, not A",
      'R=%s; ls %s && cd "$R"; git status' % (TARGET, MISSING), "git status", None)
