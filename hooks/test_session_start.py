@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -815,9 +816,9 @@ class GitFixtureMixin:
         vcs(self.primary, "update-ref", "refs/remotes/origin/trunk", sha)
         vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 
-    def run_checked(self, session_cwd=None, path_dir=None):
+    def run_checked(self, session_cwd=None, path_dir=None, fetch_timeout="30"):
         """The hook's lines, after a control: the hook ran and printed its checkout line."""
-        lines = self.run_hook(session_cwd=session_cwd, path_dir=path_dir)
+        lines = self.run_hook(session_cwd=session_cwd, path_dir=path_dir, fetch_timeout=fetch_timeout)
         self.assertTrue(any(line.startswith("checkout ") for line in lines),
                         "the hook printed no checkout line: %r" % lines)
         return lines
@@ -1084,6 +1085,7 @@ REFRESH_FAILED = re.compile(r"^checkout .+: the origin fetch did not run, so ori
 UNREFRESHED = re.compile(r"^checkout .+: CLAUDE\.md differs from origin/main at ([0-9a-f]{7,40}); read the standing "
                          r"grants with git show origin/main:CLAUDE\.md; origin/main is unrefreshed$")
 LOCAL_MAIN = re.compile(r"^checkout .+: local main is (\d+) commits? behind origin/main(?: and (\d+) commits? ahead)?$")
+DEFAULT_BEHIND = re.compile(r"^checkout .+: main is (\d+) commits behind origin/main; pull before you read it$")
 
 
 class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTests):
@@ -1104,15 +1106,17 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.commit("stale grants")
         vcs(self.primary, "push", "-q", "origin", "main")
 
-    def advance_origin_main(self):
-        """Another clone pushes one commit with fresh grants to origin's main. The primary checkout does not fetch it.
-        Returns the new tip's sha."""
+    def advance_origin_main(self, commits=1):
+        """Another clone pushes `commits` commits to origin's main; the first carries fresh grants. The primary checkout
+        does not fetch them. Returns the new tip's sha."""
         other = os.path.join(self.root, "other")
         vcs(self.root, "clone", "-q", self.origin_repo, other)
         self.put(os.path.join(other, "CLAUDE.md"), GRANT_FRESH)
         self.put(os.path.join(other, ".claude", "CLAUDE.md"), GRANT_STALE_DOT)
         vcs(other, "add", "-f", "--", "CLAUDE.md", ".claude/CLAUDE.md")
         vcs(other, "commit", "-q", "-m", "fresh grants at origin")
+        for number in range(2, commits + 1):
+            vcs(other, "commit", "-q", "--allow-empty", "-m", "origin commit %d" % number)
         vcs(other, "push", "-q", "origin", "HEAD:main")
         return vcs(other, "rev-parse", "HEAD").stdout.strip()
 
@@ -1262,6 +1266,75 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         lines, _ = self.run_logged()
         self.assertEqual([line for line in lines if LOCAL_MAIN.match(line)], [],
                          "a local main line printed with no local main: %r" % lines)
+
+    def test_a_default_branch_behind_origin_prints_the_pull_line_and_no_local_main_line(self):
+        self.advance_origin_main(commits=2)
+        vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        main_before = self.resolve("refs/heads/main")
+        self.assertEqual(vcs(self.primary, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip(), "main",
+                         "scope: the primary checkout is not on main")
+        self.assertEqual(self.resolve("origin/HEAD"), main_before, "scope: origin/HEAD does not name the stale origin/main")
+        lines = self.run_checked()
+        behind = [found.group(1) for found in map(DEFAULT_BEHIND.match, lines) if found]
+        self.assertEqual(behind, ["2"], "want one pull line saying main is 2 commits behind origin/main, got %r" % lines)
+        self.assertEqual([line for line in lines if LOCAL_MAIN.match(line)], [],
+                         "a local main line printed beside the pull line for the same branch: %r" % lines)
+        self.assertEqual(self.resolve("refs/heads/main"), main_before, "the session start moved local main")
+
+    # The watchdog: when the fetch returns first, the hook's TERM must end the watchdog's sleep.
+
+    def make_fetch_stall_shim(self, witness):
+        """A folder whose `git fetch` waits, up to 10 seconds, until a `sleep 7` process runs, writes that process's pid
+        to `witness`, and returns 0 at once. The fetch returns first, so the hook's TERM is what must end the sleep.
+        Every other git call runs the real git."""
+        real = shutil.which("git")
+        folder = os.path.join(self.root, "stall-shim")
+        os.makedirs(folder)
+        script = os.path.join(folder, "git")
+        lines = [
+            "#!/bin/sh",
+            'if [ "$1" = fetch ]; then',
+            "  i=0",
+            "  while [ $i -lt 200 ]; do",
+            "    found=$(ps -eo pid=,args= | awk '$2 == \"sleep\" && $3 == \"7\" && NF == 3 { print $1 }')",
+            '    if [ -n "$found" ]; then printf \'%s\\n\' "$found" > "' + witness + '"; exit 0; fi',
+            "    i=$((i + 1))",
+            "    sleep 0.05",
+            "  done",
+            "  exit 0",
+            "fi",
+            'exec "' + real + '" "$@"',
+        ]
+        with open(script, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+        os.chmod(script, 0o755)
+        return folder
+
+    @staticmethod
+    def sleep_seven_pids():
+        """The pids of the processes whose command line is exactly `sleep 7`, as ps lists them now."""
+        answer = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True, text=True, timeout=60)
+        return [fields[0] for fields in (line.split() for line in answer.stdout.splitlines())
+                if fields[1:] == ["sleep", "7"]]
+
+    def test_the_watchdog_sleep_is_gone_when_the_fetch_returns_first(self):
+        witness = os.path.join(self.root, "sleep-seen")
+        folder = self.make_fetch_stall_shim(witness)
+        self.run_checked(path_dir=folder, fetch_timeout="7")
+        self.assertTrue(os.path.exists(witness),
+                        "scope: the watchdog's sleep 7 never ran while the fetch held, so the case proves nothing")
+        with open(witness, encoding="utf-8") as handle:
+            pids = handle.read().split()
+        self.assertTrue(pids, "scope: the witness names no pid")
+        self.addCleanup(self.stop_sleeps, pids)
+        left = sorted(set(pids) & set(self.sleep_seven_pids()))
+        self.assertEqual(left, [], "the watchdog's sleep 7 is still running after the hook returned: pid %r" % left)
+
+    @staticmethod
+    def stop_sleeps(pids):
+        """Ends any of the given pids that still run `sleep 7`, so a red run leaves no sleep behind."""
+        for pid in sorted(set(pids) & set(SessionStartFetchTests.sleep_seven_pids())):
+            os.kill(int(pid), signal.SIGTERM)
 
     # Prune: only remote-tracking refs go.
 
