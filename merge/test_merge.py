@@ -12664,9 +12664,12 @@ class ReviewEnv(Env):
     """The review-record cases' one home for running merge: a run that returns (rc, stdout, stderr) and reads a usage error's SystemExit as
     its code, and the check that a usage error came from a parser that knows the flag. No test lives here."""
 
-    def flags(self, *extra):
-        """The review flags, with --head set to the live head of the feature branch, then `extra`."""
-        return (*REVIEW_FLAGS, "--head", self.head(), *extra)
+    def flags(self, *extra, named=False):
+        """The review flags, with --head set to the live head of the feature branch, then `extra`. With `named`, the round names that head too:
+        a plain write with no earlier record must name a head on every round. The round is the last of REVIEW_FLAGS."""
+        if not named:
+            return (*REVIEW_FLAGS, "--head", self.head(), *extra)
+        return (*REVIEW_FLAGS[:-1], f"1:reviewer:sonnet:PASS:{self.head()}", "--head", self.head(), *extra)
 
     def run_args(self, *argv, host=None):
         out, err = io.StringIO(), io.StringIO()
@@ -12747,20 +12750,20 @@ class ReviewArgs(ReviewEnv):
 
     def test_review_record_needs_a_pr_number(self):
         self.assert_usage_error("--review-record", *self.flags())
-        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(named=True), host=self.record_host(head=self.head()))
         self.assertEqual(rc, 0, out + err)
 
     def test_review_record_takes_no_confirm_or_unlock(self):
         for extra in (("--confirm",), ("--unlock",)):
             with self.subTest(extra=extra):
                 self.assert_usage_error("7", "--review-record", *self.flags(), *extra)
-        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(named=True), host=self.record_host(head=self.head()))
         self.assertEqual(rc, 0, out + err)
 
     def test_review_record_needs_a_head(self):
         _out, err = self.assert_usage_error("7", "--review-record", *REVIEW_FLAGS)
         self.assertIn("needs --head", err)
-        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(named=True), host=self.record_host(head=self.head()))
         self.assertEqual(rc, 0, out + err)
 
     def test_head_must_be_a_full_lowercase_sha(self):
@@ -12768,7 +12771,7 @@ class ReviewArgs(ReviewEnv):
             with self.subTest(head=head):
                 _out, err = self.assert_usage_error("7", "--review-record", *REVIEW_FLAGS, "--head", head)
                 self.assertIn("40-hex", err)
-        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(named=True), host=self.record_host(head=self.head()))
         self.assertEqual(rc, 0, out + err)
 
     def test_head_needs_review_record(self):
@@ -12798,7 +12801,7 @@ class ReviewRecordWrite(ReviewEnv):
 
     def test_the_record_is_printed_and_nothing_is_pushed(self):
         before, locked = self.refs(), self.lock_ref()
-        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(named=True), host=self.record_host(head=self.head()))
         self.assertEqual(rc, 0, out + err)
         body = posted_body(self, out)
         rec = parse_text(self, body)
@@ -12808,8 +12811,8 @@ class ReviewRecordWrite(ReviewEnv):
         self.assertEqual(self.lock_ref(), locked, "the write took the lock")
 
     def test_the_printed_head_is_the_reviewed_head_when_the_live_head_matches(self):
-        self.host.head_override = "f" * 40
-        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS, "--head", "f" * 40)
+        rc, out, err = self.run_args("7", "--review-record", "--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:PASS:" + "f" * 40, "--head", "f" * 40,
+                                     host=self.record_host(head="f" * 40))
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["head"], "f" * 40)
 
@@ -12817,14 +12820,14 @@ class ReviewRecordWrite(ReviewEnv):
         # The rounds were read on the old head. A push moves the live head, so the old rounds never print as the current record.
         old = self.head()
         self.host.head_override = "f" * 40
-        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS, "--head", old)
+        rc, out, err = self.run_args("7", "--review-record", "--kind", "normal", "--guard", "no", "--round", f"1:reviewer:sonnet:PASS:{old}", "--head", old)
         self.assertEqual(rc, 1, out + err)
         self.assertNotIn(REVIEW_MARKER, out)
         self.assertIn("f" * 9, err)
         self.assertIn(old[:9], err)
 
     def test_the_net_value_is_the_one_given(self):
-        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--net-value", "negative")
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(named=True), "--net-value", "negative", host=self.record_host(head=self.head()))
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["net"], "negative")
 
@@ -12849,11 +12852,13 @@ class ReviewRecordAncestorHead(ReviewEnv):
     BASE_BRANCH = "main"  # the PR's base branch, as batch_pull and PullsHost name it
     FAIL_ONE = ("1:reviewer:sonnet:FAIL",)
     PASS_ONE = ("1:reviewer:sonnet:PASS",)
+    PRIOR = (review_comment(1, 7, record_text(head=EARLIER, rounds=("Round 1: reviewer, sonnet, PASS",))),)  # an earlier record of this pull request, so a plain write is not its first; a PASS round 1 holds no FAIL and reads no compare
 
-    def review_at(self, head, rounds, status="ahead", comments=(), extra=(), kind="normal", base_status="ahead", base=BASE_BRANCH, **reads):
+    def review_at(self, head, rounds, status="ahead", comments=None, extra=(), kind="normal", base_status="ahead", base=BASE_BRANCH, **reads):
         """The record for --head `head` with `rounds` (N:ROLE:MODEL:VERDICT each), `extra` after them. The compare of `head` and the live head
-        answers `status`, and the compare of the pull request's base branch `base` and `head` answers `base_status`. `reads` go to record_host,
-        a failed compare read for one. -> (rc, out, err, host)."""
+        answers `status`, and the compare of the pull request's base branch `base` and `head` answers `base_status`. `comments` default to PRIOR.
+        `reads` go to record_host, a failed compare read for one. -> (rc, out, err, host)."""
+        comments = self.PRIOR if comments is None else comments
         host = self.record_host(*comments, base=base, diffs={(head, self.LIVE): compare_of(status), (base, head): compare_of(base_status)}, **reads)
         argv = ["7", "--review-record", "--kind", kind, "--guard", "no", "--head", head]
         for rnd in rounds:
@@ -13028,7 +13033,7 @@ class ReviewRecordAncestorHead(ReviewEnv):
             self.assert_head_refused(rc, out, err, "a FAIL record on a diverged head")
             self.assertNotIn((self.BASE_BRANCH, self.DIVERGED), host.compare_reads, "a diverged head read the base compare")
         with self.subTest(path="live head"):
-            host = self.record_host(diffs={(self.BASE_BRANCH, self.LIVE): compare_of("ahead")})
+            host = self.record_host(*self.PRIOR, diffs={(self.BASE_BRANCH, self.LIVE): compare_of("ahead")})
             rc, out, err = self.run_args("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.LIVE,
                                          "--round", "1:reviewer:sonnet:FAIL", host=host)
             self.assertEqual(rc, 0, "a FAIL record on the live head was refused:\n" + out + err)
@@ -13172,7 +13177,7 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         self.assertEqual(rc, 0, "a record whose lower rounds earlier records hold was refused:\n" + out + err)
 
     def test_a_first_record_with_round_one_only_needs_no_earlier_record(self):
-        rc, out, err = self.post(rounds=(self.SHAPE[0],))
+        rc, out, err = self.post(rounds=(f"1:reviewer:haiku:FAIL:{self.LIVE}",))
         self.assertEqual(rc, 0, "a first record with round 1 only was refused:\n" + out + err)
 
     def test_the_top_rounds_own_lines_need_no_earlier_record(self):
@@ -13236,14 +13241,14 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
 
     def test_a_first_round_one_pass_with_no_earlier_record_is_written(self):
         # control: no earlier record on this pull request, so the round 1 PASS is written with no record before it
-        rc, out, err = self.post(rounds=("1:reviewer:sonnet:PASS",))
+        rc, out, err = self.post(rounds=(f"1:reviewer:sonnet:PASS:{self.LIVE}",))
         self.assertEqual(rc, 0, "control: a first round 1 PASS record was refused:\n" + out + err)
 
     def test_an_earlier_record_at_this_head_that_does_not_parse_refuses_a_pass_top_round(self):
         # fail closed: the unparsable record holds this head's round 1 FAIL, and dropping it must not let the round 1 PASS through
         bad = self.unparsable(REVIEW_HEAD, (self.FIRST,))
         self.assertIsNone(review_fn(self, "parse_review")(bad), "scope: the earlier record parses, so the case tests nothing")
-        rc, out, err = self.post(review_comment(1, 7, bad), rounds=("1:reviewer:haiku:PASS",))
+        rc, out, err = self.post(review_comment(1, 7, bad), rounds=(f"1:reviewer:haiku:PASS:{self.LIVE}",))
         self.assert_refused_without_record(rc, out, err, "a round 1 PASS after an earlier record at this head that does not parse")
         self.assertRegex(err, r"earlier (?:review )?record[^\n]*does not parse", "the refusal does not say that an earlier record at this head does not parse:\n" + err)
 
@@ -13251,7 +13256,7 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         # control: the record is at HEAD_A, so it is no earlier record of this head and the same round 1 PASS is written
         bad = self.unparsable(self.HEAD_A, (self.FIRST,))
         self.assertIsNone(review_fn(self, "parse_review")(bad), "scope: the earlier record parses, so the control tests nothing")
-        rc, out, err = self.post(review_comment(1, 7, bad), rounds=("1:reviewer:haiku:PASS",))
+        rc, out, err = self.post(review_comment(1, 7, bad), rounds=(f"1:reviewer:haiku:PASS:{self.LIVE}",))
         self.assertEqual(rc, 0, "control: a round 1 PASS was refused because of an unparsable record at another head:\n" + out + err)
         self.assertNotIn("does not parse", err, "control: the refusal names a parse problem at another head:\n" + err)
 
@@ -13360,8 +13365,10 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         self.assertEqual(rc, 0, "control: a PASS top round on another head was refused because of an unparsable earlier body:\n" + out + err)
 
     def test_round_heads_a_record_that_names_no_head_is_written_unchanged(self):
-        # E: a record with no named head writes its round line with no head field, as before
-        rc, out, err = self.write_at(self.record_host(), ("1:reviewer:sonnet:PASS",))
+        # E: a record with no named head writes its round line with no head field, as before. An earlier old-form record of this pull request
+        # makes the plain write not its first, so the round line is written with no head field
+        earlier = review_comment(1, 7, record_text(head=self.HEAD_A, rounds=(self.FIRST,)))
+        rc, out, err = self.write_at(self.record_host(earlier), ("1:reviewer:sonnet:PASS",))
         self.assertEqual(rc, 0, "a plain record was refused:\n" + out + err)
         self.assertIn("Round 1: reviewer, sonnet, PASS", posted_body(self, out).splitlines(), "the plain round line changed")
 
@@ -13450,15 +13457,15 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         for verdict in ("FAIL", "PARTIAL"):
             with self.subTest(control=verdict):
                 bad = self.unparsable(REVIEW_HEAD, (f"Round 1: reviewer, haiku, {verdict}",))
-                rc, out, err = self.post(review_comment(1, 7, bad), rounds=("1:reviewer:haiku:PASS",))
+                rc, out, err = self.post(review_comment(1, 7, bad), rounds=(f"1:reviewer:haiku:PASS:{self.LIVE}",))
                 self.assert_refused_without_record(rc, out, err, f"an unparsable record at this head holding a {verdict} line")
         # the subject: an unparsable record at this head with a PASS line, or with no round line, does not refuse the old-form PASS on it
         for label, rounds in (("a PASS line only", ("Round 1: reviewer, haiku, PASS",)), ("no round line", ())):
             with self.subTest(label=label):
                 bad = self.unparsable(REVIEW_HEAD, rounds)
                 self.assertIsNone(review_fn(self, "parse_review")(bad), "scope: the earlier record parses, so the case tests nothing")
-                rc, out, err = self.post(review_comment(1, 7, bad), rounds=("1:reviewer:haiku:PASS",))
-                self.assertEqual(rc, 0, f"an unparsable record at this head with {label} refused the old-form PASS on it:\n" + out + err)
+                rc, out, err = self.post(review_comment(1, 7, bad), rounds=(f"1:reviewer:haiku:PASS:{self.LIVE}",))
+                self.assertEqual(rc, 0, f"an unparsable record at this head with {label} refused the PASS round on it:\n" + out + err)
 
     def test_round_heads_r1_an_unparsable_old_form_record_with_a_failed_round_refuses_a_new_form_pass_naming_its_head(self):
         # the body's Head is an own commit and its FAIL line names no sha, so that FAIL read the body's Head: a new-form PASS on that head is refused
@@ -13618,7 +13625,7 @@ class ReviewFixFlag(ReviewEnv):
 
     def test_without_the_flag_the_record_prints_no_fix_line(self):
         # control: the same record without --fix-check prints no fix line
-        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(named=True), host=self.record_host(head=self.head()))
         self.assertEqual(rc, 0, out + err)
         self.assertFalse([l for l in posted_body(self, out).splitlines() if l.startswith("Fix check")])
 
@@ -14604,7 +14611,7 @@ class ReviewFixBaseRecord(ReviewEnv):
     def test_the_flag_goes_only_with_fix_check_and_review_record(self):
         host = self.record_host(self.source(), head=REVIEW_HEAD)
         url = self.link()
-        plain = ["7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:PASS"]
+        plain = ["7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no", "--round", f"1:reviewer:sonnet:PASS:{REVIEW_HEAD}"]
         rc, out, err = self.run_args(*plain, host=host)  # control, green on the old code: the record without the flag is written
         self.assertEqual(rc, 0, out + err)
         for label, argv in (("no --fix-check", [*plain, "--fix-base-record", url]),
