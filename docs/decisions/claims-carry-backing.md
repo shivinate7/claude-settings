@@ -14,7 +14,7 @@ Code spans, 2026-11-06 12:28 CST, process-only: a code span used as a claim's su
 
 Part (v), the owner hand-off check. Coordinator agreed 2026-11-06 12:00 and 12:21 CST, process-only.
 
-- (a) At Stop, report_guard (the Stop check in `lint/report_guard.py`) refuses an owner hand-off whose "Why yours" line gives a capability reason, unless the line carries a cite that the rulings below allow (read lint/report_guard.py:1581-1591).
+- (a) At Stop, report_guard (the Stop check in `lint/report_guard.py`, function `hand_off_problem`) refuses an owner hand-off whose "Why yours" line gives a capability reason, unless the line carries a cite that the rulings below allow. `why_yours_verdict` judges each line (read lint/report_guard.py:1580-1605; read lint/report_guard.py:1557-1577).
 - (b) `hooks/reply_judge.py` (the reply judge) judges the hand-off's cite against the cited route row and the act's alternates. When the cited id has no row on this surface, it reads the act from the other surface's row and carries neither that row nor its alternates (read hooks/reply_judge.py:146-152; read hooks/reply_judge.py:174-176).
 
 Lane ruling, 2026-11-06 12:34 CST, process-only: layer (a) checks only "Why yours" lines. A route cite passes only when the row's outcome is refused or asks. A row whose outcome is works refuses the cite. An unknown outcome reads UNKNOWN.
@@ -120,7 +120,7 @@ No daemon and no timer.
 Built:
 
 - The route rows file, `hooks/route_rows.json`, and its one path reader, `rows_path()` (read hooks/route_match.py:40-42).
-- The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read hooks/refusal_note.py:43) and the Stop read (read lint/report_guard.py:1416-1434).
+- The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read hooks/refusal_note.py:43) and the Stop read, `refusal_route_flags` in `lint/report_guard.py` (read lint/report_guard.py:1391-1412; read lint/report_guard.py:2825), and `success_route_flags`, which flags a refused route row that a call of the turn succeeded in (read lint/report_guard.py:1415-1436; called read lint/report_guard.py:2878).
 - Part (vi), `cannot_problem`, run at Stop (read `cannot_problem` in lint/report_guard.py; its call is `cannot_problem(ack_turn, text, cannot_refused)` in lint/report_guard.py).
 - Part (v) layer (a), `hand_off_problem`, run at Stop (read `hand_off_problem` in lint/report_guard.py; its call is `hand_off_problem(hook, reply)` in lint/report_guard.py).
 - Part (v) on the waiting page: guard rule `task-why-cited` refuses a task's Why yours line that gives a capability reason with no route-row or dated measured cite (`why_cited_hit` in hooks/question_form.py; the verdict is `why_yours_verdict` in lint/report_guard.py).

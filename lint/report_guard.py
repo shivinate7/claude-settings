@@ -2142,8 +2142,8 @@ def _script_tries(tokens):
 def _gh_target(verb, args, branch=""):
     """The target of a `gh pr <verb>` call. A create names no PR, so its target is its --head branch, else `branch` (the
     branch the same command checked out). Any other verb names its PR by number or URL wherever it sits among the flags,
-    else by its first plain argument; a number is qualified by its --repo and a URL by its own repo, so a PR of another
-    repo is another target, and a URL matches a number only when --repo names the URL's repo. A call that names no
+    else by its first plain argument; a number is qualified by its --repo, so a PR of another repo is another target. A
+    URL names its own repo, so it matches a number only when --repo names the URL's repo. A call that names no
     target is keyed by its own arguments, tagged so they match no named target: an identical retry is the same call, and
     a call with other arguments is not. A call with no arguments has the empty target ''."""
     flags = {"--head": "head", "-H": "head", "--repo": "repo", "-R": "repo"}
@@ -2162,8 +2162,9 @@ def _gh_target(verb, args, branch=""):
     for token in plain:
         if re.fullmatch(r"#?\d+", token) or "/pull/" in token:
             url = re.search(r"([^/]+/[^/]+)/pull/(\d+)", token)
-            repo = url.group(1) if url else named.get("repo", "")  # a PR's URL names its repo, as --repo does
-            return (repo + "#" if repo else "") + (url.group(2) if url else token.lstrip("#"))
+            if url:  # a PR's URL names its repo, as --repo does
+                return url.group(1) + "#" + url.group(2)
+            return (named["repo"] + "#" if named.get("repo") and "/pull/" not in token else "") + token.lstrip("#")
     return (named["repo"] + "#" if named.get("repo") else "") + plain[0] if plain else own
 
 
@@ -2285,7 +2286,8 @@ def failed_tries(records, refused=(), recovered=None):
             elif not _is_relay(use):
                 for act, key in found:
                     if not key[1] and key[0].startswith("gh pr ") and key[0][6:] in CANNOT_GH_PR_ACTS:
-                        continue  # an act verb of gh pr with no arguments has no identity (empty key): it cancels nothing
+                        # CANNOT_GH_PR_ACTS holds every act verb: each one with no arguments has the empty key
+                        continue  # a bare `gh pr merge` or `gh pr create` names no PR: it cancels nothing
                     if key in tries.get(act, ()) and recovered is not None:
                         recovered.add(act)
                     tries.get(act, set()).discard(key)
