@@ -1,6 +1,6 @@
 {
   "design": {
-    "asOf": "Measured Nov 8: claude-settings e2703c61, banchi 78398f4, q_max 121bee8, home-app 580b018 (home merged in)",
+    "asOf": "Measured Nov 9: claude-settings 81a720c, banchi 78398f4, q_max 32d4373, home-app 60a5b74 (home merged in)",
     "foot": "banchi's 88 design checks are from the Oct 17 audit.",
     "metrics": [
       {
@@ -29,13 +29,13 @@
     ]
   },
   "later": {
-    "asOf": "Measured Nov 8 at claude-settings e2703c61",
+    "asOf": "Measured Nov 9 at claude-settings 81a720c",
     "foot": "Later steps start once the core is steady.",
     "metrics": [
       {
         "label": "Agents defined",
         "rule": "agents/ in claude-settings. An agent pruner, gated on evals (l4)",
-        "value": 9
+        "value": 10
       },
       {
         "label": "Skills in claude-settings",
@@ -55,7 +55,7 @@
     ]
   },
   "organize": {
-    "asOf": "Measured Nov 8: claude-settings e2703c61, banchi 78398f4, q_max 121bee8, home-app 580b018 (home merged in)",
+    "asOf": "Measured Nov 9: claude-settings 81a720c, banchi 78398f4, q_max 32d4373, home-app 60a5b74 (home merged in)",
     "foot": "All four repos measured (home merged into home-app).",
     "metrics": [
       {
@@ -90,9 +90,10 @@
           264,
           281,
           456,
-          1360
+          1360,
+          2017
         ],
-        "value": 1360
+        "value": 2017
       },
       {
         "label": "Repos with a living roadmap page",
@@ -103,7 +104,7 @@
     ]
   },
   "rollout": {
-    "asOf": "Measured Nov 8: q_max 121bee8, home-app 580b018",
+    "asOf": "Measured Nov 9: q_max 32d4373, home-app 60a5b74",
     "foot": "Counting method is in each tile, so later counts compare like with like.",
     "metrics": [
       {
@@ -122,13 +123,13 @@
         "label": "home-app padding or spacing literals",
         "rule": "Views.swift (2,701 lines, Oct 25, 65315da): .padding(...) or spacing: calls with a number, counted per match. The Oct 17 audit counted about 95 another way (r3)",
         "target": "0",
-        "value": 188
+        "value": 194
       },
       {
         "label": "home-app web border radii",
         "rule": "Distinct border-radius values in web CSS, HTML and JS. The Oct 17 audit counted 12, likely CSS only (r3)",
         "target": "a few tokens",
-        "value": 54
+        "value": 58
       }
     ]
   }
