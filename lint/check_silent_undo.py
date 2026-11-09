@@ -281,9 +281,6 @@ def rewritten(line, hs, base=(), modified=False):
     return False
 
 
-OWN_LOOKUPS = 25  # per file: lost lines checked for a branch-only adder in one `git log -p` read; the rest count as lost
-
-
 def changed(patch):
     """The normalized added and removed lines of a patch. Headers are skipped by state, never by prefix:
     a line is content only after the first `@@` of its file section, so `++i;` and `-- note` count."""
@@ -432,7 +429,7 @@ def lost_in_parent(cwd, m, p, bases, refs, blobs):
                 if not rewritten(l, hs, in_b, mod):
                     lost.append(l)
         if refs and lost:
-            own = branch_only_lines(cwd, p, bases, path, lost[:OWN_LOOKUPS], refs)  # the rest count as lost, unread
+            own = branch_only_lines(cwd, p, bases, path, lost, refs)
             lost = [l for l in lost if l not in own]
         if lost:
             found.append((path, p, lost))
