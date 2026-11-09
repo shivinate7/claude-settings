@@ -460,7 +460,7 @@ def _split_jobs(segments, ends):
     for at, segment in enumerate(segments):
         end = ends[at] if at < len(ends) else ""
         if cut_ends[-1:] == [";"] and segment.lstrip().startswith("&"):
-            rest = segment.lstrip()[1:]
+            rest = type(segment)(segment.lstrip()[1:])
             cut.append("&")
             if not rest.strip():
                 cut_ends.append(end)
