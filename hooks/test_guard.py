@@ -10384,6 +10384,16 @@ sh("env: walk pin, find names ./sub/.env, grep's ./sub/* include picks it on the
 sh("env: walk pin, find names ./sub/.env, grep's ./sub/* exclude skips it, allowed: "
    + _FIND_GREP_EXCLUDE_DOT_SUB, _FIND_GREP_EXCLUDE_DOT_SUB, "allow", cwd=ENVWALK_NESTED)
 
+# A find that names the env file by its literal word is refused whatever grep's globs say (`env_reference`). A
+# backslash before the dot is read as the dot by the shell, so `sub/\.env` starts find at sub/.env with no literal env
+# word, and grep's named file reaches the file branch.
+_FIND_ESCAPED_INCLUDE = "find sub/\\" + ENV + " -type f | xargs grep --include='sub/*' K"
+_FIND_ESCAPED_EXCLUDE = "find sub/\\" + ENV + " -type f | xargs grep --exclude='sub/*' K"
+sh("env: walk pin, find names sub/.env by an escaped dot, grep's sub/* include picks it by a tail after /, refused: "
+   + _FIND_ESCAPED_INCLUDE, _FIND_ESCAPED_INCLUDE, "deny", "env-file", cwd=ENVWALK_NESTED)
+sh("env: walk pin, find names sub/.env by an escaped dot, grep's sub/* exclude skips it, allowed: "
+   + _FIND_ESCAPED_EXCLUDE, _FIND_ESCAPED_EXCLUDE, "allow", cwd=ENVWALK_NESTED)
+
 # A -print prints each name before a later test runs, so a name test after -print does not bound the names printed.
 _PRINT_THEN_NAME = "find . -print -name '*.js' | xargs grep K"
 sh("env: walk pin, find -print before -name '*.js' prints every name, refused: " + _PRINT_THEN_NAME, _PRINT_THEN_NAME,
