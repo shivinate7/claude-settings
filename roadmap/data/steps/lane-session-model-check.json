@@ -1,10 +1,10 @@
 {
   "title": "A guard refuses a lane session started on a model other than the lane-session row's",
-  "why": "Coordinator 23:55 CST Nov 8: it started tonight's lane sessions on claude-sonnet-5-5, but decision agent-model-cap's lane-session row says Opus (owner, 2026-10-28, item 50 b). No guard checked the model on create_session.",
-  "note": "Fix: refuse a create_session tagged cs-build:lane whose model is not that row's model. Note owner item 439 direction (12:21 CST Nov 8, lanes run Sonnet for now, step lanes-sonnet-trial): the row and that direction must agree before the guard lands.",
+  "why": "Coordinator 23:55 CST Nov 8: no guard checks the model of a lane session at create_session. Tonight's lanes ran claude-sonnet-5-5, which is correct under owner item 439 (12:21 CST Nov 8, lanes run Sonnet for now); decision agent-model-cap's lane-session row still says Opus and is stale until step lanes-sonnet-trial lands (coordinator 23:57 CST).",
+  "note": "Lands after step lanes-sonnet-trial. Fix: refuse a create_session tagged cs-build:lane whose model is not the lane-session row's model, read from that row (rule building-allow-list-is-the-constant), never a copied value.",
   "phase": "now",
   "owner": "coordinator",
   "status": "todo",
   "order": 881,
-  "updatedAt": "2026-11-08T23:50:00-06:00"
+  "updatedAt": "2026-11-08T23:52:00-06:00"
 }
