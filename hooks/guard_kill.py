@@ -636,7 +636,8 @@ def _mask_arithmetic(segment: str) -> str:
 
 def _arithmetic_end(segment: str, start: int) -> int:
     """The index just past the `))` that closes the `((` at `start`, or 0 when none does. Parentheses inside
-    quotes do not count, and the last two closers must be adjacent (`((a) & b)` is nested subshells)."""
+    quotes do not count. Arithmetic never falls below depth 2 before its final `))`, so a `)` that leaves depth 1
+    with no `)` right after it shows nested subshells (`((a) & (b))`)."""
     depth, quote, i = 0, "", start
     while i < len(segment):
         ch = segment[i]
@@ -652,8 +653,10 @@ def _arithmetic_end(segment: str, start: int) -> int:
             depth += 1
         elif ch == ")":
             depth -= 1
+            if depth == 1 and segment[i + 1:i + 2] != ")":
+                return 0
             if depth == 0:
-                return i + 1 if segment[i - 1] == ")" and i - 1 > start + 1 else 0
+                return i + 1
         i += 1
     return 0
 

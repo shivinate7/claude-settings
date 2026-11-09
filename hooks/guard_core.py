@@ -1254,7 +1254,9 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         if heredoc and segment.strip() == heredoc[0][0]:
             heredoc[0].pop(0)
             if not heredoc[0]:
-                (states, held), heredoc = heredoc[1], None   # the last body ended: the cds in the bodies moved a child shell
+                # The last body ended: its cds moved a child shell, and its `if` or `fi` lines are the child's text, so
+                # neither the folder nor the open blocks carry past it.
+                (states, held), depth, heredoc = heredoc[1], heredoc[2], None
             continue
         tokens = segment_tokens(segment)
         run_cd(tokens, segment, before, end)
@@ -1272,17 +1274,17 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                     run_cd(segment_tokens(part), part, inner_ends[number_in - 1] if number_in else before,
                            inner_ends[number_in] or end)
             skipping = False
+        depth = max(0, depth + _block_change(tokens))
         heads, open_quote = heredoc_heads(segment)
         in_fed_frame = any(keeps for _, _, _, keeps in frames)   # inside `source <(` opened on an earlier line
         if heads and not heredoc and not in_fed_frame and not (
                 tokens and (_sources_stdin(tokens) or _fed_to_shell(tokens, open_quote))):
-            heredoc = ([delimiter for _, delimiter in heads], (states, held))
+            heredoc = ([delimiter for _, delimiter in heads], (states, held), depth)
         elif heads and not heredoc and not stdin_bodies and tokens and _sources_stdin(tokens):
             stdin_bodies = [delimiter for _, delimiter in heads[:-1]]   # bash reads only the last body as stdin
         for _ in range(marks.count(")")):
             if frames:
                 leave()
-        depth = max(0, depth + _block_change(tokens))
         if end == "&":
             states, held = list_start, ()   # the list ran in a subshell: the shell is where the list began
     return seen if each else states[0][0]
