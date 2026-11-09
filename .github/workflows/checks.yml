@@ -609,6 +609,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_merge.py
 
+      - name: Merge tool grant review-record fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_merge_grant.py
+
       - name: Merge launcher fixture suite (bin/merge)
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_cmd.py
