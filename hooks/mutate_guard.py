@@ -1736,6 +1736,11 @@ MUTATIONS = [
      '        return api_merge_call_of(rest)',
      '        return None', "guard",
      "merge-route: gh api -X PUT is refused while another ready pr's required check is pending"),
+    # Both lines of GH_API_MERGE_PATH change together: the pattern loses its `|%s` arm and the format tuple loses its argument.
+    ("merge-route: the raw API merge path takes only a digit pr number, so a shell variable reads as no merge",
+     'pulls/(\\d+|%s)/merge/?(?:\\?.*)?"\n                               % (_GH_API_PART, _GH_API_PART, _GH_API_VAR, _GH_API_VAR))',
+     'pulls/(\\d+)/merge/?(?:\\?.*)?"\n                               % (_GH_API_PART, _GH_API_PART, _GH_API_VAR))', "guard",
+     "merge-route: variable: gh api -X PUT, a pr number in a shell variable"),
     ("push-batch: a push to main never reads its busy pull requests",
      '                    busy = push_batch_hit(args, where, overrides)',
      '                    busy = ""', "guard",
@@ -1743,9 +1748,14 @@ MUTATIONS = [
     # The no-op push exemption lives in merge/merge.py (Host.batch_read), so it is a `merge` target: its copy takes the
     # mutated tool beside the copied guard, which the guard loads first.
     ("merge-batch: the no-op push exemption is never read, so a push of main's own tip is denied",
-     '                if self.compare_status(base, head) == "identical":',
-     '                if False:', "merge",
+     '                        if self.compare_status(base, head) == "identical":',
+     '                        if False:', "merge",
      "merge-route: git push origin main, pushing main's own tip, is asked, not denied"),
+    # The anchors below carry each line's full indent. A shorter one matches mid-line, and the replacement keeps the stray prefix.
+    ("merge-batch: a no-op compare that raises a timeout escapes the exemption read, so the push's batch read is lost",
+     '                            return "green", ""\n                    except Exception:\n                        pass',
+     '                            return "green", ""\n                    except Stop:\n                        pass', "merge",
+     "merge-route: stuck compare: a push to main whose no-op exemption read raises a timeout is denied, never allowed"),
     ("merge-checks: a body flag's value is read as the pull request",
      'MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body",',
      'MERGE_VALUE_FLAGS = {"-R", "--repo", "--body",', "guard",
