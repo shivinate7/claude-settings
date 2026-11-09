@@ -75,10 +75,11 @@ Known limits:
 - An rg `!` glob is not read.
 - A brace sequence, such as `{a..c}`, is not expanded.
 - A literal `cd <dir>` earlier in the command is followed, so the search is judged in the folder it runs in. A `cd` the guard cannot resolve (a variable, `popd`, a folder that does not exist) leaves the walk at the starting folder. Other variables and substitutions in a path word are not resolved. A conditional `cd` with `&&` before it and only `&&` up to the search (`test -d D && cd D && rg K`) is judged in D alone, since a skipped `cd` skips the search too. A pipe between them (`test -d D && cd D && echo | rg K`) also skips the search in bash. But the guard judges the folder before the `cd` too, so a start folder with an env file refuses it. Only the all-run, all-skipped and each-one-skipped cases are tried when several `cd` are conditional.
-- A string that `bash -c`, `sh -c` or `eval` runs is walked as a command of its own. `zsh`, `dash`, `ksh` and `bash` with a script file are not looked into.
+- A string that `bash -c`, `sh -c`, `zsh -c`, `dash -c`, `ksh -c` or `eval` runs is judged as a command of its own, behind a wrapper too. A shell given a script file is not looked into.
 - Accepted limit: past the cap, an rg `-g` or `--iglob` glob, or a grep `--include` glob, that matches none of the sample env file names, such as `*.py`, is allowed. A name with an env stem and a `.py` suffix would match that glob and is read, out of the walk's sight. Under the cap the walk sees it.
 - A search in a heredoc body is not walked.
-- The walk sees a search behind a subshell paren, a `{ ...; }` group, `command`, `env` (with `--` too) or `nice` (with any form of its adjustment flag). A search behind `sudo`, `xargs` or `env -C` is not walked.
+- The walk sees a search behind a subshell paren, a `{ ...; }` group, `command`, `env`, `nice`, `sudo`, `nohup`, `exec` or `xargs`. A search behind `env -C` or `sudo -D` is not walked.
+- A `find` or `ls -a` piped to `xargs` names the paths the search reads. `ls -a` names the parent folder too. A find expression with a paren, or with `-exec` or `-printf`, is not read, so its start folders are walked.
 - An ignore file other than the checkout's own is not read. So a search of a folder with an env file is refused, even when such a file skips it.
 - Accepted limit: a regex with no `.env` prefix of its own, such as `prod$`, is judged on the sample names only. Rewriting `\.py$` as the names it could pick would refuse every extension filter.
 

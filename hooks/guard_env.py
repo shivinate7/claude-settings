@@ -1532,9 +1532,39 @@ def _every_folder(texts, cwd):
     return found
 
 
-ENV_FIND_EXPRESSION = ("(", "\\(", "!", "-not", "-o", "-or")
+ENV_FIND_EXPRESSION = ("(", "!", "-not", "-o", "-or")
+# The options find reads before its start folders, and the ones of them that take a value word.
+ENV_FIND_LEAD = ("-H", "-L", "-P", "-D")
+# The find actions that print other text than the name a test matched, such as the folder (`-printf '%h'`) or a
+# program's output (`-exec`), so a `-name` test does not bound what the search is handed.
+ENV_FIND_OTHER_OUTPUT = ("-printf", "-fprintf", "-fprint", "-fprint0", "-fls", "-ls", "-exec", "-execdir", "-ok",
+                         "-okdir")
 ENV_WALK_REASON_FED = ("this command would search a name that a lister hands to xargs, and the name is an "
                        "environment file")
+
+
+def _find_names_no_env(expression) -> bool:
+    """True when each name a find expression prints matches a `-name` or `-iname` glob that no env file name
+    fits. The words are dequoted. Without a paren, find's `-a` binds tighter than `-o`, so each part between
+    two top-level `-o` is one alternative. Each alternative needs a `-name` or `-iname` test that no `!` or
+    `-not` turns round. Any other test in it, negated or not, only narrows the names. A paren, or an action
+    that prints other text than the name, is not read, and the answer is False."""
+    alternatives, current, at = [], [], 0
+    while at < len(expression):
+        word = expression[at]
+        if word in ("(", ")") or word in ENV_FIND_OTHER_OUTPUT:
+            return False
+        if word in ("-o", "-or"):
+            alternatives.append(current)
+            current = []
+        elif word in ("-name", "-iname") and at + 1 < len(expression):
+            negated = at > 0 and expression[at - 1] in ("!", "-not")
+            if not negated:
+                current.append(not _glob_could_name_env(expression[at + 1], word == "-iname"))
+            at += 1
+        at += 1
+    alternatives.append(current)
+    return all(any(names) for names in alternatives)
 
 
 def _xargs_source(pieces, ends, number: int, part: int, here: str):
@@ -1543,9 +1573,10 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str):
 
     `find` names every file under each folder it is given (default `.`), and `ls -a` or `ls -A` names each
     entry of the folder, dotfiles too. Each name reaches the search as a path, which `rg` and `grep` read
-    whatever their flags. A `find` `-name` or `-iname` glob that no env file name fits (`*.py`) names none,
-    and `-type d` names folders alone. A plain `ls` names no dotfile, so only the folders it names are
-    walked. `ls -a` also names `.`. Any other source, or a pipe that is not directly before the xargs,
+    whatever their flags. A `find` whose every alternative has a `-name` or `-iname` glob that no env file
+    name fits (`*.py`) names none (`_find_names_no_env`), and `-type d` names folders alone. A start word
+    with a variable names folders the guard cannot see. A plain `ls` names no dotfile, so only the folders it names are
+    walked. `ls -a` also names `.` and `..`, so `here` and its parent are walked. Any other source, or a pipe that is not directly before the xargs,
     names paths the guard cannot see, so `here` is walked."""
     unknown = ("", True, [])
     if not (part == 0 and number > 0 and ends[number - 1] == "|"):
@@ -1566,23 +1597,35 @@ def _xargs_source(pieces, ends, number: int, part: int, here: str):
         folders = [os.path.join(here, n) for n in entries
                    if (dotfiles or not n.startswith(".")) and os.path.isdir(os.path.join(here, n))]
         named = next((os.path.join(here, n) for n in entries if dotfiles and names_env_file(n)), "")
-        return named, "a" in letters or "--all" in flags, folders
+        every = "a" in letters or "--all" in flags
+        # `ls -a` names `.` and `..` as well, which listdir leaves out: `.` is `here`, and `..` its parent.
+        parent = os.path.dirname(os.path.normpath(here))
+        if every and parent and parent != os.path.normpath(here):
+            folders.append(parent)
+        return named, every, folders
     if command == "find":
+        # find sees each word after the shell's quote removal: `"."` is the folder `.`, and `\(` a paren.
+        bare = [_shell_value(w) for w in rest]
+        at = 0
+        while at < len(bare) and bare[at] in ENV_FIND_LEAD:
+            at += 2 if bare[at] == "-D" else 1
         starts = []
-        for word in rest:
-            if word.startswith("-") or word in ENV_FIND_EXPRESSION:
-                break
-            starts.append(word)
-        if any(rest[i + 1:i + 2] == ["d"] for i, w in enumerate(rest) if w == "-type"):
+        while at < len(bare) and not (bare[at].startswith("-") or bare[at] in ENV_FIND_EXPRESSION):
+            starts.append((rest[at], bare[at]))
+            at += 1
+        if any(bare[i + 1:i + 2] == ["d"] for i, w in enumerate(bare) if w == "-type"):
             return unknown
-        globs = [(rest[i + 1], w == "-iname") for i, w in enumerate(rest[:-1]) if w in ("-name", "-iname")]
-        if globs and not any(w in ENV_FIND_EXPRESSION for w in rest) and not any(
-                _glob_could_name_env(g, fold) for g, fold in globs):
+        if _find_names_no_env(bare[at:]):
             return "", False, []
-        for start in starts or ["."]:
-            folder = os.path.join(here, os.path.expanduser(start))
-            if os.path.isdir(folder):
-                found = _env_file_in(folder)
+        for word, start in starts or [(".", ".")]:
+            if re.search(r"[$`]", start):
+                return unknown
+            target = os.path.join(here, os.path.expanduser(start))
+            # A quoted glob is no glob to the shell, so it is not expanded.
+            expand = re.search(r"[*?\[]", start) and word == start
+            for folder in glob.glob(target) if expand else [target]:
+                found = (_env_file_in(folder) if os.path.isdir(folder)
+                         else folder if names_env_file(os.path.basename(folder)) else "")
                 if found:
                     return found, False, []
         return "", False, []
@@ -1797,14 +1840,15 @@ def _env_flat(cmd: str, text_ok: bool = False):
             words, position, command = _env_words(segment)
             if not words:
                 continue
-            if command in ENV_SHELL_STRING_COMMANDS:
-                # The string is one quoted word, and it runs as a command line of its own.
-                words, position, command = _env_words(segment, keep_newlines=True)
-                inner = _shell_string(words, position, command)
+            # The string is one quoted word, and it runs as a command line of its own. The shell is found
+            # behind the same wrappers and subshell paren the walk looks through (`nohup bash -c`), so the
+            # two readers agree on which word runs the string.
+            shell_words, shell_at, shell = _env_words(segment, walk=True, keep_newlines=True)
+            if shell in ENV_SHELL_STRING_COMMANDS:
+                inner = _shell_string(shell_words, shell_at, shell)
                 refusal = env_refusal(inner) if inner else ("", "")
                 if refusal[0]:
                     return refusal
-                words, position, command = _env_words(segment)
             # The first segment of a piece reads the pipe that the piece before it closed with.
             stdin_piped = number == 0 and previous_end == "|"
             # A segment that pipes onward hands its output to another command, which may read it
