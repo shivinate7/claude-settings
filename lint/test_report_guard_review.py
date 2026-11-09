@@ -242,15 +242,21 @@ class ReviewRecordTests(unittest.TestCase):
         subprocess.run(["git", "-C", self.repo, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True, capture_output=True)
         write_fake_gh(self.gh_dir)
         self.assertIsNotNone(shutil.which("gh", path=self.gh_dir), "the stand-in gh is not on its own PATH")
+        # merge's default-branch read asks gh, and gh is not on this process's PATH: in this process it answers the fixture's default branch.
+        patch = mock.patch.object(merge_mod, "default_branch_once", side_effect=lambda root: self.default_branch)
+        patch.start()
+        self.addCleanup(patch.stop)
         self.serve()
 
-    def serve(self, comments=(), fail_pulls=None, fail_comments=None, prs=None, base="main", default_branch="main"):
+    def serve(self, comments=(), fail_pulls=None, fail_comments=None, prs=None, base="main", default_branch=None):
         """The stand-in's answers: each PR's live head and its comments, oldest first, and any read to break. `base` is the branch
-        the pull requests name as their base. `default_branch` is the repo's default branch: each pull carries it as
+        the pull requests name as their base. `default_branch` is the repo's default branch, `base` when None: each pull carries it as
         base.repo.default_branch, and the repo read answers it. `prs` maps a PR number to {"head": sha, "comments": [bodies]}; without
         it, PR 12 has `comments`. A comment is its body, or a dict with body, created_at and updated_at, as the comment list gives them."""
         if prs is None:
             prs = {PR: {"head": LIVE, "comments": list(comments)}}
+        default_branch = base if default_branch is None else default_branch
+        self.default_branch = default_branch
         state = {"prs": {str(n): {"head": p["head"], "comments": list(p["comments"])} for n, p in prs.items()},
                  "count_file": self.count, "fail_pulls": fail_pulls, "fail_comments": fail_comments,
                  "base": base, "default_branch": default_branch}
@@ -260,6 +266,7 @@ class ReviewRecordTests(unittest.TestCase):
     def cutover_history(self, base):
         """origin/<base> holds merge/merge.py without the salt line, then the commit that adds it, at CUTOVER. update-ref sets the
         remote-tracking ref, so nothing is pushed. Then merge's review_stamp_since reads this repo's own history."""
+        self.default_branch = base  # the default branch is the one this history sits on, so the in-process read reads it
         path = os.path.join(self.repo, "merge", "merge.py")
         os.makedirs(os.path.dirname(path))
         for text, date in ((PRE_SALT_SOURCE, "2026-10-20 10:00:00 +0000"), (SALT_SOURCE, CUTOVER_GIT_DATE)):
@@ -270,12 +277,6 @@ class ReviewRecordTests(unittest.TestCase):
             subprocess.run(["git", "-C", self.repo, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com",
                             "commit", "-q", "-m", "fixture"], check=True, capture_output=True, env=env)
         subprocess.run(["git", "-C", self.repo, "update-ref", "refs/remotes/origin/" + base, "HEAD"], check=True, capture_output=True)
-
-    def in_process_cutover(self, default):
-        """merge's review_stamp_since, run in this process for the default branch `default`. gh is not on this process's PATH, so the
-        default branch is the one the stand-in's pulls carry, given by a patch of host_default_branch."""
-        with mock.patch.object(merge_mod, "host_default_branch", return_value=default):
-            return merge_mod.review_stamp_since(self.repo, default)
 
     def gh_calls(self):
         """The argv of each stand-in call of the last Stop run."""
@@ -430,7 +431,7 @@ class ReviewRecordTests(unittest.TestCase):
         # subfolder. The cutover is then none, and an unstamped record from before the cutover refuses. The control is the case below,
         # run from the root: the same record passes there, so the subfolder run is the one that differs.
         self.cutover_history("fixture")
-        self.assertEqual(self.in_process_cutover("fixture"), CUTOVER,
+        self.assertEqual(merge_mod.review_stamp_since(self.repo, "fixture"), CUTOVER,
                          "fixture: the cutover from the root is not the time of the commit that adds the salt line")
         body = unstamped(record())
         self.serve(comments=[{"body": body, "created_at": BEFORE}], base="fixture", default_branch="fixture")
@@ -442,12 +443,12 @@ class ReviewRecordTests(unittest.TestCase):
         # Catches: a record made before the stamp's merge, with no Stamp line, read as no record, so a lane's PASS claim on its
         # pull request is refused. merge --reviewed reads the same record as done.
         self.cutover_history("fixture")
-        self.assertEqual(self.in_process_cutover("fixture"), CUTOVER,
+        self.assertEqual(merge_mod.review_stamp_since(self.repo, "fixture"), CUTOVER,
                          "fixture: the cutover is not the time of the commit that adds the salt line")
         body = unstamped(record())
         self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body, BEFORE, CUTOVER), LIVE)[0], "done",
                          "fixture: merge/merge.py does not call this record done")
-        self.serve(comments=[{"body": body, "created_at": BEFORE}], base="fixture", default_branch="fixture")
+        self.serve(comments=[{"body": body, "created_at": BEFORE}], base="fixture")
         out = self.stop(self.lane_turn(report(CLAIM)))
         self.assert_reads_of(PR)
         self.assertIsNone(out, out)
@@ -455,14 +456,13 @@ class ReviewRecordTests(unittest.TestCase):
     def test_an_unstamped_record_created_after_the_cutover_refuses_a_pass_claim(self):
         # Catches: the cutover letting a record made after the stamp's merge through with no Stamp line.
         self.cutover_history("fixture")
-        self.serve(comments=[{"body": unstamped(record()), "created_at": AFTER}], base="fixture", default_branch="fixture")
+        self.serve(comments=[{"body": unstamped(record()), "created_at": AFTER}], base="fixture")
         self.assert_blocked(self.stop(self.lane_turn(report(CLAIM))))
 
     def test_an_unstamped_record_created_before_and_edited_after_the_cutover_refuses_a_pass_claim(self):
         # Catches: a record created before the cutover and edited after it, with no Stamp line, read as made before the cutover.
         self.cutover_history("fixture")
-        self.serve(comments=[{"body": unstamped(record()), "created_at": BEFORE, "updated_at": AFTER}], base="fixture",
-                   default_branch="fixture")
+        self.serve(comments=[{"body": unstamped(record()), "created_at": BEFORE, "updated_at": AFTER}], base="fixture")
         self.assert_blocked(self.stop(self.lane_turn(report(CLAIM))))
 
     def test_record_whose_rounds_hold_no_pass_does_not_satisfy_a_pass_claim(self):
@@ -528,7 +528,7 @@ class ReviewRecordTests(unittest.TestCase):
     def test_unstamped_record_with_no_cutover_is_refused_and_the_remedy_names_the_stamp_line(self):
         # Catches: the refusal of an unstamped record in a repo with no cutover, whose text names no Stamp line, so the
         # reviewer is not told what the record lacks. The render command stays in the remedy.
-        self.assertIsNone(self.in_process_cutover("main"), "fixture: a cutover is set for main")
+        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: a cutover is set for main")
         body = unstamped(record())
         self.assertIsNone(merge_mod.parse_review(body, None, None), "fixture: merge reads the unstamped record with no cutover")
         self.serve(comments=[body])
@@ -703,7 +703,7 @@ class ReviewRecordTests(unittest.TestCase):
         # Catches: an unstamped record with a note after its CI line, and no cutover, named with the CI-line cause. The record
         # has no Stamp line, so the Stamp cause is the one to name.
         body = unstamped(record()) + "\n" + INCIDENT_NOTE + "\n"
-        self.assertIsNone(self.in_process_cutover("main"), "fixture: a cutover is set for main")
+        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: a cutover is set for main")
         self.assertIsNone(merge_mod.parse_review(body, None, None), "fixture: merge reads the record with a note after the CI line")
         self.serve(comments=[body])
         out = self.stop(self.lane_turn(report(CLAIM)))

@@ -13875,6 +13875,15 @@ class ReviewedList(ReviewEnv):
         rc, out, err = self.run_args("--reviewed", host=host)
         return host, rc, out, err
 
+    def test_review_comments_finds_a_marker_line_with_trailing_spaces(self):
+        # the marker is the record's first line; the MCP tool may add spaces to it, and review_marked reads the line with its spaces taken out
+        text = record_text(rounds=REVIEW_PASS)
+        lines = text.splitlines()
+        spaced = "\n".join([lines[0] + "  "] + lines[1:]) + "\n"
+        host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=[review_comment(1, 7, spaced, created="2026-10-02T00:00:00Z")])
+        self.assertEqual(host.review_comments("2026-10-01T00:00:00Z"), {7: [("2026-10-02T00:00:00Z", spaced)]},
+                         "review_comments dropped a record whose marker line has trailing spaces")
+
     def test_the_newest_record_decides_the_line(self):
         comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), review_comment(2, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
@@ -13960,15 +13969,6 @@ class ReviewedList(ReviewEnv):
         reads = [f for rel, f in host.list_calls if rel == "issues/comments"]
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
-
-    def test_review_comments_finds_a_marker_line_with_trailing_spaces(self):
-        # the marker is the record's first line; the MCP tool may add spaces to it, and review_marked reads the line with its spaces taken out
-        text = record_text(rounds=REVIEW_PASS)
-        lines = text.splitlines()
-        spaced = "\n".join([lines[0] + "  "] + lines[1:]) + "\n"
-        host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=[review_comment(1, 7, spaced, created="2026-10-02T00:00:00Z")])
-        self.assertEqual(host.review_comments("2026-10-01T00:00:00Z"), {7: [("2026-10-02T00:00:00Z", spaced)]},
-                         "review_comments dropped a record whose marker line has trailing spaces")
 
     def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
         # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection
