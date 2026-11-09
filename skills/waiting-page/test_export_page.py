@@ -291,6 +291,24 @@ RED = [
     ("URL credentials on a host name with a short password", "https://user:" + "p4ss" + "@host.example.com/", "p4ss"),
     ("password that starts with !0", "password:" + "!0hunter2", "!0hunter2"),
     ("credential name with a value that starts with return", "api_key=" + "return9fQ2xZ7Lk3", "return9fQ2xZ7Lk3"),
+    # A URL password may hold a bracket, a bar or a quote: the credential is still in the URL. Each password is joined from parts.
+    ("URL password with a bar", "https://user:" + "pa|ss" + "@host", "pa|ss"),
+    ("URL password with brackets", "postgres://app:" + "Qz9(Lk2Xm7)" + "@db.internal/x", "Qz9(Lk2Xm7)"),
+    ("URL password with quotes around it", 'https://user:"' + "secret1" + '"@api.example.com/', "secret1"),
+    ("URL password with dollars and brackets on an IP host", "mongodb://admin:" + "Pa$$(word)" + "@10.0.0.7:27017",
+     "Pa$$(word)"),
+    # A minified boolean such as !0 or !1 after a password word is not the value: the real value after it is the secret.
+    ("password with a minified boolean and a comma before a real value", "password:" + "!0," + "hunter2", "hunter2"),
+    ("password with = and a minified boolean before a real value", "password=" + "!0," + "Xk9mP2qL", "Xk9mP2qL"),
+    ("password with a minified boolean and a semicolon before a real value", "password: " + "!1;" + "Tr0ub4dorX",
+     "Tr0ub4dorX"),
+    ("password with a minified boolean and a space before a real value", "password: " + "!0 " + "hunter2secret",
+     "hunter2secret"),
+    # A credential name, a keyword prefix, a symbol, then a real value: the value after the symbol is the secret.
+    ("api_key with a keyword prefix, a hyphen and a real value", "api_key=" + "return-" + "9fQ2xZ7Lk3",
+     "return-9fQ2xZ7Lk3"),
+    ("token with a keyword prefix, a plus and a real value", "token=" + "void+" + "Ab3dEf7Hi9", "void+Ab3dEf7Hi9"),
+    ("SECRET with a keyword prefix, a tilde and a real value", "SECRET=" + "typeof~" + "Kq8LmZ2xW", "typeof~Kq8LmZ2xW"),
 ]
 # Dashed and short vendor-style keys, each set in four credential-name carriers. Each value is joined from parts, so no
 # key-looking literal sits whole in the source. A hyphen-joined value of letters and digits is a key shape, so the
@@ -313,6 +331,18 @@ KEY_CARRIERS = (
 )
 RED += [("%s in %s" % (name, carrier), fmt % value, value)
         for name, value in DASHED_KEYS for carrier, fmt in KEY_CARRIERS]
+# Dashed vendor-style keys after an unquoted KEY= or token= carrier. A separate tuple: KEY_CARRIERS also feeds the 7-character GREEN rows.
+VENDOR_KEYS = (
+    ("dashed sk proj key", "sk-" + "proj-" + "abcdefgh1"),
+    ("dashed sk ant key", "sk-" + "ant-" + "api03-" + "abcdefg1"),
+    ("dashed stripe live key", "stripe-" + "live-" + "ab12"),
+    ("dashed sk proj live key", "sk-" + "proj-" + "live-" + "ab12"),
+    ("dashed sk key of nine characters", "sk-" + "abcd12"),
+    ("dashed ghp key of eight characters", "ghp-" + "ab12"),
+)
+VENDOR_CARRIERS = (("KEY unquoted", "KEY=%s"), ("token unquoted", "token=%s"))
+RED += [("%s in %s" % (name, carrier), fmt % value, value)
+        for name, value in VENDOR_KEYS for carrier, fmt in VENDOR_CARRIERS]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
 GREEN = [
@@ -324,6 +354,9 @@ GREEN = [
     # has a short part (`key`, `v`), so a fix that refuses short parts goes red here.
     ("key name of hyphen words with a short part and a digit", "KEY='cache-key-v2'"),
     ("token name of hyphen words with a short part and a digit", "token: page-length-v2"),
+    ("storage key name of hyphen words with a short part and a digit", 'storageKey:"page-length-v2"'),
+    # A keyword word, then a space and a digit, is minified code. It is not a secret, and a keyword-prefix fix must not refuse it.
+    ("minified void 0 after a token word", "token:void 0,"),
     ("minified JS boolean after a password word", "password:!0"),
     ("minified code with :// and a colon and @ across quotes and brackets", '"https://a"})];U&&(c=I==null||x:y@b'),
     ("minified keyCode comparison", "e.keyCode===13&&e.preventDefault()"),
