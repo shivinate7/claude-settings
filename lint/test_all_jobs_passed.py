@@ -6,7 +6,8 @@ cancelled or was skipped, so every job all-jobs-passed needs must run on a non-d
 all-jobs-passed needs exactly the jobs that run there, derived from the file and not from a copied list; only the shard
 jobs (test_windows_split.SHARD_VAR) stay off it; no needed job has a job-level if, since each scope condition sits in
 its steps (test_windows_split.job_check_problems); the job's shape, its own if (non-draft pull_request only) and its
-checkout pin; scope skips only a draft PR; and ci-done needs all-jobs-passed.
+checkout pin; scope skips only a draft PR; and ci-done needs all-jobs-passed. The two Linux guard shards are named in both
+fan-ins (LinuxGuardShardFanIns); the ci-done list is read by actions/ci-done-comment/test_comment.py's ci_done_problems.
 
 Stdlib only, no PyYAML. CHECKS_YML overrides the path (red runs on a scratch copy).
 Run with:  python3 lint/test_all_jobs_passed.py -v
@@ -22,11 +23,14 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import CHECKS  # noqa: E402  the one home of the checks.yml path
-from all_jobs_passed_rules import (all_problems, child_problems, ci_done_problems, needs_problems,  # noqa: E402  the one home of the rules
-                                   off_problems, scope_if_problems, shape_problems, steps_problems)
+from all_jobs_passed_rules import (all_problems, child_problems, ci_done_problems,  # noqa: E402  the one home of the rules
+                                   needs_of, needs_problems, off_problems, scope_if_problems, shape_problems, steps_problems)
+from workflow_steps import job_block  # noqa: E402  the one home of the step parser
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  test-temp-standard: teardown removes the run folder (testing/tracked_tree.py)
+sys.path.insert(0, os.path.join(HERE, "..", "actions", "ci-done-comment"))
+import test_comment as ci_done_comment  # noqa: E402  the one home of the ci-done needs list (ci_done_problems)
 
 PIN = "08c6903cd8c0fde910a37f88322edcfb5dd907a8"
 # A minimal checks.yml that passes. Its comment openers sit inside quotes and in a block body, a lone quote sits in
@@ -165,6 +169,53 @@ class AllJobsPassedFixtures(unittest.TestCase):
             with self.subTest(defect=label):
                 self.assertIn(old, GOOD, label)  # a mutation that matches nothing proves nothing
                 self.assertTrue(all_problems(GOOD.replace(old, new, 1)), label)
+
+
+SECOND_SHARD = "checks-guard-2"
+SECOND_SHARD_JOB = f"  {SECOND_SHARD}:\n    runs-on: ubuntu-latest\n    needs: scope\n    steps:\n      - run: echo shard\n"
+
+
+def with_second_guard_shard(text):
+    """checks.yml text with the planned second Linux guard shard: a job named checks-guard-2 (a stub; the fan-in rules read its
+    name and needs), named in all-jobs-passed's needs and in ci-done's, as the planned split does."""
+    assert text.count("  checks-shoot:\n") == 1 and text.count("      - checks-guard\n") == 2  # the anchors, each once
+    text = text.replace("  checks-shoot:\n", SECOND_SHARD_JOB + "  checks-shoot:\n", 1)
+    return text.replace("      - checks-guard\n", f"      - checks-guard\n      - {SECOND_SHARD}\n")
+
+
+def without_shard_in(text, job):
+    """`text` with the second guard shard taken out of the needs of `job` (the job's own block, from its key to the next)."""
+    block = job_block(text, job)
+    assert block and f"      - {SECOND_SHARD}\n" in block, f"{SECOND_SHARD} is not in {job}'s needs"
+    return text.replace(block, block.replace(f"      - {SECOND_SHARD}\n", "", 1), 1)
+
+
+class LinuxGuardShardFanIns(unittest.TestCase):
+    """Both Linux guard shards are in each fan-in: all-jobs-passed (needs_problems, the rule that every PR job is in its needs)
+    and ci-done (ci_done_problems in actions/ci-done-comment/test_comment.py, the rule that ci-done needs every other job)."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+
+    def test_both_guard_shards_are_in_each_fan_in(self):
+        # Named failure: a guard shard runs on a pull request but is in neither all-jobs-passed's needs nor ci-done's, so its
+        # red cannot block the merge or post the wake comment.
+        for job in ("all-jobs-passed", "ci-done"):
+            self.assertIsNotNone(job_block(self.text, job), job)
+            for shard in ("checks-guard", SECOND_SHARD):
+                with self.subTest(job=job, shard=shard):
+                    self.assertIn(shard, needs_of(job_block(self.text, job)) or [], f"{shard} is not in {job}'s needs")
+
+    def test_a_shard_left_out_of_either_fan_in_is_flagged(self):
+        planned = with_second_guard_shard(self.text)
+        # The control: the planned text passes both rules, so each defect below shows as a flag and nothing else.
+        self.assertEqual(needs_problems(planned), [])
+        self.assertEqual(ci_done_comment.ci_done_problems(planned), [])
+        self.assertTrue([p for p in needs_problems(without_shard_in(planned, "all-jobs-passed")) if SECOND_SHARD in p],
+                        "all-jobs-passed without the second shard")
+        self.assertTrue(ci_done_comment.ci_done_problems(without_shard_in(planned, "ci-done")),
+                        "ci-done without the second shard")
 
 
 # A child repo's workflow: the generic rules, read through `--workflow PATH`. CHILD_GOOD passes them and each

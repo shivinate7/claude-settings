@@ -17,7 +17,8 @@ CiCoverage also proves every tracked test file has a run step: test_*.py, test_*
 *.test.js and *.test.ps1. A file the mod-test collector prints is covered by the step that runs that collector.
 
 SplitJobs does the same for the Linux split (checks, checks-merge-install) and the macOS split (checks-macos, checks-macos-b):
-each suite runs in exactly one job of its split, with its pinned `if:` and `shell:`.
+each suite runs in exactly one job of its split, with its pinned `if:` and `shell:`. It also reads the Linux guard split
+(checks-guard, checks-guard-2): the guard suite runs in one shard per job, each with its GUARD_SHARD value.
 
 Run with:  python3 lint/test_windows_split.py -v
 """
@@ -775,6 +776,47 @@ def macos_split_problems(text):
     return problems
 
 
+# The Linux guard split: the guard suite runs in two shards, one per job, each with its GUARD_SHARD value. Each shard step is
+# pinned as the macOS guard shards are: the scope `if:`, no shell, and the suite's own env plus its shard value.
+LINUX_GUARD_SHARD = {"checks-guard": "1/2", "checks-guard-2": "2/2"}
+LINUX_GUARD = "python3 hooks/test_guard.py"
+LINUX_GUARD_IF = "needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request'"
+LINUX_GUARD_ENV = {"NODE_PATH": "${{ github.workspace }}/.github/shoot/node_modules", "GUARD_CHROMIUM": '"1"'}
+PLAYWRIGHT_USES = "$/actions/playwright-setup"
+
+
+def linux_guard_split_problems(text):
+    """The Linux guard split: the guard suite runs in exactly the LINUX_GUARD_SHARD jobs, one shard each, and in no other Linux
+    job. Each shard step is pinned by pin_problems. A job-level or workflow-level GUARD_SHARD would reach every step, so it is
+    a problem too."""
+    problems = job_env_problems(text, tuple(LINUX_GUARD_SHARD))
+    header = re.split(r"^jobs:\s*$", text, maxsplit=1, flags=re.M)[0]
+    if any(re.match(r"\s*GUARD_SHARD:", strip_comment(line)) for line in header.splitlines()):
+        problems.append("GUARD_SHARD is set in the workflow env, so every job takes it")
+    linux = [n for n, j in all_jobs(text).items() if (j["os"] or "").startswith("ubuntu")]
+    homes = split_homes(text, linux, LINUX_GUARD)
+    names = sorted(job for job, _ in homes)
+    if names != sorted(LINUX_GUARD_SHARD):
+        problems.append(f"{LINUX_GUARD!r} runs in {names}, want one shard in each of {sorted(LINUX_GUARD_SHARD)}")
+    for job, st in homes:
+        if job in LINUX_GUARD_SHARD:
+            problems += pin_problems(job, st, LINUX_GUARD, LINUX_GUARD_IF, None,
+                                     {**LINUX_GUARD_ENV, "GUARD_SHARD": LINUX_GUARD_SHARD[job]})
+    return problems
+
+
+def linux_guard_install_problems(text):
+    """Each Linux guard shard job installs Playwright, the browser the guard's checker renders with, under the scope `if:`."""
+    problems = []
+    for job in LINUX_GUARD_SHARD:
+        installs = [st for st in step_blocks(job_block(text, job)) if step_key(st, "uses") == PLAYWRIGHT_USES]
+        if not installs:
+            problems.append(f"{job} has no Playwright install step ({PLAYWRIGHT_USES})")
+        for st in installs:
+            problems += pin_problems(job, st, PLAYWRIGHT_USES, LINUX_GUARD_IF, None)
+    return problems
+
+
 class WindowsSplit(unittest.TestCase):
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -1059,6 +1101,19 @@ def split_doc(jobs):
     return "\n".join(out) + "\n"
 
 
+def linux_guard_shard(value, if_=LINUX_GUARD_IF, shell=None, env=None):
+    """One Linux guard shard step for split_doc: the suite with its env, its GUARD_SHARD value and any `env` override."""
+    return (LINUX_GUARD, if_, shell, {**LINUX_GUARD_ENV, "GUARD_SHARD": value, **(env or {})})
+
+
+def linux_guard_doc(a=None, b=None, extra=None):
+    """checks.yml text for the planned Linux guard split: checks-guard runs shard 1/2 and checks-guard-2 shard 2/2. The step
+    lists a and b replace those jobs' steps, and extra jobs are added as given."""
+    jobs = {"checks-guard": ("ubuntu-latest", [linux_guard_shard("1/2")] if a is None else a),
+            "checks-guard-2": ("ubuntu-latest", [linux_guard_shard("2/2")] if b is None else b)}
+    return split_doc({**jobs, **(extra or {})})
+
+
 class SplitJobs(unittest.TestCase):
     """The Linux split (checks, checks-merge-install) and the macOS split (checks-macos, checks-macos-b): each suite of the old
     single job runs in exactly one job of its split, with its pinned `if:` and `shell:` and no env (LINUX_SUITES, MACOS_SUITES)."""
@@ -1151,6 +1206,60 @@ class SplitJobs(unittest.TestCase):
         for label, (text, check) in cases.items():
             with self.subTest(defect=label):
                 self.assertTrue([p for p in check(text) if "check_unknown_reads_contract" in p], label)
+
+    def test_the_linux_guard_runs_in_its_two_shard_jobs(self):
+        # Named failure: the guard suite runs in one Linux job, or in a third, or in neither, so its cases do not each run once.
+        self.assertEqual(linux_guard_split_problems(self.text), [])
+
+    def test_the_linux_guard_shards_install_playwright(self):
+        # Named failure: a guard shard job has no Playwright install, so the guard's checker has no browser to render with.
+        self.assertEqual(linux_guard_install_problems(self.text), [])
+
+    def test_checker_sees_the_linux_guard_split_defects(self):
+        self.assertEqual(linux_guard_split_problems(linux_guard_doc()), [])  # the control: the planned split passes
+        bad = {
+            "the second shard missing": split_doc({"checks-guard": ("ubuntu-latest", [linux_guard_shard("1/2")])}),
+            "the second shard's value dropped": linux_guard_doc(b=[(LINUX_GUARD, LINUX_GUARD_IF, None, dict(LINUX_GUARD_ENV))]),
+            "both shards 1/2": linux_guard_doc(b=[linux_guard_shard("1/2")]),
+            "a third Linux job runs the guard": linux_guard_doc(
+                extra={"checks-guard-3": ("ubuntu-latest", [linux_guard_shard("1/2")])}),
+            "the guard in neither shard job": linux_guard_doc(a=[], b=[]),
+            "no job at all": "jobs:\n",
+            "GUARD_SHARD in a job's env": linux_guard_doc().replace(
+                "    needs: scope\n    steps:", "    needs: scope\n    env:\n      GUARD_SHARD: 1/2\n    steps:", 1),
+            "GUARD_SHARD in the workflow env": "env:\n  GUARD_SHARD: 1/2\n" + linux_guard_doc(),
+            "the shard's if changed": linux_guard_doc(a=[linux_guard_shard(
+                "1/2", if_="needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'")]),
+            "the shard's if dropped": linux_guard_doc(a=[linux_guard_shard("1/2", if_=None)]),
+            "a shell added to a shard": linux_guard_doc(a=[linux_guard_shard("1/2", shell="bash")]),
+            "the suite's env changed": linux_guard_doc(a=[linux_guard_shard("1/2", env={"GUARD_CHROMIUM": '"0"'})]),
+        }
+        for label, text in bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(linux_guard_split_problems(text), label)
+
+    def test_a_workflow_comment_or_quoted_value_that_names_guard_shard_is_no_home(self):
+        # A comment and a quoted value are text, not a workflow env key, so neither is a defect (the scanner rule: a comment
+        # opener in quotes, and a lone quote in a comment, read as text).
+        controls = ["# GUARD_SHARD is set per step; don't set it here\n", 'note: "# GUARD_SHARD: 1/2"\n']
+        for control in controls:
+            with self.subTest(control=control):
+                self.assertEqual(linux_guard_split_problems(control + linux_guard_doc()), [])
+
+    def test_hardening_does_not_flag_the_linux_shard_values(self):
+        # The two Linux shard values are homes: each sits in a guard step's env, as the Windows and macOS shard values do.
+        self.assertEqual([p for p in hardening_problems(linux_guard_doc()) if "GUARD_SHARD" in p], [])
+
+    def test_hardening_flags_a_stray_guard_shard_value(self):
+        # Named failure: a GUARD_SHARD value that no shard step owns reaches every step that inherits it (job or workflow env).
+        ci_wake = ("python3 hooks/test_ci_wake.py", None, None, {"GUARD_SHARD": "1/2"})
+        stray = {
+            "in the workflow env": "env:\n  GUARD_SHARD: 1/2\n" + linux_guard_doc(),
+            "on a step that runs no guard shard": linux_guard_doc(extra={"checks-ci-wake": ("ubuntu-latest", [ci_wake])}),
+        }
+        for label, text in stray.items():
+            with self.subTest(defect=label):
+                self.assertTrue([p for p in hardening_problems(text) if "GUARD_SHARD appears" in p], label)
 
 
 class TopLevelOr(unittest.TestCase):
