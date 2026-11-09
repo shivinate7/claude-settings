@@ -420,13 +420,13 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_reads_of(PR)
         self.assertIsNone(out, out)
 
-    def test_an_unstamped_record_created_after_the_cutover_blocks_a_pass_claim(self):
+    def test_an_unstamped_record_created_after_the_cutover_refuses_a_pass_claim(self):
         # Catches: the cutover letting a record made after the stamp's merge through with no Stamp line.
         self.cutover_history("fixture")
         self.serve(comments=[{"body": unstamped(record()), "created_at": AFTER}], base="fixture")
         self.assert_blocked(self.stop(self.lane_turn(report(CLAIM))))
 
-    def test_an_unstamped_record_created_before_and_edited_after_the_cutover_blocks_a_pass_claim(self):
+    def test_an_unstamped_record_created_before_and_edited_after_the_cutover_refuses_a_pass_claim(self):
         # Catches: a record created before the cutover and edited after it, with no Stamp line, read as made before the cutover.
         self.cutover_history("fixture")
         self.serve(comments=[{"body": unstamped(record()), "created_at": BEFORE, "updated_at": AFTER}], base="fixture")
