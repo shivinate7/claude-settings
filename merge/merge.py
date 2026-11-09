@@ -1415,23 +1415,24 @@ class Host:
     def batch_read(self, base, head, batch_ignore=None):
         """The batch read alone, for a push to `base` that has no pull request: -> (verdict, detail). batch: another ready PR on `base` is busy and its head
         does not hold `head` ("" when the pushed head could not be read). green: none is. unknown: a read could not run. One pull list read, under the
-        same shared deadline as head_read."""
+        same shared deadline as head_read, and so is the no-op compare below: inside it Host.gh never retries or waits on a rate limit."""
         self.base = base  # protection_names reads this base; only pr() sets it otherwise
         try:
             with shared_deadline(SH_TIMEOUT):
                 blockers = self.batch_running(0, base, unprotected_counts_all=True, ignore=batch_ignore, head=head or "",
                                               unread_not_contained=True)
+                if blockers and head:
+                    # A push of the base's own tip moves nothing: no run tests a different base. Any failed read (Stop, a hung gh's
+                    # TimeoutExpired, a missing gh) keeps the blockers: the push is denied, never let through.
+                    try:
+                        if self.compare_status(base, head) == "identical":
+                            return "green", ""
+                    except Exception:
+                        pass
         except subprocess.TimeoutExpired:
             return "unknown", "a gh call timed out"
         except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
             return "unknown", str(e)
-        if blockers and head:
-            # A push of the base's own tip moves nothing: no run tests a different base. A read that fails keeps the blockers.
-            try:
-                if self.compare_status(base, head) == "identical":
-                    return "green", ""
-            except Stop:
-                pass
         return ("batch", "; ".join(blockers)) if blockers else ("green", "")
 
     def block(self, pending, got):

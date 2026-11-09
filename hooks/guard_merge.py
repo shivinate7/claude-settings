@@ -114,7 +114,12 @@ GH_API_VALUE_FLAGS = {"-H", "--header", "-f", "--raw-field", "-F", "--field", "-
                       "--input", "--hostname", "--cache", "-p", "--preview"}
 # gh fills `{owner}/{repo}` from the checkout's remote, so that placeholder names the repo gh resolves, as no path repo does.
 GH_API_PLACEHOLDER_REPO = "{owner}/{repo}"
-GH_API_MERGE_PATH = re.compile(r"/?(?:repos/(\{owner\}/\{repo\}|[^/{}\s]+/[^/{}\s]+)/)?pulls/(\d+)/merge/?(?:\?.*)?")
+# A shell variable (`$PR`, `${PR}`) may stand for the number, the whole repo, or one part of it. Its value is not known here, so
+# the call is read as a merge of the selector or repo as written, which the read cannot resolve: unknown, as `gh pr merge $PR` is.
+_GH_API_VAR = r"\$\{?\w+\}?"
+_GH_API_PART = r"(?:[^/{}\s]|\$\{\w+\})+"  # one path part; a bare `$NAME` already fits the first arm
+GH_API_MERGE_PATH = re.compile(r"/?(?:repos/(\{owner\}/\{repo\}|%s/%s|%s)/)?pulls/(\d+|%s)/merge/?(?:\?.*)?"
+                               % (_GH_API_PART, _GH_API_PART, _GH_API_VAR, _GH_API_VAR))
 
 
 def api_merge_call_of(rest):
