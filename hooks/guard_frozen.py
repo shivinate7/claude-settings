@@ -702,7 +702,13 @@ def _written_sources(word, cwd):
             # A relative pattern is matched from `cwd` and its matches stay relative, as `cp` names them: `--parents`
             # writes each name under DEST, so a match made absolute would write the cwd's own folders there.
             target = _expanded(pattern, "")
-            matches = glob.iglob(target) if os.path.isabs(target) else glob.iglob(target, root_dir=cwd or None)
+            if os.path.isabs(target) or not cwd:
+                matches = glob.iglob(target)
+            else:
+                # The folder is joined escaped, so a glob character in it matches itself, then cut from each match.
+                head = os.path.join(cwd, "")
+                matches = (found[len(head):] if found.startswith(head) else found
+                           for found in glob.iglob(os.path.join(glob.escape(cwd), target)))
             matched = list(itertools.islice(matches, _WALK_LIMIT + 1 - len(paths)))
             paths.extend(matched or [_unquoted(each)])
         else:
