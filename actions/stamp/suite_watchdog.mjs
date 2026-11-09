@@ -453,6 +453,8 @@ export async function watchdog({ self, ci, tempPrefix }) {
   hard.unref();
 
   const arm = () => {
+    // A test that checks the cap reads the armed delay from this file, in ms as plain digits.
+    if (process.env.STAMP_SUITE_ARMED_FILE) writeFileSync(process.env.STAMP_SUITE_ARMED_FILE, String(capS * 1000));
     timer = setTimeout(() => stopTree(
       `FAIL - ${current ?? "(before the first test)"}\nThe suite ran past its ${capS} s cap (STAMP_SUITE_CAP_S). Processes under it:`,
     ), capS * 1000);
