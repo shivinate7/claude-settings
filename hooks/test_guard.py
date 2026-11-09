@@ -3881,7 +3881,7 @@ HMADD = VCS + " worktree add "
 HMIN = slash(HMMAIN)
 
 
-def hm_deny(name, command, **kw):
+def hm_refuse(name, command, **kw):
     kw.setdefault("cwd", HMMAIN)
     sh("hand-made worktree: " + name, command, "deny", HM, **kw)
 
@@ -3892,40 +3892,40 @@ def hm_allow(name, command, **kw):
 
 
 # DENY. The new tree lands outside <primary>/.claude/worktrees/.
-hm_deny("a relative sibling path from the primary is refused", HMADD + "../lane-x")
-hm_deny("-C reaches the primary from elsewhere, and a scratch path is refused",
+hm_refuse("a relative sibling path from the primary is refused", HMADD + "../lane-x")
+hm_refuse("-C reaches the primary from elsewhere, and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, cwd=NOGIT)
-hm_deny("cd into a non-temp primary, then a tree in the temp folder, is the incident",
+hm_refuse("cd into a non-temp primary, then a tree in the temp folder, is the incident",
         "cd " + HMIN + " && " + HMADD + HMSCRATCH, cwd=NOGIT)
-hm_deny("-b before the path does not hide it", HMADD + "-b hmx ../lane-x")
-hm_deny("-B before the path does not hide it", HMADD + "-B hmx ../lane-x")
-hm_deny("--detach before the path does not hide it", HMADD + "--detach ../lane-x")
-hm_deny("--lock --reason r before the path does not hide it",
+hm_refuse("-b before the path does not hide it", HMADD + "-b hmx ../lane-x")
+hm_refuse("-B before the path does not hide it", HMADD + "-B hmx ../lane-x")
+hm_refuse("--detach before the path does not hide it", HMADD + "--detach ../lane-x")
+hm_refuse("--lock --reason r before the path does not hide it",
         HMADD + "--lock --reason r ../lane-x")
-hm_deny("a double dash ends the options, and the path after it is judged",
+hm_refuse("a double dash ends the options, and the path after it is judged",
         HMADD + "-- ../lane-x")
-hm_deny("a dash-led name after a double dash is still a path", HMADD + "-- -lane-x")
-hm_deny("a .claude/worktrees-x prefix is outside the home folder",
+hm_refuse("a dash-led name after a double dash is still a path", HMADD + "-- -lane-x")
+hm_refuse("a .claude/worktrees-x prefix is outside the home folder",
         HMADD + ".claude/worktrees-x/foo")
-hm_deny("a .claude/worktreesX name is outside the home folder", HMADD + ".claude/worktreesX")
-hm_deny("a dot-dot that climbs out of the home folder is outside",
+hm_refuse("a .claude/worktreesX name is outside the home folder", HMADD + ".claude/worktreesX")
+hm_refuse("a dot-dot that climbs out of the home folder is outside",
         HMADD + ".claude/worktrees/../../lane-x")
-hm_deny("from inside a linked tree, a sibling of the primary is still outside",
+hm_refuse("from inside a linked tree, a sibling of the primary is still outside",
         HMADD + "../../../lane-x", cwd=HMLANE)
-hm_deny("a PowerShell call is judged the same",
+hm_refuse("a PowerShell call is judged the same",
         "Set-Location " + HMIN + "; " + VCS + " worktree add ../lane-x", tool="PowerShell",
         cwd=NOGIT)
-hm_deny("a PowerShell call with -C and a scratch path is refused",
+hm_refuse("a PowerShell call with -C and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, tool="PowerShell", cwd=NOGIT)
-hm_deny("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
-hm_deny("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
+hm_refuse("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
+hm_refuse("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
 # A cd into a variable folder is judged where the shell runs the command, so it takes the verdict of its
 # literal twin. The -C form reads its variable on another branch only, so it has no row here.
-hm_deny("a variable folder, cd \"$R\", then a tree outside home is refused, as the literal cd is",
+hm_refuse("a variable folder, cd \"$R\", then a tree outside home is refused, as the literal cd is",
         "R=" + HMIN + "; cd \"$R\" && " + HMADD + HMSCRATCH, cwd=NOGIT)
-hm_deny("a braced variable folder, cd \"${R}\", then a tree outside home is refused",
+hm_refuse("a braced variable folder, cd \"${R}\", then a tree outside home is refused",
         "R=" + HMIN + "; cd \"${R}\" && " + HMADD + HMSCRATCH, cwd=NOGIT)
-hm_deny("the literal twin: cd into the primary, then a tree outside home, is refused",
+hm_refuse("the literal twin: cd into the primary, then a tree outside home, is refused",
         "cd " + HMIN + " && " + HMADD + HMSCRATCH, cwd=NOGIT)
 
 # ALLOW. Nothing here is the act, or the act lands in the home folder, or the repo is a throwaway.
@@ -6959,9 +6959,9 @@ sh("silent-write real: a variable folder holding the real checkout, cd \"$R\" th
    cwd=THROWAWAY)
 sh("silent-write real: the literal twin, cd into the real checkout then a discarded commit, is refused",
    "cd " + slash(GITMAIN) + " && " + VCS + " commit -m x >/dev/null", "deny", "silent-write", cwd=THROWAWAY)
-# A variable is read only from a plain assignment that runs in this shell. On 9e6762c56 the walk reads the
-# throwaway folder in the first and third rows and allows the commit; the one-quote row is denied there, as
-# on main. Judged from the real checkout, each row stays denied.
+# A variable is read only from a plain assignment that runs in this shell. A walk that reads the throwaway
+# folder in the first and third rows allows the commit; the one-quote row is denied either way. Judged from the
+# real checkout, each row stays denied.
 sh("silent-write [cdvar-unread]: D=<throwaway> mkdir -p, cd \"$D\", then a discarded commit from the real checkout, is refused",
    "D=" + TSLASH + " mkdir -p \"$D\"; cd \"$D\" && " + VCS + " commit -m x >/dev/null 2>&1", "deny", "silent-write",
    cwd=GITMAIN)
@@ -6972,7 +6972,7 @@ sh("silent-write [cdvar-unread]: as the row before, with a second quote after R=
    "R=" + TSLASH + "; echo \"it's\"; R=" + slash(GITMAIN) + "; echo \"it's\"; cd \"$R\" && " + VCS
    + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)
 # A `[ -d <missing> ] &&` may fail, so the assignment after it may not run and the cd target is unknown:
-# the discarded commit is refused. Red on 5b6135cbf, which reads the assignment as run and allows the commit.
+# the discarded commit is refused. A walk that reads the assignment as run allows the commit and fails this row.
 # The row after it is its twin with the assignment first, which runs, so the throwaway repo is judged.
 sh("silent-write [cdvar-unread]: [ -d <missing> ] && R=<throwaway>, cd \"$R\", then a discarded commit, is refused",
    "[ -d " + slash(os.path.join(ROOT, "no-such-folder")) + " ] && R=" + TSLASH + "; cd \"$R\" && " + VCS
@@ -6980,8 +6980,8 @@ sh("silent-write [cdvar-unread]: [ -d <missing> ] && R=<throwaway>, cd \"$R\", t
 sh("silent-write [cdvar-unread]: control: R=<throwaway> && cd \"$R\", then a discarded commit, is allowed",
    "R=" + TSLASH + " && cd \"$R\" && " + VCS + " commit -m x >/dev/null 2>&1", "allow", cwd=GITMAIN)
 # A `ls <missing> &&` may fail, so the cd after it may not run and the commit's folder is unknown: the
-# discarded commit is refused. Red on 49ef79340, which reads the cd as run and allows the commit; the tests
-# branch's own product denies it, as the row expects.
+# discarded commit is refused. A walk that reads the cd as run allows the commit; the product denies it, as
+# the row expects.
 sh("silent-write [cdvar-unread]: R=<throwaway>; ls <missing> && cd \"$R\", then a discarded commit from the real checkout, is refused",
    "R=" + TSLASH + "; ls " + slash(os.path.join(ROOT, "no-such-folder")) + " && cd \"$R\"; " + VCS
    + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)

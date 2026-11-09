@@ -138,9 +138,9 @@ case("a variable built from an unknown one is unknown: None",
 
 
 # --- A variable is read only from a plain NAME=value that runs in this shell. The cases that expect
-# None are red on 9e6762c56, where the walk takes a value no shell at that position holds. The literal
-# apostrophe form, the comment cases and the controls are green on 9e6762c56 and must stay green. On main,
-# which reads no variable, the None cases are green and the controls are red.
+# None fail a walk that takes a value no shell at that position holds. The literal
+# apostrophe form, the comment cases and the controls pass on a correct walk and must keep passing.
+# A walk that reads no variable passes the None cases and fails the controls.
 case("a prefix assignment, D=<dir> true, is not the shell's variable: cd \"$D\" reads None",
      'D=%s true; cd "$D" && git status' % TARGET, "git status", None)
 case("an apostrophe in double quotes, then a later assignment: cd \"$R\" reads B or None, never A",
@@ -178,7 +178,7 @@ case("a comment opener inside double quotes is text: the assignment after it sti
      'R=%s; echo "# x"; R=%s; cd "$R" && git status' % (TARGET, OTHER), "git status", OTHER)
 
 # --- An assignment after `&&` runs only when the command before it succeeds. The walk cannot tell that
-# for a command that may fail, so the assignment is not read: None. Red on 5b6135cbf, which reads it as run.
+# for a command that may fail, so the assignment is not read: None. A walk that reads it as run fails these rows.
 # The `true` row may go either way. `R=<dir> && cd "$R"` is the control at line 169.
 case("[ -d <missing> ] && R=<B>, then cd \"$R\": the assignment may not run, so None",
      '[ -d %s ] && R=%s; cd "$R" && git status' % (MISSING, OTHER), "git status", None)
@@ -192,9 +192,9 @@ case("control: true && R=<B>, then cd \"$R\": either answer, the assignment may 
      'true && R=%s; cd "$R" && git status' % OTHER, "git status", (OTHER, None))
 
 # --- A cd after an `&&` whose left side may fail is not known to run: the shell may stay where it was, so the
-# folder the next command runs in is None. Red on 49ef79340, which reads the cd's variable as run; the
-# controls are green there. The literal twin (`ls <missing> &&`, a newline, `cd <A>`) reads A on main and on
-# 49ef79340 alike. That is a known gap, not red here: the right answer is None, so the row takes A or None
+# folder the next command runs in is None. A walk that reads the cd's variable as run fails these rows; the
+# controls pass either way. The literal twin (`ls <missing> &&`, a newline, `cd <A>`) reads A in every walk,
+# so that is a known gap, not a failure here: the right answer is None, so the row takes A or None
 # and does not pin A as the only answer.
 case("R=<A>; ls <missing> && cd \"$R\": the cd may not run, so the next command reads None, not A",
      'R=%s; ls %s && cd "$R"; git status' % (TARGET, MISSING), "git status", None)
@@ -213,7 +213,7 @@ case("control: R=<A>, a newline, then cd \"$R\" reads A",
 
 # --- A paren group inside a segment does not undo that segment's own clear. A group that balances inside
 # the segment (`$(...)`, `<(...)`, `((...))`, `$((...))`) is not a subshell, so the variable it clears stays
-# cleared. Red on 5b6135cbf, which restores the value from before the segment. The subshell rows are controls.
+# cleared. A walk that restores the value from before the segment fails these rows. The subshell rows are controls.
 case("R=<A>; R=$(cmd); cd \"$R\": the substitution clears R, so None, not A",
      'R=%s; R=$(pwd); cd "$R" && git status' % TARGET, "git status", None)
 case("R=<A>; export R=$(cmd); cd \"$R\": the export clears R, so None, not A",
@@ -236,7 +236,7 @@ case("control: R=<A>; (cd <B>); cd \"$R\" reads A, the subshell cd does not pers
      'R=%s; (cd %s); cd "$R" && git status' % (TARGET, SECOND), "git status", TARGET)
 
 # --- A prefix assignment on the cd is not in effect when the cd's word is expanded: bash expands "$R"
-# before `R=<value>` applies. Red on 5b6135cbf, which reads the prefix value as the folder. With R=<A>
+# before `R=<value>` applies. A walk that reads the prefix value as the folder fails these rows. With R=<A>
 # first, the cd target is A, never B.
 case("R=<A> cd \"$R\": the prefix assignment is not the cd target, the target is unset: None",
      'R=%s cd "$R" && git status' % TARGET, "git status", None)
