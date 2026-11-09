@@ -382,7 +382,7 @@ class QuestionReviewer(unittest.TestCase):
         self.assertEqual(gaps, [], "the question reviewer prompt does not name: %s" % gaps)
 
     def test_the_rubric_check_sees_each_missing_item(self):
-        # Green on main by design: it tests the check, not settings.json.
+        # It tests the check itself, not settings.json, so an edit to settings.json cannot change its result.
         self.assertEqual(set(SAMPLE), set(RUBRIC), "SAMPLE and RUBRIC name different items")
         self.assertEqual(rubric_gaps(" ".join(SAMPLE.values())), [])
         self.assertEqual(rubric_gaps(""), list(RUBRIC))
@@ -410,7 +410,7 @@ class QuestionReviewer(unittest.TestCase):
         self.assertEqual(listed, [], "the question reviewer prompt lists source kinds %s: code reads them" % listed)
 
     def test_the_kinds_readers_see_a_kind_added_or_dropped(self):
-        # Green on main by design: it tests the two readers, not settings.json.
+        # It tests the two readers, not settings.json, so an edit to settings.json cannot change its result.
         row = "| `%s` | means | Weak |\n"
         table = table_kinds("| Kind | Means |\n|---|---|\n" + row % "ruling" + row % "assumed")
         self.assertEqual(table, ["ruling", "assumed"])
