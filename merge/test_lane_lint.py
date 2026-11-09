@@ -1143,5 +1143,40 @@ class LintCheckJoin(tm.CloudSession):
         self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), out)
 
 
+    def side_commit(self):
+        """A commit on a branch of its own, off main: in origin, and in no history of feat. -> its sha."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "side", "origin/main")
+        tm.put(os.path.join(o, "side.txt"), "side\n")
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", "A side commit")
+        tm.sh(o, "git", "push", "-q", "origin", "side")
+        return tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def test_a_forged_claim_trailer_on_a_non_record_file_is_refused(self):
+        # a trailer alone is no claim: the newer commit must touch only record files
+        linted = self.head("feat")
+        self.feat_commit({"notes.txt": "forged\n"}, "Claim record numbers", "Record-claim: D-903")
+        self.assert_refused([lint_comment(2, linted)], "a Record-claim trailer on a commit that touches a non-record file")
+
+    def test_a_record_only_commit_with_no_trailer_is_refused(self):
+        linted = self.head("feat")
+        self.feat_commit({"docs/decisions/d904.md": "# D904\n"}, "Add a decision")
+        self.assert_refused([lint_comment(2, linted)], "a commit that touches only record files and has no Record-claim trailer")
+
+    def test_a_normal_commit_after_a_claim_commit_is_refused(self):
+        linted = self.head("feat")
+        self.feat_commit({"docs/decisions/d905.md": "# D905\n"}, "Claim record numbers", "Record-claim: D-905")
+        self.feat_commit({"notes.txt": "normal\n"}, "Fix the notes")
+        self.assert_refused([lint_comment(2, linted)], "a normal commit after a claim commit")
+
+    def test_a_pass_for_a_head_the_live_head_does_not_descend_from_is_refused(self):
+        # the newer commits are claim-only, so only the ancestry of the PASS's head is wrong: it is a commit of its own branch
+        side = self.side_commit()
+        self.feat_commit({"docs/decisions/d906.md": "# D906\n"}, "Claim record numbers", "Record-claim: D-906")
+        self.assert_refused([lint_comment(2, side)], "a lint PASS for a head that is not an ancestor of the live head")
+
+
 if __name__ == "__main__":
     unittest.main()
