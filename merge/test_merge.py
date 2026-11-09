@@ -15228,13 +15228,20 @@ class BatchFreeze(CloudSession):
             calls.append((a.arguments["target"], a.arguments["base"], a.arguments["unknown_ok"]))
         return calls
 
-    def lint_fail_naming(self, *paths):
-        """ci_job_run's answer for a batch head whose lint FAILs on a step that names each of `paths`. ci-job's FAIL line names the step and
-        the verdict log (`log=`), not a path: the step's own output, which names the failing paths, is in that log. -> the answer as
-        ci_job_run returns it: (state, lines, log, liftable)."""
+    # ci-job names a step by its temp script (verdict's argv), as captured from `ci-job checks --workflow` on a scratch workflow.
+    FAILED_STEP_CMD = "/usr/bin/bash -e /tmp/tmp62v2ry54.sh"
+    PASSED_STEP_CMD = "/usr/bin/bash -e /tmp/tmp24302j2s.sh"
+
+    def lint_fail_naming(self, *paths, passing=()):
+        """ci_job_run's answer for a batch head whose lint FAILs on one step that names each of `paths`, in the log shape ci-job writes: one
+        verdict log shared by every step, each step's section headed `=== verdict run <time>: <cmd>`, and the FAIL line carries that same
+        <cmd>. A passing step's section comes first and names each of `passing`. -> the answer as ci_job_run returns it: (state, lines, log, liftable)."""
         log = os.path.join(self.t, "ci-job-batch.log")
-        put(log, "".join(f"lint/check_lane_paths.py: FAIL {p}:1: the lane header is missing\n" for p in paths))
-        verdict = f"FAIL python3 lint/check_lane_paths.py rc=1 (0.2s) log={log}"
+        put(log, f"=== verdict run 2026-11-09 04:47:54: {self.PASSED_STEP_CMD}\n"
+                 + "".join(f"a passing step prints {p}\n" for p in passing)
+                 + f"=== verdict run 2026-11-09 04:47:54: {self.FAILED_STEP_CMD}\n"
+                 + "".join(f"lint/check_lane_paths.py: FAIL {p}:1: the lane header is missing\n" for p in paths))
+        verdict = f"FAIL {self.FAILED_STEP_CMD} rc=1 (0.2s) log={log}"
         return ("fail", ["%-15s %s: %s" % ("FAIL", "Check lane paths", verdict)], [f"log={log}"], False)
 
     def drop_pr_numbers(self, out, name):
