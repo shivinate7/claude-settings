@@ -10184,13 +10184,10 @@ _FIND_PRUNE_ALL = "find . -path ./node_modules -prune -o -print | xargs grep K"
 sh("env: walk pin, find -prune then -print names every file, refused: " + _FIND_PRUNE_ALL, _FIND_PRUNE_ALL, "deny",
    "env-file", cwd=ENVWALK_HELD)
 
-# Each env file name starts with .env, so `! -name '.env*'` names no env file. The word check refuses the glob
-# `'.env*'` in any folder, since find is no pattern command, so this row is red on that check and not on the walk.
-# It runs in a folder with no env file to show that. The control negates a glob no env name fits, so the env file
-# stays in the names and the walk refuses it.
+# Known limit: the word check judges an env-shaped word even when find negates it, so `! -name '.env*'` is refused.
 _FIND_NOT_ENV = "find . -type f ! -name '.env*' | xargs grep K"
-sh("env: word check false alarm, find -name '.env*' pattern is judged as an env path, allowed: " + _FIND_NOT_ENV,
-   _FIND_NOT_ENV, "allow", cwd=ENVWALK_CLEAN)
+sh("env: word check pin, find ! -name '.env*' is refused even when negated, refused: " + _FIND_NOT_ENV,
+   _FIND_NOT_ENV, "deny", "env-file", cwd=ENVWALK_CLEAN)
 _FIND_NOT_JS = "find . -type f ! -name '*.js' | xargs grep K"
 sh("env: walk pin, find ! -name *.js keeps the env file in the names, refused: " + _FIND_NOT_JS, _FIND_NOT_JS, "deny",
    "env-file", cwd=ENVWALK_HELD)
