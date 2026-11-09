@@ -1,0 +1,10 @@
+{
+  "title": "The folder walk reads `cd \"$(cmd)\"` as a change of folder",
+  "why": "Lane cd-var-dir-unread (#2379), 23:15 CST Nov 8: `cd \"$(cmd)\"` keeps the folder from before the segment, because the `)` pop in dir_before_segment (hooks/guard_core.py) restores `where` from the saved copy. Same cause as #2379's paren-pop fix for variables. Main does the same.",
+  "note": "Also noted: the literal twin `ls M &&\\n cd A` reads as run (same on main). Red case first.",
+  "phase": "next",
+  "owner": "coordinator",
+  "status": "todo",
+  "order": 875,
+  "updatedAt": "2026-11-08T23:16:00-06:00"
+}

@@ -1,0 +1,10 @@
+{
+  "title": "Triage runs each roadmap push in its own call",
+  "why": "Triage mistake 23:14 CST Nov 8: it ran commit and push in one Bash call, against its handoff's rule (push alone, so a non-fast-forward refusal is read and rebased before anything else runs). No harm: the push went through.",
+  "note": "Low value for a hook; a candidate for the triage brief's checklist instead. Decide at the next cull.",
+  "phase": "later",
+  "owner": "coordinator",
+  "status": "todo",
+  "order": 876,
+  "updatedAt": "2026-11-08T23:16:00-06:00"
+}
