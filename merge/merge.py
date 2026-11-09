@@ -3649,6 +3649,13 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--kind docs-only means no guard or check, so --guard must be no")
         if a.fix_check and a.fix_check[0] == a.head:
             p.error("--fix-check: the reviewed head must differ from --head, or the fix diff is empty")
+        # The reviewer row (decision agent-model-cap): a fix check and a reviewer round 2 or 3 run Sonnet; round 3 may run Opus by the
+        # owner's override. Checked here, never in parse_review, so a record posted before the rule still parses.
+        if a.fix_check and "sonnet" not in a.fix_check[2].lower():
+            p.error(f"--fix-check: a fix check runs sonnet, not {a.fix_check[2]!r} (decision agent-model-cap, the reviewer row)")
+        for n, role, model, _verdict in a.round:
+            if role == REVIEW_ROLES[0] and n >= 2 and "sonnet" not in model.lower() and not (n == 3 and "opus" in model.lower()):
+                p.error(f"--round {n}: a reviewer's round {n} runs sonnet, not {model!r}; only round 3 may run opus (decision agent-model-cap, the reviewer row)")
         if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)) is None:
             p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3")
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
