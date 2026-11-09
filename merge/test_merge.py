@@ -15315,6 +15315,13 @@ def incident_host(**reads):
              2401: [touch_file("docs/x.md", "@@ -1,1 +1,1 @@", "+a docs line")]}
     return TouchesHost(pulls, files, **reads)
 
+def run_jobs(*rows):
+    """A run's jobs as its jobs read lists them, and each job's log as its log read returns it. A row is (id, name, conclusion, log text); a job
+    with conclusion None is still running. -> (jobs, job_logs): the `jobs` and `job_logs` of TouchesHost, keyed as its reads key them."""
+    listed = [{"id": i, "name": name, "status": "in_progress" if conclusion is None else "completed", "conclusion": conclusion}
+              for i, name, conclusion, _log in rows]
+    return {TOUCH_RUN: listed}, {str(i): log for i, _name, _conclusion, log in rows}
+
 def cost_host(**reads):
     """Three open pulls, for the cost pin: #2390 (the fix, ready), #2401 (unrelated) and #2402 (a draft that touches the guard file, with no case)."""
     pulls = [touch_pull(2390, TOUCH_FIX), touch_pull(2401, "docs-x"), touch_pull(2402, "wip-guard-tests", draft=True)]
@@ -15575,6 +15582,77 @@ class TouchesRead(Env):
                 rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, "--file", TOUCH_GUARD, host=incident_host(jobs=jobs, count_gh=True))
                 self.assertEqual(rc, 1, out + err)
                 self.assertIn("merge: unknown", err, f"a {conclusion} red job read clear beside --file:\n" + out + err)
+
+    def touches_run(self, rows, *argv):
+        """`merge --touches --run RUN` beside argv, over the run of `rows` (run_jobs) and the incident's open pulls. -> (rc, out, err). The scope
+        is read first: the run's jobs were listed, and the log of each failed job was read (the gate job's log is not asked for), so a verdict
+        below is about the log lines and never about a read that did not run."""
+        jobs, logs = run_jobs(*rows)
+        host = incident_host(jobs=jobs, job_logs=logs, count_gh=True)
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, *argv, host=host)
+        self.assertIn(f"actions/runs/{TOUCH_RUN}/jobs", host.gh_calls, "the run's jobs were not listed")
+        for i, name, conclusion, _log in rows:
+            if conclusion == "failure" and name != REQUIRED_CHECK:
+                self.assertIn(f"actions/jobs/{i}/logs", host.gh_calls, f"the log of failed job {i} was never read")
+        return rc, out, err
+
+    def unparsed_beside_parsed_rows(self):
+        """Job 1 logs a case no open pull touches, so its case alone reads clear on the tip; job 2's log holds only the exit line, which parses to nothing."""
+        other = "brief-destructive-git: a case no open pull request touches"
+        return ((201, "tests", "failure", failed_case(other)), (202, "lint", "failure", "Error: Process completed with exit code 1."))
+
+    def test_a_failed_job_that_logs_no_case_beside_a_parsed_one_is_unknown_never_clear(self):
+        rc, out, err = self.touches_run(self.unparsed_beside_parsed_rows())
+        self.assertEqual(rc, 1, "a failed job that logged no case read clear beside a parsed one:\n" + out + err)
+        self.assertIn("merge: unknown", err, "a failed job that logged no case printed no unknown beside a parsed one:\n" + out + err)
+        self.assertNotIn(TOUCH_NONE, out + err, "the clear line printed beside a failed job that logged no case")
+
+    def test_a_failed_job_that_logs_no_case_beside_a_parsed_one_keeps_its_matches_on_stdout(self):
+        rc, out, err = self.touches_run(self.unparsed_beside_parsed_rows(), "--file", TOUCH_GUARD)
+        self.assertEqual(rc, 1, "a failed job that logged no case read clear beside --file:\n" + out + err)
+        self.assertIn("merge: unknown", err, "a failed job that logged no case printed no unknown beside --file:\n" + out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}"],
+                         "the matches on stdout changed beside the unknown:\n" + out)
+
+    def test_a_startup_failure_action_required_or_running_job_beside_a_parsed_failure_is_unknown(self):
+        for conclusion in ("startup_failure", "action_required", None):
+            with self.subTest(conclusion=conclusion):
+                rows = ((201, "tests", "failure", failed_case(TOUCH_CASE_A)), (202, "lint", conclusion, ""))
+                rc, out, err = self.touches_run(rows)
+                self.assertEqual(rc, 1, f"a job with conclusion {conclusion!r} beside a parsed failed job read clear:\n" + out + err)
+                self.assertIn("merge: unknown", err, f"a job with conclusion {conclusion!r} printed no unknown beside a parsed failed job:\n" + out + err)
+                self.assertNotIn(TOUCH_NONE, out + err, f"the clear line printed beside a job with conclusion {conclusion!r}")
+                self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"],
+                                 "the matches on stdout changed beside the unknown:\n" + out)
+
+    def test_a_failed_job_with_an_empty_log_beside_a_parsed_failure_is_unknown(self):
+        rc, out, err = self.touches_run(((201, "tests", "failure", failed_case(TOUCH_CASE_A)), (202, "lint", "failure", "")))  # HTTP 200, no lines
+        self.assertEqual(rc, 1, "a failed job with an empty log read clear beside a parsed failed job:\n" + out + err)
+        self.assertIn("merge: unknown", err, "a failed job with an empty log printed no unknown beside a parsed failed job:\n" + out + err)
+        self.assertNotIn(TOUCH_NONE, out + err, "the clear line printed beside a failed job with an empty log")
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"],
+                         "the matches on stdout changed beside the unknown:\n" + out)
+
+    def test_success_skipped_and_neutral_jobs_beside_a_parsed_failure_read_clear(self):
+        for conclusion in ("success", "skipped", "neutral"):
+            with self.subTest(conclusion=conclusion):
+                rc, out, err = self.touches_run(((201, "tests", "failure", failed_case(TOUCH_CASE_A)), (202, "lint", conclusion, "")))
+                self.assertEqual(rc, 0, f"a job with conclusion {conclusion!r} beside a parsed failed job read as unknown:\n" + out + err)
+                self.assertNotIn("merge: unknown", err, f"a job with conclusion {conclusion!r} printed unknown beside a parsed failed job:\n" + err)
+                self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"], out)
+
+    def test_the_all_jobs_passed_gate_failing_beside_a_parsed_failure_is_not_read_unknown(self):
+        rc, out, err = self.touches_run(((201, "tests", "failure", failed_case(TOUCH_CASE_A)),
+                                         (202, REQUIRED_CHECK, "failure", f"{REQUIRED_CHECK}: failure")))  # the gate fails in every red run, with this one line
+        self.assertEqual(rc, 0, "the gate job's failure read as unknown beside a parsed failed job:\n" + out + err)
+        self.assertNotIn("merge: unknown", err, "the gate job's failure printed unknown beside a parsed failed job:\n" + err)
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"], out)
+
+    def test_two_failed_jobs_that_each_log_a_case_read_clear(self):
+        rc, out, err = self.touches_run(((201, "tests", "failure", failed_case(TOUCH_CASE_A)), (202, "lint", "failure", failed_case(TOUCH_CASE_B))))
+        self.assertEqual(rc, 0, "two failed jobs that each log a case read as unknown:\n" + out + err)
+        self.assertNotIn("merge: unknown", err, "two failed jobs that each log a case printed unknown:\n" + err)
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}; case {TOUCH_CASE_B}"], out)
 
     def test_a_changed_file_with_no_patch_makes_its_pull_unknown_for_a_case(self):
         pulls = [touch_pull(2390, TOUCH_FIX), touch_pull(2401, "docs-x")]
