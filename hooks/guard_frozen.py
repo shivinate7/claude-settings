@@ -805,7 +805,7 @@ def _join_path(head: str, tail: str) -> str:
     return head.rstrip("/") + "/" + tail if head else tail
 
 
-_PY_TEMP = "\0temp"   # stands for a folder a temp call made: no path of the repo, so nothing under it is judged
+_PY_TEMP = "\0temp"   # a folder a python or node temp call made: no path of the repo, so nothing under it is judged
 _PY_TEMP_CALLS = ("mkdtemp", "mkstemp", "gettempdir", "TemporaryDirectory")
 
 
@@ -983,12 +983,44 @@ def _py_written(tree, env_at):
     return [(call, expression) for call, expression in out if expression is not None]
 
 
-def _py_hit(body: str, cwd: str, predicate, script: str = "") -> str:
+_PY_PREFIX_TRIES = 8   # parses of a cut script, at most; each is of no more than `_SCRIPT_READ_LIMIT` bytes
+
+
+def _py_prefix_tree(body: str):
+    """The tree of the longest run of whole lines from the start of a cut script that parses, else None.
+    The last line may be partial, so it goes first. A parse error names the line its statement opens
+    on (an open bracket or triple quote), so each try cuts there and the search ends in a few tries."""
+    import ast
+    lines = body.splitlines(keepends=True)[:-1]
+    for _ in range(_PY_PREFIX_TRIES):
+        if not lines:
+            return None
+        try:
+            return ast.parse("".join(lines))
+        except SyntaxError as error:
+            line = error.lineno or len(lines)
+            lines = lines[:min(line - 1, len(lines) - 1)]
+        except ValueError:
+            lines = lines[:-1]
+    return None
+
+
+def _py_hit(body: str, cwd: str, predicate, script: str = "", cut: bool = False) -> str:
+    """`cut` is True for a script file read only up to `_SCRIPT_READ_LIMIT`: it is judged by the part
+    that parses (`_py_prefix_tree`), never by the literal fallback, which would count every test-path
+    string in the file beside any write call."""
     import ast
     import textwrap
-    try:
-        tree = ast.parse(textwrap.dedent(body))
-    except (SyntaxError, ValueError):
+    if cut:
+        tree = _py_prefix_tree(body)
+        if tree is None:
+            return ""
+    else:
+        try:
+            tree = ast.parse(textwrap.dedent(body))
+        except (SyntaxError, ValueError):
+            tree = None
+    if tree is None:
         # Unparsable (a shell variable in an unquoted body, a Python 2 line): a literal path the
         # predicate accepts, beside a write call in the same body, counts.
         if _PY_WRITE_CALL.search(body):
@@ -1012,22 +1044,43 @@ _JS_ONE = re.compile(
 _JS_TWO = re.compile(
     r"(?:\b(?:copyFileSync|copyFile|renameSync|cpSync)|\bfs(?:\.promises)?\s*\.\s*(?:rename|cp))"
     r"\s*\(\s*" + _JS_STR + r"\s*,\s*" + _JS_STR)
-_JS_ASSIGN = re.compile(r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*" + _JS_STR)
+_JS_BIND = re.compile(r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*")
+_JS_VALUE = re.compile(_JS_STR)
 _JS_JOIN_PIECE = re.compile(r"""\s*(?:'([^']*)'|"([^"]*)"|`([^`$]*)`|([A-Za-z_$][\w$]*))\s*$""")
+_JS_TEMP_STEP = re.compile(
+    r"\s*(?:await\s+)?(?:(?:[A-Za-z_$][\w$]*\s*\.\s*)*(tmpdir|mkdtempSync|mkdtemp)\s*\("
+    r"|path\s*\.\s*(?:join|resolve)\s*\(|([A-Za-z_$][\w$]*)(?![\w$]|\s*[.(]))")
+
+
+def _js_temp_head(body: str, at: int, env, depth: int = 0) -> bool:
+    """True when the expression at `at` starts with a folder a temp call made: `os.tmpdir()`, a name bound
+    to one, a `path.join` that starts with one, or `fs.mkdtempSync` given one. A mkdtemp prefix that starts
+    anywhere else makes the folder there, maybe in the repo, as python's `dir=` does: no temp head."""
+    match = _JS_TEMP_STEP.match(body, at)
+    if not match or depth > 4:
+        return False
+    if match.group(2):
+        return env.get(match.group(2)) == [_PY_TEMP]
+    if match.group(1) == "tmpdir":
+        return True
+    return _js_temp_head(body, match.end(), env, depth + 1)
 
 
 def _js_join(args: str, env) -> list:
     """The paths `path.join(...)` or `path.resolve(...)` can hold: each quoted piece, and each name bound
-    to a path (`__dirname`, a `const`), joined in order. A piece it cannot tell is left out, as for python."""
+    to a path (`__dirname`, a `const`), joined in order. A later piece it cannot tell is left out, as for
+    python. A first piece it cannot tell may be any folder, the repo's or not, so nothing under it is
+    judged: empty. A temp folder stays a temp folder (`_PY_TEMP`)."""
     out = [""]
-    for piece in args.split(","):
+    for number, piece in enumerate(args.split(",")):
         match = _JS_JOIN_PIECE.match(piece)
-        if not match:
+        quoted = next((g for g in match.groups()[:3] if g is not None), None) if match else None
+        options = [quoted] if quoted is not None else list(env.get(match.group(4), ())) if match else []
+        if not options:
+            if number == 0:
+                return []
             continue
-        quoted = next((g for g in match.groups()[:3] if g is not None), None)
-        options = [quoted] if quoted is not None else list(env.get(match.group(4), ()))
-        if options:
-            out = [(_join_path(a, b.lstrip("/")) if a else b) for a in out for b in options]
+        out = [a if a == _PY_TEMP else _join_path(a, b.lstrip("/")) if a else b for a in out for b in options]
     return out if out != [""] else []
 
 
@@ -1046,8 +1099,12 @@ def _js_values(groups, env):
 def _js_hit(body: str, cwd: str, predicate, script: str = "") -> str:
     """`script` is the file the body came from: `__filename` is that path and `__dirname` its folder."""
     env = {"__filename": [script], "__dirname": [os.path.dirname(script)]} if script else {}
-    for match in _JS_ASSIGN.finditer(body):
-        values = _js_values(match.groups()[1:], env)
+    for match in _JS_BIND.finditer(body):
+        if _js_temp_head(body, match.end(), env):
+            values = [_PY_TEMP]
+        else:
+            value = _JS_VALUE.match(body, match.end())
+            values = _js_values(value.groups(), env) if value else []
         if values:
             known = env.setdefault(match.group(1), [])
             known.extend(v for v in values if v not in known)
@@ -1131,15 +1188,17 @@ def _script_path(name: str, where: str) -> str:
     return os.path.normpath(name)
 
 
-def _read_script(path: str) -> str:
-    """The first `_SCRIPT_READ_LIMIT` bytes of a script file, or '' for a folder, a missing or an unreadable file."""
+def _read_script(path: str):
+    """(text, cut): the first `_SCRIPT_READ_LIMIT` bytes of a script file, and True when the file runs past
+    them. ('', False) for a folder, a missing or an unreadable file."""
     try:
         if not os.path.isfile(path):
-            return ""
+            return "", False
         with open(path, "rb") as handle:
-            return handle.read(_SCRIPT_READ_LIMIT).decode("utf-8", "replace")
+            data = handle.read(_SCRIPT_READ_LIMIT + 1)
     except OSError:
-        return ""
+        return "", False
+    return data[:_SCRIPT_READ_LIMIT].decode("utf-8", "replace"), len(data) > _SCRIPT_READ_LIMIT
 
 
 def _heredoc_scripts(raw: str, segments, ends, cwd: str) -> dict:
@@ -1191,13 +1250,14 @@ def _script_file_hit(raw: str, cwd: str, predicate) -> str:
             continue
         if written is None:
             written = _heredoc_scripts(raw, segments, ends, cwd) if "<<" in raw else {}
-        bodies = [body for made, body in written.get(path, ()) if made < number]
+        bodies = [(body, False) for made, body in written.get(path, ()) if made < number]
         bodies.append(_read_script(path))
-        for body in bodies:
-            if body:
-                hit = (_py_hit if kind == "py" else _js_hit)(body, at, predicate, path)
-                if hit:
-                    return hit
+        for body, cut in bodies:
+            if not body:
+                continue
+            hit = _py_hit(body, at, predicate, path, cut) if kind == "py" else _js_hit(body, at, predicate, path)
+            if hit:
+                return hit
     return ""
 
 
