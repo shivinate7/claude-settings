@@ -15,7 +15,7 @@ Why: batch 66 merged nothing in 5.5 hours (Nov 8, 14:50-20:20 CST). Runner 8 reb
 
 Sources: owner, 2026-11-08 20:24 CST, as relayed in the coordinator's brief: fix the cause before new lanes start. The four rules above are the coordinator's brief, not the owner's own words.
 
-Tool check: no tool rebuilds or lints a lane set by itself. `merge --lane-lint` runs only when a session types it. The draft step (`merge <pr> --confirm` on a draft) runs the repo's ready checks once, before the ready mark, and never on a PR that is already ready. A drop runs neither. Nothing in `merge/` or `bin/` needs a change for this ruling.
+Tool check: no tool rebuilds or lints a lane set by itself. `merge --lane-lint` runs only when a session types it. The draft step (`merge <pr> --confirm` on a draft) runs the repo's ready checks once, before the ready mark, and never on a PR that is already ready. A drop runs neither. So the freeze is held by hand today. Owner, 2026-11-08 20:30 CST, relayed by triage and the coordinator: enforce it in the merge tool. That is step `batch-freeze-lane-set-enforce`, a separate lane, not built here. Until it lands, the batch runner holds the freeze by hand.
 
 Kind: process
 Home: skills/ci-hygiene/SKILL.md

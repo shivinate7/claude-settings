@@ -71,6 +71,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    passes. A draft run skips every job, so never rebuild a draft batch only to close it. The next
    batch builds and runs on top of the one in CI, and its head holds the running batch's head, so it
    is not refused (decision `no-merge-during-batch-ci`, the contains rule).
+   The merge tool will enforce the freeze (step `batch-freeze-lane-set-enforce`, not built yet). Until
+   it lands, the batch runner holds the freeze by hand.
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
    the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
