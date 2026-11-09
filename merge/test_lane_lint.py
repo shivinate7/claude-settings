@@ -1063,17 +1063,24 @@ class StepCites(CiJobStub, tm.CloudSession):
     run_lane = LaneLint.run_lane  # the run and its refusal read, as LaneLint reads them
     lint_run = LaneLint.lint_run
 
-    def put_roadmap(self, slugs):
-        """origin's roadmap branch: an orphan holding roadmap/data/steps/<slug>.json for each of `slugs`."""
+    def put_roadmap(self, slugs, branch="roadmap"):
+        """origin's record branch `branch`: an orphan holding roadmap/data/steps/<slug>.json for each of `slugs`. Each call takes its own local name."""
         o = self.other
+        local = "fixture-" + branch
         tm.sh(o, "git", "fetch", "-q", "origin")
-        tm.sh(o, "git", "checkout", "-q", "--orphan", "roadmap")
+        tm.sh(o, "git", "checkout", "-q", "--orphan", local)
         tm.sh(o, "git", "rm", "-rq", "-f", ".")
         for slug in slugs:
             tm.put(os.path.join(o, STEP_FOLDER, slug + ".json"), json.dumps(STEP_JSON))
         tm.sh(o, "git", "add", "-A")
-        tm.sh(o, "git", "commit", "-qm", "roadmap steps")
-        tm.sh(o, "git", "push", "-q", "origin", "roadmap")
+        tm.sh(o, "git", "commit", "-qm", "record branch steps")
+        tm.sh(o, "git", "push", "-q", "origin", f"{local}:refs/heads/{branch}")
+
+    def write_layout_extras(self, keys):
+        """The lane checkout's extras file, as lint/layout.py reads it from the root the lint runs in: `kinds`, plus the `keys` given."""
+        data = {"kinds": {}}
+        data.update(keys)
+        tm.put(os.path.join(self.co, ".claude", "layout-extras.json"), json.dumps(data) + "\n")
 
     def push_main(self, files):
         """One commit on origin's main holding `files` ({path: text}), pushed from the second clone."""
@@ -1201,6 +1208,48 @@ class StepCites(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 1, "a missing step cited bare, without backticks, passed the lint: " + text)
         self.assertIn("bare-ghost", text, "the refusal does not name the bare missing step: " + text)
         self.assertEqual(pass_lines(text), [], "the lint printed PASS over a bare missing step: " + text)
+
+    def test_a_cite_of_a_step_on_the_fork_record_branch_passes_under_the_record_branch_key(self):
+        self.put_roadmap(["roadmap-only-step"])
+        self.put_roadmap(["fork-step"], branch="roadmap-fork")
+        self.write_layout_extras({"record-branch": "roadmap-fork"})
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "Builds on `step:fork-step`.")})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a cite of a step on the record branch named by the extras key refused the lint: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, "the lint passed with no PASS line: " + text)
+
+    def test_a_cite_of_a_step_only_on_origin_roadmap_is_refused_under_the_record_branch_key(self):
+        self.put_roadmap(["roadmap-only-step"])
+        self.put_roadmap(["fork-step"], branch="roadmap-fork")
+        self.write_layout_extras({"record-branch": "roadmap-fork"})
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "Builds on `step:roadmap-only-step`.")})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a step only on origin/roadmap passed under the extras key that names roadmap-fork: " + text)
+        self.assertIn("roadmap-only-step", text, "the refusal does not name the step missing from the named record branch: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed PASS over a step missing from the named record branch: " + text)
+
+    def test_a_changed_record_with_an_open_fence_refuses_as_unknown_even_with_no_cite(self):
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "```bash\nnpm test")})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a changed record with an open fence passed the lint: " + text)
+        self.assertIn("unknown, not a pass", text, "the refusal does not say unknown, not a pass: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed PASS over an open fence: " + text)
+
+    def test_a_cite_after_an_open_fence_refuses_as_unknown_and_never_passes(self):
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "```bash\nnpm test\n\nBuilds on `step:ghost-x`.")})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a cite hidden by an open fence passed the lint: " + text)
+        self.assertIn("unknown, not a pass", text, "the refusal does not say unknown, not a pass: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed PASS over a cite hidden by an open fence: " + text)
+
+    def test_a_changed_record_with_a_closed_fence_passes(self):  # the control
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "```bash\nnpm test\n```\n\nBuilds on `step:real-step`.")})
+        rc, text = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a changed record with a closed fence refused the lint: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
 
     def test_a_lone_quote_or_a_comment_opener_before_a_cite_does_not_hide_it(self):
         lines = ["Don't: `step:lone-ghost`.", "Note // `step:slash-ghost`.", "Note # `step:hash-ghost`.",
