@@ -80,5 +80,37 @@ class MissingOfTheTexts(unittest.TestCase):
         self.assertEqual(scan.missing(["plain text, no cite"], set()), [], "a text with no cite listed a slug as missing")
 
 
+class OpenFence(unittest.TestCase):
+    """open_fence(text): True when the text's last fence is never closed, so the rows after it read as fenced and a cite there is not seen.
+    merge --lane-lint reads that as unknown, never as a pass."""
+
+    def test_an_open_backtick_fence_at_the_end_is_open(self):
+        self.assertTrue(scan.open_fence("```bash\nnpm test\n\nBuilds on `step:ghost-x`.\n"), "an unclosed backtick fence was read as closed")
+
+    def test_an_open_tilde_fence_at_the_end_is_open(self):
+        self.assertTrue(scan.open_fence("~~~\nnpm test\n"), "an unclosed tilde fence was read as closed")
+
+    def test_a_closed_backtick_fence_is_not_open(self):
+        self.assertFalse(scan.open_fence("```\nnpm test\n```\nafter\n"), "a closed backtick fence was read as open")
+
+    def test_a_closed_tilde_fence_is_not_open(self):
+        self.assertFalse(scan.open_fence("~~~\nnpm test\n~~~\n"), "a closed tilde fence was read as open")
+
+    def test_a_fence_opened_after_a_closed_one_is_open(self):
+        self.assertTrue(scan.open_fence("```\na\n```\n```\nb\n"), "a fence opened after a closed one was read as closed")
+
+    def test_a_backtick_row_does_not_close_a_tilde_fence(self):
+        self.assertTrue(scan.open_fence("~~~\nx\n```\n"), "a backtick row closed a tilde fence")
+
+    def test_a_shorter_closer_does_not_close_a_longer_fence(self):
+        self.assertTrue(scan.open_fence("````\nx\n```\n"), "a three-backtick row closed a four-backtick fence")
+
+    def test_a_backtick_span_in_the_info_string_opens_no_fence(self):
+        self.assertFalse(scan.open_fence("``` `x` y\nBuilds on `step:a`.\n"), "a fence whose info string holds a backtick span was read as open")
+
+    def test_a_text_with_no_fence_is_not_open(self):
+        self.assertFalse(scan.open_fence("plain `step:a` text\n"), "a text with no fence was read as open")
+
+
 if __name__ == "__main__":
     unittest.main()
