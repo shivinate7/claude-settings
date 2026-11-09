@@ -1,0 +1,11 @@
+{
+  "title": "A refusal of an unquoted URL that holds `&` tells Claude to quote the URL",
+  "why": "Since #2156 (check-tail-glued-amp), an unquoted URL such as `curl x?a=1&b=2` is refused where main allowed it. The remedy names run_in_background, not quoting, so Claude loses a retry. Claude writes unquoted query URLs in normal work.",
+  "note": "Debt, from #2156 round 3 (reviewer sonnet, 22:37 CST Nov 8) and stack B's fresh round 3 (lane bg-tail-loses-verdict, reviewer sonnet, 00:10 CST Nov 9). Site: hooks/guard_kill.py:635-640. Fix: name quoting in the remedy, or skip a `&` inside a word that holds `?` or `=`. The refusal itself is right; only the remedy is wrong. Starts after #2156 merges.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 884,
+  "updatedAt": "2026-11-09T00:12:00-06:00"
+}
