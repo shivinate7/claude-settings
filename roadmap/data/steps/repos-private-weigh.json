@@ -1,0 +1,11 @@
+{
+  "title": "The coordinator weighs making the owner's repos private, and brings one page question if it helps",
+  "why": "Owner note on item 451 a (20:04 CST Nov 8): 'im open to making all repos private if that makes us happy'. Public repos expose page copies the export scan cannot judge (plain-word personal facts).",
+  "note": "Filed by triage, Nov 8 20:04 CST. Not a ruling: the owner picked a (stay public). Weigh before asking: private repos pay Actions minutes after the free credit (macOS bills most), branch protection on a private repo needs a paid plan, and git history already pushed stays wherever it was cloned or forked. The coordinator brings the page question only if the gain is clear.",
+  "phase": "next",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "todo",
+  "order": 860,
+  "updatedAt": "2026-11-08T20:04:00-06:00"
+}
