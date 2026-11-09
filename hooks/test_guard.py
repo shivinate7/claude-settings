@@ -12117,7 +12117,7 @@ RECMAIN = os.path.join(RECROOT, "main")
 # One linked worktree per index state, each cut from the stale local `main`: a case only reads, but
 # the index is per tree.
 REC_LANES = {name: os.path.join(RECROOT, "lane-" + name) for name in (
-    "staged", "staged-edit", "unstaged", "product", "merge", "merge-rebuilt", "copy-base")}
+    "staged", "staged-edit", "unstaged", "product", "merge", "merge-rebuilt", "copy-base", "deleted")}
 REC_NOPAGE = os.path.join(RECROOT, "nopage")   # a repository that has no page at all
 REC_NOBASE = os.path.join(RECROOT, "nobase")   # a page change staged, and no origin, main or master
 
@@ -12179,6 +12179,7 @@ def _build_records_page():
     stage("merge-rebuilt", "docs/records.md")
     write(page(REC_LANES["copy-base"]), REC_V1)          # the base's page copied over, no merge
     stage("copy-base", "docs/records.md")
+    run(REC_LANES["deleted"], "rm", "docs/records.md")   # the page removed and staged, no merge in progress
     staged = lambda name: run(REC_LANES[name], "diff", "--cached", "--name-only")   # noqa: E731
     need(run(REC_LANES["staged"], "show", ":docs/records.md") == REC_LANE.strip(), "staged page is not v2")
     need(staged("unstaged") == "" and run(REC_LANES["unstaged"], "diff", "--name-only") == "docs/records.md",
@@ -12191,6 +12192,8 @@ def _build_records_page():
     need(run(REC_LANES["merge-rebuilt"], "show", ":docs/records.md") == REC_LANE.strip(),
          "the rebuilt merge lane page is not v2")
     need(run(REC_LANES["copy-base"], "show", ":docs/records.md") == REC_V1.strip(), "the copy-base page is not v1")
+    need(staged("deleted") == "docs/records.md" and run(REC_LANES["deleted"], "ls-files", "--", "docs/records.md") == "",
+         "the deleted lane does not stage the page's removal")
 
     make_repo(REC_NOPAGE, {"src/app.py": "x = 1\n"})
     write(os.path.join(REC_NOPAGE, "src", "app.py"), "x = 2\n")
@@ -12448,6 +12451,9 @@ records_allow("a merge commit that brings the base's page", VCS + " commit -m x"
 records_allow("a merge commit that brings the base's page, under PowerShell", VCS + " commit -m x",
               REC_LANES["merge"], tool="PowerShell")
 records_allow("a commit of the base's own page copied over", VCS + " commit -m x", REC_LANES["copy-base"])
+# Refused: a commit that deletes the page from the index, with no merge in progress. No merge is in progress to
+# bring a page, so the commit holds no page the rule accepts.
+records_deny("a commit that deletes the page, with no merge in progress", VCS + " commit -m x", "deleted")
 # The stage-then-commit forms must hold the same line. A guard that refuses whenever the page on disk
 # differs from HEAD's, with no look at the base, refuses the merge and the remedy: both false alarms.
 for _lane in ("merge", "copy-base"):

@@ -2540,6 +2540,12 @@ MUTATIONS = [
      '            if not page_id or page_id != _merge_head_page(top, base):',
      '            if True:',
      "guard", "a test-author commit of the merge's own page, after origin/main moved on"),
+    # An absent page (a deletion staged in the index) is refused unless no merge brings one. Without the check, a
+    # deleted page with no merge in progress compares '' with '' and is allowed.
+    ("records-page: the absent-page check is dropped, so a commit that deletes the page is allowed with no merge",
+     '            if not page_id or page_id != _merge_head_page(top, base):',
+     '            if page_id != _merge_head_page(top, base):',
+     "guard", "a commit that deletes the page, with no merge in progress"),
     # Rule brief-destructive-git: the check reads no brief, so an ordered discard passes.
     ("brief-destructive-git: the check finds no ordered discard, so a brief that orders a reset passes",
      "                if match and match[1] not in BRIEF_DESTRUCTIVE_SKIP",
