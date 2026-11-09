@@ -526,6 +526,16 @@ jobs:
       - name: Skill model rows fixture suite
         run: python3 lint/test_check_skill_model_rows.py
 
+      # The floor for hooks/ and lint/ is Python 3.9; this job runs 3.11. vermin is pinned to an exact version.
+      - name: Install vermin
+        run: python3 -m pip install vermin==1.9.2
+
+      - name: Python 3.9 floor check
+        run: python3 lint/check_python_floor.py
+
+      - name: Python 3.9 floor fixture suite
+        run: python3 lint/test_check_python_floor.py
+
       - name: No-window spawn check
         run: python3 lint/test_no_window_spawn.py
 
