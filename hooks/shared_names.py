@@ -71,10 +71,11 @@ GH_FALLBACK_LOGIN = "ssemwal-cdc"
 REPO_TAG = "cs-repo:"
 STEP_TAG = "cs-step:"
 # A topic lane carries TOPIC_TAG; a tier session (batch-runner, triage) carries BUILD_TAG plus its tier; a lane
-# session carries LANE_TAG.
+# session carries LANE_TAG; a coordinator session carries COORDINATOR_TAG.
 TOPIC_TAG = "cs-topic:"
 BUILD_TAG = "cs-build:"
 LANE_TAG = BUILD_TAG + "lane"
+COORDINATOR_TAG = BUILD_TAG + "coordinator"
 
 
 def lane_head_refs(slug: str) -> tuple[str, str]:
