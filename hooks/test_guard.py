@@ -7983,12 +7983,13 @@ sh("push: agent branch named in the command, the refusal names the lane-branch r
 
 
 def agent_refusal_opens_with_rule_case():
-    """The agent-branch refusal opens with its rule's id, as the guard's refusals do: "Rule (" and the rule."""
+    """The printed reason is "<rule id>: <reason>", and the reason opens "Rule (Git): " as the sibling push refusals
+    do (PUSH_REASON, PUSH_MAIN_REASON). No refusal can open with "Rule (" itself."""
     got, reason = decide({
         "raw": None, "tool": "Bash", "cwd": PUSHAGENT, "session": None,
         "env_path": None, "tool_input": {"command": VCS + " push origin HEAD"},
     })
-    want = "Rule (" + PUSH_AGENT_RULE + ")"
+    want = PUSH_AGENT_RULE + ": Rule (Git): "
     if got != "deny":
         return False, "expected deny, got %s" % got
     if not reason.startswith(want):
@@ -16722,7 +16723,7 @@ LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
 # The agent-branch refusal's opening words (defined in the push section). Registered here, where LOG_CHECKS_EXTRA is
 # defined, and its family is the push section's, set by hand.
-AGENT_OPENS_LABEL = "push-agent-branch: the refusal opens with its rule id, Rule (push-agent-branch)"
+AGENT_OPENS_LABEL = "push-agent-branch: the refusal's reason opens with Rule (Git), after its rule id"
 LOG_CHECKS_EXTRA.append((AGENT_OPENS_LABEL, agent_refusal_opens_with_rule_case))
 LOG_FAMILY[AGENT_OPENS_LABEL] = "push-delete"
 # The wait-until remedy checks are defined beside the wait-until cases. They are log checks, so they are
