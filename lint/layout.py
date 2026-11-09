@@ -129,6 +129,15 @@ def _origin_slug(url):
     return origin_slug(url)
 
 
+def _nowindow_run(*args, **kwargs):
+    """hooks/_nowindow.run, the one route that starts a process with no console window; imported on first use."""
+    hooks = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks")
+    if hooks not in sys.path:
+        sys.path.append(hooks)
+    from _nowindow import run
+    return run(*args, **kwargs)
+
+
 def _common_dir(root):
     """The git folder that holds the config of the checkout at `root`, a linked worktree too, or None."""
     found = os.path.join(root, ".git")
@@ -344,8 +353,8 @@ def _default_branch_extras(root):
         return None
     for ref in ("origin/HEAD", "origin/main"):
         try:
-            done = subprocess.run(["git", "-C", root, "show", "%s:%s" % (ref, where)], capture_output=True,
-                                  stdin=subprocess.DEVNULL, timeout=GIT_SHOW_TIMEOUT)
+            done = _nowindow_run(["git", "-C", root, "show", "%s:%s" % (ref, where)], capture_output=True,
+                                 stdin=subprocess.DEVNULL, timeout=GIT_SHOW_TIMEOUT)
             if done.returncode == 0:
                 return _parse(done.stdout.decode("utf-8"), "%s:%s" % (ref, where)), "%s:%s" % (ref, where)
         except (OSError, ValueError, subprocess.SubprocessError, LayoutError):
