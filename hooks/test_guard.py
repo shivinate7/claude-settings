@@ -10894,16 +10894,17 @@ TRUST_TOOLS = {
 TRUST_NAMED = ("confirm_repository_trust", "request_computer_folder")
 
 
-def trust_refuse(name, tool, transcript, carries=(), env=ROLE_ENV):
-    """A trust-card call the guard refuses. The reason names its rule, and never either tool."""
+def trust_refuse(name, tool, transcript, carries=(), env=ROLE_ENV, agent_id=None):
+    """A trust-card call the guard refuses. The reason names its rule, and never either tool. `agent_id`, when given,
+    makes the call an agent's, as the harness sends it."""
     add("trust-card-in-build: " + name, "deny", rule=TRUST_RULE, tool=tool, cwd=NOGIT, lacks=TRUST_NAMED,
-        carries=carries, transcript=transcript, env=env, **TRUST_TOOLS[tool])
+        carries=carries, transcript=transcript, env=env, agent_id=agent_id, **TRUST_TOOLS[tool])
 
 
-def trust_allow(name, tool, transcript):
-    """A call the guard lets through silently."""
+def trust_allow(name, tool, transcript, agent_id=None):
+    """A call the guard lets through silently. `agent_id` as in trust_refuse."""
     add("trust-card-in-build: " + name, "allow", tool=tool, cwd=NOGIT, silent=True, transcript=transcript,
-        env=ROLE_ENV, **TRUST_TOOLS.get(tool, {}))
+        env=ROLE_ENV, agent_id=agent_id, **TRUST_TOOLS.get(tool, {}))
 
 
 for _trust_tool in TRUST_TOOLS:
@@ -11117,6 +11118,17 @@ AGENT_FIXTURES = {
     "agent-dir-at-file": (role_target_call("g1", ARCH_TRIAGE_TAGS), [(AGENT_OWN_ID, None)]),
     "main-lane-agent-second-step": (role_target_call("g1", ARCH_LANE_TAGS),
                                     [(AGENT_OWN_ID, role_target_call("g1", ARCH_AGENT_LANE_TAGS))]),
+    # An agent's brief and trust reads (rules lane-one-topic and trust-card-in-build). The record the guard needs sits in
+    # the agent's own file, and the main transcript holds none of it, or holds a record that decides otherwise.
+    "brief-agent-topic-icons": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_call("t1", STEP_TOPIC_TAGS))]),
+    "brief-agent-stale": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_call("t1", STEP_TOPIC_TAGS)
+                                         + role_tag_call("t2", session=ROLE_OTHER))]),
+    "brief-agent-lane-over-triage": (role_target_call("t1", TRIAGE_TAGS),
+                                     [(AGENT_OWN_ID, role_target_call("t1", STEP_TOPIC_TAGS))]),
+    "brief-agent-lanes-both": (role_target_call("t1", STEP_TOPIC_TAGS),
+                               [(AGENT_OWN_ID, role_target_call("t1", STEP_COLORS_TAGS))]),
+    "trust-agent-untagged": (AGENT_QUIET, [(AGENT_OWN_ID, role_call("g1", ["cs-repo:o/r"]))]),
+    "trust-agent-lane": (role_call("g1", ["cs-repo:o/r"]), [(AGENT_OWN_ID, role_call("g1", LANE_TAGS))]),
 }
 
 
@@ -11202,6 +11214,23 @@ archive_refuse("a lane in both records, with the open pull request on the main r
                carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN)
 
 
+# The trust card's read of an agent's own record (rule trust-card-in-build). An agent's call is judged on its own record in
+# its own transcript too, so a cs-build record there refuses it, even when the main transcript's record is untagged.
+FAMILY = "merge"
+for _trust_tool in TRUST_TOOLS:
+    _trust_word = _trust_tool.rsplit("__", 1)[1]
+    trust_allow(_trust_word + " whose untagged own record is only in the agent's transcript allows", _trust_tool,
+                role_path("trust-agent-untagged"), agent_id=AGENT_OWN_ID)
+    trust_refuse(_trust_word + " whose cs-build record is only in the agent's transcript is refused, though the main record is untagged",
+                 _trust_tool, role_path("trust-agent-lane"), agent_id=AGENT_OWN_ID)
+    # The control: no own record in either transcript is still a refusal, and the reason steers to get_session.
+    trust_refuse(_trust_word + " with no own record in the agent's transcript or the main one is refused", _trust_tool,
+                 role_path("agent-no-record"), agent_id=AGENT_OWN_ID, carries=("get_session", "alone", ("retry", "Retry")))
+    # The control: an orchestrator call (no agent_id) reads the main transcript alone, never the agent's file.
+    trust_allow(_trust_word + " from an orchestrator call (no agent_id) ignores a cs-build record in an agent's transcript",
+                _trust_tool, role_path("trust-agent-lane"))
+
+
 # =========================================================================== 5h. one lane, one topic
 FAMILY = "lane-one-topic"
 #
@@ -11216,17 +11245,17 @@ SEND_MESSAGE = "mcp__claude-code-remote__send_message"
 TOPIC_STEER = (("topic", "Topic"),)  # the refusal steers the sender to name the topic
 
 
-def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=()):
+def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=(), agent_id=None):
     """A send_message the guard refuses. The reason names its rule, and the rule's own id. `lacks` names fragments
-    the reason must not hold."""
+    the reason must not hold. `agent_id`, when given, makes the call an agent's, as the harness sends it."""
     add("lane-one-topic: " + name, "deny", rule=LANE_ONE_TOPIC, tool=SEND_MESSAGE, cwd=NOGIT, transcript=transcript,
-        env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks)
+        env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks, agent_id=agent_id)
 
 
-def step_allow(name, transcript, message, target=ROLE_OTHER):
-    """A send_message the guard lets through silently."""
+def step_allow(name, transcript, message, target=ROLE_OTHER, agent_id=None):
+    """A send_message the guard lets through silently. `agent_id` as in step_refuse."""
     add("lane-one-topic: " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True, transcript=transcript,
-        env=ROLE_ENV, session_id=target, message=message)
+        env=ROLE_ENV, session_id=target, message=message, agent_id=agent_id)
 
 
 # Refused: the brief's topic differs from the lane's. Each brief names the lane's own step, so a match on the step
@@ -11312,6 +11341,26 @@ step_refuse("a heading marker, # Lane brief: x. Topic: icons., to a lane on topi
             role_path("step-colors-lane"), "# Lane brief: x. Topic: icons.")
 step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topic colors is refused",
             role_path("step-colors-lane"), "lane brief: x. topic: icons.")
+# An agent's own transcript (rule lane-one-topic). The agent's brief reads its target's record in the agent's own file,
+# beside the main transcript, as its archive and trust reads do. The main transcript holds no record of the target, or
+# one that decides otherwise.
+step_allow("a brief for topic icons to a lane whose record is only in the agent's own transcript is allowed",
+           role_path("brief-agent-topic-icons"), "Lane brief: icon-b. Topic: icons.", agent_id=AGENT_OWN_ID)
+step_refuse("a brief for topic colors to a lane whose record is only in the agent's own transcript is refused, for its topic",
+            role_path("brief-agent-topic-icons"), "Lane brief: icon-b. Topic: colors.", agent_id=AGENT_OWN_ID,
+            carries=("names a topic the lane does not hold",), lacks=("holds no get_session",))
+step_refuse("a brief for topic icons, after set_session_tags in the agent's own transcript, is refused as stale",
+            role_path("brief-agent-stale"), "Lane brief: icon-b. Topic: icons.", agent_id=AGENT_OWN_ID,
+            carries=("set_session_tags call on the target followed",))
+step_refuse("a lane in the agent's own record decides though the main record says triage: a brief for topic colors is refused",
+            role_path("brief-agent-lane-over-triage"), "Lane brief: icon-b. Topic: colors.", agent_id=AGENT_OWN_ID,
+            carries=("names a topic the lane does not hold",))
+step_allow("lanes in both records join their topics: a brief for topic colors, named only by the agent's record, is allowed",
+           role_path("brief-agent-lanes-both"), "Lane brief: colors-a. Topic: colors.", agent_id=AGENT_OWN_ID)
+# The control: an orchestrator brief (no agent_id) reads the main transcript alone, so the agent's file is no record for it.
+step_refuse("a brief with no agent_id does not read the agent's transcript: the lane there is no record of the target",
+            role_path("brief-agent-topic-icons"), "Lane brief: icon-b. Topic: icons.",
+            carries=("holds no get_session or create_session record",))
 
 
 # =========================================================================== 5i. SendMessage to a cloud session
@@ -15754,6 +15803,115 @@ for _label, _check in (
          own_read_case("body-int-then-lane", [ARCH_LANE_TAGS])),
         ("lane-closes-after-records: own_session_read skips a get_session result whose content is an int, reads no record",
          own_read_case("body-int", [None]))):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+# The agent's own transcript folder has one home (rule agent-transcript-path-one-home): own_session's agent_transcript_dir,
+# <transcript minus .jsonl>/subagents. The copies in hooks/guard_kill.py and hooks/stall_watch.py must name that folder.
+# The copies in lint/report_guard.py and lint/ruling_census.py are pinned in their own suites.
+AGENT_HOME_ID = "ab12cd34ef56a7890"  # an agent id as the harness sends it: 17 hex characters
+
+
+def load_hook(name, file_name):
+    """A hooks module beside the guard under test (GUARD), loaded by path, so a mutant copy of the guard reads its own copy."""
+    import importlib.util
+    hooks = os.path.dirname(GUARD)
+    if hooks not in sys.path:
+        sys.path.insert(0, hooks)  # guard_kill imports its siblings by name
+    spec = importlib.util.spec_from_file_location(name, os.path.join(hooks, file_name))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def agent_home_shape_check():
+    """agent_transcript_dir names <transcript minus .jsonl>/subagents, for a transcript path with .jsonl, without it, and dotted."""
+    own = _load_own_session()
+    if not hasattr(own, "agent_transcript_dir"):
+        return False, "own_session has no agent_transcript_dir: the one home of the agent folder is not built"
+    base = os.path.join(ROOT, "agenthome")
+    for name in ("sess.jsonl", "sess", "sess.v2"):
+        got = own.agent_transcript_dir(os.path.join(base, name))
+        want = os.path.join(base, name[:-len(".jsonl")] if name.endswith(".jsonl") else name, "subagents")
+        if got != want:
+            return False, "agent_transcript_dir(%s) is %s, want %s" % (name, got, want)
+    return True, "agent_transcript_dir names <transcript minus .jsonl>/subagents for each shape"
+
+
+def agent_path_check():
+    """agent_transcript_path is the agent's file in the home folder."""
+    own = _load_own_session()
+    if not hasattr(own, "agent_transcript_dir"):
+        return False, "own_session has no agent_transcript_dir: agent_transcript_path has no home to build on"
+    transcript = os.path.join(ROOT, "agenthome", "sess.jsonl")
+    got = own.agent_transcript_path(transcript, AGENT_HOME_ID)
+    want = os.path.join(own.agent_transcript_dir(transcript), "agent-" + AGENT_HOME_ID + ".jsonl")
+    if got != want:
+        return False, "agent_transcript_path is %s, want %s" % (got, want)
+    return True, "agent_transcript_path is the agent's file in the home folder"
+
+
+def agent_kill_finds_check():
+    """in_own_agent_worktree finds the agent file beside a .jsonl transcript, for a pid whose parent is init in its worktree."""
+    kill = load_hook("guard_kill_home_check", "guard_kill.py")
+    base = os.path.join(ROOT, "agenthome-kill")
+    transcript = os.path.join(base, "live.jsonl")
+    write(transcript, "{}\n")
+    write(os.path.join(base, "live", "subagents", "agent-" + AGENT_HOME_ID + ".jsonl"), "{}\n")
+    cwd = os.path.join(base, ".claude", "worktrees", "agent-" + AGENT_HOME_ID)
+    kill._ps_ppid = lambda pid: 1  # a pid whose parent is init
+    kill._pid_cwd = lambda pid: cwd  # a cwd inside this agent's worktree
+    if not kill.in_own_agent_worktree(4242, transcript):
+        return False, "in_own_agent_worktree does not find the agent file beside the transcript"
+    return True, "in_own_agent_worktree finds the agent file beside the transcript"
+
+
+def agent_stall_finds_check():
+    """agent_transcripts lists the agent file beside the session first."""
+    stall = load_hook("stall_watch_home_check", "stall_watch.py")
+    base = os.path.join(ROOT, "agenthome-stall")
+    got = stall.agent_transcripts(os.path.join(base, "sess.jsonl"), AGENT_HOME_ID, "")[:1]
+    want = [os.path.join(base, "sess", "subagents", "agent-" + AGENT_HOME_ID + ".jsonl")]
+    if got != want:
+        return False, "agent_transcripts lists %r first, want %r" % (got, want)
+    return True, "agent_transcripts lists the agent file beside the session first"
+
+
+def agent_copies_agree_check():
+    """The stall_watch and guard_kill copies name <transcript minus .jsonl>/subagents, for each transcript shape."""
+    own = _load_own_session()
+    stall = load_hook("stall_watch_home_agree", "stall_watch.py")
+    kill = load_hook("guard_kill_home_agree", "guard_kill.py")
+    base = os.path.join(ROOT, "agenthome-agree")
+    for name in ("sess.jsonl", "sess", "sess.v2"):
+        transcript = os.path.join(base, name)
+        stem = name[:-len(".jsonl")] if name.endswith(".jsonl") else name
+        agent_file = os.path.join(base, stem, "subagents", "agent-" + AGENT_HOME_ID + ".jsonl")
+        write(agent_file, "{}\n")
+        got = stall.agent_transcripts(transcript, AGENT_HOME_ID, "")[0]
+        if got != agent_file:
+            return False, "agent_transcripts names %s for %s, want %s" % (got, name, agent_file)
+    if not hasattr(own, "agent_transcript_dir"):
+        return False, "own_session has no agent_transcript_dir: the copies have no home to agree with"
+    jsonl = os.path.join(base, "sess.jsonl")  # guard_kill reads a transcript that ends in .jsonl, by its own gate
+    kill._ps_ppid = lambda pid: 1
+    kill._pid_cwd = lambda pid: os.path.join(base, ".claude", "worktrees", "agent-" + AGENT_HOME_ID)
+    if not kill.in_own_agent_worktree(4242, jsonl):
+        return False, "in_own_agent_worktree finds no agent file in the folder beside sess.jsonl"
+    return True, "the stall_watch and guard_kill copies name the home's folder for each shape"
+
+
+for _label, _check in (
+        ("agent-transcript-path-one-home: agent_transcript_dir names <transcript minus .jsonl>/subagents, with or without .jsonl",
+         agent_home_shape_check),
+        ("agent-transcript-path-one-home: agent_transcript_path is the agent's file in the home folder",
+         agent_path_check),
+        ("agent-transcript-path-one-home: guard_kill finds the agent file beside a .jsonl transcript",
+         agent_kill_finds_check),
+        ("agent-transcript-path-one-home: stall_watch lists the agent file beside the session first",
+         agent_stall_finds_check),
+        ("agent-transcript-path-one-home: the stall_watch and guard_kill copies name the home's folder for each shape",
+         agent_copies_agree_check)):
     LOG_CHECKS_EXTRA.append((_label, _check))
 FAMILY = "paths"
 # ---- the test-author, inverted: only tests and test config may change
