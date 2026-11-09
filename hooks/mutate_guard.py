@@ -62,6 +62,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  git's tracked files under a folder, suites left out (testing/tracked_tree.py)
 GUARD = os.path.join(HERE, "guard.py")
 SUITE = os.path.join(HERE, "test_guard.py")
 WATCH = os.path.join(HERE, "config_watch.py")
@@ -3692,10 +3694,7 @@ def run_mutant(sources, work: str, entry):
     _path, suite, variable, stem = TARGETS[target]
     if target in ("guard", "simlease"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
-        # module that holds it. The suite loads the copied guard.py, which finds its siblings. The
-        # simulator refusal imports janitor/sweep.py from ../janitor and fails open when it cannot, so
-        # the copy takes sweep.py and temp_sweep.py beside its hooks folder, as a checkout has them.
-        # Without them every simulator arm would be judged against a guard that allows everything.
+        # module that holds it. The suite loads the copied guard.py, which finds its siblings.
         root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
         tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
@@ -3708,13 +3707,12 @@ def run_mutant(sources, work: str, entry):
             mutate_shared.apply_mutant(tree, old, new)
             shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
         copy_path = os.path.join(tree, "guard.py")
-        os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
-        for name in ("sweep.py", "temp_sweep.py"):
-            shutil.copy(os.path.join(HERE, "..", "janitor", name), os.path.join(root, "janitor"))
-        # guard.py reads lint/layout.py from ../lint (_layout_module), which is root/lint for this copy. Without
-        # it the role-model table reads as unread and every role-model arm passes unjudged.
-        shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
-                        ignore=shutil.ignore_patterns("__pycache__"))
+        # The guard family reads the folders beside its hooks folder as a checkout has them: ../lint (layout.py,
+        # the role-model table: without it every role-model arm passes unjudged), ../janitor (the simulator
+        # refusal fails open without sweep.py) and ../skills (waiting-page, impeccable). Git's own list of each
+        # folder fills them, so a file the guard starts to read cannot be left out. git is read from the source
+        # checkout, never from this scaffold.
+        tracked_tree.copy_tracked(root, "lint", "janitor", "skills", root=os.path.dirname(HERE))
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
         mutated = sources[target].replace(old, new, 1)
@@ -3835,8 +3833,7 @@ def main() -> int:
     # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
     # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The ruling and
     # decision copies read their own tree/lint instead (above). A guard copy carries its own lint folder (run_mutant).
-    shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(work, "lint"),
-                    ignore=shutil.ignore_patterns("__pycache__"))
+    tracked_tree.copy_tracked(work, "lint", root=os.path.dirname(HERE))
 
     try:
         return mutate_shared.run_mutants(
