@@ -1495,7 +1495,8 @@ GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
 # The one home of the comment routes. The guard sees the word before the shell fills it, so a repo, an issue number or a comment id
 # may be a variable (`$N`, `${N}`, `${N:-12}`), an arithmetic (`$((N+1))`) or a command substitution (`$(...)`, `` `...` ``).
 # Group 1 is the repo, group 2 the number. `_joined_substitutions` first joins a substitution the tokenizer split at its spaces into one word.
-_ROUTE_REPO = r"([^/\s]+/[^/\s]+|\$\w+|\$\{[^}\s]*\}|\$\(.*\)|`[^`]*`)"
+_ROUTE_REPO_UNIT = r"(?:[^/\s$`]|\$(?!\()|\$\(.*?\)|`[^`]*`)+"   # a segment may hold a substitution with spaces; the units start on different characters
+_ROUTE_REPO = r"(" + _ROUTE_REPO_UNIT + "/" + _ROUTE_REPO_UNIT + r"|\$\w+|\$\{[^}\s]*\}|\$\(.*\)|`[^`]*`)"
 _ROUTE_NUMBER = r"(\d+|\$\w+|\$\{[^}\s]*\}|\$\(.*|`[^`]*`)"
 
 
@@ -1589,14 +1590,14 @@ def _api_method(args) -> str:
 def _comment_route(args):
     """Return (routes, repo, number) for the comment route of a `gh api` call, else None. `routes` is the post or the edit
     pattern. A first route-shaped word wins, and an endpoint that starts with a shell expansion (`$URL`, `${URL}`, `$(...)`, a
-    backtick) is a variable target (ENDPOINT_NUMBER, repo ''), an edit when the call names the method PATCH or PUT, else a post."""
+    backtick) is a variable target (ENDPOINT_NUMBER, repo ''), an edit when the call names the method PATCH, else a post (the comment edit route is PATCH)."""
     for arg in args[1:]:
         for routes in (_COMMENTS_ROUTE, _COMMENT_EDIT_ROUTE):
             found = routes.fullmatch(arg)
             if found:
                 return routes, found.group(1), found.group(2)
     if re.match(r"[$`]", _api_endpoint(args)):
-        return (_COMMENT_EDIT_ROUTE if _api_method(args) in ("PATCH", "PUT") else _COMMENTS_ROUTE), "", ENDPOINT_NUMBER
+        return (_COMMENT_EDIT_ROUTE if _api_method(args) == "PATCH" else _COMMENTS_ROUTE), "", ENDPOINT_NUMBER
     return None
 
 
