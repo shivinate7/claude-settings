@@ -53,6 +53,13 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
+sys.dont_write_bytecode = True  # the import below must not write __pycache__ beside hooks/
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # the probe never dies for a missing helper, as in a copy of the probe beside a stub guard
+    _nowindow = subprocess
 TIMEOUT_SECONDS = 120
 # The payload fields that tie a call to a session or an agent. The verdict is for a main-session call.
 SESSION_FIELDS = ("agent_id", "agent_type", "session_id")
@@ -207,9 +214,9 @@ def probe(payload):
         for name in SESSION_ENV:
             env.pop(name, None)
         try:
-            result = subprocess.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True,
-                                    text=True, encoding="utf-8", env=env, cwd=run_cwd,
-                                    timeout=TIMEOUT_SECONDS)
+            result = _nowindow.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True,
+                                   text=True, encoding="utf-8", env=env, cwd=run_cwd,
+                                   timeout=TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
             raise BadInput("the guard did not answer in %d seconds" % TIMEOUT_SECONDS)
         if result.returncode != 0:
