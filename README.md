@@ -148,6 +148,10 @@ merge --reviewed        one line per open PR that has a review record comment: i
 merge --reviewed --root DIR [--root DIR ...]
                         the same list for each repo checkout DIR, one block each, then one batch line per repo:
                         `open batch now: OWNER/NAME #a`, or `build next batch on the running head: ...`. A failed root prints unknown.
+merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
+                        one line per open PR that changes a named file or adds a named case in a `+` line of its patch. --run reads the
+                        failing lines of that run's failed jobs for the cases. No lock, no merge, no post; no match, or a failed read, never reads as clear.
+                        Cost: API reads only, one pull list, one files read per open PR, and for --run one jobs read and one log read per failed job.
 merge --dev ...         run the checkout's own tree, not origin main
 ```
 

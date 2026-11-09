@@ -35,6 +35,15 @@
                           Cost: the gh calls of one --reviewed per root; when the base has a done PR, plus the CI reads of each ready PR on
                           the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base; no
                           new process, file or timer.
+  merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
+                          one line per open PR that touches a named file (a changed file of that path) or holds a named case in a `+` line of its
+                          patch: `#N HEADREF SHA9 draft|ready: file PATH; case TEXT`. With --run, the run's failing log lines name the cases
+                          (and, for a pytest `FAILED path::name` line, the file): a line that starts, after any timestamp, with FAIL, FAILED or
+                          ERROR; the case text is what follows the `]` of a hooks/test_guard.py line. A --run with no failing case and no --case
+                          or --file is `unknown` (exit 1), never clear. No match prints `no open pull request touches them.` Stands alone; takes
+                          no lock, merges and posts nothing; any session may run it. A failed read prints only `unknown` (exit 1).
+                          Cost per call: API reads only: the open pull list pages, one pulls/N/files read (its pages) per open PR, and for --run
+                          one jobs read and one log read per failed job. No file, process or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
@@ -825,6 +834,23 @@ class Host:
         else:
             why = f": more than {PAGE_CEILING} pages of 100"
         raise Stop(f"reading {rel} from GitHub failed{why}")
+
+    def pull_files(self, n):
+        """-> the changed files of pull request n, every page of pulls/N/files: dicts with `filename` and, for a text file, `patch`."""
+        return self.pages(f"pulls/{n}/files")
+
+    def failed_lines(self, run_id):
+        """-> the failing lines (see failing_line) of the log of each failed job of run RUN_ID: one jobs read, then one log read per failed job.
+        A failed read is a Stop."""
+        lines = []
+        for job in self.pages(f"actions/runs/{run_id}/jobs", "jobs"):
+            if job.get("conclusion") != "failure":
+                continue
+            c, out = self.api(f"actions/jobs/{job['id']}/logs")
+            if c:
+                raise Stop(f"reading the log of job {job['id']} of run {run_id} failed: {out} " + UNKNOWN_CITE)
+            lines += [t for t in out.splitlines() if failing_line(t) is not None]
+        return lines
 
     # The old GraphQL values the rest of the tool reads, from the REST fields.
     MERGEABLE = {True: "MERGEABLE", False: "CONFLICTING", None: "UNKNOWN"}  # mergeable is null while GitHub works it out
@@ -3393,6 +3419,50 @@ def reviewed_block(h):
         out.append(f"{REVIEW_BATCH_BUILD if busy else REVIEW_BATCH_OPEN}{h.repo} " + " ".join(f"#{n}" for n in nums))
     return out, True
 
+LOG_PREFIX = re.compile(r"^﻿?(?:\d{4}-\d\d-\d\dT[\d:.]+Z\s+)?(?:\x1b\[[0-9;]*m)*")  # a log line's timestamp and colour codes, before its text
+FAILING_LINE = re.compile(r"(?:FAILED|FAIL|ERROR)\b[:\s]*(.*)")
+TOUCH_NONE = "no open pull request touches them."
+
+def failing_line(text):
+    """-> None when the log line `text` is not a failing line (one that starts, after any timestamp, with FAIL, FAILED or ERROR); else (file, case),
+    each None when the line names none. A hooks/test_guard.py line `FAIL  allow (want deny  )  [Bash       ] <case>` gives the text after the first `]` as
+    the case. A pytest line `FAILED path::Class::name - why` gives the path as the file and the name, without its `[param]`, as the case."""
+    m = FAILING_LINE.fullmatch(LOG_PREFIX.sub("", text, count=1).rstrip())
+    if not m:
+        return None
+    rest = m.group(1)
+    head = rest.split(None, 1)[0] if rest.split() else ""
+    if "::" in head or head.endswith(".py"):
+        path, *names = head.split("::")
+        return path, (re.sub(r"\[.*\]$", "", names[-1]) or None) if names else None
+    if "]" in rest:
+        return None, rest.split("]", 1)[1].strip() or None
+    return None, None
+
+def touches_lines(h, run, cases, files):
+    """-> the lines of `merge --touches`: one per open pull request that touches a named file or holds a named case in a `+` line of its patch, ascending
+    by number; or the one no-match line. The failing lines of the run (Host.failed_lines) add their cases and files to the named ones. No case and no file
+    left, with a run named, is a Stop: unknown, never clear. Reads: one Host.failed_lines for a run, the open pull list pages, one Host.pull_files per open
+    pull request. A Stop in any read raises before any line is made."""
+    cases, files = list(cases), list(files)
+    for line in (h.failed_lines(run) if run else []):
+        file, case = failing_line(line) or (None, None)
+        if file and file not in files:
+            files.append(file)
+        if case and case not in cases:
+            cases.append(case)
+    if not cases and not files:
+        raise Stop(f"unknown: no failing case read from run {run}; pass --case or --file " + UNKNOWN_CITE)
+    out = []
+    for d in sorted(h.pages("pulls", fields={"state": "open"}), key=lambda d: d["number"]):
+        changed = h.pull_files(d["number"])
+        added = [t[1:] for f in changed for t in (f.get("patch") or "").splitlines() if t.startswith("+") and not t.startswith("+++")]
+        hits = [f"file {p}" for p in files if any(f.get("filename") == p for f in changed)]
+        hits += [f"case {c}" for c in cases if any(c in t for t in added)]
+        if hits:
+            out.append(f"#{d['number']} {d['head']['ref']} {d['head']['sha'][:9]} {'draft' if d.get('draft') else 'ready'}: " + "; ".join(hits))
+    return out or [TOUCH_NONE]
+
 def default_branch(root):
     """The default branch of the checkout `root`: origin/HEAD first, else the repo's default branch as gh reads it (host_default_branch).
     A folder that is missing or unreadable stops here, naming the root, so --root prints it unknown beside the other roots."""
@@ -3567,10 +3637,21 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
     p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after round 3")
+    p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
+    p.add_argument("--run", default=None, metavar="RUN_ID", help="with --touches: a workflow run whose failing log lines name the cases")
+    p.add_argument("--case", action="append", default=[], metavar="TEXT", help="with --touches: a case to find in the `+` lines of an open pull request's patch; repeat it")
+    p.add_argument("--file", action="append", default=[], metavar="PATH", help="with --touches: a file an open pull request changes; repeat it")
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
     if ((a.head and not a.confirm) or a.kind or a.guard or a.round or a.fix_check or a.net_value != "not owed") and not a.review_record:
         p.error("--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record (--head also goes with --confirm)")
+    if (a.run or a.case or a.file) and not a.touches:
+        p.error("--run, --case and --file go with --touches")
+    if a.touches:
+        if a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint or a.idle_lanes:
+            p.error("--touches stands alone")
+        if not (a.run or a.case or a.file):
+            p.error("--touches needs --run, --case or --file")
     if a.live is not None and not a.idle_lanes:
         p.error("--live goes with --idle-lanes")
     if a.root and not a.reviewed:
@@ -3583,7 +3664,7 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--base and --lint-unknown-ok go with --lane-lint")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
-    if a.idle_lanes:
+    if a.idle_lanes or a.touches:
         pass  # stands alone: checked above
     elif a.lane_lint:
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record:
@@ -3610,6 +3691,15 @@ def main(argv, host=None, lock=None, hosts=None):
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, --reviewed, or --role TIER")
     try:
+        if a.touches:  # before the role check and any lock: it reads, merges and posts nothing
+            try:
+                lines = touches_lines(host or Host(), a.run, a.case, a.file)
+            except Stop as e:
+                why = " ".join(str(e).split())
+                print("merge: " + (why if why.startswith("unknown") else f"unknown ({why}) {UNKNOWN_CITE}"), file=sys.stderr)
+                return 1
+            say(*lines)
+            return 0
         if a.idle_lanes:
             return idle_lanes(a.live)  # before the role check and any lock: it reads, merges and posts nothing
         if a.lane_lint:
