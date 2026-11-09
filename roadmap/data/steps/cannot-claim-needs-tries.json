@@ -1,11 +1,11 @@
 {
   "title": "A report that says an act cannot be done shows a failed try",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 103.9,
   "owner": "coordinator",
-  "lane": "session_013NEJL4AtAVhGNb2poKhrsi",
+  "lane": "session_013NEJKzVpKrvAyy61PHcyb4",
   "why": "At 21:47 CST Nov 7 the coordinator reported that it could not open a PR, after only a plugin connect-failure notice. mcp__github__create_pull_request then worked on its first try at 21:52 CST (#1768). Owner, 21:52 CST: \"dont we know to just use the rest api etc theres tons of ways how did u make a bad assumption\".",
-  "note": "Guard: lint/report_guard.py refuses a report line that claims an act in the table of decision claims-carry-backing Part vi cannot be done, unless the turn shows a failed try on at least one route (GitHub MCP tool, gh api, REST). Rule: shiv-stylisms output-never-hand-off-doable-step. Slug and guard from the coordinator, 21:52 CST Nov 7. Lane session_013NEJL4AtAVhGNb2poKhrsi started as an owner ask under item 387 a (coordinator, 22:33 CST Nov 7). Scope per the brief (lane ruling 23:50 CST Nov 7). Built as #1812 (head f582a7ec6), with runner 8; round 3 passed with net positive value. Its two debts and notes ride in a follow-up PR from the same lane (coordinator, 00:43 CST Nov 8). #1891 reverts its skip widenings (coordinator pick A, 04:31 CST Nov 8). The false alarms that come back are notes; their fix is follow-up 3's class design.",
-  "updatedAt": "2026-11-08T04:32:00-06:00"
+  "note": "Guard: lint/report_guard.py refuses a report line that claims an act in the table of decision claims-carry-backing Part vi cannot be done, unless the turn shows a failed try on at least one route (GitHub MCP tool, gh api, REST). Rule: shiv-stylisms output-never-hand-off-doable-step. Slug and guard from the coordinator, 21:52 CST Nov 7. Lane session_013NEJL4AtAVhGNb2poKhrsi started as an owner ask under item 387 a (coordinator, 22:33 CST Nov 7). Scope per the brief (lane ruling 23:50 CST Nov 7). Built as #1812 (head f582a7ec6), with runner 8; round 3 passed with net positive value. Its two debts and notes ride in a follow-up PR from the same lane (coordinator, 00:43 CST Nov 8). #1891 reverts its skip widenings (coordinator pick A, 04:31 CST Nov 8). The false alarms that come back are notes; their fix is follow-up 3's class design. Lane session_013NEJKzVpKrvAyy61PHcyb4 started 12:13 CST Nov 9 (coordinator).",
+  "updatedAt": "2026-11-09T12:11:00-06:00"
 }

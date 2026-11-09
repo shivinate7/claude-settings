@@ -1,11 +1,11 @@
 {
   "title": "The shared push reader drops redirect tokens before it reads a push's remote and refs",
   "why": "#2366 round 3 (lane octopus-merge-push-refused, via the coordinator 20:37 CST Nov 8): `_push_refs` keeps redirect tokens, so `git push origin 2>&1` skips the octopus read and a bare `git push 2>&1` reads `2>&1` as the remote.",
-  "note": "Filed by triage, Nov 8 20:37 CST. Starts after #2366 merges. Fix in the shared reader, not per guard.",
+  "note": "Filed by triage, Nov 8 20:37 CST. Starts after #2366 merges. Fix in the shared reader, not per guard. Lane session_013NEJKyuyMvkyfa5EDmUpJS started 12:13 CST Nov 9 (coordinator).",
   "phase": "now",
   "owner": "coordinator",
-  "lane": "",
-  "status": "todo",
+  "lane": "session_013NEJKyuyMvkyfa5EDmUpJS",
+  "status": "doing",
   "order": 866,
-  "updatedAt": "2026-11-08T20:37:00-06:00"
+  "updatedAt": "2026-11-09T12:11:00-06:00"
 }
