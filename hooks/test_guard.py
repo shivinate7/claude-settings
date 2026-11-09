@@ -642,6 +642,21 @@ PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/ma
 PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
 PUSHNEWBR = os.path.join(ROOT, "pushnewbr")    # origin/lane/base at commit A; lane/fix one commit on it, at B
 PUSHBATCH = os.path.join(ROOT, "pushbatch")    # origin/main and origin/batch-01 at A; origin/lane/join one commit on A, at B
+# REF READER LAYOUTS (rule push-new-branch, the ref reader of guard_push_delete.py). Each is a real checkout
+# whose origin/lane/base holds commit A, with lane/fix one commit on A at B. Each lays the remote's refs out one
+# way, so one arm of the reader decides its cases. The layouts are checked before any judgement (scope first).
+PUSHPACKED = os.path.join(ROOT, "pushpacked")        # origin/lane/base and origin/HEAD only in packed-refs
+PUSHPACKEDSUB = os.path.join(PUSHPACKED, "sub")      # a folder in it: the reader walks up to the checkout
+PUSHLINKMAIN = os.path.join(ROOT, "pushlinkmain")    # the clone: origin/lane/base loose in the common folder
+PUSHLINKWT = os.path.join(ROOT, "pushlinkwt")        # a linked worktree of the clone, with its own gitdir
+PUSHLOCK = os.path.join(ROOT, "pushlock")            # loose refs, no packed-refs, a stale .lock ref, loose origin/HEAD
+PUSHREFTABLE = os.path.join(ROOT, "pushreftable")    # a reftable folder, so the reader asks for-each-ref
+PUSHSYMREF = os.path.join(ROOT, "pushsymref")        # origin/alias: a symbolic ref to a local branch
+PUSHBADREF = os.path.join(ROOT, "pushbadref")        # a loose ref file that is not text, beside origin/lane/base
+PUSHSUBMAIN = os.path.join(ROOT, "pushsubmain")      # the clone whose git folder a submodule's .git file names
+PUSHSUB = os.path.join(ROOT, "pushsub")              # a submodule-style checkout: .git is a file naming a git folder
+PUSHBADPACK = os.path.join(ROOT, "pushbadpack")      # packed-refs with a line that is no object id, beside lane/base
+BADPACK = {}                                         # the sha of origin/lane/base in PUSHBADPACK, set when it is built
 # The rule ids the two new asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
@@ -2312,6 +2327,65 @@ lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDET
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
               PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHNEWBR, PUSHBATCH],
              _build_push)
+
+
+def _ref_repo(where):
+    """A checkout with origin/lane/base at commit A, and lane/fix one commit on A at B (HEAD)."""
+    make_repo(where, {"base.txt": "base\n"})
+    run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(where, "update-ref", "refs/remotes/origin/lane/base", "HEAD")
+    run_vcs(where, "checkout", "-q", "-b", "lane/fix")
+    write(os.path.join(where, "stacked.txt"), "stacked\n")
+    run_vcs(where, "add", "-A")
+    run_vcs(where, *IDENT, "commit", "-q", "-m", "stacked")
+
+
+def _build_pushref():
+    """The ref reader's layouts (the PUSHPACKED .. PUSHSUB constants). Each is a real git checkout, so the reader
+    meets the layout git itself writes."""
+    _ref_repo(PUSHPACKED)
+    run_vcs(PUSHPACKED, "update-ref", "refs/remotes/origin/HEAD", "HEAD")
+    run_vcs(PUSHPACKED, "pack-refs", "--all", "--prune")
+    os.makedirs(PUSHPACKEDSUB, exist_ok=True)
+
+    _ref_repo(PUSHLINKMAIN)
+    run_vcs(PUSHLINKMAIN, "worktree", "add", "-q", "-b", "lane/wt", slash(PUSHLINKWT), "refs/remotes/origin/lane/base")
+
+    _ref_repo(PUSHLOCK)
+    write(os.path.join(PUSHLOCK, "stacked2.txt"), "again\n")
+    run_vcs(PUSHLOCK, "add", "-A")
+    run_vcs(PUSHLOCK, *IDENT, "commit", "-q", "-m", "stacked again")
+    run_vcs(PUSHLOCK, "update-ref", "refs/remotes/origin/HEAD", "HEAD~1")
+    stacked = run_vcs(PUSHLOCK, "rev-parse", "HEAD").stdout.strip()
+    write(os.path.join(PUSHLOCK, ".git", "refs", "remotes", "origin", "lane", "stale.lock"), stacked + "\n")
+
+    _ref_repo(PUSHREFTABLE)
+    run_vcs(PUSHREFTABLE, "update-ref", "refs/remotes/origin/HEAD", "HEAD")
+    os.makedirs(os.path.join(PUSHREFTABLE, ".git", "reftable"), exist_ok=True)
+
+    _ref_repo(PUSHSYMREF)
+    run_vcs(PUSHSYMREF, "branch", "lane-local", "HEAD")
+    write(os.path.join(PUSHSYMREF, ".git", "refs", "remotes", "origin", "alias"), "ref: refs/heads/lane-local\n")
+
+    _ref_repo(PUSHBADREF)
+    with open(os.path.join(PUSHBADREF, ".git", "refs", "remotes", "origin", "not-text"), "wb") as handle:
+        handle.write(b"\xff\xfe not text\n")
+
+    _ref_repo(PUSHSUBMAIN)
+    # A submodule's git folder is a whole git folder with no commondir, and its .git file names it.
+    modules = os.path.join(PUSHSUBMAIN, ".git", "modules", "sub")
+    shutil.copytree(os.path.join(PUSHSUBMAIN, ".git"), modules, ignore=shutil.ignore_patterns("modules"))
+    write(os.path.join(PUSHSUB, ".git"), "gitdir: " + slash(modules) + "\n")
+
+    _ref_repo(PUSHBADPACK)
+    BADPACK["sha"] = run_vcs(PUSHBADPACK, "rev-parse", "HEAD~1").stdout.strip()
+    run_vcs(PUSHBADPACK, "pack-refs", "--all", "--prune")
+    with open(os.path.join(PUSHBADPACK, ".git", "packed-refs"), "a", encoding="utf-8") as handle:
+        handle.write("not-a-sha refs/remotes/origin/junk\n")
+
+
+lazy_fixture([PUSHPACKED, PUSHPACKEDSUB, PUSHLINKMAIN, PUSHLINKWT, PUSHLOCK, PUSHREFTABLE, PUSHSYMREF,
+              PUSHBADREF, PUSHSUBMAIN, PUSHSUB, PUSHBADPACK], _build_pushref)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
 lazy_fixture([LINKMAIN, LINKOUT, WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR,
@@ -7652,6 +7726,195 @@ sh("push-new-branch: a delete of main beside a new-branch refspec stays ask, not
 # origin holds no master here, so without the default-branch skip the new-branch rule would judge this push.
 sh("push-new-branch: a remote branch's tip pushed to master asks push-main, not a new branch",
    VCS + " push origin origin/feat:master", "ask", PUSH_MAIN_RULE, cwd=PUSHSELF)
+
+# REF READER CHECKS (rule push-new-branch, the ref reader of guard_push_delete.py). One check per arm, each
+# built on its REF_* layout. A verdict check judges push_new_branch_hit on `args` at `cwd`: `want` names the
+# refspec it must judge, or is '' when none may be judged. A count check counts the for-each-ref starts the
+# read makes (guard_core._git), and must judge a refspec, so the read provably ran. Scope first (P7): each
+# check reads its layout before it judges, so a case never passes on a folder that lacks the layout it pins.
+def _ref_layout(where, must=(), absent=(), contains=()):
+    """A layout a check reads before judging: paths that must exist, paths that must not, and (path, text)
+    pairs whose file must hold the text. Paths are relative to WHERE."""
+    return (where, tuple(must), tuple(absent), tuple(contains))
+
+
+def _layout_gap(layout):
+    """'' when the layout holds, else the first gap, named."""
+    where, must, absent, contains = layout
+    materialize(where)
+    for rel in must:
+        if not os.path.exists(os.path.join(where, rel)):
+            return "%s is missing" % rel
+    for rel in absent:
+        if os.path.exists(os.path.join(where, rel)):
+            return "%s is present" % rel
+    for rel, text in contains:
+        try:
+            with open(os.path.join(where, rel), encoding="utf-8") as handle:
+                body = handle.read()
+        except OSError:
+            body = ""
+        if text not in body:
+            return "%s lacks %r" % (rel, text)
+    return ""
+
+
+def _ref_verdict_check(layout, cwd, args, want):
+    def check():
+        gap = _layout_gap(layout)
+        if gap:
+            return False, "layout: " + gap
+        try:
+            got = _load_guard_module().push_new_branch_hit(args() if callable(args) else args, cwd)
+        except Exception as error:  # a reader that raises is a named failure, never a crash of the run
+            return False, "raised %s" % type(error).__name__
+        if not want:
+            return got == "", "judged %r, want no refspec judged" % got
+        return want in got, "judged %r, want the refspec naming %s" % (got, want)
+    return check
+
+
+def _ref_count_check(layout, cwd, args, starts_want, judged=True):
+    """A count check. `judged` (the default) also needs a refspec judged, which proves the read reached its tips.
+    A case where git refuses the layout judges nothing, so it passes judged=False and the count alone is its proof."""
+    def check():
+        gap = _layout_gap(layout)
+        if gap:
+            return False, "layout: " + gap
+        module = _load_guard_module()
+        core = sys.modules["guard_core"]
+        real_git = core._git
+        starts = []
+
+        def counting_git(where, *git_args):
+            if "for-each-ref" in git_args:
+                starts.append(git_args)
+            return real_git(where, *git_args)
+
+        core._git = counting_git
+        try:
+            got = module.push_new_branch_hit(args() if callable(args) else args, cwd)
+        except Exception as error:
+            return False, "raised %s" % type(error).__name__
+        finally:
+            core._git = real_git
+        if judged and not got:
+            return False, "judged nothing, so the read may not have run (%d for-each-ref starts)" % len(starts)
+        return len(starts) == starts_want, "%d for-each-ref starts, want %d (judged %r)" % (
+            len(starts), starts_want, got)
+    return check
+
+
+def _ref_no_git_check(layout, cwd, args):
+    """A verdict check with git unable to start, so the fallback read gets no result at all (None). The module and
+    the layout are read first, with PATH intact; only the reader's own git start finds no git."""
+    def check():
+        gap = _layout_gap(layout)
+        if gap:
+            return False, "layout: " + gap
+        module = _load_guard_module()
+        saved = os.environ.get("PATH", "")
+        os.environ["PATH"] = ""
+        try:
+            got = module.push_new_branch_hit(args, cwd)
+        except Exception as error:
+            return False, "raised %s" % type(error).__name__
+        finally:
+            os.environ["PATH"] = saved
+        return got == "", "judged %r, want no refspec judged" % got
+    return check
+
+
+REF_PACKED = _ref_layout(PUSHPACKED, must=[".git/packed-refs"],
+                         absent=[".git/refs/remotes/origin/lane/base", ".git/refs/remotes/origin/HEAD"],
+                         contains=[(".git/packed-refs", "refs/remotes/origin/lane/base"),
+                                   (".git/packed-refs", "refs/remotes/origin/HEAD")])
+REF_SUB = _ref_layout(PUSHPACKED, must=[".git/packed-refs", "sub"], absent=["sub/.git"],
+                      contains=[(".git/packed-refs", "refs/remotes/origin/lane/base")])
+REF_LINKED = _ref_layout(PUSHLINKWT, must=[".git"], contains=[(".git", "gitdir: ")])
+REF_LOOSE = _ref_layout(PUSHLOCK, must=[".git/refs/remotes/origin/lane/base",
+                                        ".git/refs/remotes/origin/lane/stale.lock",
+                                        ".git/refs/remotes/origin/HEAD"],
+                        absent=[".git/packed-refs"])
+REF_REFTABLE = _ref_layout(PUSHREFTABLE, must=[".git/reftable", ".git/refs/remotes/origin/lane/base"])
+REF_SYMREF = _ref_layout(PUSHSYMREF, must=[".git/refs/remotes/origin/alias"],
+                         contains=[(".git/refs/remotes/origin/alias", "ref: refs/heads/lane-local")])
+REF_NEWBR = _ref_layout(PUSHNEWBR, must=[".git/refs/remotes/origin/lane/base"])
+REF_BADREF = _ref_layout(PUSHBADREF, must=[".git/refs/remotes/origin/not-text", ".git/refs/remotes/origin/lane/base"])
+REF_BADPACK = _ref_layout(PUSHBADPACK, must=[".git/packed-refs"],
+                          contains=[(".git/packed-refs", "not-a-sha refs/remotes/origin/junk")])
+REF_SUBGIT = _ref_layout(PUSHSUB, must=[".git"], contains=[(".git", "gitdir: ")])
+
+PUSH_REF_CHECKS = (
+    ("push-new-branch: ref reader, a remote branch packed in packed-refs is a tip, a new branch at it is judged",
+     _ref_verdict_check(REF_PACKED, PUSHPACKED, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-packed"],
+                        "skc-packed")),
+    ("push-new-branch: ref reader, origin/HEAD packed in packed-refs is no branch, its sha is not judged",
+     _ref_verdict_check(REF_PACKED, PUSHPACKED, ["origin", "refs/remotes/origin/HEAD:refs/heads/skc-packed-head"],
+                        "")),
+    ("push-new-branch: ref reader, a linked worktree reads the clone's remote refs in the common folder, judged",
+     _ref_verdict_check(REF_LINKED, PUSHLINKWT, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-wt"],
+                        "skc-wt")),
+    ("push-new-branch: ref reader, a linked worktree's .git file is read, no for-each-ref start",
+     _ref_count_check(REF_LINKED, PUSHLINKWT, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-wt-count"], 0)),
+    ("push-new-branch: ref reader, a checkout's .git folder is read, no for-each-ref start",
+     _ref_count_check(REF_PACKED, PUSHPACKED, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-dir-count"], 0)),
+    ("push-new-branch: ref reader, a folder inside a checkout walks up to its .git, no for-each-ref start",
+     _ref_count_check(REF_SUB, PUSHPACKEDSUB, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-sub-count"], 0)),
+    ("push-new-branch: ref reader, a checkout with no packed-refs reads its loose refs, no for-each-ref start",
+     _ref_count_check(REF_LOOSE, PUSHLOCK, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-loose-count"], 0)),
+    ("push-new-branch: ref reader, a loose remote branch is a tip, a new branch at it is judged",
+     _ref_verdict_check(REF_LOOSE, PUSHLOCK, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-loose"],
+                        "skc-loose")),
+    ("push-new-branch: ref reader, a stale .lock ref is not a remote tip, HEAD~0 is allowed",
+     _ref_verdict_check(REF_LOOSE, PUSHLOCK, ["origin", "HEAD~0:refs/heads/skc-lock"], "")),
+    ("push-new-branch: ref reader, a loose origin/HEAD is no branch, its sha is not judged",
+     _ref_verdict_check(REF_LOOSE, PUSHLOCK, ["origin", "refs/remotes/origin/HEAD:refs/heads/skc-loose-head"], "")),
+    ("push-new-branch: ref reader, a reftable folder reads for-each-ref once, the one start",
+     _ref_count_check(REF_REFTABLE, PUSHREFTABLE, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-rt-count"],
+                      1)),
+    ("push-new-branch: ref reader, a reftable folder is judged on for-each-ref's tips",
+     _ref_verdict_check(REF_REFTABLE, PUSHREFTABLE, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-rt"],
+                        "skc-rt")),
+    ("push-new-branch: ref reader, for-each-ref's origin/HEAD is no branch, its sha is not judged",
+     _ref_verdict_check(REF_REFTABLE, PUSHREFTABLE, ["origin", "refs/remotes/origin/HEAD:refs/heads/skc-rt-head"], "")),
+    ("push-new-branch: ref reader, a symbolic ref under refs/remotes reads for-each-ref once",
+     _ref_count_check(REF_SYMREF, PUSHSYMREF, ["origin", "refs/remotes/origin/alias:refs/heads/skc-alias-count"], 1)),
+    ("push-new-branch: ref reader, a symbolic ref under refs/remotes resolves to its commit, judged",
+     _ref_verdict_check(REF_SYMREF, PUSHSYMREF, ["origin", "refs/remotes/origin/alias:refs/heads/skc-alias"],
+                        "skc-alias")),
+    ("push-new-branch: ref reader, a loose ref that is not text goes to for-each-ref, the branch beside it is judged",
+     _ref_verdict_check(REF_BADREF, PUSHBADREF, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-badref"],
+                        "skc-badref")),
+    # git refuses this packed-refs on every read, the reader's own rev-parse included, so only the start count shows
+    # the arm: a line that is no object id hands the read to for-each-ref, one start.
+    ("push-new-branch: ref reader, a packed-refs line that is no object id sends the read to for-each-ref once",
+     _ref_count_check(REF_BADPACK, PUSHBADPACK, lambda: ["origin", BADPACK["sha"] + ":refs/heads/skc-badpack"], 1,
+                      judged=False)),
+    ("push-new-branch: ref reader, a submodule's .git file names a git folder whose refs are read as files, "
+     "no for-each-ref start",
+     _ref_count_check(REF_SUBGIT, PUSHSUB, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-sub-git-count"],
+                      0)),
+    # The exemptions of rule push-new-branch that had no case of their own: a glob, --all, --mirror, a URL remote,
+    # and a read that cannot start.
+    ("push-new-branch: a glob destination is exempt, allows",
+     _ref_verdict_check(REF_NEWBR, PUSHNEWBR, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-*"], "")),
+    ("push-new-branch: --all is exempt, allows",
+     _ref_verdict_check(REF_NEWBR, PUSHNEWBR, ["--all", "origin", "refs/remotes/origin/lane/base:refs/heads/skc-all"],
+                        "")),
+    ("push-new-branch: --mirror is exempt, allows",
+     _ref_verdict_check(REF_NEWBR, PUSHNEWBR,
+                        ["--mirror", "origin", "refs/remotes/origin/lane/base:refs/heads/skc-mirror"], "")),
+    ("push-new-branch: a remote named by URL is exempt, allows",
+     _ref_verdict_check(REF_NEWBR, PUSHNEWBR,
+                        ["https://example.invalid/clone.git", "refs/remotes/origin/lane/base:refs/heads/skc-url"], "")),
+    ("push-new-branch: a read that cannot start (git cannot be run) is exempt, allows",
+     _ref_no_git_check(REF_REFTABLE, PUSHREFTABLE, ["origin", "refs/remotes/origin/lane/base:refs/heads/skc-nogit"])),
+)
+for _label, _check in PUSH_REF_CHECKS:
+    LOG_FAMILY[_label] = _family(_label)
+FIXTURELESS_CHECKS.update(check for _label, check in PUSH_REF_CHECKS)  # each materializes its own layout
+
 
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
@@ -22930,6 +23193,7 @@ FIXTURELESS_CHECKS.update(check for _label, check in _NEW_BRANCH_SPEC_CHECKS)  #
 LOG_CHECKS += _NEW_BRANCH_SPEC_CHECKS
 for _label, _check in LOG_CHECKS:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
+LOG_CHECKS += PUSH_REF_CHECKS  # tagged push-delete where they are defined, above
 
 
 # =========================================================================== session-home
