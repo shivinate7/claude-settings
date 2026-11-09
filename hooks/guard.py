@@ -43,9 +43,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   plumbing-commit-diff deny. A `git commit-tree` call of a builder, test-author, record-writer or
                        designer whose tree holds a path the role may not change, judged against
                        its parent (git's own merge of two parents; no tree for no parent), also
-                       inside `$( )` or backticks. The reason names no path. No override lifts
-                       it. A tree git cannot read, a parent it cannot resolve, two parents it
-                       cannot merge and three or more parents log role-diff-unread and are allowed.
+                       inside `$( )` or backticks. A `$(git write-tree)` tree is the index's tree.
+                       The reason names no path. No override lifts it. A tree git cannot read
+                       (`$T`), a parent it cannot resolve, two parents it cannot merge and three
+                       or more parents log role-diff-unread and are allowed.
                        (builders-cannot-edit-tests)
   author-diff, writer-diff, designer-diff, role-diff-*
                        noted. A test-author or record-writer commit or push.
@@ -2430,27 +2431,55 @@ PLUMBING_REASON = (
 )
 # `git commit-tree` options that take a value in the next word.
 COMMIT_TREE_VALUE_OPTS = ("-p", "-m", "-F")
-# A parent word that asks git for a name: `$(git rev-parse X)` or the backtick form. It is read as X.
-PARENT_REV_PARSE = re.compile(r"^(?:\$\(|`)\s*git\s+rev-parse\s+([^\s-][^\s)`]*)\s*(?:\)|`)$")
+# A parent word that asks git for a name: `$(git rev-parse X)` or the backtick form, with `--verify`,
+# `--quiet` or `-q` before X. It is read as X. Other rev-parse flags change what it prints, so they stay unread.
+PARENT_REV_PARSE = re.compile(
+    r"^(?:\$\(|`)\s*git\s+rev-parse(?:\s+(?:--verify|--quiet|-q))*\s+([^\s-][^\s)`]*)\s*(?:\)|`)$")
+# A tree word that is the index's tree: `$(git write-tree)` or the backtick form. A flag such as
+# `--prefix` names another tree, so a flagged form stays unread.
+TREE_WRITE_TREE = re.compile(r"^(?:\$\(|`)\s*git\s+write-tree\s*(?:\)|`)$")
 
 
 def whole_words(args):
     """`args` with each unquoted `$( )` or backtick group joined into one word, so that a word the shell
-    expands counts once, as the shell passes it."""
-    words, held = [], ""
-    for word in args:
-        held = held + " " + word if held else word
-        if held.count("(") > held.count(")") or held.count("`") % 2:
-            continue
-        words.append(held)
-        held = ""
-    return words + ([held] if held else [])
+    expands counts once, as the shell passes it. A group opens at a word that holds `$(` or a backtick
+    and no whitespace (shlex splits an unquoted group at its spaces; a quoted word arrives whole), and
+    only when a later word closes it. A bare `(` in a message opens nothing."""
+    words, index = [], 0
+    while index < len(args):
+        word, end = args[index], index
+        if ("$(" in word or "`" in word) and not any(char.isspace() for char in word):
+            held = word
+            while (held.count("(") > held.count(")") or held.count("`") % 2) and end + 1 < len(args):
+                end += 1
+                held += " " + args[end]
+            if not (held.count("(") > held.count(")") or held.count("`") % 2):
+                word, index = held, end
+        words.append(word)
+        index += 1
+    return words
+
+
+def message_end(args, index):
+    """The index of the last word of the option value at `index`. One word, unless the value still
+    holds its opening quote (git_calls splits a segment it cannot parse at whitespace, and keeps the
+    quotes), when the value runs to the word that closes the quote. A quote that never closes runs
+    to the end; None when an option word sits in that run, since the split is then unknown."""
+    quote = args[index][:1]
+    if quote not in ("'", '"') or (len(args[index]) > 1 and args[index].endswith(quote)):
+        return index
+    for end in range(index + 1, len(args)):
+        if args[end].endswith(quote):
+            return end
+    return None if any(word.startswith("-") for word in args[index + 1:]) else len(args) - 1
 
 
 def commit_tree_args(args):
-    """`(tree, parents)` read from the words after `commit-tree`, or None when they do not name exactly
-    one tree. A parent spelled `$(git rev-parse X)` is X; another word the shell expands stays as
-    spelled, and git cannot read it, so the call is unread."""
+    """`(tree, parents)` read from the words after `commit-tree`, or None when they name no tree. Git
+    takes the first plain word as the tree, so a later plain word is ignored. A message value never
+    becomes a tree: a value that still holds its opening quote runs to its closing quote (`message_end`).
+    A parent spelled `$(git rev-parse X)` is X; another word the shell expands stays as spelled, and git
+    cannot read it, so the call is unread."""
     tree, parents, index = "", [], 0
     args = whole_words(args)
     while index < len(args):
@@ -2458,18 +2487,21 @@ def commit_tree_args(args):
         if word in COMMIT_TREE_VALUE_OPTS:
             if index + 1 >= len(args):
                 return None
+            end = index + 1
             if word == "-p":
-                parents.append(args[index + 1])
-            index += 2
+                parents.append(args[end])
+            else:
+                end = message_end(args, end)
+                if end is None:
+                    return None
+            index = end + 1
         elif word.startswith("-p") and not word.startswith("--"):
             parents.append(word[2:])
             index += 1
         elif word.startswith("-"):
             index += 1
-        elif tree:
-            return None
         else:
-            tree = word
+            tree = tree or word
             index += 1
     parents = [(PARENT_REV_PARSE.match(p) or [None, p])[1] for p in parents]
     return (tree, parents) if tree else None
@@ -2479,12 +2511,18 @@ def plumbing_diff(root: str, top: str, role: str, args):
     """The paths of a `commit-tree` call that the role may not change, judged on the tree it would
     commit; None when git could not answer (unknown, never clear). The tree is compared with its
     parent, with git's own merge of the two parents when there are two, and with no tree at all
-    (every path counts as added) when there is no parent. Three or more parents, and two that git
+    (every path counts as added) when there is no parent. A tree spelled `$(git write-tree)` is the
+    index's tree, which `git write-tree` in the checkout names. Three or more parents, and two that git
     cannot merge, are unknown: git makes no merge to compare with."""
     read = commit_tree_args(args)
     if read is None or len(read[1]) > 2:
         return None
     named, parent_names = read
+    if TREE_WRITE_TREE.match(named):
+        written = guard_core._git(root, "write-tree")
+        if written is None or written.returncode != 0 or not written.stdout.strip():
+            return None
+        named = written.stdout.strip()
     ids = []
     for name, kind in [(named, "tree")] + [(p, "commit") for p in parent_names]:
         answer = guard_core._git(root, "rev-parse", "--verify", "--quiet", name + "^{" + kind + "}")
