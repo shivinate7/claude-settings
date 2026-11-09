@@ -471,6 +471,82 @@ class CleanLayoutControlTests(unittest.TestCase):
                         "the other target's mutant does not read KILLED: %r" % lines)
         self.assertEqual(code, 1, "a run with an UNKNOWN mutant must exit 1, not %r" % code)
 
+    CONTROLLED = "mutant of a guard target"  # the label the run_mutants cases below read UNKNOWN or KILLED
+
+    def run_one_mutant_under_control(self, control_result):
+        """Run run_mutants over one mutant whose key is "guard", and whose control returns `control_result` as
+        run_suite does. Return (exit code, stdout lines)."""
+        def run_one(entry):
+            return entry, 1, RED_RIGHT, REQUIRED, None
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = mutate_shared.run_mutants([self.CONTROLLED], run_one,
+                                             controls={"guard": lambda: control_result},
+                                             control_of=lambda entry: "guard")
+        return code, out.getvalue().splitlines()
+
+    def test_run_mutants_reads_a_control_that_exits_zero_with_no_ran_line_as_red(self):
+        """The signature these cases pin: a control is `controls[key]()`, which returns run_suite's
+        (code, red, ran, seen), as it does now. run_mutants reads `ran` (today it drops it). Exit 0 with an
+        empty `ran` is the crash signature: the suite ran no case, so the mutant reads UNKNOWN, never KILLED."""
+        _code, lines = self.run_one_mutant_under_control((0, [], [], []))
+        self.assertTrue([line for line in lines if line.startswith("UNKNOWN") and self.CONTROLLED in line],
+                        "a control that exits 0 and ran no case left its mutant unjudged: no UNKNOWN line: %r"
+                        % lines)
+
+    def test_run_mutants_keeps_the_kill_when_the_control_exits_zero_with_one_ran_line(self):
+        """The green control beside the red case above: the same exit 0, with one `ran` line. It reads
+        KILLED, and no UNKNOWN."""
+        ran = ["PASS  allow (want allow) [Bash] " + REQUIRED]
+        _code, lines = self.run_one_mutant_under_control((0, [], ran, []))
+        self.assertTrue([line for line in lines if line.startswith("KILLED") and self.CONTROLLED in line],
+                        "a green control that ran one case lost the kill: %r" % lines)
+        self.assertFalse([line for line in lines if line.startswith("UNKNOWN")],
+                         "a green control that ran one case reads its mutant UNKNOWN: %r" % lines)
+
+    def test_a_control_that_exits_zero_with_no_ran_line_reads_every_mutant_of_its_target_unknown(self):
+        """Through main: two guard mutants share one clean-layout control. Its exit 0 with no ran line reads
+        both UNKNOWN, with 'clean layout' named, and neither KILLED."""
+        entries = self.guard_entries("work-tree: the tree option goes unread",
+                                     "pointer-head: the git directory option goes unread")
+        suite = _FakeSuite(entries, control_passes=True,
+                           hooks={mutate_guard.control_name("guard"): lambda: (0, [], [], [])})
+        _code, lines = self.run_main(entries, suite, jobs=2)
+        for entry in entries:
+            label = mutate_guard.mutation_parts(entry)[0]
+            self.assertTrue([line for line in lines
+                             if line.startswith("UNKNOWN") and label in line and "clean layout" in line],
+                            "a control that ran no case left this mutant of its target unjudged: no UNKNOWN "
+                            "line with 'clean layout': %r" % lines)
+
+    def test_run_control_asks_its_suite_for_a_required_fragment_of_its_own_target(self):
+        """The clean-layout control proves only that the unmutated layout does not crash, so it runs a filtered
+        subset: `only`, the MUTATE_ONLY it hands run_suite, is one required case fragment from that target's own
+        mutation entries (`mutation_parts`), never None (the full suite). run_suite and lay_out are stubbed."""
+        asked = []
+
+        def record(suite, variable, copy_path, config_dir, only=None):
+            asked.append(only)
+            return pass_result()
+
+        def laid_out(sources, work, target, name, old, new):
+            return os.path.join(self.run, mutate_shared.safe_name(name))
+
+        bad = []
+        for target in sorted({mutate_guard.mutation_parts(e)[3] for e in mutate_guard.MUTATIONS}):
+            fragments = [mutate_guard.mutation_parts(e)[4] for e in mutate_guard.MUTATIONS
+                         if mutate_guard.mutation_parts(e)[3] == target]
+            self.assertTrue(fragments, "no mutation entry names target %s" % target)
+            del asked[:]
+            with mock.patch.object(mutate_guard, "lay_out", side_effect=laid_out), \
+                    mock.patch.object(mutate_guard, "run_suite", side_effect=record):
+                mutate_guard.run_control({}, self.run, target)
+            self.assertTrue(asked, "run_control made no suite call for target %s" % target)
+            bad += [(target, only) for only in asked
+                    if not only or not any(only in required for required in fragments)]
+        self.assertEqual(bad, [], "a clean-layout control asks its suite for no required case fragment of its "
+                                  "own target, as (target, only): %r" % bad)
+
 
 def scaffold_sources(**extra):
     """The `sources` a scaffold is built from: a short text for each file, and a case replaces one
