@@ -1,0 +1,10 @@
+{
+  "title": "`merge <batch-pr> --confirm` on a draft batch PR goes through `--batch-build NAME --ready`",
+  "why": "Round 3 on #2378 (lane batch-freeze-lane-set-enforce, session_013NEJL1SSD89Hzb8ahrTmfs), via the coordinator 23:55 CST Nov 8: `--confirm` on a draft batch PR still runs the old draft_step, with no lane lint and no freeze block, then Host.ready.",
+  "note": "Starts after #2378 merges.",
+  "phase": "next",
+  "owner": "coordinator",
+  "status": "todo",
+  "order": 880,
+  "updatedAt": "2026-11-08T23:50:00-06:00"
+}
