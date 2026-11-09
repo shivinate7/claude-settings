@@ -16750,8 +16750,11 @@ def _build_find_cp():
     # non-test file under a test folder, copied with --parents. dyn/ is absent on purpose: dyn/[id].test.tsx matches
     # no file, so bash passes that text on as the source. tests/test_a.py is the test the made-folder cases copy out
     # of tests/ into out/, by a glob and by name. tests/unit/test_x.py is the test the made-folder folder walk copies.
+    # tests/list.txt names tests/test_a.py, so a substitution of it is a test path. src/x.py has no test name, and
+    # test_b.py is a second root test, so a root glob matches two tests.
     make_repo(FINDCP, {"src/app.py": "x\n", "src/a.py": "x\n", "src/b.txt": "x\n", "src/test_a.py": "x\n",
-                       "src/test_x.py": "x\n", "test_x.py": "x\n", "tests/notes.txt": "x\n", "tests/test_a.py": "x\n",
+                       "src/test_x.py": "x\n", "src/x.py": "x\n", "test_x.py": "x\n", "test_b.py": "x\n",
+                       "tests/notes.txt": "x\n", "tests/test_a.py": "x\n", "tests/list.txt": "tests/test_a.py\n",
                        "tests/unit/test_x.py": "x\n",
                        "pkg/keep.py": "x\n", "hooks/keep.py": "x\n", "hooks/test_x.py": "x\n",
                        "hooks/guard.py": "x\n", "hooks/notes.txt": "x\n", "docs/keep.txt": "x\n",
@@ -16998,6 +17001,37 @@ sh("builder-find: find src tests -name *.py -exec cp x {}, the test folder last,
    **dict(BR, cwd=FINDCP))
 sh("builder-find: for f in tests/*, cp \"$f\" to /tmp/snap/, reads each test and writes none, is allowed",
    'for f in tests/*; do cp "$f" /tmp/snap/; done', "allow", **dict(BR, cwd=FINDCP))
+# ---- a value read from a file is a path the check cannot read, so the check judges what the command text writes.
+# tests/list.txt names tests/test_a.py. The first four rows write or delete that test through a variable or a loop,
+# and are refused. The next two name the substitution in the command, and are refused. The grep count and the copy
+# to a name with no test prefix are green controls.
+sh("builder-find: n=$(cat tests/list.txt), rm $n, deletes the test it names, is refused",
+   'n=$(cat tests/list.txt); rm $n', "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: for f in $(cat tests/list.txt), rm \"$f\", deletes the test each line names, is refused",
+   'for f in $(cat tests/list.txt); do rm "$f"; done', "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: n=$(cat tests/list.txt), cp src/a.py $n, writes the test it names, is refused",
+   'n=$(cat tests/list.txt); cp src/a.py $n', "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: n=$(cat tests/list.txt), echo x > $n, writes the test it names, is refused",
+   'n=$(cat tests/list.txt); echo x > $n', "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: rm $(cat tests/list.txt), a substitution named in the command, deletes the test it names, is refused",
+   "rm $(cat tests/list.txt)", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: cat tests/list.txt | xargs rm, the names piped to rm, deletes the test they name, is refused",
+   "cat tests/list.txt | xargs rm", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: n=$(grep -c foo tests/test_a.py), sed -i on src/a.py with $n in the script, is allowed",
+   'n=$(grep -c foo tests/test_a.py); sed -i "s/N/$n/" src/a.py', "allow", **dict(BR, cwd=FINDCP))
+sh("builder-find: cp src/test_a.py src/test_a.py.bak, a test copied to a name with no test prefix, is allowed",
+   "cp src/test_a.py src/test_a.py.bak", "allow", **dict(BR, cwd=FINDCP))
+# A loop over a glob of src/*.py also takes test_a.py. Each copy writes a .bak name, which carries no test name.
+sh("builder-find: for f in src/*.py, cp \"$f\" \"$f.bak\", writes backups with no test name, is allowed",
+   'for f in src/*.py; do cp "$f" "$f.bak"; done', "allow", **dict(BR, cwd=FINDCP))
+# Older gaps. A loop or a copy over test_* at the repo root writes the root tests, test_b.py and test_x.py.
+sh("builder-find: for d in test_*, cp x \"$d\" at the root, writes the root tests, is refused",
+   'for d in test_*; do cp x "$d"; done', "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: cp x test_* at the root, writes the root tests, is refused",
+   "cp x test_*", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: for f in src/x.py tests/test_a.py, echo x > \"$f\", writes the test item, is refused",
+   'for f in src/x.py tests/test_a.py; do echo x > "$f"; done', "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDCP))
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
     ("new-test", _put("tests/test_new.py", "pass\n")),
