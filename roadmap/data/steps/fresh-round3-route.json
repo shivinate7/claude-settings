@@ -1,0 +1,11 @@
+{
+  "title": "Decision pr-review-record holds the coordinator's standing review route for a fix chain",
+  "why": "The route lived only in the coordinator's handoff, so lanes asked the same question six times on the night of Nov 8.",
+  "note": "Coordinator, 04:05 CST Nov 9. The route (coordinator standing process pick, 20:59 CST Nov 8, process only; also on step guard-fix-check-sonnet): one fix check per chain; otherwise a fresh full Sonnet `Round 3 of 3` review at the live head; merge main once, with no replay. Lane session_013NEJL3Ci1xJoJyTgLU5Nt7.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJL3Ci1xJoJyTgLU5Nt7",
+  "status": "doing",
+  "order": 893,
+  "updatedAt": "2026-11-09T04:05:00-06:00"
+}
