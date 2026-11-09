@@ -81,8 +81,11 @@ report label, or after "; " or ". ". A compaction is the newest `compact_boundar
 Each line is tracked alone: any main-session reply after it that holds the line satisfies that
 demand; the current reply counts by its blockquote. A bare `Recovered:` takes the lines below it as
 its items; with nothing below, it is missing. While the Recovered demand is pending, each item of
-the current Recovered line (split on ";" outside parentheses) names a whole-word source: git, page
-or digest. An item that starts with "none" or "nothing" needs no source. The demand holds on landed turns and unlanded turns
+the current Recovered line (split on ";" outside parentheses) names a source, matched ignoring case: git,
+page or digest as whole words, `commit <hex>`, `commits <hex>` or `sha <hex>` (7-40 hex characters with a digit;
+a colon or spaces, then at most one backtick, may sit between), `PR #<n>`, `PRs #<n>`, `PR (#<n>)`, `PR#<n>`,
+`pull request #<n>`, `pull #<n>`, `issue #<n>` (`issue` needs the `#`), or a github.com URL; the space before `#` is optional; a bare `#<n>` is no source,
+and a PR with no `#` (`PR 3`) is no source even beside git, page or digest. A `pull <n>` is no PR when `git` and one space lead it or a word follows the number (`git pull 2`, `pull 3 files`). An item that starts with "none" or "nothing" needs no source. The demand holds on landed turns and unlanded turns
 whose reply has the report shape, and in the rewrite after a missing-report block when the rewrite
 has the report shape. Cost: a scan of the records main()
 already loaded (the rewrite reads the transcript once, as before); no file, log or process.
@@ -899,7 +902,20 @@ CARRY_LINES = (
     ("Recovered", re.compile(CARRY_START + r"recovered(?:\*\*)?:", re.I | re.M)),
     ("Handoff gave", re.compile(CARRY_START + r"handoff gave(?:\*\*)?:", re.I | re.M)),
 )
-SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
+# A source word or form, matched ignoring case: git, page, digest, `commit <hex>`, `commits <hex>` or `sha <hex>` (a
+# colon or spaces, then at most one backtick, may sit between), `PR #<n>`, `PRs #<n>`, `PR (#<n>)`, `PR#<n>`,
+# `pull request #<n>`, `pull #<n>`, `issue #<n>` (`issue` needs the `#`), a github.com link. A space before `#` is optional (`pull#1`). A bare `#<n>` is no source. The hex has 7 to 40 characters and holds
+# a digit, so a word such as "commit defaced" names no source.
+# A PR with no `#` is no source, and the word beside it (git, page, digest) does not rescue it (see
+# item_names_source): "PR 97", "PR97", "PR-97", "PR: 97", "PR number 97", "PR no. 97", "PRs 97", "pull 97",
+# "pull request 978", "pull requests 978".
+SOURCE_WORD_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
+SOURCE_FORM_RE = re.compile(r"\b(?:commits?|sha)(?::\s*|\s+)`?(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
+                            r"|\bPRs?\s*\(?#\d+\b|\bissue\s*#\d+\b|\bpull(?:\s+request)?\s*#\d+\b|\bgithub\.com/\S", re.I)
+# A bare "pull <n>" is no PR when a git verb leads it ("git pull 2") or a word follows the number ("pull 3 files").
+_BARE_PR_SEP = r"(?:\s*[-:]?\s*|\s+(?:number|no\.?)\s+)"
+BARE_PR_RE = re.compile(r"\b(?:(?:PRs?|pull\s+requests?)" + _BARE_PR_SEP + r"\d|(?<!\bgit\s)pull" + _BARE_PR_SEP
+                        + r"\d+\b(?!\s+[a-z]))", re.I)
 NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
 
 
@@ -972,12 +988,19 @@ def carry_present(name, text):
     return bool(dict(CARRY_LINES)[name].search(text))
 
 
+def item_names_source(item):
+    """Whether a Recovered item names a source: a source form, or a source word unless the item cites a PR with no `#`."""
+    if SOURCE_FORM_RE.search(item):
+        return True
+    return not BARE_PR_RE.search(item) and bool(SOURCE_WORD_RE.search(item))
+
+
 def unsourced_recovered_item(block):
-    """The first item of a Recovered line in `block` that names no git, page or digest source, else ''.
+    """The first item of a Recovered line in `block` that names no source (see item_names_source), whole, else ''.
     An item that starts with "none" or "nothing" needs no source."""
     for item in recovered_items(block) or []:
-        if not NONE_ITEM_RE.match(item) and not SOURCE_RE.search(item):
-            return item[:60]
+        if not NONE_ITEM_RE.match(item) and not item_names_source(item):
+            return item
     return ""
 
 
@@ -1015,8 +1038,10 @@ def recovered_problem(records, text):
         reasons.append("a compaction came before this report and no %s line has landed since" %
                        " or ".join(missing))
     bad = unsourced_recovered_item(block) if "Recovered" in pending else ""
-    if bad:
-        reasons.append("the Recovered item %r names no source (git, page or digest)" % bad)
+    if bad and BARE_PR_RE.search(bad):  # the whole item: a PR past the 60 quoted characters still names the fix
+        reasons.append("the Recovered item %r names a PR with no #, which is no source (the form is PR #<n>)" % bad[:60])
+    elif bad:
+        reasons.append("the Recovered item %r names no source (git, page or digest)" % bad[:60])
     return owner_line("Recovered guard", "; ".join(reasons)) if reasons else ""
 
 
@@ -1161,13 +1186,13 @@ def question_problem(records, turn, text, hook):
         return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
     root = repo_root(hook.get("cwd"))
     page = layout.waiting_page(root) if root else "unknown"
-    here = None if page == "unknown" else page.rstrip("/")
+    has_page = page != "unknown"
     for u in uses:
         inp = u.get("input")
         if (str(u.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict) and items_write(inp)
-                and (here is None or str(inp.get("url", "")).rstrip("/") == here)):
+                and (not has_page or layout.is_waiting_page_url(root, inp.get("url")))):
             return "", ""
-    if here is None:
+    if not has_page:
         # No page: the question is asked in the reply or the box, so the box counts.
         return "", ("" if any(u.get("name") == ASK_TOOL for u in uses) else NO_PAGE_NOTE)
     return OWNER_REFUSAL % (("the page writer is session " + writer) if writer else

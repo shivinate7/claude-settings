@@ -1445,7 +1445,7 @@ def report_lines(*deviations):
 
 
 REPORT_BOTH_NONE = report_lines("Recovered: none", "Handoff gave: none")
-REPORT_BOTH_SOURCED = report_lines("Recovered: ruling X from PR 978 (git); fact Y (page)", "Handoff gave: none")
+REPORT_BOTH_SOURCED = report_lines("Recovered: ruling X from PR #978 (git); fact Y (page)", "Handoff gave: none")
 
 
 class CompactionCarryTests(unittest.TestCase):
@@ -1682,6 +1682,175 @@ class CompactionCarryTests(unittest.TestCase):
         for reply, name in rows:
             with self.subTest(reply=reply):
                 self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), *([name] if name else []))
+
+    def test_cc_green_recovered_item_naming_a_commit_pr_or_url_passes(self):
+        # Catches: a Recovered item sourced as "commit <hex>" (with or without backticks or a colon), "PR #<n>",
+        # "PR#<n>", "PR #<n> (page)", "GitHub PR #<n>" or a github.com URL is refused as sourceless. Each names where
+        # the fact came from. A bare "PR <n>" is no source (test_cc_red_pr_source_without_a_hash_is_no_source).
+        items = [
+            "ruling X from commit abc1234",
+            "ruling X from commit `abc1234`",
+            "ruling X from commit: abc1234",
+            "ruling X from PR #978",
+            "ruling X from PR#978",
+            "ruling X from PR #978 (page)",
+            "ruling X from GitHub PR #978",
+            "ruling X from https://github.com/shivinate7/claude-settings/pull/978",
+        ]
+        for item in items:
+            with self.subTest(item=item):
+                reply = report_lines("Recovered: " + item, "Handoff gave: none")
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced Recovered item blocks: " + item)
+
+    def test_cc_green_pull_commits_sha_and_issue_forms_pass(self):
+        # Catches: the source forms "pull request #<n>", "pull #<n>", "commits <hex>", "sha <hex>" and "issue #5"
+        # are refused as sourceless. An issue with no # is no source (test_cc_red_issue_without_a_hash_is_no_source),
+        # and a bare "PR <n>" is no source (test_cc_red_pr_source_without_a_hash_is_no_source). The "#" form beside a
+        # source word is the control for the bare pull forms (test_cc_red_pull_without_a_hash_is_no_source).
+        items = ["ruling X from pull request #978", "ruling X from pull request #978 (git)",
+                 "ruling X from pull request #978 (page)", "ruling X from pull #978", "ruling X from commits abc1234",
+                 "ruling X from sha abc1234", "ruling X from issue #5"]
+        for item in items:
+            with self.subTest(item=item):
+                reply = report_lines("Recovered: " + item, "Handoff gave: none")
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced Recovered item blocks: " + item)
+
+    def test_cc_red_pull_without_a_hash_is_no_source(self):
+        # Catches: the one "#" optional across PR, pull and issue passes "pull <n>" and "pull request <n>" as a source.
+        # The records list "pull #<n>" and "pull request #<n>" only. A source word beside a bare pull does not rescue
+        # it: "pull 978 (git)", "pull request 978 (git)", "pull requests 978 (page)" and "pull request 978 (page)" are
+        # no source either.
+        items = ["ruling X from pull 978", "ruling X from pull request 978", "ruling X from pull 978 (git)",
+                 "ruling X from pull request 978 (git)", "ruling X from pull requests 978 (page)",
+                 "pull request 978 (page)"]
+        for item in items:
+            with self.subTest(item=item):
+                out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
+                self.assertIsNotNone(out, "a bare pull <n> passes as a source: " + item)
+                self.assertEqual(out["decision"], "block", item)
+
+    def test_cc_red_pr_source_without_a_hash_is_no_source(self):
+        # Catches: a PR with no "#" passes as a source: "PR2", "PR3", "PR   <n>" (spaces), "PR <n>", "GitHub PR <n>",
+        # "pr 2 of the plan", "the PR 3 times", and a bare PR beside a page or git word, which that word does not
+        # rescue: "PR <n> on the page", "PR <n> (page)", "PRs <n> (page)", "PR no. <n> (page)", "PR-<n> on the page",
+        # "PR: 978 (git)", "PR number 978 (git)". The "#" form is the source
+        # (test_cc_green_recovered_item_naming_a_commit_pr_or_url_passes).
+        items = ["ruling X from PR2", "ruling X from PR3", "ruling X from PR   3", "ruling X from PR 978",
+                 "ruling X from GitHub PR 978", "ruling X from pr 2 of the plan", "ruling X from the PR 3 times",
+                 "ruling X from PR 978 on the page", "ruling X from PRs 978 (page)", "ruling X from PR no. 978 (page)",
+                 "ruling X from PR-978 on the page", "ruling X from PR: 978 (git)", "ruling X from PR number 978 (git)",
+                 "PR 978 (page)"]
+        for item in items:
+            with self.subTest(item=item):
+                out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
+                self.assertIsNotNone(out, "a PR with no # passes as a source: " + item)
+                self.assertEqual(out["decision"], "block", item)
+
+    def test_cc_red_pr_refusal_names_the_hash_fix(self):
+        # Catches: the refusal for a bare "PR <n> (git)" does not name "PR #<n>" as the fix. A bare PR is refused even
+        # beside git, so the owner must be told to write the "#<n>" form. The control is "PR #<n> (git)", which passes.
+        control = report_lines("Recovered: ruling X from PR #978 (git)", "Handoff gave: none")
+        self.assertIsNone(self.stop(self.compacted_turn(control)), "a sourced PR #<n> item blocks")
+        reply = report_lines("Recovered: ruling X from PR 978 (git)", "Handoff gave: none")
+        out = self.stop(self.compacted_turn(reply))
+        self.assertBlocksNaming(out, "ruling X from PR 978 (git)")
+        self.assertIn("PR #<n>", out["reason"], "the refusal for a PR with no # does not name PR #<n> as the fix")
+
+    def test_cc_red_pr_past_sixty_characters_still_names_the_hash_fix(self):
+        # Catches: a bare PR past character 60 of a Recovered item is judged on the cut-off text, so the refusal
+        # names no PR and gives no "PR #<n>" fix. The item is over 60 characters and its bare PR starts past 60.
+        item = "ruling X from the planning thread the owner signed off in March, see PR 978"
+        self.assertGreater(item.index("PR 978"), 60, "the fixture must put the bare PR past character 60")
+        out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
+        self.assertBlocksForRecovered(out)
+        self.assertIn("PR #<n>", out["reason"], "a bare PR past character 60 is refused without the PR #<n> fix")
+
+    def test_cc_red_issue_without_a_hash_is_no_source(self):
+        # Catches: "issue <n>" with no "#" passes as a source, so a plain "issue 2 of the plan" names no issue.
+        # The source form that counts is "issue #<n>" (test_cc_green_issue_with_a_hash_is_a_source).
+        items = ["ruling X from issue 2 of the plan", "ruling X from issue 12"]
+        for item in items:
+            with self.subTest(item=item):
+                out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
+                self.assertIsNotNone(out, "a bare issue <n> passes as a source: " + item)
+                self.assertEqual(out["decision"], "block", item)
+
+    def test_cc_green_issue_with_a_hash_is_a_source(self):
+        # Catches: "issue #<n>" refused as sourceless. It is the control for the case above: the same item with the "#".
+        reply = report_lines("Recovered: ruling X from issue #2 of the plan", "Handoff gave: none")
+        self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced issue #<n> blocks")
+
+    def test_cc_green_pull_hash_with_no_space_is_a_source(self):
+        # Catches: "pull#<n>", with no space before the "#", refused as sourceless.
+        reply = report_lines("Recovered: ruling X from pull#978", "Handoff gave: none")
+        self.assertIsNone(self.stop(self.compacted_turn(reply)), "'pull#978' is refused as a source")
+
+    def test_cc_green_issue_hash_with_no_space_is_a_source(self):
+        # Catches: "issue#<n>", with no space before the "#", refused as sourceless.
+        reply = report_lines("Recovered: ruling X from issue#5", "Handoff gave: none")
+        self.assertIsNone(self.stop(self.compacted_turn(reply)), "'issue#5' is refused as a source")
+
+    def test_cc_green_pull_request_hash_with_no_space_is_a_source(self):
+        # Catches: "pull request#<n>", with no space before the "#", refused as sourceless.
+        reply = report_lines("Recovered: ruling X from pull request#978", "Handoff gave: none")
+        self.assertIsNone(self.stop(self.compacted_turn(reply)), "'pull request#978' is refused as a source")
+
+    def test_cc_green_upper_case_github_link_is_a_source(self):
+        # Catches: an upper-case github.com link refused as sourceless. The link matches without regard to case.
+        reply = report_lines("Recovered: ruling X from https://GITHUB.COM/shivinate7/claude-settings/pull/978",
+                             "Handoff gave: none")
+        self.assertIsNone(self.stop(self.compacted_turn(reply)), "'GITHUB.COM' link is refused as a source")
+
+    def test_cc_green_spaced_pr_hash_is_a_source(self):
+        # Catches: "PR #<n>" refused as sourceless. It is the control for the cases above: a narrowing that drops
+        # only the no-space forms must leave it a source. "PR #<n> on the page" is the control for the page-word case.
+        for item in ("ruling X from PR #3", "ruling X from PR #978 on the page"):
+            with self.subTest(item=item):
+                reply = report_lines("Recovered: " + item, "Handoff gave: none")
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), "'%s' is refused as a source" % item)
+
+    def test_cc_green_pr_hash_after_plural_or_in_parens_is_a_source(self):
+        # Catches: a PR whose "#" follows "PRs" or sits in parentheses is refused as sourceless: "PRs #978 and #979"
+        # and "PR (#978)". The "#" makes it a PR, so it is a source with or without a source word. The "(page)" twins
+        # pass on base and are the controls.
+        items = ["PRs #978 and #979 (page)", "PRs #978 and #979", "PR (#978) (page)", "PR (#978)"]
+        for item in items:
+            with self.subTest(item=item):
+                reply = report_lines("Recovered: " + item, "Handoff gave: none")
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced Recovered item blocks: " + item)
+
+    def test_cc_green_git_pull_with_a_number_is_no_bare_pr(self):
+        # Catches: the git-verb exemption (the lookbehind in BARE_PR_RE) is dropped, so "git pull 2" and
+        # "ruling X from git pull 2 (git)" read as a bare PR. Neither has a word after the number, so only that
+        # exemption passes them. "git pull 2 rebases (git)" and "pull 3 files from git" have a word after the number,
+        # which passes them on its own, so they are controls. "git pull rebases (git)" has no number. The bare
+        # "pull 978 (git)" stays refused (test_cc_red_pull_without_a_hash_is_no_source).
+        items = ["git pull rebases (git)", "git pull 2", "ruling X from git pull 2 (git)",
+                 "git pull 2 rebases (git)", "pull 3 files from git"]
+        for item in items:
+            with self.subTest(item=item):
+                reply = report_lines("Recovered: " + item, "Handoff gave: none")
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced Recovered item blocks: " + item)
+
+    def test_cc_red_bare_hash_number_is_no_source(self):
+        # Catches: a bare "#<n>" passes as a source. "#3 of my notes" names no PR, commit or page.
+        items = ["ruling X from #3 of my notes", "ruling X (#1 priority)", "ruling X from memory (#2)"]
+        for item in items:
+            with self.subTest(item=item):
+                out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
+                self.assertIsNotNone(out, "a bare #<n> passes as a source: " + item)
+                self.assertEqual(out["decision"], "block", item)
+
+    def test_cc_red_recovered_item_with_no_source_still_blocks_with_the_new_forms(self):
+        # Catches: a widened source form passes an item with no source: a bare word "commit" or "memory", "commit"
+        # with a non-hex word, or a 6-character hex (a sha or commit needs 7 or more).
+        items = ["ruling X", "ruling X from memory", "ruling X from a commit", "ruling X from commit defaced",
+                 "ruling X from commit abc123", "ruling X from sha abc123"]
+        for item in items:
+            with self.subTest(item=item):
+                out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
+                self.assertIsNotNone(out, "a sourceless Recovered item passes: " + item)
+                self.assertEqual(out["decision"], "block", item)
 
     def test_cc_red_source_word_must_match_a_whole_word(self):
         # Catches: "git" inside "gitlab", or "page" inside "pages", counts as a source.
@@ -1953,6 +2122,33 @@ class PickGuardTests(unittest.TestCase):
     def test_pk_red_page_write_to_another_repo_blocks(self):
         out = self.verdict(self.PICK + "\n\n" + self.OTHER, [self.page_set(self.OTHER)])
         self.assertIsNotNone(out)
+
+    def test_pk_green_page_write_in_other_url_forms_passes(self):
+        # Catches: the page's own write refused when its URL is the /code/artifact/ form or carries a query.
+        # layout.is_waiting_page_url decides "same artifact"; the string compare in question_problem does not.
+        code_form = self.PAGE.replace("/artifact/", "/code/artifact/")
+        for url in (code_form, self.PAGE + "?tab=items", code_form + "/?tab=items"):
+            with self.subTest(url=url):
+                self.assertIsNone(self.verdict(self.PICK, [self.page_set(url)]), "the page's write blocks: " + url)
+
+    def test_pk_green_page_write_with_trailing_slash_passes(self):
+        # Catches: a trailing slash on the page's write refused. The string compare already strips it (a control).
+        self.assertIsNone(self.verdict(self.PICK, [self.page_set(self.PAGE + "/")]))
+
+    def test_pk_green_page_recorded_in_code_form_passes(self):
+        # Catches: a page recorded in the /code/artifact/ form refuses its own /artifact/ write. The setUp repo,
+        # re-pointed at the code form of the page.
+        with open(os.path.join(self.repo, ".claude", "layout-extras.json"), "w") as f:
+            json.dump({"kinds": {}, "waiting-page": self.PAGE.replace("/artifact/", "/code/artifact/")}, f)
+        self.assertIsNone(self.verdict(self.PICK, [self.page_set()]), "the page's own write blocks")
+
+    def test_pk_red_other_artifact_in_other_url_forms_blocks(self):
+        # Catches: a match by substring, or by the /code/artifact/ form alone, passes another artifact.
+        # "waitpage10" is another artifact, not the page with a digit added (a control).
+        other_code = self.OTHER.replace("/artifact/", "/code/artifact/")
+        for url in (other_code, self.OTHER + "?tab=items", self.PAGE + "0"):
+            with self.subTest(url=url):
+                self.assertIsNotNone(self.verdict(self.PICK, [self.page_set(url)]), "another artifact passes: " + url)
 
     def test_pk_green_page_write_without_link_passes(self):
         # The writer's items write is the send. It reaches the page without a link in the reply, so no link is needed.
