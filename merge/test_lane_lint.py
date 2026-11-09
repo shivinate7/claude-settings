@@ -32,6 +32,9 @@ UNKNOWN = [("PASS", "record slugs"), ("unknown", "shellcheck")]
 # The drift line bin/ste-changed prints under the pin note's variable: PIN_NOTE_MARKER, then this text.
 PIN_NOTE_DRIFT = ("CI pins ste-lint at abc1234 (2026-10-01, .github/workflows/checks.yml:5), older than this copy's lint. "
                   "A line can pass here and fail CI. Move the pin to claude-settings main, in a lane of its own.")
+# The unknown line bin/ci-job prints when a heavy run finds another holding its lock: exit 2, and the check never ran.
+BUSY = ("another heavy check runs in this container (4242 bin/ci-job checks --lint --base origin/main); "
+        "run one at a time and retry when it ends")
 
 STUB = '''import json, os, subprocess, sys, time
 LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
@@ -369,6 +372,22 @@ class LaneLint(CiJobStub, tm.CloudSession):
                 rc, out = self.lint_run("--lane-lint", "7", "--lint-unknown-ok", reason)
                 self.assertEqual(rc, 1, out)
                 self.assertEqual(pass_lines(out), [], out)
+
+    def test_a_busy_refusal_is_not_lifted_by_a_reason(self):  # the check never ran, so no reason makes it a pass
+        self.use_ci_job([("unknown", "checks")], 2, details={"checks": BUSY})
+        rc, out = self.lint_run("--lane-lint", "7", "--lint-unknown-ok", "shellcheck is not on this box")
+        self.assertNotEqual(rc, 0, "a busy refusal was lifted by --lint-unknown-ok: %s" % out)
+        self.assertEqual(pass_lines(out), [], out)
+
+    def test_a_busy_refusal_says_to_retry_when_the_other_heavy_check_ends(self):
+        self.use_ci_job([("unknown", "checks")], 2, details={"checks": BUSY})
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertIn("retry when the other heavy check ends", out, "the busy refusal does not say to retry when the other heavy check ends: %s" % out)
+
+    def test_a_busy_refusal_offers_no_unknown_ok_flag(self):
+        self.use_ci_job([("unknown", "checks")], 2, details={"checks": BUSY})
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertNotIn("--lint-unknown-ok", out, "the busy refusal offers the flag that lifts an unknown lint: %s" % out)
 
     def test_a_ref_target_lints_against_main_by_default(self):
         self.use_ci_job(PASSING, 0)
@@ -955,6 +974,19 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(self.host.readies, [], "the pull request went ready on an unknown ready check")
         self.assertNotIn("--lint-unknown-ok", out, "the ready check offers the lint's unknown-ok flag")
         self.assertNotIn("ready after its draft run shows", out)
+
+    def test_a_busy_ready_check_says_to_retry_and_never_to_fix_it_on_the_branch(self):
+        self.declare(["check invariants"])
+        self.stale_feat()
+        self.use_ci_job([("unknown", "check invariants")], 2, details={"check invariants": BUSY})
+        refs_before = self.refs()
+        rc, out = self.draft_confirm()
+        self.assertEqual(len(self.lint_calls()), 1, "the ready check did not run: " + out)
+        self.assertNotIn("Fix it on the branch", out, "a busy ready check tells the author to fix the branch: %s" % out)
+        self.assertIn("retry when the other heavy check ends", out, "a busy ready check does not say to retry: %s" % out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "a page was pushed on a busy ready check")
+        self.assertEqual(self.host.readies, [], out)
 
     def test_a_declared_step_that_fails_on_a_non_default_base_still_stops_the_draft(self):
         self.base_stamp("integ", ["check invariants"])
