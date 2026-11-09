@@ -3266,6 +3266,8 @@ def shallow_boundary(root):
     # A file read, not a git call: a `git log` per history is the whole cost of the cutover read. A linked worktree's `.git` is a
     # file naming its git dir, and the `shallow` file lives in that dir's common dir.
     path = os.path.join(root, ".git")
+    if not os.path.exists(path):  # no git dir could hold a shallow file, so whether the clone is shallow is unknown
+        raise Stop(f"cannot read {path} to tell whether this clone is shallow: there is no .git here. Run the command from inside the repository. " + REVIEW_CITE)
     try:
         gitdir = path
         if os.path.isfile(gitdir):
@@ -3344,16 +3346,18 @@ def review_stamp_since(root, base, default=None):
     merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. When the caller's repo has no
     salt commit, whatever its history touched, the cutover comes from the merge tool's own source checkout (tool_stamp_since): the stamp rule then holds
     in every repo, not only claude-settings (coordinator item 386). A read that cannot run
-    (git errors, no origin/<default branch> ref, a shallow clone whose first salt commit is the boundary, a shallow file that cannot be read, or a
+    (git errors, no origin/<default branch> ref, a shallow clone whose first salt commit is the boundary, a shallow file that cannot be read, no .git, or a
     tool checkout with no salt commit) raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
-    (rule verification-report-unknown-reads). The caller fetches first (fetch_default_branch). One call per (root, `base`) in a process. A record
+    (rule verification-report-unknown-reads). The caller fetches first (fetch_default_branch). One call per (repo top, `base`, default branch) in a process. A `root` in a subfolder reads the repo top's history, since the pathspec is relative to it. A record
     created before this time may carry no Stamp line. `default` is the default branch name when the caller already read it (the report guard's
     pulls/N payload, base.repo.default_branch); with none, default_branch_once asks gh."""
     # `base` is only a cache key, since the answer reads the default branch. It stays because both callers and their test doubles pass it.
-    key = (root, base)
+    import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
+    top = git_reads.repo_top(root) or root  # `merge/merge.py` below is a path from the repo top; with no top, git or shallow_boundary stops naming it
+    default = default or default_branch_once(root)
+    key = (top, base, default)
     if key not in _stamp_since:
-        default = default or default_branch_once(root)
-        stamp, c, out = salt_cutover(root, f"origin/{default}")
+        stamp, c, out = salt_cutover(top, f"origin/{default}")
         if c:
             raise Stop(f"could not read origin/{default} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again. " + REVIEW_CITE)
         if stamp is None:

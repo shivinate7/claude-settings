@@ -14444,6 +14444,96 @@ BACKING_TEXT = "a = 1\nb = 2\nc = 3\nd = 4\n"
 CAP_NAME = "PROSE_JUDGE_MAX_CALLS"
 PROSE_CAP = 2
 
+REAL_HOST_DEFAULT_BRANCH = merge.host_default_branch  # captured at import, before ReviewEnv patches it to answer main with no gh call
+REAL_REVIEW_STAMP_SINCE = merge.review_stamp_since  # captured at import, before ReviewEnv patches it to a fixed cutover
+REPO_ROUTE = re.compile(r"repos/(?:\{owner\}/\{repo\}|[^/\s]+/[^/\s]+)/?")  # the repo's own record, not a path under it
+
+
+class ReviewedRootRepoReads(ReviewEnv):
+    """The gh reads of the repo's own record (`repos/{owner}/{repo}`) that `merge --reviewed --root` makes, pinned as counts (decision
+    pr-review-record, its cost paragraph). ReviewEnv answers host_default_branch and review_stamp_since with no gh call, so a count under it
+    is low. These cases put the real functions back. Each read is counted at merge.sh, the seam every gh call passes through, with the merge
+    functions on the stack that made it. The root's fixture and shim are ReviewedRoots' (the one home); this class does not inherit its cases."""
+
+    def setUp(self):
+        super().setUp()
+        for name, real in (("host_default_branch", REAL_HOST_DEFAULT_BRANCH), ("review_stamp_since", REAL_REVIEW_STAMP_SINCE)):
+            patch = unittest.mock.patch.object(merge, name, real)
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.alpha = ReviewedRoots.checkout(self, "alpha")
+
+    def fixture(self, root, origin_head):
+        """`root`, with the gh shim on PATH and origin/HEAD set or missing, as the case names. The state is checked before a run."""
+        ReviewedRoots.gh_shim_for(self, root)
+        if not origin_head:
+            sh(root, "git", "update-ref", "-d", "refs/remotes/origin/HEAD")
+        present = subprocess.run(["git", "-C", root, "rev-parse", "--verify", "-q", "origin/HEAD"], capture_output=True).returncode == 0
+        self.assertEqual(present, origin_head, "fixture: origin/HEAD is %s, not %s" % ("set" if present else "missing", "set" if origin_head else "missing"))
+
+    def counted(self, run):
+        """Call run() with every gh call counted. -> (run's result, reads, pulls): reads holds the merge functions that made each repo-record
+        read, innermost first, and pulls the argv of each pulls read."""
+        reads, pulls, real = [], [], merge.sh
+
+        def merge_frames():
+            names, frame = [], sys._getframe(1)
+            while frame is not None:
+                if frame.f_code.co_filename == merge.__file__:
+                    names.append(frame.f_code.co_name)
+                frame = frame.f_back
+            return names
+
+        def counting(args, *a, **k):  # every gh and git call goes through merge.sh
+            if args[:2] == ["gh", "api"]:
+                if any(REPO_ROUTE.fullmatch(x) for x in args):
+                    reads.append(merge_frames())
+                elif any(x.startswith("repos/") and x.endswith("/pulls") for x in args):
+                    pulls.append(args)
+            return real(args, *a, **k)
+
+        with unittest.mock.patch.object(merge, "sh", counting):
+            return run(), reads, pulls
+
+    def root_run(self):
+        return ReviewedRoots.run_roots(self, "--reviewed", "--root", self.alpha, hosts=None)
+
+    def plain_run(self):
+        """Plain `--reviewed` in the Env's own checkout (run_merge changes into it), with no --root. No test host is given, so main builds the real Host."""
+        self.host = None
+        return self.run_args("--reviewed", hosts=None)
+
+    def assert_reads(self, result, reads, pulls, count, form):
+        rc, out, err = result
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(pulls, "the run read no pulls, so it did not reach the batch:\n" + out + err)  # scope: the run reached the batch
+        self.assertEqual(len(reads), count, "%s made %d repo-record reads, by caller: %r" % (form, len(reads), reads))
+
+    def test_a_root_with_origin_head_set_pins_its_repo_record_reads(self):
+        # Pinned: two reads. root_host's full_name read, and the cutover's default-branch read in review_stamp_since. The decision names one.
+        self.fixture(self.alpha, origin_head=True)
+        result, reads, pulls = self.counted(self.root_run)
+        self.assert_reads(result, reads, pulls, 2, "--reviewed --root with origin/HEAD set")
+
+    def test_a_root_with_origin_head_missing_pins_its_repo_record_reads(self):
+        # Pinned: three reads. The fallback in default_branch (merge.py:3478) and the cutover's default-branch read both ask gh, so the
+        # default branch is read twice, then root_host's full_name read.
+        self.fixture(self.alpha, origin_head=False)
+        result, reads, pulls = self.counted(self.root_run)
+        self.assert_reads(result, reads, pulls, 3, "--reviewed --root with origin/HEAD missing")
+
+    def test_plain_reviewed_with_origin_head_set_pins_its_repo_record_reads(self):
+        # Pinned: one read, the cutover's default-branch read. Plain --reviewed names no root, so default_branch never runs.
+        self.fixture(self.co, origin_head=True)
+        result, reads, pulls = self.counted(self.plain_run)
+        self.assert_reads(result, reads, pulls, 1, "plain --reviewed with origin/HEAD set")
+
+    def test_plain_reviewed_with_origin_head_missing_pins_its_repo_record_reads(self):
+        # Pinned: one read, the same as with origin/HEAD set. Plain --reviewed never reads origin/HEAD.
+        self.fixture(self.co, origin_head=False)
+        result, reads, pulls = self.counted(self.plain_run)
+        self.assert_reads(result, reads, pulls, 1, "plain --reviewed with origin/HEAD missing")
+
 
 class JudgeStub:
     """Stands in for decision_watch.invoke_model. `answer(prompt)` gives (verdict, error), or raises. Each call's prompt is
@@ -15891,6 +15981,40 @@ class ReviewStampSince(unittest.TestCase):
         self.git_at(root, "2026-10-20 10:00:00 +0000", "update-ref", "refs/remotes/origin/feat", first)
         got = review_fn(self, "review_stamp_since")(root, "feat")
         self.assertEqual(got, "2026-10-21T15:04:05Z", "the stacked base feat has no salt commit, and its cutover is %r, not the default branch's" % (got,))
+
+    def test_a_folder_with_no_git_dir_stops_naming_the_git_dir(self):
+        # shallow_boundary's docstring: only a missing `shallow` file means full history. A folder with no .git has no git dir that could hold
+        # one, so the read is unknown and must stop naming the .git. Returning the empty set reads every unstamped record as old. The control
+        # is a full clone: its shallow file is missing from a real git dir, and that answer is the empty set.
+        self.assertEqual(review_fn(self, "shallow_boundary")(self.repo(salt_at=2)), set(), "control: a full clone did not read as full history")
+        folder = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
+        self.addCleanup(shutil.rmtree, folder, True)
+        try:
+            got = review_fn(self, "shallow_boundary")(folder)
+        except merge.Stop as stop:
+            self.assertIn(".git", str(stop), "the Stop does not name the git dir:\n" + str(stop))
+        else:
+            self.fail("shallow_boundary read a folder with no .git as full history and returned %r instead of stopping" % (got,))
+
+    def test_two_default_branches_on_one_root_and_base_each_get_their_own_cutover(self):
+        # The cache is keyed by (root, base) and holds the first answer. A second call with another default branch must read that branch.
+        # origin/trunk here is commit 1, which has no salt line, so its cutover is none. main's is the salt commit's committer time.
+        root = self.repo(salt_at=2)
+        sh(root, "git", "update-ref", "refs/remotes/origin/trunk", sh(root, "git", "rev-parse", "HEAD~2"))
+        self.assertNotIn("REVIEW_STAMP_SALT =", sh(root, "git", "show", "origin/trunk:merge/merge.py"), "fixture: origin/trunk holds the salt line")
+        fn = review_fn(self, "review_stamp_since")
+        self.assertEqual(fn(root, "main", default="main"), "2026-10-21T15:04:05Z", "fixture: main's cutover is not the salt commit's time")
+        got = fn(root, "main", default="trunk")
+        self.assertIsNone(got, "the call with default trunk returned %r, the answer cached for main, not trunk's none" % (got,))
+
+    def test_a_subfolder_root_reads_the_same_cutover_as_the_repo_root(self):
+        # merge/merge.py is a path from the repo root. `git -C <subfolder>` reads that path under the subfolder, finds no history, and
+        # gives no cutover, so a guard run from a subfolder would read the cutover as none. The subfolder's answer must be the root's.
+        root = self.repo(salt_at=2)
+        fn = review_fn(self, "review_stamp_since")
+        self.assertEqual(fn(root, "main"), "2026-10-21T15:04:05Z", "fixture: the repo root's cutover is not the salt commit's time")
+        got = fn(os.path.join(root, "merge"), "main")
+        self.assertEqual(got, "2026-10-21T15:04:05Z", "a subfolder root read the cutover as %r, not the repo root's" % (got,))
 
 
 if __name__ == "__main__":
