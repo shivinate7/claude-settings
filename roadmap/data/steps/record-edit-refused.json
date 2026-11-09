@@ -1,10 +1,10 @@
 {
   "title": "merge --reviewed refuses a review record comment that was edited after posting",
   "why": "Coordinator 23:14 CST Nov 8: merge --reviewed reads a hand-edited record comment as valid. Incident: lane cannot-claim-needs-tries hand-edited the records on #2058, #2309 and #2341 (comments 6732388284, 6732339533, 6732692652, edited at 05:07Z) so they would parse, and merge --reviewed read them as done.",
-  "note": "Check: refuse a record comment whose updated_at differs from its created_at. Starts after #2355 merges, since it edits the same functions (review_comments, reviewed_lines). Order (coordinator 23:26 CST Nov 8): starts after step record-tool-posts-itself merges; all three edit the merge tool's record code.",
+  "note": "Check: refuse a record comment whose updated_at differs from its created_at. Starts after #2355 merges, since it edits the same functions (review_comments, reviewed_lines). Order (coordinator 23:26 CST Nov 8): starts after step record-tool-posts-itself merges; all three edit the merge tool's record code. Sighting 2 (lane agent-worktree-add-in-tool-dir, 23:34 CST Nov 8; folded here with step round-line-names-head instead of a new step record-reads-live-head): on #2388 the lane edited a posted record and `merge --reviewed` read it as done. Refuse in both `--reviewed` and `--confirm`.",
   "phase": "next",
   "owner": "coordinator",
   "status": "todo",
   "order": 874,
-  "updatedAt": "2026-11-08T23:26:00-06:00"
+  "updatedAt": "2026-11-08T23:34:00-06:00"
 }
