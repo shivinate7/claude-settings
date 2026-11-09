@@ -112,7 +112,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is
    refused, except a small move.
    "No conflicts" does not prove the lanes work together. A green integration run does not prove that
-   no line was lost either. Run `lint/check_silent_undo.py` before the merge. Pass `--upstream origin/<base>`, the PR's base branch, and `--strict`, as CI does. Without `--strict`, a local run exits 0 on UNKNOWN, so a skipped check reads as clean.
+   no line was lost either. Run `lint/check_silent_undo.py` before the merge. First run `git fetch origin <base>`. Then pass `--upstream origin/<base>`, the PR's base branch, `--head <head SHA>`, the PR's head commit, and `--strict`, as CI does. Without `--strict`, a local run exits 0 on UNKNOWN, so a skipped check reads as clean.
    GitHub's merge queue needs an organization-owned repo. A personal repo batches by hand or through
    the merge tool.
    Batch across sessions too (`git-integration-branch-merge`).
