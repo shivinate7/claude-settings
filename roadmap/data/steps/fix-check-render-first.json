@@ -1,11 +1,11 @@
 {
   "title": "A fix-check reviewer spawns only after `merge --fix-check` renders the record it will fill",
   "why": "A lane spent a fix-check reviewer that the merge tool would not record, because a chain takes one fix check (lane fix-push-needs-fail-record, via the coordinator 20:33 CST Nov 8).",
-  "note": "Filed by triage, Nov 8 20:34 CST. The lane routine, or a guard on the spawn, runs `merge --fix-check` first; a refusal there stops the spawn. Related: steps fix-check-chain, fix-base-own-round-head.",
+  "note": "Filed by triage, Nov 8 20:34 CST. The lane routine, or a guard on the spawn, runs `merge --fix-check` first; a refusal there stops the spawn. Related: steps fix-check-chain, fix-base-own-round-head. Lane session_013NEJL1MAU4nrqwiN3pHJzz (coordinator 20:35 CST Nov 8).",
   "phase": "now",
   "owner": "coordinator",
-  "lane": "",
-  "status": "todo",
+  "lane": "session_013NEJL1MAU4nrqwiN3pHJzz",
+  "status": "doing",
   "order": 865,
-  "updatedAt": "2026-11-08T20:34:00-06:00"
+  "updatedAt": "2026-11-08T20:36:00-06:00"
 }
