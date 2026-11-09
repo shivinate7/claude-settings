@@ -5319,16 +5319,34 @@ sh("git-after-cd: a check, then ; an if whose else body holds a git push, is ref
    carries=("&&",))
 sh("git-after-cd: an if whose else body holds a git push, with no check before it, passes",
    'if [ -n "$X" ]; then :; else %s push -u origin b; fi' % VCS, "allow", cwd=NOGIT)
+# A COMMAND IN A THEN BODY IS NO TEST. `make x` runs only when the file test passes, and the push in the else body has no
+# check before it, so the push passes. The walk must not read `make x` as a test of the else body.
+sh("git-after-cd: an if on a file test with make in its then body, and a git push in its else body, passes",
+   "if [ -f x ]; then make x; else %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
 # A TEST THAT IS NO CHECK, AND AN ELIF TEST THAT IS ONE. A `!` test runs its else body when its command passes, and a git
 # call is no check of the project, so neither else body runs on a failed check: both pushes pass. The `if` test of the
 # last case is `[ -n "$X" ]`, a condition word, so the elif test guards its else body and that push is refused.
 sh("git-after-cd: an if ! test whose else body pushes, with an exit in its then body, passes",
    "if ! pytest -q; then exit 1; else %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
+# A GLUED IF ! TEST. The `!` test runs its else body when the check passes, so the push there is no push on a failed check,
+# as in the unglued form above. The subshell's `(` must not hide the `!`.
+sh("git-after-cd: a subshell holding an if ! check that exits, with a git push in its else body, passes",
+   "(if ! pytest -q; then exit 1; else %s push -u origin b; fi)" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: an if on a git diff whose else body pushes, passes",
    "if %s diff --quiet; then echo same; else %s push -u origin b; fi" % (VCS, VCS), "allow", cwd=NOGIT)
 sh("git-after-cd: an elif test that is a check guards its else body with a git push, is refused",
    'if [ -n "$X" ]; then :; elif pytest -q; then :; else %s push -u origin b; fi' % VCS, "deny", "git-after-cd",
    cwd=NOGIT, carries=("&&",))
+# AN ELIF BODY AFTER A FAILED FIRST TEST. The elif test runs when the first test fails, so a push in its then body runs on a
+# failed check and is refused. A push in the first then body is guarded by the check, and a file test is no check, so the
+# last two pass.
+sh("git-after-cd: a check with an elif whose then body holds a git push, is refused",
+   'if pytest -q; then echo ok; elif [ -f x ]; then %s push -u origin b; fi' % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: an elif on a file test with a git push in its then body, and no check, passes",
+   'if [ -f y ]; then echo ok; elif [ -f x ]; then %s push -u origin b; fi' % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a git push in the first then body of an if on a check, with an elif that echoes, passes",
+   'if pytest -q; then %s push -u origin b; elif [ -f x ]; then echo no; fi' % VCS, "allow", cwd=NOGIT)
 # A COMPOUND'S TEST OR AN EXIT TAIL CLEARS ONLY ITS OWN COMMANDS. An elif body, an until body, a `|| exit` after a
 # git fetch, and an if whose test is a git fetch each cover only their own command. The walk keeps going back past
 # them, so a check joined by `;` further back still guards the push, and each push here is refused. A `|| exit` after
@@ -5668,9 +5686,8 @@ sh("git-after-cd: a negated check as an if test, then a git push -u in the then 
    "if ! pytest -q; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: a negated check as a while test, then a git push -u in the body, passes: ruling 2026-11-08 20:29 CST withdrew the refusal",
    "while ! make check; do %s push -u origin b; done" % VCS, "allow", cwd=NOGIT)
-# AN ELIF BODY AFTER A NEGATED CHECK. The elif test runs only when the negated test failed, so its then body runs only on a
-# passing check. Real bash runs the push only when make passes, so it is allowed. The negated test's found flag must reset
-# at the elif, or the push would read as one on a failed check.
+# AN ELIF BODY AFTER A NEGATED CHECK. The elif test runs only when the negated test failed, which means make passed, so its
+# then body runs only on a passing check. The case pins that the push there is allowed.
 sh("git-after-cd: a negated check as an if test, then an elif body with a git push -u, passes",
    "if ! make check; then :; elif true; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
 # A NEGATED TEST THAT IS NO CHECK. gh pr view is no check, so a push in the then body is allowed by ruling 2026-11-08
