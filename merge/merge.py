@@ -73,7 +73,7 @@ A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond 
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, contextlib, datetime, functools, io, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, collections, contextlib, datetime, functools, io, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -3655,8 +3655,13 @@ def return_to_draft(h, n, info):
         say(f"merge: #{n} could not return to draft: {' '.join(why.split()) or 'no reason given'}; the push restarts CI")
     return ok
 
-def needs_ready(name):
-    say(f"merge: batch {name} needs `merge --batch-build {name} --ready` again before it goes ready.")
+def needs_ready(name, drafted=True):
+    """The line after a push that moved the integration branch of a batch that was ready when read. `drafted` False: the return to draft was refused, so the
+    pull request is still ready on a head no lint has read, and `--ready` alone leaves a ready one as it is: it must go back to draft first."""
+    if drafted:
+        say(f"merge: batch {name} needs `merge --batch-build {name} --ready` again before it goes ready.")
+    else:
+        say(f"merge: batch {name} is still ready, on a head no lint has read. Return its pull request to draft by hand, then run `merge --batch-build {name} --ready`.")
 
 def restack(root, h, moved, new_head, gone=None, seen=frozenset()):
     """Batch branch `moved` has a new head. Rebuild each open batch whose block says `On: moved` on it: the same lanes, the On sha updated, force-with-lease,
@@ -3684,8 +3689,7 @@ def restack(root, h, moved, new_head, gone=None, seen=frozenset()):
             new = build_batch_branch(root, block["name"], new_head, sorted(kept.items()), lease=tip, body=(h, n, info["body"], text))
             say(f"merge: batch {block['name']} was on {moved}; rebuilt on its new head {new_head[:9]}"
                 + (f", without {lane_list(off)}, which stacked on a dropped lane." if off else "."))
-            if drafted:
-                needs_ready(block["name"])
+            needs_ready(block["name"], drafted)
             if moved not in seen:
                 failed += restack(root, h, info["branch"], new, {**gone, **off}, seen | {moved})
         except Stop as e:
@@ -3704,15 +3708,16 @@ def fetch_heads(root, shas):
             git(root, "fetch", "-q", "origin", s)
     return [s for s in dict.fromkeys(shas) if missing(s)]
 
-def holds_commit_of(root, lane, other, kept):
-    """True when commit `lane` holds a commit of `other` that no commit of `kept` holds. A pull request whose head holds the whole lane (one stacked on it)
-    brings nothing of its own into it, so that is False."""
+def holds_commit_of(root, lane, other, kept, frozen=()):
+    """True when commit `lane` holds a commit of `other` that no commit of `kept` holds and that is not one of `frozen`, the request's own lane heads. A pull
+    request whose head holds the whole lane (one stacked on it) brings nothing of its own into it, so that is False. A common commit that is a requested lane's
+    head is already frozen in the request: an outside pull request stacked on that lane shares it, and brings none of its own commits in."""
     if holds(root, lane, other):
         return False
     c, out = git(root, "merge-base", "--all", lane, other)
     if c and out:
         raise Stop(f"cannot read the common commits of {lane[:9]} and {other[:9]}: {out} {FREEZE_CITE}")
-    return any(not any(holds(root, b, k) for k in kept) for b in out.split())
+    return any(b not in frozen and not any(holds(root, b, k) for k in kept) for b in out.split())
 
 def stacked_without_base(root, h, base, heads, running, own=None, remedy="Add the missing pull request, or leave the stacked lane out."):
     """Refuse (Stop) a request in which a lane holds a commit of another open pull request on `base` that the request leaves out: merging the lane
@@ -3720,6 +3725,7 @@ def stacked_without_base(root, h, base, heads, running, own=None, remedy="Add th
     `running` is the head of the integration branch it stacks on, or None; a commit that it or the base tip holds is already in. `own` is the batch's
     own pull request. Each other head is the sha the open list gives. `remedy` is the route the refusal names."""
     kept = [fetch_branch(root, base), *([running] if running else [])]
+    frozen = set(heads.values())
     others = [(n, info["head"]) for n, info in h.open_prs() if n not in heads and n != own and info["base"] == base]
     unread = fetch_heads(root, [s for _, s in others])
     found = []
@@ -3727,7 +3733,7 @@ def stacked_without_base(root, h, base, heads, running, own=None, remedy="Add th
         if head in unread:
             say(f"merge: #{n}'s head {head[:9] or '(none)'} cannot be fetched from origin, so this request was not checked against its commits.")
             continue
-        found += [f"#{m} holds a commit of #{n}, which is not in this request" for m in sorted(heads) if holds_commit_of(root, heads[m], head, kept)]
+        found += [f"#{m} holds a commit of #{n}, which is not in this request" for m in sorted(heads) if holds_commit_of(root, heads[m], head, kept, frozen)]
     if found:
         raise Stop("\n".join(found) + f"\n{remedy} Nothing was pushed. {FREEZE_CITE}")
 
@@ -3765,18 +3771,20 @@ def sync_batch(root, h, pr, info, block, on, base):
     new = build_batch_branch(root, name, start, sorted(heads.items()), lease=tip, body=(h, pr, info["body"], text))
     say(f"merge: batch {name} rebuilt on {on or base}, lanes {lane_list(heads)}"
         + (f"; it held {len(strays)} lane head(s) its frozen set does not list, which are now off." if strays else "."))
-    if drafted and not info["draft"]:  # a draft was a draft before the rebuild; only a batch this rebuild sent back needs the line
-        needs_ready(name)
+    if not info["draft"]:  # a draft was a draft before the rebuild; a batch that was ready needs the line, whether or not its return to draft held
+        needs_ready(name, drafted)
     return 1 if restack(root, h, branch, new, {s: s for s in strays}) else 0
 
 VERDICT_HEADER = re.compile(r"^=== verdict run \d{4}-\d\d-\d\d \d\d:\d\d:\d\d: (.*)$")
-FAIL_COMMAND = re.compile(r"FAIL (\S.*?) rc=-?\d+ \(")
+FAIL_COMMAND = re.compile(r"FAIL (\S.*?) rc=-?\d+(?: .*?)? \([\d.]+s\)(?: log=|$)")  # bin/verdict's FAIL line: a note (killed by signal, no tests ran, ...) may sit after rc
 
 def failed_step_text(fail):
     """-> the text bin/verdict kept for each step that FAILed in a lane lint, or None when it cannot be read. ci-job keeps one log for all its steps, each
     section headed by `=== verdict run <time>: <command>`, and the FAIL line carries the same command. The passing steps' sections are left out, so a
-    path a passing step printed blames no lane."""
-    commands = {m[-1] for m in (FAIL_COMMAND.findall(l) for l in fail.lines) if m}
+    path a passing step printed blames no lane. The FAIL line has no section time, so a command that heads more sections than it has FAIL lines is two steps
+    of one name, and which of them failed is not known: None, because a lane is never named from a section that may have passed."""
+    fails = collections.Counter(m[-1] for m in (FAIL_COMMAND.findall(l) for l in fail.lines) if m)
+    commands = set(fails)
     if not commands or not fail.log or not fail.log[0].startswith("log="):
         return None
     try:
@@ -3784,13 +3792,16 @@ def failed_step_text(fail):
             text = f.read().splitlines()
     except OSError:
         return None
-    kept, current = [], False
+    kept, current, sections = [], False, collections.Counter()
     for line in text:
         header = VERDICT_HEADER.match(line)
         if header:
             current = header[1] in commands
+            sections[header[1]] += current
         elif current:
             kept.append(line)
+    if any(sections[c] > fails[c] for c in commands):
+        return None
     return "\n".join(kept) if kept else None
 
 def blamed_lanes(root, fail, lanes, base):
@@ -3850,9 +3861,12 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok=""):
         if infos[n]["base"] != base:
             raise Stop(f"#{n} targets {infos[n]['base']}, and batch {name} targets {base}. Nothing was pushed. Retarget #{n}, or give --base {infos[n]['base']}. {FREEZE_CITE}")
     heads ={n: infos[n]["head"] for n in numbers}  # read once, now: this is the freeze
+    merged_on = False
     if on:
         running = h.batch_pr(on)
-        if running is None or parse_freeze(running[1]["body"]) is None:
+        # --ready on a batch whose On batch has merged: the base holds the On sha now, so there is no running batch to read, and nothing to stack on
+        merged_on = bool(ready and running is None and frozen["on"] and frozen["on"][0] == on and holds(root, frozen["on"][1], fetch_branch(root, base)))
+        if not merged_on and (running is None or parse_freeze(running[1]["body"]) is None):
             raise Stop(f"--on {on}: {on} has no open pull request that holds a frozen block, so it is not a running batch. {FREEZE_CITE}")
     found = found or h.batch_pr(branch)
     if found is None:
@@ -3890,6 +3904,9 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok=""):
     if ready and not info["draft"]:
         say(f"merge: batch {name}: PR #{pr} is already ready.")
         return 0
+    if merged_on:  # a plain batch from here: its lanes sit on the base, which holds what the On batch held
+        say(f"merge: batch {name} was on {on}, which has merged into {base}; it is checked against {base}.")
+        on, block = None, {**block, "on": None, "base": fetch_branch(root, base)}
     rc = sync_batch(root, h, pr, info, block, on, base)
     if ready:
         try:
@@ -3935,13 +3952,19 @@ def batch_drop(root, h, name, number):
     if not kept:
         raise Stop(f"dropping {lane_list(dropping)} leaves batch {name} no lane. To end the batch, close pull request #{pr} instead. {FREEZE_CITE}")
     start, recorded = batch_start(root, block, info["base"])
-    text = freeze_rewrite(info["body"], block, freeze_lines(name, kept, [*block["dropped"], *dropping], block["on"], recorded))
+    on = block["on"]
+    if on:  # the On batch's head moves on a drop, a claim or a heal, and a restack that failed leaves this batch behind: rebuild on its head now, not the recorded one
+        try:
+            start = fetch_branch(root, on[0])
+            on = (on[0], start)
+        except Stop as e:
+            say(f"merge: {on[0]} could not be read ({e}); batch {name} is rebuilt on the On sha it recorded, {on[1][:9]}.")
+    text = freeze_rewrite(info["body"], block, freeze_lines(name, kept, [*block["dropped"], *dropping], on, recorded))
     drafted = return_to_draft(h, pr, info)
     new = build_batch_branch(root, name, start, sorted(kept.items()), lease=tip, body=(h, pr, info["body"], text))
     say(f"merge: #{number} dropped from batch {name}.", *(f"merge: #{n} dropped too: its head contains #{number}'s head." for n in dependents),
         f"merge: batch {name} now holds lanes {lane_list(kept)}.")
-    if drafted:
-        needs_ready(name)
+    needs_ready(name, drafted)
     return 1 if restack(root, h, branch, new, {n: lanes[n] for n in dropping}) else 0
 
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
