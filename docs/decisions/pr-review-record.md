@@ -72,7 +72,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 
 ## The limits
 
-- The lane-lint comment counts only from an `OWNER` author (`LANE_LINT_AUTHOR`). Unmeasured for cloud tokens: a `MEMBER` author refuses every join and leaves a done record at `no lint` (fail-closed). A PASS for an earlier head counts after claim-only commits, in the join only; `--reviewed` is exact-head (record `lanes-run-no-full-ci-job`; read merge/merge.py::lint_check).
+- The lane-lint comment counts only from an `OWNER` author (`LANE_LINT_AUTHOR`). A cloud-session post on shivinate7/claude-settings reads back OWNER (measured pull request 2382, comment 6732994630, 2026-11-09 05:28 UTC). An org-owned repo or a non-OWNER token stays unmeasured, and refuses every join, leaving a done record at `no lint` (fail-closed). A PASS for an earlier head counts after claim-only commits, in the join only; `--reviewed` is exact-head (record `lanes-run-no-full-ci-job`; read merge/merge.py::lint_check).
 - Kind, Guard or check, and docs-only are the lane's own claims. The tool does not check paths. It does not tell a record that files an owner ruling from other docs. Kind stays the lane's claim. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`).
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
