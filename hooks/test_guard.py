@@ -5632,6 +5632,14 @@ sh("git-after-cd: a subshell check piped to tail, then && a git push -u, is refu
 # when pytest fails. Real bash runs the push here.
 sh("git-after-cd: a check joined by ; to a pipe to head, then && a git push -u, is refused",
    "pytest -q; ls | head -1 && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT)
+# A CHECK JOINED BY ; TO A LISTING PIPED TO head, THEN && A git add AND A PUSH. The ; lets the push run when pytest fails,
+# and the && chain reads head's status. Real bash runs the push here.
+sh("git-after-cd: a check, then ; a listing piped to head, then && a git add and a git push -u, is refused",
+   "pytest -q; ls dist | head -3 && %s add -A && %s push -u origin b" % (VCS, VCS), "deny", "git-after-cd", cwd=NOGIT)
+# A CHECK JOINED BY ; TO A git fetch, THEN A LISTING PIPED TO head, THEN && A PUSH. The fetch is no check, so the ; still
+# lets the push run when pytest fails. Real bash runs the push here.
+sh("git-after-cd: a check, then ; a git fetch and a listing piped to head, then && a git push -u, is refused",
+   "pytest -q; %s fetch origin && ls | head -1 && %s push -u origin b" % (VCS, VCS), "deny", "git-after-cd", cwd=NOGIT)
 # A HEREDOC PIPED TO tee, THEN && A PUSH, WITH A CHECK IN ITS BODY. The body's $(make check) runs, but its status feeds
 # nothing, so tee's status alone decides the &&, and the push runs when make fails. Real bash runs the push here.
 sh("git-after-cd: a heredoc piped to tee with a make check in its body, then && a git push -u, is refused",
@@ -5647,19 +5655,21 @@ sh("git-after-cd: a quoted heredoc piped to tee with a make check in its body, t
    "cat <<'EOF' | tee r.md && %s push -u origin b\n$(make check)\nEOF" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: a quoted heredoc and a plain heredoc on one line, the quoted body with a make check, then && a git push -u, passes",
    "cat <<'EOF' <<X | tee r.md && %s push -u origin b\n$(make check)\nEOF\nok\nX" % VCS, "allow", cwd=NOGIT)
-# A NEGATED CHECK AS THE TEST OF AN if OR A while. The then branch and the loop body run on the failure, so a push there
-# runs on a failed check. Real bash runs each push here.
+# NEGATED CHECKS AS THE TEST OF AN if OR A while. Ruling 2026-11-08 20:29 CST withdraws the refusal of a push in these
+# bodies, so both pass. Real bash runs each push on a failed check: the expectation is the ruling's, not bash's.
 sh("git-after-cd: a negated check as an if test, then a git push -u in the then branch, is refused",
-   "if ! pytest -q; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT,
-   carries=("`if !`",))
+   "if ! pytest -q; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: a negated check as a while test, then a git push -u in the body, is refused",
-   "while ! make check; do %s push -u origin b; done" % VCS, "deny", "git-after-cd", cwd=NOGIT,
-   carries=("`while !`",))
+   "while ! make check; do %s push -u origin b; done" % VCS, "allow", cwd=NOGIT)
 # AN ELIF BODY AFTER A NEGATED CHECK. The elif test runs only when the negated test failed, so its then body runs only on a
 # passing check. Real bash runs the push only when make passes, so it is allowed. The negated test's found flag must reset
 # at the elif, or the push would read as one on a failed check.
 sh("git-after-cd: a negated check as an if test, then an elif body with a git push -u, passes",
    "if ! make check; then :; elif true; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
+# A NEGATED TEST THAT IS NO CHECK. gh pr view is no check, so a push in the then body is allowed by ruling 2026-11-08
+# 20:29 CST. Real bash runs that push only when gh pr view fails.
+sh("git-after-cd: an if ! on gh pr view with a git push -u in its then body, passes",
+   "if ! gh pr view >/dev/null 2>&1; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
 # A DATA SOURCE OR A LISTING PIPED TO A PUSH. Neither first stage runs a check, so no check hides behind the pipe, and
 # the push after it is no push on a failed check. Both are allowed.
 sh("git-after-cd: a cat piped to a while loop with a git push in its body, passes",
