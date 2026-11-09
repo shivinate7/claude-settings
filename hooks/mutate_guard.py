@@ -1049,7 +1049,7 @@ MUTATIONS = [
     ("role-model: the fix check row drops the tab from its line-start class, so a reviewer on sonnet with a leading tab walks past",
      r'("fixcheck", r"^[ \t]*" + re.escape(FIX_CHECK_MARKER)',
      r'("fixcheck", r"^[ ]*" + re.escape(FIX_CHECK_MARKER)', "guard",
-     'role-model: fix check: reviewer on sonnet with a leading tab on line one is allowed'),
+     'role-model: fix check: reviewer on sonnet with the marker after a leading tab on line one is allowed'),
     ("role-model: the fix check row loses its trailing word boundary, so a reviewer on sonnet with Fix checkpoint on line one walks past",
      r're.escape(FIX_CHECK_MARKER) + r"\b", "first-line"),',
      r're.escape(FIX_CHECK_MARKER), "first-line"),', "guard",
