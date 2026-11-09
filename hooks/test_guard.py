@@ -1256,6 +1256,7 @@ def build_fixtures():
     global LINKS_MADE, SYMWT_MADE
     # `sub` and `docs` are the folders a foreground cd reaches from the config folder. A folder that does not exist is never entered.
     for folder in (CFG, os.path.join(CFG, "sub"), os.path.join(CFG, "docs"), LOGDIR, PROJ, CLONE, NOGIT,
+                   os.path.join(CLONE, "docs"),   # a repo's own docs folder: the cd target of a clone's CLAUDE.md case
                    os.path.join(UNDERTESTS, ".git"),
                    os.path.join(ROOT, "tmp")):   # the temp folder the silent-write cases read
         os.makedirs(folder, exist_ok=True)
@@ -5142,6 +5143,41 @@ sh("detached: sleep 99 &echo ok is refused by the waiter first [glued pin]",
    "sleep 99 &echo ok", "deny", "waiter", cwd=NOGIT)
 sh("detached: a glued & inside echo's quotes is text, allows [glued control]",
    'echo "a &echo b"', "allow", cwd=NOGIT)
+# The glued-& reader skips three shapes that are no job: `((` arithmetic, a `$!` pid capture and a PowerShell call.
+# The `((`, `$!` and PowerShell pins are each held by one of those skips: removing it turns its row red.
+sh("detached: (( a&b )) is arithmetic, not a background job, allows [glued pin]",
+   "(( a&b ))", "allow", cwd=NOGIT)
+sh("detached: python3 -c pass&p=$! captures the pid, allows [glued pin]",
+   "python3 -c pass&p=$!", "allow", cwd=NOGIT)
+# The waiter refuses a glued `sleep N&` that captures a pid before the glued check runs, so this row is red on the
+# waiter, not on the glued skip. It is a false alarm: one pause of 1 s is under the waiter's own 25 s limit.
+sh("detached: sleep 1&p=$! captures the pid, allows [glued red, the waiter refuses it first]",
+   "sleep 1&p=$!", "allow", cwd=NOGIT)
+sh("detached: a PowerShell call after a glued word, Write-Output x&npx -v, allows [glued pin]",
+   "Write-Output x&npx -v", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached: a printer before a glued &, echo x&sed, allows [glued pin]",
+   "echo x&sed -n 1p notes.txt", "allow", cwd=NOGIT)
+sh("detached: a cd before a glued &, cd sub&sed, allows [glued pin]",
+   "cd sub&sed -n 1p notes.txt", "allow", cwd=NOGIT)
+# The `((` skip drops the whole segment, so a real detached job in that segment is allowed. The spaced form is refused.
+sh("detached: sleep 2 &echo $((1)) starts a job in a segment that holds ((, is refused [glued red]",
+   "sleep 2 &echo $((1))", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: sleep 2 & echo $((1)), the spaced form, is refused [glued control]",
+   "sleep 2 & echo $((1))", "deny", "detached-launch", cwd=NOGIT)
+# Scanner rows for the glued-& reader. A lone apostrophe, a `#` in text and a glued & on line 2 each read as the text
+# or the job it is. A `#` in quotes is text, so the spaced twin without the `#` gives the same verdict.
+sh("detached: a lone apostrophe in double quotes before && ls allows [scanner pin]",
+   "echo \"don't\"&& ls", "allow", cwd=NOGIT)
+sh("detached: a lone apostrophe in text before a glued detached job is refused [scanner control]",
+   "echo \"don't\"; sleep 2 &echo ok", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: a # in double quotes, echo \"a#b\" & ls, is refused like its spaced twin [scanner pin]",
+   "echo \"a#b\" & ls", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: the spaced twin without the #, echo \"ab\" & ls, is refused [scanner control]",
+   "echo \"ab\" & ls", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: a # in double quotes before a glued detached job is refused [scanner control]",
+   "sleep 2 \"a#b\"&echo ok", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: a glued & on line 2 of a multi-line command is refused [scanner multi-line]",
+   "echo start\nsleep 2 &echo ok", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: disown on its own line after a background job",
    "python3 server.py &\ndisown", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: disown on its own line, even with a pid printed first",
@@ -12652,11 +12688,54 @@ for _name, _command in (
     ("if false; then cd docs", "if false; then cd docs; fi; sed -i s/a/b/ settings.json"),
     ("cd docs with two arguments", "cd docs extra; sed -i s/a/b/ settings.json"),
     ("bash heredoc holding cd docs", "bash <<'EOF'\ncd docs\nEOF\nsed -i s/a/b/ settings.json"),
+    # cat reads its heredoc body as data, so a cd in the body must not move the shell: were it followed, the sed
+    # would write docs/settings.json, which is not frozen. The row holds only because the body's cd is not followed.
+    ("cat with a << EOF header holding cd docs", "cat << EOF\ncd docs\nEOF\nsed -i s/a/b/ settings.json"),
+    ("cat with a <<EOF>s.sh header holding cd docs", "cat <<EOF>s.sh\ncd docs\nEOF\nsed -i s/a/b/ settings.json"),
 ):
     sh("frozen shell: F2, %s, then sed -i on settings.json, denies [may-not-run red]" % _name, _command, "deny",
        "frozen-path", cwd=CFG)
 sh("frozen shell: F2 control, ls X || cd docs, then sed -i on notes.txt, allows [may-not-run control]",
    "ls X || cd docs; sed -i s/a/b/ notes.txt", "allow", cwd=CFG)
+# A sourced heredoc body runs in this shell: `source` and `.` read it from /dev/stdin, so its cd moves the shell and
+# the sed -i after it writes the frozen file. A bare `source <<EOF` has no file and runs no body, so it is not pinned.
+sh("frozen shell: source /dev/stdin <<'EOF' with a cd into the config folder, then sed -i on settings.json, "
+   "denies [source red]", "source /dev/stdin <<'EOF'\ncd " + slash(CFG) + "\nEOF\nsed -i s/a/b/ settings.json",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: . /dev/stdin <<EOF with a cd into the config folder, then sed -i on settings.json, "
+   "denies [source red]", ". /dev/stdin <<EOF\ncd " + slash(CFG) + "\nEOF\nsed -i s/a/b/ settings.json",
+   "deny", "frozen-path", cwd=NOGIT)
+# The same body under bash runs in a child shell, so its cd moves nothing here. The notes.txt row is the sourced body
+# on a file that is not frozen.
+sh("frozen shell: bash /dev/stdin <<'EOF' with the same cd, then sed -i on settings.json, allows [source control]",
+   "bash /dev/stdin <<'EOF'\ncd " + slash(CFG) + "\nEOF\nsed -i s/a/b/ settings.json", "allow", cwd=NOGIT)
+sh("frozen shell: source /dev/stdin with the same cd, then sed -i on notes.txt, allows [source control]",
+   "source /dev/stdin <<'EOF'\ncd " + slash(CFG) + "\nEOF\nsed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
+# Five cds, then a frozen write. The absolute chain is refused. A chain of `../` steps keeps each step as text, so the
+# walk's folder states pass _STATE_LIMIT and the folder is read as unknown, which the frozen check allows: that row is
+# red. Both chains end on the config folder, and the notes.txt rows are the same chains on a file that is not frozen.
+CFG_SUB_DIR = slash(os.path.join(CFG, "sub"))
+CFG_DOCS_DIR = slash(os.path.join(CFG, "docs"))
+FIVE_ABS = ("cd " + CFG_SUB_DIR + " && cd " + CFG_DOCS_DIR + " && cd " + CFG_SUB_DIR + " && cd " + CFG_DOCS_DIR
+            + " && cd " + slash(CFG))
+FIVE_DOTDOT = "cd " + CFG_SUB_DIR + " && cd ../docs && cd ../sub && cd ../docs && cd " + slash(CFG)
+sh("frozen shell: five absolute cds into the config folder, then sed -i on settings.json, denies [chain of five pin]",
+   FIVE_ABS + " && sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: five absolute cds, then sed -i on notes.txt, allows [chain of five control]",
+   FIVE_ABS + " && sed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
+sh("frozen shell: five cds with ../ steps into the config folder, then sed -i on settings.json, "
+   "denies [chain of five red]", FIVE_DOTDOT + " && sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: five cds with ../ steps, then sed -i on notes.txt, allows [chain of five control]",
+   FIVE_DOTDOT + " && sed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
+# A repository's own docs/CLAUDE.md is not the config CLAUDE.md: CONFIG_FROZEN_FILES freezes a CLAUDE.md only at the
+# config root. Either way the sed, if it runs, writes the clone's own docs/CLAUDE.md, which is not frozen.
+sh("frozen shell: make && cd docs && sed -i on CLAUDE.md in the clone's docs folder is allowed [false alarm pin]",
+   "make && cd docs && sed -i s/a/b/ CLAUDE.md", "allow", cwd=CLONE)
+sh("frozen shell: make && cd into the config folder && sed -i on CLAUDE.md, from the clone, denies [false alarm control]",
+   "make && cd " + slash(CFG) + " && sed -i s/a/b/ CLAUDE.md", "deny", "frozen-path", cwd=CLONE)
+# Here `make ||` may skip the cd, so the sed can run in the config folder on its frozen CLAUDE.md.
+sh("frozen shell: make || cd docs && sed -i on CLAUDE.md, from the config folder, denies [may-not-run pin]",
+   "make || cd docs && sed -i s/a/b/ CLAUDE.md", "deny", "frozen-path", cwd=CFG)
 # F4. A subshell that cds into the config folder, backgrounded from outside it. The cd is inside the parens, so the
 # sed -i writes the frozen file. The bare `&` form is refused by detached-launch before this reader, so the form that
 # reaches it carries `& echo $!`; the bare form stays pinned as refused.
