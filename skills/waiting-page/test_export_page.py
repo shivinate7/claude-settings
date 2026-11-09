@@ -38,6 +38,24 @@ Contract the page cases assume (the builder builds to it):
     named is unknown, exit 2, even one of the five waiting collections. Without --collections the five are allowed.
     --collections without --rebuild, or a name that is not a collection slug, is a usage error: exit 2, an argparse
     `error:` line, nothing written. The error for --collections without --rebuild names --rebuild.
+  --merge COPY --live LIVE --batches OUT [--collections NAME ...] [--live-page PATH]. COPY holds the --rebuild layout.
+    LIVE holds the --fetched layout: one folder per collection, each with its marker. OUT gets batch-NNN.json files of
+    `set` entries, one for each COPY doc whose (collection, doc_id) LIVE lacks. A doc LIVE holds is never written. A copy
+    answer (answers/<id>) is not written either when LIVE holds items/<id>: the live page wins on that item, open or
+    answered. Batches follow --rebuild: at most 50 entries and 900,000 bytes each, and a doc over the cap is unknown. A
+    copied item whose n a live item holds, or an earlier written copied item holds, takes the next free n above the highest
+    n in either folder. "Earlier" is the sorted doc_id order. The item's answer (answers/<doc_id>, with `item` set to the
+    item's id) takes the same n, so a page grant still matches. OUT/renumbered.json maps each old n to its new n, with
+    string keys, and is written even when empty. It holds items only. `renumbered` counts items, not answers.
+    `kept-live` counts the COPY docs that LIVE holds, and each answer kept for its live item. The last stdout line is
+    `batches K docs N kept-live S renumbered R designs D`, exit 0. D counts the design keys added, and is 0 when the copy
+    has no designData. Designs: when COPY holds page/designData.json, --live-page PATH (the live page's fetched html) is
+    required. OUT/designData.json then holds the live page's designData plus each copy key that LIVE lacks, and the live
+    value wins a shared key. Without --live-page, such a copy is unknown, exit 2. Unknown, exit 2: a missing or empty
+    COPY, a missing LIVE, a LIVE collection with no .complete marker (a cut-short fetch), a folder in either that is not a
+    collection (or a --collections name), a live page with no designData block (when the copy has designs), or nothing
+    left to write. The COPY needs no marker. --collections works as with --rebuild. A usage error, exit 2: --merge without
+    --live or --batches.
   Verdict words: `changed N`, `same`, `refused` (exit 1), `unknown` (exit 2), and a crash (exit 3, one line).
   Not pinned here: whether a supporting file no longer fetched is deleted.
 """
@@ -50,6 +68,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -112,6 +131,30 @@ STREET = "123 Main Street"
 API_VALUE = "abcdefgh" + "12345678"
 SESSION_VALUE = "q9W8e7R6" + "t5Y4u3I2"
 CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
+GLUED_VALUE = "Yt6Nb3Kd9Hj2" + "Pq7W"  # a credential value of letters and digits, built from parts
+# Two hundred letters, one 16-letter block repeated 12 times and 8 more: a digit after them sits at offset 200, past a lookahead of 20 characters.
+LETTERS_200 = LETTERS_16 * 12 + "xKqPzLmR"
+# Three hundred letters, 16 letters repeated 18 times and 12 more, with no digit: only the letters side of the long-value shape reads it.
+LETTERS_300 = LETTERS_16 * 18 + LETTERS_12
+assert len(LETTERS_300) == 300, "LETTERS_300 must hold 300 letters"
+NPM_VALUE = "npm_Ab3Cd5Ef7Gh9Ij1Kl3" + "Mn5"  # an npm token shape, built from parts
+PROSE_SECRET = "correcthorsebatterystaple"  # letters only, no digit, symbol or hump: only the prose rule can refuse it
+# A digit at index 256 of a credential value: refused, and it must stay refused.
+CAP_LAST_DIGIT = "abcdefgh" * 32 + "1"
+# A digit with letters before it and no other digit: at index 257, and at index 1000. Refused, wherever the digit sits.
+DIGIT_AT_257 = "abcdefgh" * 32 + "a1"
+DIGIT_AT_1000 = "abcdefgh" * 125 + "1"
+assert CAP_LAST_DIGIT.index("1") == 256 and DIGIT_AT_257.index("1") == 257 and DIGIT_AT_1000.index("1") == 1000, \
+    "the digit fixtures must sit at their named indexes"
+# 300 digits and no letter, and the same with a letter after them at index 300. The long-value shape refuses a value with a
+# letter and a digit, and allows one with a digit and no letter. Only the long-value shape reads past index 256.
+DIGITS_300 = "7" * 300
+DIGITS_300_THEN_LETTER = DIGITS_300 + "a"
+assert DIGITS_300_THEN_LETTER.index("a") == 300, "the letter must sit at index 300, past the short shape's window"
+# A scan that re-reads a run from each start position takes about 16 times as long over four times the run; a linear
+# scan takes about 4 times. The bound sits between them. RUN_N is the shorter run, the longer run is four times it.
+RUN_N = 20000
+GROWTH_BOUND = 10
 # Hyphenated letters for the words test, built from parts. Each comment names the check the value fails.
 TIGHT_COMPACT = "tight-" + "compact"  # a plain option key that passes: each part holds a vowel, and no part has five consonants in a row
 ICON_COMPACT = "icon-" + "compact"  # a plain option key that passes: a vowel in each part
@@ -191,6 +234,10 @@ RED = [
     ("PWD path with a second keyword after an ampersand", "PWD=/home/x&" + "password=" + "hunter2", "hunter2"),
     # Refused today, kept so that a fix which matches a prefix, or a lower-case path, goes red.
     ("password with a plain word and digits", "password: " + "none123", "none123"),
+    # A real password value stays refused when prose follows it on its line, and when it sits in backticks.
+    ("password with a colon and a value of letters and digits", "password: " + "hunter2xyz", "hunter2xyz"),
+    ("password with a real value before prose", "password: " + "hunter2xyz" + " for the guest.", "hunter2xyz"),
+    ("password assignment in backticks", "`password=" + "hunter2xyz" + "`", "hunter2xyz"),
     ("lower-case pwd with a path value", "pwd=" + "/Users/x", "/Users/x"),
     ("email address", "person.name" + "@" + "example.com", "person.name@example.com"),
     ("phone number", "+1 (555) 010-2345", "+1 (555) 010-2345"),
@@ -229,6 +276,18 @@ RED = [
     ("apikey with no separator", "apikey=" + API_VALUE, API_VALUE),
     ("authtoken with a colon", "authtoken: " + SESSION_VALUE, SESSION_VALUE),
     ("SECRET_KEY_BASE assignment", "SECRET_KEY_BASE=" + "w8Kd2Lp9" + "Vx4Qz7Mn", "w8Kd2Lp9" + "Vx4Qz7Mn"),
+    # A key word at the start of a name, after `_` or at a camelCase hump, still names a credential when its value has digits.
+    ("secret_key assignment with digits", "secret_key=" + "Yt6Nb3Kd" + "Hj9Pq2Wr", "Yt6Nb3Kd" + "Hj9Pq2Wr"),
+    ("GITHUB_TOKEN assignment with digits", "GITHUB_TOKEN=" + "Rt4Vb8Nm" + "Ls2Qw6Yp", "Rt4Vb8Nm" + "Ls2Qw6Yp"),
+    # A key word glued to the word before it, with no `_` and no camelCase hump, still names a credential.
+    ("CI_NPMTOKEN with an npm token value", "CI_NPMTOKEN=" + NPM_VALUE, NPM_VALUE),
+    ("DEPLOY_GITHUBTOKEN with digits", "DEPLOY_GITHUBTOKEN=" + GLUED_VALUE, GLUED_VALUE),
+    ("MYAPPSECRET with digits", "MYAPPSECRET=" + GLUED_VALUE, GLUED_VALUE),
+    ("NPMTOKEN with digits", "NPMTOKEN=" + GLUED_VALUE, GLUED_VALUE),
+    ("dbkey with digits", "dbkey=" + GLUED_VALUE, GLUED_VALUE),
+    # A long name that ends in a key word is a credential name however long it runs before the word.
+    ("a long name ending in token with digits",
+     "token_for_the_production_environment_of_the_billing_service=" + GLUED_VALUE, GLUED_VALUE),
     ("API_KEY_V2 assignment", "API_KEY_V2=" + "Hk3Lm9Qp" + "Wz7Rt2Yc", "Hk3Lm9Qp" + "Wz7Rt2Yc"),
     ("clientSecret as a JSON pair", '"clientSecret": "' + CLIENT_VALUE + '"', CLIENT_VALUE),
     # A credential name set to a value of 12 or more characters is refused, digits or not. These values have no digit.
@@ -297,6 +356,44 @@ RED = [
     ("password with a plain word before a secret", "password: " + "none hunter2", "hunter2"),
     ("password with a plain word and a comma before a secret", "password: " + "none, hunter2", "hunter2"),
     ("password with a quoted plain word before a secret", "password: " + '"none" hunter2', "hunter2"),
+    # A key word inside a longer name is a credential name too. The stem of an everyday word (mon, turn, hoc) is no
+    # reason to skip it. The value is the one the turnkey control in GREEN uses.
+    ("commonKey with a value of letters and digits", "commonKey: " + GLUED_VALUE, GLUED_VALUE),
+    ("daemonKey with a value of letters and digits", "daemonKey: " + GLUED_VALUE, GLUED_VALUE),
+    ("adHocKey with a value of letters and digits", "adHocKey: " + GLUED_VALUE, GLUED_VALUE),
+    ("returnKey with a value of letters and digits", "returnKey: " + GLUED_VALUE, GLUED_VALUE),
+    # A letters-only secret after a plain word and prose is one. The prose after the plain word must not hide it.
+    ("letters-only secret after a plain word, a semicolon and `is`",
+     "password: required to log in; default is swordfish", "swordfish"),
+    ("letters-only secret after a plain word and `and`", "password: none and swordfish", "swordfish"),
+    # Each separator word or mark before a non-function word starts a second value, so the password value is refused.
+    ("letters-only secret after a plain word and `or`", "password: none or swordfish", "swordfish"),
+    ("letters-only secret after a plain word and `but`", "password: none but swordfish", "swordfish"),
+    ("letters-only secret after a plain word and `is`", "password: none is swordfish", "swordfish"),
+    ("letters-only secret after a plain word and `are`", "password: none are swordfish", "swordfish"),
+    ("letters-only secret right after a plain word and a semicolon", "password: none; swordfish", "swordfish"),
+    ("one-word letters-only secret after a plain word, prose and a comma","password: none for the guest, swordfish", "swordfish"),
+    # A comma does not end the prose: a letters-only secret after a comma, with prose before it, is one.
+    ("25-letter letters-only passphrase after a plain word, prose and a comma","password: none for the admin account, " + PROSE_SECRET, PROSE_SECRET),
+    # The digit counts wherever it sits in the value: at 256, and at 257 and 1000 past it.
+    ("digit at index 256 of a credential value", "API_KEY=" + CAP_LAST_DIGIT, CAP_LAST_DIGIT),
+    ("digit at index 257 of a credential value", "API_KEY=" + DIGIT_AT_257, DIGIT_AT_257),
+    ("digit at index 1000 of a credential value", "API_KEY=" + DIGIT_AT_1000, DIGIT_AT_1000),
+    # The letter at index 300 is past the short shape's window, so only the long-value shape can see it. It refuses.
+    ("API_KEY of 300 digits then a letter", "API_KEY=" + DIGITS_300_THEN_LETTER, DIGITS_300_THEN_LETTER),
+    # A semicolon after prose starts a second value as a comma does. Only the `;` in the separator check refuses this.
+    ("letters-only secret after prose and a semicolon", "password: none for the guest; swordfish", "swordfish"),
+    # A prose tail after a plain value passes only as a function word first, then letter words. A letter word with no
+    # function word first, a digit in a later word, and a symbol inside a later word each refuse.
+    ("password none then a letter word with no function word first", "password: none " + "swordfish", "swordfish"),
+    ("password none then a function word and a word with a digit", "password: none for " + "hunter2", "hunter2"),
+    ("password none then a function word and a word with a trailing mark and a digit",
+     "password: none for " + "hunter2!", "hunter2!"),
+    ("password none then a function word and a symbol inside a word", "password: none for " + "hunter&co", "hunter&co"),
+    # VALUE_LOOKAHEAD_MAX pin: a value whose digit sits past the first 20 characters is refused only at the full cap.
+    ("api_key of 200 letters, one 16-letter block repeated, then a digit", "api_key: " + LETTERS_200 + "7", LETTERS_200 + "7"),
+    # Control for the pin above: the same 200 letters with no digit are refused by the letters-only branch at any cap.
+    ("api_key of 200 letters, one 16-letter block repeated, with no digit", "api_key: " + LETTERS_200, LETTERS_200),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -357,6 +454,21 @@ GREEN = [
     ("a time with PM and a street word in prose", "Due 5 PM. Way forward is clear"),
     ("a number before the word Park in prose", "Phase 2 Park the lane"),
     ("a key inside a longer word", "turnkey solution"),
+    # A key word inside a longer word is no credential name, even with a value of letters and digits after it.
+    ("a key word inside a longer word with a value", "monkey: Banana12345"),
+    ("a key word inside a longer word with a camel value", "hotkey: Ctrl1Shift2"),
+    # The control for the longer names in RED: the everyday word with the same value passes.
+    ("turnkey with a value of letters and digits", "turnkey: " + GLUED_VALUE),
+    # The same holds for other words that end in key, with a value of letters and digits.
+    ("turkey with a value", "turkey: Gobble2024"),
+    ("donkey with a value", "donkey: Kong1981"),
+    ("whiskey with a value", "whiskey: Jameson12"),
+    ("jockey with a value", "jockey: Rider123"),
+    # Each word of EVERYDAY_KEY_WORDS has its own row with a random-looking value. Dropping a word from the list
+    # turns that row red.
+    ("turnkey with a random value", "turnkey=" + "Xq7Zt2Lm" + "9Qw4"),
+    ("hockey with a random value", "hockey: " + "Rk4Ps8Vn" + "2Tz6"),
+    ("lackey with a random value", "lackey=" + "Wm3Bq9Jd" + "5Hx7"),
     ("a keyboard label with a number", "keyboard: 104 keys"),
     # A shell variable, an ssh remote, a no-reply address, and the placeholders and masks: none names a secret.
     ("password word with optional", "password: " + "optional"),
@@ -381,6 +493,12 @@ GREEN = [
     ("single-quoted optional after a password word", "password: " + "'optional'"),
     ("parenthesized none after a password word", "password: " + "(none)"),
     ("none with a period after a password word", "password: " + "none."),
+    # A placeholder word with prose after it on the same line, and a backticked shell path, name no secret.
+    ("password word with optional and prose after it", "Set password: optional for the guest."),
+    ("password word with none and prose after it", "password: none for the guest"),
+    # A function word after a comma is no second value: only a non-function word after a separator is one.
+    ("password word with none, prose, a comma and a function word", "password: none for the guest, and the"),
+    ("backticked shell path after PWD", "`PWD=/Users/x`"),
     # Near misses of the three new shapes: a digit count, a tail length, a prefix inside a word, and a clock time pass.
     ("Telegram token with 11 digits before the colon", "12345678901:" + TG_TAIL),
     ("Telegram token with a 34-character tail", "123456789:" + TG_TAIL[:34]),
@@ -396,6 +514,13 @@ GREEN = [
     ("API_KEY set to a long variable reference", "API_KEY=${MY_LONG_API_KEY_NAME}"),
     ("MY_TOKEN set to a plain word", "MY_TOKEN=optional"),
     ("MY_TOKEN set to a long placeholder", "MY_TOKEN=<your-long-token-here>"),
+    # The RED value at 1000 with no credential name in front: a fix that refuses any long value with a digit fails here.
+    ("a long run of letters with a digit at index 1000, and no credential name", DIGIT_AT_1000),
+    # 300 digits and no letter is no secret: the long-value shape refuses only a value with a letter and a digit.
+    ("API_KEY of 300 digits and no letter", "API_KEY=" + DIGITS_300),
+    # 300 letters and no digit is no secret: the long-value shape refuses only a value with a letter and a digit. A fix that
+    # refuses any letter in a long value turns this row red.
+    ("token with 300 letters and more words", "token: " + LETTERS_300 + " and more words"),
     ("prose with the word secret before a name", "the secret santa list"),
     # A letters-only value of 12 or more characters after a credential name refuses today. These three are placeholder and
     # label text, not secrets, so each is red on main. The RED rows above hold a random value after the same names.
@@ -568,14 +693,16 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
         self.addCleanup(self.tmp.cleanup)
 
-    def fetch(self, items=None, answers=None, groups=None, asks=None, meta=None):
+    def fetch(self, items=None, answers=None, groups=None, asks=None, meta=None, folders=None):
         """A fetched folder: one folder per collection, each doc a JSON file, and the completeness marker. An empty
-        collection is an empty folder with its marker."""
+        collection is an empty folder with its marker. `folders`, when given, names the folders instead of the five:
+        {folder: {doc_id: data}}, for a page whose collections are named by --collections."""
         root = tempfile.mkdtemp(prefix="fetched-", dir=self.tmp.name)
-        docs = {"items": items, "answers": answers, "groups": groups, "asks": asks, "meta": meta}
-        for name in COLLECTIONS:
+        docs = folders if folders is not None else {"items": items, "answers": answers, "groups": groups,
+                                                     "asks": asks, "meta": meta}
+        for name, found in docs.items():
             os.makedirs(os.path.join(root, name))
-            for doc_id, data in (docs[name] or {}).items():
+            for doc_id, data in (found or {}).items():
                 write_text(os.path.join(root, name, doc_id + ".json"), canonical(data))
             write_text(os.path.join(root, name, MARKER), "")
         return root
@@ -583,19 +710,19 @@ class Base(unittest.TestCase):
     def out(self, name="waiting"):
         return os.path.join(self.tmp.name, name)
 
-    def run_cmd(self, *args, env=None):
+    def run_cmd(self, *args, env=None, timeout=60):
         if not os.path.isfile(CMD):
             self.fail("export_page.py is not built: no file at %s" % CMD)
         env = env or dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
-        return subprocess.run([sys.executable, CMD, *args], capture_output=True, text=True, timeout=60, env=env)
+        return subprocess.run([sys.executable, CMD, *args], capture_output=True, text=True, timeout=timeout, env=env)
 
-    def export(self, fetched, out, page=None, allow_empty=()):
+    def export(self, fetched, out, page=None, allow_empty=(), timeout=60):
         args = ["--fetched", fetched, "--out", out]
         if page:
             args += ["--page", page]
         for name in allow_empty:
             args += ["--allow-empty", name]
-        return self.run_cmd(*args)
+        return self.run_cmd(*args, timeout=timeout)
 
     def assertVerdict(self, r, want, secrets=()):
         self.assertTrue(says(r, want), "verdict %r not printed. Output:\n%s" % (want, shown(r, secrets)))
@@ -657,6 +784,52 @@ class Scan(Base):
                 self.assertFalse(says(r, "refused"), "%s: the scan refused a non-secret. Output:\n%s" % (label, shown(r)))
                 self.assertEqual(r.returncode, 0, "%s: the run failed without a refusal. Output:\n%s" % (label, shown(r)))
                 self.assertEqual(read_text(os.path.join(out, "items", "ok.json")), canonical(doc), label)
+
+    def timed_export(self, fetched, folder, timeout, want_exit=0):
+        """Seconds for one export of `fetched` into a fresh copy. The exit code is asserted before the time is used:
+        0 for an export, 1 for a refusal (`want_exit`)."""
+        start = time.perf_counter()
+        r = self.export(fetched, self.out(folder), timeout=timeout)
+        took = time.perf_counter() - start
+        cause = "was not refused" if want_exit else "did not export"
+        self.assertEqual(r.returncode, want_exit, "%s %s (exit %d). Output:\n%s" % (folder, cause, r.returncode, shown(r)))
+        return took
+
+    def timed_growth(self, folder, make_note, want_exit=0):
+        """(growth, short, long) for the scan of a run of 4 x RUN_N characters over the scan of a run of RUN_N, both timed
+        in this process. Each size is the faster of two exports, so one slow export does not set the ratio. The timeout is
+        a hang guard only: the scan takes well under a second at RUN_N, and a quadratic scan takes minutes at 4 x RUN_N."""
+        timings = {}
+        for size in (RUN_N, 4 * RUN_N):
+            fetched = self.fetch(items={"ok": {"id": "ok", "title": "Ok", "note": make_note(size)}})
+            timings[size] = min(self.timed_export(fetched, "%s-%d-%d" % (folder, size, run), timeout=900, want_exit=want_exit)
+                                for run in (1, 2))
+        return timings[4 * RUN_N] / timings[RUN_N], timings[RUN_N], timings[4 * RUN_N]
+
+    def assert_grows_no_faster_than_linear(self, folder, make_note, what, want_exit=0):
+        growth, short, long_run = self.timed_growth(folder, make_note, want_exit)
+        self.assertLess(growth, GROWTH_BOUND,
+                        "the scan of %s grew %.1f times, from %.3f s at %d characters to %.3f s at %d; a linear scan "
+                        "grows 4 times, and the bound is %d" % (what, growth, short, RUN_N, long_run, 4 * RUN_N, GROWTH_BOUND))
+
+    def test_a_long_run_of_name_characters_grows_no_faster_than_linear(self):
+        # Name characters with no keyword in them.
+        self.assert_grows_no_faster_than_linear("long-run", lambda n: "aB3_-" * (n // 5), "a run of name characters")
+
+    def test_a_long_run_of_underscores_grows_no_faster_than_linear(self):
+        # The password shape's name prefix takes `_`, so a run of them is re-read from each start position.
+        self.assert_grows_no_faster_than_linear("underscores", lambda n: "_" * n, "a run of underscores")
+
+    def test_a_long_run_of_key_equals_grows_no_faster_than_linear(self):
+        # The credential-name value lookaheads scan to the end of a run of `key=`, from each start position.
+        self.assert_grows_no_faster_than_linear("key-equals", lambda n: "key=" * (n // 4), "a run of key=")
+
+    def test_a_digit_past_index_256_is_refused_and_grows_no_faster_than_linear(self):
+        # A same-process ratio, as above (test-practices P5): stdlib `re` exposes no step count to pin instead. Each size's only
+        # digit is past index 256, so each export must refuse it. A build that passes it goes red on the refusal, first.
+        self.assert_grows_no_faster_than_linear(
+            "digit-past-256", lambda n: "API_KEY=" + "abcdefgh" * (n // 8) + "1",
+            "a credential value whose only digit is past index 256", want_exit=1)
 
 
 class Mirror(Base):
@@ -960,6 +1133,16 @@ class PageScan(Base):
         self.assertEqual(snapshot(out), {}, "a refused page wrote into the copy")
 
 
+def item_as(doc_id, n):
+    """`item(n)` under another doc id. The item's `id` field follows the doc id, as the page's own items do."""
+    return dict(item(n), id=doc_id)
+
+
+def answer_for(item_id, n):
+    """An answer keyed by its item's id, read as page_grant.py reads it: `item` is that id and `n` is the item's n."""
+    return {"item": item_id, "n": n, "pick": "a", "note": "Synthetic answer for %s" % item_id}
+
+
 class Rebuild(Base):
     def batch_entries(self, batches):
         files = sorted(glob.glob(os.path.join(batches, "batch-*.json")))
@@ -1177,6 +1360,425 @@ class Rebuild(Base):
                 self.assertIsNotNone(err, "--collections page has no usage error line. Output:\n" + shown(r))
                 self.assertIn("'page'", err, "the usage error does not name page: %s" % err)
                 self.assertEqual(os.listdir(batches), [], "--collections page still wrote files")
+
+
+    # --merge: the copy's docs that the live page lacks, as set entries. The contract is in the module docstring.
+    def merge_run(self, copy, live, batches, collections=(), live_page=None):
+        """`--merge COPY --live LIVE --batches OUT`, with --collections and --live-page when given. It makes no batch
+        folder itself."""
+        args = ["--merge", copy, "--live", live, "--batches", batches]
+        if collections:
+            args += ["--collections", *collections]
+        if live_page:
+            args += ["--live-page", live_page]
+        return self.run_cmd(*args)
+
+    def copy_with_designs(self, folders, design, name="copy"):
+        """A copy of `folders` that also holds the page's designData, as an export writes it at page/designData.json."""
+        copy = self.copy_of(folders, name=name)
+        write_text(os.path.join(copy, "page", "designData.json"), canonical(design))
+        return copy
+
+    def live_page_with(self, design, name="live.html"):
+        """The fixture page with its designData block holding `design`, written under the run folder."""
+        body = json.dumps(design, sort_keys=True).replace("<", "\\u003c").replace(">", "\\u003e")
+        text = DESIGN.sub(lambda m: m.group(1) + body + m.group(3), PAGE, count=1)
+        return write_text(os.path.join(self.tmp.name, name), text)
+
+    def batch_files(self, batches):
+        return sorted(glob.glob(os.path.join(batches, "batch-*.json")))
+
+    def assertNoBatches(self, batches, why):
+        self.assertEqual(self.batch_files(batches), [], "%s, yet it wrote batch files" % why)
+
+    def assertMergeSummary(self, r, k, n, kept, renumbered, designs=None):
+        """Exit 0, and the last stdout line is `batches K docs N kept-live S renumbered R`, then ` designs D`. The four
+        counts are checked in every merge. The design count is checked only when `designs` is given: then the suffix
+        must be on the line and read D."""
+        self.assertEqual(r.returncode, 0, "exit %d, not 0. Output:\n%s" % (r.returncode, shown(r)))
+        lines = r.stdout.splitlines()
+        last = lines[-1].strip() if lines else ""
+        found = re.fullmatch(r"batches (\d+) docs (\d+) kept-live (\d+) renumbered (\d+)(?: designs (\d+))?", last)
+        self.assertIsNotNone(found, "the last stdout line is not `batches K docs N kept-live S renumbered R designs D`; "
+                                    "it is %r. Output:\n%s" % (last, shown(r)))
+        self.assertEqual(tuple(int(g) for g in found.groups()[:4]), (k, n, kept, renumbered),
+                         "the summary counts (batches, docs, kept-live, renumbered) differ. Output:\n" + shown(r))
+        if designs is not None:
+            self.assertIsNotNone(found.group(5), "the last stdout line has no ` designs %d`: %r" % (designs, last))
+            self.assertEqual(int(found.group(5)), designs, "the design count differs. Output:\n" + shown(r))
+
+    def entry_of(self, entries, collection, doc_id):
+        found = [e for e in entries if e.get("collection") == collection and e.get("doc_id") == doc_id]
+        return found[0] if found else None
+
+    def unnumbered(self, data):
+        return {key: value for key, value in data.items() if key != "n"}
+
+    def copy_with_a_clash(self, name="copy"):
+        """A copy whose item-900 holds n 2, which live item-002 holds, with the item's answer. Items 001 to 003 match the
+        live page. Live holds n 1 to 3, so the highest n in either folder is 3."""
+        return self.copy_of({
+            "items": {"item-001": item(1), "item-002": item(2), "item-003": item(3), "item-900": item_as("item-900", 2)},
+            "answers": {"item-900": answer_for("item-900", 2)}}, name=name)
+
+    def test_merge_without_its_partner_flag_is_a_usage_error_that_names_it(self):
+        copy = self.copy_of({"items": {"item-001": item(1)}})
+        live = self.fetch()
+        batches = os.path.join(self.tmp.name, "batches")
+        forms = {
+            "no --live": (["--merge", copy, "--batches", batches], "--live"),
+            "no --batches": (["--merge", copy, "--live", live], "--batches"),
+        }
+        for label, (args, flag) in forms.items():
+            with self.subTest(form=label):
+                r = self.run_cmd(*args)
+                err = error_line(r)
+                self.assertIsNotNone(err, "no usage error line. Output:\n" + shown(r))
+                self.assertIn(flag, err, "the usage error does not name %s: %s" % (flag, err))
+                self.assertEqual(r.returncode, 2, shown(r))
+                self.assertNoBatches(batches, "a usage error")
+
+    def test_merge_with_a_missing_or_empty_copy_is_unknown_and_writes_nothing(self):
+        empty = self.out("empty-copy")
+        os.makedirs(empty)
+        live = self.fetch(items={"item-001": item(1)})
+        for label, copy in (("missing copy", self.out("no-copy")), ("empty copy", empty)):
+            batches = os.path.join(self.tmp.name, "batches-" + label.replace(" ", "-"))
+            with self.subTest(form=label):
+                r = self.merge_run(copy, live, batches)
+                self.assertVerdict(r, "unknown")
+                self.assertEqual(r.returncode, 2, shown(r))
+                self.assertNoBatches(batches, label)
+
+    def test_merge_with_a_missing_live_folder_is_unknown_and_writes_nothing(self):
+        copy = self.copy_of({"items": {"item-001": item(1)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, self.out("no-live"), batches)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertNoBatches(batches, "a missing live folder")
+
+    def test_a_live_collection_with_no_marker_is_unknown_and_writes_nothing(self):
+        # A fetch cut short leaves a folder with no marker. Its missing docs look absent, so a merge would `set` over
+        # live docs that the fetch never reached: item-002 here.
+        live = self.fetch(items={"item-001": item(1)})
+        os.remove(os.path.join(live, "items", MARKER))
+        copy = self.copy_of({"items": {"item-001": item(1), "item-002": item(2)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertNoBatches(batches, "a live collection with no marker")
+
+    def test_merge_with_a_folder_that_is_not_a_collection_on_either_side_is_unknown(self):
+        stray = {"x": {"n": 1}}
+        forms = {
+            "copy": (self.copy_of({"items": {"item-001": item(1)}, "stray": stray}), self.fetch()),
+            "live": (self.copy_of({"items": {"item-001": item(1)}}),
+                     self.fetch(folders=dict({name: {} for name in COLLECTIONS}, stray=stray))),
+        }
+        for label, (copy, live) in forms.items():
+            batches = os.path.join(self.tmp.name, "batches-" + label)
+            with self.subTest(form=label):
+                r = self.merge_run(copy, live, batches)
+                lines = [line for line in verdict_lines(r) if line.startswith("unknown")]
+                self.assertTrue(any("stray" in line for line in lines),
+                                "no unknown line names the stray folder in the %s. Output:\n%s" % (label, shown(r)))
+                self.assertEqual(r.returncode, 2, shown(r))
+                self.assertNoBatches(batches, "a stray folder in the " + label)
+
+    def test_merge_with_nothing_left_to_write_is_unknown_and_writes_nothing(self):
+        live = self.fetch(items={"item-001": item(1), "item-002": item(2)})
+        copy = self.copy_of({"items": {"item-001": item(1), "item-002": item(2)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertNoBatches(batches, "a copy the live page already holds")
+
+    def test_merge_of_a_full_size_copy_into_an_empty_live_page_writes_every_doc(self):
+        data = full_size()
+        copy = self.exported(data, page=False)  # no page, so no designData: the merge needs no --live-page here
+        live = self.fetch()  # five empty collections, each with its marker
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 3, 133, 0, 0)
+        _, entries, sizes = self.batch_entries(batches)
+        self.assertTrue(all(size <= 50 for size in sizes), "a batch holds more than 50 entries: %s" % sizes)
+        self.assertNotIn("page", {entry["collection"] for entry in entries}, "the page folder went into a batch")
+        want = collections.Counter((name, doc_id, canonical(doc)) for name, docs in data.items()
+                                   for doc_id, doc in docs.items())
+        got = collections.Counter((e["collection"], e["doc_id"], canonical(e["data"])) for e in entries)
+        self.assertEqual(got, want, "the batches do not hold the copy's 133 docs, each once")
+
+    def test_merge_writes_only_the_docs_the_live_page_lacks_and_never_a_live_one(self):
+        live = self.fetch(items={"item-001": dict(item(1), context="Live text for item 1."),
+                                 "item-002": dict(item(2), context="Live text for item 2.")})
+        copy = self.copy_of({"items": {"item-001": item(1), "item-002": item(2), "item-003": item(3)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 1, 2, 0)
+        _, entries, _ = self.batch_entries(batches)
+        self.assertEqual(sorted((e["collection"], e["doc_id"]) for e in entries), [("items", "item-003")],
+                         "the batches hold other docs than the one the live page lacks")
+        self.assertEqual(canonical(entries[0]["data"]), canonical(item(3)), "items/item-003 is not the copy's doc")
+
+    def test_a_doc_id_the_live_page_holds_in_one_collection_is_still_written_from_another(self):
+        group = {"name": "Copy group", "items": ["shared"]}
+        live = self.fetch(items={"shared": dict(item_as("shared", 1), context="Live text.")})
+        copy = self.copy_of({"items": {"shared": item_as("shared", 1)}, "groups": {"shared": group}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 1, 1, 0)
+        _, entries, _ = self.batch_entries(batches)
+        self.assertEqual(sorted((e["collection"], e["doc_id"]) for e in entries), [("groups", "shared")],
+                         "the key is not the (collection, doc_id) pair: groups/shared was not written")
+        self.assertEqual(canonical(entries[0]["data"]), canonical(group))
+
+    def test_a_copy_answer_whose_item_the_live_page_holds_is_not_written_and_counts_as_kept_live(self):
+        # The live page wins on the item, open or answered, so its copy answer is kept. The copy's item-002 is new.
+        forms = {
+            "open": {},
+            "answered": {"answers": {"item-001": dict(answer_for("item-001", 1), note="Owner's answer")}},
+        }
+        for label, live_answers in forms.items():
+            batches = os.path.join(self.tmp.name, "batches-" + label)
+            with self.subTest(form=label):
+                live = self.fetch(items={"item-001": item(1)}, **live_answers)
+                copy = self.copy_of({"items": {"item-001": item(1), "item-002": item(2)},
+                                     "answers": {"item-001": answer_for("item-001", 1)}})
+                r = self.merge_run(copy, live, batches)
+                self.assertMergeSummary(r, 1, 1, 2, 0)
+                _, entries, _ = self.batch_entries(batches)
+                self.assertEqual(sorted((e["collection"], e["doc_id"]) for e in entries), [("items", "item-002")],
+                                 "answers/item-001 was written though items/item-001 is live: the live page must win")
+
+    def test_merge_with_a_live_page_adds_the_copy_design_keys_the_live_page_lacks(self):
+        live = self.fetch(items={"item-001": item(1)})
+        live_page = self.live_page_with({"a": "live a", "b": "live b"})
+        copy = self.copy_with_designs({"items": {"item-002": item(2)}}, {"b": "copy b", "c": "copy c"})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches, live_page=live_page)
+        self.assertMergeSummary(r, 1, 1, 0, 0, designs=1)
+        design_file = os.path.join(batches, "designData.json")
+        self.assertTrue(os.path.isfile(design_file), "no designData.json in the batches folder")
+        self.assertEqual(json.loads(read_text(design_file)), {"a": "live a", "b": "live b", "c": "copy c"},
+                         "the live designData must win a shared key, and the copy's new key must be added")
+
+    def test_copy_designs_without_a_live_page_are_unknown_and_write_nothing(self):
+        live = self.fetch(items={"item-001": item(1)})
+        copy = self.copy_with_designs({"items": {"item-002": item(2)}}, {"c": "copy c"})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertNoBatches(batches, "a copy with designs and no --live-page")
+        self.assertFalse(os.path.exists(os.path.join(batches, "designData.json")), "designData.json was written")
+
+    def test_a_copy_without_designs_needs_no_live_page_and_reports_zero_designs(self):
+        live = self.fetch(items={"item-001": item(1)})
+        copy = self.copy_of({"items": {"item-002": item(2)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 1, 0, 0, designs=0)
+
+    def test_a_live_page_with_no_designdata_block_is_unknown_when_the_copy_has_designs(self):
+        live = self.fetch(items={"item-001": item(1)})
+        live_page = write_bytes(os.path.join(self.tmp.name, "queue.html"), QUEUE_PAGE)
+        copy = self.copy_with_designs({"items": {"item-002": item(2)}}, {"c": "copy c"})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches, live_page=live_page)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertNoBatches(batches, "a live page with no designData block")
+
+    def test_merge_writes_the_renumber_map_from_each_old_n_to_its_new_n(self):
+        live = self.fetch(items={"item-001": item(1), "item-002": item(2), "item-003": item(3)})
+        copy = self.copy_with_a_clash()
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 2, 3, 1)
+        renumbered = os.path.join(batches, "renumbered.json")
+        self.assertTrue(os.path.isfile(renumbered), "no renumbered.json in the batches folder")
+        self.assertEqual(json.loads(read_text(renumbered)), {"2": 4},
+                         "item-900 moved from n 2 to n 4: the map must read {\"2\": 4}, with string keys")
+
+    def test_the_renumber_map_is_written_empty_when_no_n_moves(self):
+        live = self.fetch(items={"item-009": item(9)})
+        copy = self.copy_of({"items": {"item-001": item(1), "item-002": item(2)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 2, 0, 0)
+        renumbered = os.path.join(batches, "renumbered.json")
+        self.assertTrue(os.path.isfile(renumbered), "renumbered.json is not written when no n moves: it must be, empty")
+        self.assertEqual(json.loads(read_text(renumbered)), {}, "the map of a merge with no moves must be {}")
+
+    def test_the_renumber_map_keys_only_the_item_that_moved_when_two_copies_share_an_n(self):
+        # item-a keeps 7 (no live clash). item-b, the later one, takes 8. The map keys item-b's old n and no other item.
+        copy = self.copy_of({"items": {"item-a": item_as("item-a", 7), "item-b": item_as("item-b", 7)}})
+        live = self.fetch()
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 2, 0, 1)
+        renumbered = os.path.join(batches, "renumbered.json")
+        self.assertTrue(os.path.isfile(renumbered), "no renumbered.json in the batches folder")
+        self.assertEqual(json.loads(read_text(renumbered)), {"7": 8},
+                         "only the mover is keyed, and its key maps to its own new n 8: the keeper must not appear")
+
+    def test_the_design_file_holds_no_raw_less_than_and_parses_to_the_same_values(self):
+        # The file is pasted into the page's script block as it is, so a "</script>" in a value must not reach it raw.
+        live = self.fetch(items={"item-001": item(1)})
+        live_page = self.live_page_with({"a": "live </script> a"})
+        copy = self.copy_with_designs({"items": {"item-002": item(2)}}, {"c": "copy <b>tag</b>"})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches, live_page=live_page)
+        self.assertMergeSummary(r, 1, 1, 0, 0, designs=1)
+        design_file = os.path.join(batches, "designData.json")
+        self.assertTrue(os.path.isfile(design_file), "no designData.json in the batches folder")
+        raw = read_text(design_file)
+        self.assertNotIn("<", raw, "designData.json holds a raw '<': every '<' must be written as the escape \\u003c")
+        ESCAPE = chr(92) + "u003c"  # the six characters of the JSON escape for '<'
+        self.assertIn(ESCAPE, raw, "designData.json has no escape for the '<' in its values")
+        self.assertEqual(json.loads(raw), {"a": "live </script> a", "c": "copy <b>tag</b>"},
+                         "designData.json must parse to the live values plus the copy's added key")
+
+    def test_fifty_one_missing_docs_with_one_live_make_one_batch_of_fifty(self):
+        live = self.fetch(items={"item-001": item(1)})
+        copy = self.copy_of({"items": {"item-%03d" % n: item(n) for n in range(1, 52)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 50, 1, 0)
+        _, entries, sizes = self.batch_entries(batches)
+        self.assertEqual(sizes, [50], "one batch of 50 entries, not %s" % sizes)
+        self.assertEqual(sorted(e["doc_id"] for e in entries), sorted("item-%03d" % n for n in range(2, 52)),
+                         "the batch does not hold the 50 docs the live page lacks")
+
+    def test_merge_batches_stay_under_900_kb(self):
+        # 100 docs of about 20 KB: the byte cap splits them, as it does for --rebuild.
+        big = {"item-%03d" % n: dict(item(n), context="word " * 4000) for n in range(1, 101)}
+        copy = self.copy_of({"items": big})
+        live = self.fetch()
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        files = self.batch_files(batches)
+        self.assertMergeSummary(r, len(files), 100, 0, 0)
+        self.assertGreaterEqual(len(files), 3, "2 MB of docs cannot fit in fewer than three 900 KB batches")
+        for path in files:
+            self.assertLessEqual(os.path.getsize(path), 900000, "%s is over 900 KB" % os.path.basename(path))
+        _, entries, _ = self.batch_entries(batches)
+        self.assertEqual(len(entries), 100, "the batches hold %d entries, not 100" % len(entries))
+
+    def test_a_doc_over_900_kb_is_unknown_for_a_merge(self):
+        copy = self.copy_of({"items": {"item-001": dict(item(1), context="word " * 200000)}})
+        live = self.fetch()
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertNoBatches(batches, "a doc over the byte cap")
+
+    def test_a_copied_item_with_a_live_n_takes_the_next_free_n_and_its_answer_follows(self):
+        live = self.fetch(items={"item-001": item(1), "item-002": item(2), "item-003": item(3)})
+        copy = self.copy_with_a_clash()
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 2, 3, 1)
+        _, entries, _ = self.batch_entries(batches)
+        moved = self.entry_of(entries, "items", "item-900")
+        answer = self.entry_of(entries, "answers", "item-900")
+        self.assertIsNotNone(moved, "items/item-900 is not in the batches")
+        self.assertIsNotNone(answer, "answers/item-900 is not in the batches: its item was renumbered, so its answer follows")
+        self.assertEqual(moved["data"].get("n"), 4, "items/item-900 has n %s, not the next free n above 3, which is 4"
+                         % moved["data"].get("n"))
+        self.assertEqual(answer["data"].get("n"), 4, "answers/item-900 has n %s, not its item's new n 4"
+                         % answer["data"].get("n"))
+        self.assertEqual(self.unnumbered(moved["data"]), self.unnumbered(item_as("item-900", 2)),
+                         "items/item-900 changed a field other than n")
+        self.assertEqual(self.unnumbered(answer["data"]), self.unnumbered(answer_for("item-900", 2)),
+                         "answers/item-900 changed a field other than n")
+
+    def test_copied_items_that_share_an_n_renumber_the_later_one_and_its_answer(self):
+        live = self.fetch()
+        copy = self.copy_of({
+            "items": {"item-a": item_as("item-a", 7), "item-b": item_as("item-b", 7)},
+            "answers": {"item-a": answer_for("item-a", 7), "item-b": answer_for("item-b", 7)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 4, 0, 1)
+        _, entries, _ = self.batch_entries(batches)
+        got = {(e["collection"], e["doc_id"]): e["data"].get("n") for e in entries}
+        self.assertEqual(got, {("items", "item-a"): 7, ("items", "item-b"): 8,
+                               ("answers", "item-a"): 7, ("answers", "item-b"): 8},
+                         "of two copied items with n 7, the earlier (sorted doc_id) keeps 7, and the later takes 8 with its answer")
+
+    def test_a_new_n_is_above_the_highest_n_in_either_folder(self):
+        # Live holds n 1 to 3. Copy's item-a clashes with live item-002, and copy's item-b holds 4. A new n of 4 would
+        # clash with item-b, so item-a takes 5: the next free n above the highest in either folder.
+        live = self.fetch(items={"item-001": item(1), "item-002": item(2), "item-003": item(3)})
+        copy = self.copy_of({"items": {"item-001": item(1), "item-002": item(2), "item-003": item(3),
+                                       "item-a": item_as("item-a", 2), "item-b": item_as("item-b", 4)}})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 2, 3, 1)
+        _, entries, _ = self.batch_entries(batches)
+        got = {e["doc_id"]: e["data"].get("n") for e in entries if e["collection"] == "items"}
+        self.assertEqual(got, {"item-a": 5, "item-b": 4},
+                         "item-a's n 2 is held live: the next free n above the highest in either folder is 5, and item-b keeps 4")
+
+    def test_merge_with_collections_writes_each_named_folder_under_its_name(self):
+        steps = {"step-%03d" % n: {"n": n, "title": "Step %d" % n} for n in range(1, 31)}
+        topics = {"topic-%03d" % n: {"n": n, "title": "Topic %d" % n} for n in range(1, 31)}
+        # `receipts` is named in the live page and absent from the copy: the copy holds none of it, which is fine.
+        live = self.fetch(folders={"steps": {"step-001": steps["step-001"]}, "topics": {}, "receipts": {}})
+        copy = self.copy_of({"steps": steps, "topics": topics})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches, collections=("steps", "topics", "receipts"))
+        self.assertMergeSummary(r, 2, 59, 1, 0)
+        _, entries, _ = self.batch_entries(batches)
+        want = collections.Counter(
+            [("steps", doc_id, canonical(doc)) for doc_id, doc in steps.items() if doc_id != "step-001"]
+            + [("topics", doc_id, canonical(doc)) for doc_id, doc in topics.items()])
+        got = collections.Counter((e["collection"], e["doc_id"], canonical(e["data"])) for e in entries)
+        self.assertEqual(got, want, "the batches do not hold the named folders' missing docs under their folder names")
+
+    def test_merge_with_collections_names_a_folder_not_named_as_unknown(self):
+        forms = {
+            "copy": (self.copy_of({"steps": {"step-001": {"n": 1}}, "items": {"item-001": item(1)}}),
+                     self.fetch(folders={"steps": {}, "topics": {}})),
+            "live": (self.copy_of({"steps": {"step-001": {"n": 1}}}),
+                     self.fetch(folders={"steps": {}, "topics": {}, "items": {"item-001": item(1)}})),
+        }
+        for label, (copy, live) in forms.items():
+            batches = os.path.join(self.tmp.name, "batches-" + label)
+            with self.subTest(form=label):
+                r = self.merge_run(copy, live, batches, collections=("steps", "topics"))
+                lines = [line for line in verdict_lines(r) if line.startswith("unknown")]
+                self.assertTrue(any("items" in line for line in lines),
+                                "no unknown line names items in the %s. Output:\n%s" % (label, shown(r)))
+                self.assertEqual(r.returncode, 2, shown(r))
+                self.assertNoBatches(batches, "an unnamed folder in the " + label)
+
+    def test_merge_collections_follow_the_rebuild_name_rules(self):
+        copy = self.copy_of({"steps": {"step-001": {"n": 1}}})
+        live = self.fetch(folders={"steps": {}})
+        for number, bad in enumerate(("page", "../steps")):
+            batches = os.path.join(self.tmp.name, "batches-%d" % number)
+            with self.subTest(name=bad):
+                r = self.merge_run(copy, live, batches, collections=(bad,))
+                err = error_line(r)
+                self.assertIsNotNone(err, "no usage error line for %r. Output:\n%s" % (bad, shown(r)))
+                self.assertNotIn("unrecognized arguments", err,
+                                 "argparse rejected the command before the name %r was checked: %s" % (bad, err))
+                self.assertIn(bad, err, "the usage error does not name %r: %s" % (bad, err))
+                self.assertEqual(r.returncode, 2, shown(r))
+                self.assertNoBatches(batches, "a usage error")
+
+    def test_a_control_rebuilds_the_clash_copy_so_its_fixture_is_well_formed(self):
+        """Green on the old code: the copy the renumber case merges also rebuilds, so a red there is the merge."""
+        copy = self.copy_with_a_clash(name="control")
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.rebuild(copy, batches)
+        self.assertBatches(r, 1, 5)
 
 
 class All(Base):
