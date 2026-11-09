@@ -270,10 +270,12 @@ class ReviewRecordTests(unittest.TestCase):
         with open(os.path.join(self.gh_dir, "state.json"), "w", encoding="utf-8") as handle:
             json.dump(state, handle)
 
-    def cutover_history(self, base):
+    def cutover_history(self, base, default=None):
         """origin/<base> holds merge/merge.py without the salt line, then the commit that adds it, at CUTOVER. update-ref sets the
-        remote-tracking ref, so nothing is pushed. Then merge's review_stamp_since reads this repo's own history."""
-        self.default_branch = base  # the default branch is the one this history sits on, so the in-process read reads it
+        remote-tracking ref, so nothing is pushed. Then merge's review_stamp_since reads this repo's own history. With `default`, the
+        commit that adds the salt line sits on origin/<default> alone: origin/<base>, a stacked base, stops before it."""
+        default = base if default is None else default
+        self.default_branch = default  # the default branch is the one that holds the salt line, so the in-process read reads it
         path = os.path.join(self.repo, "merge", "merge.py")
         os.makedirs(os.path.dirname(path))
         for text, date in ((PRE_SALT_SOURCE, "2026-10-20 10:00:00 +0000"), (SALT_SOURCE, CUTOVER_GIT_DATE)):
@@ -283,7 +285,9 @@ class ReviewRecordTests(unittest.TestCase):
             subprocess.run(["git", "-C", self.repo, "add", "merge/merge.py"], check=True, capture_output=True)
             subprocess.run(["git", "-C", self.repo, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com",
                             "commit", "-q", "-m", "fixture"], check=True, capture_output=True, env=env)
-        subprocess.run(["git", "-C", self.repo, "update-ref", "refs/remotes/origin/" + base, "HEAD"], check=True, capture_output=True)
+        base_tip = "HEAD~1" if default != base else "HEAD"  # a stacked base stops before the commit that adds the salt line
+        for name, rev in ((base, base_tip), (default, "HEAD")):
+            subprocess.run(["git", "-C", self.repo, "update-ref", "refs/remotes/origin/" + name, rev], check=True, capture_output=True)
 
     def gh_calls(self):
         """The argv of each stand-in call of the last Stop run."""
@@ -445,6 +449,24 @@ class ReviewRecordTests(unittest.TestCase):
         out = self.stop(self.lane_turn(report(CLAIM)), cwd=os.path.join(self.repo, "merge"))
         self.assert_reads_of(PR)
         self.assertIsNone(out, "a run from a subfolder refused an unstamped record from before the cutover:\n" + str(out))
+
+    def test_a_stacked_pull_request_reads_the_cutover_from_the_default_branch(self):
+        # Catches: the cutover read asked of the pull's base branch (pull["base"]["ref"]) instead of the default branch. A stacked base
+        # lacks the commit that adds the salt line, so that read finds no cutover, and an unstamped record from before the cutover is
+        # refused. The default branch holds the commit, so the cutover is CUTOVER and the same record passes.
+        self.cutover_history("feature", default="main")
+        self.assertEqual(merge_mod.review_stamp_since(self.repo, "main"), CUTOVER,
+                         "fixture: the default branch does not hold the commit that adds the salt line")
+        base_source = subprocess.run(["git", "-C", self.repo, "show", "origin/feature:merge/merge.py"],
+                                     check=True, capture_output=True, encoding="utf-8").stdout
+        self.assertNotIn("REVIEW_STAMP_SALT =", base_source, "fixture: the stacked base already holds the salt line")
+        body = unstamped(record())
+        self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body, BEFORE, CUTOVER), LIVE)[0], "done",
+                         "fixture: merge/merge.py does not call this record done")
+        self.serve(comments=[{"body": body, "created_at": BEFORE}], base="feature", default_branch="main")
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assertIsNone(out, "a stacked pull request refused an unstamped record from before the cutover on its default branch:\n" + str(out))
 
     def test_an_unstamped_done_record_created_before_the_cutover_satisfies_a_pass_claim(self):
         # Catches: a record made before the stamp's merge, with no Stamp line, read as no record, so a lane's PASS claim on its
@@ -1021,6 +1043,20 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_blocked(out, "a failed cutover read let a PASS claim through on a record with a malformed field:")
         self.assertIn("PR #12", out["reason"], out)
 
+    def test_a_failed_cutover_read_still_refuses_an_unstamped_malformed_record_without_the_stamp_wording(self):
+        # Catches: a failed cutover read adding the Stamp-line wording to the refusal of an unstamped record that does not parse. The
+        # cutover is unknown, not none, so the malformed field is the only cause the refusal names.
+        body = unstamped(merge_mod.review_body(PR, LIVE, "weird", "no", ROUNDS, "not owed"))
+        self.assertIn("Kind: weird", body, "fixture: the record does not carry the malformed field")
+        self.assertIsNone(merge_mod.parse_review(body, "unknown", None), "fixture: merge/merge.py reads the unstamped record with Kind: weird as well formed")
+        self.serve(comments=[body])
+        self.delete_cutover_ref()
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assert_blocked(out, "a failed cutover read let a PASS claim through on an unstamped record with a malformed field:")
+        self.assertIn("PR #12", out["reason"], out)
+        self.assertNotIn("Stamp", out["reason"], "a failed cutover read named the Stamp line for an unstamped malformed record:\n" + out["reason"])
+
     def test_a_failed_cutover_read_still_refuses_an_unstamped_record_naming_another_pr(self):
         # Catches: a failed cutover read passing an unstamped record for another pull request. The record is well formed and done for
         # the live head, so only its PR line decides: the cutover could place it, but no record names PR #12, so the claim is refused.
@@ -1052,6 +1088,7 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_reads_of(PR)
         self.assert_blocked(out, "a failed cutover read let a PASS claim through on an unstamped record for a stale head:")
         self.assertIn("PR #12", out["reason"], out)
+        self.assertNotIn("Stamp", out["reason"], "a failed cutover read named the Stamp line for an unstamped record for a stale head:\n" + out["reason"])
 
     def test_a_failed_cutover_read_still_refuses_an_edited_unstamped_newest_record(self):
         # Catches: an edited newest record read as no record when the cutover read fails, so its body is never parsed. The record is
@@ -1068,6 +1105,7 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_reads_of(PR)
         self.assert_blocked(out, "a failed cutover read let a PASS claim through on an edited unstamped newest record:")
         self.assertIn("PR #12", out["reason"], out)
+        self.assertNotIn("Stamp", out["reason"], "a failed cutover read named the Stamp line for an edited unstamped record:\n" + out["reason"])
 
     def test_a_failed_cutover_read_still_refuses_an_edited_stamped_newest_record(self):
         # Catches: an edited newest record with a matching Stamp line read as no record when the cutover read fails, so the claim is
