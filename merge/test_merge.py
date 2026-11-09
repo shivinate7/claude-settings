@@ -11969,6 +11969,13 @@ class BatchBrake(Env):
 
 ROLE_SESSION = "cse_role_check_test"
 OLD_PARSER_ERRORS = ("unrecognized arguments", "invalid int value")  # what merge.py's parser says to `--role` before the writer exists
+# git-remedy-never-names-target: a refusal names no plain merge form, `merge <pr> --confirm`, which would point a lane at a merge it may not run.
+# The one remedy that names --confirm is `merge <pr> --review-record ... --confirm`, which posts the review record, so a match with --review-record is no plain form.
+PLAIN_MERGE_CONFIRM = re.compile(r"merge\b[^`\n]*?--confirm\b")
+
+def plain_merge_forms(text):
+    """The `merge ... --confirm` commands in `text` that have no --review-record between merge and --confirm: the plain form a refusal must not name."""
+    return [m for m in PLAIN_MERGE_CONFIRM.findall(text) if "--review-record" not in m]
 
 class CloudSession(Env):
     """The cloud-session fixture, one home for MergeRoleCheck and StandingGrantSwitch: a run's config dir, a made-up session id, and
@@ -12045,7 +12052,7 @@ class MergeRoleCheck(CloudSession):
         self.assertEqual(len(self.host.pr_calls), reads, "the run read the host before the role check refused")
         self.assertEqual(self.refs(), refs, "the run took the lock or pushed before the role check refused")
         self.assertTrue(err.strip(), "the refusal said nothing on stderr")
-        self.assertNotIn("--confirm", err)
+        self.assertEqual(plain_merge_forms(err), [], "the refusal names the plain merge form, which points a lane at a merge it may not run: " + err)
         self.assertNotIn("Traceback", err)
         return err
 
@@ -12168,9 +12175,9 @@ class MergeRoleCheck(CloudSession):
         self.assertRegex(err, r"(?i)review record")
         self.assertRegex(err, r"(?i)batch[ -]runner finds")
         self.assertNotRegex(out, r"(?i)batch[ -]runner")  # stdout carries no part of the refusal
-        # git-remedy-never-names-target: the text never names the command it refused
-        self.assertNotIn("--confirm", err)
-        self.assertNotRegex(err, r"\bmerge\s+[<\d]")
+        # git-remedy-never-names-target: the text names no plain merge form. Its one --confirm is the review record's, after --review-record.
+        self.assertEqual(plain_merge_forms(err), [], "the refusal names the plain merge form: " + err)
+        self.assertNotRegex(err, r"\bmerge\s+\d")  # no PR number: the remedy keeps the <pr> placeholder
         # A session without a role must not learn which role to claim: the text names the batch runner only as the one that finds the PR.
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
