@@ -156,7 +156,7 @@ record from before the cutover reads done, as merge --reviewed reads it; with no
 A failed cutover read never refuses by itself. Only an unstamped record, otherwise well formed and done for the live head, gets the UNKNOWN note and no refusal.
 A Stamp line that does not match, or a malformed field, is refused as with a known cutover. Cost: 2 gh reads, and for the cutover one git log
 (review_stamp_since, cached per (repo top, base, default branch) in the process: one per distinct key per Stop; the default branch comes from the pull, never a third gh read),
-plus the guard_merge and merge module imports. A full clone, or a shallow one whose boundary is not the first salt commit, runs that one git log and no fetch. In a shallow clone
+plus the guard_merge and merge module imports. A repo whose history holds no salt commit adds one git log of the merge tool's own checkout (tool_stamp_since), with no fetch. A full clone, or a shallow one whose boundary is not the first salt commit, runs that one git log and no fetch. In a shallow clone
 whose first salt commit is the shallow boundary, the read deepens first (this Stop keeps the deepen by the orchestrator's ruling, filed in decision pr-review-record): up to
 merge/merge.py REVIEW_DEEPEN_TRIES fetches of REVIEW_DEEPEN_STEP commits each, with a git log pass after each, so up to 4 git log passes and 3 fetches, more log calls when another
 process races the clone (REVIEW_RACE_TRIES). Each fetch makes a network call and writes objects, the clone's shallow file and origin/<default branch>. The deepen is once per
@@ -2498,12 +2498,6 @@ def _budget_spent(err, end):
     raised by merge's review_stamp_since on a spent deadline. A read cut at its own cap with time left on the clock (a slow git read) is a failed read,
     not a run-out. Decision `pr-review-record`."""
     return end - time.monotonic() <= 0
-
-
-def _newest_marked(comments, merge_mod):
-    """The newest comment of `comments` (oldest first) that merge's review_marked calls a record, else None."""
-    marked = [c for c in comments if isinstance(c, dict) and merge_mod.review_marked(c.get("body") or "")]
-    return marked[-1] if marked else None
 
 
 def _newest_record(n, comments, merge_mod, cutover=None):

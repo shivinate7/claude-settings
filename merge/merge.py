@@ -3329,7 +3329,7 @@ def shallow_boundary(root):
     """-> the set of commit shas whose parents this clone cut off (its `shallow` file); empty for a full clone. Only a missing `shallow` file
     means full history. Any other read error, or a `.git` file that names no git dir, raises Stop naming the file: reading it as full history
     would read every unstamped record as old."""
-    # A file read, not a git call: on a full clone the one `git log` is the whole cost of the cutover read (a test pins it). A linked worktree's `.git` is a
+    # A file read, not a git call: on a full clone whose history holds a salt commit the one `git log` is the whole cost of the cutover read (a test pins it); a repo with no salt commit adds the tool checkout's one `git log`. A linked worktree's `.git` is a
     # file naming its git dir, and the `shallow` file lives in that dir's common dir.
     path = os.path.join(root, ".git")
     if not os.path.exists(path):  # no git dir could hold a shallow file, so whether the clone is shallow is unknown
@@ -3354,20 +3354,28 @@ def shallow_boundary(root):
         why = "it names no git dir" if isinstance(e, IndexError) else f"{type(e).__name__}: {e}"
         raise Stop(f"cannot read {os.path.normpath(path)} to tell whether this clone is shallow ({why}). Repair it, then run the command again. " + REVIEW_CITE) from e
 
+def salt_log(root, ref):
+    """-> (git_log_exit, out) of the first-parent log of `ref` in `root`, oldest first, for the commits that add `REVIEW_STAMP_SALT =` to merge/merge.py: the home of this log."""
+    return git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%H %ct", ref, "--", "merge/merge.py")
+
+def salt_stamp(first):
+    """-> the committer time, UTC as `YYYY-MM-DDTHH:MM:SSZ`, in `first` (the first line of salt_log's output, split: sha, time), or None when it holds none."""
+    return (datetime.datetime.fromtimestamp(int(first[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if len(first) == 2 and first[1].isdigit() else None)
+
 def salt_cutover(root, ref, where=None):
     """-> (stamp, git_log_exit, out) of the first first-parent commit on `ref` in `root` whose merge/merge.py holds `REVIEW_STAMP_SALT =`: its committer time,
     UTC as `YYYY-MM-DDTHH:MM:SSZ`, or None when the read ran and found none. A non-zero exit gives (None, exit, output): the caller names it. A shallow clone whose
     first salt commit is the boundary raises Stop, since an older salt commit may exist and the cutover is unknown. `where` names the history in that Stop
     (default `ref`), for a caller whose ref says nothing, such as the tool checkout's HEAD."""
-    c, out = git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%H %ct", ref, "--", "merge/merge.py")
+    c, out = salt_log(root, ref)
     if c:
         return None, c, out
     first = out.split()[:2]
     if first and first[0] in shallow_boundary(root):  # its parent is missing, so an older salt commit may exist: the cutover is unknown
         raise Stop(f"{where or ref} is a shallow history, too shallow to read the review stamp cutover: the first commit holding the salt, {first[0][:9]}, is the shallow boundary. "
                    "Run `git fetch --unshallow origin`, then run the command again. " + REVIEW_CITE)
-    return (datetime.datetime.fromtimestamp(int(first[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            if len(first) == 2 and first[1].isdigit() else None), 0, out
+    return salt_stamp(first), 0, out
 
 _tool_stamp_since = {}
 
@@ -3419,13 +3427,16 @@ def tool_stamp_since():
 
 def review_stamp_since(root, base, default=None):
     """-> the committer time, UTC as `YYYY-MM-DDTHH:MM:SSZ`, of the first first-parent commit on origin/<default branch> whose merge/merge.py holds
-    `REVIEW_STAMP_SALT =`, or None when the read ran and found none. It reads the default branch (host_default_branch), never the PR's `base`: the stamp
-    merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. A read that cannot run
-    (git errors, no origin/<default branch> ref, a shallow clone whose first salt commit is still the boundary after REVIEW_DEEPEN_TRIES deepens of
-    REVIEW_DEEPEN_STEP commits or whose deepen fetch fails, a boundary that changes on each of REVIEW_RACE_TRIES reads, a shallow file that cannot be read, or no .git)
-    raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
-    (rule verification-report-unknown-reads). Inside `shared_deadline`, each deepen fetch gets the time left, never more than its own cap, and a spent
-    budget raises Stop naming it and starts no fetch after. The caller fetches first (fetch_default_branch). One call per (repo top, `base`, default branch) in a process. A `root` in a subfolder reads the repo top's history, since the pathspec is relative to it. A record
+    `REVIEW_STAMP_SALT =`. It reads the default branch (host_default_branch), never the PR's `base`: the stamp
+    merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. A shallow clone whose first salt
+    commit is the boundary deepens first, since an older salt commit may exist below it. When the caller's repo has no salt commit, whatever its history touched,
+    the cutover comes from the merge tool's own source checkout (tool_stamp_since), which fetches and deepens nothing: the stamp rule then holds in every repo, not
+    only claude-settings (coordinator item 386, 2026-11-08 12:51 CST). A read that cannot run (git errors, no origin/<default branch> ref, a shallow clone whose
+    first salt commit is still the boundary after REVIEW_DEEPEN_TRIES deepens of REVIEW_DEEPEN_STEP commits or whose deepen fetch fails, a boundary that changes on
+    each of REVIEW_RACE_TRIES reads, a shallow file that cannot be read, no .git, or a tool checkout with no salt commit) raises Stop naming it, never None: an
+    unknown cutover must not read every unstamped record as old (rule verification-report-unknown-reads). Inside `shared_deadline`, each deepen fetch gets the time
+    left, never more than its own cap, and a spent budget raises Stop naming it and starts no fetch after. The caller fetches first (fetch_default_branch). One call
+    per (repo top, `base`, default branch) in a process. A `root` in a subfolder reads the repo top's history, since the pathspec is relative to it. A record
     created before this time may carry no Stamp line. `default` is the default branch name when the caller already read it (the report guard's
     pulls/N payload, base.repo.default_branch); with none, default_branch_once asks gh."""
     # `base` is only a cache key, since the answer reads the default branch. It stays because both callers and their test doubles pass it.
@@ -3439,7 +3450,7 @@ def review_stamp_since(root, base, default=None):
             # Read the boundary before and after the log, and run the log again until the two reads agree.
             for _ in range(REVIEW_RACE_TRIES):
                 before = shallow_boundary(top)
-                c, out = git(top, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%H %ct", f"origin/{default}", "--", "merge/merge.py")
+                c, out = salt_log(top, f"origin/{default}")
                 if c:
                     raise Stop(f"could not read origin/{default} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again. " + REVIEW_CITE)
                 boundary = shallow_boundary(top)
@@ -3473,8 +3484,10 @@ def review_stamp_since(root, base, default=None):
                 raise Stop(f"origin/{default} is a shallow history, too shallow to read the review stamp cutover: the first commit holding the salt, {first[0][:9]}, is the shallow boundary, "
                            f"and the fetch that deepens it by {REVIEW_DEEPEN_STEP} commits (`git fetch --deepen={REVIEW_DEEPEN_STEP} origin`) failed (git exited {fc}): {fout[:300]}. "
                            "Run the command again to retry the fetch. If it keeps failing, `git fetch --unshallow origin` fetches the full history instead. " + REVIEW_CITE)
-        _stamp_since[key] = (datetime.datetime.fromtimestamp(int(first[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                             if len(first) == 2 and first[1].isdigit() else None)
+        stamp = salt_stamp(first)
+        if stamp is None:  # this repo's history holds no salt commit: the merge tool's own checkout supplies the cutover, and it needs no deepen (item 386)
+            stamp = tool_stamp_since()
+        _stamp_since[key] = stamp
     return _stamp_since[key]
 
 def parse_review(text, created=None, cutover=None):
