@@ -29850,7 +29850,7 @@ LOG_CHECKS_EXTRA.append(("role-model: fix check chain: a round 2 reviewer brief 
 
 
 def fix_check_round_line_does_not_skip_its_chain():
-    """A fix check with a `Round 2 of 3` line below its PR line is judged on its chain. The round line does not lift it above its row."""
+    """A fix check with a round marker line below its PR line is judged on its chain. The marker does not lift it above its row."""
     scope = fix_check_scope_problem()
     if scope:
         return False, scope
