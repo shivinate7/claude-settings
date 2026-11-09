@@ -2418,8 +2418,8 @@ MUTATIONS = [
      '            yield args, where, overrides', "guard",
      "a lane's HEAD:roadmap push in a subshell after a cd, piped to tail, is refused"),
     ("roadmap-one-writer: the word a glued ) or & ends keeps its mark",
-     '            if word:\n                words.append(word)\n            break',
-     '            if word:\n                words.append(arg)\n            break', "guard",
+     '            parts = group[:-1] + ([word] if word else [])',
+     '            parts = group[:-1] + ([arg] if word else [])', "guard",
      "a lane's push to roadmap in a subshell under bash -c after a cd is refused"),
     ("roadmap-one-writer: the record branch is never read, so every checkout's record is roadmap",
      '        return layout.record_branch(root)',
@@ -2428,8 +2428,8 @@ MUTATIONS = [
     # RULE merge-confirm-repo, the merge's glued-paren read (guard_merge._merge_words) and the merge tool's refusal of a flag
     # (_merge_flags, raised as _FlagsUnreadable). Each mutant breaks one arm; its named case reads that arm.
     ("merge-confirm-repo: every glued ) or & closes the word, whatever its quote state",
-     '    return None if args is None else _command_words(args, _glued_counts(segment, args))',
-     '    return None if args is None else _command_words(args)', "guard",
+     '    return _command_words(args, counts, joined)\n\n\ndef _push_calls',
+     '    return _command_words(args)\n\n\ndef _push_calls', "guard",
      "a reason ending in ) before -C naming another checkout is denied"),
     ("merge-confirm-repo: a flag the merge tool refuses is read as unset, not raised as unreadable",
      '        raise _FlagsUnreadable(message)',
