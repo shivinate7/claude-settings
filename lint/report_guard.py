@@ -704,20 +704,49 @@ def agent_pin(role):
     return ""
 
 
+def _closed_by_notice(text):
+    """The agent ids a completion notice in `text` closes: stall_watch's parser, the one home.
+    It loads on first use, and a missing module closes nothing, so a spawn stays running."""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    try:
+        from stall_watch import closed_by_notice
+    except ImportError:
+        return []
+    return closed_by_notice(text)
+
+
+class Spawned(dict):
+    """spawn_models' map of role to model families, with `finished`: the roles that have a finished spawn."""
+    finished = frozenset()
+
+
 def spawn_models(records):
     """Map each named role spawned in `records` to the set of model families it ran on.
 
     A spawn's model is its call's `model` field, else its agent file's pin, else
     CLAUDE_CODE_SUBAGENT_MODEL; Claude Code reads them in that order. A spawn none of them
     resolve adds '' (unknown), which never counts as a mismatch.
+
+    A running spawn has no result yet, or only a background-launch result. It joins the map
+    but not `finished`.
     """
-    failed = set()  # a denied or errored spawn ran no agent, so it counts for nothing
+    failed, answered, agent_of, closed = set(), set(), {}, set()  # a denied or errored spawn counts for nothing
     for rec in records:
-        content = (rec.get("message") or {}).get("content")
-        for b in content if isinstance(content, list) else []:
-            if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
+        launch = rec.get("toolUseResult")
+        launched = isinstance(launch, dict) and launch.get("isAsync") is True and launch.get("status") == "async_launched"
+        for b in tool_results(rec):
+            if b.get("is_error"):
                 failed.add(b.get("tool_use_id"))
-    found = {}
+            elif launched:
+                agent_of[b.get("tool_use_id")] = launch.get("agentId")
+            else:
+                answered.add(b.get("tool_use_id"))
+        att = rec.get("attachment")  # a completion notice that arrives as a queued command
+        notice = att.get("prompt") if rec.get("type") == "attachment" and isinstance(att, dict) else None
+        if isinstance(notice, str):
+            closed.update(_closed_by_notice(notice))
+    answered.update(t for t, agent in agent_of.items() if agent in closed)
+    found, finished = Spawned(), set()
     for rec in records:
         for b in tool_uses(rec):
             if b.get("name") not in SPAWN_TOOLS or b.get("id") in failed:
@@ -729,22 +758,32 @@ def spawn_models(records):
             model = model_family(inp.get("model")) or model_family(agent_pin(role)) or \
                 model_family(os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL"))
             found.setdefault(role, set()).add(model)
+            if not b.get("id") or b.get("id") in answered:  # no id: no result to wait for
+                finished.add(role)
+    found.finished = frozenset(finished)
     return found
 
 
-def done_models_problem(text, spawned):
-    """Name what Done gets wrong about the spawned roles' models, else ''."""
+def done_models_problem(text, spawned, every=None):
+    """Name what Done gets wrong about the spawned roles' models, else ''.
+
+    `spawned` is the turn's spawns and sets which roles Done must name. `every` is the whole
+    transcript's spawns: Done also reports a spawn that ran before the turn's window.
+    Only the models an earlier spawn resolved count; its unknown '' must not hide a window mismatch.
+    """
     if not spawned:
         return ""
     done = " ".join(done_items(block_text(text, keep_indent=True)))
     named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
              for r in ROLE_RE.findall(roles)}
-    missing = sorted(r for r in spawned if not any(nr == r for nr, _ in named))
+    # A running role Done leaves out is not yet claimed; one Done names must carry a model.
+    required = spawned.finished | {r for r in spawned if re.search(r"\b" + r + r"\b", done, re.I)}
+    missing = sorted(r for r in required if not any(nr == r for nr, _ in named))
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
-        ran = spawned.get(role)
-        if ran is not None and "" not in ran and model not in ran:
+        ran = set(spawned.get(role, ())) | {m for m in (every or {}).get(role, ()) if m}
+        if ran and "" not in ran and model not in ran:
             return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
     return ""
 
@@ -2596,7 +2635,7 @@ def rewrite_problems(hook):
         text = last_reply(hook)
         spawned = spawn_models(records[idx + 1:])
         reasons = []
-        models = done_models_problem(text, spawned)
+        models = done_models_problem(text, spawned, spawn_models(records))
         if models:
             reasons.append(MODELS_REASON % models)
         if unstarted_problem(text, spawned):
@@ -3088,7 +3127,7 @@ def main():
             "a Done line does not say BUILT, RECORDED or OTHER, or says BUILT or RECORDED with no PR or commit: "
             + repr(item)))
     spawned = spawn_models(after)
-    models = done_models_problem(text, spawned) if shape_ok else ""
+    models = done_models_problem(text, spawned, spawn_models(records)) if shape_ok else ""
     if models:
         reasons.append(MODELS_REASON % models)
     if shape_ok and unstarted_problem(text, spawned):
