@@ -46,7 +46,7 @@
                           A head whose diff against the base touches hooks/mutate_*.py or hooks/mutate_*.mjs also runs the command of
                           the head's checks-mutate-guard job (step "Guard mutation test") in that same worktree, after a passing lint.
                           It FAILs on any survivor, on more than MUTATE_UNKNOWN_MAX unknown mutants (the crashed column; a timeout lands
-                          there), on a run past that job's timeout-minutes, and on a nonzero exit or a report it cannot read. It prints
+                          there), on a run past that job's timeout-minutes, and on a report it cannot read at any exit (a readable report is judged by its counts, not its exit code). It prints
                           its wall time and killed, survived and unknown counts, on the PASS line or in the FAIL text. Extra cost, only
                           then: one run of that command (about 11 to 16 min); on any other head, one `git diff --name-only`.
   merge --idle-lanes --live FILE
@@ -2652,8 +2652,7 @@ def mutate_run_check(wt):
         failures.append(f"the mutate run took {wall} s, past the {cap}-minute cap of job {MUTATE_JOB}")
     if counts is None:
         failures.append(f"the mutate run exited {'at its timeout' if c is None else c} and printed no report that can be read")
-    elif c:
-        failures.append(f"the mutate run exited {c}")
+    # A readable report is judged on its counts, not the exit code: run_mutants exits 1 on any wrong-cause mutant, which the unknown bound already allows for.
     if survived:
         failures.append(f"{survived} mutant{'s' if survived != 1 else ''} survived")
     if unknown > MUTATE_UNKNOWN_MAX:
