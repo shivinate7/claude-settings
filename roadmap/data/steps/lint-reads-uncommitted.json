@@ -1,0 +1,11 @@
+{
+  "title": "`ci-job checks --lint` judges the work tree as it will be pushed, or refuses while uncommitted changes would change its verdict",
+  "why": "Lane record-after-each-round (session_013NEJL3gDkEvHawhJUPygWa, PR #1678), 18:25 CST Nov 8: a record-writer (haiku) ran `bin/ci-job checks --lint` before committing and got 0 FAIL. check_glossary reads only committed adds against origin/main, so an uncommitted debt record's avoided word ('block' for 'refuse') passed, then failed the lane lint on pushed head f6b2dbc76 (fixed in c140876bf). Harm: a red lane lint after push, one more push and lint cycle (about 10 min, 1 run).",
+  "note": "The lane proposed `step:lint-after-commit-in-briefs` (role files and brief template say to lint the committed head). Triage filed the check instead, per the owner's ruling of 11:27 CST Nov 8 that a habit is never a guard (decision mistake-means-missing-guard, #2183). Either fix shape is the lane's to pick: check_glossary also reads uncommitted adds, or ci-job --lint refuses or warns on a dirty tree. The coordinator routes it.",
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "todo",
+  "order": 850,
+  "updatedAt": "2026-11-08T18:27:00-06:00"
+}
