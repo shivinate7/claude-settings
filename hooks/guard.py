@@ -4870,8 +4870,8 @@ def _push_segment_inert(segment: str):
     if tokens is None:
         return None
     words = list(tokens)
-    while words and (words[0].lstrip("({") in GIT_PUSH_LEADING_WORDS or not words[0].strip("({")):
-        words.pop(0)   # a `(` or `{` glued to a leading word (`(if true`) is no part of the word
+    while words and (words[0].lstrip("(") in GIT_PUSH_LEADING_WORDS or not words[0].strip("({")):
+        words.pop(0)   # a `(` glued to a leading word (`(if true`) is no part of it; `{if` is a plain word, no keyword
     if not words or words[0].startswith("}"):
         return True
     head = re.split(r"[<>&]", words[0].lstrip("({"))[0].rstrip(")}")   # `done>>/dev/null` closes a loop
@@ -4935,8 +4935,9 @@ def git_push_after_check_hit(command: str) -> str:
     `A || { echo x && push; }`, and `A | B && push` unless `set -o pipefail` is sure to run first. So does a pipe
     that hides a check in the test of the compound that holds the push (`_push_test_hides_check`). A pipe that hides
     none (data sources only, no git call) does not end the walk: it goes on to the command before the pipe's `;`.
-    A `then` whose own `if` or `elif` test is a check with an `|| true` or `|| :` tail also refuses, as 'or': the
-    tail makes the test unfailing, so the push runs after a failed check (`_push_then_test_unfailing`).
+    A `then` or a `while` `do` whose own test is a check with a `||` tail that cannot fail (`|| true`, `|| :`,
+    `|| echo bad`) also refuses, as 'or': the tail makes the test unfailing, so the push runs after a failed check
+    (`_push_then_test_unfailing`).
     A heredoc whose unquoted body runs a substitution makes its stage a check (`_mark_heredoc_substitutions`,
     applied by the caller, since the bodies are gone by now). An interpreter
     heredoc's body is dropped before the walk, so a lone quote in it hides no `;`. A dry run
@@ -5139,17 +5140,18 @@ def _push_test_lead(words):
 
 
 def _push_then_test_unfailing(segments, ends, opener: int, head: int) -> bool:
-    """True when `segments[opener]` is the `then` of an `if` or `elif` whose own test ends in `|| true` or `|| :`
-    after a check: `true` and `:` exit 0 whatever the check did, so the test cannot fail and the `then` body runs
-    after a failed check. The test is the `if` or `elif` test that ends at the `then`: its last step is the tail, and
-    the check is a command before the `||` (back over its `&&`, `||` and `|` joins, no further than the compound's head)
-    that is not inert, no condition word and no git call, as in `_push_hidden_by_tail`. A `!` does not matter: the
-    tail still ends the test in success. An earlier test that cannot fail makes this `then` unreachable, so only its
-    own test is read."""
-    if (segment_tokens(segments[opener]) or [""])[0] != "then":
+    """True when `segments[opener]` is the `then` of an `if` or `elif`, or the `do` of a `while`, whose own test ends in
+    a `||` tail that cannot fail (`_cannot_fail`: `|| true`, `|| :`, `|| echo bad`, `|| true >/dev/null`) after a
+    check: the tail exits 0 whatever the check did, so the test cannot fail and the body runs after a failed check. The
+    test is the `if`, `elif` or `while` test that ends at the opener: its last step is the tail, and the check is a
+    command before the `||` (back over its `&&`, `||` and `|` joins, no further than the compound's head) that is not
+    inert, no condition word and no git call, as in `_push_hidden_by_tail`. A `!` does not matter: the tail still ends
+    the test in success. An `|| exit 1` tail is none, since it ends the shell. An earlier test that cannot fail makes
+    a `then` after it unreachable, so only its own test is read. An `until` body is `_push_body_runs_on_failure`'s."""
+    if (segment_tokens(segments[opener]) or [""])[0] not in ("then", "do"):
         return False
     tail = opener - 1
-    if tail - 1 < head or ends[tail - 1] != "||" or segment_tokens(segments[tail]) not in (["true"], [":"]):
+    if tail - 1 < head or ends[tail - 1] != "||" or not _cannot_fail(segments[tail]):
         return False
     left = tail - 1
     while left > head and ends[left - 1] in ("&&", "||", "|"):
