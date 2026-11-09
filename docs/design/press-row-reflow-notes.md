@@ -49,7 +49,7 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   with no side press. On a row with Dismiss or Restore, "Show answer" stays in the button's name only, as today's phone row.
   The glyph sits on the title's first line (`align-items: start`), not on the middle of the block.
   The press may shrink below its busy label's box (`grid-template-columns: minmax(0, max-content)`), never past the row.
-  Loss: at 180 px a busy label ("Restoring…") can be wider than its press for the moment it shows.
+  A busy label ("Restoring…") wider than its press clips to one line with an ellipsis for the moment it shows.
 - Option "Press under the text, at its start" (`#s=start`, pick). The press keeps its width. Dismiss (quiet) keeps its label
   centred in its box, as on main. Restore (outlined) lines its edge up with the text (40 px). Add to list and Send ask stack at the
   start. Gain: the quiet act stays quiet; the row reads as today's, one line taller. Loss: a ragged right edge.
@@ -88,18 +88,21 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   `12.5em`, where those two no longer fit side by side, Send reply takes its own line and Close the next. The Send bar, item
   cards and `.rfoot` (each is flex-wrap today).
 
-## 6. Round 2: what the first build got wrong, and the rule now
+## 6. The rule at narrow widths and large text
 
 - The Ask box rule (`askf (width <= 28.375em)`) applies to the Ask box only (`:where(.askform:not(.replyform))`). The reply form is an
   `askf` container too, and has its own stacked arrangement from `26.75em` (its content in the 520 px window). At 530 and 546 wide
   at the default text the reply form is wider than that, so Close sits left of Send reply on one line, as main draws it.
 - The Designs head's position reads `1/2` or `1 of 2` by the `dsh` container: its `30.5em` rule sets `--pos-short` on `#dPos`,
-  and the script reads that custom property. The window query is gone. The text is still set by script, because the tests read it as text.
-- A hidden sizer ("Dismissing…", "Restoring…") in the ask list clips on one line (`max-inline-size: 100%`), so it never sets a press's
-  height: the presses stay 44 px at 180 wide. Show answer takes 12 px of the row's end padding at 180 wide so it stays on one line
-  (a bandaid for that one width; at larger text it wraps inside the window).
+  and the script reads that custom property. The script sets the text, because the tests read it as text.
+- In the ask list, a press's hidden sizer ("Dismissing…", "Restoring…") and its busy label (`.busy`) each clip on one line
+  (`max-inline-size: 100%`), so neither sets a press's height: the presses stay 44 px at 180 wide, busy or not. Show answer takes
+  12 px of the row's end padding at 180 wide so it stays on one line (a bandaid for that one width; at larger text it wraps inside the window).
 - The room under the page follows the send bar's real height (`--bar-h`, set from the bar by a `ResizeObserver`), never under 96 px,
-  so the bar covers no list element where it wraps and grows at 180 to 360 wide with text doubled or tripled.
-- At 180 to 320 wide with text doubled or tripled, no element sets the width of the Ask box or the list: `.asks-body`, `#askList` and
-  `.asks-head` have one `minmax(0, 1fr)` track, the Show dismissed toggle's words break inside it, the Questions heading wraps, and
-  the reply waiting line breaks anywhere.
+  so the bar covers no list element where it wraps and grows at 180 to 360 wide with text doubled or tripled. The Status view's
+  copy notice (`.sv-toast`) sits that same room above the window's foot (`bottom: var(--bar-room)`), so it never covers the bar.
+- At 180 to 320 wide with text doubled or tripled, no element sets the width of the Ask box or the list: `.asks-body`, `#askList`
+  and `.asks-head` have one `minmax(0, 1fr)` track. The Show dismissed toggle's words break inside it, the Questions heading wraps,
+  and a card's waiting line (`.astate`) breaks anywhere, so no word sets the card's width.
+- Under `16.5em` of the Ask box or reply form, a press's word that is wider than the box breaks inside it (`overflow-wrap: anywhere`),
+  so "Close" and "Send reply" stay inside their presses and the presses inside the card at 180 and 220 wide, doubled or tripled.
