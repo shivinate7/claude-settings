@@ -5623,13 +5623,21 @@ sh("git-after-cd: UNFAILING-TAIL, an else body after an if test of [ -f a with |
 sh("git-after-cd: UNFAILING-TAIL, an elif body after an if test of pytest with || echo bad >/no/dir, whose tail can fail, is refused",
    "if pytest -q || echo bad >/no/dir; then :; elif [ -f x ]; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd",
    cwd=NOGIT, carries=("&&", "`elif`"))
-# A CLOSED FD CAN FAIL TOO. `>&-` closes stdout, so echo writes to a bad descriptor and exits 1. Only the null device
-# cannot fail, so this tail can fail, and the elif runs its push after a failed pytest.
+# A CLOSED FD CAN FAIL TOO. `>&-` closes stdout, so echo writes to a bad descriptor and exits 1. A writer on a closed
+# descriptor fails, so this tail can fail, and the elif runs its push after a failed pytest.
 sh("git-after-cd: UNFAILING-TAIL, an elif body after an if test of pytest with || echo bad >&-, whose tail can fail, is refused",
    "if pytest -q || echo bad >&-; then :; elif [ -f x ]; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd",
    cwd=NOGIT, carries=("&&", "`elif`"))
 sh("git-after-cd: UNFAILING-TAIL, an elif body after an if test of pytest with || echo bad >&2, whose tail cannot fail, passes",
    "if pytest -q || echo bad >&2; then :; elif [ -f x ]; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
+# A CLOSED FD FAILS ONLY A TAIL THAT WRITES. `true >&-` writes nothing and exits 0 whatever pytest did, so the elif never
+# runs and its push passes. `printf bad >&-` writes to the closed descriptor and returns 1, so its tail can fail, and the
+# elif runs its push after a failed pytest.
+sh("git-after-cd: UNFAILING-TAIL, an elif body after an if test of pytest with || true >&-, whose tail writes nothing and cannot fail, passes",
+   "if pytest -q || true >&-; then :; elif [ -f x ]; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: UNFAILING-TAIL, an elif body after an if test of pytest with || printf bad >&-, whose tail can fail, is refused",
+   "if pytest -q || printf bad >&-; then :; elif [ -f x ]; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "`elif`"))
 # A NULL DEVICE CANNOT FAIL, SO A TAIL WITH `>/dev/null` STILL NEVER FAILS. The redirect opens always, so the tail
 # succeeds, the else never runs, and its push passes. Reading the null redirect as one that can fail refuses it.
 sh("git-after-cd: UNFAILING-TAIL, an else body after an if test of pytest with || true >/dev/null, whose tail cannot fail, passes",
