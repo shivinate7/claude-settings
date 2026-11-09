@@ -21417,6 +21417,9 @@ ORCH_TESTMIX_DONE = diff_repo("orch-testmix-done",
 ORCH_MIXED_DONE = diff_repo("orch-mixed-done",
                             lambda w: _orch_mid_merge(w, [ORCH_DOCS, ORCH_SRC], [ORCH_CLEAN], resolve=True),
                             files=ORCH_FILES)
+ORCH_NB = "notebooks/analysis.ipynb"
+ORCH_NB_OPEN = diff_repo("orch-nb-open", lambda w: _orch_mid_merge(w, [ORCH_NB], [ORCH_CLEAN]),
+                         files={**ORCH_FILES, ORCH_NB: '{"cells": []}\n'})
 
 
 def orch_write_input(cwd, rel, tool="Edit"):
@@ -21424,6 +21427,10 @@ def orch_write_input(cwd, rel, tool="Edit"):
     target = os.path.join(cwd, rel)
     if tool == "Write":
         return {"file_path": target, "content": "x = 7\n"}
+    if tool == "MultiEdit":
+        return {"file_path": target, "edits": [{"old_string": "x = 1\n", "new_string": "x = 7\n"}]}
+    if tool == "NotebookEdit":
+        return {"notebook_path": target, "new_source": "x = 7\n"}
     return {"file_path": target, "new_string": "x = 7\n"}
 
 
@@ -21493,6 +21500,15 @@ orch_allow("orchestrator-merge-write: a general-purpose agent's Edit of a produc
 orch_write("orchestrator-merge-write: a record-writer's Edit of a product file is refused by record-writer-scope, not by this rule",
            "deny", ORCH_PROD_OPEN, ORCH_SRC, rule="record-writer-scope", lacks=(ORCH_RULE,),
            agent=("rw-orch", "record-writer"))
+# MultiEdit and NotebookEdit take the same route: write_targets reads every path field of the call.
+orch_refuse("orchestrator-merge-write: a lane's MultiEdit of a product file its merge conflicts is refused",
+            ORCH_PROD_OPEN, ORCH_SRC, tool="MultiEdit")
+orch_refuse("orchestrator-merge-write: a lane's NotebookEdit of a notebook its merge conflicts is refused",
+            ORCH_NB_OPEN, ORCH_NB, tool="NotebookEdit")
+orch_allow("orchestrator-merge-write: a lane's MultiEdit of a doc its merge conflicts is allowed",
+           ORCH_DOCS_OPEN, ORCH_DOCS, tool="MultiEdit")
+orch_allow("orchestrator-merge-write: a builder's MultiEdit of a product file its merge conflicts is allowed",
+           ORCH_PROD_OPEN, ORCH_SRC, tool="MultiEdit", agent=("bld-orch", "builder"))
 
 
 def orch_log_rules(config):
@@ -21520,6 +21536,27 @@ def orch_unread_check(key, cwd, tool_input, tool="Edit", transcript=ORCH_LANE_TR
     return check
 
 
+def orch_silent_check(key, cwd, tool_input, env=None):
+    """A check that a session with no id in the env is allowed silently: no reason, and no guard.log line at all.
+    The folder is this check's own, so the log holds this call's lines and no other's."""
+    config = os.path.join(ROOT, "orchcfg", key)
+    case = orch_case(cwd, "Edit", tool_input, ORCH_LANE_TR, env, config)
+
+    def check():
+        os.makedirs(config, exist_ok=True)
+        if os.path.exists(os.path.join(config, "guard.log")):
+            os.remove(os.path.join(config, "guard.log"))
+        got, reason = decide(case)
+        if got != "allow" or reason:
+            return False, "got %s (%s), want a silent allow" % (got, reason[:70])
+        lines = gs_log_lines(config)
+        if lines:
+            return False, "guard.log holds %d line(s), want none: %s" % (len(lines), lines[0][:90])
+        return True, "allowed silently, with no guard.log line"
+    FIXTURELESS_CHECKS.add(check)
+    return check
+
+
 def orch_case(cwd, tool, tool_input, transcript, env, config, env_path=None, agent=None):
     """The decide() case of one guard call, for a log check that builds it by hand."""
     agent_id, agent_type = agent or (None, None)
@@ -21537,9 +21574,9 @@ LOG_CHECKS_EXTRA.append(("orchestrator-merge-write: an Edit in a merge whose tra
                          "logged " + ORCH_UNREAD,
                          orch_unread_check("missing", ORCH_PROD_OPEN, orch_write_input(ORCH_PROD_OPEN, ORCH_SRC),
                                            transcript=role_path("missing"))))
-LOG_CHECKS_EXTRA.append(("orchestrator-merge-write: an Edit in a merge with no session id in the env is allowed and "
-                         "logged " + ORCH_UNREAD,
-                         orch_unread_check("noenv", ORCH_PROD_OPEN, orch_write_input(ORCH_PROD_OPEN, ORCH_SRC),
+LOG_CHECKS_EXTRA.append(("orchestrator-merge-write: an Edit in a merge with no session id in the env is allowed silently, "
+                         "with no guard.log line",
+                         orch_silent_check("noenv", ORCH_PROD_OPEN, orch_write_input(ORCH_PROD_OPEN, ORCH_SRC),
                                            env=None)))
 LOG_CHECKS_EXTRA.append(("orchestrator-merge-write: a commit of a merge with an unreadable transcript is allowed and "
                          "logged " + ORCH_UNREAD,
