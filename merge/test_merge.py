@@ -4236,20 +4236,27 @@ def gh_case_setup(test):
 class CloseKeywordReason(Env):
     """A reason flag's reason lands in the merge commit (lift_message), and GitHub closes an issue that a commit names after a closing keyword.
     So a reason with a closing keyword before an issue ref is refused, after argparse and before the lock, any host read and any write.
-    The refusal gives the reword example and never prints the closing form. A keyword with no ref right after it is allowed."""
+    The refusal gives the reword example and never prints the closing form. A closing word before an issue URL is refused the same way. A keyword with no ref or URL right after it is allowed."""
     FLAGS = ("--base-red-ok", "--undo-check-unknown-ok")
     NINE = ("close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved")
     REFUSED = ([f"{word} #2390" for word in NINE]
                + ["FiXeS #2390", "CLOSED #2390", "rEsOlVeS #2390", "fixes: #2390", "fixes:#2390", "fixes#2390", "Resolves:   #2390",
                   "fixes shivinate7/claude-settings#2390", "closes owner/repo#2390", "base red; this fixes #2390 too"])
-    ALLOWED = ("PR #2390", "#2390", "fix the base", "fix the base, see #2390", "prefixes #2390", "cause and fix: PR 2390")
+    REFUSED_URL = ([f"{word} https://github.com/o/r/issues/2390" for word in NINE]
+                   + ["Fixes: https://github.com/o/r/issues/2390", "resolves http://github.com/o/r/issues/2390",
+                      "closed www.github.com/o/r/issues/2390", "fix https://github.com/o/r/pull/2390",
+                      "fixes https://www.github.com/o/r/issues/2390", "closes:https://github.com/shivinate7/claude-settings/issues/2390",
+                      "base red; this fixes https://github.com/o/r/issues/2390 too"])
+    ALLOWED = ("PR #2390", "#2390", "fix the base", "fix the base, see #2390", "prefixes #2390", "cause and fix: PR 2390",
+               "see https://github.com/o/r/issues/2390", "fix https://example.com/issues/5")
     REWORD = "cause and fix: PR 2390"  # the example the refusal gives
-    CLOSE_FORM = re.compile(r"(?i)\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b\s*:?\s*([\w.-]+/[\w.-]+)?#\d+")  # a closing keyword before an issue ref
+    CLOSE_FORM = re.compile(r"(?i)\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b\s*:?\s*"
+                            r"(?:(?:https?://)?(?:www\.)?github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/\d+|(?:[\w.-]+/[\w.-]+)?#\d+)")  # a closing keyword before an issue ref or an issue URL
 
-    def refused_each(self, flag):
+    def refused_each(self, flag, reasons):
         """Each refused reason, given with `flag`, stops before the host read. The PR is CLOSED, so a run that reads it stops on a CLOSED line instead."""
         self.host.pr_state = "CLOSED"
-        for reason in self.REFUSED:
+        for reason in reasons:
             with self.subTest(flag=flag, reason=reason):
                 reads = len(self.host.pr_calls)
                 rc, out, err = self.run_args("7", "--confirm", flag, reason)
@@ -4257,29 +4264,41 @@ class CloseKeywordReason(Env):
                 self.assertEqual(rc, 1, out + err)
                 self.assertIn(self.REWORD, err, "the refusal does not give the reword example")
                 self.assertRegex(err, r"(?i)reword", "the refusal does not say to reword the reason")
-                self.assertIsNone(self.CLOSE_FORM.search(out + err), "the refusal prints a closing keyword before an issue ref")
+                self.assertIsNone(self.CLOSE_FORM.search(out + err), "the refusal prints a closing keyword before an issue ref or URL")
                 self.assertNotIn("Traceback", err)
 
-    def refusal_writes_nothing(self, flag):
+    def refusal_writes_nothing(self, flag, reason="fixes #2390"):
         """A refused reason stops the run before the lock, the claim, the merge and any host read. The PR is OPEN and green, so a run that gets past the reason merges it."""
         reads, refs = len(self.host.pr_calls), self.refs()
-        rc, out, err = self.run_args("7", "--confirm", flag, "fixes #2390")
+        rc, out, err = self.run_args("7", "--confirm", flag, reason)
         self.assertEqual(len(self.host.pr_calls), reads, "the reason was not refused before the host read: the run read the PR")
         self.assertFalse(self.lock_ref(), "the reason was not refused before the lock: the run took the merge lock")
         self.assertEqual(self.refs(), refs, "the run pushed to origin before the reason was refused")
         self.assertEqual(rc, 1, out + err)
 
     def test_close_keyword_base_red_ok_refuses_each_closing_form_before_the_host_read(self):
-        self.refused_each("--base-red-ok")
+        self.refused_each("--base-red-ok", self.REFUSED)
 
     def test_close_keyword_undo_check_unknown_ok_refuses_each_closing_form_before_the_host_read(self):
-        self.refused_each("--undo-check-unknown-ok")
+        self.refused_each("--undo-check-unknown-ok", self.REFUSED)
+
+    def test_close_keyword_base_red_ok_refuses_each_closing_issue_url_before_the_host_read(self):
+        self.refused_each("--base-red-ok", self.REFUSED_URL)
+
+    def test_close_keyword_undo_check_unknown_ok_refuses_each_closing_issue_url_before_the_host_read(self):
+        self.refused_each("--undo-check-unknown-ok", self.REFUSED_URL)
 
     def test_close_keyword_base_red_ok_refused_reason_takes_no_lock_and_writes_nothing(self):
         self.refusal_writes_nothing("--base-red-ok")
 
     def test_close_keyword_undo_check_unknown_ok_refused_reason_takes_no_lock_and_writes_nothing(self):
         self.refusal_writes_nothing("--undo-check-unknown-ok")
+
+    def test_close_keyword_base_red_ok_refused_issue_url_takes_no_lock_and_writes_nothing(self):
+        self.refusal_writes_nothing("--base-red-ok", "fixes https://github.com/o/r/issues/2390")
+
+    def test_close_keyword_undo_check_unknown_ok_refused_issue_url_takes_no_lock_and_writes_nothing(self):
+        self.refusal_writes_nothing("--undo-check-unknown-ok", "fixes https://github.com/o/r/issues/2390")
 
     def test_close_keyword_allowed_reasons_reach_the_host_read_for_both_flags(self):
         # the controls: a reason with no closing form before a ref is not refused, so the run goes on to read the PR, which is CLOSED here
