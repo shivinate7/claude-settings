@@ -15135,6 +15135,43 @@ sh("builder-find: brace-group cp of src/test_x.py into docs/ writes docs/test_x.
    "{ cp src/test_x.py docs/; }", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
 sh("builder-find: brace-group cp of src/b.txt into docs/ writes docs/b.txt, is allowed",
    "{ cp src/b.txt docs/; }", "allow", **dict(BR, cwd=FINDCP))
+# ---- a copy's folder when the command makes it or enters it. A folder that an earlier mkdir makes is read where
+# that mkdir runs, and a cd into a folder the command makes moves the copy into it.
+# The cd enters tests/new, which the command makes, so the copy writes tests/new/guard.py, a test folder. The control
+# makes docs/new instead, which writes docs/new/guard.py, a path no test name matches, so the cd alone decides.
+sh("builder-find: mkdir -p tests/new, cd tests/new, cp ../../hooks/guard.py . writes tests/new/guard.py, is refused",
+   "mkdir -p tests/new && cd tests/new && cp ../../hooks/guard.py .", "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDCP))
+sh("builder-find: mkdir -p docs/new, cd docs/new, cp ../../hooks/guard.py . writes docs/new/guard.py, is allowed",
+   "mkdir -p docs/new && cd docs/new && cp ../../hooks/guard.py .", "allow", **dict(BR, cwd=FINDCP))
+# The mkdir makes newd at the root, not under docs/, so the copy writes the file docs/newd: a name with no test shape.
+# Without the cd, the copy writes newd/test_guard.py and is refused, as the mkdir newd case above shows.
+sh("builder-find: mkdir newd, cd docs, cp ../hooks/test_guard.py newd writes docs/newd, a file name, is allowed",
+   "mkdir newd && cd docs && cp ../hooks/test_guard.py newd", "allow", **dict(BR, cwd=FINDCP))
+# An unmatched glob stays its text, as bash passes it. cp then fails, and nothing is written, because no file is
+# named assets/test_*.py. The dyn/[id].test.tsx case above has the same shape and expects a refusal.
+sh("builder-find: cp of unmatched glob assets/test_*.py into docs/, nothing matches and nothing is written, is allowed",
+   "cp assets/test_*.py docs/", "allow", **dict(BR, cwd=FINDCP))
+# FINDLIT holds a file literally named dyn/[id].test.tsx. Its glob matches no file, so bash passes the text on, and
+# the text names that file: bash copies it, so the copy writes docs/[id].test.tsx and is refused. The fixture is
+# separate because only this case needs the file.
+FINDLIT = os.path.join(ROOT, "findlit")
+
+
+def _build_find_lit():
+    make_repo(FINDLIT, {"dyn/[id].test.tsx": "x\n", "docs/keep.txt": "x\n"})
+
+
+lazy_fixture([FINDLIT], _build_find_lit)
+sh("builder-find: cp of unmatched glob dyn/[id].test.tsx naming an existing file into docs/ is refused",
+   "cp dyn/[id].test.tsx docs/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDLIT))
+# Braces inside quotes are text, so mkdir "x{a,b}" makes one folder, x{a,b}, and xa is no folder: the copy writes the
+# file xa, which no test name matches. The control has the braces unquoted, so bash makes xa and xb, and the copy
+# writes xa/test_x.py.
+sh('builder-find: mkdir "x{a,b}", then cp test_x.py into xa, writes the file xa, is allowed',
+   'mkdir "x{a,b}" && cp test_x.py xa', "allow", **dict(BR, cwd=FINDCP))
+sh("builder-find: mkdir x{a,b} with the braces unquoted, then cp test_x.py into xa, writes xa/test_x.py, is refused",
+   "mkdir x{a,b} && cp test_x.py xa", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
     ("new-test", _put("tests/test_new.py", "pass\n")),
