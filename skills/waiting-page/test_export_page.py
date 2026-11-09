@@ -1695,6 +1695,26 @@ class NoExport(Base):
         self.assertEqual(r.returncode, 2, "an empty label must exit 2. Output:\n" + shown(r))
         self.assertFalse(os.path.exists(worktree), "a run whose empty label matched no entry wrote into the copy")
 
+    def test_check_with_account_gets_the_usage_error_that_account_without_all_gets_and_writes_nothing(self):
+        """--check --account LABEL: the usage error that `--account` without `--all` gets (exit 2, the text main prints), and
+        nothing written. --check takes no --account, so the run refuses the flag and runs no check. The first run is the
+        control: `--account` without `--all` gets that error on main already."""
+        text = "--account goes with --all"
+        fetched = self.fetch()
+        page = write_text(os.path.join(self.tmp.name, "page-account.html"), "<!doctype html><title>Queue</title>")
+        control = self.run_cmd("--fetched", fetched, "--out", self.out(), "--account", "work")
+        self.assertEqual(control.returncode, 2, "the control: --account without --all must exit 2. Output:\n" + shown(control))
+        self.assertIn(text, error_line(control) or "", "the control: --account without --all does not print %r. Output:\n%s"
+                      % (text, shown(control)))
+        before = snapshot(self.tmp.name)
+        r = self.run_cmd("--check", "--fetched", fetched, "--page", page, "--account", "work")
+        self.assertEqual(snapshot(self.tmp.name), before, "--check --account wrote a file. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 2, "--check --account must exit 2 with the usage error, not run the checks. Output:\n"
+                         + shown(r))
+        err = error_line(r)
+        self.assertIsNotNone(err, "--check --account printed no usage error line. Output:\n" + shown(r))
+        self.assertIn(text, err, "--check --account does not print the usage error that --account without --all prints: %s" % err)
+
 
 # ---------------------------------------------------------------------------------------------- picture checks at export
 # Each fetched item with a picture that is an open decision gets the page's own

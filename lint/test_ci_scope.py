@@ -286,7 +286,7 @@ class Scope(unittest.TestCase):
     # An edit, not a new file: a new file under lint/ also turns on the landed-dir jobs, which is another arm's rule.
     def test_clause_parser_change_selects_the_jobs_the_arm_names(self):
         self.assertEqual(self.true_set(run(["lint/_clause.py"], existing=["lint/_clause.py"])),
-                         {"checks_windows_rest", "checks_macos", "code", "guard"},
+                         {"checks_windows_rest", "checks_macos", "code", "guard", "shoot"},
                          "lint/_clause.py must select the hooks/* arm's jobs and no merge job")
 
     # Guard family: hooks/guard_<anything>.py is split out of hooks/guard.py. Each sibling must set
