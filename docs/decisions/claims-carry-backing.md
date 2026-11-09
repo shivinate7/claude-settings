@@ -120,7 +120,7 @@ No daemon and no timer.
 Built:
 
 - The route rows file, `hooks/route_rows.json`, and its one path reader, `rows_path()` (read hooks/route_match.py:40-42).
-- The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read `route_flag` in hooks/refusal_note.py) and the Stop read, `refusal_route_flags` in `lint/report_guard.py` (read `refusal_route_flags` in lint/report_guard.py).
+- The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read `route_flag` in hooks/refusal_note.py) and the Stop read, `refusal_route_flags` in `lint/report_guard.py` (read `refusal_route_flags` in lint/report_guard.py), and `success_route_flags`, which flags a refused route row that a call of the turn succeeded in (read `success_route_flags` in lint/report_guard.py).
 - Part (vi), `cannot_problem`, run at Stop (read `cannot_problem` in lint/report_guard.py; its call is `cannot_problem(ack_turn, text, cannot_refused)` in lint/report_guard.py).
 - Part (v) layer (a), `hand_off_problem`, run at Stop (read `hand_off_problem` in lint/report_guard.py; its call is `hand_off_problem(hook, reply)` in lint/report_guard.py).
 - Part (v) on the waiting page: guard rule `task-why-cited` refuses a task's Why yours line that gives a capability reason with no route-row or dated measured cite (`why_cited_hit` in hooks/question_form.py; the verdict is `why_yours_verdict` in lint/report_guard.py).
