@@ -21,13 +21,20 @@ A local annotation in a function body and a string annotation are not flagged.
 
     python3 lint/check_python_floor.py [--root DIR]
 
-DIR holds hooks/ and lint/ and defaults to the repo root. Needs vermin installed (the pin is in
-.github/workflows/checks.yml). The vermin command defaults to this Python running vermin's `main`; env
-FLOOR_VERMIN_CMD overrides it (split like a shell line).
+DIR holds hooks/ and lint/ and defaults to the repo root. The check installs its own vermin: VERMIN_PIN, the one
+home of the pin, goes into a cached venv under the temp folder (floor-vermin-<pin>-py<major><minor>; env
+FLOOR_VENV_DIR overrides the path). A cache counts only with its `.ok` marker, written after a good install. The
+venv is built in a sibling temp folder and renamed into place, so a parallel run never sees a half-made cache; the
+loser of the rename uses the winner's. Ordinary PIP_* env applies to the install. Env FLOOR_VERMIN_CMD (split like a
+shell line) replaces the venv and skips the bootstrap.
+
+Cost: first use is one venv create and one pip install (two process starts), about 10 MB under the temp folder,
+and network. Later runs reuse the cache and start no extra process.
 
 Exits 0 and prints nothing when clean. Exits 1 and prints one line per offending file for vermin (file and
-feature) and one line per union type (file:line). Exits 2, naming the cause, when vermin cannot run, a product
-file cannot be read, or a file cannot be parsed: an unread file is never clean.
+feature) and one line per union type (file:line). Exits 2, naming the cause, when vermin cannot run or be
+installed (the message names the pin), a product file cannot be read, or a file cannot be parsed: an unread file is
+never clean.
 
 Limits: vermin's tables miss `subprocess.run(process_group=)` and `datetime.fromisoformat` with a "Z" suffix, both
 3.11 behaviour, so neither is caught. A symlinked folder under hooks/ or lint/ is not followed. An assignment value
@@ -39,7 +46,9 @@ import io
 import os
 import re
 import shlex
+import shutil
 import sys
+import tempfile
 import tokenize
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -50,8 +59,10 @@ import guard  # noqa: E402  is_test_rel is the one home of what a test path is (
 
 FOLDERS = ("hooks", "lint")
 TARGET = "3.9-"
+VERMIN_PIN = "1.9.2"  # the one home of the vermin version
 # vermin 1.9.2 ships no __main__, so `python -m vermin` fails; its console script runs main() like this.
-DEFAULT_CMD = [sys.executable, "-c", "import sys; from vermin import main; sys.exit(main())"]
+VERMIN_CODE = "import sys; from vermin import main; sys.exit(main())"
+OK_MARKER = ".ok"
 FLAGS = ["-t=" + TARGET, "--eval-annotations", "--no-tips", "--violations", "--quiet", "--no-make-paths-absolute"]
 CHUNK = 100  # files per vermin run, so a Windows command line stays short
 TIMEOUT = 300
@@ -84,19 +95,101 @@ def product_files(root):
     return sorted(found)
 
 
+def venv_python(venv):
+    parts = ("Scripts", "python.exe") if os.name == "nt" else ("bin", "python")
+    return os.path.join(venv, *parts)
+
+
+def cache_dir():
+    override = os.environ.get("FLOOR_VENV_DIR")
+    if override:
+        return os.path.abspath(override)
+    name = "floor-vermin-%s-py%d%d" % ((VERMIN_PIN,) + tuple(sys.version_info[:2]))
+    return os.path.join(tempfile.gettempdir(), name)
+
+
+def run_step(what, cmd):
+    """Run one bootstrap process. Raises Unreadable, naming the pin and the cause, when it does not succeed."""
+    try:
+        proc = _nowindow.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=TIMEOUT)
+    except (OSError, ValueError) as err:
+        raise Unreadable("cannot install vermin==%s: %s cannot start: %s" % (VERMIN_PIN, what, err))
+    except Exception as err:  # subprocess.TimeoutExpired
+        raise Unreadable("cannot install vermin==%s: %s did not finish: %s" % (VERMIN_PIN, what, err))
+    if proc.returncode != 0:
+        lines = proc.stderr.strip().splitlines() or proc.stdout.strip().splitlines() or ["no output"]
+        raise Unreadable("cannot install vermin==%s: %s failed (exit %d): %s"
+                         % (VERMIN_PIN, what, proc.returncode, lines[-1]))
+
+
+def build_cache(cache):
+    """Make the venv in a sibling temp folder, then rename it to `cache`. A rename lost to a parallel run keeps the
+    winner's cache. Raises Unreadable when the venv cannot be made or the pin cannot be installed."""
+    parent = os.path.dirname(cache)
+    marker = os.path.join(cache, OK_MARKER)
+    try:
+        os.makedirs(parent, exist_ok=True)
+        stage = tempfile.mkdtemp(prefix=os.path.basename(cache) + ".tmp-", dir=parent)
+    except OSError as err:
+        raise Unreadable("cannot install vermin==%s: no folder for the cache %s: %s" % (VERMIN_PIN, cache, err))
+    try:
+        run_step("python -m venv", [sys.executable, "-m", "venv", stage])
+        run_step("pip install", [venv_python(stage), "-m", "pip", "install", "--disable-pip-version-check",
+                                 "vermin==" + VERMIN_PIN])
+        try:
+            with open(os.path.join(stage, OK_MARKER), "w", encoding="utf-8") as handle:
+                handle.write(VERMIN_PIN + "\n")
+        except OSError as err:
+            raise Unreadable("cannot install vermin==%s: cannot write the marker: %s" % (VERMIN_PIN, err))
+        for _ in range(2):
+            try:
+                os.rename(stage, cache)
+                return
+            except OSError as err:
+                if os.path.isfile(marker):
+                    return  # a parallel run won the rename; its cache is whole
+                if not os.path.exists(cache):
+                    raise Unreadable("cannot install vermin==%s: cannot move the cache into place: %s"
+                                     % (VERMIN_PIN, err))
+                # `cache` holds no marker, so it is an incomplete leftover: move it aside, then rename again.
+                aside = tempfile.mkdtemp(prefix=os.path.basename(cache) + ".old-", dir=parent)
+                try:
+                    os.rename(cache, os.path.join(aside, "old"))
+                except OSError:
+                    pass
+                shutil.rmtree(aside, ignore_errors=True)
+        if not os.path.isfile(marker):
+            raise Unreadable("cannot install vermin==%s: cannot move the cache into place at %s" % (VERMIN_PIN, cache))
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
+
+_COMMAND = []
+
+
 def vermin_command():
-    custom = os.environ.get("FLOOR_VERMIN_CMD")
-    return shlex.split(custom) if custom else list(DEFAULT_CMD)
+    """The vermin command as an argv list: FLOOR_VERMIN_CMD, else the cached venv, built on first use."""
+    if not _COMMAND:
+        custom = os.environ.get("FLOOR_VERMIN_CMD")
+        if custom:
+            _COMMAND.append(shlex.split(custom))
+        else:
+            cache = cache_dir()
+            if not os.path.isfile(os.path.join(cache, OK_MARKER)):
+                build_cache(cache)
+            _COMMAND.append([venv_python(cache), "-c", VERMIN_CODE])
+    return list(_COMMAND[0])
 
 
 def run_vermin(root, files):
     """Run vermin on files (relative to root). -> {rel: [feature, ...]} for each file over the floor."""
-    cmd = vermin_command() + FLAGS + files
+    base = vermin_command()
+    cmd = base + FLAGS + files
     try:
         proc = _nowindow.run(cmd, cwd=root, capture_output=True, encoding="utf-8", errors="replace",
                              timeout=TIMEOUT)
     except (OSError, ValueError) as err:
-        raise Unreadable("vermin cannot start (%s): %s" % (" ".join(vermin_command()), err))
+        raise Unreadable("vermin cannot start (%s): %s" % (" ".join(base), err))
     except Exception as err:  # subprocess.TimeoutExpired
         raise Unreadable("vermin did not finish: %s" % err)
     findings = {}
@@ -120,7 +213,7 @@ def run_vermin(root, files):
     if proc.returncode == 1 and findings:
         return findings
     detail = (proc.stderr.strip().splitlines() or proc.stdout.strip().splitlines() or ["no output"])[-1]
-    raise Unreadable("vermin failed (exit %d, is vermin installed?): %s" % (proc.returncode, detail))
+    raise Unreadable("vermin failed (exit %d): %s" % (proc.returncode, detail))
 
 
 def is_type_operand(node):
