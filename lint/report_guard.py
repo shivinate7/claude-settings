@@ -2471,11 +2471,6 @@ def _gh_json(args, cwd):
     return json.loads(run.stdout)
 
 
-def _newest_marked(comments, merge_mod):
-    """The newest comment of `comments` (oldest first) that merge's review_marked calls a record, else None. merge's review_newest is the one home."""
-    return merge_mod.review_newest(comments)[0]
-
-
 def _newest_record(n, comments, merge_mod, cutover=None):
     """(parsed record, body) of the newest review record comment of `comments` (oldest first). No marked comment is
     (None, None); a marked comment that does not parse is (None, its body), so the caller needs no second read. (None, None) as well when
@@ -2539,7 +2534,10 @@ def review_record_problem(hook, text):
                 cause = REVIEW_NO_STAMP  # decision `pr-review-record`, "The cutover": with no cutover an old unstamped record is refused, naming the Stamp line
             reasons.append(REVIEW_UNPARSED % (n, cause, n, n))
         elif not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
-            reasons.append(REVIEW_NO_RECORD % (n, n, n))
+            newest = merge_mod.review_newest(comments)[0]  # an edited record is untrusted, so _newest_record gave no body; the Stamp cause still reads from it
+            unstamped = (not cutover and newest is not None
+                         and not any(line.startswith("Stamp: ") for line in (newest.get("body") or "").splitlines()))
+            reasons.append(REVIEW_NO_RECORD % (n, n, n) + (REVIEW_NO_STAMP if unstamped else ""))
     return " ".join(reasons), " ".join(notes)
 
 
