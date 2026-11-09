@@ -1179,6 +1179,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     held = ()   # states a `&&` cd may have left behind: reached only once its `&&` chain ends
     frames = []   # (states, list_start, held, keeps) for each `(` still open; `keeps` leaves a cd in it standing
     heredoc = None   # (closing words still to come, states and held before the bodies) while inside heredoc bodies
+    stdin_bodies = []   # closing words of the heredoc bodies a `source /dev/stdin` skips, ahead of the last one
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     depth = 0   # compound commands (`if`, `for`, ...) still open: a cd on a line of its own in one may not run
     seen = []
@@ -1226,7 +1227,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             list_start = states
         opens = marks.count("(")
         feeds = False   # a `(` of a substitution whose output the shell runs: its cd moves this shell
-        if opens and "<<" in segment:
+        if opens:
             fed_tokens = segment_tokens(segment)
             feeds = bool(fed_tokens) and _fed_to_shell(fed_tokens, heredoc_heads(segment)[1])
         for _ in range(opens):
@@ -1246,6 +1247,10 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                     skipping = False
             depth = max(0, depth + _block_change(segment_tokens(segment)))
             continue
+        if stdin_bodies:
+            if segment.strip() == stdin_bodies[0]:
+                stdin_bodies.pop(0)
+            continue   # a body bash does not read: its cd never runs
         if heredoc and segment.strip() == heredoc[0][0]:
             heredoc[0].pop(0)
             if not heredoc[0]:
@@ -1254,17 +1259,26 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         tokens = segment_tokens(segment)
         run_cd(tokens, segment, before, end)
         index = resolve_command(tokens) if tokens else None
-        if index is not None and "<<" in segment and basename(tokens[index]) == "eval":
-            # eval runs the bodies of its own heredocs as commands, in this shell, so their cds move it.
-            for _, body, _ in _split_heredocs(segment)[1]:
+        if index is not None and basename(tokens[index]) == "eval":
+            # eval runs its heredoc bodies, or else its words joined, as commands in this shell, so their cds move it.
+            if "<<" in segment:
+                texts = [body for _, body, _ in _split_heredocs(segment)[1]]
+            else:
+                texts = [" ".join(tokens[index + 1:])]
+            for text in texts:
                 inner_ends = []
-                inner = split_segments(body, inner_ends)
+                inner = split_segments(text, inner_ends)
                 for number_in, part in enumerate(inner):
-                    run_cd(segment_tokens(part), part, inner_ends[number_in - 1] if number_in else "", inner_ends[number_in])
+                    run_cd(segment_tokens(part), part, inner_ends[number_in - 1] if number_in else before,
+                           inner_ends[number_in] or end)
             skipping = False
         heads, open_quote = heredoc_heads(segment)
-        if heads and not heredoc and not (tokens and (_sources_stdin(tokens) or _fed_to_shell(tokens, open_quote))):
+        in_fed_frame = any(keeps for _, _, _, keeps in frames)   # inside `source <(` opened on an earlier line
+        if heads and not heredoc and not in_fed_frame and not (
+                tokens and (_sources_stdin(tokens) or _fed_to_shell(tokens, open_quote))):
             heredoc = ([delimiter for _, delimiter in heads], (states, held))
+        elif heads and not heredoc and not stdin_bodies and tokens and _sources_stdin(tokens):
+            stdin_bodies = [delimiter for _, delimiter in heads[:-1]]   # bash reads only the last body as stdin
         for _ in range(marks.count(")")):
             if frames:
                 leave()

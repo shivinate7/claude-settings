@@ -610,21 +610,52 @@ def bare_background_hit(cmd: str) -> str:
 
 def _mask_arithmetic(segment: str) -> str:
     """`segment` with each `((...))` span (`(( a&b ))`, `$((1&2))`) replaced by `x` of the same length, so an `&`
-    inside it reads as the AND it is while an `&` outside it still splits. A span with no closing `))` runs to the
-    end of the segment."""
-    out, at = [], 0
-    while True:
-        start = segment.find("((", at)
-        if start < 0:
-            return "".join(out) + segment[at:]
-        depth, end = 0, len(segment)
-        for i in range(start, len(segment)):
-            depth += {"(": 1, ")": -1}.get(segment[i], 0)
+    inside it reads as the AND it is while an `&` outside it still splits. A span counts only when its `((` opens
+    outside quotes and its parentheses close with `))`: a quoted `((` (`echo "((" & make`) or an unclosed one
+    masks nothing, so the `&` after it still reads as a job."""
+    out, at, i, quote = [], 0, 0, ""
+    while i < len(segment):
+        ch = segment[i]
+        if ch == "\\" and quote != "'":
+            i += 2
+            continue
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+        elif segment.startswith("((", i):
+            end = _arithmetic_end(segment, i)
+            if end:
+                out.append(segment[at:i] + "x" * (end - i))
+                at = i = end
+                continue
+        i += 1
+    return "".join(out) + segment[at:]
+
+
+def _arithmetic_end(segment: str, start: int) -> int:
+    """The index just past the `))` that closes the `((` at `start`, or 0 when none does. Parentheses inside
+    quotes do not count, and the last two closers must be adjacent (`((a) & b)` is nested subshells)."""
+    depth, quote, i = 0, "", start
+    while i < len(segment):
+        ch = segment[i]
+        if ch == "\\" and quote != "'":
+            i += 2
+            continue
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
             if depth == 0:
-                end = i + 1
-                break
-        out.append(segment[at:start] + "x" * (end - start))
-        at = end
+                return i + 1 if segment[i - 1] == ")" and i - 1 > start + 1 else 0
+        i += 1
+    return 0
 
 
 def glued_background_hit(cmd: str, trailing: bool = False) -> str:
