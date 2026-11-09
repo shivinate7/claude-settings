@@ -142,6 +142,7 @@ class FakeHost:
         self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
         self.pr_calls = []  # each n the run read through pr(): a refusal before any host read leaves it empty
         self.readies, self.ready_refuse = [], None  # readies: each n a draft confirm asked to mark ready; ready_refuse: the reason the host refuses
+        self.files, self.files_error, self.files_calls = [], None, []  # files: the changed paths pr_files reads; files_error: raised instead; files_calls: each n read
 
     def pr(self, n):
         self.pr_calls.append(n)
@@ -161,6 +162,12 @@ class FakeHost:
 
     def head_state(self, n):
         return self.state
+
+    def pr_files(self, n):  # the changed paths of the pull request, as the diff read gives them; files_error makes the read a Stop
+        self.files_calls.append(n)
+        if self.files_error:
+            raise self.files_error
+        return list(self.files)
 
     def base_state(self, base, flows):  # main's latest run is green unless a case says so (RedMainBrake)
         return "green", ""
@@ -13521,6 +13528,103 @@ class ReviewRecordWrite(ReviewEnv):
             with self.subTest(round=rnd):
                 out, _err = self.assert_usage_error("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head(), "--round", rnd)
                 self.assertNotIn(REVIEW_MARKER, out)
+
+class ReviewDocsOnlyDiff(ReviewEnv):
+    """A docs-only review record reads the pull request's changed paths and refuses when one is not a doc. A doc is a .md path that is not
+    a rule file. Cases 1-5, 7 and 8 fail on a merge.py that never reads the diff. Cases 6 and 9 are controls: they hold on both."""
+
+    def docs_flags(self, *extra):
+        """The docs-only review flags with --head set to the live head, then `extra`. A docs-only change has no rounds, so no --round."""
+        return ("--kind", "docs-only", "--guard", "no", "--head", self.head(), *extra)
+
+    def run_docs(self, *paths, error=None):
+        """-> (rc, stdout, stderr) of a docs-only record for pull request 7 whose diff holds `paths`, or whose read raises `error`."""
+        self.host.files, self.host.files_error, self.host.files_calls = list(paths), error, []
+        return self.run_args("7", "--review-record", *self.docs_flags())
+
+    def assert_refused(self, rc, out, err):
+        """A refused record: exit 1, no record on stdout, and the review cite on stderr."""
+        self.assertEqual(rc, 1, "a docs-only record with a non-doc path in its diff was not refused:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "the refused record printed on stdout")
+        self.assertIn(merge.REVIEW_CITE, err, "the refusal lacks the review cite")
+
+    def test_a_code_file_in_the_diff_refuses_the_docs_only_record(self):
+        rc, out, err = self.run_docs("merge/merge.py")
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_refused(rc, out, err)
+        self.assertIn("merge/merge.py", err, "the refusal does not name the code file")
+
+    def test_a_rule_file_is_not_a_doc(self):
+        rc, out, err = self.run_docs("docs/a.md", "CLAUDE.md")
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_refused(rc, out, err)
+        self.assertIn("CLAUDE.md", err, "the refusal does not name the rule file")
+        self.assertNotIn("docs/a.md", err, "the refusal names a doc, which is not an offending path")
+
+    def test_a_claude_rule_file_under_a_folder_refuses(self):
+        rc, out, err = self.run_docs(".claude/CLAUDE.md")
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_refused(rc, out, err)
+        self.assertIn(".claude/CLAUDE.md", err, "the refusal does not name the rule file")
+
+    def test_an_output_style_file_refuses(self):
+        rc, out, err = self.run_docs("output-styles/shiv-stylisms.md")
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_refused(rc, out, err)
+        self.assertIn("output-styles/shiv-stylisms.md", err, "the refusal does not name the output style")
+
+    def test_a_rename_from_a_code_file_refuses(self):
+        # The real Host reads the changed-files page; a rename's previous path arrives as previous_filename, and the gate must see it.
+        seen = []
+
+        class Renamed(PullsHost):
+            def pages(self, rel, key=None, fields=None):
+                if rel == "pulls/7/files":
+                    seen.append(rel)
+                    return [{"filename": "docs/new.md", "status": "renamed", "previous_filename": "merge/merge.py"}]
+                return super().pages(rel, key, fields)
+
+        host = Renamed([batch_pull(7, REVIEW_HEAD)], {})
+        rc, out, err = self.run_args("7", "--review-record", "--kind", "docs-only", "--guard", "no", "--head", REVIEW_HEAD, host=host)
+        self.assertEqual(seen, ["pulls/7/files"], "the docs-only record never read the pull request's files")
+        self.assert_refused(rc, out, err)
+        self.assertIn("merge/merge.py", err, "the refusal does not name the previous path of the rename")
+
+    def test_an_unreadable_diff_refuses_as_unknown(self):
+        rc, out, err = self.run_docs("docs/a.md", error=merge.Stop("injected read failure of pulls/7/files"))
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_refused(rc, out, err)
+        self.assertIn("injected read failure", err, "the failed read's Stop did not reach stderr")
+
+    def test_a_docs_only_diff_prints_the_record(self):
+        # The control: a diff of docs alone, a .md outside the rule files, gets the record and exit 0. It holds on the old code too.
+        rc, out, err = self.run_docs("docs/a.md", "README.md")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only", "the printed record is not docs-only")
+
+    def test_normal_kind_with_a_code_diff_prints_and_never_reads_the_files(self):
+        # Scope first: the docs-only read on this same code diff happens, so the not-called check below is live.
+        self.run_docs("merge/merge.py")
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record read no files, so the not-called check below proves nothing")
+        self.host.files_calls.clear()
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+        posted_body(self, out)
+        self.assertEqual(self.host.files_calls, [], "--kind normal read the pull request's files")
+
+    def test_more_than_five_offending_paths_name_five(self):
+        paths = [f"merge/part{i}.py" for i in range(6)]
+        rc, out, err = self.run_docs(*paths)
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_refused(rc, out, err)
+        named = [p for p in paths if p in err]
+        self.assertEqual(len(named), 5, f"the refusal names {len(named)} of 6 offending paths; the cap is 5:\n" + err)
+
+    def test_an_empty_diff_prints_the_record(self):
+        # The empty state: no changed path, so no non-doc path. It holds on the old code too.
+        rc, out, err = self.run_docs()
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only", "the printed record is not docs-only")
 
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
