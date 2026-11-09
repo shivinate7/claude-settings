@@ -15144,6 +15144,11 @@ sh("builder-find: mkdir -p tests/new, cd tests/new, cp ../../hooks/guard.py . wr
    **dict(BR, cwd=FINDCP))
 sh("builder-find: mkdir -p docs/new, cd docs/new, cp ../../hooks/guard.py . writes docs/new/guard.py, is allowed",
    "mkdir -p docs/new && cd docs/new && cp ../../hooks/guard.py .", "allow", **dict(BR, cwd=FINDCP))
+# A paren glued to the mkdir's folder word still ends the subshell, so the folder is tests/new and the cd enters it.
+# The copy writes tests/new/guard.py, a test folder.
+sh("builder-find: (mkdir -p tests/new) && cd tests/new && cp ../../hooks/guard.py ., a subshell mkdir, writes tests/new/guard.py, is refused",
+   "(mkdir -p tests/new) && cd tests/new && cp ../../hooks/guard.py .", "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDCP))
 # The mkdir makes newd at the root, not under docs/, so the copy writes the file docs/newd: a name with no test shape.
 # Without the cd, the copy writes newd/test_guard.py and is refused, as the mkdir newd case above shows.
 sh("builder-find: mkdir newd, cd docs, cp ../hooks/test_guard.py newd writes docs/newd, a file name, is allowed",
@@ -15171,6 +15176,21 @@ sh('builder-find: mkdir "x{a,b}", then cp test_x.py into xa, writes the file xa,
    'mkdir "x{a,b}" && cp test_x.py xa', "allow", **dict(BR, cwd=FINDCP))
 sh("builder-find: mkdir x{a,b} with the braces unquoted, then cp test_x.py into xa, writes xa/test_x.py, is refused",
    "mkdir x{a,b} && cp test_x.py xa", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+# A glob's matches are absolute paths, so --parents would write the cwd's own folders under docs/. FINDABS sits under
+# a folder named test, a test folder, so the written path reads as a test. The control names its file with no glob
+# and writes docs/src/b.txt, which is no test.
+FINDABS = os.path.join(ROOT, "test", "findabs")
+
+
+def _build_find_abs():
+    make_repo(FINDABS, {"src/b.txt": "x\n", "docs/keep.txt": "x\n"})
+
+
+lazy_fixture([FINDABS], _build_find_abs)
+sh("builder-find: cp --parents of src/*.txt into docs/ from a cwd under a test folder, writes docs/src/b.txt, is allowed",
+   "cp --parents src/*.txt docs/", "allow", **dict(BR, cwd=FINDABS))
+sh("builder-find: cp --parents of src/b.txt into docs/ from a cwd under a test folder, writes docs/src/b.txt, is allowed",
+   "cp --parents src/b.txt docs/", "allow", **dict(BR, cwd=FINDABS))
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
     ("new-test", _put("tests/test_new.py", "pass\n")),
