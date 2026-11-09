@@ -9,7 +9,7 @@ import tempfile
 
 import guard_core
 from guard_core import (
-    GIT_CHECKOUT_TAKES_NAME, PATH_EXTENSION, PATH_PREFIX, REDIRECTION, _inside_work_tree,
+    GIT_CHECKOUT_TAKES_NAME, PATH_EXTENSION, PATH_PREFIX, REDIRECTION, _git, _inside_work_tree,
     _segment_git_c_target, basename, git_calls, long_flag_abbrev, pathspec_from_file_flag, porcelain,
     resolve_command,
     segment_tokens, split_segments, stash_stack, worktree_prune_subject, worktree_remove_subject,
@@ -19,11 +19,33 @@ from guard_branch_worktree import (
 )
 
 
+def lone_operand_is_dirty_file(root: str, name: str) -> bool:
+    """True when a bare `git checkout <name>` would be read by git as a path with an uncommitted
+    change: `name` is no revision (git's own rule reads a name that is both a branch and a file as
+    the branch), it exists under `root`, and `git status` reports a tracked change for it. The
+    spelling decides nothing, so an extensionless file reads the same as `a.json`. An unreadable
+    answer is False and is logged as `subject-unread`, the form this read used to leave unjudged."""
+    if not name or name.startswith(("-", ":")) or not os.path.lexists(os.path.join(root, name)):
+        return False
+    rev = _git(root, "rev-parse", "--verify", "--quiet", name + "^{commit}")
+    if rev is None:
+        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)
+        return False
+    if rev.returncode == 0:
+        return False
+    lines = porcelain(root, [name])
+    if lines is None:
+        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)
+        return False
+    return any(line[:2] != "??" for line in lines)
+
+
 def checkout_names_a_path(args, root: str = "") -> str:
     """Return the matched text when a `git checkout` names a path, else ''.
 
     Also matched: a forced switch (`-f`, `--force`), a pathspec file, and, when `root` is given,
-    a lone bare operand that is a folder under `root` (git reads it as a path)."""
+    a lone bare operand that is a folder under `root` or a tracked file with an uncommitted change
+    that no branch shares its name with (git reads each as a path)."""
     if "--" in args:
         return " ".join(["--"] + args[args.index("--") + 1:]).strip()
     plain = []
@@ -47,6 +69,8 @@ def checkout_names_a_path(args, root: str = "") -> str:
         ):
             return arg
     if root and len(plain) == 1 and os.path.isdir(os.path.join(root, plain[0])):
+        return plain[0]
+    if root and len(plain) == 1 and lone_operand_is_dirty_file(root, plain[0]):
         return plain[0]
     for arg in args:
         if arg in ("-f", "--force") or pathspec_from_file_flag(arg):
@@ -79,7 +103,9 @@ def clean_deletes_files(args) -> bool:
     return False
 
 
-STASH_READ_ACTIONS = {"list", "show", "help"}
+# `create` only writes an unreachable commit object and prints its hash: no entry, no ref, no
+# index or tree change. It reads like `list` and `show`.
+STASH_READ_ACTIONS = {"list", "show", "help", "create"}
 # `push`, `save` and a bare `git stash` PUT work onto the stack. They take it from the working
 # tree, so the working tree is their subject. Every other action that is not a read TAKES an
 # entry off the stack, so the stack is theirs.
@@ -123,7 +149,7 @@ def stash_action(args) -> str:
     reads it as a push anyway, to fail closed, so the tree is judged and nothing falls through.
 
     No word is left unknown, so none lands on the stack side. What lands there is a KNOWN word
-    that is not a read and not a push: pop, apply, drop, clear, branch, create, store, export and
+    that is not a read and not a push: pop, apply, drop, clear, branch, store, export and
     import. Git 2.55 lists `export` and `import` in `git stash -h`, so they are known words.
     """
     args = list(args)
@@ -145,12 +171,13 @@ def stash_takes_the_stack(args) -> bool:
     """True when a `git stash` call takes an entry OFF the shared stack.
 
     The predicate is the DIRECTION of the act, not a list of action words. A call reads the
-    stack, puts work onto it, or takes an entry off it. `list` and `show` read. `push`, `save`
+    stack, puts work onto it, or takes an entry off it. `list` and `show` read the stack; `create`
+    reads the tree and index and writes an unreachable commit, with no entry. `push`, `save`
     and a bare `git stash` put work on. Every other action takes an entry off: `pop` and
     `branch` consume the entry they use, `drop` and `clear` destroy entries outright, and
-    `apply` reads another session's work into this tree without that session's word. `create`,
-    `store`, `export` and `import` touch the stack's entries or refs, so the stack is their
-    subject too, and they fall on its side with the rest.
+    `apply` reads another session's work into this tree without that session's word. `store`,
+    `export` and `import` touch the stack's entries or refs, so the stack is their subject too,
+    and they fall on its side with the rest.
 
     A word that is no known action is a pathspec, which stash_action reads as a push. Only a
     known action word that is neither a read nor a push falls on the stack side, the side where
@@ -163,7 +190,8 @@ def stash_takes_the_stack(args) -> bool:
 def stash_discards(args) -> bool:
     """True when a `git stash` call can lose work.
 
-    `list` and `show` read the stash and change nothing, so they pass. Every other action can
+    `list` and `show` read the stack and change nothing. `create` reads the tree and index and writes
+    an unreachable commit with no stash entry, so it loses nothing either. They pass. Every other action can
     lose work, and the SUBJECT READ below decides whether this call would lose any.
 
     `apply` and `pop` count: the thing at risk is not this tree but the shared stack. The entry
