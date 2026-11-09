@@ -12109,6 +12109,9 @@ RECORDS_NEVER = (VCS + " restore", VCS + " reset", VCS + " stash", VCS + " check
 REC_V0 = "# Records index\nrecords page v0, as the lane was cut\n"
 REC_V1 = "# Records index\nrecords page v1, rebuilt on main\n"
 REC_LANE = "# Records index\nrecords page v2, rebuilt by the lane\n"
+REC_FEAT = "# Records index\nrecords page on the feature branch\n"
+REC_REBUILT = "# Records index\nrecords page rebuilt by hand after the merge\n"
+REC_MOVED_TEXT = "# Records index\nrecords page v3, moved on again on main\n"
 RECROOT = os.path.join(ROOT, "recpage")
 RECMAIN = os.path.join(RECROOT, "main")
 # One linked worktree per index state, each cut from the stale local `main`: a case only reads, but
@@ -12222,14 +12225,19 @@ REC_ADOPT_LANE = os.path.join(RECMORE, "adopt-lane")
 # The base page is hand-written: it does not open with the generated header, so the rule is no hit.
 REC_PLAIN = os.path.join(RECMORE, "plain")
 REC_PLAIN_LANES = {name: os.path.join(RECMORE, "plain-" + name) for name in ("staged", "product")}
+# A lane merged origin/main (or the feature branch), and origin/main then moved on: the page the merge
+# brought, MERGE_HEAD's, is no longer the base's. Each lane holds one state, see the moved section below.
+REC_MOVED = os.path.join(RECMORE, "moved")
+REC_MOVED_LANES = {name: os.path.join(RECMORE, "moved-" + name) for name in (
+    "merge", "rebuilt", "quit", "product", "nonbase", "take", "base")}
 
 
 def _build_records_more():
     run, need, page = _rec_run, _rec_need, _rec_page
 
-    def advance(where, files, origin_head):
+    def advance(where, files, origin_head, start="HEAD"):
         # origin/main moves on after the lane's cut; local main stays at the cut
-        run(where, "checkout", "-q", "-b", "advance")
+        run(where, "checkout", "-q", "-b", "advance", start)
         for rel, text in files.items():
             write(os.path.join(where, rel), text)
         run(where, "add", "-A")
@@ -12290,9 +12298,64 @@ def _build_records_more():
          and run(REC_PLAIN_LANES["product"], "diff", "--cached", "--name-only") == "src/app.py",
          "the plain lanes are not 'base page has no header; page staged / product file staged'")
 
+    # The moved repository. Each lane is cut from main (page v0), and holds its own page edit, committed.
+    # origin/main is v1 when the lanes merge it, so MERGE_HEAD is v1. Then origin/main moves to v3, on
+    # top of v1. `base` merges v3, so its MERGE_HEAD page is the base's own page.
+    make_repo(REC_MOVED, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    advance(REC_MOVED, {"docs/records.md": REC_V1}, "refs/remotes/origin/main")
+    run(REC_MOVED, "checkout", "-q", "-b", "feat")
+    write(page(REC_MOVED), REC_FEAT)
+    run(REC_MOVED, "add", "-A")
+    run(REC_MOVED, "commit", "-q", "-m", "feature page")
+    run(REC_MOVED, "checkout", "-q", "main")
+    for name, where in REC_MOVED_LANES.items():
+        run(REC_MOVED, "worktree", "add", "-q", "-b", "lane-moved-" + name, where, "main")
+        write(page(where), REC_LANE)
+        write(os.path.join(where, "src", "app.py"), "x = 2\n")
+        run(where, "add", "-A")
+        run(where, "commit", "-q", "-m", "lane page")
+
+    def conflicted(name, ref):
+        where = REC_MOVED_LANES[name]
+        run_vcs(where, *IDENT, "merge", "--no-commit", "--no-ff", ref)   # a conflict exits 1: that state is the point
+        _require_conflict(where, "docs/records.md")
+
+    def take(name):
+        """The lane takes MERGE_HEAD's page into its index, as a test-author does after a conflict."""
+        where = REC_MOVED_LANES[name]
+        write(page(where), run_vcs(where, "show", "MERGE_HEAD:docs/records.md").stdout)
+        run(where, "add", "docs/records.md")
+
+    for name in ("merge", "rebuilt", "quit", "product", "take"):
+        conflicted(name, "origin/main")                      # MERGE_HEAD is v1
+    conflicted("nonbase", "feat")                            # MERGE_HEAD is the feature branch's page
+    advance(REC_MOVED, {"docs/records.md": REC_MOVED_TEXT}, "refs/remotes/origin/main",
+            start="refs/remotes/origin/main")                # origin/main moves on: v3
+    conflicted("base", "origin/main")                        # MERGE_HEAD is v3
+    take("merge")
+    write(page(REC_MOVED_LANES["rebuilt"]), REC_REBUILT)
+    run(REC_MOVED_LANES["rebuilt"], "add", "docs/records.md")
+    take("quit")
+    run(REC_MOVED_LANES["quit"], "merge", "--quit")          # MERGE_HEAD removed; the index keeps v1
+    take("product")
+    write(os.path.join(REC_MOVED_LANES["product"], "src", "app.py"), "x = 3\n")
+    run(REC_MOVED_LANES["product"], "add", "src/app.py")
+    take("nonbase")
+    take("base")
+    write(os.path.join(REC_MOVED_LANES["base"], "src", "app.py"), "x = 3\n")
+    run(REC_MOVED_LANES["base"], "add", "src/app.py")
+    need(run(REC_MOVED, "show", "origin/main:docs/records.md") == REC_MOVED_TEXT.strip(),
+         "origin/main did not move to v3 in the moved repository")
+    need(run(REC_MOVED_LANES["merge"], "show", ":docs/records.md") == REC_V1.strip()
+         and run(REC_MOVED_LANES["base"], "show", ":docs/records.md") == REC_MOVED_TEXT.strip(),
+         "the moved lanes do not hold MERGE_HEAD's pages (v1 for merge, v3 for base)")
+    need(run(REC_MOVED_LANES["nonbase"], "show", ":docs/records.md") == REC_FEAT.strip()
+         and run_vcs(REC_MOVED_LANES["quit"], "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode != 0,
+         "the moved nonbase lane does not hold the feature page, or the quit lane still has a merge")
+
 
 lazy_fixture([REC_DANGLE, REC_NEW, REC_ADOPT, REC_PLAIN, *REC_DANGLE_LANES.values(), REC_NEW_LANE,
-              REC_ADOPT_LANE, *REC_PLAIN_LANES.values()], _build_records_more)
+              REC_ADOPT_LANE, *REC_PLAIN_LANES.values(), REC_MOVED, *REC_MOVED_LANES.values()], _build_records_more)
 
 
 def records_deny(name, command, lane, **kw):
@@ -12472,6 +12535,61 @@ records_allow("a commit of a staged page edit where the base page is hand-writte
               REC_PLAIN_LANES["staged"])
 records_allow("a chain that runs the generator, then add -A and commit, where the base page is hand-written",
               GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_PLAIN_LANES["product"])
+
+# ---- a merge that brings MERGE_HEAD's page, after origin/main moved on (decision records-index-at-merge)
+#
+# A lane merged origin/main. The page conflicted, and the lane took the page the merge brought into its
+# index. origin/main then moved to a newer page. The page is then none of HEAD's, the base tip's and
+# origin/<base>'s, so the guard refuses the merge's own commit. It is the merge's own result, and it is
+# allowed. The guard reads HEAD, the base and origin/<base>; a fix reads MERGE_HEAD too. Each lane holds
+# one state: the RED cases are refused today and must pass; the GREEN pins must stay as they are.
+#
+# THE SCOPE. Nothing wider than exact blob equality with MERGE_HEAD's page. A rebuilt page, a page of a
+# merge of a branch that is not the base, and a page taken once the merge state is gone stay refused.
+RECORDS_AUTHOR = {"agent_id": "rec-auth1", "agent_type": "test-author"}
+_mv = REC_MOVED_LANES
+_mv_page = _rec_page(_mv["merge"])
+
+# RED now: the merge's own page, committed by a test-author, by a plain session, and by the commit forms a
+# test-author uses after a merge.
+records_allow("a test-author commit of the merge's own page, after origin/main moved on", VCS + " commit -m x",
+              _mv["merge"], **RECORDS_AUTHOR)
+records_allow("a test-author commit of the merge's own page, after origin/main moved on, under PowerShell",
+              VCS + " commit -m x", _mv["merge"], tool="PowerShell", **RECORDS_AUTHOR)
+records_allow("a plain session's commit of the merge's own page, after origin/main moved on", VCS + " commit -m x",
+              _mv["merge"])
+records_allow("a test-author commit -am of the merge's own page, after origin/main moved on",
+              VCS + " commit -am x", _mv["merge"], **RECORDS_AUTHOR)
+records_allow("a test-author add -A and commit of the merge's own page, after origin/main moved on",
+              VCS + " add -A && " + VCS + " commit -m x", _mv["merge"], **RECORDS_AUTHOR)
+records_allow("a test-author commit --no-edit of the merge's own page, after origin/main moved on",
+              VCS + " commit --no-edit", _mv["merge"], **RECORDS_AUTHOR)
+records_allow("a test-author Bash call that writes MERGE_HEAD's page, adds it and commits, origin/main moved on",
+              VCS + " show MERGE_HEAD:docs/records.md > docs/records.md && " + VCS + " add docs/records.md && "
+              + VCS + " commit -m x", _mv["take"], **RECORDS_AUTHOR)
+# RED now, and the product path is the test-author's out-of-role path: logged, never refused (decision
+# builders-cannot-edit-tests). The page is the merge's own, so the commit is allowed.
+records_allow("a test-author commit of the merge's own page with a clean product file staged",
+              VCS + " commit -m x", _mv["product"], **RECORDS_AUTHOR)
+
+# GREEN pins: a page rebuilt after the merge, a merge of a branch that is not the base, and a page taken
+# after the merge state is gone are refused, for a test-author as for a plain session.
+records_deny("a test-author commit of a page rebuilt after the merge, origin/main moved on", VCS + " commit -m x",
+             _mv["rebuilt"], **RECORDS_AUTHOR)
+records_deny("a test-author commit of a non-base merge's page, the feature branch's, origin/main moved on",
+             VCS + " commit -m x", _mv["nonbase"], **RECORDS_AUTHOR)
+records_deny("a test-author commit of the merge's page after merge --quit, no merge in progress",
+             VCS + " commit -m x", _mv["quit"], **RECORDS_AUTHOR)
+# GREEN pin: the base's own page (origin/main, the merge's page too) with a clean product file staged. The
+# test-author scope adds no refusal for the product path in a merge.
+records_allow("a test-author merge commit of origin/main's page with a clean product file staged",
+              VCS + " commit -m x", _mv["base"], **RECORDS_AUTHOR)
+# GREEN pin: the test-author's Edit of the page stays refused, under the test-author scope.
+add("records-page: a test-author Edit of the merge's page is refused", "deny", rule="test-author-scope", tool="Edit",
+    file_path=_mv_page, cwd=_mv["merge"], **RECORDS_AUTHOR)
+# GREEN pin: writing MERGE_HEAD's page into the tree, with no commit, is allowed.
+records_allow("a test-author writes MERGE_HEAD's page into the tree, with no commit, origin/main moved on",
+              VCS + " show MERGE_HEAD:docs/records.md > docs/records.md", _mv["take"], **RECORDS_AUTHOR)
 
 # =========================================================================== 5d. conflict markers
 #
