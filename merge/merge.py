@@ -48,7 +48,8 @@
                           It FAILs on any survivor, on more than MUTATE_UNKNOWN_MAX unknown mutants (the crashed column; a timeout lands
                           there), on a run past that job's timeout-minutes, and on a report it cannot read at any exit (a readable report is judged by its counts, not its exit code). It prints
                           its wall time and killed, survived and unknown counts, on the PASS line or in the FAIL text. Extra cost, only
-                          then: one run of that command (about 11 to 16 min); on any other head, one `git diff --name-only`.
+                          then: one run of that command (about 11 to 16 min); on any other head, one `git diff --name-only`. A tally
+                          line (the command's own form) fails on any wrong cause; the table form allows MUTATE_UNKNOWN_MAX.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -2606,22 +2607,22 @@ def ci_job_run(wt, *args, notes=None):
     return "unknown", [f"ci-job exited {c}"], log, False
 
 MUTATE_JOB, MUTATE_STEP = "checks-mutate-guard", "Guard mutation test"  # the job and step of checks.yml whose run: line and timeout-minutes the lint reads at the head
-MUTATE_UNKNOWN_MAX = 5  # unknown (crashed or timed-out) mutants a lint tolerates: one or two flaky mutants are noise, a mutation test that cannot run reads hundreds
+MUTATE_UNKNOWN_MAX = 5  # unknown (crashed or timed-out) mutants a lint tolerates: in the table form one or two flaky mutants are noise, a mutation test that cannot run reads hundreds. The tally form has no bound: any wrong cause fails, as it does in CI
 MUTATE_TEST_FILE = re.compile(r"hooks/mutate_[^/]*\.(?:py|mjs)")
 
 def mutate_report_counts(out):
-    """-> (killed, survived, unknown, unread) of a mutate run's stdout, or None when it holds no report. Two forms: the per-file table of
+    """-> (killed, survived, unknown, unread, tally) of a mutate run's stdout, or None when it holds no report. Two forms: the per-file table of
     hooks/mutate_shared.format_report (columns file mutants killed crashed survived rate silent; unknown is the crashed column), and the tally line
     that run_mutants prints, which the job's own command ends with (`K of N mutations killed (S survived, W wrong cause, X skipped)`; unknown is
-    the wrong-cause count). `unread` counts the table's `UNKNOWN (reason)` rows: a file that read no mutant."""
+    the wrong-cause count, and `tally` is True). `unread` counts the table's `UNKNOWN (reason)` rows: a file that read no mutant."""
     rows = re.findall(r"^\S+[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+\d+%", out, re.M)
     unread = len(re.findall(r"^\S+[ \t]+UNKNOWN \(", out, re.M))
     if rows:
-        return sum(int(r[1]) for r in rows), sum(int(r[3]) for r in rows), sum(int(r[2]) for r in rows), unread
+        return sum(int(r[1]) for r in rows), sum(int(r[3]) for r in rows), sum(int(r[2]) for r in rows), unread, False
     m = re.search(r"^(\d+) of \d+ mutations killed \((\d+) survived, (\d+) wrong cause, \d+ skipped\)", out, re.M)
     if m:
-        return int(m.group(1)), int(m.group(2)), int(m.group(3)), unread
-    return (0, 0, 0, unread) if unread else None
+        return int(m.group(1)), int(m.group(2)), int(m.group(3)), unread, True
+    return (0, 0, 0, unread, False) if unread else None
 
 def mutate_run_check(wt):
     """Run the head's checks-mutate-guard command in the tree `wt`. -> (summary, failures): one line of wall time and counts, and the reasons the
@@ -2646,16 +2647,18 @@ def mutate_run_check(wt):
         c, out = None, ""
     wall = round(time.monotonic() - start) if c is not None else cap * 60
     counts = mutate_report_counts(out)
-    killed, survived, unknown, unread = counts or (0, 0, 0, 0)
+    killed, survived, unknown, unread, tally = counts or (0, 0, 0, 0, False)
     failures = []
     if c is None or wall > cap * 60:
         failures.append(f"the mutate run took {wall} s, past the {cap}-minute cap of job {MUTATE_JOB}")
     if counts is None:
         failures.append(f"the mutate run exited {'at its timeout' if c is None else c} and printed no report that can be read")
-    # A readable report is judged on its counts, not the exit code: run_mutants exits 1 on any wrong-cause mutant, which the unknown bound already allows for.
+    # A readable report is judged on its counts, not the exit code. The tally is the command's own verdict, and run_mutants exits 1 on any wrong cause, so any fails.
     if survived:
         failures.append(f"{survived} mutant{'s' if survived != 1 else ''} survived")
-    if unknown > MUTATE_UNKNOWN_MAX:
+    if tally and unknown:
+        failures.append(f"wrong cause {unknown}: the tally counts a mutant whose red lines miss its required case, and CI fails the run on any")
+    elif unknown > MUTATE_UNKNOWN_MAX:
         failures.append(f"{unknown} mutants are unknown (crashed or timed out), more than the {MUTATE_UNKNOWN_MAX} the lint allows")
     if unread:
         failures.append(f"{unread} file{'s' if unread != 1 else ''} read no mutant (UNKNOWN row)")
@@ -2684,9 +2687,12 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
         mutate, mutate_fails = "", []
         if state == "pass" or (liftable and unknown_ok.strip()):  # a lint that fails or stays unknown stops without the run's minutes
-            c, changed = git(root, "diff", "--name-only", f"origin/{base}...{head}")
-            if c:
-                raise Stop(f"cannot list the files the head changes against {base}: {changed} {LANE_LINT_REMEDY}")
+            c, changed = git(root, "diff", "--no-renames", "--name-only", f"origin/{base}...{head}")  # no renames: a moved file lists its old path too, as CI's scope reads it
+            if c:  # a shallow clone has no merge base; the two-dot diff lists at least every file the lane changed
+                c, changed = git(root, "diff", "--no-renames", "--name-only", f"origin/{base}", head)
+                if c:
+                    raise Stop(f"cannot list the files the head changes against {base}: {changed} {LANE_LINT_REMEDY}")
+                say(f"merge: no merge base of {head[:9]} with origin/{base} could be read, so the mutation test trigger used a two-dot diff.")
             if any(MUTATE_TEST_FILE.fullmatch(f) for f in changed.splitlines()):
                 mutate, mutate_fails = mutate_run_check(wt)
     finally:
