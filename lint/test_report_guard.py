@@ -130,6 +130,41 @@ def assistant_text(text, stop_reason=None):
     return {"type": "assistant", "isSidechain": False, "message": message}
 
 
+def background_agent_launch(spawn, n=0):
+    """A background spawn's launch: its Agent tool_use with run_in_background, then the async-launch result
+    that names the agent. Its completion, when it has one, arrives later as a notice (background_agent_done).
+    A launch with no notice after it is still running. The shape is the one hooks/stall_watch.py reads:
+    isAsync, status async_launched, agentId."""
+    cid = "toolu_bg%d" % n
+    aid = "a%016x" % (0x51a7e0000 + n)
+    use = {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": cid, "name": "Agent", "input": dict(spawn, run_in_background=True)}]}}
+    result = {"type": "user", "isSidechain": False, "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": cid,
+         "content": "Async agent launched successfully. agentId: %s." % aid}]},
+        "toolUseResult": {"isAsync": True, "status": "async_launched", "agentId": aid}}
+    return [use, result]
+
+
+def background_agent_done(n, status="completed"):
+    """The completion notice of background spawn n: a queued_command attachment whose prompt is a task
+    notification. Its tool-use-id is the spawn's own id, and its status is terminal."""
+    cid = "toolu_bg%d" % n
+    aid = "a%016x" % (0x51a7e0000 + n)
+    prompt = ("<task-notification>\n<task-id>%s</task-id>\n<tool-use-id>%s</tool-use-id>\n"
+              "<status>%s</status>\n<summary>Agent \"review\" %s</summary>\n</task-notification>"
+              % (aid, cid, status, status))
+    return {"type": "attachment", "isSidechain": False,
+            "attachment": {"type": "queued_command", "prompt": prompt}}
+
+
+def keyed_spawn(spawn, n=0):
+    """A finished foreground spawn that carries its tool_use id, answered by a real result."""
+    use = tool_use_msg("Agent", spawn)
+    use["message"]["content"][0]["id"] = "toolu_fg%d" % n
+    return [use, tool_result_msg("toolu_fg%d" % n)]
+
+
 def compact_boundary():
     """The system record Claude Code writes when a compaction finishes. Its token fields are as the
     hook-inputs-carry-token-counts decision measured them, top level; their nesting is unmeasured."""
@@ -605,8 +640,8 @@ class ReportGuardTests(unittest.TestCase):
                              "a turn that lands nothing was asked for a report: " + run.stdout[:200])
         # Catches: a record that ends no turn and starts none, between the reply and the peer message, stops the peer
         # message from starting a new turn, so the earlier commit still counts and "nothing to land" is asked for a
-        # report. The stop summary and queue rows are green before the fix. The last-prompt, atis-latch, tools-used and
-        # hook_success rows, and the measured order from a real transcript, are red. The row with no record is the control.
+        # report. The rows below cover the record kinds that do this, and the measured order from a real transcript.
+        # The row with no record is the control.
         measured = [queue_op("enqueue", 0), stop_summary(0), queue_op("remove", 0), queue_op("enqueue", 0),
                     last_prompt(), atis_latch(), queue_op("dequeue", 0)]
         ends_no_turn = [("stop_hook_summary", [stop_summary(0)]), ("queue-operation", [queue_op("enqueue", 0)]),
@@ -624,7 +659,7 @@ class ReportGuardTests(unittest.TestCase):
                 self.assertEqual(run.stdout.strip(), "",
                                  "%s between the reply and the peer message: the peer message did not start a new "
                                  "turn, so the earlier commit still counts: %s" % (label, run.stdout[:200]))
-        # Pin (green before the fix): a peer message that arrives mid-turn, after a tool result and a record that ends
+        # Pin: a peer message that arrives mid-turn, after a tool result and a record that ends
         # no turn, keeps the earlier commit in its window and the reply must still block. A fix that resets on any
         # record but a tool result passes these replies and fails here.
         for label, extra in ends_no_turn:
@@ -910,27 +945,36 @@ class DoneNamesModelsTests(unittest.TestCase):
     """reports-done-names-models, in report_guard.py's Stop hook."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def verdict(self, reply, spawns, denied=()):
+    def stop(self, records, reply, agent_model="sonnet"):
+        """Run the Stop hook over the turn's records, with the reply as its last text. Return its verdict or None."""
+        records = records + [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                             assistant_text(reply)]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+        env = dict(os.environ)
+        env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)  # an unset spawn reads the agent file's pin, not this
+        if agent_model:
+            env["CLAUDE_CODE_SUBAGENT_MODEL"] = agent_model
+        run = run_guard(REPORT_GUARD, hook, env=env)
+        self.assertEqual(run.returncode, 0)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def verdict(self, reply, spawns, denied=(), running=(), agent_model="sonnet"):
         records = [human("do the task")]
         for spawn in spawns:
             records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+        for n, spawn in enumerate(running):  # a background spawn with no completion notice: still running
+            records += background_agent_launch(spawn, n)
         for spawn in denied:
             use = tool_use_msg("Agent", spawn)
             use["message"]["content"][0]["id"] = "tu_denied"
             result = tool_result_msg("tu_denied")
             result["message"]["content"][0]["is_error"] = True
             records += [use, result]
-        records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                    assistant_text(reply)]
-        path = write_transcript(records, self.tmp.name)
-        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
-        env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
-        run = run_guard(REPORT_GUARD, hook, env=env)
-        self.assertEqual(run.returncode, 0)
-        return json.loads(run.stdout) if run.stdout.strip() else None
+        return self.stop(records, reply, agent_model)
 
     BUILDER = {"subagent_type": "builder", "prompt": "build it"}
     REVIEWER_R2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
@@ -991,6 +1035,208 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNone(self.verdict(
             "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
             [{"subagent_type": "Explore", "prompt": "find x"}, {"subagent_type": "Plan", "prompt": "plan"}]))
+
+    REVIEWER = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}
+    TEST_AUTHOR = {"subagent_type": "test-author", "model": "haiku", "prompt": "write the cases"}
+    RUNNING_NEXT = "> **Next** reviewer round 1 running; Unstarted: none"
+
+    @staticmethod
+    def file_pin(role):
+        """The model: key of agents/<role>.md's frontmatter, read from the file the way the guard reads it."""
+        with open(os.path.join(HERE, "..", "agents", role + ".md"), encoding="utf-8") as f:
+            front = f.read().split("---")[1].splitlines()
+        for line in front:
+            key, _, value = line.partition(":")
+            if key.strip() == "model":
+                return value.strip()
+        return ""
+
+    def check_unset_spawn_takes_file_pin(self, role):
+        import report_guard  # noqa: E402  MODEL_FAMILIES, the names a Done item may give (one home)
+        pin = self.file_pin(role)
+        self.assertEqual(pin, "haiku", "agents/%s.md pins %r, not the haiku this case expects" % (role, pin))
+        wrong = next(f for f in report_guard.MODEL_FAMILIES if f != pin)
+        spawn = {"subagent_type": role, "prompt": "Round 1 of 3"}
+
+        def reply(model):
+            return "> **Done** BUILT the cases, PR #5 (%s %s)\n> **Next** Unstarted: none" % (role, model)
+
+        out = self.verdict(reply(pin), [spawn], agent_model=None)
+        self.assertIsNone(out, out and out["reason"])
+        out = self.verdict(reply(wrong), [spawn], agent_model=None)
+        self.assertIsNotNone(out, "a %s spawn with no model field ran %s, yet Done naming %s passed"
+                             % (role, pin, wrong))
+        self.assertIn("'%s %s' matches no %s spawn, which ran %s" % (role, wrong, role, pin), out["reason"])
+
+    def test_dm_green_unset_reviewer_takes_file_pin(self):
+        self.check_unset_spawn_takes_file_pin("reviewer")
+
+    def test_dm_green_unset_test_author_takes_file_pin(self):
+        self.check_unset_spawn_takes_file_pin("test-author")
+
+    def test_dm_false_alarm_running_reviewer_absent_from_done_passes(self):
+        # A reviewer still running is not a finished claim: Done names the test-author and the builder only.
+        reply = "> **Done** BUILT the cases, PR #5 (test-author haiku, builder sonnet)\n" + self.RUNNING_NEXT
+        out = self.verdict(reply, [self.TEST_AUTHOR, self.BUILDER], running=[self.REVIEWER])
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_green_running_reviewer_named_at_pin_passes(self):
+        # Control for the case above: the same running fixture, with Done naming the reviewer at its pin.
+        reply = ("> **Done** BUILT the cases, PR #5 (test-author haiku, builder sonnet, reviewer haiku)\n"
+                 + self.RUNNING_NEXT)
+        out = self.verdict(reply, [self.TEST_AUTHOR, self.BUILDER], running=[self.REVIEWER])
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_unnamed_reviewer_in_done_blocks(self):
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer)\n> **Next** Unstarted: none",
+                           [self.BUILDER, self.REVIEWER])
+        self.assertIsNotNone(out, "a reviewer that Done names with no model passed")
+        self.assertIn("no model named for reviewer", out["reason"])
+
+    def test_dm_green_both_roles_named_match_passes(self):
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer haiku)\n> **Next** Unstarted: none",
+            [self.BUILDER, {"subagent_type": "reviewer", "model": "haiku", "prompt": "Round 1 of 3"}]))
+
+    TEST_AUTHOR_HAIKU = {"subagent_type": "test-author", "model": "haiku", "prompt": "write the cases"}
+    TEST_AUTHOR_DONE = "> **Done** BUILT the cases, PR #5 (test-author haiku)\n> **Next** Unstarted: none"
+
+    def background_builder_turn(self, status):
+        """A finished test-author, then a background builder whose completion notice has `status`.
+        `status` None leaves the builder with no notice: still running."""
+        records = [human("do the task")] + keyed_spawn(self.TEST_AUTHOR_HAIKU, 0)
+        records += background_agent_launch(self.BUILDER, 0)
+        if status:
+            records.append(background_agent_done(0, status))
+        return records
+
+    def test_dm_red_completed_background_builder_omitted_blocks(self):
+        out = self.stop(self.background_builder_turn("completed"), self.TEST_AUTHOR_DONE)
+        self.assertIsNotNone(out, "a completed background builder that Done omits passed")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_failed_background_builder_omitted_blocks(self):
+        out = self.stop(self.background_builder_turn("failed"), self.TEST_AUTHOR_DONE)
+        self.assertIsNotNone(out, "a failed background builder that Done omits passed")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_false_alarm_running_background_builder_omitted_passes(self):
+        out = self.stop(self.background_builder_turn(None), self.TEST_AUTHOR_DONE)
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_finished_keyed_spawn_omitted_blocks(self):
+        # A finished spawn that carries its tool_use id and a real result is required in Done like any other.
+        records = [human("do the task")] + keyed_spawn(self.TEST_AUTHOR_HAIKU, 0) + keyed_spawn(self.BUILDER, 1)
+        out = self.stop(records, self.TEST_AUTHOR_DONE)
+        self.assertIsNotNone(out, "a finished keyed builder that Done omits passed")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_running_reviewer_named_bare_blocks(self):
+        # A Done item that names a role with no model blocks, whether or not that role is still running.
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer)\n"
+                           "> **Next** reviewer round 1 running; Unstarted: none",
+                           [self.BUILDER], running=[self.REVIEWER])
+        self.assertIsNotNone(out, "a running reviewer named bare in Done passed")
+        self.assertIn("no model named for reviewer", out["reason"])
+
+    def test_dm_red_running_reviewer_named_wrong_model_blocks(self):
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer sonnet)\n"
+                           "> **Next** reviewer round 1 running; Unstarted: none",
+                           [self.BUILDER], running=[self.REVIEWER])
+        self.assertIsNotNone(out, "a running reviewer named with a wrong model passed")
+        self.assertIn("'reviewer sonnet' matches no reviewer spawn, which ran haiku", out["reason"])
+
+    REVIEWER_R3 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 3 of 3"}
+    ROUND1_NO_MODEL = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}  # runs its file pin, haiku
+
+    def turn_records(self, earlier=(), window=()):
+        """The turn's records: `earlier` spawns from before the owner's second message, then `window` spawns
+        after it. Each spawn carries its tool_use id and a real result, as a finished spawn does. With no
+        earlier spawn there is no second message: the window is the whole transcript."""
+        records = [human("do the task")]
+        n = 0
+        for spawn in earlier:
+            records += keyed_spawn(spawn, n)
+            n += 1
+        if earlier:
+            records.append(human("the owner's next message"))
+        for spawn in window:
+            records += keyed_spawn(spawn, n)
+            n += 1
+        return records
+
+    ROUNDS_DONE = ("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer haiku round 1, "
+                   "reviewer sonnet rounds 2 and 3)\n> **Next** Unstarted: none")
+
+    def test_dm_false_alarm_earlier_round_pin_named_passes(self):
+        # The earlier reviewer runs before the owner's second message, on its file pin, haiku. The later
+        # reviewers run after it, on sonnet, and each is named at its own model.
+        records = self.turn_records(earlier=[self.ROUND1_NO_MODEL],
+                                    window=[self.BUILDER, self.REVIEWER_R2, self.REVIEWER_R3])
+        out = self.stop(records, self.ROUNDS_DONE)
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_earlier_round_named_with_unspawned_model_blocks(self):
+        # Control: no spawn of any turn ran opus, so naming reviewer opus blocks.
+        records = self.turn_records(earlier=[self.ROUND1_NO_MODEL],
+                                    window=[self.BUILDER, self.REVIEWER_R2, self.REVIEWER_R3])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer opus)\n"
+                                 "> **Next** Unstarted: none")
+        self.assertIsNotNone(out, "Done named reviewer opus, which no spawn ran, and passed")
+        self.assertIn("'reviewer opus' matches no reviewer spawn", out["reason"])
+
+    def test_dm_false_alarm_earlier_unnamed_builder_passes(self):
+        # Control: the missing-role check stays window-only. An earlier builder Done does not name is no refusal.
+        records = self.turn_records(earlier=[self.BUILDER], window=[self.REVIEWER_R2])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none")
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_same_window_mismatch_blocks(self):
+        # Control: a mismatch inside the window still blocks, with no earlier spawn.
+        records = self.turn_records(window=[self.REVIEWER_R2])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (reviewer haiku)\n> **Next** Unstarted: none")
+        self.assertIsNotNone(out, "Done named reviewer haiku against a window reviewer that ran sonnet, and passed")
+        self.assertIn("'reviewer haiku' matches no reviewer spawn, which ran sonnet", out["reason"])
+
+    BUILDER_NO_MODEL = {"subagent_type": "builder", "prompt": "build it"}  # no model field, no file pin
+    BUILDER_SONNET = {"subagent_type": "builder", "model": "sonnet", "prompt": "Round 2 of 3"}
+    BUILDER_OPUS = {"subagent_type": "builder", "model": "opus", "prompt": "Round 3 of 3"}
+    REVIEWER_HAIKU = {"subagent_type": "reviewer", "model": "haiku", "prompt": "Round 2 of 3"}
+    REVIEWER_SONNET_EARLY = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 1 of 3"}
+
+    def test_dm_red_earlier_unresolved_spawn_hides_window_mismatch_blocks(self):
+        # An earlier builder with no resolvable model is '' in the transcript's map. That must not switch off
+        # the builder check for the window's builder, which ran opus.
+        self.assertEqual(self.file_pin("builder"), "", "agents/builder.md pins a model, so no spawn is unresolved")
+        records = self.turn_records(earlier=[self.BUILDER_NO_MODEL], window=[self.BUILDER_OPUS])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
+                        agent_model=None)
+        self.assertIsNotNone(out, "Done named builder sonnet against a window builder that ran opus, and passed")
+        self.assertIn("'builder sonnet' matches no builder spawn, which ran opus", out["reason"])
+
+    def test_dm_red_earlier_unresolved_spawn_hides_window_wrong_model_blocks(self):
+        # The mirror: the window's builder ran sonnet, and Done names opus. The earlier unresolved spawn must
+        # not let that wrong name pass.
+        self.assertEqual(self.file_pin("builder"), "", "agents/builder.md pins a model, so no spawn is unresolved")
+        records = self.turn_records(earlier=[self.BUILDER_NO_MODEL], window=[self.BUILDER_SONNET])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
+                        agent_model=None)
+        self.assertIsNotNone(out, "Done named builder opus against a window builder that ran sonnet, and passed")
+        self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
+
+    def test_dm_limit_earlier_spawn_model_passes(self):
+        # Accepted limit: a Done model name is judged against every spawn in the transcript, not the turn's
+        # window alone. The earlier sonnet reviewer lets "reviewer sonnet" pass, though the window's reviewer ran haiku.
+        records = self.turn_records(earlier=[self.REVIEWER_SONNET_EARLY], window=[self.REVIEWER_HAIKU])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none")
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_limit_earlier_builder_spawn_model_passes(self):
+        # Accepted limit, as above: the earlier sonnet builder lets "builder sonnet" pass, though the
+        # window's builder ran opus.
+        records = self.turn_records(earlier=[self.BUILDER_SONNET], window=[self.BUILDER_OPUS])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none")
+        self.assertIsNone(out, out and out["reason"])
 
 
 class UnstartedItemsTests(unittest.TestCase):
@@ -1200,6 +1446,26 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.missing_report_block()
         self.assertIsNone(self.stop(self.GOOD, True))
         self.assertIsNone(self.stop(self.GOOD, True))
+
+    def earlier_round_records(self, reply):
+        """A turn whose reviewer ran before the owner's second message, on its file pin (haiku), and whose
+        second reviewer ran after it, on sonnet. `reply` is the turn's last text."""
+        round1 = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}  # no model field: its file pin, haiku
+        round2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
+        records = [human("do the task")] + keyed_spawn(round1, 0) + [human("the owner's next message")]
+        records += keyed_spawn(round2, 1)
+        records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(), assistant_text(reply)]
+        return records
+
+    def test_rw_earlier_round_pin_named_passes(self):
+        # The rewrite is judged against every spawn in the transcript, as the stop path is: Done names the earlier
+        # reviewer at its pin, haiku, which ran before the window, and the later one at sonnet, which ran in it.
+        block = self.run_hook(self.earlier_round_records("All done."), False)
+        self.assertIn("does not end with the report", block["reason"])
+        reply = ("> **Done** BUILT the guard, PR #5 (reviewer haiku round 1, reviewer sonnet round 2)\n"
+                 "> **Next** Unstarted: none")
+        out = self.run_hook(self.earlier_round_records(reply), True)
+        self.assertIsNone(out, out and out["reason"])
 
     def test_rw_red_rewrite_keeps_an_unsourced_answered_line_is_refused_again(self):
         # Red then pass. With the report marker set, the rewrite is judged again, so a line that says
