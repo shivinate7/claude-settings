@@ -46,7 +46,8 @@ plants each listed defect in a checkout of HEAD, installs the profile's packages
 catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id on REF's list also needs a row, or a
 `Known-defect-removed: <id>` trailer in REF..HEAD, else `MISSING <id>`; an entry that differs from REF's needs a
 `Known-defect-changed: <id>` trailer, else `CHANGED <id>`. Exit 1 when any defect is MISS, UNKNOWN, MISSING or CHANGED.
-`--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile.
+`--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile. A guard module
+with a family row also prints its `hooks/test_guard.py::<family>` lines beside the suites that import it.
 """
 
 import contextlib
@@ -2863,8 +2864,9 @@ REPORT_TARGETS = [
     ("lint/check_silent_undo.py", ["lint/test_check_silent_undo.py"]),
 ]
 # hooks/guard_<x>.py -> the families of hooks/test_guard.py (FAMILIES there) that exercise it. `--tests-for` prints a row as
-# `hooks/test_guard.py::<family>` lines, which the engine runs with GUARD_FAMILY=<family>. A mutant meets only the
-# families that reach its module, since the whole file takes minutes. A guard module is a row, REPORT_GOLD's file, or in
+# `hooks/test_guard.py::<family>` lines beside the other suites that load the module, which the engine runs with
+# GUARD_FAMILY=<family> for a family line. A mutant meets only the families that reach its module, since the whole file takes
+# minutes. A guard module is a row, REPORT_GOLD's file, or in
 # GUARD_MODULE_EXEMPT (a test checks this).
 GUARD_MODULE_FAMILIES = {
     "hooks/guard_kill.py": ["kill", "git-env"],
@@ -3437,9 +3439,10 @@ def _loads_module(source: str, stem: str) -> bool:
 
 def tests_for_main(argv) -> int:
     """Print the suites that test one file, a line each, sorted, once each. A file listed in REPORT_TARGETS prints exactly its
-    suites. A file with a row in GUARD_MODULE_FAMILIES prints exactly its `hooks/test_guard.py::<family>` lines. Any other `.py` file prints each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, plus each tracked
-    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). Any other file
-    prints the suites beside it only. A suite that cannot be read or parsed is skipped. It is the `select` command of the
+    suites. Any other `.py` file prints each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, plus each tracked
+    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). A file with a row
+    in GUARD_MODULE_FAMILIES prints that union with its `hooks/test_guard.py::<family>` lines, minus the plain whole
+    `hooks/test_guard.py`. Any other file prints the suites beside it only. A suite that cannot be read or parsed is skipped. It is the `select` command of the
     `claude_settings` profile. A file with no suite prints nothing."""
     import argparse
     import re
@@ -3450,8 +3453,6 @@ def tests_for_main(argv) -> int:
     listed = dict(REPORT_TARGETS)
     if path in listed:
         names = set(listed[path])
-    elif path in GUARD_MODULE_FAMILIES:
-        names = {"hooks/test_guard.py::%s" % family for family in GUARD_MODULE_FAMILIES[path]}
     else:
         folder, name = os.path.split(path)
         stem, extension = os.path.splitext(name)
@@ -3476,6 +3477,10 @@ def tests_for_main(argv) -> int:
                     continue
                 if _loads_module(source, stem):
                     names.add(item)
+        if path in GUARD_MODULE_FAMILIES:
+            # The whole `hooks/test_guard.py` loads every guard module and takes minutes per mutant, so only its families run.
+            names.discard("hooks/test_guard.py")
+            names.update("hooks/test_guard.py::%s" % family for family in GUARD_MODULE_FAMILIES[path])
     for name in sorted(names):
         print(name)
     return 0
