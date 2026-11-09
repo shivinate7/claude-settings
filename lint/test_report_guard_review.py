@@ -272,10 +272,11 @@ class ReviewRecordTests(unittest.TestCase):
         with open(os.path.join(self.gh_dir, "state.json"), "w", encoding="utf-8") as handle:
             json.dump(state, handle)
 
-    def cutover_history(self, base=None, root=None):
+    def cutover_history(self, base=None, root=None, default=None):
         """HEAD of `root` (this run's repo when None) holds merge/merge.py without the salt line, then the commit that adds it, at CUTOVER.
-        With a `base`, update-ref also sets origin/<base> to that HEAD, so nothing is pushed. merge's review_stamp_since reads
-        origin/<default branch>, and tool_stamp_since reads the merge tool checkout's HEAD."""
+        With a `base`, update-ref also sets origin/<base> to that HEAD, so nothing is pushed. With a `default` other than `base`, the
+        commit that adds the salt line sits on origin/<default> alone: origin/<base>, a stacked base, stops before it. merge's
+        review_stamp_since reads origin/<default branch>, and tool_stamp_since reads the merge tool checkout's HEAD."""
         root = root or self.repo
         path = os.path.join(root, "merge", "merge.py")
         os.makedirs(os.path.dirname(path))
@@ -286,14 +287,19 @@ class ReviewRecordTests(unittest.TestCase):
             subprocess.run(["git", "-C", root, "add", "merge/merge.py"], check=True, capture_output=True)
             subprocess.run(["git", "-C", root, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com",
                             "commit", "-q", "-m", "fixture"], check=True, capture_output=True, env=env)
+        stacked = default not in (None, base)  # the default branch holds the salt commit; a stacked base stops before it
         if base is not None:
-            subprocess.run(["git", "-C", root, "update-ref", "refs/remotes/origin/" + base, "HEAD"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", root, "update-ref", "refs/remotes/origin/" + base, "HEAD~1" if stacked else "HEAD"],
+                           check=True, capture_output=True)
+        if stacked:
+            subprocess.run(["git", "-C", root, "update-ref", "refs/remotes/origin/" + default, "HEAD"], check=True, capture_output=True)
+        if default is not None:
+            self.default_branch = default  # the in-process default branch (setUp's default_branch_once patch) is the one with the salt
 
     def in_process_cutover(self, default):
-        """merge's review_stamp_since, run in this process for the default branch `default`. gh is not on this process's PATH, so the
-        default branch is the one the stand-in's pulls carry, given by a patch of host_default_branch."""
-        with mock.patch.object(merge_mod, "host_default_branch", return_value=default):
-            return merge_mod.review_stamp_since(self.repo, default)
+        """merge's review_stamp_since, run in this process for the default branch `default`, passed in so the read asks no gh. setUp's
+        default_branch_once patch answers only when no default is passed, so it is not reached here."""
+        return merge_mod.review_stamp_since(self.repo, default, default=default)
 
     def tool_checkout_with_salt(self):
         """A merge tool checkout whose HEAD history adds the salt line at CUTOVER. Its merge/merge.py links to the merge tool beside
@@ -482,7 +488,7 @@ class ReviewRecordTests(unittest.TestCase):
         # subfolder. The cutover is then none, and an unstamped record from before the cutover refuses. The control is the case below,
         # run from the root: the same record passes there, so the subfolder run is the one that differs.
         self.cutover_history("fixture")
-        self.assertEqual(merge_mod.review_stamp_since(self.repo, "fixture"), CUTOVER,
+        self.assertEqual(self.in_process_cutover("fixture"), CUTOVER,
                          "fixture: the cutover from the root is not the time of the commit that adds the salt line")
         body = unstamped(record())
         self.serve(comments=[{"body": body, "created_at": BEFORE}], base="fixture", default_branch="fixture")
@@ -512,7 +518,7 @@ class ReviewRecordTests(unittest.TestCase):
         # Catches: a record made before the stamp's merge, with no Stamp line, read as no record, so a lane's PASS claim on its
         # pull request is refused. merge --reviewed reads the same record as done.
         self.cutover_history("fixture")
-        self.assertEqual(merge_mod.review_stamp_since(self.repo, "fixture"), CUTOVER,
+        self.assertEqual(self.in_process_cutover("fixture"), CUTOVER,
                          "fixture: the cutover is not the time of the commit that adds the salt line")
         body = unstamped(record())
         self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body, BEFORE, CUTOVER), LIVE)[0], "done",
@@ -715,13 +721,12 @@ class ReviewRecordTests(unittest.TestCase):
     def test_an_edited_unstamped_record_with_no_cutover_is_refused_and_the_remedy_names_the_stamp_line(self):
         # Catches: _newest_record returning (None, None) for an edited newest record, so the refusal of an unstamped record with no
         # cutover names the no-record cause, not the Stamp line that merge's parse of the same body requires. The unedited twin
-        # above names the Stamp line.
+        # above names the Stamp line. The hook has no cwd, so the guard reads no cutover, as the sibling no-cutover test does.
         comment = edited_unstamped()
-        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: no cutover is set for main")
         self.assertIsNone(merge_mod.parse_review(comment["body"], None, None), "fixture: merge reads the unstamped record with no cutover")
         self.assertIsNotNone(merge_mod.review_newest([comment])[1], "fixture: merge does not call the edited newest record untrusted")
         self.serve(comments=[comment])
-        out = self.stop(self.lane_turn(report(CLAIM)))
+        out = self.stop_without_cwd(self.lane_turn(report(CLAIM)))
         self.assert_reads_of(PR)
         self.assert_blocked(out)
         self.assertIn("merge 12 --review-record", out["reason"], out)
@@ -729,10 +734,12 @@ class ReviewRecordTests(unittest.TestCase):
                       "the refusal names no Stamp line for an edited unstamped record with no cutover:\n" + out["reason"])
 
     def test_an_edited_unstamped_record_with_no_cutover_still_refuses_a_pass_claim(self):
-        # The control: the same edited, unstamped record is refused on two reads, never accepted.
-        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: no cutover is set for main")
+        # The control: the same edited, unstamped record is refused on two reads, never accepted. The hook has no cwd, so the guard
+        # reads no cutover, as the sibling no-cutover test does.
+        self.assertIsNone(merge_mod.parse_review(edited_unstamped()["body"], None, None),
+                          "fixture: merge reads the edited unstamped record with no cutover")
         self.serve(comments=[edited_unstamped()])
-        out = self.stop(self.lane_turn(report(CLAIM)))
+        out = self.stop_without_cwd(self.lane_turn(report(CLAIM)))
         self.assert_reads_of(PR)
         self.assert_blocked(out)
 

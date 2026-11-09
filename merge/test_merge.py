@@ -14813,13 +14813,14 @@ class ReviewedRootRepoReads(ReviewEnv):
         self.assertEqual(len(reads), count, "%s made %d repo-record reads, by caller: %r" % (form, len(reads), reads))
 
     def test_a_root_with_origin_head_set_pins_its_repo_record_reads(self):
-        # Pinned: two reads. root_host's full_name read, and the cutover's default-branch read in review_stamp_since. The decision names one.
+        # Pinned: two reads. root_host's full_name read, and the cutover's default-branch read in review_stamp_since. The decision's
+        # cost paragraph names two for --root with origin/HEAD set.
         self.fixture(self.alpha, origin_head=True)
         result, reads, pulls = self.counted(self.root_run)
         self.assert_reads(result, reads, pulls, 2, "--reviewed --root with origin/HEAD set")
 
     def test_a_root_with_origin_head_missing_pins_its_repo_record_reads(self):
-        # Pinned: three reads. The fallback in default_branch (merge.py:3478) and the cutover's default-branch read both ask gh, so the
+        # Pinned: three reads. The fallback in default_branch and the cutover's default-branch read both ask gh, so the
         # default branch is read twice, then root_host's full_name read.
         self.fixture(self.alpha, origin_head=False)
         result, reads, pulls = self.counted(self.root_run)
