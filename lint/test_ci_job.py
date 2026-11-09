@@ -44,6 +44,7 @@ STALL_WATCH = os.path.join(HERE, "..", "hooks", "stall_watch.py")
 ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
                            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
 ENV.pop("VERDICT_LOG", None)
+ENV.pop("CLAUDE_CODE_REMOTE", None)  # a cloud session's "true" would brake every Job case on the shared lock; HeavyBrake sets it
 
 
 def workflow(*steps):
@@ -1877,10 +1878,10 @@ class HeavyBrake(Job):
         self.assertTrue(os.path.exists(os.path.join(self.root, "quick-ran.txt")), out)
 
     @unittest.skipUnless(os.path.isdir("/proc") and hasattr(os, "pidfd_open"), "the step's exit is read from /proc and a pidfd: Linux only")
-    def test_a_killed_holders_lock_frees_once_its_step_ends(self):  # coordinator, 2026-11-09 14:39 CST, F3 a
-        """The claim: the lock frees when the orphaned step of a killed holder ends. The refusal while that step runs is asserted
-        here only as the precondition, so a lock that was never held cannot read as freed. F3's case
-        (test_a_killed_run_keeps_the_lock_while_its_step_still_runs) owns that refusal as its own claim."""
+    def test_a_killed_holders_lock_frees_once_its_step_ends(self):
+        """The claim: the lock frees when the orphaned step of a killed holder ends. The lock stays held while that step runs,
+        because a SIGKILL of ci-job must not free it. The refusal is asserted here only as the precondition, so a lock that was
+        never held cannot read as freed. test_a_killed_run_keeps_the_lock_while_its_step_still_runs owns that refusal as its own claim."""
         holder, rc, lines, out = self.kill_holder_while_its_step_runs()
         self.assertEqual(self.verdicts(lines), ["unknown"], "precondition: the second run was not refused while the killed holder's step ran, so the lock freed with the holder: %s" % out)
         pending = self.pidfds_of_group(holder.pid)  # taken before the release, while the step's processes are alive
