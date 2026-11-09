@@ -256,10 +256,12 @@ class Project(object):
 
 
 def write(path, text):
+    """Write `text` with LF newlines on every platform. Text mode on Windows would make each \\n a CRLF,
+    which breaks a fixture script (a `cp` line ends in a stray CR) and any byte-level check."""
     parent = os.path.dirname(path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(text)
 
 
@@ -723,12 +725,17 @@ GIT_IDENTITY = ["-c", "user.name=pointer-test", "-c", "user.email=pointer-test@e
 
 
 def _git(where, *args, stdin=None):
-    """One git call in a fixture. The identity is pinned, so no commit reads the machine's config."""
+    """One git call in a fixture. The identity is pinned, so no commit reads the machine's config.
+
+    `stdin` is sent as UTF-8 bytes. A text-mode pipe turns each \\n into CRLF on Windows, and git then
+    reads the CR as part of the last field of every line.
+    """
+    data = None if stdin is None else stdin.encode("utf-8")
     done = _nowindow.run(["git"] + GIT_IDENTITY + ["-C", where] + list(args),
-                         capture_output=True, text=True, input=stdin)
+                         capture_output=True, input=data)
     if done.returncode != 0:
-        raise RuntimeError("git %s: %s" % (" ".join(args), done.stderr.strip()))
-    return done.stdout.strip()
+        raise RuntimeError("git %s: %s" % (" ".join(args), done.stderr.decode("utf-8", "replace").strip()))
+    return done.stdout.decode("utf-8", "replace").strip()
 
 
 def _commit(where, name):
