@@ -605,10 +605,16 @@ NEW_TIP = "%040d" % 99            # the branch tip after a new commit, past the 
 ARCH_SLOW_A = "claude/slow-behind-a"                           # the first slow branch: behind main in q_max
 ARCH_SLOW_B = "claude/slow-behind-b"                           # the second slow branch: behind main in q_max
 ARCH_COPY_BRANCH = "claude/x"                                  # a lane's branch in o/r, ahead of main, on no pull request
-ARCH_COPY_TIP = "%040d" % 31                                   # that branch's tip: the archive copy's compare is keyed by this sha
+ARCH_COPY_REF = "archive/" + ARCH_COPY_BRANCH                  # the copy the guard lists under the branch's archive/ name
+ARCH_COPY_TIP = "%040d" % 31                                   # that branch's tip: each copy's compare is keyed by this sha
 ARCHCOPY_IDENT = os.path.join(ROOT, "archcopy-identical")      # the branch's archive/ copy holds its tip
 ARCHCOPY_AHEAD = os.path.join(ROOT, "archcopy-ahead")          # the branch's archive/ copy is at an older tip: the tip is ahead of it
-ARCHCOPY_MISSING = os.path.join(ROOT, "archcopy-missing")      # the branch has no archive/ copy: its compare answers 404
+ARCHCOPY_MISSING = os.path.join(ROOT, "archcopy-missing")      # the branch has no archive/ copy: the listing is empty
+# Copies under other names. The listing returns each ref under the prefix, and the guard counts only the exact name and `-<digits>`.
+ARCHCOPY_NUMBERED = os.path.join(ROOT, "archcopy-numbered")    # archive/<branch> at a diverged tip; archive/<branch>-2 holds the tip
+ARCHCOPY_NUMBERED_NONE = os.path.join(ROOT, "archcopy-numbered-none")  # archive/<branch> diverged; archive/<branch>-2 ahead: none holds the tip
+ARCHCOPY_LOOKALIKE = os.path.join(ROOT, "archcopy-lookalike")  # archive/<branch>y holds the tip: neither the exact name nor -<digits>
+ARCHCOPY_SUFFIX_R2 = os.path.join(ROOT, "archcopy-suffix-r2")  # archive/<branch>-r2 holds the tip: a suffix that is not digits
 
 
 def arch_pair(qmax=None, settings=None):
@@ -640,17 +646,30 @@ def arch_replaced(containment):
     }
 
 
-def arch_copy(archive, others=()):
+def arch_copies(answers, others=()):
     """The repo of a lane whose branch ARCH_COPY_BRANCH is ahead of main on no pull request, or on the rows given. Its tip is
-    ARCH_COPY_TIP, and the compare of archive/<branch> with that sha reads `archive`: "identical" when the copy holds the tip,
-    "ahead" when the copy is older, "missing" when there is no copy (the compare answers 404). The key names the tip by
-    sha, as the guard reads it, never by the branch name."""
+    ARCH_COPY_TIP. `answers` maps each archive/ ref the listing holds (its full name) to the status of that ref's compare with
+    the tip, so a listed copy and its compare are one answer. The compare key names the tip by sha, never by the branch."""
+    compares = {"main..." + ARCH_COPY_BRANCH: "ahead"}
+    compares.update({name + "..." + ARCH_COPY_TIP: status for name, status in answers.items()})
     return {
         "tips": {ARCH_COPY_BRANCH: ARCH_COPY_TIP},
-        "compares": {"main..." + ARCH_COPY_BRANCH: "ahead",
-                     "archive/" + ARCH_COPY_BRANCH + "..." + ARCH_COPY_TIP: archive},
+        "refs": list(answers),
+        "compares": compares,
         "others": list(others),
     }
+
+
+def arch_copy(archive, others=()):
+    """The repo of a lane whose branch ARCH_COPY_BRANCH is ahead of main on no pull request, with its archive/<branch> copy
+    answering `archive`: "identical" when the copy holds the tip, "ahead" when it is older, "missing" when there is no copy.
+    A "missing" copy is not listed, so the listing answers []. Its compare still answers 404 for a direct read of the copy, so
+    a guard that compared the copy without the listing would read it as unreadable, and fail the case that names it."""
+    if archive == "missing":
+        copy = arch_copies({}, others)
+        copy["compares"][ARCH_COPY_REF + "..." + ARCH_COPY_TIP] = "missing"
+        return copy
+    return arch_copies({ARCH_COPY_REF: archive}, others)
 
 
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
@@ -1603,6 +1622,12 @@ def build_fixtures():
     make_fake_gh(ARCHCOPY_IDENT, "main", repos={"o/r": arch_copy("identical")})
     make_fake_gh(ARCHCOPY_AHEAD, "main", repos={"o/r": arch_copy("ahead")})
     make_fake_gh(ARCHCOPY_MISSING, "main", repos={"o/r": arch_copy("missing")})
+    make_fake_gh(ARCHCOPY_NUMBERED, "main", repos={"o/r": arch_copies({ARCH_COPY_REF: "diverged",
+                                                                       ARCH_COPY_REF + "-2": "identical"})})
+    make_fake_gh(ARCHCOPY_NUMBERED_NONE, "main", repos={"o/r": arch_copies({ARCH_COPY_REF: "diverged",
+                                                                            ARCH_COPY_REF + "-2": "ahead"})})
+    make_fake_gh(ARCHCOPY_LOOKALIKE, "main", repos={"o/r": arch_copies({ARCH_COPY_REF + "y": "identical"})})
+    make_fake_gh(ARCHCOPY_SUFFIX_R2, "main", repos={"o/r": arch_copies({ARCH_COPY_REF + "-r2": "identical"})})
     make_fake_gh(ARCHINC_OPEN, "main", repos=arch_pair(qmax={"others": [arch_row(ARCH_BRANCH, 24)]}))
     make_fake_gh(ARCHINC_BEHIND, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "behind"}}))
     make_fake_gh(ARCHINC_IDENT, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "identical"}}))
@@ -11553,6 +11578,8 @@ FAMILY = "lane-closes-after-records"
 #   - a lane whose record names branches (external_metadata.current_branches): each branch ahead of its repo's
 #     default branch, on no pull request in any state, refuses. A 404 on the branch's compare means the branch is not
 #     in that repo. Any other failed read refuses. A branch equal to the default, or behind it, or archive/..., is skipped.
+#     A branch whose archive copy holds its tip is covered. The copies are listed under archive/<branch>, and only the
+#     exact name and `<branch>-<digits>` count; a listed copy under any other name is never compared.
 # The allows are as load-bearing as the refusals: a false alarm on a finished lane blocks the batch runner.
 ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
 ARCHIVE_RULE = "lane-closes-after-records"
@@ -11803,19 +11830,32 @@ archive_allow("a lane branch closed unmerged, replaced by a merged pull request 
 archive_refuse("a lane branch closed unmerged, replaced by a merged pull request whose head does not hold the tip, is refused",
                role_path("archive-lane"), fake_gh_path(ARCHLEFT_REPLACED_AHEAD), carries=("open a pull request", "push an archive copy"),
                lacks=("could not be read",))
-# A lane branch ahead of main on no pull request is covered by its archive/ copy when the copy holds the tip. The two cases
-# differ in one value: the copy's compare with the tip. The control's refusal is the plain no-pull-request one, so it shows
-# the fixture reads cleanly, and the case's red is the copy the guard does not read.
+# A lane branch ahead of main on no pull request is covered by its archive/ copy when the copy holds the tip. The copy is
+# listed by the prefix read of archive/<branch>, then compared with the tip. The two cases differ in one value: that compare.
 archive_allow("a lane branch ahead on no pull request, whose archive/ copy holds its tip, is allowed",
               role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_IDENT))
 archive_refuse("a lane branch ahead on no pull request, whose archive/ copy is at an older tip, is refused as no pull request",
                role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_AHEAD), carries=ARCHIVE_NOPR_PIN,
                lacks=(ARCH_COPY_BRANCH, "could not be read"))
-# No archive/ copy at all: GitHub's compare answers 404. The refusal is the plain no-pull-request one, not a failed read.
-# This passes on the old code, which never reads the copy. It pins the build: a read that raised on the 404 would
-# refuse as "could not be read" and fail here.
+# No archive/ copy at all: the listing answers []. The refusal is the plain no-pull-request one, not a failed read.
+# A guard that read an empty listing as a failure would refuse as "could not be read" and fail here.
 archive_refuse("a lane branch ahead on no pull request, with no archive/ copy, is refused as no pull request",
                role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_MISSING), carries=ARCHIVE_NOPR_PIN,
+               lacks=(ARCH_COPY_BRANCH, "could not be read"))
+# The copy under archive/<branch>-2 holds the tip, and the exact copy is diverged: the -2 copy is one the guard counts.
+# Red on the old code, which compares only the exact copy.
+archive_allow("a lane branch ahead on no pull request, whose archive/<branch>-2 copy holds its tip, is allowed though archive/<branch> is diverged",
+              role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_NUMBERED))
+# Neither counted copy holds the tip: the exact copy is diverged and the -2 copy is ahead. Refused as no pull request.
+archive_refuse("a lane branch ahead on no pull request, whose counted copies both miss its tip, is refused as no pull request",
+               role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_NUMBERED_NONE), carries=ARCHIVE_NOPR_PIN,
+               lacks=(ARCH_COPY_BRANCH, "could not be read"))
+# A listed copy under a name that is neither the exact one nor `-<digits>` is not counted, though it holds the tip.
+archive_refuse("a lane branch ahead on no pull request, whose only copy is archive/<branch>y holding its tip, is refused as no pull request",
+               role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_LOOKALIKE), carries=ARCHIVE_NOPR_PIN,
+               lacks=(ARCH_COPY_BRANCH, "could not be read"))
+archive_refuse("a lane branch ahead on no pull request, whose only copy is archive/<branch>-r2 holding its tip, is refused as no pull request",
+               role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_SUFFIX_R2), carries=ARCHIVE_NOPR_PIN,
                lacks=(ARCH_COPY_BRANCH, "could not be read"))
 archive_refuse("a current_branches value that is an int is refused, and the reason says the read failed",
                role_path("archive-inc-branch-int"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN,
@@ -16652,19 +16692,28 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane whose record names a
 
 
 def archive_copy_reads_case():
-    """The archive copy of a stranded branch is read once, on the refusal path. A branch ahead on no pull request reads its
-    archive/ copy once, as one compare of archive/<branch> with the tip, and the copy at an older tip refuses on that
-    branch. A branch on an open pull request reads no copy, because that pull request covers it before any copy is read.
-    Each run takes its own call log, and a copy read is a call whose route names archive/."""
-    stranded = archive_counted_gh(repos={"o/r": arch_copy("ahead")}, name="archcount-copy-stranded")
+    """The archive copies of a stranded branch are listed once, and only the counted ones are compared with the tip. The
+    listing is one matching-refs read of archive/<branch>. It holds four refs: the exact copy and archive/<branch>-2 are
+    counted, each compared once; archive/<branch>y, which holds the tip, and archive/<branch>-r2 are listed and never
+    compared. The branch is ahead on no pull request, so the refusal stands. A branch on an open pull request reads no
+    copy at all, because that pull request covers it before any copy is read. Each run takes its own call log, and a copy
+    read is a call whose route names archive/."""
+    stranded = archive_counted_gh(repos={"o/r": arch_copies({
+        ARCH_COPY_REF: "diverged", ARCH_COPY_REF + "-2": "ahead",
+        ARCH_COPY_REF + "y": "identical", ARCH_COPY_REF + "-r2": "identical"})}, name="archcount-copy-stranded")
     gh_calls_taken(stranded)
     decision, reason = archive_judged(role_path("archive-copy-lane"), stranded)
     calls = gh_calls_taken(stranded)
     if decision != "deny" or ARCHIVE_NOPR_PIN[0] not in (reason or ""):
-        return False, "the older-tip copy: %s (%r), want a refusal for no pull request" % (decision, reason)
-    copies = [call for call in calls if "/compare/archive/" in _gh_route(call)]
-    if len(copies) != 1:
-        return False, "the refusal path read the archive copy %d times, want once: %r" % (len(copies), copies)
+        return False, "the copies that miss the tip: %s (%r), want a refusal for no pull request" % (decision, reason)
+    listings = [call for call in calls if _gh_route(call).endswith("/git/matching-refs/heads/" + ARCH_COPY_REF)]
+    if len(listings) != 1:
+        return False, "the refusal path listed the archive copies %d times, want once: %r" % (len(listings), calls)
+    compared = sorted(_gh_route(call).split("/compare/", 1)[1] for call in calls if "/compare/archive/" in _gh_route(call))
+    want = sorted([ARCH_COPY_REF + "..." + ARCH_COPY_TIP, ARCH_COPY_REF + "-2..." + ARCH_COPY_TIP])
+    if compared != want:
+        return False, "the archive copies compared were %r, want the exact copy and the -2 copy only, each once: %r" % (
+            compared, want)
     covered = archive_counted_gh(repos={"o/r": arch_copy("identical", others=[arch_row(ARCH_COPY_BRANCH, 41)])},
                                  name="archcount-copy-covered")
     gh_calls_taken(covered)
@@ -16672,10 +16721,10 @@ def archive_copy_reads_case():
     calls = gh_calls_taken(covered)
     if decision != "allow" or reason:
         return False, "a branch on an open pull request: %s (%r), want allowed" % (decision, reason)
-    copies = [call for call in calls if "/compare/archive/" in _gh_route(call)]
-    if copies:
-        return False, "a branch on an open pull request read its archive copy %d times, want none: %r" % (len(copies), copies)
-    return True, "the refusal path reads the archive copy once; a branch on an open pull request reads none"
+    touched = [call for call in calls if "/compare/archive/" in _gh_route(call) or "/git/matching-refs/heads/archive/" in _gh_route(call)]
+    if touched:
+        return False, "a branch on an open pull request read its archive copies %d times, want none: %r" % (len(touched), touched)
+    return True, "the refusal path lists the archive copies once and compares the two counted ones once each; a branch on an open pull request reads none"
 
 
 LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an archive copy of a stranded branch is read once, and not on an open pull request",
