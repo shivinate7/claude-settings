@@ -2789,9 +2789,10 @@ def plumbing_diff(root: str, top: str, role: str, args):
     else:
         old = parents[0]
         if len(parents) > 1:
-            old = merge_tree(root, parents[0], parents[1])
-            if old is None:
+            merged = merge_tree(root, parents[0], parents[1])
+            if merged is None:
                 return None
+            old = merged[0]
         paths = changed_paths(root, old, tree, top)
     if paths is None:
         return None
