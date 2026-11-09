@@ -76,6 +76,9 @@ TOKEN = "ghp_" + TAIL  # a GitHub-token shape, built at run time
 MAIL = "person.name" + "@" + "example.com"  # a personal-email shape, built at run time
 PASSWORD = "hunter2"  # a password value; the URLs below join it at run time, so no credential URL is a literal here
 SUP_PASSWORD = "Sup3r" + "S3cret"  # letters, digits and capitals, joined from parts, for the concatenated and templated URL rows
+HUNTER_PASSWORD = "Hunter" + "2xx"  # a literal password, joined from parts, for the templated-user URL rows
+QUOTE_PASSWORD = "O'" + "Neil2020"  # a literal password that holds a single quote, joined from parts
+QUOTE_IN_PASSWORD = 'p"' + "ss"  # a literal password that holds a double quote, joined from parts
 DB_IP_URL = "postgres://app:" + PASSWORD + "@10.0.0.5:5432/db"  # credentials on an IP host, with a port
 BUILD_IP_URL = "https://svc:" + PASSWORD + "@10.0.0.5/build"  # credentials on an IP host, with no port
 DB_NAME_URL = "postgres://app:" + PASSWORD + "@db.example.com:5432/db"  # the control: a host name refuses today
@@ -365,7 +368,36 @@ RED = [
      'f"postgres://{user}:' + SUP_PASSWORD + '@{host}/app"', SUP_PASSWORD),
     ("postgres URL with a shell-variable user, a literal password and a braced template host",
      "postgres://${USER}:" + SUP_PASSWORD + "@{db_host}/app", SUP_PASSWORD),
+    # A templated user that is not a whole {word} does not make the password a placeholder. The literal after the user's
+    # colon is the credential, whatever the template form and whatever the dotted host. Today the email rule refuses these
+    # rows, since Hunter2xx@db.example.com reads as an address; the family after the postgres rows is the one that pins
+    # the URL-credentials rule.
+    ("postgres URL with an attribute user, a literal password and a dotted host",
+     "postgres://{cfg.user}:" + HUNTER_PASSWORD + "@db.example.com/app", HUNTER_PASSWORD),
+    ("postgres URL with a self attribute user, a literal password and a dotted host",
+     "postgres://{self.user}:" + HUNTER_PASSWORD + "@db.example.com/app", HUNTER_PASSWORD),
+    ("postgres URL with a double-braced user, a literal password and a dotted host",
+     "postgres://{{user}}:" + HUNTER_PASSWORD + "@db.example.com/app", HUNTER_PASSWORD),
+    ("postgres URL with a percent-format user, a literal password and a dotted host",
+     "postgres://%(user)s:" + HUNTER_PASSWORD + "@db.example.com/app", HUNTER_PASSWORD),
+    ("postgres URL with a dotted shell-variable user, a literal password and a dotted host",
+     "postgres://${var.db_user}:" + HUNTER_PASSWORD + "@db.example.com/app", HUNTER_PASSWORD),
+    ("postgres URL with a conversion-flag user, a literal password and a dotted host",
+     "postgres://{user!r}:" + HUNTER_PASSWORD + "@db.example.com/app", HUNTER_PASSWORD),
+    ("postgres URL with an indexed user, a literal password and a dotted host",
+     "postgres://{cfg[user]}:" + HUNTER_PASSWORD + "@db.example.com/app", HUNTER_PASSWORD),
+    # A literal password may hold a quote. The quote sits in the password, so a quote or a brace after the @ is still a host.
+    ("postgres URL with a quote in the literal password, then @ and a quote and a plus",
+     "postgres://admin:" + QUOTE_PASSWORD + '@"+h', QUOTE_PASSWORD),
+    ("f-string URL with a double quote in the literal password and a braced template host",
+     'f"postgres://admin:' + QUOTE_IN_PASSWORD + '@{host}/db"', QUOTE_IN_PASSWORD),
 ]
+# A paren in the password keeps the email rule from reading the dotted host as an address, so only the URL-credentials rule
+# can refuse these. Each templated user form must refuse on its own.
+TEMPLATED_USERS = ("{cfg.user}", "{self.user}", "{{user}}", "%(user)s", "${var.db_user}", "{user!r}", "{cfg[user]}")
+RED += [("templated user %s, a literal password with a paren and a dotted host" % user,
+         "postgres://" + user + ":" + HUNTER_PASSWORD + "(@db.example.com/app", HUNTER_PASSWORD + "(")
+        for user in TEMPLATED_USERS]
 # Dashed and short vendor-style keys, each set in four credential-name carriers. Each value is joined from parts, so no
 # key-looking literal sits whole in the source. A hyphen-joined value of letters and digits is a key shape, so the
 # hyphen-words rule must not pass it. The underscored row and the six-character last part are refused today; they pin
