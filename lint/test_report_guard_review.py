@@ -401,6 +401,19 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertTrue(merge_mod.review_marked(body), "fixture: merge does not read the marker line with trailing spaces as the marker")
         self.assert_record_satisfies_claim(body)
 
+    def test_a_subfolder_cwd_reads_the_same_cutover_as_the_repo_root(self):
+        # Catches: the cutover read run from a subfolder of the checkout, `git -C <subfolder>` reading merge/merge.py as a path under the
+        # subfolder. The cutover is then none, and an unstamped record from before the cutover refuses. The control is the case below,
+        # run from the root: the same record passes there, so the subfolder run is the one that differs.
+        self.cutover_history("fixture")
+        self.assertEqual(self.in_process_cutover("fixture"), CUTOVER,
+                         "fixture: the cutover from the root is not the time of the commit that adds the salt line")
+        body = unstamped(record())
+        self.serve(comments=[{"body": body, "created_at": BEFORE}], base="fixture", default_branch="fixture")
+        out = self.stop(self.lane_turn(report(CLAIM)), cwd=os.path.join(self.repo, "merge"))
+        self.assert_reads_of(PR)
+        self.assertIsNone(out, "a run from a subfolder refused an unstamped record from before the cutover:\n" + str(out))
+
     def test_an_unstamped_done_record_created_before_the_cutover_satisfies_a_pass_claim(self):
         # Catches: a record made before the stamp's merge, with no Stamp line, read as no record, so a lane's PASS claim on its
         # pull request is refused. merge --reviewed reads the same record as done.
@@ -414,19 +427,6 @@ class ReviewRecordTests(unittest.TestCase):
         out = self.stop(self.lane_turn(report(CLAIM)))
         self.assert_reads_of(PR)
         self.assertIsNone(out, out)
-
-    def test_a_subfolder_cwd_reads_the_same_cutover_as_the_repo_root(self):
-        # Catches: the cutover read run from a subfolder of the checkout, `git -C <subfolder>` reading merge/merge.py as a path under the
-        # subfolder. The cutover is then none, and an unstamped record from before the cutover refuses. The case above, run from the
-        # root, is the control: the same record passes there, so the subfolder run is the one that differs.
-        self.cutover_history("fixture")
-        self.assertEqual(self.in_process_cutover("fixture"), CUTOVER,
-                         "fixture: the cutover from the root is not the time of the commit that adds the salt line")
-        body = unstamped(record())
-        self.serve(comments=[{"body": body, "created_at": BEFORE}], base="fixture", default_branch="fixture")
-        out = self.stop(self.lane_turn(report(CLAIM)), cwd=os.path.join(self.repo, "merge"))
-        self.assert_reads_of(PR)
-        self.assertIsNone(out, "a run from a subfolder refused an unstamped record from before the cutover:\n" + str(out))
 
     def test_an_unstamped_record_created_after_the_cutover_blocks_a_pass_claim(self):
         # Catches: the cutover letting a record made after the stamp's merge through with no Stamp line.
