@@ -22820,6 +22820,61 @@ repo_case("a -C naming another checkout inside bash -c is denied", "deny",
           f"bash -c '{MERGE_SHIM} -C {REPO_B} 5 --confirm'", LANE_REPO, TX_RUNNER)
 repo_case("a merge in a subshell inside the tagged checkout is allowed", "allow",
           f"({MERGE_SHIM} 5 --confirm)", LANE_REPO, TX_RUNNER)
+# Decision merge-confirm-repo, the merge target's checkout rule. A merge's arguments end at a token that ends in `)` or `&` only when
+# that token is not quoted. A quoted reason that ends in one of them is text, so the flags after it are read and judged: a -C or
+# --confirm after the reason is not hidden. A real subshell close, unquoted, still ends the merge's arguments.
+repo_case("a reason ending in ) before -C naming another checkout is denied", "deny",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "flaky (x)" -C {REPO_B}', REPO_A, TX_A)
+repo_case("--confirm after a reason ending in ) beside -C naming another checkout is denied", "deny",
+          f'{MERGE_SHIM} -C {REPO_B} 5 --base-red-ok "flaky (x)" --confirm', REPO_A, TX_A)
+repo_case("a --session name ending in ) before -C naming another checkout is denied", "deny",
+          f'{MERGE_SHIM} 5 --confirm --session "batch (main)" -C {REPO_B}', REPO_A, TX_A)
+repo_case("a reason ending in & before -C naming another checkout is denied", "deny",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "R&" -C {REPO_B}', REPO_A, TX_A)
+repo_case("a reason ending in ) in its quotes is allowed when it names this checkout", "allow",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "owner, 06:11 CST)"', REPO_A, TX_A)
+repo_case("a real subshell close after a reason is allowed when the own record names this checkout", "allow",
+          f"({MERGE_SHIM} 5 --confirm --base-red-ok fixlane)", LANE_REPO, TX_RUNNER)
+# A subshell around the merge, and quote forms the reader of a reason's quoted text may miss: adjacent quoted pieces, an escaped quote,
+# and an apostrophe inside double quotes. Each reason ends in `)` inside its quotes, so the -C after it is read and judged: a checkout
+# that is not the own record's is denied. Each form's control names this checkout instead, and is allowed: the deny turns on the -C.
+repo_case("a subshell whose reason ends in ) before a -C naming another checkout is denied", "deny",
+          f'({MERGE_SHIM} 5 --confirm --base-red-ok "flaky (x)" -C "{REPO_B}")', REPO_A, TX_A)
+repo_case("adjacent quoted pieces ending in ) before -C naming another checkout are denied", "deny",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "a""b (x)" -C {REPO_B}', REPO_A, TX_A)
+repo_case("an escaped quote in a reason ending in ) before -C naming another checkout is denied", "deny",
+          rf'{MERGE_SHIM} 5 --confirm --base-red-ok "say \"x\" (y)" -C {REPO_B}', REPO_A, TX_A)
+repo_case("an apostrophe in a double-quoted reason ending in ) before -C naming another checkout is denied", "deny",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "can\'t merge (x)" -C {REPO_B}', REPO_A, TX_A)
+repo_case("an apostrophe in a double-quoted reason ending in ) before -C naming this checkout is allowed", "allow",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "can\'t merge (x)" -C {REPO_A}', REPO_A, TX_A)
+repo_case("a subshell whose reason ends in ) before a -C naming this checkout is allowed", "allow",
+          f'({MERGE_SHIM} 5 --confirm --base-red-ok "flaky (x)" -C "{REPO_A}")', REPO_A, TX_A)
+repo_case("adjacent quoted pieces ending in ) before -C naming this checkout are allowed", "allow",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "a""b (x)" -C {REPO_A}', REPO_A, TX_A)
+repo_case("an escaped quote in a reason ending in ) before -C naming this checkout is allowed", "allow",
+          rf'{MERGE_SHIM} 5 --confirm --base-red-ok "say \"x\" (y)" -C {REPO_A}', REPO_A, TX_A)
+# A `#` in a quoted reason, a reason that spans a newline, and a quote that never closes. The `#` and the newline are text inside the
+# quotes, so the -C after the reason is read and judged. A quote that never closes has no end to read: the merge is denied whatever -C
+# names. Its control closes the quote and names this checkout.
+repo_case("a # in a reason ending in ) before -C naming another checkout is denied", "deny",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "see #5 (x)" -C {REPO_B}', REPO_A, TX_A)
+repo_case("a # in a reason ending in ) before -C naming this checkout is allowed", "allow",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "see #5 (x)" -C {REPO_A}', REPO_A, TX_A)
+repo_case("a reason across a newline ending in ) before -C naming another checkout is denied", "deny",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "line one\nflaky (x)" -C {REPO_B}', REPO_A, TX_A)
+repo_case("a reason across a newline ending in ) before -C naming this checkout is allowed", "allow",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "line one\nflaky (x)" -C {REPO_A}', REPO_A, TX_A)
+repo_case("an unclosed quote in a reason before -C naming another checkout is denied", "deny",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "flaky (x) -C {REPO_B}', REPO_A, TX_A)
+# An open quote is judged only when the segment names --confirm: the merge tool cannot confirm without that flag. An apostrophe in
+# echo text opens no merge, so the text that names merge and --confirm is not judged either.
+repo_case("an open quote with no --confirm naming another checkout is not judged", "allow",
+          f'{MERGE_SHIM} 5 --base-red-ok "flaky (x) -C {REPO_B}', REPO_A, TX_A)
+repo_case("an apostrophe in echo text that names merge --confirm is not judged", "allow",
+          "echo it's merge 5 --confirm", REPO_A, TX_A)
+repo_case("a reason ending in ) in closed quotes before -C naming this checkout is allowed", "allow",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "flaky (x)" -C {REPO_A}', REPO_A, TX_A)
 # Not judged: a merge named in quoted text, --lane-lint (no lock, no merge), and any session outside the cloud.
 repo_case("a merge named in a quoted echo is not judged", "allow", f"echo '{MERGE_SHIM} --repo-dir {REPO_B} 5 --confirm'", REPO_A, TX_A)
 repo_case("--lane-lint is not judged, whatever the record", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir {REPO_B} 5", REPO_A, TX_NONE)
