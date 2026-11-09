@@ -209,9 +209,16 @@ def unstamped(text):
 BEFORE = "2026-10-02T00:00:00Z"   # a comment created before the cutover
 AFTER = "2026-11-01T00:00:00Z"    # a comment created after the cutover
 CUTOVER = "2026-10-21T15:04:05Z"  # the committer time of the commit that adds the salt line
+EDIT_EARLY = "2026-10-05T00:00:00Z"  # an edit made after BEFORE and before AFTER
+EDIT_LATE = "2026-11-02T00:00:00Z"  # an edit made after AFTER
 CUTOVER_GIT_DATE = "2026-10-21 15:04:05 +0000"
 PRE_SALT_SOURCE = "def f():\n    return 1\n"
 SALT_SOURCE = 'REVIEW_STAMP_SALT = "claude-settings review record stamp v1"\n' + "def f():\n    return 2\n"
+
+
+def edited_unstamped():
+    """The record with no Stamp line, as a comment created before the cutover and edited after it: no cutover reads it as an edit."""
+    return {"body": unstamped(record()), "created_at": BEFORE, "updated_at": AFTER}
 
 
 def setUpModule():
@@ -463,7 +470,61 @@ class ReviewRecordTests(unittest.TestCase):
         # Catches: a record created before the cutover and edited after it, with no Stamp line, read as made before the cutover.
         self.cutover_history("fixture")
         self.serve(comments=[{"body": unstamped(record()), "created_at": BEFORE, "updated_at": AFTER}], base="fixture")
-        self.assert_blocked(self.stop(self.lane_turn(report(CLAIM))))
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assert_blocked(out)
+        # With a cutover, an edited record names no Stamp line: the cutover, not the Stamp line, decides its cause.
+        self.assertNotIn("Stamp line", out["reason"], "the refusal names the Stamp line with a cutover set: %r" % out["reason"])
+
+    def test_a_hand_edited_newest_record_blocks_a_pass_claim(self):
+        # Catches: _newest_record taking the newest record without its edit, so a record that merge --reviewed reads bad (its updated_at
+        # differs from its created_at) satisfies a PASS claim. The body alone reads done, so only the edit can block the claim.
+        body = record()
+        self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body), LIVE)[0], "done",
+                         "fixture: merge/merge.py does not call the body done with no edit")
+        self.serve(comments=[{"body": body, "created_at": BEFORE, "updated_at": AFTER}])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assertIsNotNone(out, "the PASS claim passed on a hand-edited newest record, which merge --reviewed reads bad")
+        self.assert_blocked(out)
+        self.assertIn("PR #12", out["reason"], out)
+        # A stamped record names no Stamp line, though it is edited with no cutover: the Stamp line is there, so no cause names it.
+        self.assertNotIn("Stamp line", out["reason"], "the refusal names the Stamp line for a stamped record: %r" % out["reason"])
+
+    def test_an_unedited_newest_record_satisfies_a_pass_claim(self):
+        # The control: the same body, with updated_at equal to created_at, is no edit, and it satisfies the claim on two reads.
+        self.serve(comments=[{"body": record(), "created_at": BEFORE, "updated_at": BEFORE}])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_two_rest_reads()
+        self.assertIsNone(out, out)
+
+    def test_an_edited_comment_newer_than_the_newest_record_blocks_a_pass_claim(self):
+        # Catches: the newest-record read (merge/merge.py review_newest, through _newest_record) reading only the marked comments,
+        # so a comment newer than the record that was edited passes a PASS claim. A stripped record and an edited comment look the
+        # same to the tool, so the edit blocks the claim (decision pr-review-record).
+        lgtm = {"body": "LGTM", "created_at": AFTER, "updated_at": EDIT_LATE}
+        self.serve(comments=[{"body": record(), "created_at": BEFORE}, lgtm])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assertIsNotNone(out, "a PASS claim passed with an edited comment newer than the newest record")
+        self.assert_blocked(out)
+        self.assertIn("PR #12", out["reason"], out)
+
+    def test_an_unedited_comment_newer_than_the_newest_record_satisfies_a_pass_claim(self):
+        # The control: the same comment, never edited, is no edit, so the record it follows still satisfies the claim.
+        lgtm = {"body": "LGTM", "created_at": AFTER, "updated_at": AFTER}
+        self.serve(comments=[{"body": record(), "created_at": BEFORE}, lgtm])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_two_rest_reads()
+        self.assertIsNone(out, out)
+
+    def test_an_edited_comment_older_than_the_newest_record_satisfies_a_pass_claim(self):
+        # The control: an edited comment below the newest record does not count, so the record satisfies the claim.
+        lgtm = {"body": "LGTM", "created_at": BEFORE, "updated_at": EDIT_EARLY}
+        self.serve(comments=[lgtm, {"body": record(), "created_at": AFTER}])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_two_rest_reads()
+        self.assertIsNone(out, out)
 
     def test_record_whose_rounds_hold_no_pass_does_not_satisfy_a_pass_claim(self):
         # Catches: a record for the live head read as satisfying a PASS claim when none of its rounds passed.
@@ -528,7 +589,7 @@ class ReviewRecordTests(unittest.TestCase):
     def test_unstamped_record_with_no_cutover_is_refused_and_the_remedy_names_the_stamp_line(self):
         # Catches: the refusal of an unstamped record in a repo with no cutover, whose text names no Stamp line, so the
         # reviewer is not told what the record lacks. The render command stays in the remedy.
-        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: a cutover is set for main")
+        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: no cutover is set for main")
         body = unstamped(record())
         self.assertIsNone(merge_mod.parse_review(body, None, None), "fixture: merge reads the unstamped record with no cutover")
         self.serve(comments=[body])
@@ -536,6 +597,30 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_blocked(out)
         self.assertIn("merge 12 --review-record", out["reason"], out)
         self.assertIn("Stamp", out["reason"], "the refusal names no Stamp line for a record that has none:\n" + out["reason"])
+
+    def test_an_edited_unstamped_record_with_no_cutover_is_refused_and_the_remedy_names_the_stamp_line(self):
+        # Catches: _newest_record returning (None, None) for an edited newest record, so the refusal of an unstamped record with no
+        # cutover names the no-record cause, not the Stamp line that merge's parse of the same body requires. The unedited twin
+        # above names the Stamp line.
+        comment = edited_unstamped()
+        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: no cutover is set for main")
+        self.assertIsNone(merge_mod.parse_review(comment["body"], None, None), "fixture: merge reads the unstamped record with no cutover")
+        self.assertIsNotNone(merge_mod.review_newest([comment])[1], "fixture: merge does not call the edited newest record untrusted")
+        self.serve(comments=[comment])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assert_blocked(out)
+        self.assertIn("merge 12 --review-record", out["reason"], out)
+        self.assertIn("Stamp line", out["reason"],
+                      "the refusal names no Stamp line for an edited unstamped record with no cutover:\n" + out["reason"])
+
+    def test_an_edited_unstamped_record_with_no_cutover_still_refuses_a_pass_claim(self):
+        # The control: the same edited, unstamped record is refused on two reads, never accepted.
+        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: no cutover is set for main")
+        self.serve(comments=[edited_unstamped()])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assert_blocked(out)
 
     def test_full_size_comment_list_without_a_record_blocks(self):
         # Full size: 101 comments, none a record. The check reads them all, then blocks.
@@ -703,7 +788,7 @@ class ReviewRecordTests(unittest.TestCase):
         # Catches: an unstamped record with a note after its CI line, and no cutover, named with the CI-line cause. The record
         # has no Stamp line, so the Stamp cause is the one to name.
         body = unstamped(record()) + "\n" + INCIDENT_NOTE + "\n"
-        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: a cutover is set for main")
+        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: no cutover is set for main")
         self.assertIsNone(merge_mod.parse_review(body, None, None), "fixture: merge reads the record with a note after the CI line")
         self.serve(comments=[body])
         out = self.stop(self.lane_turn(report(CLAIM)))

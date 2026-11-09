@@ -332,16 +332,18 @@ def undrafted_pr_create(segment: str) -> bool:
 # ---- a review record posted as a comment (rule pr-review-record)
 #
 # A body whose first line is the record marker must parse as a record (merge/merge.py `parse_review`, the one home of the form).
-# That is the form check, `review_form_hit`: the render output as it is, or with a footer after a line exactly `---` and
-# no text between the CI line and `---`. A post, and a shell edit in place (`gh api -X PATCH`), are both judged for form. A post must also name the pull request it is posted
-# on and name that pull request's live head (`review_record_hit`). A hand-typed head is how a record goes stale the moment it is
+# That is the form check, inside `review_record_hit`: the render output as it is, or with a footer after a line exactly `---` and
+# no text between the CI line and `---`. A post must also name the pull request it is posted
+# on and name that pull request's live head. A hand-typed head is how a record goes stale the moment it is
 # posted. The remedy is the render, which fills the live head itself.
+# An edit of a comment (`gh api` on issues/comments/<id>, `--edit-last`, the MCP update tool) whose new body is marked is refused
+# after the form check, stamped or not. Any other edit, also one whose new body the guard cannot see (`--input`, stdin), reads the
+# old body once and is refused when that holds a record, or when the read could not run. A body file that cannot be read refuses the edit.
 # Cost: the form check reads no pull request and no file. One pull request read per marked post that passes it (`Host.pr`), none
-# for a post with no marker. A marked update through the MCP tool adds one comment read (its input names a comment, not a pull request);
-# a shell edit in place makes no read. A read that fails allows the
+# for a post with no marker. A marked edit makes no read; any other edit makes one (a bare `--edit-last` lists the open pull requests first). A read that fails allows the
 # post with a note on stderr: a network blip must not block every post. A malformed body is refused before any read.
 REVIEW_COMMENT_TOOL = "mcp__github__add_issue_comment"
-# The update tool's input names a comment, not a pull request: the pull request comes from one read of the comment.
+# The update tool replaces a comment's text: a marked body is refused as an edit (REVIEW_EDIT_REASON).
 UPDATE_COMMENT_TOOL = "mcp__github__update_issue_comment"
 # The host's file-write tools each push a commit to the `branch` they name, as `git push` does.
 FILE_WRITE_TOOLS = ("mcp__github__push_files", "mcp__github__create_or_update_file", "mcp__github__delete_file")
@@ -358,6 +360,53 @@ REVIEW_FORM_REASON = (
     "with no text between the CI line and `---`. "
     "(decision pr-review-record, a review record must parse)"
 )
+REVIEW_EDIT_REASON = (
+    "Rule (pr-review-record): an edit of a comment whose new body is a review record is refused, stamped or not. "
+    "A record is rendered by the merge tool for the live head, and an edited one was rendered by no run. "
+    "Remedy: post a fresh record. Run `%s` and post its output as a new comment. "
+    "(decision pr-review-record, an edit of a record comment is refused)"
+)
+REVIEW_WITHDRAW_REASON = (
+    "Rule (pr-review-record): this edit would overwrite a comment that holds a review record, so the record would be gone. "
+    "A record is never edited into a note. "
+    "Remedy: post a separate withdrawal comment, then post a fresh record. Run `%s` and post its output as a new comment. "
+    "(decision pr-review-record, an edit of a record comment is refused)"
+)
+REVIEW_OLD_UNREAD_REASON = (
+    "Rule (pr-review-record): the read of the comment's current body could not run (%s), so the edit is refused. "
+    "The old body may hold a review record. "
+    "Remedy: %s "
+    "(decision pr-review-record, hooks fail closed on a read that cannot run)"
+)
+REVIEW_UNREAD_REMEDY = "run the edit again when `gh` can read the comment, or post a new comment."
+REVIEW_LITERAL_ID_REMEDY = ("write the route with a literal `owner/repo` and a literal comment id, such as repos/owner/repo/issues/comments/<id>, "
+                            "or with the `{owner}/{repo}` placeholder, not a shell variable or `$(...)`; the guard then reads that route. "
+                            "Or post a new comment.")
+REVIEW_LITERAL_PR_REMEDY = ("write the PR number literally and the repo as a literal `-R owner/repo`, "
+                            "such as `gh pr comment <number> -R owner/repo --edit-last`, not a shell expansion such as $PR; "
+                            "the guard then reads that pull request. Or post a new comment.")
+REVIEW_LITERAL_REPO_REMEDY = ("write the repo, OWNER/NAME, literally, as `-R owner/repo` on the call, "
+                              "such as `gh pr comment <number> -R owner/repo --edit-last`, not a shell expansion such as $REPO. "
+                              "Or post a new comment.")
+REVIEW_BODY_FILE_REASON = (
+    "Rule (pr-review-record): the new body's file %s could not be read, so the check could not run and the edit is refused. "
+    "The body may be a review record. "
+    "Remedy: name a body file that exists and can be read, or post the text with `--body`. "
+    "(decision pr-review-record, hooks fail closed on a read that cannot run)"
+)
+
+
+def shell_expanded(text) -> bool:
+    """True when `text` holds a shell expansion (`$X`, `${X}`, `$(..)`, `$((..))`, a backtick) the guard sees before the shell fills it."""
+    return "$" in str(text) or "`" in str(text)
+
+
+class _LiteralIdNeeded(RuntimeError):
+    """The route's repo or comment id, or the pull request number, is not a literal the guard can read, such as a shell variable or `$(...)`. `remedy` tells the caller what to write."""
+
+    def __init__(self, message, remedy):
+        super().__init__(message)
+        self.remedy = remedy
 
 
 _ANSI_ESCAPE = re.compile(
@@ -398,19 +447,6 @@ def review_note(why: str) -> None:
     sys.stderr.write("review-record: not checked, " + why + "\n")
 
 
-def comment_pull_request(comment_id):
-    """A selector for review_record_hit: the pull request number a conversation comment sits on, from one read of the comment."""
-    def read(host):
-        code, out = host.api("issues/comments/%d" % comment_id)
-        if code:
-            raise RuntimeError("reading the comment failed")
-        found = re.search(r"/issues/(\d+)$", str(json.loads(out).get("issue_url", "")))
-        if not found:
-            raise RuntimeError("the comment names no issue")
-        return found.group(1)
-    return read
-
-
 def _review_render(module, number, head):
     return REVIEW_RENDER % (number, head, "|".join(module.REVIEW_KINDS), "|".join(module.REVIEW_GUARDS))
 
@@ -436,36 +472,118 @@ def _unparsed(module, marked):
 def _form_reason(module, selector):
     """Return (matched, reason) for a record that does not parse. The refusal sits one call below its two callers, so the
     rule audit reads its reason within its depth limit."""
-    named = "" if callable(selector) else str(selector).strip()
+    named = str(selector).strip()
     return "review record that does not parse", REVIEW_FORM_REASON % _review_render(
         module, named if named.isdigit() else "<pr>", "<live head>")
 
 
-def review_form_hit(bodies, selector=""):
-    """Return (matched, reason) when a body that opens with the record marker does not parse, else None. The one home of the
-    form check: an edit in place is judged by this alone, and review_record_hit calls the same two helpers. It makes no read."""
-    found = _marked_bodies(bodies)
-    if found and _unparsed(*found):
-        return _form_reason(found[0], selector)
+def _edit_reason(module):
+    """Return (matched, reason) for an edit whose new body is a record. The refusal sits one call below its callers, so the
+    rule audit reads its reason within its depth limit."""
+    return "edit of a review record comment", REVIEW_EDIT_REASON % _review_render(module, "<pr>", "<live head>")
+
+
+def _old_body(host, edit):
+    """The one read of the body an edit replaces. `edit` is ("comment", id) for an edit that names a comment, or ("last", selector)
+    for `--edit-last`, which edits the caller's last comment on that pull request: the newest comment of the listing (the listing
+    names its authors, but the caller's login is a second read, so a newer comment by another user hides the record: a limit).
+    A read that fails raises."""
+    kind, ref = edit
+    if kind == "comment":
+        if isinstance(ref, str) and ref.isdigit():
+            ref = int(ref)
+        if not isinstance(ref, int) or isinstance(ref, bool):
+            raise _LiteralIdNeeded("the comment id or repo is a shell expansion the guard cannot read", REVIEW_LITERAL_ID_REMEDY)
+        code, out = host.api("issues/comments/%d" % ref)
+        if code:
+            raise RuntimeError("reading the comment failed")
+        return str(json.loads(out).get("body") or "")
+    if shell_expanded(ref):   # a variable selector names no pull request, so no retry reads it
+        raise _LiteralIdNeeded("the pull request number is a shell expansion the guard cannot read", REVIEW_LITERAL_PR_REMEDY)
+    rows = host.pages("issues/%d/comments" % host.pr_number(ref))   # 100 a page, so a long thread stays inside MERGE_READ_TIMEOUT
+    return str(rows[-1].get("body") or "") if rows else ""
+
+
+def _old_body_hit(edit, repo: str, where: str, stdin_unseen: bool = False):
+    """Return (matched, reason) for an edit whose new body holds no marker but whose old body does, or whose old body could not be
+    read, else None. One read of the old body. `stdin_unseen`: the new body came from stdin the guard cannot see, so an allowed edit
+    prints the not-checked note; a refused edit prints none."""
+    module = merge_module()
+    try:
+        if shell_expanded(repo):   # no retry reads such a repo: it needs a literal route, not a read; each remedy names the form typed
+            raise _LiteralIdNeeded("the repo is a shell expansion the guard cannot read",
+                                   REVIEW_LITERAL_REPO_REMEDY if edit[0] == "last" else REVIEW_LITERAL_ID_REMEDY)
+        if module is None:
+            raise RuntimeError("the merge tool could not be loaded")
+        with module.shared_deadline(MERGE_READ_TIMEOUT):
+            old = _old_body(module.Host(repo=repo or None, cwd=where or None), edit)
+    except (Exception, SystemExit) as e:
+        why = cap_safe((str(e).splitlines() or [type(e).__name__])[0], 80)
+        remedy = e.remedy if isinstance(e, _LiteralIdNeeded) else REVIEW_UNREAD_REMEDY
+        return "edit of a comment, old body not read", REVIEW_OLD_UNREAD_REASON % (why, remedy)
+    if module.review_marked(old):
+        return "edit of a comment that holds a review record", REVIEW_WITHDRAW_REASON % _review_render(module, "<pr>", "<live head>")
+    if stdin_unseen:
+        review_note("the body comes from stdin and cannot be read")
     return None
 
 
-def review_record_hit(bodies, repo: str, selector, where: str):
+VARIABLE_REMEDIES = {
+    "number": "write the PR number literally (`issues/12/comments`, `gh pr comment 12`)",
+    "repo": "write the repo, OWNER/NAME, instead of a shell expansion (`repos/OWNER/NAME/issues/12/comments`, `-R OWNER/NAME`)",
+    "endpoint": "write the route out in the call (`repos/OWNER/NAME/issues/12/comments`) instead of a substitution",
+}
+
+
+def _variable_reason(module, variable):
+    """Return (matched, reason) for a record posted to an issue number, repo or endpoint held in a shell expansion (a variable, an
+    arithmetic, a command substitution): its pull request cannot be checked. `variable` names the parts that are expansions
+    ("number", "repo", "endpoint"), and each gets its own remedy. The refusal sits one call below its caller, so the rule audit
+    reads its reason within its depth limit."""
+    return "review record posted to a variable issue number", REVIEW_REASON % (
+        "this record goes to a route the guard cannot read, held in a shell expansion; "
+        + "; ".join(VARIABLE_REMEDIES[name] for name in variable), _review_render(module, "<pr>", "<live head>"))
+
+
+def _body_file_reason(name):
+    """Return (matched, reason) for an edit whose body file could not be read. The refusal sits one call below its caller, so the
+    rule audit reads its reason within its depth limit."""
+    return "edit with a body file that could not be read", REVIEW_BODY_FILE_REASON % cap_safe(str(name), 80)
+
+
+def review_record_hit(bodies, repo: str, selector, where: str, edit=None, variable=(), unseen: bool = False, unread: str = "",
+                      stdin_unseen: bool = False):
     """Return (matched, reason) when a comment post must be refused, else None.
 
     `bodies` are the texts the post would send, `selector` names the pull request it goes to (a number, a URL, a branch,
-    or '' for the current branch's), `repo` is OWNER/NAME or ''. A callable `selector` takes the Host and returns that name,
-    so its read happens only once the body parses. No body holding the marker: None, and no read."""
+    or '' for the current branch's), `repo` is OWNER/NAME or ''. A post with no body holding the marker: None, and no read.
+    `edit` is None for a post. For a body that replaces a comment's text (a PATCH of the comment, `--edit-last`, the MCP update
+    tool) it names the comment, ("comment", id) or ("last", selector). A marked new body is refused after the form check and
+    before any read, because an edited record was rendered by no run. Any other edit makes one read of the old body
+    (`_old_body`) and is refused when that holds a record, or when the read could not run. `unseen` is true when the new body cannot be
+    seen (`--input`, stdin): it is read like an unmarked body. `unread` names a body file that could not be read: refused, no read.
+    No new body named and none unseen: None, no read.
+    `variable` names the route parts that are shell expansions (`_variable_reason`), empty for a literal route: a marked post is refused with no read, as its pull request cannot be checked."""
     found = _marked_bodies(bodies)
+    if edit and not found:
+        if unread:
+            return _body_file_reason(unread)
+        if not unseen and not any(isinstance(b, str) for b in bodies):
+            return None
+        return _old_body_hit(edit, repo, where, stdin_unseen)
     if not found:
         return None
     module, marked = found
     if _unparsed(module, marked):
         return _form_reason(module, selector)
+    if edit:
+        return _edit_reason(module)
+    if variable:
+        return _variable_reason(module, variable)
     try:
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             host = module.Host(repo=repo or None, cwd=where or None)
-            number = host.pr_number(selector(host) if callable(selector) else selector)
+            number = host.pr_number(selector)
             live = str(host.pr(number)["head"])
     except (Exception, SystemExit) as e:
         review_note("the live head could not be read (" + cap_safe((str(e).splitlines() or [type(e).__name__])[0], 80) + ")")
