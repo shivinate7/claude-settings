@@ -3406,6 +3406,25 @@ for (const [set, note] of [[SHEET_RED, ""], [[430], " (control)"]]) for (const w
     assert.ok(s.l >= g.nav.l - 0.5 && s.r <= g.nav.r + 0.5, `the selected ${s.name} tab runs from ${Math.round(s.l)} to ${Math.round(s.r)} px, past the tab bar's ${Math.round(g.nav.l)} to ${Math.round(g.nav.r)} px, at ${width} wide`);
   });
 }
+// ---------------------------------------------------------------- showTab reveals the selected tab when Status is selected by script
+// A press by Playwright scrolls its tab into view first, which would hide a strip that never reveals its selected tab. So Status is selected
+// by script, as a click is: showTab must bring the selected tab into the strip by itself (revealTab). Red with revealTab's scroll removed.
+const selectTabByScript = (page, id) => page.evaluate((id) => document.getElementById(id).click(), id);
+// [width, root font size in percent]. At 240 and 430 the two tabs fit the strip with the revealing scroll removed too, so those are controls.
+const SHOW_TAB_RED = [[180, 100], [200, 100], [320, 200]];
+const SHOW_TAB_CONTROL = [[240, 100], [430, 100]];
+for (const [set, note] of [[SHOW_TAB_RED, ""], [SHOW_TAB_CONTROL, " (control)"]]) for (const [width, pct] of set) for (const scheme of SCHEMES) {
+  test(`tab list, ${scheme}: ${sizeWhere(width, pct)}, Status selected by script: the selected tab sits inside the tab bar${note}`, async (t) => {
+    const page = await tabSetPage(t, { width, pct, scheme, sel: "Questions" }); if (!page) return;
+    await selectTabByScript(page, "tabStatus");
+    await page.locator("#sPanel").waitFor({ state: "visible" });
+    assert.equal(await page.getAttribute("#tabStatus", "aria-selected"), "true", "Status is not the selected tab after the script press");
+    const g = await tabGeo(page);
+    const s = g.tabs.find((x) => x.sel);
+    assert.ok(s, "no shown tab is marked selected");
+    assert.ok(s.l >= g.nav.l - 0.5 && s.r <= g.nav.r + 0.5, `the selected ${s.name} tab runs from ${Math.round(s.l)} to ${Math.round(s.r)} px, past the tab bar's ${Math.round(g.nav.l)} to ${Math.round(g.nav.r)} px, at ${width} wide`);
+  });
+}
 // [width, root font size in percent]. On the old page the selected tab is wider than the strip at 180 doubled and at 180-240 tripled. At
 // 200-240 doubled it fits, so those are controls.
 const TAB_WIDE_RED = [[180, 200], [180, 300], [200, 300], [220, 300], [240, 300]];
