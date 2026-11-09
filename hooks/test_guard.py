@@ -31527,7 +31527,7 @@ role_model_refuse("role-model: reviewer on sonnet with no marker says round 1 ru
                   "not a model name or drop the model field",
                   "reviewer", "sonnet", "Check the diff for typos.",
                   carries=(("round 1", "Round 1"),) + FREE_ROUND_MARKERS + (FIX_MARKER,),
-                  lacks=ROLE_LACKS + ("haiku", "drop the model field"))
+                  lacks=ROLE_LACKS + ("haiku", "sonnet", "Sonnet", "SONNET", "drop the model field"))
 # Control: the other roles keep the drop-the-model remedy. A test-author's refusal names none of the reviewer's markers.
 role_model_refuse("role-model: control: test-author on sonnet keeps the drop-the-model remedy and names no marker",
                   "test-author", "sonnet", "Write the failing cases.", carries=(ROLE_REMEDY,),
