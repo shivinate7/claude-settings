@@ -123,18 +123,18 @@ where a row is narrow for its text, so link them with `z=2` (for example `#s=sta
   tab. A word breaks mid-word when it does not fit its line. A word narrower than the strip can break too, because the count chip
   shares the line. "Questions" is 157 px against 166 to 186 px of room at 180 to 200 wide at 200% text. Measured on the built page.
   The 23 harness widths are 180, 190, 200, 210, 220, 240, 260, 280, 300, 320, 360, 390, 430, 480, 520, 540, 560, 600, 640, 700, 820, 1024
-  and 1280; 225, 230, 250, 270 and 275 were added for the range ends. "Questions" breaks at 180 to 200 wide at 200% text and at 180 to 270
-  at 300%; "Designs" breaks at 180 to 230 at 300%; "Status" and every label at 100%, 150% and 390 wide or more never break. A lone
-  letter appears at 190 to 200 wide at 200% ("Question|s") and at 260 to 270 at 300%, and at 210 to 230 at 300% for "Designs"
-  ("Design|s"). A named limit; fix: step `page-narrow-breaks-rest`. The page
+  and 1280. Five more were added for the range ends: 225, 230, 250, 270 and 275. "Questions" breaks at 180 to 200 wide at 200% text.
+  At 300% it breaks at 180 to 270. "Designs" breaks at 180 to 230 at 300%. "Status" and every label at 100%, 150% and 390 wide or
+  more never break. A lone letter appears at 190 to 200 wide at 200% ("Question|s") and at 260 to 270 at 300%. For "Designs" it
+  appears at 210 to 230 at 300% ("Design|s"). A named limit; fix: step `page-narrow-breaks-rest`. The page
   before this lane never broke a tab label: its tab ran wider than the strip, and the bar scrolled. When the Designs sheet closes,
   `revealTab()` scrolls the selected tab fully into the bar, as a tab press does.
 - The Designs sheet's head wraps (`.dsh-head .in`, `flex-wrap: wrap`). The title's basis is 0 and its floor is 4em (`min-width: 4em`),
   so the row breaks where the buttons leave the title under 4em. The title keeps the first line, alone if no button fits beside it.
   Then the last buttons take a second line and Close sits at its end, inside the window. Prev and Next sit in one box (`.dnav`), so they
   wrap as a pair, never one on each row. The head takes a third row
-  at 180 to 210 wide at the default text, at 125% and at 150%, at 180 to 220 at 200% and at 180 to 280 at 300%. Measured at 180, 190,
-  200, 210, 220, then 240 to 300 in steps of 20, on the built page. Row 3 holds Close alone at 180 to 210 at the default text, at 125% and
+  at 180 to 210 wide at the default text, at 125% and at 150%. At 200% it does so at 180 to 220, and at 300% at 180 to 280. Measured
+  at 180, 190, 200, 210, 220, then 240 to 300 in steps of 20, on the built page. Row 3 holds Close alone at 180 to 210 at the default text, at 125% and
   at 150%, and at 260 to 280 at 300%. It holds Open full size and Close at 180 to 220 at 200% and at 180 to 240 at 300%.
 - The title's text grows with the root size, `min(1.0625rem, 24cqw)`: 17 px at the default text, 21.25 px at 125%, 25.5 px at 150%, 34 px
   at 200%. The cap, 24% of the head's content width, keeps 4em of the title inside one line of the head. It sets the size only at large
