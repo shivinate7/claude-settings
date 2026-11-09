@@ -4713,6 +4713,7 @@ GIT_PUSH_BODY_REASON = (
 GIT_PUSH_BODY_OPENERS = {
     "else": ("`else` branch of an `if` on a check", "put the push in the `then` branch, or "),
     "until": ("body of an `until` on a check", ""),
+    "elif": ("`elif` branch of an `if` on a check", "put the push in the `then` branch, or "),
 }
 # The reason each kind of `git_push_after_check_hit` prints: a `;` or newline join, a pipe that hides its check, a
 # pipe joined to the push by `;` or a newline, a `||` that runs the push on a failed check, an `|| exit` that reads
@@ -5073,20 +5074,25 @@ def _push_join_kind(segments, ends, start: int, position: int) -> str:
 
 def _push_body_runs_on_failure(segments, start: int, head: int) -> str:
     """The kind of hit (`body-` and the opener, `GIT_PUSH_BODY_OPENERS`) when `segments[start]` opens a body whose
-    compound starts at `segments[head]`, and the body runs when a check fails, else ''. Two bodies run on a failed
-    check: the `else` of an `if` and the `do` of an `until`, when a test of the compound is a check. The tests are the
-    head's own and each `elif`'s, up to the first `then` or `do`, at the compound's own level only. A test is a check
+    compound starts at `segments[head]`, and the body runs when a check fails, else ''. Three bodies run on a failed
+    check: the `else` of an `if` and the `do` of an `until`, when a test of the compound is a check, and the `then` of
+    an `elif`, when a test before its own is a check (the `if` test, or an earlier `elif`'s): its own test does not
+    matter, since it runs only after those failed. The tests are the head's own and each `elif`'s, up to the first
+    `then` or `do`, at the compound's own level only. A test is a check
     when it is not inert, no git call and no condition word (`GIT_PUSH_CONDITION_WORDS`: `if [ -n "$X" ]; then :;
     else git push; fi` passes). A test with a `!` runs the body when its command passes, so it is no check
-    (`if ! pytest -q; then exit 1; else git push; fi`). The `then` of an `if !` and the `do` of a `while !` pass by
-    lane pick 2026-11-08 20:29 CST, though bash runs a push there on a failed check."""
+    (`if ! pytest -q; then exit 1; else git push; fi`); a `(` glued to the `if` does not hide the `!`. The `then` of
+    an `if !` and the `do` of a `while !` pass by lane pick 2026-11-08 20:29 CST, though bash runs a push there on a
+    failed check."""
     opener = (segment_tokens(segments[start]) or [""])[0]
     head_words = [word.lstrip("({") for word in segment_tokens(segments[head]) or []
                   if word.strip("({") and word not in GIT_PUSH_BODY_WORDS]
-    kind = {("else", "if"): "else", ("do", "until"): "until"}.get((opener, head_words[0] if head_words else ""))
+    kind = {("else", "if"): "else", ("do", "until"): "until", ("then", "if"): "elif"}.get(
+        (opener, head_words[0] if head_words else ""))
     if kind is None:
         return ""
     depth, level, testing = 0, None, False
+    check_at, elif_at = None, None   # the first test that is a check; the last `elif` at the compound's own level
     for at in range(head, start):
         part = segments[at]
         words = segment_tokens(part) or []
@@ -5094,20 +5100,27 @@ def _push_body_runs_on_failure(segments, start: int, head: int) -> str:
             testing = True
         elif depth == level:
             testing = {"then": False, "do": False, "else": False, "elif": True}.get(words[0] if words else "", testing)
+            if words[:1] == ["elif"]:
+                elif_at = at
         if testing and (at == head or depth == level):
             lead = []
             for word in words:
-                if word not in GIT_PUSH_LEADING_WORDS and word.strip("({"):
+                word = word.lstrip("({")   # `(if ! pytest`: the `(` is no part of the word
+                if word not in GIT_PUSH_LEADING_WORDS and word:
                     break
                 lead.append(word)
             command = words[len(lead)] if len(lead) < len(words) else ""
-            if ("!" not in lead and command not in GIT_PUSH_CONDITION_WORDS
+            if (check_at is None and "!" not in lead and command not in GIT_PUSH_CONDITION_WORDS
                     and _push_segment_inert(part) is False and not git_calls(part)):
-                return "body-" + kind
+                check_at = at
         depth += _compound_delta(part, wide=True)
         if at == head:
             level = depth
-    return ""
+    if check_at is None:
+        return ""
+    if kind == "elif" and (elif_at is None or check_at >= elif_at):
+        return ""   # the first `then`, or a test of this `elif` itself: the push runs only when the checks passed
+    return "body-" + kind
 
 
 def _push_test_hides_check(segments, ends, opener: int, head: int) -> bool:
