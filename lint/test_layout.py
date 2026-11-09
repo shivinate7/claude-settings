@@ -223,6 +223,24 @@ class LayoutFile(Tree):
                 self.origin(url)
                 self.assertEqual(self.layout.repo_name(self.tree), want)
 
+    def test_repo_name_reads_an_origin_with_a_port_after_the_host(self):
+        """repo_name reads the owner and name of a GitHub origin with a port between the host and the path."""
+        for url in ("ssh://git@github.com:22/shivinate7/q_max.git", "https://github.com:443/shivinate7/q_max.git"):
+            with self.subTest(url=url):
+                self.setUp()
+                self.origin(url)
+                self.assertEqual(self.layout.repo_name(self.tree), "shivinate7/q_max",
+                                 "repo_name reads no owner/name from an origin with a port after the host")
+
+    def test_repo_name_is_none_when_the_origin_path_runs_past_owner_and_name(self):
+        """A GitHub origin names one owner and one name. A path past them, or a name under a folder, is no repo."""
+        for url in ("https://github.com/o/n/pulls", "git@github.com:o/sub/n.git", "https://github.com/o/n.git/pulls"):
+            with self.subTest(url=url):
+                self.setUp()
+                self.origin(url)
+                self.assertIsNone(self.layout.repo_name(self.tree),
+                                  "repo_name reads a name past the owner and name as the repo")
+
     def test_an_unreadable_git_file_is_no_origin_never_a_crash(self):
         with open(os.path.join(self.tree, ".git"), "wb") as f:
             f.write(b"gitdir: \xff\xfe\x00\n")
@@ -833,6 +851,23 @@ class Registry(Tree):
             self.artifacts()
         self.assertIn("collections", str(caught.exception), "the refusal does not name the missing collections")
         self.assertIn("ext001", str(caught.exception), "the refusal does not name its entry")
+
+    def test_a_page_only_entry_with_empty_collections_is_read(self):
+        """A page-only artifact gives `collections` []: its page and files export, and it holds no database."""
+        self.registry([self.queue_entry(collections=[])])
+        found = self.read_registry("a page-only entry with collections []")
+        self.assertEqual([e["id"] for e in found], ["queue02"], "the page-only entry was not read")
+        self.assertEqual(found[0]["collections"], [], "the page-only entry was not read with no collections")
+
+    def test_a_page_only_entry_exports_to_its_artifact_folder(self):
+        self.registry([self.queue_entry(collections=[])])
+        found = self.read_registry("a page-only entry with collections []")
+        self.assertEqual(found[0]["export"], "artifacts/queue02", "a page-only entry does not export to artifacts/<id>")
+
+    def test_a_waiting_page_entry_with_empty_collections_is_still_refused_and_named(self):
+        """Control: the waiting page exports its five collections, so an empty list on its role is refused, not read."""
+        self.registry([self.page_entry(collections=[])])
+        self.assertReported("page01", "a waiting-page entry with collections []")
 
     def test_an_export_path_entry_keeps_its_path(self):
         """Control: an entry with a path exports to that path, as it does today."""
