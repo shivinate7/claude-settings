@@ -30030,6 +30030,11 @@ rbb_line_refuse("reviewer-brief-blind: refused: a Prior verdict: FAIL line above
 rbb_line_refuse("reviewer-brief-blind: refused: a FAIL, round 2 line above a Done and Next report, the refusal names line 2",
                 "Check the floor fix.\nFAIL, round 2\nDone: the floor fix is in.\nNext: merge the head.", 2,
                 extra=("line 2 of the brief",))
+# The refusal names the first refused line whatever its shape, so an item above a report's labels is named at line 1,
+# not at the Done label below it.
+rbb_line_refuse("reviewer-brief-blind: refused: a BUILT item line above a Done and Next report, the refusal names line 1",
+                "BUILT c1 the floor fix, tests green.\nDone: the floor fix is in.\nNext: merge the head.", 1,
+                extra=("line 1 of the brief",))
 
 
 # A refused line over 200 characters is named by its number, and its text is not echoed, so a 5 KB line cannot make the
