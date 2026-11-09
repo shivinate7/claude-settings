@@ -3305,13 +3305,21 @@ def salt_cutover(root, ref, where=None):
 
 _tool_stamp_since = {}
 
-def tool_source_note(tool):
-    """-> a sentence naming the checkout launch.py started from (its TOOL_SOURCE_ENV) when the tool runs from another folder, else "". launch.py
-    runs the tool from a temporary worktree and removes it when the run ends, so a Stop that names only that worktree names no folder left to repair."""
+def tool_source_env():
+    """-> launch.py's TOOL_SOURCE_ENV, or None when launch cannot be imported. A caller reads it before the try that can raise a Stop, so a broken launch.py
+    cannot replace that Stop with an ImportError (the note is then left off, the Stop stands)."""
     if MERGE_DIR not in sys.path:  # PYTHONSAFEPATH keeps this folder off sys.path, so a bare import of launch fails
         sys.path.insert(0, MERGE_DIR)
-    from launch import TOOL_SOURCE_ENV  # here, not at the top: hooks/guard_merge.py loads this file by path, with no merge folder on sys.path
-    source = os.environ.get(TOOL_SOURCE_ENV)
+    try:
+        from launch import TOOL_SOURCE_ENV  # here, not at the top: hooks/guard_merge.py loads this file by path, with no merge folder on sys.path
+    except ImportError:
+        return None
+    return TOOL_SOURCE_ENV
+
+def tool_source_note(tool, source_env):
+    """-> a sentence naming the checkout launch.py started from (the `source_env` variable, tool_source_env) when the tool runs from another folder, else "". launch.py
+    runs the tool from a temporary worktree and removes it when the run ends, so a Stop that names only that worktree names no folder left to repair."""
+    source = os.environ.get(source_env) if source_env else None
     if not source or os.path.realpath(source) == os.path.realpath(tool):
         return ""
     return f"The merge tool ran from {tool}, a temporary copy of {source} that is gone once this run ends, so repair {source}."
@@ -3320,10 +3328,11 @@ def tool_stamp_since():
     """-> the cutover read from the merge tool's own source checkout (the parent of the folder holding this file, as the other tool paths are found), HEAD's history.
     The salt commit is fixed history, and a checkout that runs code reading the salt holds it, so this fetches nothing. One read per tool root in a process.
     A read that cannot run, or a HEAD with no salt commit, raises Stop naming the checkout, never None: an unknown cutover must not read every unstamped
-    record as old (coordinator item 386). Each such Stop also names the checkout launch.py started from, when it differs (tool_source_note)."""
+    record as old (coordinator item 386). Each such Stop also names the checkout launch.py started from, when it differs (tool_source_env, tool_source_note)."""
     tool = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     if tool not in _tool_stamp_since:
         where = f"the merge tool's checkout {tool}"
+        source_env = tool_source_env()
         try:
             stamp, c, out = salt_cutover(tool, "HEAD", where=where)
             if c:
@@ -3333,7 +3342,7 @@ def tool_stamp_since():
                 raise Stop(f"{where} lacks the review stamp salt: no commit on its HEAD history adds `REVIEW_STAMP_SALT =` to merge/merge.py, so the "
                            "review stamp cutover is unknown. Update that checkout to origin/main, then run the command again. " + REVIEW_CITE)
         except Stop as e:
-            note = tool_source_note(tool)
+            note = tool_source_note(tool, source_env)
             if not note:
                 raise
             raise Stop(f"{note} {str(e).removesuffix(REVIEW_CITE).rstrip()} " + REVIEW_CITE) from e  # each tool-read Stop ends with this cite
