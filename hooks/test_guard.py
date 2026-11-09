@@ -11722,6 +11722,7 @@ VARIABLE_POST_ROUTES = (
     ("backticks with a pipe", "repos/y/x/issues/`echo 12 | cat`/comments"),
     ("backticks with a semicolon", "repos/y/x/issues/`echo 12; echo 12`/comments"),
     ("backticks with and", "repos/y/x/issues/`true && echo 12`/comments"),
+    ("a backtick in the repo beside literal text", "repos/o/`cat n`/issues/12/comments"),
 )
 # The five plain-id forms run in the loop above, so the list starts empty.
 VARIABLE_FORMS = ()
@@ -11783,7 +11784,7 @@ for _label, _target in VARIABLE_TARGET_ROUTES:
     bash_post("review-record: an unmarked edit whose endpoint is a substitution is refused as a read that could not run, %s" % _label,
               "gh api -X PATCH %s -f 'body=%s'" % (_target, UNMARKED_BODY), "deny", rule=REVIEW_RULE, carries=("could not run",))
 
-# Decision pr-review-record, the variable route: an endpoint that is a substitution, with no PATCH or PUT, is a post. An unmarked body is
+# Decision pr-review-record, the variable route: an endpoint that is a substitution, with no PATCH, is a post. An unmarked body is
 # allowed with no read, since a post with no marker makes none. A marked body is refused with no read, since the endpoint names no pull
 # request the guard can read.
 for _label, _target in VARIABLE_TARGET_ROUTES:
@@ -11871,6 +11872,32 @@ for _label, _command in (
 # call after `&&` joins the substitution and is never judged on its own. The `rm` after it is still refused under its own rule.
 bash_post("review-record: a quoted parenthesis in a substitution does not hide a call after && from its own rule, gh api post then rm",
           "gh api repos/y/x/issues/$(echo '(' 12)/comments -f 'body=%s' && rm -rf $HOME" % UNMARKED_BODY, "deny", rule="destructive-delete")
+
+# SCANNER PINS. Decision pr-review-record. `review_segments` and `_open_substitutions` (hooks/guard.py) read only what is code: a lone
+# apostrophe in text, and a `#`, a `//` or a `/*` inside quotes, neither cut a line nor open a substitution. Each opener opens the first
+# line after the CI line, so a cut there turns prose into nothing and flips the refusal. A footer after `---` is allowed.
+PIN_OPENERS = ("#", "//", "/*")
+for _opener in PIN_OPENERS:
+    for _label, _command in inline_forms(review_record() + "%s Lane note after the record.\n" % _opener):
+        bash_post("review-record: prose after the CI line that opens with %s is refused, %s" % (_opener, _label), _command, "deny",
+                  rule=REVIEW_RULE, carries=FORM_TEXT)
+    for _label, _command in inline_forms(review_record() + "---\n%s footer text\n" % _opener):
+        bash_post("review-record: a record with a footer that opens with %s is allowed, %s" % (_opener, _label), _command, "allow")
+# A lone apostrophe in double quotes: the prose after the CI line is refused, and a footer with an apostrophe is allowed.
+bash_post("review-record: prose after the CI line with a lone apostrophe in double quotes is refused, gh pr comment --body",
+          '%s --body "%s"' % (PR_CMD, review_record() + "Lane note: Don't merge yet.\n"), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
+bash_post("review-record: prose after the CI line with a lone apostrophe is refused, gh api -f body= in double quotes",
+          '%s -f "body=%s"' % (API_CMD, review_record() + "Lane note: Don't merge yet.\n"), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
+bash_post("review-record: a record with a footer that holds a lone apostrophe in double quotes is allowed, gh pr comment --body",
+          '%s --body "%s"' % (PR_CMD, review_record() + "---\nDon't edit by hand\n"), "allow")
+# The same texts inside a substitution: the quoted opener or apostrophe is text, so the substitution still opens and closes, and the
+# route is judged. A marked edit is refused under the edit rule before any read, so it names the edit refusal: the body was seen.
+for _label, _word in (("#", "'#'"), ("//", "'//'"), ("/*", "'/*'"), ("a lone apostrophe", "\"Don't\"")):
+    bash_post("review-record: a marked edit whose id is a substitution with %s in quotes is refused, gh api -X PATCH" % _label,
+              "gh api -X PATCH repos/y/x/issues/comments/$(echo %s 4417) -f 'body=%s'" % (_word, review_record()), "deny",
+              rule=REVIEW_RULE, carries=(EDIT_REFUSAL,))
+    bash_post("review-record: a marked post whose number is a substitution with %s in quotes is refused, gh api post" % _label,
+              "gh api repos/y/x/issues/$(echo %s 12)/comments -f 'body=%s'" % (_word, review_record()), "deny", rule=REVIEW_RULE)
 
 # THE REMEDY NAMES WHAT IS A VARIABLE. A post to a literal number in a variable repo is told to name the repo, not to write the PR number
 # literally, which is the remedy for a variable number. A variable number keeps its remedy: write the number literally.
@@ -12141,6 +12168,10 @@ UNREADABLE_ROUTE_FORMS = (
     ("a command substitution in the id", "\"repos/y/x/issues/comments/$(echo %d)\"" % REVIEW_COMMENT_ID),
     ("an unquoted command substitution with a space in the id", "repos/y/x/issues/comments/$(cat idfile)"),
     ("an unquoted gh call in the id", "repos/y/x/issues/comments/$(gh api repos/y/x/issues/%d/comments --jq .[0].id)" % REVIEW_PR),
+    ("a command substitution in the owner, no space", "repos/$(o)/r/issues/comments/5"),
+    ("shell variables in the owner and the repo", "repos/$OWNER/$NAME/issues/comments/5"),
+    ("a shell variable in the repo beside literal owner text", "repos/o/$R/issues/comments/5"),
+    ("a fully quoted route with a substitution in the repo", "\"repos/o/$(cat n)/issues/comments/5\""),
 )
 for _what, _route in EDIT_ROUTE_FORMS + UNREADABLE_ROUTE_FORMS:
     bash_post("review-record: a marked edit is refused, %s, gh api -X PATCH" % _what,
@@ -12152,6 +12183,29 @@ for _what, _route in UNREADABLE_ROUTE_FORMS:
     bash_post("review-record: an edit with no marker is refused as a read that could not run, %s, gh api -X PATCH" % _what,
               "gh api -X PATCH %s -f 'body=%s'" % (_route, UNMARKED_BODY), "deny", rule=REVIEW_RULE,
               carries=("the read of the comment's current body could not run",))
+
+
+# A SPACED SUBSTITUTION BESIDE LITERAL REPO TEXT. Decision pr-review-record, the variable forms. A repo with literal text before a
+# `$(...)` that holds a space is a route the guard judges. The shell splits the word at that space, `_joined_substitutions` joins the
+# pieces, and `_ROUTE_REPO` (hooks/guard.py) must take the joined repo. A marked body on such a route is refused. An unmarked post on it
+# is allowed with no read, pinned below.
+bash_post("review-record: a marked edit whose repo is literal text beside a spaced substitution is refused, gh api -X PATCH, $(basename \"$PWD\")",
+          'gh api -X PATCH repos/OWNER/$(basename "$PWD")/issues/comments/5 -f body="%s"' % REVIEW_MARKER_TEXT, "deny", rule=REVIEW_RULE)
+bash_post("review-record: an unmarked edit whose repo is a spaced substitution beside literal text is refused as a read that could not run, gh api -X PATCH",
+          "gh api -X PATCH repos/$(cat owner)/r/issues/comments/5 -f body=x", "deny", rule=REVIEW_RULE, carries=("could not run",))
+bash_post("review-record: a marked post whose repo is a spaced substitution beside literal text is refused, gh api post, repos/o/$(cat name)/issues/12/comments",
+          "gh api repos/o/$(cat name)/issues/12/comments -f 'body=%s'" % review_record(), "deny", rule=REVIEW_RULE)
+bash_post("review-record: a marked post whose repo is a spaced substitution beside literal text is refused, gh api post, $(basename \"$PWD\")",
+          'gh api repos/OWNER/$(basename "$PWD")/issues/12/comments -f \'body=%s\'' % review_record(), "deny", rule=REVIEW_RULE)
+
+# A post whose repo is a spaced substitution, with no marker, is allowed, and makes no gh read. A widened route pattern would refuse it.
+REVIEW_LOG_CHECKS.append(("review-record:an unmarked post whose repo is a spaced substitution beside literal text is allowed with no gh read, gh api post",
+                         review_reads("Bash", {"command": "gh api repos/o/$(cat name)/issues/12/comments -f 'body=%s'" % UNMARKED_BODY}, "allow", 0)))
+
+# A PUT IS NOT AN EDIT. Decision pr-review-record: the edit route is PATCH, in any spelling `_api_method` reads, so a PUT to an expansion
+# endpoint is a post. Its body comes from `--input`, which the guard does not read, so no marker is judged and the call is allowed.
+bash_post("review-record: a PUT to a shell-expanded endpoint with an --input body is allowed, it is not an edit, gh api -X PUT",
+          'gh api -X PUT "$EP" --input prot.json', "allow")
 
 
 def remedy_of(reason):
@@ -12242,6 +12296,12 @@ for _what, _command in (
 # number. This command has no comment id and no `{owner}/{repo}` route, so its remedy names neither.
 REVIEW_LOG_CHECKS.append(("review-record:an edit whose repo is a shell variable has a remedy that names the gh pr comment form, not a comment id or {owner}/{repo}, gh pr comment -R $REPO --edit-last",
                          literal_repo_remedy_check))
+
+
+# A PULL REQUEST EDIT WITH A SHELL-EXPANDED NUMBER AND REPO. Decision pr-review-record, the remedy. The refusal writes out each part for the
+# reader: the PR number literally, and the repo literally, as `-R owner/repo`. Each part is one remedy the reader can act on.
+bash_post("review-record: an unmarked edit with a shell-expanded PR number and repo names the PR number literally and the repo literally, gh pr comment \"$PR\" -R \"$REPO\" --edit-last",
+          'gh pr comment "$PR" -R "$REPO" --edit-last --body x', "deny", rule=REVIEW_RULE, carries=("PR number literally", "OWNER/NAME, literally"))
 
 # THE PLACEHOLDER THE REMEDY OFFERS IS READ. A route with `{owner}/{repo}` reads the comment an edit replaces, as a literal route does. The
 # stamped old body shows the read: the edit is refused over the record it reads.

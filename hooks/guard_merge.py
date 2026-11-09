@@ -388,6 +388,9 @@ REVIEW_LITERAL_PR_REMEDY = ("write the PR number literally and the repo as a lit
 REVIEW_LITERAL_REPO_REMEDY = ("write the repo, OWNER/NAME, literally, as `-R owner/repo` on the call, "
                               "such as `gh pr comment <number> -R owner/repo --edit-last`, not a shell expansion such as $REPO. "
                               "Or post a new comment.")
+REVIEW_LITERAL_PR_AND_REPO_REMEDY = ("write the PR number literally, and the repo, OWNER/NAME, literally, as `-R owner/repo`, "
+                                     "such as `gh pr comment <number> -R owner/repo --edit-last`, not a shell expansion such as $PR or $REPO; "
+                                     "the guard then reads that pull request. Or post a new comment.")
 REVIEW_BODY_FILE_REASON = (
     "Rule (pr-review-record): the new body's file %s could not be read, so the check could not run and the edit is refused. "
     "The body may be a review record. "
@@ -511,8 +514,11 @@ def _old_body_hit(edit, repo: str, where: str, stdin_unseen: bool = False):
     module = merge_module()
     try:
         if shell_expanded(repo):   # no retry reads such a repo: it needs a literal route, not a read; each remedy names the form typed
-            raise _LiteralIdNeeded("the repo is a shell expansion the guard cannot read",
-                                   REVIEW_LITERAL_REPO_REMEDY if edit[0] == "last" else REVIEW_LITERAL_ID_REMEDY)
+            if edit[0] != "last":
+                remedy = REVIEW_LITERAL_ID_REMEDY
+            else:   # `--edit-last` names no comment id, and a variable selector is a second part the reader must write out
+                remedy = REVIEW_LITERAL_PR_AND_REPO_REMEDY if shell_expanded(edit[1]) else REVIEW_LITERAL_REPO_REMEDY
+            raise _LiteralIdNeeded("the repo is a shell expansion the guard cannot read", remedy)
         if module is None:
             raise RuntimeError("the merge tool could not be loaded")
         with module.shared_deadline(MERGE_READ_TIMEOUT):
