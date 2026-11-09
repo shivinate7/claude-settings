@@ -12995,6 +12995,13 @@ for _cmd in ("find . -print -o -path ./big -prune | xargs grep K",
 _FIND_PRUNE_FIRST = "find . -path ./big -prune -o -print | xargs grep K"
 sh("env: find prune control, -prune comes first, so find skips big and its env file is not read, allowed: "
    + _FIND_PRUNE_FIRST, _FIND_PRUNE_FIRST, "allow", cwd=ENVBIG_ROOT)
+# A -name test before the -prune is one alternative of find's -o. find reads -prune only for an entry that the -name
+# test does not pick, so it skips big. The -print then names the top folder's files, and the env file at the top is one.
+_FIND_NAME_OR_PRUNE = "find . -name '*.py' -o -path ./big -prune -o -print | xargs grep K"
+sh("env: find prune false alarm, a -name before -prune, the env file is only in big, which find skips, allowed: "
+   + _FIND_NAME_OR_PRUNE, _FIND_NAME_OR_PRUNE, "allow", cwd=ENVBIG_ROOT)
+sh("env: find prune control, the same form over a folder whose top holds the env file, the -print names it, refused: "
+   + _FIND_NAME_OR_PRUNE, _FIND_NAME_OR_PRUNE, "deny", "env-file", cwd=ENVWALK_HELD)
 
 # A find with -exec runs its program on each name it prints. These -name tests pick only .py or .md names, or none,
 # and no env file has one of those names, so the program reads no env file. The tree holds an env file in big/.
@@ -13002,6 +13009,38 @@ for _cmd in (r"find . -name '*.py' -exec grep -n K {} \;", "find . -name '*.md' 
              "find . -name nomatch -exec grep K {} +"):
     sh("env: find -exec false alarm, its -name picks no env file name, so the program reads no env file, allowed: "
        + _cmd, _cmd, "allow", cwd=ENVBIG_ROOT)
+
+# A parenthesised group of -name tests picks each name it matches, and the program gets each one. A group of .py and .md
+# names picks no env file name, so the program reads none, and a group that names .env* or any name picks one.
+_GROUP_EXEC = r"find . -type f \( -name '*.py' -o -name '*.md' \) -exec grep K {} +"
+_GROUP_XARGS = r"find . -type f \( -name '*.py' -o -name '*.md' \) | xargs grep K"
+_GROUP_ENV_EXEC = r"find . -type f \( -name '*.py' -o -name '.env*' \) -exec grep K {} +"
+_GROUP_ENV_XARGS = r"find . -type f \( -name '*.py' -o -name '.env*' \) | xargs grep K"
+_GROUP_STAR_EXEC = r"find . -type f \( -name '*.py' -o -name '*' \) -exec grep K {} +"
+sh("env: find group false alarm, a group of .py and .md names picks no env file name, allowed: " + _GROUP_EXEC,
+   _GROUP_EXEC, "allow", cwd=ENVBIG_ROOT)
+sh("env: find group false alarm, the same group piped to xargs picks no env file name, allowed: " + _GROUP_XARGS,
+   _GROUP_XARGS, "allow", cwd=ENVBIG_ROOT)
+sh("env: find group control, a .env* name in the group picks the env file in big, refused: " + _GROUP_ENV_EXEC,
+   _GROUP_ENV_EXEC, "deny", "env-file", cwd=ENVBIG_ROOT)
+sh("env: find group control, the same .env* group piped to xargs, refused: " + _GROUP_ENV_XARGS, _GROUP_ENV_XARGS,
+   "deny", "env-file", cwd=ENVBIG_ROOT)
+sh("env: find group control, a * name in the group picks the env file in big, refused: " + _GROUP_STAR_EXEC,
+   _GROUP_STAR_EXEC, "deny", "env-file", cwd=ENVBIG_ROOT)
+
+# A -type d search hands grep each folder it prints, and grep -r reads every file below it. The prune form still names
+# the start folder, so grep -r reads big as well. Each form is refused over a folder that holds an env file below it.
+_TYPE_D_EXEC = r"find . -type d -exec grep -r K {} +"
+_TYPE_D_PRUNE_EXEC = r"find . -path ./big -prune -o -type d -exec grep -r K {} +"
+sh("env: find -type d -exec grep -r, the top folder holds the env file, refused: " + _TYPE_D_EXEC, _TYPE_D_EXEC,
+   "deny", "env-file", cwd=ENVWALK_HELD)
+sh("env: find -type d -exec grep -r, the env file is in big, refused: " + _TYPE_D_EXEC, _TYPE_D_EXEC, "deny",
+   "env-file", cwd=ENVBIG_ROOT)
+sh("env: find prune -type d -exec grep -r, the env file is in big, refused: " + _TYPE_D_PRUNE_EXEC,
+   _TYPE_D_PRUNE_EXEC, "deny", "env-file", cwd=ENVBIG_ROOT)
+for _cmd in (_TYPE_D_EXEC, _TYPE_D_PRUNE_EXEC):
+    sh("env: find -type d -exec grep -r control, a folder with no env file, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVWALK_CLEAN)
 
 # A relative cd and an env -C reach the env file's folder through two steps the guard follows: cd src moves into
 # clean/src, and env -C ../../held reaches held, which holds the env file. ENVCD_ROOT is built with ENVPROJ_ROOT above.
