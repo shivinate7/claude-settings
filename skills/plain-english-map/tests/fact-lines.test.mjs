@@ -29,7 +29,7 @@
 //       the scanner rule needs strings too, and case R7 asserts it), then a literal parse.
 //       A set comes back as an array, in any order. A missing python3 or a file that does not parse is ok: false, never ok: true.
 //
-//   scripts/map-check.mjs, MAP_FORMAT_VERSION in scripts/lib/map-config.mjs: 5, after the tested-by bump.
+//   scripts/map-check.mjs, MAP_FORMAT_VERSION in scripts/lib/map-config.mjs: 6, the version the fixtures hold.
 //   scripts/lib/map-config.mjs, validateMapConfig: the optional key `mapPaths`, a list of path prefixes. See map-paths.test.mjs.
 //
 // The fixture (tests/fixture/) gained: src/retry.py, src/caller.py, config.json, docs/map/homes.md, and fact lines in core.md.
@@ -45,6 +45,7 @@ import { pathToFileURL } from 'node:url';
 import { FIXTURE, POSIX_ONLY, SKILL, cleanEnv, expected, gitIn, gitShim, needFile, run, scratchRepo, tmpFolder, verdicts } from './helpers.mjs';
 
 const CHECK = join(SKILL, 'scripts', 'map-check.mjs');
+const PARITY = join(SKILL, 'tests', 'value-cite-parity.json');
 const READERS = join(SKILL, 'scripts', 'lib', 'fact-readers.mjs');
 const PY_FACTS = join(SKILL, 'scripts', 'lib', 'py-facts.py');
 const CORE = 'docs/map/core.md';
@@ -229,6 +230,20 @@ test('F2e. homeLines reads the lines under a Homes heading only, as capability, 
 });
 
 // ---- Step 3: the value readers ----
+
+test('F2f. the value-cite parity rows: factLines reads each row as the fixture says, and a row with no match is no value fact', async () => {
+  const { factLines } = await checkExports('factLines');
+  needFile('tests/value-cite-parity.json');
+  const rows = JSON.parse(readFileSync(PARITY, 'utf8')).rows;
+  assert.ok(rows.length >= 5, 'the parity fixture holds its rows');
+  for (const row of rows) {
+    const text = `# Map\n\n- \`${row.file}\`\n  - Holds the value. — \`${row.cite}\`\n`;
+    const want = row.match
+      ? [{ kind: 'value', line: 4, parent: row.file, prose: 'Holds the value.', file: row.file, symbol: row.match.symbol, literal: row.match.literal }]
+      : [];
+    assert.deepEqual(factLines(text), want, `row ${row.id}: ${row.cite}`);
+  }
+});
 
 test('R0. the two reader files exist: scripts/lib/fact-readers.mjs and scripts/lib/py-facts.py', () => {
   needFile('scripts/lib/fact-readers.mjs');

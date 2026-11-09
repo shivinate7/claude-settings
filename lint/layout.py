@@ -22,13 +22,15 @@ repo's GitHub name, rolled out or not, and that repo's extras file may repeat it
 Cause: each repo moves its own files in its own roll-out (owner, Oct 17). The last roll-out deletes
 "legacy", "legacy-repos", `legacy()`, `legacy_repos()`, `unmoved()`, `candidates()` and the branches in `path()`.
 
-Standard library only, and safe to import: it reads files only when a function is called.
+Safe to import: it reads files only when a function is called. It needs the standard library and
+hooks/git_reads.py, which `repo_name` imports on first use.
 """
 import json
 import ntpath
 import os
 import posixpath
 import re
+import sys
 
 LAYOUT_FILE = "lint/layout.json"  # relative to the claude-settings root; hooks/guard.py holds the same literal
 LAYOUT_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), os.path.basename(LAYOUT_FILE))
@@ -102,8 +104,20 @@ def legacy(name):
     return layout().get("legacy", {}).get(found, found)
 
 
-# github.com in https, ssh and scp form, and the /git/<owner>/<name> path of a cloud session's git proxy.
-GITHUB = re.compile(r"(?:^|[/@])github\.com[:/]+([^/\s]+/[^/\s]+?)(?:\.git)?/*$|/git/([^/\s]+/[^/\s]+?)(?:\.git)?/*$")
+# An origin repo_name may read: github.com in https, ssh and scp form, a port after the host allowed, or the
+# /git/<owner>/<name> path of a cloud session's git proxy. The path is exactly owner/name, `.git` and trailing
+# slashes optional; git_reads.origin_slug reads the owner/name.
+GITHUB = re.compile(
+    r"(?:^|[/@])github\.com(?::\d+)?[:/]+[^/\s]+/[^/\s]+?(?:\.git)?/*$|/git/[^/\s]+/[^/\s]+?(?:\.git)?/*$")
+
+
+def _origin_slug(url):
+    """git_reads.origin_slug, the one origin parser; imported on first use so this module stays safe to import."""
+    hooks = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks")
+    if hooks not in sys.path:
+        sys.path.append(hooks)
+    from git_reads import origin_slug
+    return origin_slug(url)
 
 
 def _common_dir(root):
@@ -140,8 +154,9 @@ def repo_name(root):
         if line.startswith("["):
             section = line
         elif section == '[remote "origin"]' and re.match(r"url\s*=", line):
-            hit = GITHUB.search(line.split("=", 1)[1].strip())
-            return (hit.group(1) or hit.group(2)).lower() if hit else None
+            url = line.split("=", 1)[1].strip()
+            slug = _origin_slug(url) if GITHUB.search(url) else None
+            return slug.lower() if slug else None
     return None
 
 
@@ -247,7 +262,8 @@ def artifacts(root):
     """[{id, url, role, account, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
     for a repo with no extras file or no key. `collections` and `export` are filled in: the waiting-page role exports
     the five waiting collections to the waiting-data folder of the record branch, any other role needs its own
-    `collections` and exports to `artifacts/<id>/`. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
+    `collections` and exports to `artifacts/<id>/`. A page-only entry (any other role, `"collections": []`) exports its page
+    and files and no database; an empty list is refused on the waiting-page role, and a missing key on any other. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
     no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as account, a
     repeated id, an id over 32 characters, a url that is no artifact link, a second waiting-page role or an unsafe path."""
     found = _repo_keys(root).get(ARTIFACTS)
@@ -280,7 +296,7 @@ def artifacts(root):
             raise LayoutError("%s: %s (id %s) is the waiting page and cannot be held with export false" % (where, label, entry_id))
         if "collections" in item:
             names = item["collections"]
-            if not isinstance(names, list) or not names or len(set(names)) != len(names) \
+            if not isinstance(names, list) or (not names and role == WAITING_ROLE) or len(set(names)) != len(names) \
                     or not all(isinstance(n, str) and COLLECTION.fullmatch(n) for n in names):
                 raise LayoutError("%s: %s (id %s) collections is not a list of distinct collection names" % (where, label, entry_id))
         elif no_export:
