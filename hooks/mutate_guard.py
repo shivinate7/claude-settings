@@ -1813,7 +1813,7 @@ MUTATIONS = [
      '                if verb is None:   # `_copy_reads` asks with two arguments, about the `cp` target: no, so the sources are only read; `scratchpad_copies` judges the destination\n                    return False\n',
      '',
      "guard", "scratchpad-owner: cp-mv 3"),
-    # Round 2: the shared tables keep their old meaning for every other rule.
+    # The shared runner tables keep their meaning for every rule but scratchpad-owner.
     ("heredoc: uv and npx run a file a heredoc wrote",
      '                     r"|time|ssh)(?:\\.exe|\\.cmd)?").fullmatch',
      '                     r"|time|ssh|uv|npx)(?:\\.exe|\\.cmd)?").fullmatch',
