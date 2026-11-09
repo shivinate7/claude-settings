@@ -17287,7 +17287,7 @@ _bh_push("control, two ready pull requests that hold no tip are silent", "origin
          BH_COUNT_GH, BH_COUNT, silent=True)
 _bh_push("control, a dry run into a held lane is silent", "--dry-run origin HEAD:lane-held", "allow", BH_HELD_GH,
          BH_HELD, silent=True)
-_bh_push("control, a push of main asks push-main, as before", "origin main", "ask", BH_HELD_GH, BH_HELD,
+_bh_push("control, a push of main asks push-main", "origin main", "ask", BH_HELD_GH, BH_HELD,
          rule=PUSH_MAIN_RULE)
 sh("push-batch: control, a quoted push into a held lane is silent", 'echo "' + VCS + ' push origin HEAD:lane-held"',
    "allow", cwd=BH_HELD, env_path=_bh_env(BH_HELD_GH), silent=True)
