@@ -392,8 +392,8 @@ for _t in ["reviewer", "Explore"]:
     add("brief lines: %s gets none of the push, trailer and record-path lines" % _t, "context",
         payload(_t), brief_lines_check(False))
 
-# The builder never edits tests. A mutant is test content (owner ruling 2026-11-08 17:19 CST, page item 447 a),
-# so a builder never adds one, even when its brief asks: the scope line sends a mutant to a test-author.
+# The builder never edits tests. A mutant is test content, so a builder never adds one, even when its brief
+# asks: the scope line sends a mutant to a test-author.
 add("builder scope: says never edit tests", "context", payload("builder"),
     builder_scope_check("never edit tests"))
 add("builder scope: a mutant goes to a test-author", "context", payload("builder"),

@@ -14190,8 +14190,7 @@ for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml"
               "jest.config.js"):
     add("test-author: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path, **A)
 # ---- mutation tests are test code: hooks/mutate_*.py holds the mutants the guard suite is judged
-# by, so a test-author edits them and a builder never does. Owner ruling 2026-11-08 17:19 CST
-# (page item 447 a): mutants are test content; only a test-author writes them.
+# by, so a test-author edits them and a builder never does.
 for _path in ("hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"):
     add("test-author: Edit of mutation test %s is allowed" % _path, "allow", tool="Edit",
         file_path=_path, **A)
@@ -14206,7 +14205,7 @@ for _path in ("hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate
         carries=("test-author", "Report"), **B)
 add("test-author: Edit of hooks/guard_core.py is refused", "deny", rule=TA, tool="Edit",
     file_path="hooks/guard_core.py", carries=("builder", "Report"), **A)
-# The same ruling, run in the main checkout: a builder's Edit of a mutation test is refused there too.
+# The same refusal holds in the main checkout: a builder's Edit of a mutation test is refused there too.
 add("builder-test: Edit of hooks/mutate_guard.py is refused", "deny", rule=BT, tool="Edit",
     file_path="hooks/mutate_guard.py", carries=("test-author", "Report"),
     agent_id="bld1", agent_type="builder", cwd=GITMAIN)
@@ -14664,7 +14663,7 @@ SHELL_TEST_WRITES = (
 for _name, _command in SHELL_TEST_WRITES:
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **BR)
-# Owner ruling 2026-11-08 17:19 CST (page item 447 a): a builder never writes a mutation test, by any shell form.
+# A builder never writes a mutation test, by any shell form.
 MUTATION_TESTS = ("hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py")
 for _path in MUTATION_TESTS:
     for _form, _command in (
@@ -14867,7 +14866,7 @@ BUILDER_RED = [
     ("jest-setup", _put("jest.setup.js", "global.x = 1\n")),
     ("java-test", _put("src/FooTest.java", "class FooTest {}\n")),
     ("test-support", _put("test_support/helper.py", "pass\n")),
-    # A mutation test is test code (owner ruling 2026-11-08 17:19 CST, page item 447 a); its case fold is the same file on Windows.
+    # A mutation test is test code; its case fold is the same file on Windows.
     ("mutate-guard", _put("hooks/mutate_guard.py", "x = 1\n")),
     ("mutate-shared", _put("hooks/mutate_shared.py", "x = 1\n")),
     ("mutate-sweep", _put("janitor/mutate_sweep.py", "x = 1\n")),
@@ -14910,8 +14909,7 @@ for _name, _change in BUILDER_RED:
     add("builder-diff: stop with a %s change is blocked" % _name, "deny", rule=BDIFF,
         event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
 # A mutation test the base already holds, changed or only added to, is refused at commit and at stop: a builder
-# never writes one (owner ruling 2026-11-08 17:19 CST, page item 447 a). The base holds each file, so these are
-# modifications, not new files.
+# never writes one. The base holds each file, so these are modifications, not new files.
 _CHANGED = {}
 for _rel in MUTATION_TESTS:
     _slug = _rel.replace("/", "-").replace(".py", "")
