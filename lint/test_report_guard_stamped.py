@@ -40,12 +40,12 @@ LINT_SRC = HERE
 HOOKS_SRC = trg.HOOKS
 PLACEHOLDER = '# INSTALL_ID = "uninstalled"'
 FLAT_ID = "20261109121100123"       # an install id, as install.sh writes it: a date and a process id
-OTHER_ID = "20261108090000456"      # the id of an earlier install, whose folder is still on disk
+OTHER_ID = "20261108090000456"      # the id of another install, whose folder is on disk
 STAMPED_LANE_TAG = "fixture-stamped-lane"  # the distinct value the stamped shared_names carries
 STAMP_HEAD_BYTES = 64 * 1024  # the window report_guard reads the stamp from (its _STAMP_HEAD_BYTES)
 LANE_LINE = re.compile(r"^LANE_TAG = .*$", re.MULTILINE)
 # A fresh process. -I drops PYTHONPATH and the script folder, so only report_guard's own sys.path edits decide
-# what it imports. Prints the LANE_TAG it got and the file its shared_names module was loaded from.
+# what it imports. Prints the LANE_TAG it got and the file its shared_names module comes from.
 PROBE_CODE = (
     "import json, runpy, sys\n"
     "ns = runpy.run_path(sys.argv[1], run_name='report_guard_probe')\n"
@@ -275,8 +275,8 @@ class StampedCopyTests(unittest.TestCase):
 
     def test_rgs_red_non_utf8_byte_in_guard_does_not_crash_import(self):
         # Catches: hooks/guard.py decoded as strict UTF-8 for its stamp, so one bad byte in its first 64 KB stops
-        # report_guard importing. Green on head, which reads the head as bytes. A mutant that decodes the head as
-        # UTF-8 crashes all three states. Each state plants the byte in the head:
+        # report_guard importing. The head is read as bytes, so a bad byte there does not stop the import. A mutant that
+        # decodes the head as UTF-8 crashes all three states. Each state plants the byte in the head:
         # - before a stamp line, with its folder present: the stamped copy wins;
         # - inside the stamp id, so no folder matches: the flat copy wins;
         # - before the placeholder of an unstamped guard.py beside a folder: the flat copy wins.
@@ -299,7 +299,7 @@ class StampedCopyTests(unittest.TestCase):
 
     def test_rgs_green_stamped_folder_missing_a_module_imports_it_from_flat(self):
         # Catches: a stamped folder short of one module makes report_guard fail on that module, not read the flat copy.
-        # Green on head: the folder comes first on the path, and a name it lacks falls through to hooks/.
+        # A name the stamped folder lacks falls through to hooks/ (the folder comes first on the path).
         for name in ("local_time", "override"):
             with self.subTest(module=name):
                 root, report_guard = self.tree("short-" + name, flat_id=FLAT_ID, folder_id=FLAT_ID)
