@@ -3404,6 +3404,43 @@ for (const width of TAB_SIZES) for (const zoom of [false, true]) for (const desi
   });
 }
 
+// ---------------------------------------------------------------- the tab labels at narrow widths and large text: no word breaks
+// A tab is at most the bar's width (max-inline-size: 100cqw), and that measure is 32 px narrower than the strip. A label wider than it wraps
+// inside a word (overflow-wrap: anywhere). The design review named these on a0a0e5904: "Questions 2" at 180-190 wide at 150%, 220 at 200%,
+// 300 at 300%; "Designs 2" at 180-200 at 200%, 240-260 at 300%; "Status" at 180-190 at 300%. A copy from 390dd3f97 has none of them.
+// Each case reads one tab's label: a word whose Range is in more than one box is broken across lines. The controls are widths the
+// design review did not name, so a label there is whole on a0a0e5904 and on 390dd3f97.
+const TAB_LABEL = { tabQ: "Questions 2", tabD: "Designs 2", tabStatus: "Status" };
+const TAB_LABEL_RED = [
+  ["tabQ", 180, 150], ["tabQ", 190, 150], ["tabQ", 220, 200], ["tabQ", 300, 300],
+  ["tabD", 180, 200], ["tabD", 190, 200], ["tabD", 200, 200], ["tabD", 240, 300], ["tabD", 260, 300],
+  ["tabStatus", 180, 300], ["tabStatus", 190, 300],
+];
+const TAB_LABEL_CONTROL = [["tabQ", 390, 300], ["tabD", 390, 200], ["tabStatus", 390, 300]];
+// The words of one tab's label that break across lines, each with its box count. Empty when every word is whole.
+const tabWordFaults = (page, id) => page.evaluate((id) => {
+  const tab = document.getElementById(id), faults = [];
+  const walker = document.createTreeWalker(tab, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    for (const m of n.data.matchAll(/\S+/g)) {
+      const r = document.createRange();
+      r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
+      const boxes = [...r.getClientRects()].filter((b) => b.width > 0 && b.height > 0);
+      if (boxes.length > 1) faults.push(`"${m[0]}" in ${boxes.length} pieces`);
+    }
+  }
+  return faults;
+}, id);
+for (const [set, note] of [[TAB_LABEL_RED, ""], [TAB_LABEL_CONTROL, " (control)"]]) for (const [id, width, pct] of set) for (const scheme of SCHEMES) {
+  const where = `at ${width} wide with the root font size at ${pct}%`;
+  test(`tab list, ${scheme}: ${where}: the ${TAB_LABEL[id]} tab label breaks inside no word${note}`, async (t) => {
+    const page = await tabSetPage(t, { width, pct, designs: id === "tabD", scheme, sel: "Questions" }); if (!page) return;
+    assert.equal(await page.locator("#" + id).isVisible(), true, `the ${TAB_LABEL[id]} tab is not shown ${where}`);
+    const faults = await tabWordFaults(page, id);
+    assert.deepEqual(faults, [], `the ${TAB_LABEL[id]} tab label breaks a word ${where}: ${faults.join(", ")}`);
+  });
+}
+
 // ---------------------------------------------------------------- the Designs sheet and the tab strip at narrow widths
 // The strip scrolls on its own (#tabs, overflow-x: auto), so a tab that scrolls out of it lies outside its box. Each case is a tab set with
 // Designs shown, three tabs, and reads its scope first. Red on the old page: at 180-240 the selected Questions tab scrolls out of the strip
