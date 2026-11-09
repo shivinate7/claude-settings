@@ -23,6 +23,7 @@ import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
+import test_fake_fetch  # noqa: E402  the fake clock for a timed fetch, one home (lint/test_fake_fetch.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
 
 def printed(out, marker):
@@ -15841,6 +15842,69 @@ class ReviewStampSince(unittest.TestCase):
         self.assertEqual(got2, "2026-10-21T15:04:05Z", "the read after the stop gave %r, not commit 2's committer time: the earlier result was cached" % (got2,))
         self.assertEqual(len(logs2), 1, "the read after the stop ran git log %d times, not 1: the earlier result was cached" % len(logs2))
 
+    def budgeted_read(self, clone, step, budget):
+        """review_stamp_since(clone, "fixture") inside merge's shared_deadline(budget), each fetch taking `step` s of fake time. The default
+        branch is answered as "fixture". -> (got, stop, cut, clock): `got` is the cutover, `stop` the Stop's text or None, `cut` the
+        TimeoutExpired a fetch raised or None, and `clock` the FakeFetchClock, which holds each fetch's start and timeout."""
+        clock = test_fake_fetch.FakeFetchClock(step=step)
+        got = stop = cut = None
+        with clock.patched(merge), unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"):
+            with merge.shared_deadline(budget):
+                try:
+                    got = review_fn(self, "review_stamp_since")(clone, "fixture")
+                except merge.Stop as e:
+                    stop = str(e)
+                except subprocess.TimeoutExpired as e:
+                    cut = e
+        return got, stop, cut, clock
+
+    def test_a_budget_spent_mid_deepen_stops_naming_the_budget_and_starts_no_fetch_after_it(self):
+        # The budget is the shared deadline the caller opens. Each fetch takes 0.6 s of fake time. The first fetch fits the 1.0 s budget.
+        # The second has 0.4 s left and runs out inside it, so the read must stop naming the budget, not die on the timeout. No fetch may
+        # start once the budget is spent. Each fetch's timeout is what the budget has left: all of it first, then the rest.
+        clone = self.shallow_origin(self.repo(salt_at=2, branch="fixture"), depth=2)
+        self.assert_shallow_boundary(clone, "HEAD~1")
+        got, stop, cut, clock = self.budgeted_read(clone, step=0.6, budget=1.0)
+        self.assertIsNone(cut, "the budget ran out inside a fetch, and the read raised TimeoutExpired (%s) instead of a Stop naming the budget" % (cut,))
+        self.assertIsNotNone(stop, "review_stamp_since returned %r with its budget spent, instead of stopping" % (got,))
+        self.assertIn("budget", stop, "the Stop does not name the budget:\n" + stop)
+        starts = [start for start, _ in clock.fetches]
+        self.assertTrue(starts, "no fetch ran, so the case never reached the deepen")
+        self.assertTrue(all(start < 1.0 for start in starts), "a fetch started at or after the 1.0 s budget: %r" % (clock.fetches,))
+        timeouts = [timeout for _, timeout in clock.fetches]
+        self.assertGreaterEqual(len(timeouts), 2, "the read made %d fetch before the budget ran out, not 2: %r" % (len(timeouts), clock.fetches))
+        self.assertAlmostEqual(timeouts[0], 1.0, msg="the first fetch's timeout is not the whole budget: %r" % (clock.fetches,))
+        self.assertAlmostEqual(timeouts[1], 0.4, msg="the second fetch's timeout is not what the budget had left: %r" % (clock.fetches,))
+
+    def test_a_second_read_in_a_fresh_process_after_a_deepen_fetches_nothing(self):
+        # decision pr-review-record, "The cutover": once a deepen leaves the boundary older than the salt commit, a later read in any process
+        # finds the salt commit and fetches nothing. The first read here deepens the clone for real, from its local origin. The second runs
+        # in a fresh process, which holds none of this process's caches.
+        clone = self.shallow_origin(self.repo(salt_at=2, branch="fixture"), depth=2)
+        self.assert_shallow_boundary(clone, "HEAD~1")
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"):
+            first = review_fn(self, "review_stamp_since")(clone, "fixture")
+        self.assertEqual(first, "2026-10-21T15:04:05Z", "the first read gave %r, not the salt commit's committer time" % (first,))
+        self.assertEqual(subprocess.run(["git", "-C", clone, "cat-file", "-e", "HEAD~2^{commit}"], capture_output=True).returncode, 0,
+                         "the first read did not deepen the clone, so the second read proves nothing")
+        child = ("import json, sys\n"
+                 "sys.path.insert(0, sys.argv[1])\n"
+                 "import merge\n"
+                 "from unittest import mock\n"
+                 "fetches = []\n"
+                 "real_fetch = merge.fetch_branch\n"
+                 "def counting(root, name, deepen=None):\n"
+                 "    fetches.append([name, deepen])\n"
+                 "    return real_fetch(root, name, deepen=deepen)\n"
+                 "with mock.patch.object(merge, 'host_default_branch', lambda r: 'fixture'), mock.patch.object(merge, 'fetch_branch', counting):\n"
+                 "    got = merge.review_stamp_since(sys.argv[2], 'fixture')\n"
+                 "print(json.dumps({'got': got, 'fetches': fetches}))\n")
+        run = subprocess.run([sys.executable, "-c", child, HERE, clone], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, "the fresh process failed:\n" + run.stderr)
+        second = json.loads(run.stdout)
+        self.assertEqual(second["fetches"], [], "a read in a fresh process fetched after the deepen: %r" % (second["fetches"],))
+        self.assertEqual(second["got"], first, "the fresh process read %r, not the first read's %r" % (second["got"], first))
+
     def git_at(self, root, date, *args):
         """Run git in the temp repo with its author and committer times set to `date`."""
         env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
@@ -15919,7 +15983,7 @@ class ReviewStampSince(unittest.TestCase):
             self.fail("shallow_boundary read a folder with no .git as full history and returned %r instead of stopping" % (got,))
 
     def test_two_default_branches_on_one_root_and_base_each_get_their_own_cutover(self):
-        # The cache is keyed by (root, base) and holds the first answer. A second call with another default branch must read that branch.
+        # The cache is keyed by (repo top, base, default branch) and holds the first answer. A second call with another default branch must read that branch.
         # origin/trunk here is commit 1, which has no salt line, so its cutover is none. main's is the salt commit's committer time.
         root = self.repo(salt_at=2)
         sh(root, "git", "update-ref", "refs/remotes/origin/trunk", sh(root, "git", "rev-parse", "HEAD~2"))

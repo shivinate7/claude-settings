@@ -195,6 +195,34 @@ CUTOVER = "2026-10-21T15:04:05Z"  # the committer time of the commit that adds t
 CUTOVER_GIT_DATE = "2026-10-21 15:04:05 +0000"
 PRE_SALT_SOURCE = "def f():\n    return 1\n"
 SALT_SOURCE = 'REVIEW_STAMP_SALT = "claude-settings review record stamp v1"\n' + "def f():\n    return 2\n"
+POST_SALT_SOURCE = SALT_SOURCE.replace("return 2", "return 3")  # a later commit, which keeps the salt line
+MERGE_DIR = os.path.join(HERE, "..", "merge")
+
+# The Stop hook, run as __main__ with a fake clock for its fetches (lint/test_fake_fetch.py). The hook's merge is the one this
+# driver imports: the hook's merge_module returns it. Each shared deadline the hook opens is recorded, and when the hook ends the
+# clock's total fake time, its fetches and those deadlines go to LOG.
+CUTOVER_DRIVER = """import contextlib, json, runpy, sys
+sys.path[:0] = [%(hooks)r, %(merge)r, %(lint)r]
+import guard_merge
+import merge
+import test_fake_fetch
+clock = test_fake_fetch.FakeFetchClock(step=%(step)r)
+spans, real_deadline = [], merge.shared_deadline
+@contextlib.contextmanager
+def recorded(seconds):
+    spans.append(seconds)
+    with real_deadline(seconds):
+        yield
+merge.shared_deadline = recorded
+guard_merge.merge_module = lambda: merge
+merge.SH_TIMEOUT = guard_merge.MERGE_READ_TIMEOUT
+try:
+    with clock.patched(merge):
+        runpy.run_path(%(guard)r, run_name="__main__")
+finally:
+    with open(%(log)r, "w", encoding="utf-8") as handle:
+        json.dump({"elapsed": clock.now, "fetches": clock.fetches, "spans": spans}, handle)
+"""
 
 
 def setUpModule():
@@ -259,6 +287,49 @@ class ReviewRecordTests(unittest.TestCase):
         default branch is the one the stand-in's pulls carry, given by a patch of host_default_branch."""
         with mock.patch.object(merge_mod, "host_default_branch", return_value=default):
             return merge_mod.review_stamp_since(self.repo, default)
+
+    def report_hook_timeout(self):
+        """The Stop hook timeout of the report guard, read from settings.json: the one Stop hook whose command runs report_guard.py."""
+        with open(os.path.join(HERE, "..", "settings.json"), encoding="utf-8") as handle:
+            settings = json.load(handle)
+        hooks = [hook for group in settings["hooks"]["Stop"] for hook in group.get("hooks", []) if "report_guard.py" in hook.get("command", "")]
+        self.assertEqual(len(hooks), 1, "settings.json names %d Stop hooks for report_guard.py, not one" % len(hooks))
+        self.assertIn("timeout", hooks[0], "the report guard's Stop hook sets no timeout")
+        return hooks[0]["timeout"]
+
+    def shallow_cutover_clone(self):
+        """A depth-2 clone of a source with three commits: the one before the salt, the salt commit (at CUTOVER) and a later one that keeps
+        the salt. The salt commit is the clone's shallow boundary, so the cutover read must deepen. The clone's origin/main is the ref the
+        report guard reads."""
+        src = os.path.join(self.run_dir, "src")
+        os.makedirs(os.path.join(src, "merge"))
+        subprocess.run(["git", "init", "-q", src], check=True, capture_output=True)
+        subprocess.run(["git", "-C", src, "symbolic-ref", "HEAD", "refs/heads/main"], check=True, capture_output=True)
+        commits = ((PRE_SALT_SOURCE, "2026-10-20 10:00:00 +0000"), (SALT_SOURCE, CUTOVER_GIT_DATE), (POST_SALT_SOURCE, "2026-10-22 09:00:00 +0000"))
+        for text, date in commits:
+            with open(os.path.join(src, "merge", "merge.py"), "w", encoding="utf-8") as handle:
+                handle.write(text)
+            env = dict(os.environ, GIT_AUTHOR_DATE=date, GIT_COMMITTER_DATE=date)
+            subprocess.run(["git", "-C", src, "add", "merge/merge.py"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", src, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com",
+                            "commit", "-q", "-m", "fixture"], check=True, capture_output=True, env=env)
+        clone = os.path.join(self.run_dir, "clone")
+        subprocess.run(["git", "clone", "-q", "--depth", "2", "file://" + src, clone], check=True, capture_output=True)
+        return clone
+
+    def slow_cutover_run(self, step):
+        """The Stop hook on a lane's PASS claim, with its cutover read on the shallow clone and each fetch taking `step` s of fake time.
+        -> (the hook's printed reply, the driver's log: the fake seconds elapsed, the fetches, and each shared deadline's seconds)."""
+        clone = self.shallow_cutover_clone()
+        self.serve(comments=[record()])
+        log = os.path.join(self.run_dir, "cutover-log.json")
+        driver = os.path.join(self.run_dir, "cutover-driver.py")
+        with open(driver, "w", encoding="utf-8") as handle:
+            handle.write(CUTOVER_DRIVER % {"hooks": os.path.abspath(HOOKS_DIR), "merge": os.path.abspath(MERGE_DIR), "lint": LINT_DIR,
+                                           "step": step, "guard": trg.REPORT_GUARD, "log": log})
+        out = self.stop(self.lane_turn(report(CLAIM)), script=driver, cwd=clone)
+        with open(log, encoding="utf-8") as handle:
+            return out, json.load(handle)
 
     def gh_calls(self):
         """The argv of each stand-in call of the last Stop run."""
@@ -820,6 +891,31 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_reads_of(PR)
         self.assert_blocked(out, "a failed cutover read let a PASS claim through on an unstamped record for a stale head:")
         self.assertIn("PR #12", out["reason"], out)
+
+    def test_a_slow_cutover_read_ends_within_the_hook_timeout_and_prints_the_unknown_note(self):
+        # Catches: a cutover read whose fetches outlast the Stop hook's timeout. Each fetch takes 21 s of fake time, under merge's 25 s
+        # per-call cap, so each one completes, and three of them outlast the hook's timeout. A hook killed there prints nothing, a silent
+        # allow. The read must end inside the timeout, and the hook must print the UNKNOWN cutover note.
+        out, log = self.slow_cutover_run(step=21)
+        timeout = self.report_hook_timeout()
+        self.assertIsNotNone(out, "the hook printed nothing: it was killed, or it never reached the cutover read")
+        message = out.get("systemMessage", "")
+        self.assertIn("UNKNOWN", message, "the hook printed no UNKNOWN note: %r" % (out,))
+        self.assertIn("review cutover could not be read for PR #%d" % PR, message, "the note is not the cutover note: %r" % (out,))
+        self.assertNotEqual(out.get("decision"), "block", "a failed cutover read blocked a record that is stamped and done: %r" % (out,))
+        self.assertLessEqual(log["elapsed"], timeout, "the cutover read ran %g s of fake time, past the hook's %d s timeout, over %d fetches"
+                             % (log["elapsed"], timeout, len(log["fetches"])))
+
+    def test_the_report_guard_reads_the_cutover_under_a_shared_deadline_below_the_hook_timeout(self):
+        # Catches: a cutover read with no budget. The budget is the seconds of the shared deadline the report guard opens around the read
+        # (merge's shared_deadline, the one home of a read's budget). Each one must be above zero and below the hook's timeout, which is
+        # read from settings.json here, never copied.
+        out, log = self.slow_cutover_run(step=21)
+        timeout = self.report_hook_timeout()
+        self.assertTrue(log["spans"], "the report guard opened no shared deadline around the cutover read, so the read has no budget")
+        for seconds in log["spans"]:
+            self.assertGreater(seconds, 0, "the cutover budget is %r s, not above zero" % (seconds,))
+            self.assertLess(seconds, timeout, "the cutover budget of %r s is not below the hook's %d s timeout" % (seconds, timeout))
 
 
 if __name__ == "__main__":
