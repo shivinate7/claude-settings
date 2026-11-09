@@ -12835,6 +12835,14 @@ for _opener in ("if", "while", "until", "select", "case"):
     sh("frozen shell: a heredoc body line that starts with %s opens no block, then cd docs and sed -i on settings.json, "
        "from the config folder, allows [heredoc opener red]" % _opener,
        "python3 - <<'PY'\n%s x:\n pass\nPY\ncd docs\nsed -i s/a/b/ settings.json" % _opener, "allow", cwd=CFG)
+# A heredoc body line `fi` is text for the interpreter, so the if body is still open after the heredoc: its cd may not
+# run, and the sed writes the frozen settings.json. The control has no `fi` body line and keeps today's verdict.
+sh("frozen shell: an if body holding a heredoc whose body has a line fi, then cd docs and sed -i on settings.json, "
+   "from the config folder, denies [heredoc closer red]",
+   "if test -f x; then\npython3 - <<'PY'\nfi\nPY\ncd docs\nfi\nsed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=CFG)
+sh("frozen shell: the same if body with an empty heredoc body, then cd docs and sed -i on settings.json, "
+   "from the config folder, denies [heredoc closer control]",
+   "if test -f x; then\npython3 - <<'PY'\nPY\ncd docs\nfi\nsed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=CFG)
 # Five cds, then a frozen write. The absolute chain is refused. The `../` chain reaches the same folders, and the walk
 # normalises each `..` step, so it is refused too. Both chains end on the config folder, and the notes.txt rows are the
 # same chains on a file that is not frozen.
