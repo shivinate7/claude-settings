@@ -5,7 +5,7 @@
   "order": 922,
   "owner": "coordinator",
   "why": "Agents push their worktree-agent-<hex> branch by name. The guard asks (decision plain-push-asks), so the prompt reaches the owner, who asked at 13:14 CST Nov 9 why he still sees these (ask ask-mw9n4rzeb6). A guard's remedy must go to the session, not the owner (decision guard-remedy-not-to-owner).",
-  "note": "Coordinator (13:16 CST Nov 9). Fix: the push-agent-branch rule refuses with its remedy `git push origin HEAD:<lane-branch>` instead of asking. Related: step one-worktree-per-branch (agent branches collide) and archive-agent-branch-dead.",
-  "updatedAt": "2026-11-09T13:20:00-06:00",
+  "note": "Coordinator (13:16 CST Nov 9). Fix: the push-agent-branch rule refuses with its remedy `git push origin HEAD:<lane-branch>` instead of asking. Related: step one-worktree-per-branch (agent branches collide) and archive-agent-branch-dead. PR #2465. When it merges, #1143 closes as replaced (step branch-cleanup).",
+  "updatedAt": "2026-11-09T14:04:00-06:00",
   "lane": "session_013NEJL1nA83YuznrBBaUdv6"
 }
