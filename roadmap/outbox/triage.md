@@ -184,3 +184,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - (debt) glued-amp-url-remedy: since #2156, an unquoted URL with `&` is refused and the remedy never says to quote it; Claude hits this in normal work (lane bg-tail-loses-verdict, 00:10 CST Nov 9). Step glued-amp-url-remedy.
 - merge-cloud-path-comment (lane notes-fix-page, from #2351's review record, 04:06 CST Nov 9): merge/test_merge.py:12858's comment "merge is not on a cloud PATH" turns false. The lane folds it into its next push-guard follow-up PR.
 - nested-commands-named-any-way (same source): hooks/guard_push_delete.py `_nested_commands` comment "named any way" overstates. The lane folds it into the same PR.
+- three-way-apply-not-compared (lane compare-files-missing-key, #1616, via the coordinator 04:45 CST Nov 9): a diff applied with a 3-way merge is not compared against the new base before the push.
+- fix-check-brief-merge-base (same source): fix-check briefs diff against the merge base.

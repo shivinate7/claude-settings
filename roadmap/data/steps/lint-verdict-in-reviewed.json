@@ -1,0 +1,11 @@
+{
+  "title": "A lane-lint verdict is recorded with its head, and `merge --reviewed` shows it",
+  "why": "Lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), 04:46 CST Nov 9: it handed #2034 to the coordinator as lint-passed because the review lane said so in a message; the lint had timed out (UNKNOWN, ci-job did not finish in 1200 s). A hand-off that rests on a message, not a recorded verdict, can send an unlinted PR into a batch.",
+  "note": "Fix proposed by the lane: `merge --lane-lint` records its verdict and head (a PR comment or a record field), and `merge --reviewed` prints it beside the record state. Related: step lane-lint-before-push. Filed 04:47 CST Nov 9.",
+  "phase": "now",
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "lane": "",
+  "status": "todo",
+  "order": 904,
+  "updatedAt": "2026-11-09T04:47:00-06:00"
+}
