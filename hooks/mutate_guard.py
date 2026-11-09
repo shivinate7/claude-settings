@@ -74,11 +74,14 @@ OVERRIDE = os.path.join(HERE, "override.py")
 CALL_JUDGE = os.path.join(HERE, "call_judge.py")
 CALL_JUDGE_SUITE = os.path.join(HERE, "test_call_judge.py")
 SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
+MERGE_TOOL = os.path.join(HERE, "..", "merge", "merge.py")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
 TARGETS = {
     "guard": (GUARD, SUITE, "GUARD_UNDER_TEST", "guard"),
+    # merge/merge.py, the merge tool the guard loads beside its own folder (guard_merge.merge_module).
+    "merge": (MERGE_TOOL, SUITE, "GUARD_UNDER_TEST", "merge"),
     "watch": (WATCH, WATCH_SUITE, "WATCH_UNDER_TEST", "config_watch"),
     "decision": (DECISION, DECISION_SUITE, "DECISION_WATCH_UNDER_TEST", "decision_watch"),
     "ruling": (RULING, RULING_SUITE, "RULING_HOME_UNDER_TEST", "ruling_home"),
@@ -1671,16 +1674,16 @@ MUTATIONS = [
     # ---- the three git acts: context for a write, the merge guard, and cite by id. Each mutant breaks
     # one arm of one clause, and the required case is the one that must read that break.
     ("merge-checks: a pending head merges",
-     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "gh pr merge "',
-     '        if verdict == "red":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "gh pr merge "',
+     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail, is_api_merge(segment)),\n                   "gh pr merge "',
+     '        if verdict == "red":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail, is_api_merge(segment)),\n                   "gh pr merge "',
      "guard", 'merge-checks: a pending check denies'),
     ("merge-checks: an unread head merges",
-     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "gh pr merge "',
-     '        if verdict not in ("green", "unknown"):\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "gh pr merge "',
+     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail, is_api_merge(segment)),\n                   "gh pr merge "',
+     '        if verdict not in ("green", "unknown"):\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail, is_api_merge(segment)),\n                   "gh pr merge "',
      "guard", 'merge-checks: a gh that answers nothing readable is unknown'),
     ("merge-checks: the host merge tool is never guarded",
-     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "merge tool "',
-     '        if False:\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "merge tool "',
+     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks",\n                   merge_check_reason(verdict, detail, tool == "mcp__github__enable_pr_auto_merge"),\n                   "merge tool "',
+     '        if False:\n            refuse(tool, "deny", "merge-checks",\n                   merge_check_reason(verdict, detail, tool == "mcp__github__enable_pr_auto_merge"),\n                   "merge tool "',
      "guard", 'merge-checks: the merge tool of the host denies on a pending head'),
     ("merge-checks: --auto skips the guard",
      '        if merging is None:\n            continue\n        verdict, detail = merge_check(',
@@ -1696,8 +1699,8 @@ MUTATIONS = [
      'merge_check(merging[0], merging[1], cite_where)', 'merge_check(merging[0], merging[1], cwd)',
      "guard", 'merge-checks: a cd names the repo the read runs in'),
     ("merge-checks: the host tool's read runs in the guard's own folder",
-     'repo, cwd)\n        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "merge tool "',
-     'repo, "")\n        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "merge tool "',
+     'repo, cwd)\n        if verdict != "green":\n            refuse(tool, "deny", "merge-checks",\n                   merge_check_reason(verdict, detail, tool == "mcp__github__enable_pr_auto_merge"),\n                   "merge tool "',
+     'repo, "")\n        if verdict != "green":\n            refuse(tool, "deny", "merge-checks",\n                   merge_check_reason(verdict, detail, tool == "mcp__github__enable_pr_auto_merge"),\n                   "merge tool "',
      "guard", 'merge-checks: the host merge tool reads the repo of the call'),
     ("merge-checks: the read gets no folder",
      'host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)',
@@ -1717,9 +1720,32 @@ MUTATIONS = [
      'return host.head_read(selector, nothing_is_green',
      'return host.head_read("", nothing_is_green', "guard",
      'merge-checks: the pull request and repo of the call are the ones read'),
+    # The long repo flag of `gh pr merge`. Its twin in api_merge_call_of is a different arm, so the anchor
+    # carries the arm that follows it: merge_call_of's MERGE_VALUE_FLAGS test, which only this function holds.
     ("merge-checks: the long repo flag goes unread",
-     '        elif arg.startswith("--repo="):',
-     '        elif False:', "guard", 'merge-checks: the long repo flag names the repo too'),
+     '        elif arg.startswith("--repo="):\n            repo = arg[len("--repo="):]\n        elif arg in MERGE_VALUE_FLAGS:',
+     '        elif False:\n            repo = arg[len("--repo="):]\n        elif arg in MERGE_VALUE_FLAGS:', "guard",
+     'merge-checks: the long repo flag names the repo too'),
+    # ---- the raw API merge (api_merge_call_of) and the push to main (push_batch_hit), each arm pinned to a case that
+    # is green on this commit. A pinned case must pass unmutated: the route rows carry config=MERGECFG for that reason.
+    ("api-merge: a GET of the merge endpoint is read as a merge",
+     '    if method.upper() != "PUT" or not found:',
+     '    if not found:', "guard",
+     'a GET of the merge endpoint, which reads and merges nothing'),
+    ("api-merge: a raw API call never reaches the merge reader",
+     '        return api_merge_call_of(rest)',
+     '        return None', "guard",
+     "merge-route: gh api -X PUT is refused while another ready pr's required check is pending"),
+    ("push-batch: a push to main never reads its busy pull requests",
+     '                    busy = push_batch_hit(args, where, overrides)',
+     '                    busy = ""', "guard",
+     "merge-route: git push origin main is refused while another ready pr's required check is pending"),
+    # The no-op push exemption lives in merge/merge.py (Host.batch_read), so it is a `merge` target: its copy takes the
+    # mutated tool beside the copied guard, which the guard loads first.
+    ("merge-batch: the no-op push exemption is never read, so a push of main's own tip is denied",
+     '                if self.compare_status(base, head) == "identical":',
+     '                if False:', "merge",
+     "merge-route: git push origin main, pushing main's own tip, is asked, not denied"),
     ("merge-checks: a body flag's value is read as the pull request",
      'MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body",',
      'MERGE_VALUE_FLAGS = {"-R", "--repo", "--body",', "guard",
@@ -3499,7 +3525,7 @@ def run_mutant(sources, work: str, entry):
     if skip:
         return label, None, [], required, skip
     _path, suite, variable, stem = TARGETS[target]
-    if target in ("guard", "simlease"):
+    if target in ("guard", "simlease", "merge"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
         # module that holds it. The suite loads the copied guard.py, which finds its siblings. The
         # simulator refusal imports janitor/sweep.py from ../janitor and fails open when it cannot, so
@@ -3514,7 +3540,17 @@ def run_mutant(sources, work: str, entry):
             with open(os.path.join(root, "bin", "sim-lease"), "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(sources[target].replace(old, new, 1))
         else:
-            mutate_shared.apply_mutant(tree, old, new)
+            if target == "merge":
+                # The guard loads the merge tool beside its own hooks folder before the clone its rules file points
+                # at (guard_merge.settings_roots). The copy takes the mutated tool there, so only this mutant sees it.
+                # The tool reads ../actions (the CI alarm's events, at import) and ../lint, so the copy takes both.
+                os.makedirs(os.path.join(root, "merge"), exist_ok=True)
+                with open(os.path.join(root, "merge", "merge.py"), "w", encoding="utf-8", newline="\n") as handle:
+                    handle.write(sources[target].replace(old, new, 1))
+                shutil.copytree(os.path.join(HERE, "..", "actions"), os.path.join(root, "actions"),
+                                ignore=shutil.ignore_patterns("__pycache__"))
+            else:
+                mutate_shared.apply_mutant(tree, old, new)
             shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
         copy_path = os.path.join(tree, "guard.py")
         os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
@@ -3555,7 +3591,7 @@ def run_mutant(sources, work: str, entry):
         copy_path = os.path.join(tree, "call_judge.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
-    elif target not in ("guard", "simlease"):
+    elif target not in ("guard", "simlease", "merge"):
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))

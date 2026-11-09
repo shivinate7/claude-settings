@@ -10155,13 +10155,17 @@ ROUTE_DENIALS = (
     ("git push origin HEAD:main", "Bash", VCS + " push origin HEAD:main", None),
     ("git push origin <sha>:refs/heads/main", "Bash", VCS + " push origin abc1234:refs/heads/main", None),
 )
+# config=MERGECFG on every row: a mutant copy of the guard finds the merge tool through the clone the rules file points at
+# (section 5b). Without it the copy reads no merge tool, every row is refused as unknown, and a mutant pinned to a row is
+# killed by the missing tool, not by its own arm.
 for _label, _tool, _command, _input in ROUTE_DENIALS:
     _name = "merge-route: %s is refused while another ready pr's required check is pending" % _label
     if _command is None:
         add(_name, "deny", "merge-checks", carries=ROUTE_CARRIES, lacks=ROUTE_LACKS, tool=_tool, cwd=NOGIT,
-            env_path=ROUTE_ON, **_input)
+            env_path=ROUTE_ON, config=MERGECFG, **_input)
     else:
-        sh(_name, _command, "deny", "merge-checks", carries=ROUTE_CARRIES, lacks=ROUTE_LACKS, cwd=NOGIT, env_path=ROUTE_ON)
+        sh(_name, _command, "deny", "merge-checks", carries=ROUTE_CARRIES, lacks=ROUTE_LACKS, cwd=NOGIT, env_path=ROUTE_ON,
+           config=MERGECFG)
 # With no ready pull request on main, a push to main still asks as it does today.
 sh("merge-route: git push origin main with no busy pr on main still asks", VCS + " push origin main", "ask", PUSH_MAIN_RULE,
    cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
@@ -10185,7 +10189,7 @@ for _label, _fixture, _command in (
     ("a PUT to another pull request endpoint", ROUTE_ON, "gh api -X PUT repos/y/x/pulls/1/requested_reviewers"),
 ):
     sh("merge-route: gh api, %s, is allowed: %s" % (_label, _command), _command, "allow", silent=True, cwd=NOGIT,
-       env_path=_fixture + os.pathsep + PY_PATH)
+       env_path=_fixture + os.pathsep + PY_PATH, config=MERGECFG)
 for _label, _fixture in (("no busy pr on main", GHMAIN), ("a busy pr that is a draft", GHBATCHDRAFT),
                          ("a busy pr on another base", GHBATCHBASE), ("a busy pr whose head holds this head", GHBATCHCONTAIN)):
     add("merge-route: enable_pr_auto_merge with %s is allowed" % _label, "allow", tool=MCP_AUTO, cwd=NOGIT,
@@ -10201,6 +10205,15 @@ sh("merge-route: fixture: gh pr merge 1 is refused when the busy pr is on page t
 # The busy pull request on page two is refused for a raw merge call too: the whole open list is read, not its first page.
 sh("merge-route: gh api -X PUT is refused when the busy pr is on page two of the open list", GH_API_MERGE, "deny", "merge-checks",
    carries=ROUTE_CARRIES, lacks=ROUTE_LACKS, cwd=NOGIT, env_path=GHBATCHPAGE2 + os.pathsep + PY_PATH)
+# A raw API merge whose pull request number or repo is a shell variable (`$PR`, `$REPO`) names no head the read can judge. It
+# must be judged as `gh pr merge $PR` is: unknown, so denied. Today the endpoint does not match, the call reads as no merge,
+# and it is allowed. The GET of the same path reads and merges nothing, so it stays allowed.
+sh("merge-route: variable: gh api -X PUT, a pr number in a shell variable, is refused while another ready pr's required check is pending",
+   "gh api -X PUT repos/y/x/pulls/$PR/merge", "deny", "merge-checks", cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
+sh("merge-route: variable: gh api -X PUT, a repo in a shell variable, is refused while another ready pr's required check is pending",
+   "gh api -X PUT repos/$REPO/pulls/1/merge", "deny", "merge-checks", cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
+sh("merge-route: variable: gh api, a GET of a pr number in a shell variable, reads and merges nothing, and is allowed",
+   "gh api repos/y/x/pulls/$PR/merge", "allow", silent=True, cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
 # A push to main with a busy pull request that is a draft, or on another base, still asks as it does today.
 sh("merge-route: git push origin main with a busy pr that is a draft still asks", VCS + " push origin main", "ask", PUSH_MAIN_RULE,
    cwd=NOGIT, env_path=GHBATCHDRAFT + os.pathsep + PY_PATH)
@@ -15613,6 +15626,75 @@ LOG_CHECKS_EXTRA.append(("merge-route: the merge tool's batch refusal names no m
                          route_existing_merge_remedy_case))
 LOG_CHECKS_EXTRA.append(("merge-route: one attempt of each route reads the open pulls once, makes no write call, and writes no file",
                          route_cost_case))
+
+
+# A child that loads the guard under test (GUARD_UNDER_TEST, so a mutant copy is the one judged) and stubs ONE read: the
+# no-op exemption, main against the pushed tip. Every other compare, and every other gh call, reaches the fake. The stub is
+# counted on stderr, so a push that never reached the read fails the check instead of passing it.
+STUCK_COMPARE_CHILD = r'''
+import importlib.util, os, subprocess, sys
+hooks, tip = sys.argv[1], sys.argv[2]
+sys.path.insert(0, hooks)
+spec = importlib.util.spec_from_file_location("guard_under_test", os.path.join(hooks, "guard.py"))
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+import guard_merge  # noqa: E402  the module guard.py loaded its merge clause from
+tool = guard_merge.merge_module()
+hits = []
+real = tool.Host.compare_status
+
+
+def stub(self, head, other, what=None):
+    if head == "main" and other == tip:  # Host.batch_read's exemption read: base...pushed head
+        hits.append(1)
+        raise subprocess.TimeoutExpired(["gh", "api"], 25)
+    return real(self, head, other, what)
+
+
+tool.Host.compare_status = stub
+try:
+    mod.main()
+except SystemExit:
+    pass
+sys.stderr.write("STUCK hits=%d\n" % len(hits))
+'''
+
+
+def push_stuck_compare_case():
+    """A push to main whose busy pull request is on the base, and whose no-op exemption read raises a timeout, is denied.
+
+    batch_read (merge/merge.py) reads the exemption `main...<tip>` outside the read's shared deadline and catches only Stop.
+    A read that raises anything else, a hung gh's TimeoutExpired, escapes judge(), and main() fails open: the push is allowed,
+    with a crash line in the log. The batch brake must hold, so the push is denied and the busy pull request is named.
+    """
+    materialize(PUSHMAIN)
+    materialize(GHBATCHTIP)
+    tip = run_vcs(PUSHMAIN, "rev-parse", "main").stdout.strip()
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": VCS + " push origin main"}, "cwd": PUSHMAIN})
+    env = dict(os.environ)
+    for name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR"):
+        env.pop(name, None)   # as decide() drops them: a runner's own session or lane must not reach the case
+    env["CLAUDE_CONFIG_DIR"] = MERGECFG
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    env["PATH"] = GHBATCHTIP + os.pathsep + PY_PATH + os.pathsep + GIT_PATH
+    done = subprocess.run([sys.executable, "-c", STUCK_COMPARE_CHILD, os.path.dirname(GUARD), tip], input=payload,
+                          capture_output=True, text=True, env=env, timeout=120)
+    counted = re.search(r"STUCK hits=(\d+)", done.stderr)
+    if not counted or counted.group(1) == "0":   # scope first: the stub must have been reached
+        return False, "the no-op exemption read was never reached (exit %d): %s" % (done.returncode, done.stderr.strip()[-160:])
+    decision, reason = read_decision(done.stdout)
+    if decision != "deny":
+        return False, "want deny, got %s: %s" % (decision, reason[:120])
+    lost = [f for f in ROUTE_CARRIES if not carried(f, reason)] + [f for f in ROUTE_LACKS if f in reason]
+    if "merge-checks" not in reason:
+        lost.append("merge-checks")
+    if lost:
+        return False, "the reason does not carry %r: %s" % (lost[0], reason[:120])
+    return True, "denied with the busy pr named, after the exemption read raised a timeout (%s)" % counted.group(0)
+
+
+LOG_CHECKS_EXTRA.append(("merge-route: stuck compare: a push to main whose no-op exemption read raises a timeout is denied, never allowed",
+                         push_stuck_compare_case))
 
 
 # The head-check refusal of the two new routes (a raw API PUT and enable_pr_auto_merge) while the head itself is pending or red,
