@@ -774,6 +774,49 @@ class CacheFolder(unittest.TestCase):
         self.assertEqual(code, 1, "a missing FLOOR_VENV_DIR was not built: exit %d, output %r" % (code, out))
         self.assertTrue(os.path.isfile(os.path.join(folder, ".ok")), "the built folder has no .ok marker")
 
+    def make_symlink(self, target, link):
+        try:
+            os.symlink(target, link)
+        except (OSError, NotImplementedError):
+            self.skipTest("this platform cannot make symlinks")
+
+    def test_a_regular_file_is_refused_and_kept(self):
+        python = bare_python()
+        path = self.fixture_folder()
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("keep me\n")
+        code, out = run_check(tree({"hooks/x.py": IGLOB}), env={"FLOOR_VENV_DIR": path}, python=python)
+        self.assertTrue(os.path.isfile(path), "the check deleted the file %s named by FLOOR_VENV_DIR" % path)
+        with open(path, encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "keep me\n", "the check changed the file %s" % path)
+        self.assertEqual(code, 2, "a regular file named by FLOOR_VENV_DIR exited %d, not 2: %r" % (code, out))
+        self.assertIn(path, out, "the refusal does not name the file %s: %r" % (path, out))
+
+    def test_a_dangling_symlink_is_refused_and_kept(self):
+        python = bare_python()
+        path = self.fixture_folder()
+        self.make_symlink(os.path.join(os.path.dirname(path), "no-such-target"), path)
+        code, out = run_check(tree({"hooks/x.py": IGLOB}), env={"FLOOR_VENV_DIR": path}, python=python)
+        self.assertTrue(os.path.islink(path),
+                        "the check removed the dangling symlink %s named by FLOOR_VENV_DIR" % path)
+        self.assertEqual(code, 2, "a dangling symlink named by FLOOR_VENV_DIR exited %d, not 2: %r" % (code, out))
+        self.assertIn(path, out, "the refusal does not name the symlink %s: %r" % (path, out))
+
+    def test_a_symlink_to_a_file_is_refused_and_both_kept(self):
+        python = bare_python()
+        path = self.fixture_folder()
+        target = os.path.join(os.path.dirname(path), "target.txt")
+        with open(target, "w", encoding="utf-8") as handle:
+            handle.write("keep me\n")
+        self.make_symlink(target, path)
+        code, out = run_check(tree({"hooks/x.py": IGLOB}), env={"FLOOR_VENV_DIR": path}, python=python)
+        self.assertTrue(os.path.isfile(target), "the check deleted %s, the file the symlink points at" % target)
+        with open(target, encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "keep me\n", "the check changed %s" % target)
+        self.assertTrue(os.path.islink(path), "the check removed the symlink %s named by FLOOR_VENV_DIR" % path)
+        self.assertEqual(code, 2, "a symlink to a file named by FLOOR_VENV_DIR exited %d, not 2: %r" % (code, out))
+        self.assertIn(path, out, "the refusal does not name the symlink %s: %r" % (path, out))
+
 
 class StartCount(unittest.TestCase):
     """The bootstrap's process starts, counted at the check's one no-window run. First use starts three processes
