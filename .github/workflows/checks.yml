@@ -373,6 +373,9 @@ jobs:
       - name: Red-run trailer fixture suite
         run: python3 lint/test_check_red_run.py
 
+      - name: Step cite fixture suite
+        run: python3 lint/test_check_step_cites.py
+
       - name: Plan refuter fixture suite
         run: python3 lint/test_check_plan_refuter.py
 
