@@ -10,7 +10,7 @@ import re
 from guard_core import (
     DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
     bare_words, command_indexes, inline_script, inner_commands, is_powershell, resolve_command,
-    segment_tokens, split_segments,
+    segment_tokens, split_background, split_segments,
 )
 from guard_env import _substitutions
 
@@ -219,7 +219,6 @@ def sleep_seconds(tokens, index) -> float:
     for token in tokens[index + 1:]:
         if token.lower() in ("-milliseconds", "-m"):
             unit = 0.001
-        token = token.split("&", 1)[0]   # a glued `sleep 1&p=$!` waits as the spaced form does
         if DURATION.match(token):
             return float(token.rstrip("smhd")) * scale.get(token[-1], 1) * unit
     return float("inf")
@@ -280,7 +279,10 @@ def waiter_verdict(segments, background: bool) -> str:
     `gh pr checks --watch`. Allowed: one short sleep, and `gh pr checks --watch` with
     run_in_background."""
     sleeps, loop, watcher, run_watch = [], False, "", ""
-    for segment in segments:
+    # Each part a lone `&` ends is a command of its own (`sleep 1&sleep 100`), so every sleep in it is weighed.
+    # PowerShell reads `&word` as its call operator, so its segment stays whole.
+    for segment in (part for whole in segments
+                    for part in ([whole] if is_powershell(whole) else split_background(whole))):
         # Braces get their own token, so a compact `while(1){Start-Sleep 1}` reads like a spaced one.
         tokens = segment_tokens(re.sub(r"([{}])", r" \1 ", segment))
         if not tokens:

@@ -1081,9 +1081,9 @@ def split_background(segment):
 PRINTERS = frozenset(("echo", "printf", "cat", "grep", "wc", "jq"))
 QUIET_COMMANDS = PRINTERS | {"cd", "set-location"}
 CHAIN_ENDS = ("&&", "||", "|")   # an end that keeps the next segment in the same list
+AND_ENDS = ("&&", "|")   # an end after which the next segment runs only when this one ran
 _BODY_WORDS = ("then", "else", "elif", "do")   # a cd after one of these runs only when its branch or loop does
 _STATE_LIMIT = 8   # folders a segment may run in before the walk gives up and calls it unknown
-_HEREDOC_HEADER = re.compile(r"<<-?(?!<)(.+)")
 _STDIN_PATH = re.compile(r"/+(?:dev/(?:stdin|fd/0+)|proc/(?:thread-)?self/fd/0+)")
 
 
@@ -1094,13 +1094,17 @@ def _sources_stdin(tokens) -> bool:
             and any(_STDIN_PATH.fullmatch(token) for token in tokens[index + 1:]))
 
 
-def _cd_may_not_run(tokens, before: str) -> bool:
-    """True when a `cd` segment might not move the shell: it follows `&&` or `||`, sits in a `then`,
-    `else`, `elif` or `do` body, or names more than one folder (bash refuses that and stays)."""
+def _cd_may_not_run(tokens, before: str) -> str:
+    """How a `cd` segment might not move the shell. '' when it moves it. '&&' when it follows `&&` alone: a
+    skipped or failed cd stops that `&&` chain as well, so the folder before it is reached only after the
+    chain ends. 'both' when it follows `||`, sits in a `then`, `else`, `elif` or `do` body, or names more than
+    one folder (bash refuses that and stays): the next segment may run in either folder."""
     index = resolve_command(tokens)
     operands = [t for t in tokens[index + 1:]
                 if t == "-" or not (t.startswith("-") or t[:1] in "<>" or REDIRECTION.match(t))]
-    return before in ("&&", "||") or any(word in _BODY_WORDS for word in tokens[:index]) or len(operands) > 1
+    if before == "||" or any(word in _BODY_WORDS for word in tokens[:index]) or len(operands) > 1:
+        return "both"
+    return "&&" if before == "&&" else ""
 
 
 def _cd_step(move, where, prev, failed_cd_stays):
@@ -1141,25 +1145,32 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     fails closed on an untrusted `cd` keeps doing so.
     `each` walks once and returns, for every segment up to `number`, a tuple of each folder that
     segment may run in. A `cd` that might not run (`_cd_may_not_run`) adds its folder beside the one
-    before it, so the segment is judged in both. One call per command keeps the cost linear."""
+    before it, so the segment is judged in both. After a `cd` that follows `&&` alone, the segments
+    its `&&` or `|` chain joins run only in its folder: the folder before it is held back until that
+    chain ends. One call per command keeps the cost linear."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     states = ((where, None),)   # each possible (folder, folder before the last move)
     visited = dict.fromkeys((where,)) if where else {}   # every folder a state has held
     lost = False   # the states passed _STATE_LIMIT: a segment is judged in every folder visited
     list_start = states
-    frames = []   # (states, list_start) for each `(` still open
-    heredoc = None   # (closing word, states before the body) while inside a heredoc body
+    held = ()   # states a `&&` cd may have left behind: reached only once its `&&` chain ends
+    frames = []   # (states, list_start, held) for each `(` still open
+    heredoc = None   # (closing word, states and held before the body) while inside a heredoc body
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     seen = []
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
         end = ends[at] if at < len(ends) else ""
         before = ends[at - 1] if 0 < at <= len(ends) else ""
+        if held and before not in AND_ENDS:
+            states, held = tuple(dict.fromkeys(states + held)), ()
+            lost = lost or len(states) > _STATE_LIMIT
+            states = ((None, None),) if len(states) > _STATE_LIMIT else states
         if before not in CHAIN_ENDS:
             list_start = states
         for _ in range(marks.count("(")):
-            frames.append((states, list_start))
-            list_start = states
+            frames.append((states, list_start, held))
+            list_start, held = states, ()
         here = tuple(dict.fromkeys(folder for folder, _ in states))
         if lost:
             here = tuple(dict.fromkeys(folder for folder in (*visited, *here) if folder))
@@ -1170,11 +1181,11 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             skipping = end in ("&&", "|")
             for _ in range(marks.count(")")):
                 if frames:
-                    states, list_start = frames.pop()
+                    states, list_start, held = frames.pop()
                     skipping = False
             continue
         if heredoc and segment.strip() == heredoc[0]:
-            states, heredoc = heredoc[1], None
+            (states, held), heredoc = heredoc[1], None
             continue
         tokens = segment_tokens(segment)
         move = _segment_cd_move(tokens) if tokens else None
@@ -1185,20 +1196,23 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         elif move is not None:
             steps = [_cd_step(move, folder, prev, failed_cd_stays and not each) for folder, prev in states]
             moved = [(folder, old) for folder, old, _ in steps]
-            if each and _cd_may_not_run(tokens, before):
+            may_not_run = _cd_may_not_run(tokens, before) if each else ""
+            if may_not_run == "&&":
+                held = tuple(dict.fromkeys(held + states))
+            elif may_not_run:
                 moved = list(dict.fromkeys(list(states) + moved))
             visited.update(dict.fromkeys(folder for folder, _ in moved if folder))
             lost = (lost and not all(folder for folder, _ in moved)) or len(moved) > _STATE_LIMIT
             states = ((None, None),) if len(moved) > _STATE_LIMIT else tuple(moved)
             skipping = not each and steps[0][2] and end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
-        header = next((m.group(1) for m in map(_HEREDOC_HEADER.fullmatch, tokens or ()) if m), None)
-        if header and not heredoc and not _sources_stdin(tokens):
-            heredoc = (header, states)
+        heads = heredoc_heads(segment)[0]
+        if heads and not heredoc and not (tokens and _sources_stdin(tokens)):
+            heredoc = (heads[0][1], (states, held))
         for _ in range(marks.count(")")):
             if frames:
-                states, list_start = frames.pop()
+                states, list_start, held = frames.pop()
         if end == "&":
-            states = list_start   # the list ran in a subshell: the shell is where the list began
+            states, held = list_start, ()   # the list ran in a subshell: the shell is where the list began
     return seen if each else states[0][0]
 
 
