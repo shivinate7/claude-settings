@@ -13674,15 +13674,22 @@ class ReviewRecordPost(ReviewEnv):
         self.assertFalse([l for l in (out + err).splitlines() if l.startswith("merge: posted")], "a failed post printed a success line:\n" + out + err)
 
 class RealPostHost(merge.Host):
-    """The real Host. Its one read, pr, is scripted: pull request 7 is OPEN at `head`. Its comment POST runs Host.post_review_comment over the real retry_net."""
+    """The real Host. Its reads are scripted, as PullsHost's are: pull request 7 is OPEN at `head` with changed_files counting its one file, and
+    `pulls/7/files` lists that file. The file is README.md, a non-guard file, so the record's --kind normal and --guard no both hold. Its comment
+    POST runs Host.post_review_comment over the real retry_net."""
 
     def __init__(self, head):
         super().__init__(required=["checks"], base="main", minute=60, pause=lambda s: None, repo="o/r")
-        self.live = head
+        self.live, self.files = head, [pr_file("README.md")]
 
     def pr(self, n):
         return {"number": n, "state": "OPEN", "head": self.live, "branch": "feat", "base": "main", "draft": False, "body": "",
-                "mergeable": "MERGEABLE", "merge_state": "CLEAN"}
+                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "changed_files": len(self.files)}
+
+    def pages(self, rel, key=None, fields=None):
+        if rel == "pulls/7/files":  # Host.pr_files pages this route, and the list is the whole diff
+            return self.files
+        raise AssertionError("unexpected read: " + rel)
 
 class ReviewRecordConfirmFlag(ReviewEnv):
     """`merge <pr> --review-record` prints the record and posts nothing. With --confirm it posts the record once. The good-value post with --confirm is
