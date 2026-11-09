@@ -132,11 +132,12 @@ def merge_call_of(segment: str):
     while index < len(args):
         arg = args[index]
         index += 1
-        if arg in ("-R", "--repo"):
+        taken = _gh_root_repo_flag(args, index - 1)
+        if taken == 2:
             repo = args[index] if index < len(args) else ""
             index += 1
-        elif arg.startswith("--repo="):
-            repo = arg[len("--repo="):]
+        elif taken:   # `--repo=o/r`, `-Ro/r`; pflag drops the '=' of a shorthand (`-R=o/r`)
+            repo = arg[len("--repo="):] if arg.startswith("--repo=") else arg[2:].removeprefix("=")
         elif arg in MERGE_VALUE_FLAGS:
             index += 1
         elif arg.startswith("-"):
