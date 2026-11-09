@@ -275,14 +275,17 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
 fi
 
 # Live-hooks lag, cloud only (a local install links its hooks into the clone and has no stamp). A cloud install writes
-# the full sha of its source to $config_dir/state/hooks-source-sha as its last step. Here that stamp is compared with
+# the full sha of its source to $config_dir/state/hooks-source-sha once every copy has landed. Here that stamp is compared with
 # origin/main of the claude-settings clone ($d), and the line says how far the copied hooks and rulings lag. The clone
 # is read whether or not it is a cloudMirror: the local-main block above skips a mirror, since install.sh refreshes it,
-# but a mirror's hooks are exactly what can lag. The refresh hook runs in parallel with this one, so the first line of
-# a session may read the stamp from before that refresh lands.
+# but a mirror's hooks are exactly what can lag. install.sh writes the stamp before it runs its startup entries, and this
+# hook is one of them, so a line printed from inside an install reads that install's own source, never the one before it.
 # No stamp: the source is unknown. Else the clone's fetch status decides: bounded_fetch runs the one fetch of the
 # checkout, or returns the status of the fetch another block already ran. A fetch that failed or could not run gives
-# "unread", never a count from a ref that may be stale. Cost: one file read of the stamp, then at most two git reads
+# "unread", never a count from a ref that may be stale. A stamp the clone does not have (a shallow clone) gives no count.
+# A stamp at or ahead of origin/main has nothing behind it, so no line. The jq rule for a matcher below is a copy of
+# install.sh's FIRES_JQ: that is a shell variable of another process, and sharing it would cost a second file or process
+# at every session start. Cost: one file read of the stamp, then at most two git reads
 # (rev-parse of origin/main, rev-list --count) and, only when the stamp lags, one read of settings.json for the
 # refresh entry; the fetch is the block's own. No timer, no process left running, no file written.
 if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
@@ -302,7 +305,10 @@ if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
     elif [ "$lag_stamp" != "$lag_tip" ]; then
       lag_count=$(cd "$d" 2>/dev/null && git rev-list --count "$lag_stamp..$lag_tip" 2>/dev/null)
       case "$lag_count" in
-        ""|*[!0-9]*) printf 'claude-settings: origin/main unread; lag unknown\n' ;;
+        ""|*[!0-9]*)
+          printf 'claude-settings: live hooks are from %s, which this clone does not have; lag unknown.\n' \
+            "$(printf '%s' "$lag_stamp" | cut -c1-12)" ;;
+        0) : ;;
         *)
           printf 'claude-settings: live hooks are from %s, %s commits behind origin/main; rulings since then are not in force.\n' \
             "$(printf '%s' "$lag_stamp" | cut -c1-12)" "$lag_count"

@@ -1035,6 +1035,22 @@ if [ "$CLOUD" != 1 ] && ! grep -qsF '# claude-settings: ~/.claude/bin on PATH' "
   log "added ~/.claude/bin to PATH in $RC; a new session picks it up"
 fi
 
+# Cloud: the stamp of the source these hooks were copied from, for the lag line in hooks/session_start.sh. It is written
+# after every copy and folder landing and before the startup entries below, since an entry runs session_start.sh, which
+# reads the stamp and must see this install's source. An install that failed, or that left a folder unlanded
+# (FAILED_SUBS), keeps the old stamp, so the lag line keeps naming the hooks that are really live. A source with no git
+# history leaves the old stamp as it is.
+if [ "$CLOUD" = 1 ] && [ "$INSTALL_FAILED" = 0 ] && [ -z "$FAILED_SUBS" ] \
+   && STAMP_SHA=$(git -C "$SRC" rev-parse HEAD 2>/dev/null) && [ -n "$STAMP_SHA" ]; then
+  STAMP_FILE="$CLAUDE_DIR/state/hooks-source-sha"
+  if mkdir -p "$CLAUDE_DIR/state" && printf '%s\n' "$STAMP_SHA" > "$STAMP_FILE.tmp.$$" && mv -f "$STAMP_FILE.tmp.$$" "$STAMP_FILE"; then
+    :
+  else
+    rm -f "$STAMP_FILE.tmp.$$"
+    log "WARNING: could not write $STAMP_FILE; the lag line reads the old stamp"
+  fi
+fi
+
 # Runs one startup entry bounded to $1 seconds where there is no `timeout` binary (macOS). The entry and a
 # sleeper each start under job control, so each leads its own process group (`set +m` inside keeps a
 # pipeline from splitting off into a group of its own): the sleeper's TERM then reaches
@@ -1100,19 +1116,6 @@ if [ "$CLOUD" = 1 ] && command -v jq >/dev/null 2>&1 && [ -f "$SRC/settings.json
     fi
     START_I=$((START_I + 1))
   done
-fi
-
-# Cloud: the stamp of the source these hooks were copied from, for the lag line in hooks/session_start.sh. It is the
-# last write, after every copy and every startup entry, so an install that stopped earlier leaves the old stamp, and the
-# lag line keeps naming the hooks that are really live. A source with no git history leaves the old stamp as it is.
-if [ "$CLOUD" = 1 ] && [ "$INSTALL_FAILED" = 0 ] && STAMP_SHA=$(git -C "$SRC" rev-parse HEAD 2>/dev/null) && [ -n "$STAMP_SHA" ]; then
-  STAMP_FILE="$CLAUDE_DIR/state/hooks-source-sha"
-  if mkdir -p "$CLAUDE_DIR/state" && printf '%s\n' "$STAMP_SHA" > "$STAMP_FILE.tmp.$$" && mv -f "$STAMP_FILE.tmp.$$" "$STAMP_FILE"; then
-    :
-  else
-    rm -f "$STAMP_FILE.tmp.$$"
-    log "WARNING: could not write $STAMP_FILE; the lag line reads the old stamp"
-  fi
 fi
 
 # Marks a local install has landed here, so the NEXT local run treats a real file/dir at a
