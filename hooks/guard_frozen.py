@@ -699,12 +699,15 @@ def _folded(path, held=None):
     shell reads `out/../tests` through `out`, but `out` may be a folder the same command makes, and `..`
     cannot pass through a folder that is not there yet. Where the folder exists, `..` stays for the
     filesystem to resolve, as a symlink's `..` is its target's parent. A relative path is returned as is.
+    In a rooted one a `.` part is dropped first, so it is never the part a `..` removes.
     `held` is set for a glob: the count of leading parts that are a literal folder. They come back escaped,
     and a later part with a glob character is never folded past, as it may match a file."""
     names = path.split("/")
     rooted = not names[0] and len(names) > 1
     kept = []
     for at, each in enumerate(names):
+        if rooted and (each == "." or not each and 0 < at < len(names) - 1):
+            continue
         foldable = held is None or at < held or not _GLOB_MAGIC.search(each)
         if rooted and each == ".." and len(kept) > 1 and kept[-1][1] and kept[-1][0] \
                 and not os.path.exists("/".join(name for name, _, _ in kept)):
