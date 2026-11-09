@@ -5485,14 +5485,20 @@ sh("git-after-cd: a check, then || an echo piped to cat and && a git push -u, is
 sh("git-after-cd: a check, then || cat of a log file and && a git push -u, is refused",
    "pytest -q || cat log && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&",))
-# A `||` TAIL THAT CANNOT FAIL, BEHIND `command` OR A SUBSHELL. `command true` and `(true)` exit 0 whatever make did, so
-# the `|| exit 1` after them never fires, and the push after `;` runs on a failed make. Bash runs the push on that
-# failure, so both are refused, as `echo bad` is.
+# A `||` TAIL THAT CANNOT FAIL, BEHIND `command`, `builtin`, A PATH OR A SUBSHELL. `command true`, `builtin true`,
+# `/bin/true` and `(true)` exit 0 whatever make did, so the `|| exit 1` after them never fires, and the push after `;`
+# runs on a failed make. Bash runs the push on that failure, so each is refused, as `echo bad` is.
 sh("git-after-cd: a make a, then || command true, then || exit 1 and ; a git push -u, is refused",
    "make a || command true || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&",))
 sh("git-after-cd: a make a, then || (true), then || exit 1 and ; a git push -u, is refused",
    "make a || (true) || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a make a, then || builtin true, then || exit 1 and ; a git push -u, is refused",
+   "make a || builtin true || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a make a, then || /bin/true, then || exit 1 and ; a git push -u, is refused",
+   "make a || /bin/true || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&",))
 # A PUSH THAT RUNS ON A FAILED CHECK, AND A PIPE THAT HIDES ONE. A brace group after `||` runs when pytest fails, so
 # the push in it runs on that failure. A pipe's status is its last command's, so `pytest | tail` clears the `&&` whatever
@@ -5554,10 +5560,20 @@ sh("git-after-cd: a check protected by || a braced exit 1, then && a git push -u
 # never runs. The control is the `set -o pipefail` pipe pass with `&&`.
 sh("git-after-cd: set -eo pipefail, a check piped to tail, then ; a git push -u, passes",
    "set -eo pipefail; pytest | tail; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+# ERREXIT WITHOUT PIPEFAIL. `set -e` alone does not stop the shell on a failed stage of a pipe: the pipe's status is
+# tail's, so pytest's failure ends nothing, and the push after `;` runs on it. Only `set -o pipefail` makes the pipe fail
+# with its check. Bash runs the push here, so it is refused.
+sh("git-after-cd: set -e alone, a check piped to tail, then ; a git push -u, is refused",
+   "set -e; pytest | tail; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
 # AN APOSTROPHE IN DOUBLE QUOTES BEFORE A PIPE. The quoted text is one word of the echo, so the apostrophe in it opens no
 # quote, and the echo stage of the pipe is inert: the push after `&&` runs with no check before it, and passes.
 sh("git-after-cd: an apostrophe in double quotes of an echo piped to cat, then && a git push -u, passes",
    'echo "don\'t" | cat && %s push -u origin b' % VCS, "allow", cwd=NOGIT)
+# A BRACED GROUP OF GIT WRITES PIPED TO TEE. A `{ }` group that holds only git calls runs no check, so the pipe hides
+# none, and the push after `&&` runs on a successful commit. The control is the braced check piped to tee above, refused.
+sh("git-after-cd: a braced git commit piped to tee, then && a git push -u, passes",
+   "{ %s commit -m x; } | tee l && %s push -u origin b" % (VCS, VCS), "allow", cwd=NOGIT)
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
 # git-after-cd rule refuses the push after the cd, and the crash is logged as a guard crash. The planted copy
 # raises at that try. The intact copy, on the same landing cd, is the control, so the refusal can only come
