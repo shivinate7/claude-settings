@@ -52,8 +52,10 @@ A file git pairs as renamed (its own 50 percent similarity) is read as the same 
 are the diff of old name to new name, as they would be in place. A file below that stays a delete and an add.
 
 Blank lines and whitespace never count. The escape is a trailer in a commit message, one per
-path: `Drops-lines: <path> -- <reason>`. The PR body is read too: the same line in it
-excuses its path, except for a hand edit, and only when that commit changes the path (a merge: against any parent). A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
+path: `Drops-lines: <path> -- <reason>`. A trailer counts only when its commit changes at least one file (a
+merge: against any parent), so a trailer on an empty commit excuses nothing. The path it excuses is its own: the
+commit need not change that path. The PR body is read too: the same line in it excuses its path. Neither a trailer
+nor a body line excuses a hand edit. A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
 `Retire-run: <slug> -- <run URL>` line in the PR body's last paragraph that the debt-close check
 (check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. It needs a
 run reader (run_state); with none, or a read that fails, the finding stays. Only a whole delete is excused, not a rename out of
@@ -160,8 +162,9 @@ def last_paragraph(pr_body):
 def allowed(cwd, rng, pr_body=""):
     """{path: reason} from `Drops-lines: <path> -- <reason>` trailers on any commit of the range
     (a rev or a..b), and from such lines in pr_body (its last_paragraph). A line with no reason excuses nothing.
-    A commit's trailer excuses only a path that commit changes (a merge: its diff against any parent), so an empty
-    commit excuses nothing. One `git log -m --name-only` pass reads the trailers and the paths together."""
+    A commit's trailer counts only when that commit changes at least one file (a merge: against any parent), so an
+    empty commit excuses nothing. The path it excuses is its own, and that commit need not change it. One
+    `git log -m --name-only` pass reads the trailers and the changed files together."""
     _, out = git(cwd, "log", "-m", "--no-renames", "--name-only", "-z", "--format=%x01%H%x02%(trailers:key=" + TRAILER + ",valueonly,unfold)%x03", rng)
     res, touched, said = {}, {}, {}
     for rec in out.split("\x01")[1:]:
@@ -172,7 +175,7 @@ def allowed(cwd, rng, pr_body=""):
     for sha, trailers in said.items():
         for line in trailers.splitlines():
             m = re.match(r"\s*(\S.*?)\s+--\s+(\S.*?)\s*$", line)
-            if m and m.group(1) in touched[sha]:
+            if m and touched[sha]:
                 res[m.group(1)] = m.group(2)
     body = re.findall(r"^" + TRAILER + r":(.*)$", last_paragraph(pr_body), re.I | re.M | re.ASCII)
     for line in body:
@@ -870,6 +873,7 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     refs = [upstream] + [r for r in ((default,) if default else ("origin/HEAD", "origin/main", "main")) if r != upstream and git(
         cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
     items, hand, octopus = [], [], []
+    open_hand = hand  # the hand findings an Unknown carries: all of them, until the generated-page excuse drops its page's
     try:
         for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
             try:
@@ -899,16 +903,17 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
         if open_paths:
             ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
         bad, notes = judge(items, ok)
-        bad += [t for p, t in hand if not (same and p == page)]  # no Drops-lines trailer excuses a hand edit; only a generated page does
+        open_hand = [(p, t) for p, t in hand if not (same and p == page)]  # no Drops-lines trailer excuses a hand edit; only a generated page does
+        bad += [t for _, t in open_hand]
         notes += misplaced(cwd, "%s..%s" % (upstream, h)) if bad else []
         if octopus:
             e = Octopus("; ".join(octopus))
             e.problems, e.notes = bad, notes
             raise e
         return bad, notes
-    except Unknown as e:  # a hand finding already made rides on the exception, as an octopus merge's findings do: a later unreadable read never hides it
-        if not e.problems and hand:
-            e.problems = [t for _, t in hand]
+    except Unknown as e:  # an open hand finding rides on the exception, as an octopus merge's findings do: a later unreadable read never hides it
+        if not e.problems and open_hand:
+            e.problems = [t for _, t in open_hand]
         raise
 
 

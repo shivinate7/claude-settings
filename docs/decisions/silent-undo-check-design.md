@@ -21,18 +21,18 @@
   base, outside a conflict (debt `merge-commit-skips-review`, a merge commit that hides a lane's change to
   main's lines). One `git show --remerge-diff -U0` per merge commit shows what the merge changed against git's own
   re-merge. A removed line inside the diff's conflict markers is a resolution, judged across hunks and never per
-  hunk, and is quiet. Outside a block, a hunk that removes a line and adds another is a finding when one
-  parent holds the removed line, the other parent and every base lack it, and (in the check, not in history) a
-  commit upstream holds its adder. A line the lane touched, or only the lane added, is quiet. A whitespace-only
+  hunk, and is quiet. Outside a block, a hunk that removes a line and adds another can be a finding. It is one
+  when one parent holds the removed line and the other parent and every base lack it. In the check, not in
+  history, a commit upstream must also hold its adder. A line the lane touched, or only the lane added, is quiet. A whitespace-only
   change, a reorder and a pure delete are quiet; a pure delete is the lost-line read. **A `Drops-lines` trailer
   does not lift it**, because the trailer excuses a path by whatever reason it gives, and a reworded line is
   not a lost one. The way out: restore main's lines verbatim in the merge. To change one of main's lines on
-  purpose, make a later lane commit with `Drops-lines: <path> -- <reason>`; that trailer, on a non-merge lane
+  purpose, make a later lane commit with `Drops-lines: <path> -- <reason>`. That trailer, on a non-merge lane
   commit, lifts the reversal read and never the hand finding on the merge. A refusal that holds only hand
   findings names this way out and no trailer remedy; one with a lost line keeps the trailer remedy as well.
-  A hand finding made before a later read raises UNKNOWN rides on the exception, so the merge tool refuses it
-  as dropped and its reason flag cannot lift it, as with an octopus merge's findings.
-  Only a generated page (the records page) is excused. Cost: that one git call per merge commit; a merge with
+  A hand finding still open when a later read raises UNKNOWN rides on the exception, as an octopus merge's
+  findings do. The merge tool refuses it as dropped, and its reason flag cannot lift it.
+  Only a generated page (the records page) is excused, and its excused finding does not ride on the exception. Cost: that one git call per merge commit; a merge with
   such a hunk adds a rev-list, a merge-base, renames reads and one `git cat-file --batch` read of its files. No
   process stays running and no file is written. History mode runs it too, with no refs, as the lost-line read does.
 - **Revived note.** A note the branch deleted is back at head, because a union merge of main put it back
@@ -42,8 +42,9 @@
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
-nothing. A commit's trailer excuses only a path that commit changes (a merge: its diff against any parent), so a
-trailer on an empty commit excuses nothing; a PR-body line has no commit and is read as before. Cost: one
+nothing. A commit's trailer counts only when that commit changes at least one file (a merge: against any
+parent), so a trailer on an empty commit excuses nothing. The path it excuses is its own, and the commit need not
+change that path. A PR-body line has no commit, so this rule does not apply to it. Cost: one
 `git log -m --name-only` pass over the range, with no process kept and no file written. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
 reason. No switch turns the check off.
 
