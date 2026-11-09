@@ -7678,6 +7678,49 @@ sh("push: python -c, subprocess.run takes echo of a forced push as a list, allow
 sh("push: python -c, subprocess.run takes git commit with a forced push in its message, allows (control)",
    "python3 -c 'import subprocess; subprocess.run([\"" + VCS + "\",\"commit\",\"-m\",\"fix; " + VCS + " push -f origin x\"])'",
    "allow", cwd=PUSHFEAT)
+# ARGV LIST, A WRAPPER THAT HANDS ON A COMMAND LINE. docker exec, kubectl exec and flock hand the element after
+# their sh -c on as a command line, as ssh and su -c do. A forced push there runs, and denies the way a plain one does.
+sh("push: python -c, docker exec hands sh -c a forced push in a list, denies",
+   r'python3 -c "import subprocess; subprocess.run([\"docker\",\"exec\",\"c\",\"sh\",\"-c\",\"' + VCS + r' push -f origin x\"])"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: python -c, kubectl exec hands sh -c a forced push in a list, denies",
+   r'python3 -c "import subprocess; subprocess.run([\"kubectl\",\"exec\",\"p\",\"--\",\"sh\",\"-c\",\"' + VCS + r' push -f origin x\"])"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: python -c, flock hands sh -c a forced push in a list, denies",
+   r'python3 -c "import subprocess; subprocess.run([\"flock\",\"/tmp/l\",\"sh\",\"-c\",\"' + VCS + r' push -f origin x\"])"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# A LONE APOSTROPHE IN PRINTED TEXT. The `'\''` escape closes the shell quote, writes one apostrophe and reopens it,
+# so the os.system call after it is shell-level code that runs. The apostrophe is text, not the end of the string.
+sh("push: single-quoted python -c, an apostrophe escape ahead of os.system of a forced push, denies",
+   "python3 -c 'print(\"don'\\''t\"); import os; os.system(\"" + VCS + " push -f origin x\")'",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# SINGLE QUOTES INSIDE A DOUBLE-QUOTED -c. The single quotes are python text, and os.system runs its string.
+sh("push: double-quoted python -c, os.system of a single-quoted forced push, denies",
+   "python3 -c \"import os; os.system('" + VCS + " push -f origin x')\"",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# A CALL SPLIT OVER LINES. os.system( and its string sit on different lines, in a heredoc body.
+sh("push: heredoc into python3 -, os.system split over lines runs a forced push, denies",
+   "python3 - <<'EOF'\nimport os\nos.system(\n\"" + VCS + " push -f origin x\"\n)\nEOF",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# FALSE ALARMS, ALLOW. A forced push that is only text: in a git commit message, an echo, and a gh comment body.
+sh("push: git commit -m names a list push in its message, allows",
+   VCS + r' commit -m "Fix: subprocess.run([\"' + VCS + r'\",\"push\",\"-f\"]) is read"', "allow", cwd=PUSHFEAT)
+sh("push: echo of check_output of a forced push in quotes, allows",
+   r'echo "see check_output(\"' + VCS + r' push -f origin x\")"', "allow", cwd=PUSHFEAT)
+sh("push: gh pr comment body names shell_exec of a forced push, allows",
+   r'gh pr comment 1 --body "shell_exec(\"' + VCS + r' push -f origin x\") now refuses"', "allow", cwd=PUSHFEAT)
+# A PRINT SPLIT OVER LINES. print( and its string sit on different lines, and print writes the string as text.
+sh("push: single-quoted python -c, print split over lines of a forced push, allows",
+   "python3 -c 'print(\n\"" + VCS + " push -f origin x\"\n)'", "allow", cwd=PUSHFEAT)
+# PINS, GREEN NOW. A -c script that splits os.system( from its string already denies. A watch runs a quoted
+# command line, so a forced push in it denies. A watch of git status allows.
+sh("push: single-quoted python -c, os.system split over lines runs a forced push, denies",
+   "python3 -c 'import os; os.system(\n\"" + VCS + " push -f origin x\"\n)'",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: watch of a quoted forced push, denies",
+   "watch \"" + VCS + " push -f origin x\"", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: watch -n 2 of git status, allows",
+   "watch -n 2 " + VCS + " status", "allow", cwd=PUSHFEAT)
 # CONTROL. Printed text with no escaped quote allows.
 sh("push: python -c prints hello, allows (control)", r'python3 -c "print(\"hello\")"', "allow", cwd=PUSHFEAT)
 # ARGV CALLS. A Deno.Command call names its program and its arguments as separate strings, and the pairs
