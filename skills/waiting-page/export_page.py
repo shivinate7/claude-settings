@@ -29,7 +29,10 @@ Chromium (page_check.py is the one home). A miss prints `held item <n>: <the pag
 per item, and the run exits 4: fix the item, export again, and do not republish while one is held. A check that cannot run
 (no node, no Playwright or Chromium), or an open pictured item with no page file, prints one `checks unknown: <why>` line
 before the verdict; the copy is written and the exit code is as without checks. The checker gets the fetched answers
-(`--answers`) and skips an item the page's own `isAnswered` draws as answered. No time budget spans the items.
+(`--answers`) and skips an item the page's own `isAnswered` draws as answered. One time budget (page_check.CHECK_BUDGET)
+spans the items of a run: items left unchecked when it runs out print `checks unknown: time budget spent, <k> item(s) not
+checked`, with the exit code as without checks. Under --all, a waiting-page entry whose own `collections` lacks `items` or
+`answers` runs no check: it prints `<id>: checks unknown: collections lack <name>`, its copy is written, and the exit is 2.
 Every doc is scanned, as parsed JSON, before the first write: each string value, each key, each doc id and each
 10 or 11 digit number (a phone). The page text and each supporting text file are scanned as text with the same
 shapes, except that a version pin such as `react@18.3.1` and a retina name such as `logo@2x.png` are not emails.
@@ -46,7 +49,8 @@ Check, before a republish, writes nothing:
     python3 ~/.claude/skills/waiting-page/export_page.py --check --fetched DIR --page FILE
 
 The same item checks. A miss prints its `held item` line, exit 4. Else `checks pass`, exit 0. Unknown: `checks unknown: <why>`,
-exit 3. The writer holds the republish on any exit but 0: a check that cannot read its input fails, never passes.
+exit 3, which includes `checks unknown: time budget spent, <k> item(s) not checked`; a held item (4) wins over it. The writer
+holds the republish on any exit but 0: a check that cannot read its input fails, never passes.
 
 Rebuild, the recovery path. It reads only the repo copy, never the live page:
 
@@ -95,6 +99,7 @@ MARKER = ".complete"  # the session touches it in a collection folder after the 
 BATCH_SIZE = 50
 BATCH_BYTES = 900000  # one ArtifactData batch call stays under about 1 MB
 REFUSED, UNKNOWN, CRASH, HELD = 1, 2, 3, 4
+CHECK_COLLECTIONS = ("items", "answers")  # what the picture check reads
 
 STREET_WORDS = ("Street", "St", "Avenue", "Ave", "Road", "Rd", "Drive", "Dr", "Lane", "Ln", "Boulevard", "Blvd", "Way",
                 "Court", "Ct", "Place", "Pl", "Circle", "Cir", "Terrace", "Ter", "Parkway", "Pkwy", "Park", "Trail", "Trl",
@@ -427,6 +432,11 @@ def picture_checks(page, docs):
     return ["held item %s: %s" % (n, sentence) for n, sentence in held], ("checks unknown: " + why) if why else None
 
 
+def check_lacks(collections):
+    """The collections of `collections` that the picture check needs and that are missing (items, answers), in that order."""
+    return [name for name in CHECK_COLLECTIONS if name not in collections]
+
+
 def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", design=True, files=None):
     """(verdict, `checks unknown` line or None, held item lines). The picture check runs after the copy is written, on the
     waiting page's own export only (`design`), and never on a refused or unknown run."""
@@ -490,7 +500,10 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
             os.remove(os.path.join(out, *label.split("/")))
             changed += 1
     unknown, held = None, []
-    if design and "items" in collections:
+    lacking = check_lacks(collections) if design else []
+    if lacking:  # the check needs both: with no answers it would hold an item the page draws as answered
+        unknown = "checks unknown: collections lack " + ", ".join(lacking)
+    elif design:
         if page:
             held, unknown = picture_checks(page, docs)
         elif page_check.pictured_items(docs["items"])[0]:  # a pictured item and no page: the check cannot run
@@ -524,7 +537,7 @@ def export_all(root, fetched, worktree, allow_empty):
             verdict, unknown, held = export(folder, os.path.join(worktree, *entry["export"].split("/")),
                              page if os.path.isfile(page) else None, allow_empty, tuple(entry["collections"]), "%s: " % name,
                              entry["role"] == layout.WAITING_ROLE, supporting_files(files) if os.path.isdir(files) else None)
-            code = 0
+            code = UNKNOWN if entry["role"] == layout.WAITING_ROLE and check_lacks(entry["collections"]) else 0
         except Stop as stop:
             verdict, unknown, held, code = str(stop), None, [], stop.code
         except Exception as err:  # one artifact's crash must not hide the verdict of the others
@@ -542,7 +555,7 @@ def export_all(root, fetched, worktree, allow_empty):
 def check_only(fetched, page):
     """--check: the export's picture checks on the fetched items and the page file; nothing is written. The exit code."""
     read_page(page)  # a page that is not one readable file is unknown, as in an export
-    held, unknown = picture_checks(page, fetched_docs(fetched, ("items", "answers")))
+    held, unknown = picture_checks(page, fetched_docs(fetched, CHECK_COLLECTIONS))
     for line in held:
         print(line)
     if unknown:
@@ -644,7 +657,7 @@ def main(argv):
     except Exception as err:  # a crash is unknown, never a silent pass or a traceback the reader scrolls past
         print("unknown - the run crashed (%s)" % type(err).__name__)
         return CRASH
-    if unknown:  # before the verdict, so the verdict stays the last line (hooks/feedback_guard.py reads `same` there)
+    if unknown:  # before the verdict, so the verdict stays the last line (hooks/feedback_guard.py reads `same` on any line)
         print(unknown)
     print(verdict)
     for line in held:
