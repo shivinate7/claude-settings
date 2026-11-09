@@ -5347,6 +5347,10 @@ sh("git-after-cd: an elif on a file test with a git push in its then body, and n
    'if [ -f y ]; then echo ok; elif [ -f x ]; then %s push -u origin b; fi' % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: a git push in the first then body of an if on a check, with an elif that echoes, passes",
    'if pytest -q; then %s push -u origin b; elif [ -f x ]; then echo no; fi' % VCS, "allow", cwd=NOGIT)
+# AN ELIF TEST THAT IS THE CHECK. The first test is a file test, so the elif test runs only when it fails: the push in
+# the elif's then body runs only after pytest passed. The elif's own test does not count as a failed check before it.
+sh("git-after-cd: an if on a file test, then an elif on pytest with a git push -u in its then body, passes",
+   'if [ -f y ]; then echo ok; elif pytest -q; then %s push -u origin b; fi' % VCS, "allow", cwd=NOGIT)
 # A COMPOUND'S TEST OR AN EXIT TAIL CLEARS ONLY ITS OWN COMMANDS. An elif body, an until body, a `|| exit` after a
 # git fetch, and an if whose test is a git fetch each cover only their own command. The walk keeps going back past
 # them, so a check joined by `;` further back still guards the push, and each push here is refused. A `|| exit` after
