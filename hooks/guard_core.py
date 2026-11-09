@@ -1070,34 +1070,59 @@ def shell_abs(path: str, base):
     return path
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, skipped=None,
+                       read_variables=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
     real shell keeps: `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes
-    back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
-    is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
+    back, a `cd` inside `( ... )` ends with the parenthesis, a `popd` returns to the folder the
+    matching `pushd` left (not tracked when no `pushd` of this walk matches it), a path that holds
+    a variable is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
     where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
     in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
-    a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
-    fails closed on an untrusted `cd` keeps doing so."""
+    a segment in it gets `skipped` (None unless the caller names a value, so it can tell a segment
+    that never runs from a folder it cannot read), and its own `cd` moves nothing. `failed_cd_stays`
+    is off by default, so a rule that fails closed on an untrusted `cd` keeps doing so. With it on, a
+    `cd` into a folder an earlier `mkdir` of this walk makes reads as a move to the nearest folder that
+    exists now (the shell will be in the new folder, which sits in that one's checkout). `read_variables`
+    reads a `cd` through a variable the guard's environment sets as the value it holds
+    (`expand_folder_word`); a name that is not set stays unknown. It is off by default, so a rule that
+    fails closed on a variable keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
+    made = []   # folders an earlier `mkdir` makes, absolute and normalized
+    dirs = []   # the `pushd` stack: folders to `popd` back to, or None once it cannot be told
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     for at, segment in enumerate(segments[:number + 1]):
-        marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
-        stack.extend([(where, prev)] * marks.count("("))
+        found, opens = [], []   # opens: per open parenthesis, True when it is a `$(...)` or inside one
+        for place, char, quote in walk_quotes(segment):
+            if quote or char not in "()":
+                continue
+            # A `$(` opens a command substitution, no subshell: the shell stays where it is, so neither its
+            # `(` nor its `)` counts, and its words stay one word (`cd $(dirname $PWD)/B` names an unknown folder).
+            inside = char == "(" and (place > 0 and segment[place - 1] == "$" or any(opens))
+            if char == "(":
+                opens.append(inside)
+            elif opens:
+                inside = opens.pop()
+            if not inside:
+                found.append((place, char))
+        marks = [char for _, char in found]
+        for place, _ in found:   # a parenthesis the shell reads as syntax is no part of the word beside it: `(cd A)`
+            segment = segment[:place] + " " + segment[place + 1:]
+        stack.extend([(where, prev, None if dirs is None else list(dirs))] * marks.count("("))
         end = ends[at] if at < len(ends) else ""
         if at == number:
-            return None if skipping else where
+            return skipped if skipping else where
         if skipping:
             skipping = end in ("&&", "|")
             for _ in range(marks.count(")")):
                 if stack:
-                    where, prev = stack.pop()
+                    where, prev, dirs = stack.pop()
                     skipping = False
             continue
         tokens = segment_tokens(segment)
@@ -1105,30 +1130,98 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         if move is not None and not is_powershell(segment) and "|" in (
                 ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
+        if failed_cd_stays and tokens:
+            made.extend(_mkdir_targets(tokens, where))
         if tokens is None:
             where = None
         elif move is not None:
             old = where
+            word = basename(tokens[resolve_command(tokens)]).lower()
+            pushes = word in ("pushd", "push-location")
+            if read_variables and isinstance(move, str) and move not in ("", "-"):
+                move = expand_folder_word(move) or move
             if move is CD_UNKNOWN:
-                where = None
+                if word in POP_WORDS and dirs and len(_operands(tokens)) == 0:
+                    where = dirs.pop()   # popd: back to the folder the matching pushd left
+                else:
+                    where, dirs = None, None
             elif move == "-":
                 where = prev
+                dirs = None if pushes else dirs
             elif any(mark in move for mark in "$%`"):
                 where = None
+                dirs = None if pushes else dirs
             else:
                 target = shell_abs(move or "~", where)
+                if target and failed_cd_stays and not os.path.isdir(target) and _under_any(target, made):
+                    target = _existing_parent(target)
                 if target and os.path.isdir(target):
                     where = target
+                    if pushes and dirs is not None:
+                        dirs.append(old)
                 elif target and failed_cd_stays:
                     skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
                     old = prev   # a failed cd leaves the folder `cd -` goes back to alone
                 else:
                     where = None
+                    dirs = None if pushes else dirs
             prev = old
         for _ in range(marks.count(")")):
             if stack:
-                where, prev = stack.pop()
+                where, prev, dirs = stack.pop()
     return where
+
+
+def expand_folder_word(word: str):
+    """The folder a command names in `word`, with `~` and each variable the guard's environment sets replaced
+    by its value, or None when it still runs through the shell: a name that is not set, a `$(...)`, a
+    backtick or a `%`. The one reader of a variable in a folder word."""
+    expanded = os.path.expandvars(os.path.expanduser(word))
+    return None if any(mark in expanded for mark in "$%`") else expanded
+
+
+def _mkdir_targets(tokens, where):
+    """The folders a tokenized `mkdir` segment makes, absolute and normalized: its operands, less its
+    flags and the value of `-m` or `--mode`. A relative operand is read against `where`; an operand that
+    holds a variable or a backtick, or that cannot be made absolute, is left out."""
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]).lower() != "mkdir":
+        return []
+    found, skip = [], False
+    for token in tokens[index + 1:]:
+        if skip:
+            skip = False
+        elif token in ("-m", "--mode"):
+            skip = True
+        elif token.startswith("-") or token[:1] in "<>" or REDIRECTION.match(token):
+            continue
+        elif not any(mark in token for mark in "$%`"):
+            path = shell_abs(token, where)
+            if path:
+                found.append(os.path.normpath(path))
+    return found
+
+
+def _under_any(path, folders):
+    """True when `path` is one of `folders` or sits under one."""
+    path = os.path.normpath(path)
+    return any(path == folder or path.startswith(folder.rstrip(os.sep) + os.sep) for folder in folders)
+
+
+def _existing_parent(path):
+    """`path`, or the nearest folder above it that exists."""
+    while path and not os.path.isdir(path):
+        parent = os.path.dirname(path)
+        if parent == path:
+            break
+        path = parent
+    return path
+
+
+def _operands(tokens):
+    """The words after a segment's command word that are not redirections."""
+    index = resolve_command(tokens)
+    return [t for t in tokens[index + 1:] if not (t[:1] in "<>" or REDIRECTION.match(t))] if index is not None else []
 
 
 def _segment_git_c_target(tokens):

@@ -10,7 +10,7 @@ import re
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    dir_before_segment, expand_folder_word, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
     strip_heredoc_bodies,
 )
 import guard_ste  # the ste-lint reads and run that bin/ste-changed shares (hooks/guard_ste.py)
@@ -657,7 +657,7 @@ def _checked_range(where, source, tracking, memo):
     return None, source
 
 
-def _push_hit(segment, stripped, cwd, args):
+def _push_hit(segments, ends, number, cwd, args):
     """Return the first file a `git push` would send with all three conflict markers, else ''. For each
     ref the push names, the range is the merge base with the destination's remote-tracking tip
     (`refs/remotes/<remote>/<dest>`, the named remote else origin), else the source's upstream, else the
@@ -665,7 +665,7 @@ def _push_hit(segment, stripped, cwd, args):
     glob, a typo) is read as HEAD. The range comes from the arguments alone: in the usual case one
     `git diff --check`, with no read of the top folder, the source or a base first."""
     named = push_refspecs(args)
-    where, overrides = push_target(segment, stripped, cwd)
+    where, overrides = push_target(segments, ends, number, cwd)
     if named is None or not where or not os.path.isdir(where):
         return ""
     specs = named[1] or [""]
@@ -747,7 +747,7 @@ def conflict_markers_hit(stripped: str, cwd: str):
         if call is not None and call[0] == "push":
             if blind_commit and (blind_triplet or conflict_step):
                 return "chain", "git push"
-            name = _push_hit(segment, stripped, cwd, call[1])
+            name = _push_hit(segments, ends, number, cwd, call[1])
             if name:
                 return "push", name
             readable = False
@@ -756,14 +756,8 @@ def conflict_markers_hit(stripped: str, cwd: str):
             readable = readable and _chain_safe(segment)
             conflict_step = conflict_step or (call is not None and _makes_conflict(call))
             continue
-        c_target = _segment_git_c_target(segment_tokens(segment) or [])
-        where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)   # this segment's own folder
-        if c_target is not None:
-            where = _absolute(c_target, where or "")
-            where = where if os.path.isabs(where) else None
-        tree = GIT_WORK_TREE_RE.search(segment)
-        if tree and where:
-            where = _absolute(tree.group(2), where)
+        folder = _commit_folder(segments, number, cwd, ends)
+        where = folder[1] if folder else None   # the folder its files are read from
         done = _git(where, "rev-parse", "--show-toplevel") if where and os.path.isdir(where) else None
         if done is None or done.returncode != 0 or not done.stdout.strip():
             continue
@@ -889,11 +883,43 @@ def _ste_base(where):
     return "", "the default branch of origin could not be read, and ste-changed reads origin only"
 
 
-def _segment_top(segment, stripped, cwd):
-    """The top folder of the checkout a git segment acts on (its `-C` folder, else the call's folder), or ''."""
-    target = _segment_git_c_target(segment_tokens(segment) or [])
-    root = command_root(stripped, cwd)
-    where = _absolute(target, root) if target is not None else root
+_SKIPPED = ()   # `_commit_folder` for a segment an earlier failed `cd` in an `&&` chain keeps from running
+
+
+def _commit_folder(segments, number, cwd, ends):
+    """Where `segments[number]` (a commit, add or other git call) acts: `(repo, files)`, the folder of the
+    checkout it lands in and the folder its files are read from. Both are the folder the shell is in when it
+    runs (`dir_before_segment`, after each earlier `cd`), moved by the segment's `-C`; `--work-tree` moves only
+    `files`. None when a folder cannot be read: a `-C` or `--work-tree` target that holds `$` or a backtick,
+    or that is no directory. `_SKIPPED` when the chain never runs the segment."""
+    where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True, skipped=_SKIPPED, read_variables=True)
+    if where is _SKIPPED:
+        return _SKIPPED
+    target = _segment_git_c_target(segment_tokens(segments[number]) or [])
+    if target is not None:
+        where = None if _unread_target(target) else _absolute(target, where or "")
+        where = where if where and os.path.isabs(where) and os.path.isdir(where) else None
+    if not where:
+        return None
+    files = where
+    tree = GIT_WORK_TREE_RE.search(segments[number])
+    if tree:
+        if _unread_target(tree.group(2)):
+            return None
+        files = _absolute(tree.group(2), where)
+        if not (os.path.isabs(files) and os.path.isdir(files)):
+            return None
+    return where, files
+
+
+def _unread_target(target):
+    """True when a `-C` or `--work-tree` target runs through the shell (a name that is not set, `$(...)` or a
+    backtick): no folder to read. A variable the environment sets reads as its value."""
+    return expand_folder_word(target) is None
+
+
+def _top_of(where):
+    """The top folder of the checkout `where` is in, or '' when it is not in one."""
     done = _toplevel(where) if where and os.path.isdir(where) else None
     return os.path.normpath(done.stdout.strip()) if done is not None and done.returncode == 0 and done.stdout.strip() else ""
 
@@ -974,26 +1000,48 @@ def ste_push_hit(stripped: str, cwd: str, record_branch_of, read_verb, note):
 
 def _ste_push_hit(stripped, cwd, record_branch_of, read_verb, note):
     linted = set()
-    committed, added = set(), set()   # tops where an earlier segment of this call commits / adds
+    # An earlier commit or add: `committed` is {top it lands in: {tops its files are read from}}, `added` the tops its
+    # files are read from. A commit, add, merge, cherry-pick, am or revert whose folder cannot be read (`blind_*`, and
+    # `brought[None]`) is read as made in the tree the push sends. One the chain never runs counts for nothing.
+    committed, added = {}, set()
+    blind_commit = blind_added = False
     brought = {}                      # top: [(verb, args)] of each earlier merge, cherry-pick, am or revert there
-    for segment in split_segments(stripped):
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number, segment in enumerate(segments):
         call = git_call_of(segment) if segment.strip() else None
         resumes = call is not None and call[0] in _BRINGING_VERBS + _CONTINUE_VERBS and "--continue" in call[1]
         if call is not None and (call[0] in ("add", "commit") or resumes):
-            made = _segment_top(segment, stripped, cwd)
-            if made:
-                (added if call[0] == "add" else committed).add(made)
+            folder = _commit_folder(segments, number, cwd, ends)
+            if folder is _SKIPPED:
+                continue
+            if folder is None:
+                blind_added = blind_added or call[0] == "add"
+                blind_commit = blind_commit or call[0] != "add"
+                continue
+            repo, files = _top_of(folder[0]), _top_of(folder[1])
+            if repo and files:
+                if call[0] == "add":
+                    added.add(files)
+                else:
+                    committed.setdefault(repo, set()).add(files)
             continue
         if call is not None and call[0] in _BRINGING_VERBS and not _BRING_DONE_FLAGS & set(call[1]):
-            made = _segment_top(segment, stripped, cwd)
-            if made:
+            folder = _commit_folder(segments, number, cwd, ends)
+            if folder is _SKIPPED:
+                continue
+            made = _top_of(folder[0]) if folder else None
+            if made or folder is None:
                 brought.setdefault(made, []).append(call)
             continue
         if call is None or call[0] != "push" or read_verb("push", call[1]):
             continue
         named = push_refspecs(call[1])
-        where, overrides = push_target(segment, stripped, cwd)
-        if named is None or not where or not os.path.isdir(where):
+        where, overrides = push_target(segments, ends, number, cwd)
+        if named is None:
+            continue
+        if not where or not os.path.isdir(where):
+            note("the folder the push runs in could not be read")
             continue
         done = _toplevel(where)
         top = os.path.normpath(done.stdout.strip()) if done is not None and done.returncode == 0 and done.stdout.strip() else ""
@@ -1027,19 +1075,23 @@ def _ste_push_hit(stripped, cwd, record_branch_of, read_verb, note):
             if scope is None:
                 note("the ste-lint scope in actions/ste-lint/action.yml could not be read")
                 continue
-            if top in committed:
-                dirty = _ste_dirty(top, scope, top in added)
+            unreadable = False
+            for files in sorted(committed.get(top, set()) | ({top} if blind_commit else set())):
+                dirty = _ste_dirty(files, scope, files in added or blind_added)
                 if dirty is None:
                     note("the files the commit in this call adds could not be read")
-                    continue
+                    unreadable = True
+                    break
                 if dirty:
                     return dirty, STE_PUSH_CHAIN_REASON
+            if unreadable:
+                continue
             base, why = _ste_base(where)
             if not base:
                 note(why)
                 continue
-            if top in brought:
-                fresh = _ste_brought(top, base, scope, brought[top])
+            if top in brought or None in brought:
+                fresh = _ste_brought(top, base, scope, brought.get(top, []) + brought.get(None, []))
                 if fresh is None:
                     note("the files a merge, cherry-pick or revert in this call brings could not be read")
                     continue
@@ -1203,27 +1255,31 @@ def _command_words(args):
     return words
 
 
-def _push_calls(segment: str, script: str, cwd: str):
-    """(arguments, directory, config overrides) of each `git push` in one segment, and in the scripts the
-    segment hands on (`bash -c`, `sh -lc`, `eval`, `ssh`): the one reader of those wrappers is inner_commands.
-    `script` is the text the segment came from, which push_target reads for a leading `cd`. A script
-    runs in the folder its segment's own `cd` or `git -C` names."""
+def _push_calls(segments, ends, number: int, cwd: str):
+    """(arguments, directory, config overrides) of each `git push` in `segments[number]`, and in the scripts
+    that segment hands on (`bash -c`, `sh -lc`, `eval`, `ssh`): the one reader of those wrappers is inner_commands.
+    `segments` and `ends` are the caller's own `split_segments` result, which push_target reads for each
+    earlier `cd`, so two equal segments are each read in their own folder. A script runs in the folder its
+    segment's own `cd` or `git -C` names."""
+    segment = segments[number]
     for subcommand, args in git_calls(push_text(segment)):
         if subcommand == "push":
-            where, overrides = push_target(segment, script, cwd)
+            where, overrides = push_target(segments, ends, number, cwd)
             yield _command_words(args), where, overrides
     tokens = segment_tokens(segment)
     inner = inner_commands(tokens) if tokens else []
     if inner:
-        inner_cwd = push_target(segment, script, cwd)[0] or cwd
+        inner_cwd = push_target(segments, ends, number, cwd)[0] or cwd
         from guard_env import substitution_commands   # imported late: a family reads only the families before it
         for text in inner:
             # The shell reads the wrapped script as it reads a command: a heredoc body is data, and
             # each `$( )` or backtick text runs as a command of its own (judge_shell does the same).
             stripped = strip_heredoc_bodies(text)
             for each in (stripped, *substitution_commands(text, stripped)):
-                for part in split_segments(each):
-                    yield from _push_calls(part, each, inner_cwd)
+                each_ends = []
+                each_segments = split_segments(each, each_ends)
+                for place in range(len(each_segments)):
+                    yield from _push_calls(each_segments, each_ends, place, inner_cwd)
 
 
 _TOPLEVELS = {}   # where -> the finished `git rev-parse --show-toplevel`, for the life of one hook process
@@ -1243,8 +1299,10 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
     reads the checkout's branch (lint/layout.py); a read error means the default. `read_verb(subcommand,
     args)` is guard.py's own test for a dry run, which moves nothing. The proof is read only after a push
     reaches the branch."""
-    for segment in split_segments(stripped):
-        for args, where, overrides in _push_calls(segment, stripped, cwd):
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number in range(len(segments)):
+        for args, where, overrides in _push_calls(segments, ends, number, cwd):
             if read_verb("push", args):
                 continue
             top = _toplevel(where) if where else None

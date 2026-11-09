@@ -417,7 +417,7 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
+            PUSH_REASON, PUSH_STRAY_REASON, PUSH_UNREAD_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
             parent_delete_hit, push_ask_hit, push_verdict, rm_delete_hit,
         )
         _loading = "guard_ste"
@@ -4069,23 +4069,29 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
-    for segment in (part for text in texts for part in split_segments(text)):
-        for args, where, overrides in _push_calls(segment, stripped, cwd):
-            verdict = push_verdict(args, where, overrides)
-            if verdict == "ask":
-                ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
-            elif verdict:
-                refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
-            elif not read_verb("push", args):
-                # Owner rulings 206 a and 207 a: a non-forced push that writes main or master, or an
-                # implied destination off the branch's upstream. A dry run writes nothing.
-                kind = push_ask_hit(args, where, overrides)
-                if kind == "main":
-                    ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
-                                "push to the default branch")
-                elif kind == "stray":
-                    ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
-                                "push to a stray branch")
+    for text in texts:
+        push_ends = []
+        push_segments = split_segments(text, push_ends)
+        for number in range(len(push_segments)):
+            for args, where, overrides in _push_calls(push_segments, push_ends, number, cwd):
+                verdict = push_verdict(args, where, overrides)
+                if verdict == "ask":
+                    ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
+                elif verdict:
+                    refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
+                elif not read_verb("push", args):
+                    # Owner rulings 206 a and 207 a: a non-forced push that writes main or master, or an
+                    # implied destination off the branch's upstream. A dry run writes nothing.
+                    kind = push_ask_hit(args, where, overrides)
+                    if kind == "main":
+                        ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
+                                    "push to the default branch")
+                    elif kind == "unread":
+                        ask_command("push-unread-folder", PUSH_UNREAD_REASON, "git push " + " ".join(args),
+                                    "push from an unread folder")
+                    elif kind == "stray":
+                        ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
+                                    "push to a stray branch")
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
     refusal, logged = env_refusal(stripped)

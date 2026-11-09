@@ -2,13 +2,14 @@
 
 ## The ruling
 
-Two pushes that are not forced ask. Approving the prompt lets one push through; it is not a grant.
+Three pushes that are not forced ask. Approving the prompt lets one push through; it is not a grant.
 The owner's typed override lets each through (`owner-override`). Owner rulings, Cockpit, 2026-11-03 22:23 CST.
 
 | Push | Outcome | Rule id |
 |---|---|---|
 | A destination named `main` or `master` (`main`, `HEAD:main`, `x:refs/heads/main`, a bare push that resolves there, `--all`, `--branches`) | ask | `push-main` |
 | An implied destination (bare push, `HEAD`, `@`, or the current branch's own name) that differs from the branch's upstream, on the upstream's remote | ask | `push-stray-branch` |
+| A bare push, `HEAD` or `@` whose folder cannot be read (a `cd` through a variable or `$(...)`, a `-C` folder that is not there), so its destination is unknown | ask | `push-unread-folder` |
 | Any other plain push | allow | |
 
 - Item 207 a, `push-main`: main moves only by pull request (`git-main-only-by-pr`). The names are
@@ -16,6 +17,10 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
 - Item 206 a, `push-stray-branch`: `git push origin HEAD` writes the local branch's name, not its
   upstream. Measured 2026-11-03: local `mylocal` tracking `origin/lane/x` made a new remote branch
   `mylocal`.
+- Item 413 a, `push-unread-folder` (owner, 2026-11-08 06:11 CST): the forced push already asks when its
+  destination cannot be read (`push_verdict`); a plain push that takes its destination from an unread
+  folder asks the same way. A folder that exists but is no repository, a detached HEAD and
+  `push.default=matching` stay silent below: the push fails or is not read there.
 - Silent:
   - a push to the branch's own upstream;
   - a first push with no upstream;
@@ -27,7 +32,7 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
   - a push to another remote than the upstream's;
   - `--dry-run`, which writes nothing;
   - `push.default=matching`, whose destination is not read;
-  - a plain push whose destination cannot be resolved.
+  - a plain push whose destination cannot be resolved in a folder that can be read.
 - A glob refspec such as `refs/heads/*:refs/heads/*` is not read either. Claude does not write it
   in normal work.
 - A push asks only alone, or with a harmless lead or tail such as `2>&1 | tail -1`. In a longer
