@@ -26719,16 +26719,21 @@ for _label, _check in (
     LOG_CHECKS_EXTRA.append((_label, _check))
 
 
+def _family_constant_node(tree, path):
+    """The assignment of _FAMILY_MODULES in a parsed guard.py."""
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "_FAMILY_MODULES" for t in node.targets):
+            return node
+    raise ValueError("no _FAMILY_MODULES assignment in %s" % path)
+
+
 def _guard_family_constant(path):
     """The module list the guard loads, ("guard_core",) + _FAMILY_MODULES, read from `path` with the
     language's own parser. Matching text would read a comment or a string as a module name."""
     with open(path, encoding="utf-8") as handle:
         tree = ast.parse(handle.read(), filename=path)
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-                isinstance(t, ast.Name) and t.id == "_FAMILY_MODULES" for t in node.targets):
-            return ("guard_core",) + tuple(ast.literal_eval(node.value))
-    raise ValueError("no _FAMILY_MODULES assignment in %s" % path)
+    return ("guard_core",) + tuple(ast.literal_eval(_family_constant_node(tree, path).value))
 
 
 def _list_names_every_sibling():
@@ -26749,18 +26754,24 @@ LOG_CHECKS_EXTRA.append(("audit-high fail-closed list: FAILCLOSED_MODULES matche
 
 def _constant_drop_goes_red():
     """Drop guard_wsl from a copy of the guard's own module constant, the one the guard loads. The list
-    check must go red on that copy. The copy is a scratch folder under ROOT, and GUARD is swapped only
-    for the call, then restored."""
+    check must go red on that copy. The constant is found with the parser, and only its own source is
+    edited, so a module listed beside guard_wsl cannot break the drop. The copy is a scratch folder
+    under ROOT, and GUARD is swapped only for the call, then restored."""
     global GUARD
     folder = _guard_copy("constant-drop", None)
     path = os.path.join(folder, "guard.py")
     with open(path, encoding="utf-8") as handle:
         text = handle.read()
-    needle = '"guard_mask_script", "guard_wsl")'
-    if text.count(needle) != 1:
-        return False, "the guard's constant no longer reads %s once, so the drop cannot be made" % needle
+    try:
+        node = _family_constant_node(ast.parse(text, filename=path), path)
+    except ValueError as err:
+        return False, str(err)
+    constant = ast.get_source_segment(text, node.value)
+    needle = '"guard_wsl"'
+    if constant is None or constant.count(needle) != 1 or text.count(constant) != 1:
+        return False, "the guard's constant does not hold %s once, so the drop cannot be made" % needle
     with open(path, "w", encoding="utf-8") as handle:
-        handle.write(text.replace(needle, '"guard_mask_script")'))
+        handle.write(text.replace(constant, re.sub(r'"guard_wsl",?\s*', "", constant)))
     saved, GUARD = GUARD, path
     try:
         ok, note = _list_names_every_sibling()
