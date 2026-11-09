@@ -2899,5 +2899,150 @@ class RevivedNote(unittest.TestCase):
         self.assertEqual(self.r.verdict(), [], "a deleted non-slug note flagged a different note that shares its first 40 characters")
 
 
+class MergeKeepsMain(unittest.TestCase):
+    """Roadmap step merge-keeps-main-verbatim. A merge that hand-edits a line main added since the base, outside a
+    conflict block, is a finding, and a Drops-lines trailer on its path does not excuse it. The old reads still excuse
+    the path by that trailer (an ALLOWED note), so each claim is checked after that premise. Fixtures: lib.txt at the
+    base, the lane (feat) cut there, main's commit to lib.txt, then the merge a case makes."""
+    T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+    BASE = "import os\nimport sys\n\ndef run():\n    return 1\n"
+    IMPORT = "from collections import OrderedDict, defaultdict, Counter\n"
+    REFLOWED = "from collections import (\n    OrderedDict, defaultdict, Counter)\n"
+    BASE_WITH_IMPORT = BASE.replace("import sys\n", "import sys\n" + IMPORT)
+    FILL = "".join("filler %d\n" % i for i in range(1000))  # the full-size base: a thousand lines above the imports
+    TRAILER = "Drops-lines: lib.txt -- %s"
+
+    def start(self, base, main, lane=None):
+        """lib.txt holds `base` at the cut. The lane commits `lane` to lib.txt, or else a change to other.txt. Then main commits `main`."""
+        r = self.r = Repo()
+        r.commit("base", date="2025-12-01T10:00:00", lib_txt=base, other_txt="other v1\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "feat")
+        if lane is None:
+            r.commit("feat", date=self.T0, other_txt="other v2\n")
+        else:
+            r.commit("feat", date=self.T0, lib_txt=lane)
+        r.sh("checkout", "-q", "main")
+        r.commit("main", date=self.T1, lib_txt=main)
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        return r
+
+    def merge_by_hand(self, text, trailer=None):
+        """Merge main with no conflict, then write lib.txt as `text`: a hand edit of the merge commit."""
+        r = self.r
+        r.sh("merge", "--no-commit", "--no-ff", "main")  # a conflict would fail here: no case of this class is one
+        auto = r.sh("show", ":lib.txt")  # the index holds git's own auto-merge
+        self.assertNotEqual(auto, text.strip(), "premise: the hand text is git's own auto-merge, so the merge is no hand edit")
+        r.put("lib.txt", text)
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main" + ("\n\n" + trailer if trailer else ""), date=self.T2)
+        return r.sh("rev-parse", "HEAD")
+
+    def assert_merge_holds(self, m, marker, present=True):
+        """Scope before subject: m is a two-parent merge, and its lib.txt holds (or lacks) `marker`."""
+        parents = self.r.sh("rev-list", "--parents", "-n", "1", m).split()[1:]
+        self.assertEqual(len(parents), 2, "premise: the commit under test is not a two-parent merge")
+        text = self.r.sh("show", m + ":lib.txt")
+        if present:
+            self.assertIn(marker, text, "premise: the merge does not hold %r" % marker)
+        else:
+            self.assertNotIn(marker, text, "premise: the merge still holds %r" % marker)
+
+    def hand_edits(self, got):
+        return [p for p in got if p.startswith("lib.txt:") and "hand-edited" in p]
+
+    def check_excused_hand_edit(self, reason):
+        """Premise: the old reads still excuse lib.txt by its trailer. Claim: the hand edit is still a finding."""
+        got = self.r.verdict()
+        self.assertIn("ALLOWED lib.txt: " + reason, self.r.notes, "premise: the Drops-lines trailer did not excuse lib.txt")
+        self.assertTrue(self.hand_edits(got), "a hand edit of main's line outside a conflict is not a finding under a Drops-lines trailer: %s" % got)
+
+    def reflow(self, base, main):
+        """main adds the import; the merge reflows it by hand, with the trailer a lane would write."""
+        self.start(base, main)
+        m = self.merge_by_hand(main.replace(self.IMPORT, self.REFLOWED), self.TRAILER % "reflowed, not lost")
+        self.assert_merge_holds(m, "OrderedDict, defaultdict, Counter)")
+        self.assert_merge_holds(m, "from collections import OrderedDict", present=False)
+
+    # Red on main: the hand edit is a finding by the new read, and the old reads excuse it by the trailer.
+
+    def test_a_reflowed_main_import_outside_a_conflict_is_a_hand_edit_despite_a_trailer(self):
+        self.reflow(self.BASE, self.BASE_WITH_IMPORT)
+        self.check_excused_hand_edit("reflowed, not lost")
+
+    def test_the_same_when_the_file_was_empty_at_the_base(self):
+        self.reflow("", self.BASE_WITH_IMPORT)
+        self.check_excused_hand_edit("reflowed, not lost")
+
+    def test_the_same_in_a_file_of_a_thousand_lines(self):
+        self.reflow(self.FILL + self.BASE, self.FILL + self.BASE_WITH_IMPORT)
+        self.check_excused_hand_edit("reflowed, not lost")
+
+    def test_a_renamed_main_function_with_a_neighbour_rewrite_is_a_hand_edit_despite_a_trailer(self):
+        self.start(self.BASE, self.BASE + "\ndef helper(x):\n    return x + 1\n")
+        m = self.merge_by_hand(self.BASE + "\ndef helper_v2(x):\n    return x + 2\n", self.TRAILER % "renamed, not lost")
+        self.assert_merge_holds(m, "def helper_v2(x):")
+        self.check_excused_hand_edit("renamed, not lost")
+
+    def test_four_reworded_main_lines_are_a_hand_edit_despite_a_trailer(self):
+        self.start(self.BASE, self.BASE + "retry the fetch on timeout\nlog each attempt to the audit file\n"
+                   "cap the backoff at ten seconds\ndrop the cache after a failed write\n")
+        m = self.merge_by_hand(self.BASE + "retry the fetch after a timeout\nlog every attempt to the audit file\n"
+                               "cap the backoff at ten seconds total\ndrop the cache after one failed write\n",
+                               self.TRAILER % "reworded, not lost")
+        self.assert_merge_holds(m, "drop the cache after one failed write")
+        self.check_excused_hand_edit("reworded, not lost")
+
+    # Green on main and after: the controls.
+
+    def test_a_conflict_resolved_to_a_third_value_is_quiet(self):
+        text = lambda val: "".join("l%d\n" % i for i in range(1, 6)) + val + "\ntail\n"
+        r = self.start(text("RULE_FLOOR = 80"), text("RULE_FLOOR = 91"), lane=text("RULE_FLOOR = 85"))
+        r.sh("merge", "main", ok=False)  # the same line changed on both sides: a conflict
+        self.assertTrue(r.sh("ls-files", "-u"), "premise: the merge did not conflict")
+        r.put("lib.txt", text("RULE_FLOOR = 94"))
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main", date=self.T2)
+        self.assert_merge_holds(r.sh("rev-parse", "HEAD"), "RULE_FLOOR = 94")
+        self.assertEqual(r.verdict(), [], "a conflict resolved to a third value was flagged")
+
+    def test_a_pure_delete_under_a_trailer_is_quiet(self):
+        self.start(self.BASE, self.BASE + "legacy_hook()\n")
+        m = self.merge_by_hand(self.BASE, self.TRAILER % "legacy hook removed on purpose")
+        self.assert_merge_holds(m, "legacy_hook()", present=False)
+        self.assertEqual(self.r.verdict(), [], "a true drop, a pure delete under its trailer, was flagged")
+
+    def test_a_clean_merge_with_no_hand_edit_is_quiet(self):
+        r = self.start(self.BASE, "# header\n" + self.BASE, lane=self.BASE + "lane_own = 1\n")
+        r.sh("merge", "-q", "--no-edit", "main", date=self.T2)
+        m = r.sh("rev-parse", "HEAD")
+        self.assert_merge_holds(m, "# header")
+        self.assert_merge_holds(m, "lane_own = 1")
+        self.assertEqual(r.verdict(), [], "a clean merge with no hand edit was flagged")
+
+    def test_a_verbatim_merge_then_a_later_commit_that_reflows_main_gives_the_merge_no_hand_edit(self):
+        r = self.start(self.BASE, self.BASE_WITH_IMPORT)
+        r.sh("merge", "-q", "--no-edit", "main", date=self.T2)
+        self.assert_merge_holds(r.sh("rev-parse", "HEAD"), self.IMPORT.strip())
+        r.commit("reflow the import", date=self.T2, lib_txt=self.BASE_WITH_IMPORT.replace(self.IMPORT, self.REFLOWED))
+        self.assertEqual(self.hand_edits(r.verdict()), [],
+                         "the new read flagged a verbatim merge: the later lane commit changed main's line, not the merge")
+
+    def test_a_hand_edit_of_a_line_only_the_lane_added_is_quiet(self):
+        self.start(self.BASE, self.BASE + "main_line = 1\n", lane="lane_only = 1\n" + self.BASE)
+        m = self.merge_by_hand("lane_only = 2\n" + self.BASE + "main_line = 1\n")
+        self.assert_merge_holds(m, "lane_only = 2")
+        self.assertEqual(self.r.verdict(), [], "a hand edit of a line only the lane added was flagged")
+
+    def test_a_git_auto_merge_of_mains_in_place_edit_is_quiet(self):
+        r = self.start("retries = 4\n" + self.BASE, "retries = 5\n" + self.BASE)
+        r.sh("merge", "-q", "--no-edit", "main", date=self.T2)
+        m = r.sh("rev-parse", "HEAD")
+        self.assert_merge_holds(m, "retries = 5")
+        self.assert_merge_holds(m, "retries = 4", present=False)
+        self.assertEqual(r.verdict(), [], "git's own auto-merge of main's in-place edit was flagged")
+
+
 if __name__ == "__main__":
     unittest.main()
