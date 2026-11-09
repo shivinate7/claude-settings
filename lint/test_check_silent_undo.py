@@ -2708,6 +2708,45 @@ class OctopusMerge(unittest.TestCase):
         self.assert_merge(head, [self.fixture, self.main], main_line_kept=False)
         self.assert_main_line_dropped(self.verdict(), head)
 
+    def cut_lane_from_main_line(self, deletes_line):
+        """Main gains a commit past the one that added the line, so its tip is no ancestor of the lane, which is cut
+        from that commit. The lane keeps the line, or with deletes_line deletes it on its own commit. Returns the lane's tip."""
+        r = self.r
+        r.sh("checkout", "-q", "main")
+        r.commit("main moves on", second_txt="second\n")
+        r.push()
+        self.main_tip = r.sh("rev-parse", "HEAD")
+        r.sh("checkout", "-q", "-b", "lane-from-main-line", self.main)
+        if deletes_line:
+            lane = r.commit("lane deletes main's line", app_txt=BODY + "function Card() {}\n")
+        else:
+            lane = r.commit("lane adds a file", lane2_txt="lane two line\n")
+        r.sh("checkout", "-q", "fixture")
+        return lane
+
+    def lost(self, head):
+        """The lines the merge drops, read as the check reads them: origin/main holds main's lines."""
+        try:
+            return C.lost_lines(self.r.dir, head, ("origin/main",))
+        except C.Unknown as e:
+            self.fail("the check did not read the merge: %s" % e)
+
+    def test_octopus_drop_of_a_line_the_lane_kept_from_a_shared_base_is_a_fail(self):
+        lane = self.cut_lane_from_main_line(deletes_line=False)
+        self.assertIn("added by main", self.r.sh("show", lane + ":app.txt"), "premise: the lane keeps main's line")
+        head = self.merge_into_fixture([lane, "main"], drop=True)
+        self.assert_merge(head, [self.fixture, lane, self.main_tip], main_line_kept=False)
+        named = [p for p in self.lost(head) if p[1] == self.main_tip and "added by main" in p[2]]
+        self.assertTrue(named, "the drop of main's line is not reported: a base the lane shares with main hides it")
+
+    def test_octopus_drop_of_a_line_the_second_parent_deleted_is_not_a_fail(self):
+        lane = self.cut_lane_from_main_line(deletes_line=True)
+        self.assertNotIn("added by main", self.r.sh("show", lane + ":app.txt"), "premise: the lane deleted main's line")
+        self.assertIn("added by main", self.r.sh("show", self.main_tip + ":app.txt"), "premise: main still holds the line")
+        head = self.merge_into_fixture([lane, "main"], drop=True)
+        self.assert_merge(head, [self.fixture, lane, self.main_tip], main_line_kept=False)
+        self.assertEqual(self.lost(head), [], "the drop is the second parent's own deletion, so it loses no line of main's")
+
 
 if __name__ == "__main__":
     unittest.main()
