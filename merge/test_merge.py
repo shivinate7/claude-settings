@@ -13555,6 +13555,90 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         self.assertIn(f"Round 1: reviewer, sonnet, PARTIAL, {self.OWN}", lines, "the PARTIAL line of round 1 is not printed")
         self.assertIn(f"Round 1: reviewer, haiku, PASS, {self.OWN}", lines, "the PASS line of round 1 is not printed")
 
+    def top_round_lines(self, top=None):
+        """The three record lines of the fix base cases: round 1 FAIL on OWN, round 2 FAIL on OWN_TWO, round 3 PASS on `top` (OWN_THREE by default)."""
+        top = self.OWN_THREE if top is None else top
+        return (f"Round 1: reviewer, haiku, FAIL, {self.OWN}", f"Round 2: reviewer, haiku, FAIL, {self.OWN_TWO}", f"Round 3: reviewer, opus, PASS, {top}")
+
+    def test_fix_base_top_round_sha_is_written_with_no_earlier_record(self):
+        # the top round's sha is one of this pull request's own commits, so a fix check may start from it with no earlier record
+        host = self.record_host(diffs=self.own_replies(self.OWN, self.OWN_TWO, self.OWN_THREE))
+        rc, out, err = self.write_at(host, round_args(self.top_round_lines()), extra=("--fix-check", f"{self.OWN_THREE}:reviewer:sonnet:PASS"))
+        self.assertTrue(any("comments" in rel for rel, _ in host.list_calls), "scope: the write did not read the comment list:\n" + err)
+        self.assertEqual(rc, 0, "a fix check whose base is the top round's own sha was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.OWN_THREE, "reviewer", "sonnet", "PASS"),
+                         "the printed fix check does not start from the top round's sha")
+
+    def test_fix_base_top_round_other_named_sha_is_refused_with_no_earlier_record(self):
+        # control: the round 2 head is a named own commit, but not the top round's, so the same write with it as the base is refused
+        host = self.record_host(diffs=self.own_replies(self.OWN, self.OWN_TWO, self.OWN_THREE))
+        rc, out, err = self.write_at(host, round_args(self.top_round_lines()), extra=("--fix-check", f"{self.OWN_TWO}:reviewer:sonnet:PASS"))
+        self.assert_refused_without_record(rc, out, err, "a fix base that is a named round 2 head, not the top round's, with no earlier record")
+
+    def test_fix_base_top_round_sha_is_written_after_an_earlier_record_at_another_head(self):
+        # the earlier record's Head is HEAD_A. The files between HEAD_A and the top round's sha are code, so the old base rule refuses that base;
+        # only the top round's own sha may start the fix check here
+        earlier = self.earlier_top_fail()
+        self.assertIsNotNone(review_fn(self, "parse_review")(earlier["body"]), "scope: the earlier record does not parse, so the case tests nothing")
+        diffs = {**self.own_replies(self.OWN, self.OWN_TWO, self.OWN_THREE), (self.HEAD_A, self.OWN_THREE): compare_of("ahead", file_entry("merge/merge.py"))}
+        host = self.record_host(earlier, diffs=diffs)
+        rc, out, err = self.write_at(host, round_args(self.top_round_lines()), extra=("--fix-check", f"{self.OWN_THREE}:reviewer:sonnet:PASS"))
+        self.assertTrue(any("comments" in rel for rel, _ in host.list_calls), "scope: the write did not read the comment list:\n" + err)
+        self.assertEqual(rc, 0, "a fix check whose base is the top round's sha, after an earlier record at another head, was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.OWN_THREE, "reviewer", "sonnet", "PASS"),
+                         "the printed fix check does not start from the top round's sha")
+
+    def test_fix_base_top_round_other_named_sha_is_refused_after_an_earlier_record_at_another_head(self):
+        # control: the round 1 head is a named own commit, not the earlier Head and not the top round's. The old base rule compares it with HEAD_A,
+        # finds them diverged, and refuses it
+        earlier = self.earlier_top_fail()
+        diffs = {**self.own_replies(self.OWN, self.OWN_TWO, self.OWN_THREE), (self.HEAD_A, self.OWN_THREE): compare_of("ahead", file_entry("merge/merge.py"))}
+        host = self.record_host(earlier, diffs=diffs)
+        rc, out, err = self.write_at(host, round_args(self.top_round_lines()), extra=("--fix-check", f"{self.OWN}:reviewer:sonnet:PASS"))
+        self.assert_refused_without_record(rc, out, err, "a fix base that is a named round 1 head, not the top round's, after an earlier record at another head")
+
+    def test_fix_base_top_round_old_form_record_with_no_earlier_record_is_refused(self):
+        # the rounds name no head, so no top round's sha exists to stand in as the fix base, and no earlier record can be the base
+        host = self.record_host()
+        rc, out, err = self.write_at(host, ("1:reviewer:haiku:FAIL", "2:reviewer:haiku:FAIL", "3:reviewer:opus:PASS"),
+                                     extra=("--fix-check", f"{self.OWN_THREE}:reviewer:sonnet:PASS"))
+        self.assertTrue(any("comments" in rel for rel, _ in host.list_calls), "scope: the write did not read the comment list:\n" + err)
+        self.assert_refused_without_record(rc, out, err, "an old-form record with a fix base and no earlier record")
+
+    def test_fix_base_top_round_sha_not_a_commit_of_the_pr_is_refused(self):
+        # the top round's sha is a head the live head does not descend from, so the own-commit check refuses the record before the fix base is read
+        foreign = self.FOREIGN[0]
+        host = self.record_host(diffs=self.own_replies(self.OWN, self.OWN_TWO))
+        rc, out, err = self.write_at(host, round_args(self.top_round_lines(top=foreign)), extra=("--fix-check", f"{foreign}:reviewer:sonnet:PASS"))
+        self.assertIn((foreign, self.LIVE), host.compare_reads, "scope: the own-commit check did not read the top round's head")
+        self.assert_head_refused(rc, out, err, (foreign,))
+        self.assertIn("is not one of the pull request's own commits", err, "the refusal does not name the own-commit check:\n" + err)
+
+    def test_fix_base_top_round_listing_reads_done_when_the_top_round_head_is_live(self):
+        # the listing reads the record as posted: the live head is Y, and the fix check PASS on the top round's sha clears the top round
+        body = record_text(head=self.LIVE, rounds=self.top_round_lines(), fix=(fix_check_line(verdict="PASS", head=self.OWN_THREE, model="sonnet"),))
+        state, why = self.listed([review_comment(1, 7, body)])
+        self.assertEqual(state, "done", f"the record with a fix check PASS on the top round's sha does not read done: {why}")
+
+    def test_fix_base_top_round_listing_without_the_fix_check_is_not_done(self):
+        # control: the same record without its fix check line keeps its top round on another head, so it does not read done
+        body = record_text(head=self.LIVE, rounds=self.top_round_lines())
+        state, why = self.listed([review_comment(1, 7, body)])
+        self.assertNotEqual(state, "done", f"control: the record without its fix check reads done: {why}")
+
+    def test_fix_base_top_round_after_an_earlier_fix_check_fail_or_wide_is_refused(self):
+        # the rules that still hold: an earlier record whose fix check FAILed or WIDE refuses a new fix check, even one whose base is the top round's sha
+        diffs = self.own_replies(self.OWN, self.OWN_TWO, self.OWN_THREE)
+        for verdict in ("FAIL", "WIDE"):
+            with self.subTest(verdict=verdict):
+                earlier = review_comment(1, 7, record_text(head=self.HEAD_A, rounds=self.top_round_lines()[:2],
+                                                           fix=(fix_check_line(verdict=verdict, head=self.OWN, model="haiku"),)))
+                self.assertIsNotNone(review_fn(self, "parse_review")(earlier["body"]), "scope: the earlier record does not parse, so the case tests nothing")
+                host = self.record_host(earlier, diffs=diffs)
+                rc, out, err = self.write_at(host, round_args(self.top_round_lines()), extra=("--fix-check", f"{self.OWN_THREE}:reviewer:sonnet:PASS"))
+                self.assert_refused_without_record(rc, out, err, f"a fix check after an earlier fix check {verdict}, with the top round's sha as its base")
+                self.assertIn("may not follow it", err, f"the refusal after an earlier fix check {verdict} does not name the chain:\n" + err)
+
 class ReviewRoundHeadsCheck(unittest.TestCase):
     """review_state reads a record whose Round lines name heads (decision pr-review-record). Its top round is done only when every line of that round
     names the live head by a sha prefix, or when a fix check PASS follows and the record's Head is live. A top round that names another head is stale
