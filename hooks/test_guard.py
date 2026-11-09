@@ -18115,11 +18115,13 @@ def _reaches_merge_check_case(where, rel, committed):
     if guard.own_changes(where) is None:
         return False, "own_changes returned None, so git could not answer for %s" % rel
     if committed:
-        old = guard.merge_tree(where, run_vcs(where, "rev-parse", "HEAD^1").stdout.strip(),
-                               run_vcs(where, "rev-parse", "HEAD^2").stdout.strip())
+        merged = guard.merge_tree(where, run_vcs(where, "rev-parse", "HEAD^1").stdout.strip(),
+                                  run_vcs(where, "rev-parse", "HEAD^2").stdout.strip())
+        old = None if merged is None else merged[0]
         paths = guard.changed_paths(where, old, "HEAD") if old else None
     else:
-        old = guard.merge_tree(where, "HEAD", run_vcs(where, "rev-parse", "MERGE_HEAD").stdout.strip())
+        merged = guard.merge_tree(where, "HEAD", run_vcs(where, "rev-parse", "MERGE_HEAD").stdout.strip())
+        old = None if merged is None else merged[0]
         paths = guard.changed_paths(where, old) if old else None
     if paths is None:
         return False, "git could not list the change against the merge's old side"
@@ -18191,7 +18193,7 @@ def plain_commit_reads_case():
     changes, calls = _counted_own_changes(where)
     if changes is None:
         return False, "own_changes returned None for the plain commit"
-    found = {path for _old, _new, paths, _kind in changes for path in paths}
+    found = {path for _old, _new, paths, _kind, _conflicts in changes for path in paths}
     if found != set(COST_PATHS):
         return False, "own_changes found paths %r, want %r" % (sorted(found), COST_PATHS)
     named = {rel: n for rel, n in _calls_naming(calls, COST_PATHS).items() if n}
