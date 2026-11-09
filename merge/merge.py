@@ -2598,10 +2598,12 @@ def ci_job_run(wt, *args, notes=None):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-def cite_record_paths(paths):
-    """The paths of `paths` that are records a step cite is read in: docs/decisions/*.md, docs/debts/*.md and a CLAUDE.md at any depth."""
-    return [p for p in paths if posixpath.basename(p) == "CLAUDE.md"
-            or (posixpath.dirname(p) in ("docs/decisions", "docs/debts") and p.endswith(".md"))]
+def cite_record_paths(root, paths):
+    """The paths of `paths` that are records a step cite is read in: a .md file in the decisions or debts folder of `root` (lint/layout.py) and a CLAUDE.md
+    at any depth. Raises layout.LayoutError when the layout cannot be read."""
+    import layout
+    folders = (*layout.candidates(root, "decisions"), *layout.candidates(root, "debts"))  # the root's own folder, then the layout's, as a repo not yet moved reads them
+    return [p for p in paths if posixpath.basename(p) == "CLAUDE.md" or (posixpath.dirname(p) in folders and p.endswith(".md"))]
 
 def step_cite_check(root, head, base, body=""):
     """Raise Stop on a `step:<slug>` cite, in a record that `head` changes against origin/<base> or in `body`, that names no step file on origin's record
@@ -2613,7 +2615,11 @@ def step_cite_check(root, head, base, body=""):
     if c:
         raise Stop(f"git diff failed, so the step cite read is unknown, not a pass: {out} {LANE_LINT_CITE}")
     texts = [body] if body else []
-    for path in cite_record_paths(p for p in out.split("\0") if p):
+    try:
+        records = cite_record_paths(root, [p for p in out.split("\0") if p])
+    except layout.LayoutError as e:
+        raise Stop(f"the record folders cannot be read, so the step cite read is unknown, not a pass: {e} {LANE_LINT_CITE}")
+    for path in records:
         c, text = git(root, "show", f"{head}:{path}")
         if c:
             raise Stop(f"git show {head[:9]}:{path} failed, so the step cite read is unknown, not a pass: {text} {LANE_LINT_CITE}")
