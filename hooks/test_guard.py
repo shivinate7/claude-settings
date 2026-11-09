@@ -12359,6 +12359,7 @@ CMK_PAREN = os.path.join(CMKPUSH, "fixparen")  # an unpushed triplet on branch f
 CMK_GONE = os.path.join(CMKROOT, "gone")       # a folder no fixture makes: the cd target of the missing-folder cases
 CMK_NU = os.path.join(CMKPUSH, "newtriplet")   # a triplet on branch fresh, never pushed: no tracking ref, no upstream
 CMK_NC = os.path.join(CMKPUSH, "newclean")     # a clean commit on branch fresh, never pushed
+CMK_DT = os.path.join(CMKPUSH, "detached")     # a clean commit, unpushed, with HEAD detached: no branch to push
 
 
 def _cmk_commit(where, rel, text, msg):
@@ -12460,6 +12461,9 @@ def _build_conflict_markers_push():
     _cmk_pushed(CMK_NC, {"a.txt": "base\n"})
     run(CMK_NC, "checkout", "-q", "-b", "fresh")
     commit(CMK_NC, "b.txt", "clean\n", "clean change, branch never pushed")
+    _cmk_pushed(CMK_DT, {"a.txt": "base\n"})
+    commit(CMK_DT, "b.txt", "clean\n", "clean change, unpushed")
+    run(CMK_DT, "checkout", "-q", "--detach")              # no branch: a bare push names no destination
     for gone in (CMK_GONE, os.path.join(CMK_CLT, "nope")):
         if os.path.exists(gone):
             sys.exit("fixture setup failed in the conflict-markers fixtures: %r exists, so a cd to it does not fail"
@@ -12467,7 +12471,7 @@ def _build_conflict_markers_push():
 
 
 lazy_fixture([CMK_PU, CMK_RB, CMK_MP, CMK_NF, CMK_CL, CMK_RT, CMK_CLT, CMK_SEQ, CMK_SEQB, CMK_REL, CMK_PAREN,
-              CMK_NU, CMK_NC],
+              CMK_NU, CMK_NC, CMK_DT],
              _build_conflict_markers_push)
 
 # A commit that cannot be judged, with no push after it in the call, is no hit. The sed and the fix script
@@ -12490,6 +12494,9 @@ cmk_refuse("a push of a new file that holds a triplet", VCS + " push", CMK_NF)
 # A push sends only what is unpushed: clean commits pass, and so does a triplet already on the remote.
 cmk_allow("a push of unpushed commits that are clean", VCS + " push", CMK_CL)
 cmk_allow("a push of a clean commit, with a triplet already on the remote branch", VCS + " push", CMK_RT)
+# A detached HEAD names no branch, so a bare push has no destination. git answers that read with a non-zero exit,
+# which is an answer, not an unread git read: the clean commit still passes.
+cmk_allow("a bare push from a detached HEAD, with no destination to resolve, of a clean commit", VCS + " push", CMK_DT)
 
 # A commit then a push in one call: a judged clean commit lets the push through; one that cannot be judged
 # is refused.
@@ -12669,8 +12676,9 @@ cmk_allow("two commits, the first adding a triplet and the second removing it, t
 
 # An unreadable git read. The commit check reads git through `_git`, which three modules bind by name: guard_merge
 # takes it from guard_core, which takes it from git_reads. A patch on git_reads alone reaches no reader, so each
-# case answers None on all three names. A read that times out or fails is None, and the commit check reads None as
-# no hit, so the commit is allowed. These judge in-process: every other row runs the guard as a subprocess.
+# case answers None on all three names. A git read that fails or times out is None, and it counts as unread: the
+# check asks, and a triplet it already found keeps its deny. These judge in-process; every other row runs the guard
+# as a subprocess.
 CMK_READ_MODULES = ("git_reads", "guard_core", "guard_merge")
 CMK_STAGED_COMMIT = VCS + " add -A && " + VCS + " commit -m x"
 
