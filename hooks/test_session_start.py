@@ -1599,7 +1599,7 @@ class SessionStartLiveHooksLagTests(GitFixtureMixin, SessionStartAgentWorktreeNo
         self.drop_stamp()
         self.assertEqual(self.lag_lines(self.run_lag()), [], "a local session with no stamp printed a lag line")
 
-    def test_the_lag_check_starts_at_most_two_git_processes_and_no_fetch(self):
+    def test_the_lag_check_adds_at_most_two_git_starts_and_the_block_fetches_once(self):
         self.become(True)
         self.stamp(self.first)
         lines_on, starts_on = self.logged_run()
@@ -1611,8 +1611,47 @@ class SessionStartLiveHooksLagTests(GitFixtureMixin, SessionStartAgentWorktreeNo
         added = len(starts_on) - len(starts_off)
         self.assertLessEqual(added, 2, "the lag check starts %d git processes, want at most 2; with the stamp %r, "
                              "without it %r" % (added, starts_on, starts_off))
+        # Coordinator ruling (after the 15:34 CST start): a cloud session's lag check reuses the block's one fetch helper,
+        # so the cloud session fetches once. The lag check adds no fetch of its own.
         fetches = [start for start in starts_on if start.split()[0] == "fetch"]
-        self.assertEqual(fetches, [], "the hook starts git fetch: %r" % fetches)
+        self.assertEqual(len(fetches), 1, "want the block's one git fetch in a cloud session, got %r" % fetches)
+
+    def test_a_failed_fetch_prints_unread_and_no_count_even_with_a_stale_ref(self):
+        self.become(True)
+        self.stamp(self.first)
+        vcs(self.primary, "remote", "set-url", "origin", os.path.join(self.root, "nowhere.git"))
+        hits = self.lag_lines(self.run_lag())
+        self.assertEqual(len(hits), 1, "want one line for a failed fetch, got %r" % hits)
+        self.assertIn(LAG_UNREAD, hits[0], "the line is not the unread line: %r" % hits[0])
+        self.assertNotIn("behind", hits[0], "a stale origin/main gave a count: %r" % hits[0])
+
+    def test_a_fetch_that_does_not_run_prints_unread_and_no_count_even_with_a_stale_ref(self):
+        self.become(True)
+        self.stamp(self.first)
+        vcs(self.primary, "remote", "remove", "origin")
+        vcs(self.primary, "update-ref", "refs/remotes/origin/main", self.tip)
+        hits = self.lag_lines(self.run_lag())
+        self.assertEqual(len(hits), 1, "want one line for a fetch that cannot run, got %r" % hits)
+        self.assertIn(LAG_UNREAD, hits[0], "the line is not the unread line: %r" % hits[0])
+        self.assertNotIn("behind", hits[0], "a stale origin/main gave a count: %r" % hits[0])
+
+    def test_a_fetch_that_runs_moves_origin_main_and_the_stamp_at_the_fetched_tip_prints_nothing(self):
+        self.become(True)
+        self.stamp(self.tip)
+        for number in (5, 6):
+            self.commit("main commit %d" % number)
+        vcs(self.primary, "push", "-q", "origin", "main")
+        fetched = self.head_sha()
+        # The tracking ref goes back to the old tip, so only the hook's own fetch can move it to the pushed tip.
+        vcs(self.primary, "update-ref", "refs/remotes/origin/main", self.tip)
+        hits = self.lag_lines(self.run_lag())
+        self.assertEqual(len(hits), 1, "the fetch did not move origin/main: want one lag line, got %r" % hits)
+        found = LAG_LINE.match(hits[0])
+        self.assertIsNotNone(found, "not the lag line: %r" % hits[0])
+        self.assertEqual(found.group(1), self.tip[:12], "the sha is not the stamp's first twelve: %r" % hits[0])
+        self.assertEqual(found.group(2), "2", "the count is not the two commits the fetch brought: %r" % hits[0])
+        self.stamp(fetched)
+        self.assertEqual(self.lag_lines(self.run_lag()), [], "a stamp at the fetched origin/main still prints a line")
 
 
 if __name__ == "__main__":
