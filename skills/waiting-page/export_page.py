@@ -257,6 +257,9 @@ def letters_are_words(value):
 
 # A name made of lower-case words joined by hyphens, each word with at most 2 trailing digits (`automations-v3-review`).
 HYPHEN_WORDS = re.compile(r"[a-z]+\d{0,2}(?:-[a-z]+\d{0,2})+")
+# A vendor-style key made of words: a 2 or 3 letter vendor prefix, an environment word, then a last part with a digit
+# (`sk-live-ab12`, `pk-test-ab12`). It is a key shape, so the hyphen-words path must not pass it.
+VENDOR_KEY = re.compile(r"[a-z]{2,3}-(?:live|test|prod|dev|stage|staging|sandbox)(?:-[a-z]+\d{0,2})*-[a-z]*\d\w*")
 VALUE_END = frozenset("\"'`,;)}] \t\r\n")
 
 
@@ -270,6 +273,7 @@ def credential_is_no_secret(found):
     if value and JS_KEYWORD_VALUE.match(value):
         return True
     return (bool(value) and HYPHEN_WORDS.fullmatch(value) is not None
+            and VENDOR_KEY.fullmatch(value) is None
             and found.string[found.end():found.end() + 1] in VALUE_END | {""}
             and letters_are_words(re.sub(r"\d", "", value)))
 
