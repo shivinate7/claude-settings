@@ -547,6 +547,9 @@ jobs:
       - name: Agent and skill model floor fixture suite
         run: python3 lint/test_check_agent_models.py
 
+      - name: Agent push form fixture suite
+        run: python3 lint/test_agent_push_form.py
+
       - name: Skill model rows check
         run: python3 lint/check_skill_model_rows.py
 
