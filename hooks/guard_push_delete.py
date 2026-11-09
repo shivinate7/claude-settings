@@ -9,9 +9,9 @@ import stat
 
 import guard_core
 from guard_core import (
-    CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
-    _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
-    _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
+    CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move,
+    _segment_git_c_target, dir_before_segment, expand_folder_word, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
+    bare_words, basename, command_indexes, inner_commands,
     is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
 
@@ -86,25 +86,28 @@ def _push_default_branches(cwd: str, remote: str):
 PUSH_QUOTED = re.compile(r"\"[^\"\s]*\s[^\"]*\"|'[^'\s]*\s[^']*'")
 
 
-def push_target(segment: str, cmd: str, cwd: str):
-    """(directory, config overrides) a `git push` in this segment runs against.
+def push_target(segments, ends, number: int, cwd: str):
+    """(directory, config overrides) a `git push` in `segments[number]` runs against.
 
-    The directory is the segment's own `git -C <dir>`, else the command's last `cd`, else the
-    session's cwd. A segment that cannot be read gives ('', {}): a directory that does not
-    exist, which the verdict reads as unknown, and unknown asks.
+    `segments` and `ends` are the caller's own `split_segments` result, so the segment is read in
+    the list the caller walks, never in a second reading of the command. The directory is the
+    segment's own `git -C <dir>`, else the folder the shell is in when the push runs
+    (`dir_before_segment`: each earlier `cd` or `pushd`, a subshell's `cd` ended with its
+    parenthesis, a failed `cd` that left the shell where it was, a `cd` into a folder an earlier
+    `mkdir` makes), else the session's cwd. A segment or folder that cannot be read gives ('', {}):
+    a directory that does not exist, which the verdict reads as unknown, and unknown asks.
     """
-    tokens = segment_tokens(segment)
+    tokens = segment_tokens(segments[number])
     if tokens is None:
         return "", {}
-    # The last `cd` only: `_run_dir` would also take the first `git -C` of ANY segment.
-    run_dir = cwd
-    for other in split_segments(_strip_heredoc_bodies_unconditionally(cmd)):
-        words = segment_tokens(other)
-        cd = _segment_cd_target(words) if words else None
-        if cd is not None:
-            run_dir = _absolute(cd, run_dir)
+    where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True, read_variables=True)
     git_c = _segment_git_c_target(tokens)
-    where = _absolute(git_c, run_dir) if git_c is not None else run_dir
+    if git_c is not None:
+        if expand_folder_word(git_c) is None:
+            return "", {}
+        where = _absolute(git_c, where or "")
+    if not where or not os.path.isabs(where):
+        return "", {}
     overrides = {}
     index = resolve_command(tokens)
     cursor = index + 1 if index is not None else len(tokens)
@@ -280,7 +283,7 @@ def _push_branch_config(cwd: str, current: str, with_default: bool, overrides=No
 
 
 def push_ask_hit(args, cwd: str, overrides=None) -> str:
-    """'main', 'stray' or '' for the `git push` arguments `args`, a push `push_verdict` let through.
+    """'main', 'stray', 'unread' or '' for the `git push` arguments `args`, a push `push_verdict` let through.
 
     'main' (rule push-main): a non-forced push whose destination is literally `main` or `master`, `--all`
     included. The remote's HEAD is never read. 'stray' (rule push-stray-branch): a push with an implied
@@ -289,9 +292,12 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     branch.<cur>.remote, and an upstream that is not main or master. A `-u` push is silent here: its
     implied destination is the local name, which becomes the new upstream. A bare push under push.default
     simple writes the current branch only when the upstream carries its name, else git refuses it. A
-    deletion, a forced push, a mirror, and a push of tags alone are never judged here. A destination that
-    cannot be read is allowed. Reads: none for a literal destination; the current branch for an implied
-    one; one `git config --get-regexp` when the upstream is needed.
+    deletion, a forced push, a mirror, and a push of tags alone are never judged here. 'unread' (rule
+    push-unread-folder, decision plain-push-asks): a bare push, `HEAD` or `@` whose folder cannot be read (`cwd` is
+    '' or no directory), so its destination is unknown, as `push_verdict` asks on the same folder. A folder
+    that exists but is no repository, a detached HEAD and a push.default that names no branch are allowed.
+    Reads: none for a literal destination; the current branch for an implied one; one `git config
+    --get-regexp` when the upstream is needed.
     """
     force, mirror, every, includes, unpinned, leased, delete, upstream, remote, plain = _push_parse(args)
     if force or leased or mirror or delete or any(spec.startswith(("+", ":")) for spec in plain):
@@ -301,6 +307,7 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     if not plain and _push_tags_only(args):
         return ""
     state = {}
+    unread = "unread" if not (cwd and os.path.isdir(cwd)) else ""
 
     def current():
         if "cur" not in state:
@@ -317,7 +324,7 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
         cur = current()
         merge, mode = config()[1:] if cur else (None, None)
         if cur is None or mode is None:
-            return ""
+            return unread
         if mode in ("", "simple"):
             dest = cur if merge == cur else None
         elif mode == "current":
@@ -341,8 +348,10 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
                 implied = True
         if implied and current() in DEFAULT_BRANCH_FALLBACK:
             return "main"
-    if not implied or current() is None:
+    if not implied:
         return ""
+    if current() is None:
+        return unread
     remote_cfg, merge, _mode = config()
     pushed = remote or remote_cfg
     if not merge or not remote_cfg or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:
@@ -924,6 +933,11 @@ PUSH_STRAY_REASON = (
     "Rule (Git): this push writes a branch name other than the one this branch tracks (its upstream), "
     "so it may land on a stray branch. Check the destination (decision plain-push-asks). "
     "Approving the prompt lets this one push through; it is not a grant."
+)
+PUSH_UNREAD_REASON = (
+    "Rule (Git): this push takes its destination from the folder it runs in, and that folder cannot be read "
+    "(a cd through a variable or $(...), or a -C folder that is not there), so where it writes is unknown "
+    "(decision plain-push-asks). Approving the prompt lets this one push through; it is not a grant."
 )
 PUSH_ASK_REASON = (
     "Rule (Git): this forced push may rewrite the default branch, or its target is unreadable. "
