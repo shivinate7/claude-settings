@@ -12191,6 +12191,7 @@ GRAPHQL_VARIABLE_REQUEST = os.path.join(GRAPHQL_DIR, "variable-request.json")   
 GRAPHQL_VARIABLE_PLAIN_REQUEST = os.path.join(GRAPHQL_DIR, "variable-plain-request.json")   # the same request, its body unmarked
 GRAPHQL_NODE_REQUEST = os.path.join(GRAPHQL_DIR, "node-request.json")   # the request `--input` names: FIELD_ID_UPDATE, its node id in `variables`
 GRAPHQL_NODE_FILE = os.path.join(GRAPHQL_DIR, "node-id.txt")            # the file `-F id=@` names: the node id of comment 4417
+GRAPHQL_NODE_INPUT_REQUEST = os.path.join(GRAPHQL_DIR, "node-input-request.json")   # the request `--input` names: UPDATE_INPUT_QUERY, its node id in `variables.input.id`
 GRAPHQL_NESTED_QUERY = 'mutation($input:AddCommentInput!){addComment(input:$input){clientMutationId}}'   # its body is in `variables.input`
 GRAPHQL_NESTED_REQUEST = os.path.join(GRAPHQL_DIR, "nested-request.json")   # the request `--input` names, its marked record nested in `variables`
 GRAPHQL_NESTED_PLAIN_REQUEST = os.path.join(GRAPHQL_DIR, "nested-plain-request.json")   # the same request, its body unmarked
@@ -12206,6 +12207,7 @@ def build_graphql_fixtures():
     write(GRAPHQL_VARIABLE_PLAIN_REQUEST, json.dumps({"query": GRAPHQL_VARIABLE_QUERY, "variables": {"b": GRAPHQL_PLAIN}}))
     write(GRAPHQL_NODE_REQUEST, json.dumps({"query": FIELD_ID_UPDATE, "variables": {"id": GRAPHQL_NODE}}))
     write(GRAPHQL_NODE_FILE, GRAPHQL_NODE + "\n")
+    write(GRAPHQL_NODE_INPUT_REQUEST, json.dumps({"query": UPDATE_INPUT_QUERY, "variables": {"input": {"id": GRAPHQL_NODE, "body": "x"}}}))
     write(GRAPHQL_NESTED_REQUEST, json.dumps({"query": GRAPHQL_NESTED_QUERY,
                                               "variables": {"input": {"subjectId": "X", "body": review_record()}}}))
     write(GRAPHQL_NESTED_PLAIN_REQUEST, json.dumps({"query": GRAPHQL_NESTED_QUERY,
@@ -12365,6 +12367,16 @@ REVIEW_LOG_CHECKS.append(("review-record:an unmarked updateIssueComment whose in
                                       carries=(REVIEW_RULE,) + WITHDRAW_REMEDY)))
 sh("review-record: an unmarked updateIssueComment whose input object names the node by a field is allowed over a plain comment, gh api graphql -F input[id]=",
    UPDATE_INPUT_CALL, "allow", cwd=NOGIT, env_path=GHNODEPLAIN + os.pathsep + PY_PATH)
+
+# AN UPDATE WHOSE INPUT OBJECT HOLDS THE NODE ID IN A REQUEST FILE: `variables.input.id`, given by `--input FILE`. The guard reads the node that
+# id names, as it reads the `-F input[id]=` field above: one read, and the stamped record that node holds is refused. The control is the same
+# request over a plain comment.
+REVIEW_LOG_CHECKS.append(("review-record:an unmarked updateIssueComment whose input object holds the node id in a request file is refused over a stamped record after one gh read of that node, gh api graphql --input FILE",
+                         with_graphql_files(review_reads("Bash", {"command": "gh api graphql --input %s" % GRAPHQL_NODE_INPUT_REQUEST}, "deny", 1,
+                                                          folder=GHRECORDCOUNT, bodies=REVIEW_OLD_RECORD,
+                                                          carries=(REVIEW_RULE,) + WITHDRAW_REMEDY))))
+sh("review-record: an unmarked updateIssueComment whose input object holds the node id in a request file is allowed over a plain comment, gh api graphql --input FILE",
+   "gh api graphql --input %s" % GRAPHQL_NODE_INPUT_REQUEST, "allow", cwd=NOGIT, env_path=GHNODEPLAIN + os.pathsep + PY_PATH)
 
 # A node id no word of the call names: a variable that no field and no request variable gives. The guard leaves that edit alone, with no read.
 REVIEW_LOG_CHECKS.append(("review-record:an unmarked updateIssueComment whose node id no word names is allowed with no gh read, gh api graphql -f query=",
