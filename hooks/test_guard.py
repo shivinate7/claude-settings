@@ -5622,7 +5622,12 @@ sh("git-after-cd: UNFAILING-TAIL, an else body after an if test of [ -f a with |
 # fail, so the test always succeeds, the elif never runs, and its push passes.
 sh("git-after-cd: UNFAILING-TAIL, an elif body after an if test of pytest with || echo bad >/no/dir, whose tail can fail, is refused",
    "if pytest -q || echo bad >/no/dir; then :; elif [ -f x ]; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd",
-   cwd=NOGIT, carries=("&&",))
+   cwd=NOGIT, carries=("&&", "`elif`"))
+# A CLOSED FD CAN FAIL TOO. `>&-` closes stdout, so echo writes to a bad descriptor and exits 1. Only the null device
+# cannot fail, so this tail can fail, and the elif runs its push after a failed pytest.
+sh("git-after-cd: UNFAILING-TAIL, an elif body after an if test of pytest with || echo bad >&-, whose tail can fail, is refused",
+   "if pytest -q || echo bad >&-; then :; elif [ -f x ]; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "`elif`"))
 sh("git-after-cd: UNFAILING-TAIL, an elif body after an if test of pytest with || echo bad >&2, whose tail cannot fail, passes",
    "if pytest -q || echo bad >&2; then :; elif [ -f x ]; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
 # A NULL DEVICE CANNOT FAIL, SO A TAIL WITH `>/dev/null` STILL NEVER FAILS. The redirect opens always, so the tail
@@ -5648,6 +5653,10 @@ sh("git-after-cd: UNFAILING-TAIL, an if test of pytest with || true && [ -f x, t
 sh("git-after-cd: UNFAILING-TAIL, an else body after an if test of pytest with || true && [ -f x, which can fail, is refused",
    "if pytest -q || true && [ -f x ]; then :; else %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&", "else"))
+# A STEP AFTER A TAIL THAT CANNOT FAIL NEVER RUNS. `true` succeeds, so the `[ -f x ]` after its `||` is never reached. The
+# test then always succeeds, the else body never runs, and its push is unreachable.
+sh("git-after-cd: UNFAILING-TAIL, an else body after an if test of pytest with || true || [ -f x ], whose second tail never runs, passes",
+   "if pytest -q || true || [ -f x ]; then :; else %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
 # THE PINS. `! pytest -q || true` runs its then body whatever pytest did, so its push is refused. An until body whose test
 # cannot fail never runs, and the decision's limit keeps its refusal.
 sh("git-after-cd: UNFAILING-TAIL, an if ! test of pytest with || true, then a git push -u in its then body, is refused",
