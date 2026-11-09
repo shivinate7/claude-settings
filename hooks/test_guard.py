@@ -12392,8 +12392,9 @@ def _oct_merge(where, into, names):
 
 
 def _oct_parents(where, rng):
-    """The parent count of each merge in `rng`, sorted, as git reads them."""
-    out = _cmk_run(where, "rev-list", "--merges", "--parents", rng)
+    """The parent count of each merge in `rng`, sorted, as git reads them. `rng` may hold several words, such
+    as `HEAD --not --remotes=origin`, which names the commits a push would send to the remote."""
+    out = _cmk_run(where, "rev-list", "--merges", "--parents", *rng.split())
     return sorted(len(line.split()) - 1 for line in out.splitlines())
 
 
@@ -12464,6 +12465,66 @@ def _build_octopus_push():
 
 lazy_fixture([OCT_THREE, OCT_FOUR, OCT_TWO, OCT_PLAIN, OCT_REMOTE, OCT_EMPTY, OCT_MAIN], _build_octopus_push)
 
+# The false-alarm fixtures. origin/main gains a three-parent merge O, and local main stays at the base, so O is
+# on the remote only. A push of a topic that merges origin/main sends no new octopus, and neither does a push of
+# a new branch cut from origin/main.
+OCT_ALARM = os.path.join(ROOT, "oct-alarm")          # topic, at the base and pushed, merges origin/main
+OCT_ALARM_NEW = os.path.join(ROOT, "oct-alarm-new")  # as oct-alarm, plus a new three-parent merge on topic
+OCT_FRESH = os.path.join(ROOT, "oct-fresh")          # branch fresh, cut from origin/main, with no tracking ref
+OCT_FRESH_TRUNK = os.path.join(ROOT, "oct-fresh-trunk")  # as oct-fresh, but origin's default branch is trunk, at the base
+
+
+def _oct_on_origin_main(where, trunk=False):
+    """origin/main gains a three-parent merge O of x and y. Local main stays at the base, so O is on the
+    remote only. With `trunk`, origin's default branch (origin/HEAD) is trunk, still at the base, so the
+    remote's default base lacks O. The scope is read before any case judges it."""
+    _cmk_pushed(where, {"a.txt": "base\n"})
+    if trunk:
+        _cmk_run(where, "push", "-q", "origin", "main:refs/heads/trunk")
+        _cmk_run(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+    _oct_branch(where, "x", "x.txt", "x\n")
+    _oct_branch(where, "y", "y.txt", "y\n")
+    _cmk_run(where, "checkout", "-q", "-b", "src", "main")
+    _cmk_commit(where, "m.txt", "m\n", "src one")
+    _oct_merge(where, "src", ["x", "y"])
+    _cmk_run(where, "push", "-q", "origin", "src:refs/heads/main")
+    _oct_must(where, "origin/main", [3], "the octopus on origin/main")
+    _oct_must(where, "main", [], "local main holds no merge")
+
+
+def _oct_merged_origin(where):
+    """Topic, at the base and pushed, merges origin/main: a two-parent merge that brings O in."""
+    _oct_on_origin_main(where)
+    _cmk_run(where, "checkout", "-q", "topic")
+    _cmk_run(where, "merge", "-q", "--no-ff", "--no-edit", "origin/main")
+    _oct_must(where, "origin/topic..HEAD", [2, 3], "the merge and O both sit past the tracking tip")
+    _oct_must(where, "HEAD --not --remotes=origin", [2], "only the merge is new to the remote")
+
+
+def _build_octopus_origin():
+    _oct_merged_origin(OCT_ALARM)
+    _oct_merged_origin(OCT_ALARM_NEW)
+    _oct_branch(OCT_ALARM_NEW, "x2", "x2.txt", "x2\n")
+    _oct_branch(OCT_ALARM_NEW, "y2", "y2.txt", "y2\n")
+    _oct_merge(OCT_ALARM_NEW, "topic", ["x2", "y2"])
+    _oct_must(OCT_ALARM_NEW, "HEAD --not --remotes=origin", [2, 3], "the new three-parent merge and the merge")
+
+    _oct_on_origin_main(OCT_FRESH)
+    _cmk_run(OCT_FRESH, "checkout", "-q", "-b", "fresh", "--no-track", "origin/main")
+    if run_vcs(OCT_FRESH, "rev-parse", "--verify", "-q", "refs/remotes/origin/fresh").returncode == 0:
+        sys.exit("fixture setup failed in the octopus-push fixtures: fresh has a remote-tracking ref")
+    if run_vcs(OCT_FRESH, "rev-parse", "--verify", "-q", "fresh@{upstream}").returncode == 0:
+        sys.exit("fixture setup failed in the octopus-push fixtures: fresh has an upstream")
+    _oct_must(OCT_FRESH, "HEAD", [3], "the new branch is cut from origin/main, which holds O")
+
+    _oct_on_origin_main(OCT_FRESH_TRUNK, trunk=True)
+    _cmk_run(OCT_FRESH_TRUNK, "checkout", "-q", "-b", "fresh", "--no-track", "origin/main")
+    _oct_must(OCT_FRESH_TRUNK, "origin/trunk", [], "the remote's default branch holds no merge")
+    _oct_must(OCT_FRESH_TRUNK, "HEAD", [3], "the new branch is cut from origin/main, which holds O")
+
+
+lazy_fixture([OCT_ALARM, OCT_ALARM_NEW, OCT_FRESH, OCT_FRESH_TRUNK], _build_octopus_origin)
+
 
 def oct_refuse(name, command, cwd):
     sh("octopus-push: %s is refused" % name, command, "deny", OCT_RULE, cwd=cwd)
@@ -12492,6 +12553,23 @@ oct_allow("a push with nothing unpushed, its three-parent merge already on the r
 # this case fails if a builder's rule forgets the main exemption.
 sh("octopus-push: a push of main with a three-parent merge keeps its push-main ask",
    VCS + " push origin main", "ask", PUSH_MAIN_RULE, cwd=OCT_MAIN)
+
+# A false alarm: the range is what the push adds to the remote. An octopus already on a remote ref is not sent,
+# so a merge that brings it in, or a new branch cut from it, passes. A new octopus above those is still refused.
+oct_allow("a push of a topic that merges origin/main, whose octopus is already on origin/main",
+          VCS + " push origin topic", OCT_ALARM)
+oct_allow("a push of a new branch cut from origin/main, whose octopus is already on origin/main",
+          VCS + " push origin fresh", OCT_FRESH)
+oct_allow("a push of a new branch cut from origin/main, when origin's default branch lacks that octopus",
+          VCS + " push origin fresh", OCT_FRESH_TRUNK)
+oct_refuse("a push of a topic with a new three-parent merge above a merge of origin/main",
+           VCS + " push origin topic", OCT_ALARM_NEW)
+
+# A dry run sends nothing, so it passes whatever the range holds.
+oct_allow("a dry run, --dry-run, of a push with a three-parent merge in the range",
+          VCS + " push --dry-run origin topic", OCT_THREE)
+oct_allow("a dry run, -n, of a push with a three-parent merge in the range",
+          VCS + " push -n origin topic", OCT_THREE)
 
 
 def octopus_remedy_case():
