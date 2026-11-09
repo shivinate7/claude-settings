@@ -83,7 +83,7 @@
 # starts no step: one unknown line names the holder's pid and command line (read from the file), exit 2. It never waits.
 # The file holds the holder's pid and argv; a stale one is harmless, since the flock decides. No lock off a cloud session
 # or without fcntl (Windows). Cost: one lock file, one open and flock per heavy run; no process, no timer.
-import os, re, shlex, shutil, subprocess, sys, tarfile, tempfile
+import errno, os, re, shlex, shutil, subprocess, sys, tarfile, tempfile
 try:
     import fcntl
 except ImportError:  # no POSIX flock here: no lock
@@ -230,7 +230,7 @@ LINT_CMD = re.compile(r"(?:python3 (?:lint|actions)/[\w./-]+\.py|bin/ste-changed
                       r"(?: [^|&;`<>]*)?")
 INSTALL_CMD = re.compile(r"(?:npm ci|(?:pnpm|yarn) install --(?:frozen-lockfile|immutable)|(?:python3 -m )?pip install(?: -[-\w]+)* -r [^\s|&;`<>$()]+"
                          r"|npx(?: --no-install)? [\w@./-]+ (?:sync|generate))(?: [^|&;`<>$()]*)?")
-RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_PATHS"}  # absent from a runner step's env unless its env: or the zizmor with: sets them
+RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_PATHS", "CLAUDE_CODE_REMOTE"}  # absent from a runner step's env unless its env: or the zizmor with: sets them; the last so a ci-job a step starts is not refused by this run's own heavy lock
 KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check|zizmor)(?:@\S*)?")
 SHA_PIN = pin_regex(("code-check", "zizmor"))  # a uses: pinned to a commit of this repo's action
 LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a check --lint should run
@@ -460,6 +460,7 @@ def plan(step, pr, values, top, lint=False, pinned=False):
 
 
 HEAVY_LOCK = "ci-job-heavy.lock"
+HEAVY_BUSY = "another heavy check runs in this container"  # the busy refusal's text; merge/merge.py (HEAVY_BUSY_TEXT) matches it to refuse without a lift
 _heavy_lock_fd = None  # held open to the end of the run, so the lock lasts as long as the process; never inherited by a child
 
 
@@ -475,7 +476,10 @@ def take_heavy_lock():
         return None  # no temp file to lock: run unbraked rather than refuse
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+    except OSError as e:
+        if e.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES):  # not "held": ENOLCK and the like say nothing about a holder, so run unbraked
+            os.close(fd)
+            return None
         try:
             held = " ".join(os.read(fd, 4096).decode("utf-8", "replace").split())
         except OSError:
@@ -542,7 +546,7 @@ def main(argv):
     if not dry:
         holder = take_heavy_lock()
         if holder is not None:
-            print("%-15s another heavy check runs in this container (%s); run one at a time and retry when it ends" % ("unknown", holder))
+            print("%-15s %s (%s); run one at a time and retry when it ends" % ("unknown", HEAVY_BUSY, holder))
             return 2
     base, no_base = opts["--base"], False
     if lint and not base:

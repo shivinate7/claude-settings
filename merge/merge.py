@@ -2543,6 +2543,12 @@ def drop_worktree(root, tmp, wt):
     shutil.rmtree(tmp, ignore_errors=True)
 
 LANE_LINT_REMEDY = "Fix it on the lane, push, and run `merge --lane-lint` again. Do not hand this head to the batch runner or join it to a batch until the lint passes. " + LANE_LINT_CITE
+HEAVY_BUSY_TEXT = "another heavy check runs in this container"  # bin/ci-job's HEAVY_BUSY, matched in its unknown line: bin/ci-job is a script with no module to import, so keep the two equal
+BUSY_RETRY = "Run one heavy check at a time, and retry when the other heavy check ends."
+
+def heavy_busy(lines):
+    """True when ci-job's unknown lines hold its busy refusal: the check never ran, so no reason lifts it and the branch is not at fault."""
+    return any(HEAVY_BUSY_TEXT in l for l in lines)
 
 def lane_head_and_base(root, target, base):
     """-> (head sha, base branch) of a --lane-lint ref target: the commit or ref `target`, linted against `base` (default main).
@@ -2626,6 +2632,8 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         return 0
     if state == "fail":
         raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
+    if heavy_busy(lines):  # the lint never ran: no reason lifts it, and the lane is not at fault
+        raise Stop("\n".join([f"the lint of {short} against {base} did not run:", *lines, f"{BUSY_RETRY} {LANE_LINT_CITE}"]))
     if liftable and unknown_ok.strip():
         say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log)
         return 0
@@ -2939,8 +2947,10 @@ def run_ready_checks(wt, n, base, checks):
     state, lines, log, _ = ci_job_run(wt, *args)
     short = git(wt, "rev-parse", "--short=9", "HEAD")[1]
     if state != "pass":
-        raise Stop("\n".join([f"the ready checks of {short} against {base} {'FAIL' if state == 'fail' else 'are unknown, not a pass'}:", *lines, *log,
-                              f"#{n} stays a draft and nothing was pushed. Fix it on the branch, push, and run --confirm again. {READY_CHECKS_CITE}"]))
+        what = "FAIL" if state == "fail" else "are unknown, not a pass"
+        next_step = f"{BUSY_RETRY} Then run --confirm again." if heavy_busy(lines) else "Fix it on the branch, push, and run --confirm again."
+        raise Stop("\n".join([f"the ready checks of {short} against {base} {what}:", *lines, *log,
+                              f"#{n} stays a draft and nothing was pushed. {next_step} {READY_CHECKS_CITE}"]))
     say(f"merge: the ready checks ({', '.join(checks)}) pass on {short}.")
 
 def draft_step(root, cfg, n, host, info):
