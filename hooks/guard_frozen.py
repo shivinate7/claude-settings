@@ -703,6 +703,8 @@ def _folded(path, held=None):
     An empty part is dropped too, except the second of a leading `//` (exactly two slashes, a UNC
     `//server/share` root), which stays with the first as the root. Three or more leading slashes are one
     root, as in POSIX. A rooted path that folds to nothing comes back as its root, `/` or `//`, never ''.
+    In a UNC path the server and share names belong to the root: a `..` there is dropped, as it cannot
+    climb out of the share.
     `held` is set for a glob: the count of leading parts that are a literal folder. They come back escaped,
     and a later part with a glob character is never folded past, as it may match a file."""
     names = path.split("/")
@@ -714,6 +716,8 @@ def _folded(path, held=None):
             kept.append((each, False, held is not None and at < held))
             continue
         if rooted and (each == "." or not each and 0 < at < len(names) - 1):
+            continue
+        if unc and each == ".." and len(kept) <= 4:
             continue
         foldable = held is None or at < held or not _GLOB_MAGIC.search(each)
         if rooted and each == ".." and len(kept) > 1 and kept[-1][1] and kept[-1][0] \
