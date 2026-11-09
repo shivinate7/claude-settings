@@ -1325,7 +1325,9 @@ def _hook_events(text: str):
 def hook_bypass_hit(texts):
     """Return (matched text, verb, what) for the first call in `texts` (the command and its `$( )` texts) that
     skips or redirects the git hooks, else None. A `git config` write of core.hooksPath counts when a commit,
-    merge or push runs after it, anywhere later; a write with nothing after it sets a value and skips no hook."""
+    merge or push runs after it, anywhere later in the command. A lone write is allowed on purpose: setting a
+    repo's own hooks path is a normal setup step. A later commit in another call passes, a known limit
+    (decision commit-hook-bypass-refused)."""
     for text in texts:
         written = ""
         for event in _hook_events(text):
