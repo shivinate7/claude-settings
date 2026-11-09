@@ -49,7 +49,7 @@ Cost: two more git reads, `rev-parse MERGE_HEAD MERGE_HEAD:docs/records.md` and
 `rev-list --first-parent origin/<base>`. They run only on a commit the guard would otherwise refuse, so an
 allowed commit and a commit with no records page make the reads they made before. The rev-list prints one id
 per base tip, under the 10 s read limit, and a timeout is a refusal. No file, no
-timer, no new process beyond those two git calls. Measure: the `records-page` family has 84 cases, 15 of
+timer, no new process beyond those two git calls. Measure: the `records-page` family has 85 cases, 15 of
 them on this allowance (`hooks/test_guard.py`); how often a real lane hits it is unmeasured. A chain that rewrites the
 page before its commit is judged on the page as it stands at the hook, not the page the chain leaves (debt
 note `records-page-chain-edit-after-read`, the same class as the base-page pass). A chain
