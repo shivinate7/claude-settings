@@ -608,6 +608,7 @@ ARCH_COPY_BRANCH = "claude/x"                                  # a lane's branch
 ARCH_COPY_TIP = "%040d" % 31                                   # that branch's tip: the archive copy's compare is keyed by this sha
 ARCHCOPY_IDENT = os.path.join(ROOT, "archcopy-identical")      # the branch's archive/ copy holds its tip
 ARCHCOPY_AHEAD = os.path.join(ROOT, "archcopy-ahead")          # the branch's archive/ copy is at an older tip: the tip is ahead of it
+ARCHCOPY_MISSING = os.path.join(ROOT, "archcopy-missing")      # the branch has no archive/ copy: its compare answers 404
 
 
 def arch_pair(qmax=None, settings=None):
@@ -642,7 +643,8 @@ def arch_replaced(containment):
 def arch_copy(archive, others=()):
     """The repo of a lane whose branch ARCH_COPY_BRANCH is ahead of main on no pull request, or on the rows given. Its tip is
     ARCH_COPY_TIP, and the compare of archive/<branch> with that sha reads `archive`: "identical" when the copy holds the tip,
-    "ahead" when the copy is older. The key names the tip by sha, as the guard reads it, never by the branch name."""
+    "ahead" when the copy is older, "missing" when there is no copy (the compare answers 404). The key names the tip by
+    sha, as the guard reads it, never by the branch name."""
     return {
         "tips": {ARCH_COPY_BRANCH: ARCH_COPY_TIP},
         "compares": {"main..." + ARCH_COPY_BRANCH: "ahead",
@@ -1600,6 +1602,7 @@ def build_fixtures():
     # A lane branch ahead of main on no pull request, whose archive/ copy holds its tip (identical) or is older (ahead).
     make_fake_gh(ARCHCOPY_IDENT, "main", repos={"o/r": arch_copy("identical")})
     make_fake_gh(ARCHCOPY_AHEAD, "main", repos={"o/r": arch_copy("ahead")})
+    make_fake_gh(ARCHCOPY_MISSING, "main", repos={"o/r": arch_copy("missing")})
     make_fake_gh(ARCHINC_OPEN, "main", repos=arch_pair(qmax={"others": [arch_row(ARCH_BRANCH, 24)]}))
     make_fake_gh(ARCHINC_BEHIND, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "behind"}}))
     make_fake_gh(ARCHINC_IDENT, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "identical"}}))
@@ -11807,6 +11810,12 @@ archive_allow("a lane branch ahead on no pull request, whose archive/ copy holds
               role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_IDENT))
 archive_refuse("a lane branch ahead on no pull request, whose archive/ copy is at an older tip, is refused as no pull request",
                role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_AHEAD), carries=ARCHIVE_NOPR_PIN,
+               lacks=(ARCH_COPY_BRANCH, "could not be read"))
+# No archive/ copy at all: GitHub's compare answers 404. The refusal is the plain no-pull-request one, not a failed read.
+# This passes on the old code, which never reads the copy. It pins the build: a read that raised on the 404 would
+# refuse as "could not be read" and fail here.
+archive_refuse("a lane branch ahead on no pull request, with no archive/ copy, is refused as no pull request",
+               role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_MISSING), carries=ARCHIVE_NOPR_PIN,
                lacks=(ARCH_COPY_BRANCH, "could not be read"))
 archive_refuse("a current_branches value that is an int is refused, and the reason says the read failed",
                role_path("archive-inc-branch-int"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN,
