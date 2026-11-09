@@ -24,7 +24,7 @@ def rmtree_retry(path):  # own copy: bin/merge is a standalone shim and can't im
     else: shutil.rmtree(path, onerror=lambda f, p, ei: handler(f, p, ei[1]))
 
 def run(tree, args):
-    # nowindow: merge.py prints its report on the caller's terminal; with no window that output goes to a hidden console
+    # nowindow: merge.py prints its report on the caller's terminal; the wrapper's no-window flag could hide that output
     return subprocess.run([sys.executable, os.path.join(tree, "merge", "merge.py"), *args]).returncode
 
 def warn(sha, behind, why):

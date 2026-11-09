@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status stalled row tint</title>
+<style>
+/* Harness only: the toolbar and frames around the drawn screen. The screen is the page's own CSS (#pagecss) and the picked options' CSS. */
+:root { --h-bg: #eef0f3; --h-ink: #161b22; --h-muted: #565f6b; --h-line: #cfd5dd; --h-btn: #ffffff; --h-on: #161b22; --h-on-ink: #ffffff; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; } }
+:root[data-theme="dark"] { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.sample { background: #5b21b6; color: #fff; font-weight: 700; text-align: center; padding: 8px 16px; }
+.tool { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--h-line); }
+.tool h1 { margin: 0; font-size: 17px; }
+.tool .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tool .row > span { color: var(--h-muted); font-size: 13px; min-width: 64px; }
+.tool button { min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--h-line); background: var(--h-btn); color: var(--h-ink); font: inherit; font-size: 13.5px; cursor: pointer; }
+.tool button[aria-pressed="true"] { background: var(--h-on); color: var(--h-on-ink); border-color: var(--h-on); }
+.tool button.hide { border-style: dashed; color: var(--h-muted); }
+.tool p { margin: 0; font-size: 13.5px; color: var(--h-muted); max-width: 90ch; }
+.tool code { overflow-wrap: anywhere; }
+#stage { display: grid; gap: 24px; padding: 16px; justify-items: center; }
+.fr { display: grid; gap: 6px; width: 100%; justify-items: center; }
+.fr > b { font-size: 13px; color: var(--h-muted); }
+.fw { overflow: hidden; border: 1px solid var(--h-line); border-radius: 8px; background: var(--h-btn); max-width: 100%; }
+.fw iframe { border: 0; display: block; transform-origin: 0 0; }
+</style>
+</head>
+<body>
+<div class="sample" id="sampleBanner">Sample. No step, id, title, phase or count on this page is real.</div>
+<header class="tool">
+  <h1>Waiting page Status tab: a stalled or paused row in its own band colour</h1>
+  <div class="row"><span>Stalled row</span>
+    <button data-st="tint">Red tint and edge</button>
+    <button data-st="edge">Red edge only</button>
+    <button class="hide" data-hide="tint" data-name="Red tint and edge">Hide Red tint and edge</button>
+    <button class="hide" data-hide="edge" data-name="Red edge only">Hide Red edge only</button>
+  </div>
+  <div class="row"><span>Paused row</span>
+    <button data-pz="grey">Grey edge</button>
+    <button data-pz="none">No edge</button>
+    <button class="hide" data-hide="grey" data-name="Grey edge">Hide Grey edge</button>
+    <button class="hide" data-hide="none" data-name="No edge">Hide No edge</button>
+  </div>
+  <div class="row"><span>Paused title</span>
+    <button data-wt="normal">Normal weight</button>
+    <button data-wt="bold">Bold, as today</button>
+    <button class="hide" data-hide="normal" data-name="Normal weight">Hide Normal weight</button>
+    <button class="hide" data-hide="bold" data-name="Bold, as today">Hide Bold, as today</button>
+  </div>
+  <div class="row"><span>Size</span>
+    <button data-w="all">Both</button><button data-w="390">Phone 390</button><button data-w="1280">Wide 1280</button>
+  </div>
+  <div class="row"><span>Theme</span>
+    <button data-t="both">Both</button><button data-t="light">Light</button><button data-t="dark">Dark</button>
+    <button id="labBtn">Labels on</button>
+  </div>
+  <p>Deep links: <code>#st=tint|edge, &amp;pz=grey|none, &amp;wt=normal|bold, &amp;w=all|390|1280, &amp;t=both|light|dark, &amp;lab=off, &amp;hide=edge,none,bold</code>. Focus ids: <code>pick-stalled</code>, <code>pick-paused</code>, <code>pick-weight</code>. The page CSS is an excerpt of skills/waiting-page/page.html at 12e3ea1a1 (PR #1635 head), default brand (no meta/page brand). The phase box is drawn alone, not in the tab's full layout. Phone 390 and Wide 1280 are the brief's sizes; this repo's device list is unknown. Notes: the file of the same name ending -notes.md.</p>
+</header>
+<main id="stage"></main>
+<script type="text/plain" id="pagecss">
+/* Excerpt of skills/waiting-page/page.html at 12e3ea1a1: tokens, base, the Status tab's box, phase head, hint, step rows, tags and marks. Verbatim. */
+:root {
+  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --faint: #5b6470; --line: #d9dee5; --chip: #eef1f4;
+  --holds: var(--r-holds-l, #b3261e); --on-holds: var(--r-on-holds-l, #ffffff); --due: var(--r-due-l, #8a5300); --due-soft: #fbefd9; --calm: #56606e;
+  --good: var(--r-good-l, #1d7445); --good-soft: #e0f2e7; --gold-soft: #fbf3d6; --gold-ink: #6b5000;
+  --ground: var(--r-ground-l, #f3f4f6); --hdr: var(--r-hdr-l, #4b5a6b); --on-hdr: var(--r-on-hdr-l, #ffffff);
+  --acc: var(--r-ink-l, #4b5a6b); --on-acc: #ffffff; --acc-soft: var(--r-soft-l, #eceff3);
+  --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 var(--body); }
+button { font: inherit; color: inherit; }
+.in { max-width: 1160px; margin: 0 auto; padding-left: 16px; padding-right: 16px; }
+.svwrap { container-type: inline-size; padding-block: 18px 40px; }
+.sv { display: grid; gap: 16px; min-width: 0; }
+.sv h2, .sv h3, .sv h4, .sv p { margin: 0; }
+:where(.sv) button { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+.sv .id, .sv .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+.ph-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 14px; }
+.ph-head h3 { font: 700 18px/1.25 var(--body); }
+.ph-head .prog { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.hint { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 8px; padding: 8px 14px; font-size: 13.5px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.tag { font-size: 12.5px; font-weight: 600; padding: 0 8px; border-radius: 999px; border: 1.5px solid currentColor; line-height: 19px; white-space: nowrap; }
+.tag.st-blocked, .tag.blk { color: var(--holds); }
+.tag.next { color: var(--muted); border-style: dashed; }
+.tag.stl { color: var(--holds); }
+.tag.pzd { color: var(--muted); }
+.tag.ic { display: inline-grid; place-items: center; min-width: 26px; padding: 0 4px; }
+.tag.ic svg { width: 12px; height: 12px; }
+.rsteps { list-style: none; margin: 0; padding: 0; }
+.rsteps > li + li { border-top: 1px solid var(--line); }
+.rrow { display: grid; grid-template-columns: 16px 44px minmax(0, 1fr) auto 12px; gap: 8px; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+.rrow .ttl { min-width: 0; overflow-wrap: anywhere; }
+.rrow .id { font-size: 13px; color: var(--muted); }
+.rrow .meta { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.rrow .chev { font-size: 11px; color: var(--muted); }
+.rsteps .active > .rrow { background: var(--acc-soft); box-shadow: inset 3px 0 0 var(--acc); }
+.rsteps .active .ttl { font-weight: 700; }
+.rsteps .blocked > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
+.rsteps .stl-row > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
+.rsteps .done .ttl { text-decoration: line-through; text-decoration-color: var(--line); color: var(--muted); }
+.rg { width: 16px; height: 16px; display: grid; place-items: center; }
+.rg svg { width: 14px; height: 14px; }
+</script>
+<script type="text/plain" id="labcss">
+/* Harness labels only: dashed "Today:" and "New:" marks. They are not part of the screen. */
+[data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: -2px; }
+[data-today] { outline-color: #0f766e; }
+[data-new]::after, [data-today]::after { position: absolute; z-index: 6; right: 40px; top: -8px; padding: 0 6px; border-radius: 4px; font: 600 10.5px/1.5 system-ui, sans-serif; color: #fff; white-space: nowrap; pointer-events: none; }
+[data-new]::after { content: "New: " attr(data-new); background: #6d28d9; }
+[data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
+html.nolab [data-new], html.nolab [data-today] { outline: none; }
+html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
+</script>
+<script type="text/plain" id="css-tint">
+/* New, option Red tint and edge: the row reads in the stalled band's red. The page's own red tint idiom (.dl.bad): --holds 14% on the surface. */
+.rsteps .stl-row > .rrow { background: color-mix(in srgb, var(--holds) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--holds); }
+</script>
+<script type="text/plain" id="css-edge">
+/* New, option Red edge only: no tint, the red edge the page already draws. */
+.rsteps .stl-row > .rrow { background: none; }
+.rsteps .stl-row > .rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+</script>
+<script type="text/plain" id="css-grey">
+/* New, option Grey edge: no tint, a grey edge in the paused band's --muted. */
+.rsteps .pzd-row > .rrow { background: none; box-shadow: inset 3px 0 0 var(--muted); }
+.rsteps .pzd-row > .rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+</script>
+<script type="text/plain" id="css-none">
+/* New, option No edge: a plain row, as a to-do row. Only the Paused tag and mark say paused. */
+.rsteps .pzd-row > .rrow { background: none; box-shadow: none; }
+.rsteps .pzd-row > .rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+</script>
+<script type="text/plain" id="css-normal">
+/* New, option Normal weight: a paused title is not bold. A stalled title stays bold. */
+.rsteps .pzd-row .ttl { font-weight: 400; }
+</script>
+<script type="text/plain" id="css-bold"></script>
+<script>
+const SCREEN_NAME = "Waiting page Status tab";
+const WIDTHS = [390, 1280], WNAME = { 390: "Phone", 1280: "Wide" };
+const OPTS = { st: ["tint", "edge"], pz: ["grey", "none"], wt: ["normal", "bold"] };
+const DEF = { st: "tint", pz: "grey", wt: "normal", w: "all", t: "both", lab: "on", hide: [] };
+const P = { ...DEF };
+const NAME = { tint: "red tint and edge", edge: "red edge only", grey: "grey edge", none: "no edge" };
+
+/* Status marks: the page's GLY, verbatim at 12e3ea1a1. */
+const GLY = {
+  done: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="var(--good)"/><path d="M4 7.2l2 2 4-4.2" stroke="var(--surface)" stroke-width="1.7" fill="none"/></svg>',
+  active: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--acc)" stroke-width="1.6"/><path d="M7 1.5a5.5 5.5 0 0 1 0 11z" fill="var(--acc)"/></svg>',
+  todo: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--muted)" stroke-width="1.6"/></svg>',
+  blocked: '<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="1" y="1" width="12" height="12" rx="2.5" fill="var(--holds)"/><path d="M4 7h6" stroke="var(--surface)" stroke-width="1.8"/></svg>',
+  stalled: '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.5a5.5 5.5 0 1 1-5.2 3.7" fill="none" stroke="var(--holds)" stroke-width="1.8" stroke-linecap="round"/><circle cx="7" cy="7" r="1.7" fill="var(--holds)"/></svg>',
+  paused: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--muted)" stroke-width="1.6"/><path d="M5.6 4.7v4.6M8.4 4.7v4.6" stroke="var(--muted)" stroke-width="1.6"/></svg>',
+};
+const LBL = { todo: "To do", active: "In progress", done: "Done", blocked: "Blocked", stalled: "Stalled", paused: "Paused" };
+
+/* Sample steps. status is the stored status; shown is shownState(s). A stalled or paused step keeps status active. */
+const STEPS = [
+  { id: "sx-41", t: "Sample step that a live lane is building", status: "active", shown: "active" },
+  { id: "sx-42", t: "Sample step with no live lane and no open pull request", status: "active", shown: "stalled" },
+  { id: "sx-43", t: "Sample step that triage paused until the owner rules", status: "active", shown: "paused" },
+  { id: "sx-44", t: "Sample step that waits on another step", status: "blocked", shown: "blocked" },
+  { id: "sx-45", t: "Sample step that is first up next", status: "todo", shown: "todo", next: 1 },
+  { id: "sx-46", t: "Sample step that is second up next", status: "todo", shown: "todo", next: 2 }
+];
+
+function stepRow(s) {
+  /* The builder's change: stepRow adds pzd-row beside the stl-row it already adds. */
+  const stl = s.shown === "stalled", pzd = s.shown === "paused";
+  const extra = stl ? " stl-row" : pzd ? " pzd-row" : "";
+  const meta = (s.next ? `<span class="tag next">Next ${s.next}</span>` : "") + (s.status === "blocked" ? '<span class="tag blk">Blocked</span>' : "")
+    + (stl ? `<span class="tag stl ic" role="img" aria-label="Stalled" title="Stalled: no live lane and no open pull request">${GLY.stalled}</span>` : "")
+    + (pzd ? `<span class="tag pzd ic" role="img" aria-label="Paused" title="Paused">${GLY.paused}</span>` : "");
+  const id = stl ? ' id="pick-stalled"' : pzd ? ' id="pick-paused"' : "";
+  const lab = stl ? ` data-new="${NAME[P.st]}"` : pzd ? ` data-new="${NAME[P.pz]}${P.wt === "normal" ? ", normal title" : ""}"`
+    : s.shown === "active" ? ' data-today="in progress row"' : s.shown === "blocked" ? ' data-today="blocked row"' : "";
+  const ttlId = pzd ? ' id="pick-weight"' : "";
+  return `<li class="${s.status}${extra}"${id}>
+    <button type="button" class="rrow" aria-expanded="false" aria-label="${s.id}, ${LBL[s.shown]}: ${s.t}"${lab}><span class="rg">${GLY[s.shown]}</span><span class="id">${s.id}</span><span class="ttl"${ttlId}>${s.t}</span>
+      <span class="meta">${meta}</span><span class="chev" aria-hidden="true">&#9654;</span></button></li>`;
+}
+function screen() {
+  return `<div class="in svwrap"><div class="sv"><section class="box phase" aria-label="Phase 3, Sample phase">
+    <div class="ph-head"><h3>Phase 3</h3><div class="prog"><span class="num">4/12</span></div></div>
+    <div class="hint"><span>6 open steps, in work order</span><span>Read only</span></div>
+    <ul class="rsteps">${STEPS.map(stepRow).join("")}</ul></section></div></div>`;
+}
+
+function readHash() {
+  Object.assign(P, { ...DEF, hide: [] });
+  new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k === "hide") P.hide = v.split(",").filter(Boolean); else if (k in P) P[k] = v; });
+  Object.keys(OPTS).forEach((g) => { if (!OPTS[g].includes(P[g])) P[g] = DEF[g]; });
+  if (!["both", "light", "dark"].includes(P.t)) P.t = "both";
+  if (!["all", "390", "1280"].includes(P.w)) P.w = "all";
+}
+function writeHash() {
+  const q = new URLSearchParams({ st: P.st, pz: P.pz, wt: P.wt, w: P.w, t: P.t });
+  if (P.lab === "off") q.set("lab", "off"); if (P.hide.length) q.set("hide", P.hide.join(","));
+  const h = "#" + q; if (location.hash !== h) history.replaceState(null, "", h);
+}
+const css = (id) => document.getElementById(id).textContent;
+function docFor(th) {
+  const opt = css("css-" + P.st) + css("css-" + P.pz) + css("css-" + P.wt) + css("labcss");
+  return `<!doctype html><html lang="en" data-theme="${th}" class="${P.lab === "off" ? "nolab" : ""}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css("pagecss")}${opt}</style></head><body>${screen()}</body></html>`;
+}
+function frame(w, th) {
+  const box = document.createElement("div"); box.className = "fr";
+  const cap = document.createElement("b"); cap.textContent = WNAME[w] + " " + w + ", " + th;
+  const wrap = document.createElement("div"); wrap.className = "fw";
+  const f = document.createElement("iframe"); f.title = SCREEN_NAME + " at " + w + " wide, " + th; f.style.width = w + "px";
+  wrap.append(f); box.append(cap, wrap); document.getElementById("stage").append(box);
+  const fit = () => {
+    const avail = Math.min(document.getElementById("stage").clientWidth - 32, w), sc = avail / w;
+    let hgt = 600;
+    try { hgt = f.contentDocument.documentElement.scrollHeight; } catch (e) {}
+    f.style.height = hgt + "px"; f.style.transform = "scale(" + sc + ")";
+    wrap.style.width = Math.ceil(w * sc) + 2 + "px"; wrap.style.height = Math.ceil(hgt * sc) + 2 + "px";
+  };
+  f.addEventListener("load", () => { fit(); setTimeout(fit, 250); });
+  f.srcdoc = docFor(th);
+  addEventListener("resize", fit);
+}
+function render() {
+  // A hidden option is never drawn: the other one in its group takes its place.
+  Object.keys(OPTS).forEach((g) => { if (P.hide.includes(P[g])) { const v = OPTS[g].find((x) => !P.hide.includes(x)); if (v) P[g] = v; } });
+  writeHash();
+  const sys = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  document.documentElement.dataset.theme = P.t === "both" ? sys : P.t;
+  Object.keys(OPTS).forEach((g) => document.querySelectorAll(`[data-${g}]`).forEach((b) => { const v = b.dataset[g]; b.hidden = P.hide.includes(v); b.setAttribute("aria-pressed", String(v === P[g])); }));
+  document.querySelectorAll("[data-hide]").forEach((b) => { const off = P.hide.includes(b.dataset.hide); b.textContent = (off ? "Show " : "Hide ") + b.dataset.name; b.setAttribute("aria-pressed", String(off)); });
+  document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.w === P.w)));
+  document.querySelectorAll("[data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === P.t)));
+  const lb = document.getElementById("labBtn"); lb.textContent = P.lab === "off" ? "Labels off" : "Labels on"; lb.setAttribute("aria-pressed", String(P.lab !== "off"));
+  document.getElementById("stage").replaceChildren();
+  const themes = P.t === "both" ? ["light", "dark"] : [P.t];
+  (P.w === "all" ? WIDTHS : [Number(P.w)]).forEach((w) => themes.forEach((th) => frame(w, th)));
+}
+document.querySelector(".tool").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  Object.keys(OPTS).forEach((g) => { if (b.dataset[g]) P[g] = b.dataset[g]; });
+  if (b.dataset.w) P.w = b.dataset.w;
+  if (b.dataset.t) P.t = b.dataset.t;
+  if (b.id === "labBtn") P.lab = P.lab === "off" ? "on" : "off";
+  if (b.dataset.hide) { const id = b.dataset.hide; P.hide = P.hide.includes(id) ? P.hide.filter((i) => i !== id) : [...P.hide, id]; }
+  render();
+});
+addEventListener("hashchange", () => { readHash(); render(); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (P.t === "both") render(); });
+readHash(); render();
+</script>
+</body>
+</html>

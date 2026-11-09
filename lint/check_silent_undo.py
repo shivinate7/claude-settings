@@ -4,7 +4,7 @@
     python3 lint/check_silent_undo.py [--upstream origin/main] [--head HEAD] [--strict]
     python3 lint/check_silent_undo.py --history [REV] [--window 60]   # audit, always exit 0
 
-Two reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
+Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
 
   lost lines  A merge commit M (in upstream..head) loses a line one parent added since the
               merge base: the line is absent from every base, M holds fewer copies than that
@@ -20,6 +20,18 @@ Two reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               first-parent line left main, up, that commit included. Catches
               `git revert`, a stale copy, and a rebase that took its own side (caught
               when the lost work is the rebase-base commit or later).
+  revived     A note the branch deleted is back at head. The notes file merges by union (decision
+              notes-merge-union), so a merge of the base can put a deleted note back with no conflict. A note is
+              its slug (`- <slug>:` at line start), so a reworded copy counts. Copies are counted per slug. The
+              branch's own non-merge commits (upstream..head) are replayed oldest first, each counted from its file
+              state and its parent's. A slug is refused when its last count change was a delete and head holds more
+              copies than that commit left. A note re-added by a non-merge commit passes, and so does a dedupe that
+              keeps a copy. An edit in place changes no count, so it does not keep a note. Cost, per run and per
+              notes path (lint/layout.py, kind debt-notes): a missing file at head, two git reads (`git show`, then
+              `git ls-tree`). A file with no note, one read. A file with a note, two: `git show head:<file>` and one
+              `git log` of upstream..head over the file. When that log names a commit, one `git cat-file --batch`
+              process more (class Blobs) reads each commit's file and its parent's, one commit at a time, so at most
+              two texts are held; each side whose tree lacks the file adds one `git ls-tree`. No process stays running.
 
 A file git pairs as renamed (its own 50 percent similarity) is read as the same file: its edits
 are the diff of old name to new name, as they would be in place. A file below that stays a delete and an add.
@@ -552,6 +564,66 @@ def fmt_lost(m, path, p, lost):
     return "%s: merge %s drops %d line(s) that parent %s added%s" % (path, m[:9], len(lost), p[:9], shown)
 
 
+# --------------------------------------------------------------------- revived
+
+NOTE = re.compile(r"^- ([^\s:]+):")
+
+
+def note_counts(text):
+    """slug -> how many note lines carry it. A slug is the `- <slug>:` at line start."""
+    return collections.Counter(m.group(1) for m in map(NOTE.match, text.splitlines()) if m)
+
+
+def revived_notes(cwd, upstream, head):
+    """[(notes path, problem line)] for each note the branch lowered and head holds more copies of than it left. Notes are
+    counted per slug. The branch's own non-merge commits (upstream..head) are replayed oldest first, each read from its file
+    state and its parent's, never from diff lines. A commit that changes a slug's count is that slug's last event so far.
+    The slug is refused when its last event lowered the count and head holds more copies than that commit left: a merge
+    put a copy back. A last event that raised the count is a deliberate re-add and passes. An edit in place changes no
+    count, so it keeps nothing: a sweep edit, such as a mass `Until:` change, would otherwise keep every revived note. A
+    note with no `- <slug>:` form has no slug, so the check does not see it. The texts are read one commit at a time, so
+    at most two are held at once."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import layout  # lazy, as retire_excuses loads check_debt_retire
+    try:
+        paths = layout.candidates(cwd, "debt-notes")
+    except layout.LayoutError as e:
+        raise Unknown("the notes file is not known: %s" % e)
+    found = []
+    for path in paths:
+        present = note_counts(blob(cwd, head, path))
+        if not present:
+            continue
+        # --full-history: a merge that brought the file back is TREESAME to the base's side, and default history
+        # simplification would then drop the branch's own delete commit from the walk.
+        _, out = git(cwd, "log", "--no-merges", "--full-history", "--reverse", "--format=%H %P", "%s..%s" % (upstream, head), "--", path)
+        commits = [line.split() for line in out.splitlines() if line.strip()]
+        if not commits:
+            continue
+        last = {}  # slug -> (commit, copies it left) for the last commit that lowered the slug's count
+        blobs = Blobs(cwd)
+        try:
+            for sha, *parents in commits:
+                before = note_counts(blobs.get(sha + "^", path)) if parents else collections.Counter()  # a root commit has no parent
+                after = note_counts(blobs.get(sha, path))
+                for slug in present:
+                    if after[slug] < before[slug]:
+                        last[slug] = (sha, after[slug])
+                    elif after[slug] > before[slug]:
+                        last.pop(slug, None)
+        finally:
+            blobs.close()
+        for slug in sorted(last):
+            sha, left = last[slug]
+            if present[slug] > left:
+                found.append((path, "%s: note `%s`: head holds %d cop%s, and commit %s left %d. A merge put the extra back, and "
+                              "an edit in place does not keep a note. Delete the extra %s to bring the count back to %d. To keep "
+                              "it on purpose, delete it in one commit and add it back in a later commit."
+                              % (path, slug, present[slug], "y" if present[slug] == 1 else "ies", sha[:9], left,
+                                 "line" if present[slug] - left == 1 else "lines", left)))
+    return found
+
+
 # ----------------------------------------------------------------------- modes
 
 
@@ -628,6 +700,7 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     items = []
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
         items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
+    items += revived_notes(cwd, upstream, h)
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
     if rc == 0:
         old, new = upstream, out.split()[0]
