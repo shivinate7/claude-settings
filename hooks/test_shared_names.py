@@ -247,8 +247,8 @@ def case_local_time_output_unchanged():
         s1 = os.path.exists(os.path.join(cfg, "handoffs", "s1.inbox.md"))
         override = _run_local_time(cfg, "override", "s3").stdout
     want_inbox = "### 2026-07-04 10:30 CDT (UTC-05:00)\n```\nfb real note\n```\n"
-    want_override = time_line() + ("Override: the next refused act goes through, once. "
-                                 "It ends at 10:40 CDT if unused.\n")
+    want_override = time_line() + (importlib.import_module("local_time").OVERRIDE_ONCE_PREFIX
+                                   + "It ends at 10:40 CDT if unused.\n")
     ok = (outs == [time_line()] * 4 and saved == want_inbox and not s1 and override == want_override)
     return ok, "stdouts ok=%s, s2 inbox ok=%s, tagged prompts saved nothing=%s, override ok=%s" % (
         outs == [time_line()] * 4, saved == want_inbox, not s1, override == want_override)
