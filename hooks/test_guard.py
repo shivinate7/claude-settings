@@ -5143,24 +5143,26 @@ sh("detached: sleep 99 &echo ok is refused by the waiter first [glued pin]",
    "sleep 99 &echo ok", "deny", "waiter", cwd=NOGIT)
 sh("detached: a glued & inside echo's quotes is text, allows [glued control]",
    'echo "a &echo b"', "allow", cwd=NOGIT)
-# The glued-& reader skips three shapes that are no job: `((` arithmetic, a `$!` pid capture and a PowerShell call.
-# The `((`, `$!` and PowerShell pins are each held by one of those skips: removing it turns its row red.
+# The glued-& reader leaves three shapes alone: `((` arithmetic (its spans are masked), a `$!` pid capture and a
+# PowerShell call.
 sh("detached: (( a&b )) is arithmetic, not a background job, allows [glued pin]",
    "(( a&b ))", "allow", cwd=NOGIT)
 sh("detached: python3 -c pass&p=$! captures the pid, allows [glued pin]",
    "python3 -c pass&p=$!", "allow", cwd=NOGIT)
-# The waiter refuses a glued `sleep N&` that captures a pid before the glued check runs, so this row is red on the
-# waiter, not on the glued skip. It is a false alarm: one pause of 1 s is under the waiter's own 25 s limit.
-sh("detached: sleep 1&p=$! captures the pid, allows [glued red, the waiter refuses it first]",
+# The waiter reads the first sleep of a glued `sleep N&` line as the pause, so one pause that captures a pid is allowed.
+sh("detached: sleep 1&p=$! captures the pid, allows [glued pin]",
    "sleep 1&p=$!", "allow", cwd=NOGIT)
+# The waiter judges only the first sleep of that line, so a second sleep after the glued & is not weighed: it is refused.
+sh("detached: sleep 1&sleep 100&p=$!, a second long pause after a glued &, is refused [glued red]",
+   "sleep 1&sleep 100&p=$!", "deny", "waiter", cwd=NOGIT)
 sh("detached: a PowerShell call after a glued word, Write-Output x&npx -v, allows [glued pin]",
    "Write-Output x&npx -v", "allow", tool="PowerShell", cwd=NOGIT)
 sh("detached: a printer before a glued &, echo x&sed, allows [glued pin]",
    "echo x&sed -n 1p notes.txt", "allow", cwd=NOGIT)
 sh("detached: a cd before a glued &, cd sub&sed, allows [glued pin]",
    "cd sub&sed -n 1p notes.txt", "allow", cwd=NOGIT)
-# The `((` skip drops the whole segment, so a real detached job in that segment is allowed. The spaced form is refused.
-sh("detached: sleep 2 &echo $((1)) starts a job in a segment that holds ((, is refused [glued red]",
+# The `((` spans are masked, so a real detached job after an arithmetic word is refused. The spaced form is the control.
+sh("detached: sleep 2 &echo $((1)) starts a job after an arithmetic word, is refused [glued pin]",
    "sleep 2 &echo $((1))", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: sleep 2 & echo $((1)), the spaced form, is refused [glued control]",
    "sleep 2 & echo $((1))", "deny", "detached-launch", cwd=NOGIT)
@@ -12688,8 +12690,8 @@ for _name, _command in (
     ("if false; then cd docs", "if false; then cd docs; fi; sed -i s/a/b/ settings.json"),
     ("cd docs with two arguments", "cd docs extra; sed -i s/a/b/ settings.json"),
     ("bash heredoc holding cd docs", "bash <<'EOF'\ncd docs\nEOF\nsed -i s/a/b/ settings.json"),
-    # cat reads its heredoc body as data, so a cd in the body must not move the shell: were it followed, the sed
-    # would write docs/settings.json, which is not frozen. The row holds only because the body's cd is not followed.
+    # cat reads its heredoc body as data, and the walk strips that body, so its cd is never followed. Were it
+    # followed, the sed would write docs/settings.json, which is not frozen.
     ("cat with a << EOF header holding cd docs", "cat << EOF\ncd docs\nEOF\nsed -i s/a/b/ settings.json"),
     ("cat with a <<EOF>s.sh header holding cd docs", "cat <<EOF>s.sh\ncd docs\nEOF\nsed -i s/a/b/ settings.json"),
 ):
@@ -12700,10 +12702,10 @@ sh("frozen shell: F2 control, ls X || cd docs, then sed -i on notes.txt, allows 
 # A sourced heredoc body runs in this shell: `source` and `.` read it from /dev/stdin, so its cd moves the shell and
 # the sed -i after it writes the frozen file. A bare `source <<EOF` has no file and runs no body, so it is not pinned.
 sh("frozen shell: source /dev/stdin <<'EOF' with a cd into the config folder, then sed -i on settings.json, "
-   "denies [source red]", "source /dev/stdin <<'EOF'\ncd " + slash(CFG) + "\nEOF\nsed -i s/a/b/ settings.json",
+   "denies [source pin]", "source /dev/stdin <<'EOF'\ncd " + slash(CFG) + "\nEOF\nsed -i s/a/b/ settings.json",
    "deny", "frozen-path", cwd=NOGIT)
 sh("frozen shell: . /dev/stdin <<EOF with a cd into the config folder, then sed -i on settings.json, "
-   "denies [source red]", ". /dev/stdin <<EOF\ncd " + slash(CFG) + "\nEOF\nsed -i s/a/b/ settings.json",
+   "denies [source pin]", ". /dev/stdin <<EOF\ncd " + slash(CFG) + "\nEOF\nsed -i s/a/b/ settings.json",
    "deny", "frozen-path", cwd=NOGIT)
 # The same body under bash runs in a child shell, so its cd moves nothing here. The notes.txt row is the sourced body
 # on a file that is not frozen.
@@ -12711,9 +12713,21 @@ sh("frozen shell: bash /dev/stdin <<'EOF' with the same cd, then sed -i on setti
    "bash /dev/stdin <<'EOF'\ncd " + slash(CFG) + "\nEOF\nsed -i s/a/b/ settings.json", "allow", cwd=NOGIT)
 sh("frozen shell: source /dev/stdin with the same cd, then sed -i on notes.txt, allows [source control]",
    "source /dev/stdin <<'EOF'\ncd " + slash(CFG) + "\nEOF\nsed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
-# Five cds, then a frozen write. The absolute chain is refused. A chain of `../` steps keeps each step as text, so the
-# walk's folder states pass _STATE_LIMIT and the folder is read as unknown, which the frozen check allows: that row is
-# red. Both chains end on the config folder, and the notes.txt rows are the same chains on a file that is not frozen.
+# bash runs its heredoc body in a child shell, so the cd moves nothing and the sed writes the config settings.json.
+# A header with a space after << or a redirect after its word is not read as a heredoc header, so the walk follows
+# the cd and allows the write: these rows are red.
+sh("frozen shell: bash << EOF with cd docs in the body, then sed -i on settings.json, from the config folder, "
+   "denies [bash heredoc red]", "bash << EOF\ncd docs\nEOF\nsed -i s/a/b/ settings.json", "deny", "frozen-path",
+   cwd=CFG)
+sh("frozen shell: bash << 'EOF' with cd docs in the body, then sed -i on settings.json, from the config folder, "
+   "denies [bash heredoc red]", "bash << 'EOF'\ncd docs\nEOF\nsed -i s/a/b/ settings.json", "deny", "frozen-path",
+   cwd=CFG)
+sh("frozen shell: bash <<EOF>/dev/null with cd docs in the body, then sed -i on settings.json, from the config folder, "
+   "denies [bash heredoc red]", "bash <<EOF>/dev/null\ncd docs\nEOF\nsed -i s/a/b/ settings.json", "deny",
+   "frozen-path", cwd=CFG)
+# Five cds, then a frozen write. The absolute chain is refused. The `../` chain reaches the same folders, and the walk
+# normalises each `..` step, so it is refused too. Both chains end on the config folder, and the notes.txt rows are the
+# same chains on a file that is not frozen.
 CFG_SUB_DIR = slash(os.path.join(CFG, "sub"))
 CFG_DOCS_DIR = slash(os.path.join(CFG, "docs"))
 FIVE_ABS = ("cd " + CFG_SUB_DIR + " && cd " + CFG_DOCS_DIR + " && cd " + CFG_SUB_DIR + " && cd " + CFG_DOCS_DIR
@@ -12724,9 +12738,21 @@ sh("frozen shell: five absolute cds into the config folder, then sed -i on setti
 sh("frozen shell: five absolute cds, then sed -i on notes.txt, allows [chain of five control]",
    FIVE_ABS + " && sed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
 sh("frozen shell: five cds with ../ steps into the config folder, then sed -i on settings.json, "
-   "denies [chain of five red]", FIVE_DOTDOT + " && sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
+   "denies [chain of five pin]", FIVE_DOTDOT + " && sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen shell: five cds with ../ steps, then sed -i on notes.txt, allows [chain of five control]",
    FIVE_DOTDOT + " && sed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
+# A chain that passes the walk limit keeps every folder it visited, so the config folder stays among them and the
+# overflow chain is refused. A `;` cd runs unconditionally, so a later cd into the docs folder returns the walk to that
+# one folder, and the sed after it is judged there and allowed.
+OVERFLOW = "true && cd " + CFG_SUB_DIR + " && cd " + CFG_DOCS_DIR + " && cd " + CFG_SUB_DIR + " && cd " + slash(CFG)
+sh("frozen shell: a chain past the walk limit ends in the config folder, then sed -i on settings.json, "
+   "denies [overflow pin]", OVERFLOW + " && sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: the same chain, then sed -i on notes.txt, allows [overflow control]",
+   OVERFLOW + " && sed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
+sh("frozen shell: a chain past the walk limit, then a later cd into the docs folder, then sed -i on settings.json, "
+   "allows [reset pin]", "true && cd " + CFG_SUB_DIR + " && cd " + CFG_DOCS_DIR + " && cd " + CFG_SUB_DIR
+   + " && cd " + CFG_DOCS_DIR + " && cd " + slash(CFG) + "; cd " + CFG_DOCS_DIR + "; sed -i s/a/b/ settings.json",
+   "allow", cwd=NOGIT)
 # A repository's own docs/CLAUDE.md is not the config CLAUDE.md: CONFIG_FROZEN_FILES freezes a CLAUDE.md only at the
 # config root. Either way the sed, if it runs, writes the clone's own docs/CLAUDE.md, which is not frozen.
 sh("frozen shell: make && cd docs && sed -i on CLAUDE.md in the clone's docs folder is allowed [false alarm pin]",
