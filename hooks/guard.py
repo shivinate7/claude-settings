@@ -5829,7 +5829,7 @@ def scratchpad_stdin(args):
 # count as run when a command names that file. This check asks only whether a recorded scratchpad file is
 # reached, so it adds the runners and wrappers that reach one (a verb, flags and values of their own).
 SCRATCHPAD_RUNNER = re.compile(
-    r"(?:" + _RUNNER.__self__.pattern + r"|uv|npx|tsx|ts-node|bun|deno|pytest|stdbuf|ionice|setsid|py)"
+    r"(?:" + _RUNNER.__self__.pattern + r"|uv|npx|tsx|ts-node|bun|pytest|stdbuf|ionice|setsid|py)"
     r"(?:\.exe|\.cmd)?").fullmatch
 # Runners that take test or script files anywhere in their arguments (`pytest -n 2 F`, `uv run --with x F`):
 # a flag's value cannot be told from a file, so every argument after the verb is judged.
