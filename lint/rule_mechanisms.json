@@ -226,7 +226,7 @@
         "kind": "guard",
         "ref": "gh-write-cloud"
       },
-      "test": "hooks/test_guard.py::gh-write-cloud: pr comment is refused in a cloud session"
+      "test": "hooks/test_guard.py::gh-write-cloud: a pull request opened without --draft is refused in a cloud session"
     },
     "git-ci-wait-checks-in": {
       "mechanism": {

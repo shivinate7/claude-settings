@@ -322,8 +322,8 @@ def undrafted_pr_create(segment: str) -> bool:
 # The GitHub MCP tools and the merge tool write there; a `gh` write is refused. Judged per segment from the
 # command word, so quoted text and heredoc bodies never fire. The caller applies it only when is_cloud().
 GH_WRITE_CLOUD_REASON = (
-    "Rule (GitHub): in a cloud session a GitHub write goes through the GitHub MCP tools, and the merge tool "
-    "merges; gh only reads there. "
+    "Rule (GitHub): in a cloud session a pull request write, an issue write and an API write made with gh are "
+    "refused. A GitHub write goes through the GitHub MCP tools, and the merge tool merges. "
     "Remedy: open a draft PR with mcp__github__create_pull_request, comment with mcp__github__add_issue_comment, "
     "edit or close with mcp__github__update_pull_request or mcp__github__issue_write, review with "
     "mcp__github__pull_request_review_write, and merge with `merge <pr> --confirm`. "

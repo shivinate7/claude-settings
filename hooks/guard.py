@@ -4065,6 +4065,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if refusal:
         refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, logged)
 
+    # 5b. A gh write in a cloud session (rule gh-write-cloud): the GitHub MCP tools and the merge tool write there.
+    # It runs before steps 6 and 6b so a cloud pr merge or pr create gets the MCP remedy, not one that names the
+    # refused form.
+    if is_cloud():
+        for text, _in_message in _substitutions(stripped)[0]:
+            for seg in split_segments(text):
+                label = gh_write_of(seg) if seg.strip() else ""
+                if label:
+                    refuse(tool, "deny", "gh-write-cloud", GH_WRITE_CLOUD_REASON, "gh " + label)
+
     # 6. A merge outside the merge tool, while the head has a check pending or red, or the read
     # could not run. Judged per segment from the command word, so quoted text never fires it.
     for segment in split_segments(stripped):
@@ -4095,14 +4105,6 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     for text, _in_message in _substitutions(stripped)[0]:
         if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
             refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
-
-    # 6b2. A gh write in a cloud session (rule gh-write-cloud): the GitHub MCP tools and the merge tool write there.
-    if is_cloud():
-        for text, _in_message in _substitutions(stripped)[0]:
-            for seg in split_segments(text):
-                label = gh_write_of(seg) if seg.strip() else ""
-                if label:
-                    refuse(tool, "deny", "gh-write-cloud", GH_WRITE_CLOUD_REASON, "gh " + label)
 
     # 6c. A lane commit of the generated records page (decision records-index-at-merge).
     matched = records_page_hit(stripped, cwd)
