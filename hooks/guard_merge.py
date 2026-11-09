@@ -10,8 +10,8 @@ import re
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
-    strip_heredoc_bodies,
+    dir_before_segment, git_calls, inline_script, inner_commands, record, resolve_command, resolve_default_base, segment_tokens,
+    split_segments, strip_heredoc_bodies,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import BUILD_TAG, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -19,7 +19,7 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    push_destinations, push_refspecs, push_target, push_text,
+    _push_default_branches, push_destinations, push_moves, push_refspecs, push_target, push_text,
 )
 
 
@@ -227,6 +227,66 @@ def merge_check_reason(verdict: str, detail: str) -> str:
     if verdict == "batch":
         return MERGE_BATCH_REASON % cap_safe(detail, 160)
     return MERGE_CHECK_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
+
+
+PUSH_BATCH_REASON = (
+    "Rule (Git, push-batch-held): this push moves a lane branch that a ready batch holds: %s holds this branch's "
+    "remote tip in its head. A batch is built from that head, so a moved head breaks its confirm "
+    "(decision batch-freeze-lane-set). Remedy: wait for the batch to merge, or drop the lane from the batch. "
+    "New work goes in a new lane."
+)
+
+
+def _rev(where: str, spec: str):
+    """The commit sha `spec` names in the checkout at `where`, else None."""
+    if spec.startswith("-"):
+        return None
+    answer = _git(where, "rev-parse", "-q", "--verify", spec + "^{commit}")
+    return answer.stdout.strip() if answer is not None and answer.returncode == 0 and answer.stdout.strip() else None
+
+
+def batch_held_hit(args, where: str, overrides, tool: str) -> str:
+    """The ready pull request that holds the branch a non-forced `git push` writes, as `#n (head branch)`, else ''. Rule push-batch-held
+    (decision batch-freeze-lane-set): a ready pull request on the default base, from another branch, holds the
+    branch's remote tip (the compare `tip...head` reads ahead or identical). The tip is the local
+    `refs/remotes/<remote>/<branch>`. A push with no remote tip, or one that moves nothing, is silent. A list or
+    compare that cannot be read allows the push and logs one `push-batch-unread` line.
+    Cost: one `git rev-parse` of the tip per branch written (none for main, master or a forced push), a second
+    for the source when a tip exists, the default-branch reads only when the push moves a tip; the gh reads only then: one open
+    list (one call per 100 rows) and one compare per ready pull request on the base, through the merge tool's own
+    Host.pages and Host.holds_head. None for a push of main, a dry run (the caller skips it) or a read verb."""
+    moves = []   # (branch, its remote tip, the default branches)
+    for remote, dest, source in push_moves(args, where, overrides):
+        tip = _rev(where, "refs/remotes/%s/%s" % (remote, dest))
+        if not tip or _rev(where, source) in (None, tip):
+            continue
+        defaults = _push_default_branches(where, remote)   # read only for a push that moves a tip
+        if defaults is not None and dest not in defaults:
+            moves.append((dest, tip, defaults))
+    if not moves:
+        return ""
+    unread = ""
+    try:
+        module = merge_module()
+        if module is None:
+            raise RuntimeError("the merge tool could not be loaded")
+        host = module.Host(cwd=where or None)
+        with module.shared_deadline(MERGE_READ_TIMEOUT):
+            rows = host.pages("pulls", fields={"state": "open"})   # every base: the rows are filtered below
+            for dest, tip, defaults in moves:
+                for row in rows:
+                    if row["base"]["ref"] not in defaults or row.get("draft") or row["head"]["ref"] == dest:
+                        continue
+                    try:
+                        if host.holds_head(tip, row["head"]["sha"]):
+                            return "#%s (%s)" % (row["number"], row["head"]["ref"])
+                    except Exception as e:  # one compare unread: the others are still read, and a hold still wins
+                        unread = str(e)
+    except Exception as e:  # Stop, a timeout, a missing gh, malformed JSON: unread
+        unread = str(e)
+    if unread:
+        record(tool, "noted", "push-batch-unread", "git push " + " ".join(args) + ": " + " ".join(unread.split()))
+    return ""
 
 
 def _merge_config_at(root: str):

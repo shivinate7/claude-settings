@@ -226,6 +226,23 @@ def push_refspecs(args):
     return remote, plain
 
 
+def push_moves(args, cwd: str, overrides=None):
+    """[(remote, destination branch, source rev)] for each branch a non-forced `git push` writes, off the literal
+    default names (main, master). A forced, leased, `+`, mirror, `--all`, deleting or tags-only push gives []. The
+    remote is the named one, else `origin`. A bare push has the source `HEAD`; a colon-less refspec is its own
+    source. It starts no process beyond those `push_destinations` already shares."""
+    force, mirror, every, _includes, _unpinned, leased, delete, _upstream, remote, plain = _push_parse(args)
+    if force or leased or mirror or every or _colon_delete(delete, plain) or any(s.startswith("+") for s in plain):
+        return []
+    if not plain and _push_tags_only(args):
+        return []
+    moves = []
+    for spec, dest in zip(plain or [""], push_destinations(args, cwd, overrides)):
+        if dest and "*" not in dest and dest not in DEFAULT_BRANCH_FALLBACK:
+            moves.append((remote or "origin", dest, spec.partition(":")[0] or "HEAD"))
+    return moves
+
+
 def push_verdict(args, cwd: str, overrides=None) -> str:
     """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
 

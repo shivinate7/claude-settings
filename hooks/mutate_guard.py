@@ -466,6 +466,14 @@ MUTATIONS = [
     ("push-agent-branch: the ask is not wired",
      '                elif kind == "agent":',
      '                elif kind == "agent-off":', "guard", 'agent branch, HEAD asks'),
+    # push-batch-held. The mutant folder holds no merge tool, so the gh half of the rule always reads as unread there
+    # (an allow and a push-batch-unread line). Only that line can die here. A mutant of the gh half (the draft, base and
+    # own-branch filters) or of the git half (a push that moves nothing, a lane with no tip) would survive, because its
+    # case judges the allow alone.
+    ("push-batch-held: an unread batch is allowed without a log line",
+     '        record(tool, "noted", "push-batch-unread",',
+     '        (lambda *_: None)(tool, "noted", "push-batch-unread",', "guard",
+     'an open list that cannot be read allows the push, and logs push-batch-unread'),
     ("env-file: a search command's pattern is read as a path",
      '                if index in patterns:\n                    continue\n',
      '                if False:\n                    continue\n', "guard",

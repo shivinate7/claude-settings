@@ -109,6 +109,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   push-agent-branch    ask. A non-forced push whose destination branch name is an agent-worktree name
                        (agent-<hex>, claude/agent-<hex>, worktree-agent-<hex>, 8+ hex), with or without
                        -u. No upstream is needed. A delete, a mirror and a dry run pass.
+  push-batch-held      deny. A non-forced push that moves a lane branch whose remote tip
+                       (refs/remotes/<remote>/<branch>) an open, ready pull request on the default
+                       base holds in its head, from another head branch. Wins over push-agent-branch.
+                       No remote tip, a push that moves nothing, a draft holder, another base, a dry run
+                       and a push of main pass. A list or compare that cannot be read allows the push and
+                       logs `push-batch-unread`. (decision batch-freeze-lane-set)
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
@@ -435,7 +441,7 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
+            DRAFT_PR_REASON, MERGE_TOOLS, PUSH_BATCH_REASON, RECORDS_PAGE_REASON, ROLE_REASON, batch_held_hit,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
@@ -4188,7 +4194,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif not read_verb("push", args):
                 # A non-forced push that writes main or master (rule push-main), an agent-worktree
                 # branch name (rule push-agent-branch), or an implied destination off the branch's
-                # upstream (rule push-stray-branch). A dry run writes nothing.
+                # upstream (rule push-stray-branch). A dry run writes nothing. A lane branch a ready
+                # batch holds is refused first, so the deny wins over the agent-branch ask (rule push-batch-held).
+                holder = batch_held_hit(args, where, overrides, tool)
+                if holder:
+                    refuse(tool, "deny", "push-batch-held", PUSH_BATCH_REASON % holder, "git push " + " ".join(args))
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
                     ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
