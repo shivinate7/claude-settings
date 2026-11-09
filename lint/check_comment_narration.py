@@ -39,12 +39,27 @@ class DatedText:
     """A date pattern that skips a date a rule or a limit runs on: the word effective, valid, until or expires,
     an optional `date`, `on`, `from` or `through`, and an optional colon come right before it. Such a date says
     why, so it is not history. A phrase check on the text before the date does what a lookbehind cannot:
-    take a variable run of spaces and any case."""
+    take a variable run of spaces and any case. A ruling cite is exempt too: the word owner (any case) and a
+    comma right before the date, and a time and a zone right after it. The owner word must open the comment's
+    text (after its `#`, `///`, `//!`, `//`, `/*`, `*`, `<!--`, `\"\"\"` or `'''` marker and spaces) or follow a `(`. The time is
+    an hour of 0 to 23 with one or two digits, a colon and two minute digits. The zone is one of ZONES, in any case.
+    A cite without the time, with another lead word, or with another zone stays flagged. A cite in parentheses
+    after history wording still passes, as in "Changed from None to 0 (owner, 2026-11-01 16:30 CST)"."""
+    ZONES = ("CST", "CDT", "CT", "EST", "EDT", "ET", "MST", "MDT", "MT", "PST", "PDT", "PT", "UTC", "GMT")
     DATE = re.compile(r"\b20\d\d-\d\d-\d\d\b")
-    EXEMPT = re.compile(r"\b(?:effective|valid|until|expires?)(?:\s+(?:date|on|from|through))?\s*:?\s*$", re.I)
+    EXEMPT = re.compile(r"\b(?:effective|valid|until|expires?)(?:\s+(?:date|on|from|through))?(?:\s*:)?\s*$", re.I)
+    # Each opener run matches one way only: `//+(?!/)!?` takes a whole slash run, and no space is left for a
+    # second `\s*` to share. Overlapping alternatives here backtrack exponentially on a long slash run.
+    CITE_BEFORE = re.compile(r"(?:^(?:\s|#|//+(?!/)!?|/\*|\*|<!--|\"\"\"|''')*|\(\s*)owner\s*,\s*$", re.I)
+    CITE_AFTER = re.compile(r"\s+(?:2[0-3]|[01]?\d):[0-5]\d\s+(?:%s)\b" % "|".join(ZONES), re.I)
 
     def finditer(self, text):
-        return (m for m in self.DATE.finditer(text) if not self.EXEMPT.search(text[:m.start()]))
+        return (m for m in self.DATE.finditer(text) if not self.exempt(text, m))
+
+    def exempt(self, text, m):
+        if self.EXEMPT.search(text[:m.start()]):
+            return True
+        return bool(self.CITE_BEFORE.search(text[:m.start()]) and self.CITE_AFTER.match(text, m.end()))
 
 
 class ReviewRound:

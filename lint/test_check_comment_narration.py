@@ -18,6 +18,7 @@ The cases pin this contract:
 - A comment that states a run's colour or result on a head, on main or on the base is history.
   It fails under the `history phrase` pattern. A colour phrase after when, if, unless, until, while or once in the
   same clause is a condition and stays clean.
+- A run of 60 slashes before a date stays flagged, and the cost of the cite match grows near-linearly with the run.
 - The check is one file. The suite copies only that file into the fixture repo, so the check finds
   the repo from its working directory or from its own location, and both give the fixture repo.
 """
@@ -28,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -63,6 +65,14 @@ RUN_STATE = [
     "Once the fix landed, the tests went green on main", "When it ran, it was red on main",
 ]
 
+# Date text that stays flagged: a date with no ruling word, with or without a time, and an owner word with a date but
+# no time. A ruling cite is an owner word that opens it, then a date, a 24-hour time and a zone. A word before owner,
+# or a word after the time that is not a zone, stays flagged. The `date` pattern flags each hit. The list also joins
+# FLAGGED, so every flagged test runs it.
+DATE_CONTROLS = ["Fixed on 2026-11-01.", "Changed 2026-11-01 16:30 CST.", "Owner, 2026-11-01",
+                 "Changed by the owner, 2026-11-01 16:30 CST.", "Fixed after owner, 2026-11-01 16:30 CST.",
+                 "Owner, 2026-11-01 16:30 OLD: returns None"]
+
 # Text the check must flag, in a comment or in a docstring line.
 FLAGGED = [
     "fixed in round 2", "Round3 of changes", "after review round", "a review finding", "review points",
@@ -81,7 +91,7 @@ FLAGGED = [
     "Changed from returning None to raising", "Changed from the previous default to 5",
     "changed from the old file layout to the new one", "changed from the old state machine to a table",
     "changed from the old hash function to sha256", "changed from the old base class to a mixin",
-] + RUN_STATE
+] + RUN_STATE + DATE_CONTROLS
 
 # Near misses. No pattern may flag any of them.
 CLEAN = [
@@ -179,7 +189,7 @@ class Case(unittest.TestCase):
     def change(self, files):
         self.commit("change", files)
 
-    def lint(self, *args, path_tools=False, env=None, checker_root=None):
+    def lint(self, *args, path_tools=False, env=None, checker_root=None, timeout=None):
         args = args or ("--base", "origin/main")
         run_env = dict(GIT_ENV, **(env or {}))
         run_env.pop("CODE_CHECK_TOOLS", None)
@@ -188,7 +198,7 @@ class Case(unittest.TestCase):
         script = os.path.join(checker_root or self.tree, "lint", "check_comment_narration.py")
         r = subprocess.run([sys.executable, script, *args],
                            cwd=self.tree, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           env=run_env)
+                           env=run_env, timeout=timeout)
         return r.returncode, r.stdout + r.stderr
 
     def fake_tool(self, name, body):
@@ -275,6 +285,15 @@ class FlagsAddedLines(Case):
             with self.subTest(text):
                 self.assertHit(out, "h%d.py" % i, 2)
                 self.assertIn("history phrase:", self.hit_line(out, "h%d.py" % i, 2))
+
+    def test_date_controls_hit_the_date_pattern(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"d%d.py" % i: "x = 1\n# %s\ny = 2\n" % text for i, text in enumerate(DATE_CONTROLS)})
+        _, out = self.lint()
+        for i, text in enumerate(DATE_CONTROLS):
+            with self.subTest(text):
+                self.assertHit(out, "d%d.py" % i, 2)
+                self.assertIn("date:", self.hit_line(out, "d%d.py" % i, 2))
 
     def test_docstring_kinds(self):
         self.base({"keep.py": "x = 1\n"})
@@ -441,6 +460,103 @@ class Quiet(Case):
                 self.assertNoHit(out, "c%d.py" % i, 3)
                 self.assertNoHit(out, "d%d.py" % i, 4)
         self.assertEqual(rc, 0, out)
+
+    def test_ruling_cite_with_a_time_in_a_docstring_passes(self):
+        src = ('def f():\n    """Does a thing.\n\n    Owner, 2026-11-01 16:30 CST: a re-pointed case.\n    """\n'
+               '    # fixed in round 2\n    return 1\n')
+        rc, out = self.scan({"cite.py": src})
+        self.assertHit(out, "cite.py", at(src, "fixed in round 2"))
+        self.assertNoHit(out, "cite.py", at(src, "re-pointed case"))
+
+    def test_ruling_cite_with_a_time_in_a_comment_passes(self):
+        src = "x = 1\n# (owner, 2026-10-30 16:20 CDT)\n# fixed in round 2\ny = 2\n"
+        rc, out = self.scan({"cite.py": src})
+        self.assertHit(out, "cite.py", at(src, "fixed in round 2"))
+        self.assertNoHit(out, "cite.py", at(src, "16:20 CDT"))
+
+    def test_ruling_cite_with_a_one_digit_hour_passes(self):
+        src = "x = 1\n# Owner, 2026-11-01 9:05 CST\n# fixed in round 2\ny = 2\n"
+        rc, out = self.scan({"cite.py": src})
+        self.assertHit(out, "cite.py", at(src, "fixed in round 2"))
+        self.assertNoHit(out, "cite.py", at(src, "9:05 CST"))
+
+    def test_ruling_cite_with_a_lowercase_zone_passes(self):
+        zones = ["cst", "cdt", "ct", "est", "edt", "et", "mst", "mdt", "mt", "pst", "pdt", "pt", "utc", "gmt"]
+        files = {"z%d.py" % i: "x = 1\n# owner, 2026-10-30 16:20 %s\n# fixed in round 2\ny = 2\n" % zone
+                 for i, zone in enumerate(zones)}
+        _, out = self.scan(files)
+        unread = [zone for i, zone in enumerate(zones) if self.hit_line(out, "z%d.py" % i, 3) is None]
+        self.assertEqual(unread, [], "the scan did not read each control line:\n" + out)
+        flagged = [zone for i, zone in enumerate(zones) if self.hit_line(out, "z%d.py" % i, 2) is not None]
+        self.assertEqual(flagged, [], "a ruling cite with a lowercase zone is flagged as a date:\n" + out)
+
+    def test_lowercase_zone_on_a_dated_line_that_is_not_a_cite_stays_flagged(self):
+        texts = ["Changed by the owner, 2026-10-30 16:20 cdt", "Fixed after owner, 2026-10-30 16:20 cdt",
+                 "Changed 2026-10-30 16:20 cdt"]
+        files = {"n%d.py" % i: "x = 1\n# %s\ny = 2\n" % text for i, text in enumerate(texts)}
+        _, out = self.scan(files)
+        unflagged = [text for i, text in enumerate(texts)
+                     if "date:" not in (self.hit_line(out, "n%d.py" % i, 2) or "")]
+        self.assertEqual(unflagged, [], "a dated line that is not a cite is not flagged as a date:\n" + out)
+
+    def test_ruling_cite_after_a_docstring_opener_passes(self):
+        src = ('def f():\n    """Owner, 2026-11-01 16:30 CST\n    """\n    return 1\n'
+               "def g():\n    '''Owner, 2026-11-01 16:30 CST\n    '''\n    return 2\n"
+               "# fixed in round 2\n")
+        _, out = self.scan({"cite.py": src})
+        self.assertHit(out, "cite.py", at(src, "fixed in round 2"))
+        flagged = [n for n in (2, 6) if self.hit_line(out, "cite.py", n)]
+        self.assertEqual(flagged, [], "a ruling cite after a docstring opener is flagged as a date:\n" + out)
+
+    def test_ruling_cite_with_hour_24_stays_flagged(self):
+        src = "x = 1\n# Owner, 2026-11-01 24:00 CST\n# fixed in round 2\ny = 2\n"
+        _, out = self.scan({"cite.py": src})
+        self.assertHit(out, "cite.py", at(src, "fixed in round 2"))
+        row = self.hit_line(out, "cite.py", 2)
+        self.assertIsNotNone(row, "a cite with hour 24 is exempt, so its date is not flagged:\n" + out)
+        self.assertIn("date: 2026-11-01", row, out)
+
+    def test_ruling_cite_with_minute_60_stays_flagged(self):
+        src = "x = 1\n# Owner, 2026-11-01 16:60 CST\n# fixed in round 2\ny = 2\n"
+        _, out = self.scan({"cite.py": src})
+        self.assertHit(out, "cite.py", at(src, "fixed in round 2"))
+        row = self.hit_line(out, "cite.py", 2)
+        self.assertIsNotNone(row, "a cite with minute 60 is exempt, so its date is not flagged:\n" + out)
+        self.assertIn("date: 2026-11-01", row, out)
+
+    def test_long_slash_run_before_a_date_is_flagged_and_its_cost_grows_near_linearly(self):
+        # A run of slashes is not a cite, so the date stays flagged. The cost is timed in this process: the fastest of
+        # five cite matches on a 60-slash run against the fastest on a 30-slash run. Linear growth doubles the cost.
+        # Backtracking that grows exponentially multiplies it, as the old `///|//!|//` alternatives did.
+        import check_comment_narration as checker
+        dated = checker.DatedText()
+
+        def fastest(n):
+            text = "/" * n + " Section 2026-11-08"
+            best, dates = None, None
+            for _ in range(5):
+                start = time.perf_counter()
+                dates = [m.group(0) for m in dated.finditer(text)]
+                elapsed = time.perf_counter() - start
+                best = elapsed if best is None else min(best, elapsed)
+            return best, dates
+
+        slow, dates = fastest(60)
+        fast, _ = fastest(30)
+        self.assertEqual(dates, ["2026-11-08"], "a date after a 60-slash run is not flagged")
+        ratio = slow / max(fast, 1e-7)
+        self.assertLess(ratio, 8, "the cite match grows faster than linear: 60 slashes cost %.1fx 30 slashes" % ratio)
+
+        run = "/" * 60 + " Section 2026-11-08"
+        files = {"slash.py": "x = 1\n# %s\ny = 2\n" % run, "Slash.swift": "let x = 1\n// %s\n" % run}
+        self.base({"keep.py": "x = 1\n"})
+        self.change(files)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        for path in ("slash.py", "Slash.swift"):
+            row = self.hit_line(out, path, 2)
+            self.assertIsNotNone(row, "no hit at %s:2 in:\n%s" % (path, out))
+            self.assertIn("date: 2026-11-08", row, out)
 
     def test_same_words_in_string_literals_do_not_fail(self):
         src = '''\
@@ -641,6 +757,20 @@ class Scripts(Case):
 
 @NEEDS_TSC
 class JsTsScan(Case):
+    def test_ruling_cite_after_a_block_comment_opener_passes(self):
+        src = ("/* Owner, 2026-11-01 16:30 CST */\n"
+               "/**\n"
+               " * Owner, 2026-11-01 16:30 CST\n"
+               " */\n"
+               "const a = 1;\n"
+               "// fixed in round 2\n")
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"cite.js": src})
+        _, out = self.lint(path_tools=True)
+        self.assertHit(out, "cite.js", at(src, "fixed in round 2"))
+        flagged = [n for n in (1, 3) if self.hit_line(out, "cite.js", n)]
+        self.assertEqual(flagged, [], "a ruling cite after a block comment opener is flagged as a date:\n" + out)
+
     def test_comment_openers_in_strings_do_not_hide_the_real_comment_after_them(self):
         src = 'const a = "//";\nconst b = "fixed on 2026-10-28" + \'/*\';\nconst c = "#"; // fixed in round 2\n'
         self.base({"keep.js": "const k = 1;\n"})
@@ -753,6 +883,17 @@ class JsTsScan(Case):
         self.assertEqual(rc, 0, out)
         self.assertNotIn("Traceback", out)
 
+    def test_ruling_cite_after_a_triple_slash_opener_in_ts_passes(self):
+        src = ("/// owner, 2026-10-30 16:20 CDT\nexport const x = 1;\n"
+               "// owner, 2026-10-30 16:20 CDT\n// fixed in round 2\n")
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"util.ts": src})
+        rc, out = self.lint(path_tools=True)
+        self.assertHit(out, "util.ts", 4)
+        self.assertNoHit(out, "util.ts", 3)
+        self.assertIsNone(self.hit_line(out, "util.ts", 1),
+                          "a ruling cite after /// in a TS file is flagged as a date:\n" + out)
+
 
 @NEEDS_TSC
 class AstroScan(Case):
@@ -809,6 +950,17 @@ class AstroScan(Case):
         rc, out = self.lint(path_tools=True)
         self.assertEqual(rc, 1, out)
         self.assertHit(out, "page.astro", 2)
+
+    def test_ruling_cite_in_an_html_comment_passes(self):
+        src = ("<!-- owner, 2026-10-30 16:20 CDT -->\n<p>x</p>\n<!-- (owner, 2026-10-30 16:20 CDT) -->\n"
+               "<!-- fixed in round 2 -->\n")
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"page.astro": src})
+        rc, out = self.lint(path_tools=True)
+        self.assertHit(out, "page.astro", 4)
+        self.assertNoHit(out, "page.astro", 3)
+        self.assertIsNone(self.hit_line(out, "page.astro", 1),
+                          "a ruling cite in an HTML comment is flagged as a date:\n" + out)
 
 
 class SwiftScan(Case):
@@ -917,6 +1069,47 @@ class SwiftScan(Case):
         self.change({"Urls.swift": 'let u = "http://x red on main"\nlet v = "/* green on the base */"\n'})
         self.assertClean()
 
+    # The reader keeps the opener in the comment text, so the check reads the cite after it.
+    def test_ruling_cite_after_a_triple_slash_opener_passes(self):
+        src = "/// owner, 2026-10-30 16:20 CDT\nfunc f() {}\n// owner, 2026-10-30 16:20 CDT\n// fixed in round 2\n"
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Doc.swift": src})
+        rc, out = self.lint()
+        self.assertHit(out, "Doc.swift", 4)
+        self.assertNoHit(out, "Doc.swift", 3)
+        self.assertIsNone(self.hit_line(out, "Doc.swift", 1), "a ruling cite after /// is flagged as a date:\n" + out)
+
+    def test_ruling_cite_after_a_bang_opener_passes(self):
+        src = "//! owner, 2026-10-30 16:20 CDT\nlet x = 1\n// owner, 2026-10-30 16:20 CDT\n// fixed in round 2\n"
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Inner.swift": src})
+        rc, out = self.lint()
+        self.assertHit(out, "Inner.swift", 4)
+        self.assertNoHit(out, "Inner.swift", 3)
+        self.assertIsNone(self.hit_line(out, "Inner.swift", 1),
+                          "a ruling cite after //! is flagged as a date:\n" + out)
+
+    def test_parenthesised_ruling_cite_after_a_doc_opener_stays_clean(self):
+        src = "/// (owner, 2026-10-30 16:20 CDT)\n//! (owner, 2026-10-30 16:20 CDT)\n// fixed in round 2\n"
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Doc.swift": src})
+        rc, out = self.lint()
+        self.assertHit(out, "Doc.swift", 3)
+        self.assertNoHit(out, "Doc.swift", 1)
+        self.assertNoHit(out, "Doc.swift", 2)
+
+    def test_dated_line_after_a_doc_opener_without_a_cite_stays_flagged(self):
+        src = ("/// Changed by the owner, 2026-10-30 16:20 CDT\n//! fixed on 2026-10-30 16:20 CDT\n"
+               "// owner, 2026-10-30 16:20 CDT\n// fixed in round 2\n")
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Doc.swift": src})
+        rc, out = self.lint()
+        self.assertHit(out, "Doc.swift", 4)
+        self.assertNoHit(out, "Doc.swift", 3)
+        rows = [self.hit_line(out, "Doc.swift", n) for n in (1, 2)]
+        self.assertTrue(all(row and "date:" in row for row in rows),
+                        "a dated line with no cite after a doc opener is not flagged as a date:\n" + out)
+
 
 class ShellScan(Case):
     """Shell comments: a `#` inside quotes, after an escape, in an expansion, in arithmetic or in a heredoc body is text."""
@@ -946,6 +1139,11 @@ class ShellScan(Case):
         rc, out = self.scan({"hooks/x.sh": "# (incident 2026-11-07, /base_run.txt)\n"})
         self.assertHit(out, "hooks/x.sh", 1)
         self.assertEqual(rc, 1, out)
+
+    def test_ruling_cite_with_a_time_in_a_shell_comment_passes(self):
+        rc, out = self.scan({"x.sh": "# (owner, 2026-10-30 16:20 CDT)\n# fixed in round 2\necho hi\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
 
     def test_extensionless_sh_shebang_script_is_flagged(self):
         rc, out = self.scan({"bin/run-sh": "#!/bin/sh\n# fixed in round 2\n"})
