@@ -27683,10 +27683,10 @@ for _label, _command in R3_F2_F3:
 
 
 # ---- encoded retry, installed layout. install.sh lays a copy install out as hooks/ (guard.py and the guard family,
-# flat), hooks/guard.d/<id>/ (the same family, the set guard.py loads from) and lint/ beside hooks/. guard_encoded.py
-# finds lint/guard_log_report.py at `../lint` from its own folder. In the set that is guard.d/lint, which no install
-# makes. The import fails, and the rule fails open: a guard.log deny row is never read, so a retry is allowed. Each
-# check proves the scope first (guard_encoded loads from the folder the install loads it from), then reads the decision.
+# flat), hooks/guard.d/<id>/ (the same family, the set guard.py loads from) and lint/ beside hooks/. The set loads
+# guard_encoded from guard.d/<id>/, so its lint/ lookup walks up three levels to reach lint/ beside hooks/. A lookup
+# that misses lint/ reads no guard.log refusal row, and the retry is allowed. Each check proves the scope first
+# (guard_encoded loads from the folder the install loads it from), then reads the decision.
 GD_DECODE = "echo ZWNobyBoaQ== | base64 -d | sh"
 GD_TAIL = "tail -f x | grep y"
 GD_BUILT = set()
@@ -27780,8 +27780,8 @@ for _label, _check in (
     FIXTURELESS_CHECKS.add(_check)
     LOG_CHECKS_EXTRA.append((_label, _check))
 
-# The red: a set with lint/ beside hooks/ refuses the decode-and-run call after a fresh guard.log deny row. The rule
-# reads guard.d/lint, finds nothing, and allows the call.
+# A set with lint/ beside hooks/ refuses the decode-and-run call after a fresh guard.log deny row. The set's lookup
+# reaches lint/ three levels up, so the reader imports and the row is read.
 gd_add("encoded-retry-after-refusal: installed guard set, lint/ beside hooks/, fresh guard.log deny row: "
        "the decode-and-run call is refused", "gd-set", GD_DECODE, "deny", ENC_RULE,
        seed=gd_seed(ENC_SID, ENC_FRESH))
@@ -27792,7 +27792,8 @@ gd_add("encoded-retry-after-refusal: installed guard set, guard.log deny row 15 
        "the decode-and-run call is allowed", "gd-set", GD_DECODE, "allow", seed=gd_seed(ENC_SID, ENC_STALE))
 gd_add("encoded-retry-after-refusal: installed guard set, another session's guard.log deny row: "
        "the decode-and-run call is allowed", "gd-set", GD_DECODE, "allow", seed=gd_seed(ENC_OTHER_SID, ENC_FRESH))
-# No lint/: the rule fails open. The call is allowed with no crash row and no NUL, and the stream rule still denies.
+# No lint/ in reach: the reader does not import, so the guard.log row goes unread and the call is allowed. The run
+# writes no crash row and no NUL, and the stream rule still denies.
 gd_add("encoded-retry-after-refusal: installed guard set, no lint/, fresh guard.log deny row: "
        "the decode-and-run call is allowed, with no crash row", "gd-set-nolint", GD_DECODE, "allow",
        seed=gd_seed(ENC_SID, ENC_FRESH), lint=False)
