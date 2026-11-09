@@ -13,7 +13,7 @@ import re
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
-    is_cloud, strip_heredoc_bodies, strip_redirections,
+    is_cloud, strip_heredoc_bodies, strip_redirections, walk_quotes,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import BUILD_TAG, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -956,6 +956,18 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
     return "merge --confirm" if _unproved_confirm(stripped, cwd, transcript, 0) else ""
 
 
+def _unreadable_confirm(segment: str) -> bool:
+    """True when `segment` does not tokenize (a quote left open) yet names the merge tool and the text `--confirm`. The words after the
+    open quote cannot be read, so the checkout the merge acts in is unknown: that is a refusal, never a skip. The merge tool is read from
+    the text before the quote that never closes (the last unquoted step of walk_quotes), with merge_tool_args, the one reader of which
+    segment runs the merge tool. A segment with no `--confirm` in its text is not judged: the tool refuses an abbreviated flag
+    (allow_abbrev is off), so it cannot confirm, and an open quote is a shell syntax error besides."""
+    if "--confirm" not in segment:
+        return False
+    opener = max((at for at, _char, quote in walk_quotes(segment) if not quote), default=None)
+    return opener is not None and merge_tool_args(segment[:opener]) is not None
+
+
 MERGE_NEST_DEPTH = 4  # `bash -c` inside `bash -c` is followed this far; a deeper script is judged as a refusal
 
 
@@ -978,12 +990,13 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
                 where = dir_before_segment(segments, number, cwd, ends) or ""
                 if any(_unproved_confirm(script, where, transcript, depth + 1) for script in scripts):
                     return True
+        if tokens is None and _unreadable_confirm(segment):
+            return True
         if merge_tool_args(segment) is None:
             continue
         try:
-            rest = _command_words(merge_tool_args(segment))
-            bare = merge_tool_args(strip_redirections(segment))
-            bare = None if bare is None else _command_words(bare)
+            rest = _merge_words(segment)
+            bare = _merge_words(strip_redirections(segment))
             if "--confirm" not in (rest if bare is None else bare):
                 continue
             if bare is None:
@@ -1030,19 +1043,58 @@ def _own_tier_proved(transcript: str, tier: str) -> bool:
     return False
 
 
-def _command_words(args):
+def _command_words(args, glued=None):
     """`args` up to the end of their command. The segment splitter cuts at `&&`, `||`, `;`, `|` and a
     newline, but not at `(`, `)` or a lone `&`. A `)` glued to a word closes the subshell the command
-    sits in, and a glued `&` sends it to the background: either ends that word and the command."""
+    sits in, and a glued `&` sends it to the background: either ends that word and the command.
+    `glued` is, per word, how many of its trailing `)` or `&` are unquoted (_glued_counts): a quoted one
+    is text. Without `glued` every trailing one counts."""
     words = []
-    for arg in args:
+    for index, arg in enumerate(args):
         word = arg.rstrip(")&")
+        if glued is not None:
+            word = arg[:len(arg) - glued[index]]
         if word != arg:
             if word:
                 words.append(word)
             break
         words.append(arg)
     return words
+
+
+def _glued_counts(segment: str, args):
+    """Per word of `args` (a tail of the segment's tokens), how many trailing `)` or `&` it holds outside quotes, read from the quote
+    state of walk_quotes, the one quote walk. Raises _FlagsUnreadable when the walk and the tokens do not split the segment into the same
+    words, so the caller denies and never falls back to the unquoted reading."""
+    words, current = [], []
+    for index, char, quote in walk_quotes(segment):
+        if not quote and char in " \t\r\n":
+            if current:
+                words.append(current)
+            current = []
+        else:
+            current.append((char, quote))
+    if current:
+        words.append(current)
+    tokens = segment_tokens(segment)
+    if tokens is None or len(words) != len(tokens) or len(args) > len(words):
+        raise _FlagsUnreadable("the quote walk and the tokens split the segment differently")
+    counts = []
+    for word, arg in zip(words[len(words) - len(args):], args):
+        run = 0
+        while run < len(word) and word[-1 - run][0] in ")&" and not word[-1 - run][1]:
+            run += 1
+        if run > len(arg) or any(arg[len(arg) - 1 - k] != word[-1 - k][0] for k in range(run)):
+            raise _FlagsUnreadable("a trailing ) or & does not match its token")
+        counts.append(run)
+    return counts
+
+
+def _merge_words(segment: str):
+    """The merge's arguments up to the end of its command, else None when the segment runs no merge. Raises _FlagsUnreadable when
+    the closing `)` or `&` cannot be read from the quotes."""
+    args = merge_tool_args(segment)
+    return None if args is None else _command_words(args, _glued_counts(segment, args))
 
 
 def _push_calls(segment: str, script: str, cwd: str):
