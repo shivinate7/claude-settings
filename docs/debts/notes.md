@@ -68,7 +68,7 @@
 - git-env-set-indirect-forms: indirect sets (function wrapper, iex, EncodedCommand, run-time names) pass the git-env guard (hooks/guard_kill.py)
 - git-env-set-untested-forms: no case pins the PowerShell backtick escape, group-opener pattern or heredoc quote text (hooks/test_guard.py)
 - git-env-warn-session-start: the git env warning runs at session start only, so mid-session damage shows at next start (guard hooks)
-- glued-subshell-unread: (rm -rf .) and x=$(tail -f y) pass because the closing parenthesis is glued to the last word (guard_push_delete, guard_stream)
+- glued-subshell-unread: (rm -rf .) and x=$(tail -f y) pass because the closing parenthesis is glued to the last word (guard_push_delete, guard_stream); `(git checkout -B x)` passes rule two-worktrees-one-branch the same way
 - guard-abtests-test-path: native/ABTests/ reads as a test folder, so a builder cannot edit product code there (hooks/guard.py)
 - guard-audit-agent-stop-open: SubagentStop fails open on a missing guard module, on purpose, with one log line (hooks/guard.py)
 - guard-bash-c-silent-write: a silent git write inside bash -c '...' is allowed; the check reads only the outer command (hooks/guard.py)
@@ -1535,6 +1535,9 @@
 - reviewer-no-session-tools-general-purpose-spawn: a spawn with no agents/ file (general-purpose, or a Workflow agent() with no agentType) keeps the claude-code-remote server, measured 2026-11-07 15:42 CST: a general-purpose agent in a cloud session held all 32 of its tools, create_session among them. Guard rule agent-no-remote-tools, in PR #1674 (stacked on this one), refuses those calls.
 - reviewer-no-session-tools-star-tools-alone: `tools: *` passes (lint/check_agent_models.py session_tools_problem). The effect of `*` in `tools` is unmeasured.
 - reviewer-no-session-tools-deny-unmeasured: nothing records that Claude Code honors the `mcp__claude-code-remote__*` deny on a spawned agent. The check (lint/check_agent_models.py session_tools_problem) proves only that the string is in the frontmatter. Measure it: after merge, spawn a reviewer and list its tools.
+- two-worktrees-heredoc-cd: rule two-worktrees-one-branch reads a `cd` inside an interpreter heredoc body (`bash <<'EOF'`), so a later `git checkout -B x` is judged in the wrong tree (hooks/guard.py rule 1b2). Fix: track the tree on text with heredoc bodies cut. Decision: two-worktrees-one-branch (two worktrees never hold one branch).
+- two-worktrees-cd-untested: no case covers the `cd` step of rule two-worktrees-one-branch, because other-checkout refuses the fixture's `cd` first; a mutant that drops it survives (hooks/guard.py rule 1b2). Decision: two-worktrees-one-branch (two worktrees never hold one branch).
+- two-worktrees-subshell-cd: `(cd ../w && git status); git checkout -B x` and `cd ../w && cd - && git checkout -B x` pass, and `pushd ../w && git checkout -B x` refuses (hooks/guard.py rule 1b2). Decision: two-worktrees-one-branch (two worktrees never hold one branch).
 - why-cited-asks-row-any-act: a page task's `(route r-asks)` cite passes whatever act the task names, since no row is matched to the act (lint/report_guard.py `_route_verdict`). Fix: step:why-cite-matches-act. Decision: claims-carry-backing.
 - why-cited-wrapped-line: a Why yours line wrapped onto a second line passes, since only the label line is judged (hooks/question_form.py `why_cited_hit`). Decision: task-names-its-check.
 - why-cited-cite-form-false-alarms: true cites in a backtick id, an upper-case id, an ISO datetime, "measured on <date>" or on the next line are refused, on the page and in chat alike (lint/report_guard.py cite regexes). Decision: claims-carry-backing.

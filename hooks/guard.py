@@ -56,6 +56,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        agent-worktree-discard-is-noted)
   pointer-head         deny. A command that moves HEAD off `main` in the pointer checkout.
                        A move to `main` passes.
+  two-worktrees-one-branch
+                       deny. A `checkout -B` or `switch -C` of a branch another worktree of the clone holds, a
+                       forced `worktree add` of one, or `checkout` or `switch` with
+                       `--ignore-other-worktrees` and any branch. The worktree list is read only for these forms,
+                       and a read that fails refuses. An override lifts it.
   silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
                        git's `-q`. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
@@ -396,6 +401,7 @@ while True:
             BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
             worktree_remove_forced,
         )
+        from guard_branch_worktree import TWO_WORKTREES_REFUSE_REASON, two_worktrees_hit
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
@@ -3879,6 +3885,23 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = pointer_head_hit(segment, head_where)
         if matched:
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
+
+    # 1b2. A checkout, switch or forced worktree add that takes a branch another worktree holds.
+    # Each segment is judged in the tree it runs in: its own `git -C` or `--git-dir`, else the cwd as
+    # earlier `cd` segments left it. Placed after the pointer rule and before the silent-write rule;
+    # the worktree list is read only for a call of the refused forms.
+    here = cwd
+    for segment in split_segments(stripped):
+        if not segment.strip():
+            continue
+        words = segment_tokens(segment)
+        moved = _segment_cd_target(words) if words else None
+        if moved is not None:
+            here = _absolute(moved, here)
+            continue
+        matched = two_worktrees_hit(segment, head_root(segment, here))
+        if matched:
+            refuse(tool, "deny", "two-worktrees-one-branch", TWO_WORKTREES_REFUSE_REASON, matched)
 
     # 1c. A git write whose own trace is silenced, by a redirect of either stream to a null
     # device, or, on the measured subcommands, by git's own quiet flag alone. Placed after the
