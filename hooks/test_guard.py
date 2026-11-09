@@ -680,6 +680,11 @@ PUSHAGENTCFG = os.path.join(ROOT, "pushagentcfg")      # claude/agent-<hex> with
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
 PUSH_AGENT_RULE = "push-agent-branch"   # a non-forced push whose destination is an agent-worktree branch name
+# The remedy a push-agent-branch refusal prints: the lane's own branch, by name. It never names the agent's
+# branch (rule git-remedy-never-names-target). A deny has no approval prompt, so its reason never offers one.
+PUSH_AGENT_REMEDY = "git push origin HEAD:<lane-branch>"
+PUSH_AGENT_LACKS = ("Approving the prompt", "push origin claude/agent-", "push origin worktree-agent-",
+                    "HEAD:claude/agent-", "HEAD:worktree-agent-")
 # roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
@@ -7930,38 +7935,67 @@ sh("push: stray branch, a bare push under push.default current asks",
 sh("push: stray branch, the ask names the explicit form HEAD:<branch>", VCS + " push origin HEAD", "ask",
    PUSH_STRAY_RULE, cwd=PUSHSTRAY, carries=("HEAD:<branch>",), lacks=("HEAD:mylocal", "HEAD:lane/x"))
 
-# ASK, rule push-agent-branch. A non-forced push whose destination is an agent-worktree name asks, with or
+# DENY, rule push-agent-branch. A non-forced push whose destination is an agent-worktree name is refused, with or
 # without -u. push-stray-branch stays silent on a branch with no upstream, so this rule carries that case. The
 # names are agent-<hex>, claude/agent-<hex> and worktree-agent-<hex>, with 8 or more hex characters after the
-# prefix. PUSHAGENT sits on its claude/agent- branch, with no upstream.
-push_case("agent branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
-push_case("agent branch, -u HEAD asks", "-u origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
-push_case("agent branch, @ asks", "origin @", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
-push_case("agent branch, the current name as a colon-less refspec asks", "origin claude/agent-a22bb0ed47825117b",
-          "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
-sh("push: agent branch, a bare push under push.default current asks",
-   VCS + " -c push.default=current push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
-push_case("agent worktree, worktree-agent-<hex>, -u HEAD asks", "-u origin HEAD", "ask",
-          cwd=PUSHAGENTWT, rule=PUSH_AGENT_RULE)
-push_case("agent worktree, agent-<hex>, -u HEAD asks", "-u origin HEAD", "ask",
-          cwd=PUSHAGENTBARE, rule=PUSH_AGENT_RULE)
+# prefix. PUSHAGENT sits on its claude/agent- branch, with no upstream. The case names keep their "asks"
+# wording: hooks/mutate_guard.py matches on them.
+
+
+def agent_refused(name, command, cwd=PUSHFEAT, **kw):
+    """One push the agent-branch rule refuses: a deny under its rule id, whose reason prints the lane's remedy
+    and names no agent branch."""
+    sh(name, command, "deny", PUSH_AGENT_RULE, cwd=cwd, carries=(PUSH_AGENT_REMEDY,), lacks=PUSH_AGENT_LACKS, **kw)
+
+
+agent_refused("push: agent branch, HEAD asks", VCS + " push origin HEAD", cwd=PUSHAGENT)
+agent_refused("push: agent branch, -u HEAD asks", VCS + " push -u origin HEAD", cwd=PUSHAGENT)
+agent_refused("push: agent branch, @ asks", VCS + " push origin @", cwd=PUSHAGENT)
+agent_refused("push: agent branch, the current name as a colon-less refspec asks",
+              VCS + " push origin claude/agent-a22bb0ed47825117b", cwd=PUSHAGENT)
+agent_refused("push: agent branch, a bare push under push.default current asks",
+              VCS + " -c push.default=current push", cwd=PUSHAGENT)
+agent_refused("push: agent worktree, worktree-agent-<hex>, -u HEAD asks", VCS + " push -u origin HEAD",
+              cwd=PUSHAGENTWT)
+agent_refused("push: agent worktree, agent-<hex>, -u HEAD asks", VCS + " push -u origin HEAD", cwd=PUSHAGENTBARE)
 # An explicit agent destination from a branch with no upstream (PUSHFEAT, `feat`).
-push_case("explicit agent destination from a branch with no upstream asks",
-          "origin HEAD:claude/agent-a22bb0ed47825117b", "ask", rule=PUSH_AGENT_RULE)
+agent_refused("push: explicit agent destination from a branch with no upstream asks",
+              VCS + " push origin HEAD:claude/agent-a22bb0ed47825117b")
 # Under push.autoSetupRemote, git pushes the current name and sets its upstream itself, so a bare push, `origin`
 # or `-u origin` writes the agent name. The key rides on the call, where the guard reads it.
-sh("push: agent branch, a bare push under autoSetupRemote asks",
-   VCS + " -c push.autoSetupRemote=true push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
-sh("push: agent branch, origin under autoSetupRemote asks",
-   VCS + " -c push.autoSetupRemote=true push origin", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
-sh("push: agent branch, -u origin under autoSetupRemote asks",
-   VCS + " -c push.autoSetupRemote=true push -u origin", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
-# The config-file form: push.autoSetupRemote is in the repo's own config, not on the call, so a bare push asks.
-sh("push: agent branch, a bare push under a config autoSetupRemote asks",
-   VCS + " push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENTCFG)
-# The exact shape: eight hex characters after the prefix ask.
-push_case("agent-12345678, -u HEAD asks (8 hex is the exact shape)", "-u origin HEAD", "ask",
-          cwd=PUSHAGENTEIGHT, rule=PUSH_AGENT_RULE)
+agent_refused("push: agent branch, a bare push under autoSetupRemote asks",
+              VCS + " -c push.autoSetupRemote=true push", cwd=PUSHAGENT)
+agent_refused("push: agent branch, origin under autoSetupRemote asks",
+              VCS + " -c push.autoSetupRemote=true push origin", cwd=PUSHAGENT)
+agent_refused("push: agent branch, -u origin under autoSetupRemote asks",
+              VCS + " -c push.autoSetupRemote=true push -u origin", cwd=PUSHAGENT)
+# The config-file form: push.autoSetupRemote is in the repo's own config, not on the call, so a bare push is refused.
+agent_refused("push: agent branch, a bare push under a config autoSetupRemote asks", VCS + " push",
+              cwd=PUSHAGENTCFG)
+# The exact shape: eight hex characters after the prefix are refused.
+agent_refused("push: agent-12345678, -u HEAD asks (8 hex is the exact shape)", VCS + " push -u origin HEAD",
+              cwd=PUSHAGENTEIGHT)
+# The refusal names the lane's own branch, and it does not echo the agent's name from the command. The push names
+# the agent branch as its destination from a lane checkout (PUSHFEAT, `feat`), so the name is in the command.
+sh("push: agent branch named in the command, the refusal names the lane-branch remedy, not the agent name",
+   VCS + " push origin claude/agent-a22bb0ed47825117b", "deny", PUSH_AGENT_RULE, cwd=PUSHFEAT,
+   carries=(PUSH_AGENT_REMEDY,), lacks=PUSH_AGENT_LACKS + ("claude/agent-a22bb0ed47825117b",))
+
+
+def agent_refusal_opens_with_rule_case():
+    """The agent-branch refusal opens with its rule's id, as the guard's refusals do: "Rule (" and the rule."""
+    got, reason = decide({
+        "raw": None, "tool": "Bash", "cwd": PUSHAGENT, "session": None,
+        "env_path": None, "tool_input": {"command": VCS + " push origin HEAD"},
+    })
+    want = "Rule (" + PUSH_AGENT_RULE + ")"
+    if got != "deny":
+        return False, "expected deny, got %s" % got
+    if not reason.startswith(want):
+        return False, "the reason does not open with %r: %r" % (want, reason[:90])
+    return True, "a deny whose reason opens with %r" % want
+
+
 # A side effect pin: under push.autoSetupRemote, a bare push from main with no upstream writes main, so push-main asks.
 sh("push: main with no upstream, a bare push under autoSetupRemote asks push-main",
    VCS + " -c push.autoSetupRemote=true push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
@@ -7992,6 +8026,19 @@ sh("push: lane branch, origin under autoSetupRemote is silent",
    VCS + " -c push.autoSetupRemote=true push origin", "allow", cwd=PUSHFEAT, silent=True)
 sh("push: lane branch, -u origin under autoSetupRemote is silent",
    VCS + " -c push.autoSetupRemote=true push -u origin", "allow", cwd=PUSHFEAT, silent=True)
+# Controls for the refusal, all silent allows. PUSHOWNREF is `lane-x`, tracking origin/batch-1, with origin/lane-x on
+# the remote. The archive row pushes an agent's own branch to archive/, which shared-trees-archive-then-delete
+# requires before a delete, so it must stay silent.
+sh("push: lane branch, lane-x pushed by its own name is silent", VCS + " push origin lane-x", "allow",
+   cwd=PUSHOWNREF, silent=True)
+sh("push: lane branch, -u origin of lane-x is silent", VCS + " push -u origin lane-x", "allow",
+   cwd=PUSHOWNREF, silent=True)
+sh("push: lane branch, --delete of lane-x is silent", VCS + " push --delete origin lane-x", "allow",
+   cwd=PUSHOWNREF, silent=True)
+sh("push: agent checkout, HEAD to lane/x is silent", VCS + " push origin HEAD:lane/x", "allow",
+   cwd=PUSHAGENT, silent=True)
+sh("push: agent checkout, HEAD to archive/ of the agent's own branch is silent",
+   VCS + " push origin HEAD:archive/claude/agent-a22bb0ed47825117b", "allow", cwd=PUSHAGENT, silent=True)
 
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
@@ -8044,17 +8091,17 @@ push_case("main, no remote in the repo is silent", "origin main", "allow", cwd=P
 sh("main, git -C into a repo with no remote is silent, from a repo with a network origin",
    VCS + " -C " + slash(PUSHNOREMOTE) + " push origin main", "allow", cwd=PUSHFEAT, silent=True)
 
-# ASK, rules 206 a, 207 a and push-agent-branch, on a local-path origin. A main refspec there is silent, and the
-# refspec after it still decides. The controls ask with no main refspec ahead: HEAD on PUSHLOCALSTRAY (its branch
-# tracks origin/other) is stray, and the agent name on PUSHLOCAL asks the agent rule.
+# ASK, rules 206 a and 207 a, and DENY, rule push-agent-branch, on a local-path origin. A main refspec there is
+# silent, and the refspec after it still decides. The controls decide with no main refspec ahead: HEAD on
+# PUSHLOCALSTRAY (its branch tracks origin/other) is stray, and the agent name on PUSHLOCAL is refused.
 push_case("local origin, main then HEAD on a branch tracking another name asks stray", "origin main HEAD", "ask",
           cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
-push_case("local origin, main then the agent name asks the agent rule", "origin main claude/agent-deadbeef01",
-          "ask", cwd=PUSHLOCAL, rule=PUSH_AGENT_RULE)
+agent_refused("push: local origin, main then the agent name asks the agent rule",
+              VCS + " push origin main claude/agent-deadbeef01", cwd=PUSHLOCAL)
 push_case("local origin, HEAD on a branch tracking another name asks stray (control)", "origin HEAD", "ask",
           cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
-push_case("local origin, the agent name alone asks the agent rule (control)", "origin claude/agent-deadbeef01",
-          "ask", cwd=PUSHLOCAL, rule=PUSH_AGENT_RULE)
+agent_refused("push: local origin, the agent name alone asks the agent rule (control)",
+              VCS + " push origin claude/agent-deadbeef01", cwd=PUSHLOCAL)
 # The same two commands on a network origin still ask push-main: the main refspec decides there.
 push_case("network origin, main then HEAD asks push-main", "origin main HEAD", "ask", rule=PUSH_MAIN_RULE)
 push_case("network origin, main then the agent name asks push-main", "origin main claude/agent-deadbeef01", "ask",
@@ -8186,10 +8233,11 @@ chained_ask("push: a lone quote in a commit message does not hide a push to main
             VCS + ' commit -m "don\'t" && ' + VCS + " push origin main", cwd=PUSHFEAT)
 chained_ask("push: a lone quote in a commit message does not hide a stray push that follows it",
             VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHSTRAY)
-chained_ask("push: agent branch, a lone quote in a commit message does not hide a push to an agent name",
-            VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
-chained_ask("push: agent branch, a comment opener inside a string does not hide a push to an agent name",
-            'echo "#" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
+# The agent push is refused on its own, by its rule, not by the ask-alone chain: no ask is chained with it.
+agent_refused("push: agent branch, a lone quote in a commit message does not hide a push to an agent name",
+              VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
+agent_refused("push: agent branch, a comment opener inside a string does not hide a push to an agent name",
+              'echo "#" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
 sh("push: text, an echo that names a push to an agent name, is silent",
    'echo "' + VCS + ' push origin HEAD:claude/agent-a22bb0ed47825117b"', "allow", cwd=PUSHAGENT, silent=True)
 sh("push: text, a multi-line quoted string naming a push to an agent name, is silent",
@@ -16672,6 +16720,11 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The agent-branch refusal's opening words (defined in the push section). Registered here, where LOG_CHECKS_EXTRA is
+# defined, and its family is the push section's, set by hand.
+AGENT_OPENS_LABEL = "push-agent-branch: the refusal opens with its rule id, Rule (push-agent-branch)"
+LOG_CHECKS_EXTRA.append((AGENT_OPENS_LABEL, agent_refusal_opens_with_rule_case))
+LOG_FAMILY[AGENT_OPENS_LABEL] = "push-delete"
 # The wait-until remedy checks are defined beside the wait-until cases. They are log checks, so they are
 # registered here, where LOG_CHECKS_EXTRA is defined, and their family is set by hand.
 for _constant in REMEDY_CONSTANTS:
@@ -28383,13 +28436,14 @@ OV_ACTS = (
      "kill %d" % FOREIGN, NOGIT, "deny", "machine-wide-kill", None),
     ("ask-linked-discard", "a hard reset in a linked worktree, which asks",
      VCS + " reset --hard", GITWT, "ask", "shared-tree", None),
-    # The asks of rulings 206 a and 207 a, and of rule push-agent-branch, are lifted by an owner override like any ask.
+    # The asks of rulings 206 a and 207 a are lifted by an owner override like any ask. The refusal of rule
+    # push-agent-branch is lifted the same way, as any refusal is.
     ("push-stray", "a non-forced push that lands on a stray branch",
      VCS + " push origin HEAD", PUSHSTRAY, "ask", PUSH_STRAY_RULE, None),
     ("push-main", "a non-forced push of main",
      VCS + " push origin main", PUSHMAIN, "ask", PUSH_MAIN_RULE, None),
     ("push-agent", "a non-forced push of an agent-worktree branch name",
-     VCS + " push origin HEAD", PUSHAGENT, "ask", PUSH_AGENT_RULE, None),
+     VCS + " push origin HEAD", PUSHAGENT, "deny", PUSH_AGENT_RULE, None),
     # The owner's refused wait for a clock time, from the main session (no agent id, so a once override reaches it).
     ("wait-until-clock-loop", "a foreground loop that waits for a clock time",
      WAIT_UNTIL_CLOCK_LOOP, NOGIT, "deny", "waiter", None),
