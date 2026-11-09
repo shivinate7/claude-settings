@@ -1,0 +1,10 @@
+{
+  "title": "A release check runs merge-tree pairwise across the whole release set and the building batch, and names each clashing pair",
+  "phase": "now",
+  "status": "todo",
+  "order": 929,
+  "owner": "coordinator",
+  "why": "Coordinator 15:30 CST Nov 9, owner goal: fix slow merges and mechanize the fix (owner, Nov 8 20:24 CST). Batch 70 dropped 30 of 55 released PRs (sighting 15:16 CST): each drop conflicted with main after batch 69 landed, or with another lane in the batch, because about 90 open PRs touch hooks/guard.py, test_guard.py, merge/merge.py and pr-review-record.md.",
+  "note": "Fix to build: `merge --release-check` (or the batch build's preflight) runs merge-tree pairwise across the whole release set and against the batch that is building, and names each clashing pair. The coordinator then stacks the pair or holds the second lane for the next batch. Today the coordinator checks only against main and named pairs. Related: stack-cross-measure (todo; same check within one lane's PRs, in merge --lane-lint) and lane-lint-stack-holds-base (doing); one home for the merge-tree pair read.",
+  "updatedAt": "2026-11-09T15:27:00-06:00"
+}
