@@ -3386,7 +3386,7 @@ def tool_stamp_since():
     """-> the cutover read from the merge tool's own source checkout (the parent of the folder holding this file, as the other tool paths are found), HEAD's history.
     The salt commit is fixed history, and a checkout that runs code reading the salt holds it, so this fetches nothing. One read per tool root in a process.
     A read that cannot run, or a HEAD with no salt commit, raises Stop naming the checkout, never None: an unknown cutover must not read every unstamped
-    record as old (coordinator item 386, 2026-11-08 12:51 CST). Each such Stop also names the checkout launch.py started from, when it differs and the note can be built (tool_source_env, tool_source_note). A read that succeeds never imports launch."""
+    record as old (coordinator item 386). Each such Stop also names the checkout launch.py started from, when it differs and the note can be built (tool_source_env, tool_source_note). A read that succeeds never imports launch."""
     tool = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     if tool not in _tool_stamp_since:
         where = f"the merge tool's checkout {tool}"
@@ -3414,7 +3414,7 @@ def review_stamp_since(root, base, default=None):
     `REVIEW_STAMP_SALT =`. It reads the default branch (host_default_branch), never the PR's `base`: the stamp
     merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. When the caller's repo has no
     salt commit, whatever its history touched, the cutover comes from the merge tool's own source checkout (tool_stamp_since): the stamp rule then holds
-    in every repo, not only claude-settings (coordinator item 386, 2026-11-08 12:51 CST). A read that cannot run
+    in every repo, not only claude-settings (coordinator item 386). A read that cannot run
     (git errors, no origin/<default branch> ref, a shallow clone whose first salt commit is the boundary, a shallow file that cannot be read, no .git, or a
     tool checkout with no salt commit) raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
     (rule verification-report-unknown-reads). The caller fetches first (fetch_default_branch). One call per (repo top, `base`, default branch) in a process. A `root` in a subfolder reads the repo top's history, since the pathspec is relative to it. A record
