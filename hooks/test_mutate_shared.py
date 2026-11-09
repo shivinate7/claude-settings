@@ -21,8 +21,8 @@ or when MUTATE_FULL=1 asks for it.
 The fourth part pins the layout of a guard mutant's folder: its copy must import lint/layout.py from
 its own root, the folder beside its hooks/.
 
-The fifth part pins the clean-layout control: a target's mutants count as kills only after one full-suite
-run of the unmutated layout passes. A red control reads each mutant UNKNOWN, never KILLED. The control
+The fifth part pins the clean-layout control: a target's mutants count as kills only after one filtered run
+(one required case fragment of its own mutations) of the unmutated layout passes. A red control reads each mutant UNKNOWN, never KILLED. The control
 runs inside the MUTATE_JOBS cap, and a control that raises reads its mutants UNKNOWN too.
 """
 import contextlib
@@ -268,7 +268,8 @@ class _FakeSuite:
     A call is keyed by its copy_path, which holds the name its copy was laid out under: a mutant's label,
     or a target's clean-layout control name. The key, not the text of a folder, says which call it is, so a
     watch copy stays apart from the other watch copies that share `work`. A mutant's call FAILs its required
-    case. A control (`only` None) is green when `control_passes`, red otherwise.
+    case. A control (a target's clean-layout key, whatever `only` it was asked for) is green when
+    `control_passes`, red otherwise.
 
     `hooks` maps a key to a zero-argument function that runs in place of that call's answer, so a case can
     hold a call or raise from it. `join` holds each call up to JOIN_WAIT for a second call to join it.
@@ -327,8 +328,8 @@ class _FakeSuite:
 
 class CleanLayoutControlTests(unittest.TestCase):
     """A mutant's FAIL lines prove a kill only when the same layout, unmutated, passes the suite. Without
-    that control, a layout that crashes reads as a kill. Each target gets one full-suite control run on
-    the unmutated layout. A red control reads its mutants UNKNOWN, naming "clean layout", never KILLED.
+    that control, a layout that crashes reads as a kill. Each target gets one control run, filtered to one
+    required case fragment of its own mutations, on the unmutated layout. A red control reads its mutants UNKNOWN, naming "clean layout", never KILLED.
     The control runs inside the MUTATE_JOBS cap, never holds a job slot the other targets need, and a
     control that raises reads its own mutants UNKNOWN instead of crashing the run."""
 
@@ -403,13 +404,15 @@ class CleanLayoutControlTests(unittest.TestCase):
         self.assertEqual(code, 0, "a green clean layout with every mutant killed must exit 0, not %r" % code)
 
     def test_the_control_runs_once_per_target_unmutated(self):
+        """One control per target, on the unmutated layout. A control is any call that is not a mutant, whatever
+        `only` it asked for, so the count holds whether or not the control runs a filtered subset."""
         entries = self.guard_entries("work-tree: the tree option goes unread",
                                      "pointer-head: the git directory option goes unread")
         suite = _FakeSuite(entries, control_passes=True)
         _code, lines = self.run_main(entries, suite)
-        controls = [call for call in suite.calls if not call["mutant"] and call["only"] is None]
+        controls = [call for call in suite.calls if not call["mutant"]]
         self.assertEqual(len(controls), 1,
-                         "the target runs %d full-suite clean-layout controls, want one: %r" % (len(controls), lines))
+                         "the target runs %d clean-layout controls, want one: %r" % (len(controls), lines))
         tree = controls[0]["tree"]
         for entry in entries:
             label, old, new = mutate_guard.mutation_parts(entry)[:3]
