@@ -8,9 +8,9 @@ import re
 
 import guard_core
 from guard_core import (
-    HEREDOC_HEADER, REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally,
-    basename, dir_before_segment, heredoc_delimiter, is_powershell, norm, resolve_command, segment_tokens,
-    split_segments,
+    HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, PowerShellScript, _expanded,
+    _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, dir_before_segment,
+    heredoc_delimiter, is_powershell, nested_script, norm, resolve_command, segment_tokens, split_segments,
 )
 from guard_env import _quoted_words
 
@@ -291,7 +291,11 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
 # the whole shell word, so `WT="$BASE"/../lane` is one path), the arguments of `export`, `declare`,
 # `typeset`, `local` and `readonly` (`export A=1 D=v`), and a PowerShell assignment: `$D = v` or `$D =v`
 # anywhere, and `$D=v`, `$D='v'` or `$D= v` at a statement's start only, so a bash `echo $D=x` sets
-# nothing. A backslash-newline joins two lines, so it reads as a blank. The last assignment
+# nothing. A backslash-newline joins two lines, so it reads as a blank. The text keeps its type: a
+# PowerShell text (a `pwsh -c` script, `PowerShellScript`, or any text in a PowerShell call) comes back
+# PowerShell, so a later reader judges it by the same rules. In PowerShell text a smart quote U+2018 to
+# U+201E is a quote (`_straight`): the words are read as if it were its ASCII twin, and the result
+# keeps the smart quote as written, so the scan for text that is no data still sees it. The last assignment
 # wins, `unset D` clears it, a use before the assignment stays as written, and single quotes do not
 # expand. An unassigned variable stays unresolved and allowed. `$HOME` reads as `~`:
 # `os.path.expandvars` leaves it literal when HOME is unset (the Windows default), so a literal
@@ -385,44 +389,52 @@ def _dq_end(text: str, j: int, depth: int = 0) -> int:
     return j if j < n else -1
 
 
-def _read_word(cmd: str, i: int):
-    """(end, parts) of the shell word at `i`. `parts` are (kind, text): kind `p` plain, `d` the inside
-    of a double-quoted span, `s` the inside of a single-quoted span. Quotes are read in pairs; a quote
-    with no mate is an ordinary character."""
+def _like(src: str, text: str) -> str:
+    """`text` with the type of `src`, so a slice of PowerShell text is still read as PowerShell."""
+    return text if type(src) is str else type(src)(text)
+
+
+def _read_word(cmd: str, i: int, src=None):
+    """(end, parts) of the shell word at `i`. `parts` are (kind, text, marks): kind `p` plain, `d` the
+    inside of a double-quoted span, `s` the inside of a single-quoted span; `marks` is the span's opening
+    and closing quote as written. Quotes are read in pairs; a quote with no mate is an ordinary character.
+    `cmd` is the text the quotes are read in. `src` is the text the parts are cut from, the same text
+    but for PowerShell's smart quotes (`_straight`): `cmd` has them as ASCII quotes, `src` as written."""
+    src = cmd if src is None else src
     parts, plain, n = [], [], len(cmd)
 
     def flush():
         if plain:
-            parts.append(("p", "".join(plain)))
+            parts.append(("p", _like(src, "".join(plain)), ""))
             plain.clear()
 
     while i < n and cmd[i] not in _WORD_STOP:
         c = cmd[i]
         if c == "\\" and i + 1 < n:
-            plain.append(cmd[i:i + 2])
+            plain.append(src[i:i + 2])
             i += 2
             continue
         if c == "'":
             j = cmd.find("'", i + 1)
             if j >= 0:
                 flush()
-                parts.append(("s", cmd[i + 1:j]))
+                parts.append(("s", _like(src, src[i + 1:j]), src[i] + src[j]))
                 i = j + 1
                 continue
         elif c == '"':
             j = _dq_end(cmd, i + 1)
             if j >= 0:
                 flush()
-                parts.append(("d", cmd[i + 1:j]))
+                parts.append(("d", _like(src, src[i + 1:j]), src[i] + src[j]))
                 i = j + 1
                 continue
         elif c == "$" and cmd.startswith("{", i + 1):
             j = cmd.find("}", i + 2)
             if j >= 0:
-                plain.append(cmd[i:j + 1])
+                plain.append(src[i:j + 1])
                 i = j + 1
                 continue
-        plain.append(c)
+        plain.append(src[i])
         i += 1
     flush()
     return i, parts
@@ -446,13 +458,14 @@ def _dq_text(text: str, table: dict, depth: int = 0) -> str:
     if depth >= _NEST_LIMIT:
         return _expand(text, table)
     out, i, start, n = [], 0, 0, len(text)
+    scan = _straight(text)   # the quotes inside a `$(...)` are read as PowerShell reads them
     while i < n:
         c = text[i]
         if c == "\\":
             i += 2
             continue
         if c == "$" and text.startswith("(", i + 1):
-            end, skip = _subst_end(text, i + 2, 0), 2
+            end, skip = _subst_end(scan, i + 2, 0), 2
         elif c == "`":
             end, skip = text.find("`", i + 1), 1
         else:
@@ -462,7 +475,8 @@ def _dq_text(text: str, table: dict, depth: int = 0) -> str:
             i += 1
             continue
         out.append(_expand(text[start:i], table))
-        out.append(text[i:i + skip] + _resolve_into(text[i + skip:end], dict(table), depth + 1)[0] + text[end])
+        body = _like(text, text[i + skip:end])
+        out.append(text[i:i + skip] + _resolve_into(body, dict(table), depth + 1)[0] + text[end])
         i = start = end + 1
     out.append(_expand(text[start:], table))
     return "".join(out)
@@ -473,14 +487,14 @@ def _rebuild(parts, table: dict, as_script: bool = False, depth: int = 0, as_tar
     `as_script` reads a double-quoted span as a command that runs here (`eval "D=x"`). `as_target` is
     a redirect target word (see `_expand`)."""
     out = []
-    for kind, text in parts:
+    for kind, text, marks in parts:
         if kind == "s":
-            out.append("'" + text + "'")
+            out.append(marks[0] + text + marks[1])
         elif kind == "d" and as_script and depth < _NEST_LIMIT:
             text, table = _resolve_into(text, table, depth + 1)
-            out.append('"' + text + '"')
+            out.append(marks[0] + text + marks[1])
         elif kind == "d":
-            out.append('"' + _dq_text(text, table, depth) + '"')
+            out.append(marks[0] + _dq_text(text, table, depth) + marks[1])
         else:
             out.append(_expand(text, table, as_target))
     return "".join(out), table
@@ -490,7 +504,7 @@ def _value_of(parts, table: dict) -> str:
     """The value a shell gives an assignment's word: quotes removed, `$VAR` read, escapes dropped. A
     backslash-newline outside single quotes joins two lines, so it adds nothing to the value."""
     pieces = []
-    for kind, text in parts:
+    for kind, text, _marks in parts:
         if kind == "s":
             pieces.append(text)
         elif kind == "d":
@@ -516,7 +530,7 @@ def _assign(table: dict, name: str, plus: str, parts, opens_group: bool) -> None
 def _heredoc_at(parts) -> int:
     """Offset in the word of an unquoted `<<` that opens a heredoc (not `<<<`), or -1."""
     offset = 0
-    for kind, text in parts:
+    for kind, text, _marks in parts:
         if kind != "p":
             offset += len(text) + 2   # the quotes around the span
             continue
@@ -541,12 +555,17 @@ def _heredoc_end(cmd: str, start: int, delimiter: str):
 
 
 def _resolve_vars(cmd: str) -> str:
-    """Read each `$VAR` or `${VAR}` as the value assigned earlier in the command."""
-    return _resolve_into(cmd, {"HOME": "~"})[0]
+    """Read each `$VAR` or `${VAR}` as the value assigned earlier in the command. The text keeps its
+    type, so a script that pwsh runs (PowerShellScript) is still read by PowerShell's rules after."""
+    return type(cmd)(_resolve_into(cmd, {"HOME": "~"})[0])
 
 
 def _resolve_into(cmd: str, table: dict, depth: int = 0):
-    """(`cmd` with each `$VAR` read, the table after it): `_resolve_vars` from a given table."""
+    """(`cmd` with each `$VAR` read, the table after it): `_resolve_vars` from a given table. In PowerShell
+    text a smart quote is a quote (`_straight`): the words are read on the text with ASCII quotes, and
+    every piece of the result is cut from the text as written, so the smart quotes stay in it."""
+    src = cmd
+    cmd = str(_straight(src))
     # stack: (table to restore where the group ends, glued to a `$`, closer, the outer command's child names)
     out, stack = [], []
     n, i = len(cmd), 0
@@ -582,8 +601,8 @@ def _resolve_into(cmd: str, table: dict, depth: int = 0):
                         scope.pop(name, None)
                     elif value is not None and (quoted or name not in table):
                         scope[name] = value   # the child expands a verbatim body; the parent, any other
-                out.append(_resolve_into(cmd[i:body_end], scope, depth + 1)[0])
-                out.append(cmd[body_end:line_end])
+                out.append(_resolve_into(_like(src, src[i:body_end]), scope, depth + 1)[0])
+                out.append(src[body_end:line_end])
                 i = line_end
                 if heredocs and cmd.startswith("\n", i):
                     out.append("\n")
@@ -607,11 +626,11 @@ def _resolve_into(cmd: str, table: dict, depth: int = 0):
         elif c == "#":   # a comment: its text is read for uses and holds no assignment
             j = cmd.find("\n", i)
             j = n if j < 0 else j
-            out.append(_expand(cmd[i:j], table))
+            out.append(_expand(src[i:j], table))
             i = j
         else:
-            end, parts = _read_word(cmd, i)
-            word = cmd[i:end]
+            end, parts = _read_word(cmd, i, src)
+            word = src[i:end]
             if operand:   # a redirect's file or a function's name: a word, never a command or assignment
                 text, table = _rebuild(parts, table, False, depth, operand == "target")
                 out.append(text)
@@ -637,7 +656,7 @@ def _resolve_into(cmd: str, table: dict, depth: int = 0):
                 if at_start and before is None:
                     before = dict(table)
                 rest = parts[0][1][head.end():]
-                _assign(table, head.group(1), head.group(2), ([("p", rest)] if rest else []) + parts[1:],
+                _assign(table, head.group(1), head.group(2), ([("p", rest, "")] if rest else []) + parts[1:],
                         cmd.startswith(("(", "`"), end))
                 out.append(word)
                 i = end
@@ -646,7 +665,7 @@ def _resolve_into(cmd: str, table: dict, depth: int = 0):
                 scope = dict(table)
                 scope.update((name, value) for name, value in child.items() if value is not None)
                 rest = parts[0][1][head.end():]
-                _assign(scope, head.group(1), head.group(2), ([("p", rest)] if rest else []) + parts[1:],
+                _assign(scope, head.group(1), head.group(2), ([("p", rest, "")] if rest else []) + parts[1:],
                         cmd.startswith(("(", "`"), end))
                 child[head.group(1)] = scope.get(head.group(1))
                 out.append(word)
@@ -655,21 +674,21 @@ def _resolve_into(cmd: str, table: dict, depth: int = 0):
             ps = _PS_ASSIGN.match(parts[0][1]) if at_start and parts and parts[0][0] == "p" else None
             if ps:   # PowerShell `$D=v`, `$D='v'` or `$D= v` at a statement's start
                 rest = parts[0][1][ps.end():]
-                vend, vparts = end, ([("p", rest)] if rest else []) + parts[1:]
+                vend, vparts = end, ([("p", rest, "")] if rest else []) + parts[1:]
                 if not vparts:   # `$D= v`: the value is the next word
-                    vend, vparts = _read_word(cmd, _BLANKS.match(cmd, end).end())
+                    vend, vparts = _read_word(cmd, _BLANKS.match(cmd, end).end(), src)
                 for held in [table] + [level[0] for level in stack]:
                     _assign(held, ps.group(1), "", vparts, cmd.startswith(("(", "`"), vend))
-                out.append(cmd[i:vend])
+                out.append(src[i:vend])
                 i = vend
                 continue
             if head is None and len(parts) == 1 and parts[0][0] == "p" and _PS_NAME.fullmatch(parts[0][1]):
                 eq = _PS_EQUALS.match(cmd, end)
                 if eq:   # PowerShell `$D = v`. A paren is no scope there, so every level keeps it.
-                    vend, vparts = _read_word(cmd, eq.end())
+                    vend, vparts = _read_word(cmd, eq.end(), src)
                     for held in [table] + [level[0] for level in stack]:
                         _assign(held, parts[0][1][1:], "", vparts, cmd.startswith(("(", "`"), vend))
-                    out.append(cmd[i:vend])
+                    out.append(src[i:vend])
                     i = vend
                     continue
             if at_start:
@@ -712,7 +731,8 @@ def _resolve_into(cmd: str, table: dict, depth: int = 0):
 # FAIL CLOSED. No text is data when the command holds, outside single quotes, a backtick, `$(`,
 # `$'`, `$"`, `<(`, `>(`, a backslash before a quote, an unmated quote, a `<#` (a PowerShell block
 # comment, which hides its quotes), or anywhere a smart quote U+2018 to U+201E (PowerShell reads it
-# as a quote, even inside single quotes): the shell may then read its quotes differently from the
+# as a quote, even inside single quotes, so text with one is never data; a word that holds one is read
+# with it as a quote, `_unquoted`): the shell may then read its quotes differently from the
 # scanner. Bash text is read by bash's own rules: inside double quotes `\"` and `\\` are literal, and
 # a smart quote is an ordinary character. A newline and a `#` inside quotes are text. A backtick and
 # `$(` inside double quotes stay live and stay closed. PowerShell text keeps every mark above. A segment with an unquoted `&`, `(`, `)`, `{` or `}`
@@ -730,7 +750,7 @@ _GH_MESSAGE_CALLS = frozenset((
     ("pr", "create"), ("pr", "edit"), ("issue", "create"), ("issue", "edit")))
 _UNSAFE_MARK = re.compile(r"""`|\\["']|\$['"(]|[<>]\(|<#""")
 # PowerShell reads these as quote marks. They end or open a quote that the scanner does not see.
-_SMART_QUOTES = frozenset("\u2018\u2019\u201a\u201b\u201c\u201d\u201e")
+_SMART_QUOTES = frozenset(PS_DOUBLE_QUOTES + PS_SINGLE_QUOTES)
 _GROUP_MARK = re.compile(r"[&(){}]")
 _FD_DUP = re.compile(r"\d*>&\d*|&>")
 _COMMAND_WORD_HOLDS = re.compile(r"""['"$`(){}\[\]!&]""")
@@ -838,11 +858,28 @@ def _data_words(kind: str, words):
     return data
 
 
+def _typed(text: str, like: str) -> str:
+    """`text` with the PowerShell type of `like`, so the reading follows a word to the next reader."""
+    return PowerShellScript(text) if isinstance(like, PowerShellScript) else text
+
+
+def _straight(word: str) -> str:
+    """In PowerShell text, the word with each smart quote spelled as its ASCII twin. Bash text is as it is."""
+    return _typed(word.translate(PS_STRAIGHT_QUOTES), word) if is_powershell(word) else word
+
+
+def _has_quote(word: str) -> bool:
+    """True when the word holds a quote mark: ASCII, or a smart quote in PowerShell text."""
+    return "'" in word or '"' in word or (is_powershell(word) and any(c in _SMART_QUOTES for c in word))
+
+
 def _unquoted(word: str) -> str:
     """The shell word after quote removal: `a/'b.py'` reads `a/b.py`. A quote inside the other
     kind of quote is text. The `$` of an unquoted `$'...'` or `$"..."` goes with the quote.
+    In PowerShell text a smart quote is a quote too (`_straight`).
     RESIDUAL GAP: a backslash escape inside `$'...'` (hex or octal) is not decoded."""
     out, quote = [], ""
+    word = _straight(word)
     for index, char in enumerate(word):
         if char == quote:
             quote = ""
@@ -857,8 +894,9 @@ def _words_of(word: str):
     """The words a word stands for with its quotes read: the word itself after quote removal, that
     text split as the shell splits it (a `bash -c` script), and each quote's text as its own words
     (cut at a paren too, so `'$(echo 1 > P)'` shows `P`)."""
-    inner = _unquoted(word)
-    out = [inner] + [_unquoted(w) for w in _quoted_words(inner)]   # a quoted script, read again
+    word = _straight(word)
+    inner = _typed(_unquoted(word), word)
+    out = [inner] + [_unquoted(_typed(w, word)) for w in _quoted_words(inner)]   # a quoted script, read again
     for piece in re.split(r"""['"()]""", word):
         out.extend(REDIRECT.sub(r" \1 ", piece).split())
     return out
@@ -887,15 +925,25 @@ _CP_LINK_LONG = ("link", "symbolic-link")
 _NULL_REDIRECT = re.compile(r"(?:\d*|&)>>?(?:/dev/null|nul|\$null)|\d*>" + _DESCRIPTOR, re.IGNORECASE)
 _OPEN_REDIRECT = re.compile(r"\d*>>?|&>>?")
 _CP_DEST_UNSAFE = re.compile(r"[$`*?\[{<>]")
+# A DEST that is one quoted variable (`"$f"`) stays one word, so it cannot split into `-t dir`. Its
+# value is unknown, but a DEST is only ever written, so the sources stay reads.
+_QUOTED_VAR = re.compile(r'"\$(?:\w+|\{\w+\})"')
+
+
+def _cp_start(raw) -> int:
+    """The index of the `cp` command word of a segment, past assignments, a loop keyword (`do`, `then`,
+    `else`, `{`) and a wrapper, by the one reader `resolve_command`; -1 when the segment runs no `cp`."""
+    start = resolve_command(tuple(raw))
+    return start if start is not None and _name(raw[start]) == "cp" else -1
 
 
 def _copy_reads(raw, predicate, cwd):
     """The indexes of the words of a `cp` segment that are only read, else an empty set."""
     words = [_unquoted(word) for word in raw]
-    start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
-    if _name(raw[start] if start < len(raw) else "") != "cp":
+    start = _cp_start(raw)
+    if start < 0:
         return set()
-    operands, target, index = [], None, start + 1
+    operands, target, index, shown = [], None, start + 1, ""
     while index < len(words):
         word = words[index]
         if _NULL_REDIRECT.fullmatch(word):
@@ -922,11 +970,12 @@ def _copy_reads(raw, predicate, cwd):
             target, index = (words[index + 1] if index + 1 < len(words) else None), index + 2
             if target is None:
                 return set()
+            shown = raw[index - 1]
             continue
         if word.startswith("--target-directory="):
-            target = word.split("=", 1)[1]
+            target, shown = word.split("=", 1)[1], ""
         elif word.startswith("-t") and len(word) > 2 and word[1] != "-":
-            target = word[2:]
+            target, shown = word[2:], ""
         elif _CP_FLAGS.fullmatch(word):
             pass
         elif word.startswith("-") or ">" in word or "<" in word:
@@ -937,8 +986,9 @@ def _copy_reads(raw, predicate, cwd):
     if target is None:
         if len(operands) < 2:
             return set()
+        shown = raw[operands[-1]]
         target = words[operands.pop()]
-    if not operands or not target or _CP_DEST_UNSAFE.search(target):
+    if not operands or not target or (_CP_DEST_UNSAFE.search(target) and not _QUOTED_VAR.fullmatch(shown)):
         return set()
     if predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
         return set()
@@ -951,8 +1001,8 @@ def _cp_link_source(raw, holds, cwd) -> str:
     new name the frozen file itself, so a later write there writes it. Every operand but a plain
     DEST is judged; with `-t` every operand is, which fails closed."""
     words = [_unquoted(word) for word in raw]
-    start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
-    if _name(raw[start] if start < len(raw) else "") != "cp":
+    start = _cp_start(raw)
+    if start < 0:
         return ""
     link = target = False
     operands = []
@@ -1013,10 +1063,11 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     ends = []
     segments = split_segments(cmd, ends)
     scans = [_scan(segment) for segment in segments]
-    parsed = [_quoted_words(segment) for segment in segments]
+    parsed = [[_typed(word, segment) for word in _quoted_words(segment)] for segment in segments]
     # The same words with a quoted newline kept, for a `sh -c` script read at its command positions only:
     # the text the write patterns read keeps newlines as spaces, so a quoted newline never ends a command.
-    scripts = [_quoted_words(segment, True) for segment in segments] if command_position else parsed
+    scripts = ([[_typed(word, segment) for word in _quoted_words(segment, True)] for segment in segments]
+               if command_position else parsed)
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
@@ -1050,18 +1101,23 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             else:
                 # An unquoted `)` or backtick glued to the path (`( echo > F)`, `$(... > F)`) is not
                 # part of it. A quoted word ends in its quote, so it is never cut here.
-                word = word.rstrip(")`") or word
-                pieces = _words_of(word) if "'" in word or '"' in word else [word]
+                word = _typed(word.rstrip(")`") or word, word)   # keeps the PowerShell type of the word
+                pieces = _words_of(word) if _has_quote(word) else [word]
                 # `_words_of` cuts a quote's text at a paren but not at a backtick: a `bash -c` script that
                 # holds a backtick substitution ends its path word with one.
-                pieces = [piece.rstrip("`") or piece for piece in pieces]
+                pieces = [_typed(piece.rstrip("`") or piece, piece) for piece in pieces]
                 words.extend(pieces)
                 shown.extend(pieces)
                 kept = scripts[number][index]
-                script.extend(_words_of(kept) if "'" in kept or '"' in kept else [kept])
+                script.extend(_words_of(kept) if _has_quote(kept) else [kept])
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
+        for nested in _powershell_scripts_of(segments[number]):
+            # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too
+            hit = _shell_write_hit(nested, at, predicate, holds, follow_cd, command_position, predicate_command)
+            if hit:
+                return hit
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
@@ -1070,6 +1126,25 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
                 return word
     return ""
+
+
+_PS_LAUNCHER = re.compile(r"pwsh|powershell|cmd|iex|invoke-expression", re.IGNORECASE)
+
+
+def _powershell_scripts_of(segment: str) -> list:
+    """The PowerShell scripts a segment hands on (`pwsh -c`, `powershell -Command`, `cmd /c`, `iex`), else [].
+    A shell the segment starts (`bash -c`, `sh -c`, `env -S`, `eval`) hands on text that is no PowerShell
+    itself: its segments are read the same way, so a `pwsh -c` inside one is found. Each step cuts the
+    text to the script the segment holds, so the walk ends."""
+    if not _PS_LAUNCHER.search(segment):
+        return []
+    tokens = segment_tokens(segment)
+    script = nested_script(tokens) if tokens else ""
+    if not script:
+        return []
+    if isinstance(script, PowerShellScript):
+        return [script]
+    return [found for inner in split_segments(script, []) for found in _powershell_scripts_of(inner)]
 
 
 def _segment_command(words):
@@ -1354,6 +1429,13 @@ def _inline_scripts(command: str):
             if kind and flag.match(tokens[at]):
                 yield kind, str(tokens[at + 1]), number, segments, ends
                 break
+
+
+def interpreter_may_write(raw: str) -> bool:
+    """True when `raw` holds a heredoc or an inline flag and a write call an interpreter body could make:
+    the cheap match that gates `interpreter_write_hit` for a caller that pays to learn its predicate."""
+    return ("<<" in raw or any(flag in raw for flag in _INLINE_FLAG_WORDS)) and bool(
+        _PY_WRITE_CALL.search(raw) or _JS_ONE.search(raw) or _JS_TWO.search(raw))
 
 
 def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
