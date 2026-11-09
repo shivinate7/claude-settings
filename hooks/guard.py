@@ -66,6 +66,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
   hand-made-worktree   deny. A real worktree add whose new tree lands outside
                        `<primary>/.claude/worktrees/`. A repo under the temp folder passes.
+                       A call from an agent (valid `agent_id`) is refused inside that folder
+                       too, unless the tree is its own home or its own red-run folder.
                        (lanes-start-in-tool-worktrees)
   impeccable-review-only  deny. A build or settings-writer command of the impeccable skill.
                        (design-skills)
@@ -857,11 +859,14 @@ def worktree_add_target(args):
     return words[0] if words else None
 
 
-def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
+def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=None) -> str:
     """The new-tree path when `segments[number]` is a real worktree add whose tree lands
     outside `<primary>/.claude/worktrees/`, else "". The primary is the one of the repo the call
     runs in (`dir_before_segment`, then its own `-C`). A repo under the temp folder is a throwaway
-    and passes, so the repo is judged, never the target. Anything unreadable allows."""
+    and passes, so the repo is judged, never the target. A call whose PAYLOAD carries a valid
+    `agent_id`, or an `agent_type` alone, is refused inside that folder too, unless the tree is the agent's recorded home
+    (`agent_worktree_home` status "home") or its own red-run folder (`_own_red_run`); a "no-record"
+    agent has no home to match. Anything unreadable allows."""
     tokens = segment_tokens(segments[number])
     index = resolve_command(tokens) if tokens else None
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
@@ -888,9 +893,20 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
     tree = shell_abs(target, where)
     if tree is None:
         return ""
-    if path_is_inside(tree, os.path.join(primary, ".claude", "worktrees")) is True:
+    if path_is_inside(tree, os.path.join(primary, ".claude", "worktrees")) is not True:
+        return target
+    status, home, _ = agent_worktree_home(payload, drive_form_cwd(cwd))
+    if status == "unknown" and (os.path.normcase(os.path.normpath(where))
+                                != os.path.normcase(os.path.normpath(drive_form_cwd(cwd)))):
+        # a gone cwd reads unknown: ask again from the readable repo, unless it is the same folder
+        status, home, _ = agent_worktree_home(payload, where)
+    if status == "none" and isinstance(payload, dict) and payload.get("agent_type"):
+        status = "no-record"   # an agent_type with no agent_id is an agent with no record
+    flat = os.path.normpath(tree)   # `agent-<me>-red/../lane9` must not match by its unflattened name
+    if status in ("none", "unknown") or _own_red_run(payload, primary, flat):
         return ""
-    return target
+    own = path_is_inside(flat, home) is True and path_is_inside(home, flat) is True
+    return "" if own else target
 
 
 WORKTREE_HAND_MADE_REASON = (
@@ -3784,7 +3800,7 @@ def settle_ask(tool: str, raw: str) -> None:
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", agent: bool = False,
-                background: bool = False, description: str = "") -> None:
+                background: bool = False, description: str = "", payload=None) -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     PENDING_ASK.clear()
     stripped = strip_heredoc_bodies(raw)
@@ -3929,7 +3945,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 1c2. A worktree made by hand, outside the tool's own folder.
     for number, segment in enumerate(segments):
         if segment.strip():
-            matched = hand_made_worktree_hit(segments, number, cwd, ends)
+            matched = hand_made_worktree_hit(segments, number, cwd, ends, payload)
             if matched:
                 refuse(tool, "deny", "hand-made-worktree", WORKTREE_HAND_MADE_REASON, matched)
 
@@ -5528,7 +5544,7 @@ def judge(payload) -> None:
                         transcript if isinstance(transcript, str) else "",
                         bool(payload.get("agent_id") or payload.get("agent_type")),
                         tool_input.get("run_in_background") is True,
-                        tool_input.get("description") or "")
+                        tool_input.get("description") or "", payload)
             segments = split_segments(strip_heredoc_bodies(command))
             matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
             if matched:

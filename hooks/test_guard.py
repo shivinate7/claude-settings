@@ -4119,20 +4119,40 @@ HMMAIN = os.path.join(ROOT, "hmmain")                          # a primary check
 HMLANE = os.path.join(HMMAIN, ".claude", "worktrees", "lane1")  # a real linked tree of it, in home
 HMTMPREPO = os.path.join(TEMP_DIR, "hmtmprepo")                # a repo UNDER the guard's temp folder
 HMSCRATCH = slash(os.path.join(TEMP_DIR, "scratch", "lane-a"))  # a scratch target under temp
+HM_AGENT = "hmagentown1"                                        # an agent id, whose home tree is built
+HM_SIBLING = "hmagentsib2"                                      # a second agent id, named in the denies
+HMHOME = os.path.join(HMMAIN, ".claude", "worktrees", "agent-" + HM_AGENT)  # that agent's own home
+HM_GONE = "hmagentgone4"    # an agent whose home was built, recorded, then removed by the harness
+HM_BADREC = "hmagentbad5"   # an agent whose home record is a folder, so reading it raises
+HMGONE = os.path.join(HMMAIN, ".claude", "worktrees", "agent-" + HM_GONE)  # that agent's gone home
 
 
 def _build_hand_made():
     make_repo(HMMAIN, {"f.txt": "base\n"})
     run_vcs(HMMAIN, "worktree", "add", "-q", HMLANE, "-b", "hmlane1")
+    run_vcs(HMMAIN, "worktree", "add", "-q", HMHOME, "-b", "worktree-agent-" + HM_AGENT)
+    # The record the guard writes on an agent's first call from its home, then the harness removes the
+    # folder and its branch together. The record outlives the folder, in the clone's common directory.
+    run_vcs(HMMAIN, "worktree", "add", "-q", HMGONE, "-b", "worktree-agent-" + HM_GONE)
+    run_vcs(HMMAIN, "worktree", "remove", "--force", HMGONE)
+    run_vcs(HMMAIN, "branch", "-D", "worktree-agent-" + HM_GONE)
+    records = os.path.join(HMMAIN, ".git", "agent-homes")
+    os.makedirs(records, exist_ok=True)
+    write(os.path.join(records, HM_GONE), os.path.realpath(HMGONE))
+    os.makedirs(os.path.join(records, HM_BADREC), exist_ok=True)  # a folder where the record should be
     make_repo(HMTMPREPO, {"f.txt": "base\n"})
     for where in (HMMAIN, HMTMPREPO):
         if run_vcs(where, "rev-parse", "--git-dir").returncode != 0:
             sys.exit("fixture setup failed in _build_hand_made: %r is no repository" % where)
     if not os.path.isdir(HMLANE):
         sys.exit("fixture setup failed in _build_hand_made: no linked tree at %r" % HMLANE)
+    if not os.path.isdir(HMHOME):
+        sys.exit("fixture setup failed in _build_hand_made: no agent home tree at %r" % HMHOME)
+    if os.path.exists(HMGONE):
+        sys.exit("fixture setup failed in _build_hand_made: the gone home still exists at %r" % HMGONE)
 
 
-lazy_fixture([HMMAIN, HMLANE, HMTMPREPO], _build_hand_made)
+lazy_fixture([HMMAIN, HMLANE, HMHOME, HMTMPREPO], _build_hand_made)
 HM = "hand-made-worktree"
 HMADD = VCS + " worktree add "
 HMIN = slash(HMMAIN)
@@ -4203,6 +4223,76 @@ hm_allow("a heredoc body that holds the words passes",
          "cat <<'EOF'\ngit worktree add ../x\nEOF")
 hm_allow("a folder that is no git tree passes, since unknown is no hit",
          HMADD + "../lane-x", cwd=NOGIT)
+
+# AGENT. A call with a valid agent_id that adds a tree inside the primary's folder is refused, unless
+# the tree is the agent's own recorded home or its own red-run folder. Each call runs from that home,
+# so the call itself records the home, and no case depends on another case having run first.
+HMAG = dict(cwd=HMHOME, agent_id=HM_AGENT)
+HMWT = os.path.join(HMMAIN, ".claude", "worktrees")
+HMAGENT_SIB_RED = slash(os.path.join(HMWT, "agent-" + HM_SIBLING + "-red"))
+HMAGENT_PREFIX_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "b-red"))
+HMAGENT_OWN_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "-red"))
+HMAGENT_LANE9 = slash(os.path.join(HMWT, "lane9"))
+hm_deny("an agent adds a sibling agent's red-run folder, by absolute path, is refused",
+        HMADD + HMAGENT_SIB_RED, **HMAG)
+hm_deny("an agent adds a sibling agent's red-run folder, by a relative path, is refused",
+        HMADD + "../agent-" + HM_SIBLING + "-red", **HMAG)
+hm_deny("an agent adds a folder whose name only starts with its own id is refused",
+        HMADD + HMAGENT_PREFIX_RED, **HMAG)
+hm_deny("an agent adds a non-agent folder, lane9, under the primary's folder is refused",
+        HMADD + HMAGENT_LANE9, **HMAG)
+hm_deny("a PowerShell call by an agent, adding a sibling's red-run folder, is refused",
+        HMADD + HMAGENT_SIB_RED, tool="PowerShell", **HMAG)
+hm_deny("an agent adds a tree outside the primary's folder is refused, as before",
+        HMADD + slash(os.path.join(ROOT, "hm-agent-outside")), **HMAG)
+# The agent's own red-run folder, added the way the test-author's red run adds it, and the agent's
+# own home, both pass. The same lane9 add with no agent_id passes too, so the refusal above is the agent's.
+hm_allow("an agent adds its own red-run folder, as the red run does, passes",
+         HMADD + "--detach " + HMAGENT_OWN_RED + " HEAD", **HMAG)
+hm_allow("an agent adds its own recorded home tree passes", HMADD + slash(HMHOME), **HMAG)
+hm_allow("with no agent_id, the lane9 add from the primary passes", HMADD + HMAGENT_LANE9)
+# An agent with no home record yet, called from the primary, has no home to match: a tree in the
+# folder is refused, and its own red-run folder still passes. No case records this id's home.
+HM_NOREC = "hmagentnr3"
+HMNOREC = dict(cwd=HMMAIN, agent_id=HM_NOREC)
+hm_deny("an agent with no home record adds lane9 under the primary's folder is refused",
+        HMADD + HMAGENT_LANE9, **HMNOREC)
+hm_allow("an agent with no home record adds its own red-run folder, as the red run does, passes",
+         HMADD + "--detach " + slash(os.path.join(HMWT, "agent-" + HM_NOREC + "-red")) + " HEAD",
+         **HMNOREC)
+# Only the agent's home itself passes. A tree nested inside it is a new tree in the folder.
+hm_deny("an agent adds a tree nested inside its own recorded home is refused",
+        HMADD + slash(os.path.join(HMHOME, "sub")), **HMAG)
+
+# GONE HOME. The agent's record names its home, but the folder it calls from is gone. The shell falls
+# back to the primary with a `cd`, so the add still lands in the folder and must be refused.
+HMGONE_CALL = dict(cwd=HMGONE, agent_id=HM_GONE)
+hm_deny("an agent whose home folder is gone adds lane9 after a cd into the primary is refused",
+        "cd " + HMIN + " && " + HMADD + ".claude/worktrees/lane9", **HMGONE_CALL)
+hm_allow("an agent whose home folder is gone adds its own red-run folder after a cd, passes",
+         "cd " + HMIN + " && " + HMADD + "--detach .claude/worktrees/agent-" + HM_GONE + "-red HEAD",
+         **HMGONE_CALL)
+
+# AN UNREADABLE RECORD. The record path is a folder, so reading it raises and the status is unknown.
+# An add inside the folder passes: nothing is known about the agent's home, and unknown is no hit.
+hm_allow("an agent whose home record cannot be read adds lane9 under the primary's folder, passes",
+         HMADD + HMAGENT_LANE9, cwd=HMMAIN, agent_id=HM_BADREC)
+
+# A DOT-DOT WALK. The agent's own red-run folder is matched by name before the `..` is applied, so a
+# walk out of it must not pass. The sibling's folder reached the same way is refused too. The caller
+# has no home record, so the worktree-home rule, which reads a recorded home, judges nothing here.
+HMDOT_CALL = dict(cwd=HMWT, agent_id=HM_NOREC)
+hm_deny("an agent walks out of its own red-run folder with .. to add lane9 is refused",
+        HMADD + "./agent-" + HM_NOREC + "-red/../lane9", **HMDOT_CALL)
+hm_deny("an agent walks out of its own red-run folder with .. to add a sibling's red-run folder is refused",
+        HMADD + "./agent-" + HM_NOREC + "-red/../agent-" + HM_SIBLING + "-red", **HMDOT_CALL)
+
+# AGENT TYPE ALONE. A payload that names an agent type and no agent_id is an agent's call: other rules
+# already read agent_type alone as an agent. Its tree in the folder is refused. The control with neither
+# field is the lane9 add from the primary, above: "with no agent_id, the lane9 add from the primary passes".
+hm_deny("a call that names an agent_type and no agent_id adds lane9 under the primary's folder is refused",
+        HMADD + HMAGENT_LANE9, agent_type="test-author")
+
 add("hand-made worktree: an Agent call with no isolation, whose prompt names a worktree path, passes",
     "allow", tool="Agent", cwd=HMMAIN, subagent_type="general-purpose", description="lane",
     prompt="Work in the worktree at ../lane-x. Run `git worktree add ../lane-x` first.")
