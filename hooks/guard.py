@@ -1482,7 +1482,8 @@ GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
 _ROUTE_NUMBER = r"(\d+|\$\w+|\$\{\w+\})"   # a number, or a shell variable holding one: the guard sees the word before the shell fills it
 _COMMENTS_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/" + _ROUTE_NUMBER + r"/comments/?")
 # A comment edited in place, by comment id. The route is read in every form gh takes: a full URL, a query string or fragment after the id, and a
-# command substitution (`$(...)`) in the id or in the repo. The guard judges the route it reads, so a form this pattern misses is an edit it never judges.
+# command substitution (`$(...)`) in the id or in the repo, quoted or not (substitution_words joins an unquoted one). The guard judges the route it
+# reads, so a form this pattern misses is an edit it never judges.
 _EDIT_ID = r"(\d+|\$\w+|\$\{\w+\}|\$\([^)]*\))"
 _COMMENT_EDIT_ROUTE = re.compile(r"(?:https?://[^/\s]+)?/?repos/(.+?)/issues/comments/" + _EDIT_ID + r"/?(?:[?#].*)?", re.DOTALL)
 PR_COMMENT_VALUE_FLAGS = {"-b", "--body", "-F", "--body-file", "-R", "--repo"}
@@ -1515,11 +1516,31 @@ def _piped_cat_file(previous) -> str:
     return words[1] if len(words) == 2 and words[0] == "cat" and not words[1].startswith("-") else ""
 
 
+def substitution_words(args):
+    """`args` with each word that opens a `$(` it does not close joined, with single spaces, to the words up to the one that
+    closes it. The guard splits a command into words before it reads a route, so an unquoted `$(cat idfile)` arrives as two
+    words and no route pattern matches either. A `$(` never closed leaves the words as they are. The words inside a
+    substitution are not the call's own, so a route there is not the call's route."""
+    words, index = [], 0
+    while index < len(args):
+        word, end = args[index], index
+        depth = word.count("(") - word.count(")") if "$(" in word else 0
+        while depth > 0 and end + 1 < len(args):
+            end += 1
+            depth += args[end].count("(") - args[end].count(")")
+        if depth > 0:
+            end = index   # never closed: no join
+        words.append(" ".join(args[index:end + 1]))
+        index = end + 1
+    return words
+
+
 def _api_post_bodies(args, routes=_COMMENTS_ROUTE):
     """Return (repo, number, texts, files, stdin) for a `gh api repos/O/R/issues/<n>/comments` call, else None; `routes`
-    names another route to read (the edit route returns the comment id as `number`). A `body` field
+    names another route to read (the edit route returns the comment id as `number`). The route is read from
+    substitution_words. A `body` field
     is text for -f and --raw-field, and for -F and --field text too unless it starts with `@`, which names a file (`@-` is stdin)."""
-    route = next((a for a in args if routes.fullmatch(a)), None)
+    route = next((a for a in substitution_words(args) if routes.fullmatch(a)), None)
     if route is None or args[:1] != ["api"]:
         return None
     repo, number = routes.fullmatch(route).groups()

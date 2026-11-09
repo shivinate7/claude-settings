@@ -3291,7 +3291,7 @@ def parse_review(text, created=None, cutover=None):
     `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
     tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. The `Stamp: <16 hex>` line between Net value and
     the CI line must equal review_stamp of the lines above it, so a body typed or edited by hand is None. A body with no Stamp line still parses when its
-    comment's `created` time (its last edit, see review_comments) is before `cutover` (review_stamp_since), or `cutover` is None; a Stamp line that is there must match. With no `created`,
+    comment's `created` time (its last edit, see Host.review_read) is before `cutover` (review_stamp_since), or `cutover` is None; a Stamp line that is there must match. With no `created`,
     as for a new post, the Stamp line is required. Trailing whitespace on a line and trailing blank lines are allowed. The
     record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
     lines = [line.rstrip() for line in text.splitlines()]  # trailing spaces and CRLF are no part of a line, the marker's included
