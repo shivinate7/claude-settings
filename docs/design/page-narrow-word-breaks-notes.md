@@ -51,11 +51,11 @@ Text size at the target is the section's 1rem after the cap (§3). 390 is drawn 
 | | 200 | Unpark past its block, 9 px | page scroll 9 px | page scroll 79 px | block: 20.2 / 20.2 / 20.2 px |
 | | 220 to 260 | none | Unpark past its block, 24 px (220) | page scroll 59, 39, 19 px | block: 24.5, 28.8, 33.0 px at 300% |
 
-Checked on the mockup, 120 frames of the pick (4 states, 6 widths, 4 text sizes, plus dark at 300%): no word of a fixed label
-breaks inside, no page scroll, no press past the window or past its parent's content box, no label clipped in its press, every
-press at least 44 by 44 px.
-Checked on page.html with the rules appended, every state above plus the sent state, at 180 to 390 wide and 100 to 300%: the same
-checks pass outside the item cards, apart from the sent-state items in §7. Also: no box moves at 360, 390, 820 and 1280 at 100%, and at
+Checked on the mockup, 120 frames of the pick (4 states, 6 widths, 4 text sizes, plus dark at 300%).
+Result: no word of a fixed label breaks inside. No page scroll. No press runs past the window or its parent's content box.
+No label is clipped in its press. Every press is at least 44 by 44 px.
+Checked on page.html with the rules appended: every state above plus the sent state, at 180 to 390 wide and 100 to 300%.
+The same checks pass outside the item cards, apart from the sent-state items in §7. Also: no box moves at 360, 390, 820 and 1280 at 100%, and at
 1280 at 200% and 300%. The one intended move: the waiting reply under a folded row gains its third line below a 19.5em list (§5).
 
 ## 2. Labels break only between words (both options)
@@ -84,8 +84,8 @@ never scroll sideways. The design below is kept so a later grant can build it.
 - Pick: yes. Departs from: a11y.md "Text size" (web text grows with the browser's default font size) for these three sections at
   180 to 340 px windows; the cap never takes text under the default size. Not blocking.
 - Option "Whole words at the reader's size" (`#o=wrap`): §2 and §5 only. Gain: text keeps the reader's size. Loss: at 180 and 200,
-  300%, Dismiss, Send ask and Unpark run past their box and the page scrolls sideways (31 to 99 px); the row date still breaks inside
-  "Answered"; Send answers clips to "Sen" over "answe".
+  300%, Dismiss, Send ask and Unpark run past their box and the page scrolls sideways (31 to 99 px). The row date still breaks
+  inside "Answered". Send answers clips to "Sen" over "answe".
 - Hide controls: "Whole words, text fits its box", "Whole words at the reader's size".
 
 ## 4. Titles wrap by words, never cut to letters
@@ -97,8 +97,8 @@ never scroll sideways. The design below is kept so a later grant can build it.
 
 ## 5. The waiting reply keeps three lines
 
-- What: below a 19.5em list the folded row's title already clamps at 3 lines; the waiting reply under it clamps at 2, so "Your
-  reply:" filled it and the reply's words never showed. It takes 3, as the row does.
+- What: below a 19.5em list the folded row's title already clamps at 3 lines. The waiting reply under it clamps at 2,
+  so "Your reply:" filled it and the reply's words never showed. It takes 3, as the row does.
 - Gain: the reply's first words show. Loss: the row is one line taller (24.8 px at 100%), at 180 wide only at 100%.
 - Pick: yes.
 
@@ -118,8 +118,8 @@ never scroll sideways. The design below is kept so a later grant can build it.
 | In `.parked`: `.parked > h2` .9375rem, `.pk-hint` and `.pk-why` .875rem | `N rem` | `calc(var(--fit) * N)` |
 
 The px sizes in these sections (`.bar .st` 14.5px, `.stackh` 14px, `.stack .sstate` 14px) stay px; they never grew with text.
-How the divisors were set: per section and window width, the largest section font at which no fixed word breaks, no press runs past
-the window and no label clips (binary search, 180 to 390 wide); each token's line sits under every measured point.
+How the divisors were set: per section and window width, the largest section font that passes three checks (binary search,
+180 to 390 wide). No fixed word breaks. No press runs past the window. No label clips. Each token's line sits under every measured point.
 Named limit, font: measured with the tests' fallback font (DejaVu Sans); Atkinson Hyperlegible Next is not installed here, so its
 widths are unmeasured. The Ask divisor sits about 1% inside its measured limit (19.3 px against 19.5 px at 180 wide). A wider page
 font makes the binding word wider. Fix: none in the mockup; the builder's cases on CI's pinned Chromium decide, as for PR 2423's
@@ -130,9 +130,10 @@ font makes the binding word wider. Fix: none in the mockup; the builder's cases 
 Widened by the coordinator's ruling (2026-11-09 09:28 CST): the lane also applies §2 to the card text (Park, Mark done, option
 labels) and fixes the Unpark sideways scroll. The cap on `.card` below is part B and stays unbuilt.
 
-- Item cards: Park, Mark done and None of these break inside a word at 180 to 220, 300%; option labels ("Re|d", "Blu|e") at
-  180 to 220, 200 to 300%; the context and steps text at 180 to 200, 300%. The same cap on `.card` (about `(100cqi - 106px) / 3`,
-  bound by the option label) would fix them, but card text is mostly px today. Owner grant: yes, to widen this lane.
+- Item cards: Park, Mark done and None of these break inside a word at 180 to 220, 300%. Option labels ("Re|d", "Blu|e") break
+  at 180 to 220, 200 to 300%. The context and steps text breaks at 180 to 200, 300%.
+  The same cap on `.card` (about `(100cqi - 106px) / 3`, bound by the option label) would fix them.
+  Card text is mostly px today. Owner grant: yes, to widen this lane.
 - Prose in the Ask section shrinks with §3 and so wraps by words; prose elsewhere (card context) still breaks at 180, 300%.
 - After a Send (the sent panel up): the page scrolls 9 px sideways at 180 wide at every text size, 100% too, and the answered
   card's line breaks "cho|se" at 180 to 220 at every text size. Both exist on the base, do not depend on text size, and are left
@@ -165,6 +166,7 @@ Review round 1 notes (2026-11-09), not fixed here:
 - ux-component-reads-its-box: pass; the cap reads the section's box (`cqi`), no new media query.
 - ux-label-once, ux-one-plain-name: no copy change.
 
-Departs from: today's labels, which break inside a word at 180 to 260 px windows with 150 to 300% text (`overflow-wrap: anywhere`
-on `.btn.fixw > span`, `.btn.send`, `.replyend .endrow > .btn`, `.askrow .btn`, `.older .uf-labels > span`, `.frow .fgo`), and
-today's text size in the Ask section, send bar and parked block, which follows the reader's size at any window width. Not blocking.
+Departs from: today's labels, which break inside a word at 180 to 260 px windows with 150 to 300% text. The cause is
+`overflow-wrap: anywhere` on `.btn.fixw > span`, `.btn.send`, `.replyend .endrow > .btn`, `.askrow .btn`,
+`.older .uf-labels > span` and `.frow .fgo`. It also departs from today's text size in the Ask section, send bar and parked
+block, which follows the reader's size at any window width. Not blocking.
