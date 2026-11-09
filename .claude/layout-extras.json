@@ -16,7 +16,7 @@
     {"id": "waiting-desk", "url": "https://claude.ai/artifact/KA4nFU4FauQLJgqMdAywVB", "role": "reference", "account": "outlook", "collections": []},
     {"id": "calm-waiting-page", "url": "https://claude.ai/artifact/73C2uYENSXB5bqgAHuacY1", "role": "reference", "account": "outlook", "collections": []},
     {"id": "o10-wake-test", "url": "https://claude.ai/artifact/5YrejFue3ocB1PfRNobNsR", "role": "reference", "account": "outlook", "collections": []},
-    {"id": "claude-settings-roadmap", "url": "https://claude.ai/artifact/W7oM1YhRgsgDUw86N5VSLx", "role": "reference", "account": "gmail", "collections": ["steps", "topics"]},
+    {"id": "claude-settings-roadmap", "url": "https://claude.ai/artifact/W7oM1YhRgsgDUw86N5VSLx", "role": "reference", "account": "gmail", "collections": ["steps", "topics", "meta"]},
     {"id": "ci-options", "url": "https://claude.ai/artifact/XMDQP1nVCuq3u35qvwE8eV", "role": "reference", "account": "outlook", "collections": []},
     {"id": "plan-check-other-repos", "url": "https://claude.ai/artifact/S6Eou4tPnLmypAXzoUdyEA", "role": "reference", "account": "outlook", "collections": []},
     {"id": "orchestrator-vs-builtins", "url": "https://claude.ai/artifact/4J2JgMaDyx3zTgnLG5Lmbx", "role": "reference", "account": "outlook", "collections": []}
