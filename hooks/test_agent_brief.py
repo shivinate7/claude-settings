@@ -18,9 +18,10 @@ the hook prints one JSON object on stdout and exits 0:
 - The staged-diff line holds `git diff --cached --stat`. It appears once for each type that
   commits (builder, test-author, record-writer, designer and any other type) and never for a
   read-only type. Decision lanes-start-in-tool-worktrees.
-- The refusal line holds the words refus, final and base64: a refusal from the harness or a guard is final,
-  so report it and never re-send the command in another form. It appears once for every type, reviewer and
-  Explore included. Its place in the brief is not pinned; its words are.
+- The refusal line holds the words refus, final, base64 and runtime: a refusal from the harness or a guard is final,
+  so report it and never re-send the command in another form, and a command built at runtime from parts counts as
+  that same command. It appears once for every type, reviewer and Explore included. Its place in the brief is not
+  pinned; its words are.
 - A plugin-namespaced type (`my-plugin:builder`) gets the scope of its bare name. The match ignores
   case: `Builder` and `explore` get the scope and the line set of their role.
 - When the payload's cwd holds a .github/stamp.json whose cite.form is set, one brief line
@@ -74,7 +75,7 @@ GENERAL_LINE = ("- Scope: do only what your brief names. A builder never edits t
                 "a record-writer edits Markdown only.")
 STASH_LINE = "- Never run git stash, git reset, git checkout <path>, or git restore."
 STAGED_KEY = "git diff --cached --stat"  # the stable fragment of the staged-diff line; the wording may change
-REFUSAL_WORDS = ("refus", "final", "base64")  # the stable words of the refusal line; its wording may change
+REFUSAL_WORDS = ("refus", "final", "base64", "runtime")  # the stable words of the refusal line; its wording may change
 
 
 def is_refusal_line(line):
