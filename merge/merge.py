@@ -2532,17 +2532,22 @@ def lane_head_and_base(root, target, base):
     return head, base
 
 def refuse_unstacked_head(root, head, base):
-    """A stacked PR (base other than main) whose head lacks its base's current head conflicts when it merges, so the lint FAILs it before
-    the long ci-job run. The caller has fetched origin/<base> (open_worktree). A read that cannot say is a Stop, never a pass. Main moving on is
-    not this check's job: a PR on main is not read."""
+    """A stacked PR (base other than main) whose head lacks its base's current head FAILs the lint before the long ci-job run. The caller
+    has fetched origin/<base> (open_worktree). In a shallow clone that cut the answer, the check fetches the full history once and asks
+    again. A read that still cannot say is a Stop, never a pass. Main moving on is not this check's job: a PR on main is not read."""
     if base == "main":
         return
     c, tip = git(root, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{base}^{{commit}}")
     held = None if c else ancestor(root, tip, head)
+    if held is None and not c:
+        import git_reads  # hooks/git_reads.py: the one shallow probe
+        if git_reads.is_shallow(root) is True:
+            git(root, "fetch", "-q", "--unshallow", "origin", "+refs/heads/*:refs/remotes/origin/*")  # a failed fetch leaves the read unknown below
+            held = ancestor(root, tip, head)
     if held is None:
         raise Stop(f"the stack check of {head[:9]} against {base} is unknown: git could not say whether the head holds origin/{base}. Run again. {LANE_LINT_CITE}")
     if not held:
-        raise Stop(f"the lint of {head[:9]} FAILs: its base branch {base} moved on to {tip[:9]}, and the head does not contain it, so the PR will conflict when it merges. "
+        raise Stop(f"the lint of {head[:9]} FAILs: the head lacks {base}'s current head {tip[:9]}. "
                    f"Merge {base} into the lane with an ordinary merge commit, push, and run `merge --lane-lint` again. {LANE_LINT_CITE}")
 
 def ci_job_run(wt, *args, notes=None):
