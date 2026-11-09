@@ -1,0 +1,11 @@
+{
+  "title": "iOS builds ship to TestFlight from GitHub Actions, with the App Store key as a protected GitHub environment secret",
+  "why": "Proposal from the mailaudit coordinator (session_01MVD32RMmHxq9LhRNihx66B), after mailaudit owner answer 65 a; the home, degen and mailaudit coordinators agreed one shared reusable macOS workflow on 2026-11-08 (page ask ask-mw8lneqo26).",
+  "note": "Filed by triage, Nov 8 19:46 CST. Waits on page item 452 testflight-from-actions: it departs from decision ios-ship-is-one-shared-tool (key only on the Mac). On a: one claude-settings record plus the shared workflow; each repo keeps its own ruling on where builds ship. Related: steps c47, c91.",
+  "phase": "next",
+  "owner": "owner",
+  "lane": "",
+  "status": "blocked",
+  "order": 859,
+  "updatedAt": "2026-11-08T19:46:00-06:00"
+}
