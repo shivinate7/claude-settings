@@ -2999,7 +2999,7 @@ for (const scheme of SCHEMES) {
 }
 
 // With the root font size doubled at 360 wide, the title's font size doubles, the column beside a side press is at least 8em of the
-// doubled root, and no press covers the row's text or the other Ask box press. Sizes are px, so the title does not grow with the root.
+// doubled root, and no press covers the row's text or the other Ask box press.
 for (const scheme of SCHEMES) {
   test(`press rows, ${scheme}: with the root font size doubled at 360 wide, the row title's font size doubles`, async (t) => {
     const page = await foldedRowPage(t, "dismiss", 360, scheme); if (!page) return;
@@ -3086,6 +3086,141 @@ for (const width of [1440, 820, 390, 360]) for (const scheme of SCHEMES) {
     const g = await pressGeo(page, FOLD_ROWS.dismiss.ask.id);
     const v = [g.add.l, g.add.r, g.send.l, g.send.r].map(Math.round);
     assert.ok(near(v, PIN_ASK[width]), `the Ask box presses are at x [${v}] at ${width} wide, not the pinned [${PIN_ASK[width]}]`);
+  });
+}
+
+// The narrowest width where a side press sits beside the row's text. Widths from 180 to 400 are tried in 1 px steps on one page, so the
+// width is the layout's own breakpoint. The press is beside when its left edge is past the text column's right edge.
+async function narrowestBeside(page, id) {
+  for (let w = 180; w <= 400; w++) {
+    await page.setViewportSize({ width: w, height: 800 });
+    const g = await pressGeo(page, id);
+    if (g.press.l >= g.title.r - 0.5) return { width: w, g };
+  }
+  return null;
+}
+for (const kind of SIDE_KINDS) for (const scheme of SCHEMES) {
+  test(`press rows, ${scheme}: at the narrowest width where the ${FOLD_ROWS[kind].press} press sits beside the ${kind} row's text, the text column is at least 8em`, async (t) => {
+    const page = await foldedRowPage(t, kind, 360, scheme); if (!page) return;
+    const id = FOLD_ROWS[kind].ask.id;
+    const hit = await narrowestBeside(page, id);
+    assert.ok(hit, `the ${FOLD_ROWS[kind].press} press never sits beside the ${kind} row's text from 180 to 400 wide`);
+    foldedScope(await foldedDate(page, id), kind, hit.width);
+    const col = hit.g.title.r - hit.g.title.l, need = 8 * hit.g.rootSize;
+    assert.ok(col >= need, `the text column beside the ${FOLD_ROWS[kind].press} press is ${Math.round(col)} px at ${hit.width} wide, not at least ${need} px (8em)`);
+  });
+}
+
+// The reply box's Close and Send reply, as boxes from the form's top-left corner. Both are reached through the thread's Reply press.
+const replyGeo = (page, root) => page.evaluate((k) => {
+  const box = (r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom });
+  const f = document.querySelector("form.replyform"), rx = document.getElementById("rx-" + k), rs = document.getElementById("rs-" + k);
+  if (!f || !rx || !rs) return null;
+  const fb = box(f.getBoundingClientRect());
+  const rel = (el) => { const b = box(el.getBoundingClientRect()); return { l: b.l - fb.l, r: b.r - fb.l, t: b.t - fb.t, b: b.b - fb.t, text: el.textContent.trim() }; };
+  return { rx: rel(rx), rs: rel(rs) };
+}, root);
+// Close and Send reply at the default text, in px from the form's top-left corner: [left, right, top, bottom]. Tolerance is 1 px.
+const REPLY_PINS = { 360: { rx: [13, 79, 241, 289], rs: [164, 281, 241, 289] }, 390: { rx: [13, 79, 241, 289], rs: [194, 311, 241, 289] } };
+for (const width of [360, 390]) for (const scheme of SCHEMES) {
+  test(`press rows, ${scheme}: at ${width} wide the reply form's Close and Send reply keep their boxes`, async (t) => {
+    const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: RPL_NEW, viewport: { width, height: 800 }, scheme }); if (!page) return;
+    await openReply(page, RPL_ROOT);
+    const g = await replyGeo(page, RPL_ROOT);
+    assert.ok(g, "no reply form is drawn at " + width + " wide");
+    assert.equal(g.rx.text, "Close", "the first press in the reply form reads " + JSON.stringify(g.rx.text) + ", not Close");
+    assert.equal(g.rs.text, "Send reply", "the second press in the reply form reads " + JSON.stringify(g.rs.text) + ", not Send reply");
+    for (const k of ["rx", "rs"]) {
+      const got = [g[k].l, g[k].r, g[k].t, g[k].b].map(Math.round);
+      assert.ok(near(got, REPLY_PINS[width][k]), `${g[k].text} is at [${got}] in the reply form at ${width} wide, not the pinned [${REPLY_PINS[width][k]}]`);
+    }
+  });
+}
+for (const scheme of SCHEMES) {
+  test(`press rows, ${scheme}: with the root font size doubled at 390 wide, the reply form's Close and Send reply do not overlap`, async (t) => {
+    const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: RPL_NEW, viewport: { width: 390, height: 800 }, scheme }); if (!page) return;
+    await openReply(page, RPL_ROOT);
+    await zoomText(page);
+    const g = await replyGeo(page, RPL_ROOT);
+    assert.ok(g, "no reply form is drawn at 390 wide with the root font size doubled");
+    assert.equal(g.rx.text, "Close", "the first press in the reply form reads " + JSON.stringify(g.rx.text) + ", not Close");
+    assert.equal(g.rs.text, "Send reply", "the second press in the reply form reads " + JSON.stringify(g.rs.text) + ", not Send reply");
+    assert.ok(!meets(g.rx, g.rs), `Close (at x ${spanOf(g.rx)}) and Send reply (at x ${spanOf(g.rs)}) overlap at 390 wide with the root font size doubled`);
+  });
+}
+
+// The Dismissed line: the folded row's Dismiss, pressed, leaves the line in the row's place. Its glyph is .g, its text is the line's other span,
+// and its press is the line's button (Restore). The runs are the text's own, clipped to its box, so a line the box hides is not read.
+async function droppedPage(t, width, scheme) {
+  const page = await foldedRowPage(t, "dismiss", width, scheme); if (!page) return null;
+  await pressDismiss(page, FOLD_ROWS.dismiss.ask.id);
+  await mustHave(page, `li#row-${FOLD_ROWS.dismiss.ask.id}.askc.dropped`, "the Dismissed line in the row's place");
+  return page;
+}
+const dropGeo = (page, id) => page.evaluate((id) => {
+  const box = (r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom });
+  const line = document.querySelector(`li#row-${id} > p.sline:not(.dline)`), glyph = line.querySelector(":scope > .g"), text = line.querySelector(":scope > span:not(.g)"), press = line.querySelector(".btn");
+  const tb = box(text.getBoundingClientRect());
+  const raw = [], walk = document.createTreeWalker(text, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) { const rg = document.createRange(); rg.selectNodeContents(n); raw.push(...rg.getClientRects()); }
+  const top = Math.min(...raw.map((r) => r.top)), first = raw.filter((r) => Math.abs(r.top - top) < 2);
+  const runs = raw.map((r) => ({ l: Math.max(r.left, tb.l), t: Math.max(r.top, tb.t), r: Math.min(r.right, tb.r), b: Math.min(r.bottom, tb.b) })).filter((b) => b.r - b.l > 0.5 && b.b - b.t > 0.5);
+  const gb = box(glyph.getBoundingClientRect());
+  return { text: line.textContent.replace(/\s+/g, " ").trim(), pressName: press ? press.textContent.trim() : "", press: press ? box(press.getBoundingClientRect()) : null,
+    runs, textBottom: Math.max(...runs.map((b) => b.b)), glyphMid: (gb.t + gb.b) / 2, lineMid: (Math.min(...first.map((r) => r.top)) + Math.max(...first.map((r) => r.bottom))) / 2 };
+}, id);
+// The Restore press does not cover the Dismissed line's text, at 280 and 180 wide and at 360 with the root font size doubled.
+const DROP_OVERLAP = [[280, false, "280 wide"], [180, false, "180 wide"], [360, true, "360 wide with the root font size doubled"]];
+for (const [width, zoom, label] of DROP_OVERLAP) for (const scheme of SCHEMES) {
+  test(`press rows, ${scheme}: at ${label} the Restore press of the Dismissed line does not cover its text`, async (t) => {
+    const page = await droppedPage(t, width, scheme); if (!page) return;
+    if (zoom) await zoomText(page);
+    const g = await dropGeo(page, FOLD_ROWS.dismiss.ask.id);
+    assert.ok(g.text.startsWith("Dismissed. "), `the line reads ${JSON.stringify(g.text.slice(0, 40))} at ${label}, not Dismissed`);
+    assert.ok(g.press, "the Dismissed line has no press at " + label);
+    assert.ok(g.pressName.startsWith("Restore"), `the line's press reads ${JSON.stringify(g.pressName)} at ${label}, not Restore`);
+    const hit = g.runs.find((b) => meets(b, g.press));
+    assert.ok(!hit, `the Restore press at ${spanOf(g.press)} covers the Dismissed line's text at ${hit && spanOf(hit)}, at ${label}`);
+  });
+}
+// Where the press is under the text (280, 240 and 180 wide, and 360 with the root font size doubled), the glyph sits on the first text line's
+// middle. At 360 wide with the default text the press is beside the text, so the glyph is not read there.
+const DROP_STACKED = [[280, false, "280 wide"], [240, false, "240 wide"], [180, false, "180 wide"], [360, true, "360 wide with the root font size doubled"]];
+for (const [width, zoom, label] of DROP_STACKED) for (const scheme of SCHEMES) {
+  test(`press rows, ${scheme}: at ${label} the Dismissed line's glyph sits on the middle of its first text line`, async (t) => {
+    const page = await droppedPage(t, width, scheme); if (!page) return;
+    if (zoom) await zoomText(page);
+    const g = await dropGeo(page, FOLD_ROWS.dismiss.ask.id);
+    assert.ok(g.text.startsWith("Dismissed. "), `the line reads ${JSON.stringify(g.text.slice(0, 40))} at ${label}, not Dismissed`);
+    assert.ok(g.press, "the Dismissed line has no press at " + label);
+    assert.ok(g.press.t >= g.textBottom - 1, `the Restore press is beside the text at ${label}, not under it, so the glyph case does not read this layout`);
+    const off = g.glyphMid - g.lineMid;
+    assert.ok(Math.abs(off) <= 2, `the glyph's centre is ${Math.round(Math.abs(off))} px ${off > 0 ? "below" : "above"} the first text line's middle at ${label}, not within 2 px`);
+  });
+}
+
+// ---------------------------------------------------------------- the tab list at narrow widths
+// The tab list wraps at 400 wide and under. The selected tab, Questions by default, sits on the list's bottom border, and the page does not
+// scroll sideways. Widths: 180, and 320 with the root font size doubled.
+const tabGeo = (page) => page.evaluate(() => {
+  const box = (el) => { const b = el.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; };
+  return { nav: box(document.getElementById("tabs")), q: box(document.getElementById("tabQ")), scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth };
+});
+const TAB_WIDTHS = [[180, false, "180 wide"], [320, true, "320 wide with the root font size doubled"]];
+for (const [width, zoom, label] of TAB_WIDTHS) for (const scheme of SCHEMES) {
+  test(`tab list, ${scheme}: at ${label} the selected tab sits on the tab list's border line`, async (t) => {
+    const page = await open(t, { viewport: { width, height: 900 }, scheme }); if (!page) return;
+    if (zoom) await zoomText(page);
+    await mustHave(page, "#tabQ", "Questions tab");
+    assert.equal(await page.getAttribute("#tabQ", "aria-selected"), "true", "Questions is not the selected tab at " + label);
+    const g = await tabGeo(page);
+    assert.ok(Math.abs(g.nav.b - g.q.b) <= 2, `the selected tab's bottom is ${Math.round(g.nav.b - g.q.b)} px above the tab list's border line at ${label}`);
+  });
+  test(`tab list, ${scheme}: at ${label} the page does not scroll sideways`, async (t) => {
+    const page = await open(t, { viewport: { width, height: 900 }, scheme }); if (!page) return;
+    if (zoom) await zoomText(page);
+    const g = await tabGeo(page);
+    assert.ok(g.scrollW <= g.innerW, `the page is ${g.scrollW} px wide in a ${g.innerW} px window at ${label}`);
   });
 }
 
