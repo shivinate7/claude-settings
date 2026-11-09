@@ -50,6 +50,7 @@ import merge as merge_mod  # noqa: E402  the review record's form and parser (on
 
 LINT_DIR = HERE
 HOOKS_DIR = os.path.join(HERE, "..", "hooks")
+ACTIONS_DIR = os.path.join(HERE, "..", "actions")
 CALLS = trg.SameTurnWriter()  # builds tool-call records; holds no state
 LANE_ENV, LANE_ID, PARENT = "cse_lane1", "session_lane1", "session_parent1"  # remote_session_id maps cse_ to session_
 PR = 12
@@ -219,7 +220,8 @@ class ReviewRecordTests(unittest.TestCase):
         subprocess.run(["git", "init", "-q", self.repo], check=True, capture_output=True)
         subprocess.run(["git", "-C", self.repo, "remote", "add", "origin",
                         "https://github.com/example-owner/example-repo.git"], check=True, capture_output=True)
-        # The default branch the stand-in names: origin/main at an empty commit, with no merge/merge.py, so its cutover is None.
+        # The default branch the stand-in names: origin/main at an empty commit, with no merge/merge.py. The repo holds no salt
+        # commit there, so its own cutover read finds none, and the merge tool's checkout gives the cutover.
         subprocess.run(["git", "-C", self.repo, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com",
                         "commit", "-q", "--allow-empty", "-m", "fixture"], check=True, capture_output=True)
         subprocess.run(["git", "-C", self.repo, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True, capture_output=True)
@@ -240,25 +242,62 @@ class ReviewRecordTests(unittest.TestCase):
         with open(os.path.join(self.gh_dir, "state.json"), "w", encoding="utf-8") as handle:
             json.dump(state, handle)
 
-    def cutover_history(self, base):
-        """origin/<base> holds merge/merge.py without the salt line, then the commit that adds it, at CUTOVER. update-ref sets the
-        remote-tracking ref, so nothing is pushed. Then merge's review_stamp_since reads this repo's own history."""
-        path = os.path.join(self.repo, "merge", "merge.py")
+    def cutover_history(self, base=None, root=None):
+        """HEAD of `root` (this run's repo when None) holds merge/merge.py without the salt line, then the commit that adds it, at CUTOVER.
+        With a `base`, update-ref also sets origin/<base> to that HEAD, so nothing is pushed. merge's review_stamp_since reads
+        origin/<default branch>, and tool_stamp_since reads the merge tool checkout's HEAD."""
+        root = root or self.repo
+        path = os.path.join(root, "merge", "merge.py")
         os.makedirs(os.path.dirname(path))
         for text, date in ((PRE_SALT_SOURCE, "2026-10-20 10:00:00 +0000"), (SALT_SOURCE, CUTOVER_GIT_DATE)):
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write(text)
             env = dict(os.environ, GIT_AUTHOR_DATE=date, GIT_COMMITTER_DATE=date)
-            subprocess.run(["git", "-C", self.repo, "add", "merge/merge.py"], check=True, capture_output=True)
-            subprocess.run(["git", "-C", self.repo, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com",
+            subprocess.run(["git", "-C", root, "add", "merge/merge.py"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", root, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com",
                             "commit", "-q", "-m", "fixture"], check=True, capture_output=True, env=env)
-        subprocess.run(["git", "-C", self.repo, "update-ref", "refs/remotes/origin/" + base, "HEAD"], check=True, capture_output=True)
+        if base is not None:
+            subprocess.run(["git", "-C", root, "update-ref", "refs/remotes/origin/" + base, "HEAD"], check=True, capture_output=True)
 
     def in_process_cutover(self, default):
         """merge's review_stamp_since, run in this process for the default branch `default`. gh is not on this process's PATH, so the
         default branch is the one the stand-in's pulls carry, given by a patch of host_default_branch."""
         with mock.patch.object(merge_mod, "host_default_branch", return_value=default):
             return merge_mod.review_stamp_since(self.repo, default)
+
+    def tool_checkout_with_salt(self):
+        """A merge tool checkout whose HEAD history adds the salt line at CUTOVER. Its merge/merge.py links to the merge tool beside
+        this file, so the hook loads the same code. lint/, hooks/ and actions/ link beside it: merge.py imports from the first two and reads
+        actions/ci-alarm/events.json when it loads. The cutover read reads the history's blobs, which hold the salt text, so the links do
+        not change the cutover."""
+        tool = os.path.join(self.run_dir, "tool")
+        os.makedirs(tool)
+        subprocess.run(["git", "init", "-q", tool], check=True, capture_output=True)
+        self.cutover_history(root=tool)
+        merge_py = os.path.join(tool, "merge", "merge.py")
+        os.remove(merge_py)
+        os.symlink(os.path.join(HERE, "..", "merge", "merge.py"), merge_py)
+        for name, source in (("lint", LINT_DIR), ("hooks", HOOKS_DIR), ("actions", ACTIONS_DIR)):
+            os.symlink(source, os.path.join(tool, name))
+        return tool
+
+    def assert_tool_cutover(self, tool):
+        """The scope the tool cases branch on: this repo's default branch holds no salt commit, so its cutover read finds none, and
+        the merge tool's checkout holds the salt at CUTOVER. Checked before any record, so a case that passes shows the tool's cutover."""
+        self.assertIsNone(merge_mod.salt_cutover(self.repo, "origin/main")[0],
+                          "fixture: the repo's default branch holds a salt commit, so the tool fallback is not reached")
+        self.assertEqual(merge_mod.salt_cutover(tool, "HEAD")[0], CUTOVER,
+                         "fixture: the merge tool checkout's salt commit is not at the cutover")
+
+    def stop_on_tool_cutover(self, tool, comments):
+        """The Stop run for a repo whose default branch has no salt, so its cutover is the merge tool's. The copied layout (no merge/
+        beside lint/) finds merge/merge.py through the rules file, which names `tool`. MERGE_TOOL_SOURCE names the checkout in a Stop's
+        note only, so the cutover read does not depend on it."""
+        script = self.install_layout(copy=True)
+        self.point_rules_at_checkout(tool)
+        self.serve(comments=comments)
+        with mock.patch.dict(os.environ, {"MERGE_TOOL_SOURCE": tool}):
+            return self.stop(self.lane_turn(report(CLAIM)), script=script)
 
     def gh_calls(self):
         """The argv of each stand-in call of the last Stop run."""
@@ -283,9 +322,9 @@ class ReviewRecordTests(unittest.TestCase):
                         os.symlink(src, os.path.join(dst_dir, name))
         return os.path.join(self.cfg, "lint", "report_guard.py")
 
-    def point_rules_at_checkout(self):
-        """The global rules file: one `@<path>/CLAUDE.md` line naming this real checkout, with merge/merge.py."""
-        clone = os.path.dirname(os.path.realpath(HERE))
+    def point_rules_at_checkout(self, clone=None):
+        """The global rules file: one `@<path>/CLAUDE.md` line naming `clone`, a checkout with merge/merge.py (this real checkout when None)."""
+        clone = clone or os.path.dirname(os.path.realpath(HERE))
         with open(os.path.join(self.cfg, "CLAUDE.md"), "w", encoding="utf-8") as handle:
             handle.write("@%s/CLAUDE.md\n" % clone)
 
@@ -440,6 +479,45 @@ class ReviewRecordTests(unittest.TestCase):
         self.serve(comments=[{"body": unstamped(record()), "created_at": BEFORE, "updated_at": AFTER}], base="fixture",
                    default_branch="fixture")
         self.assert_blocked(self.stop(self.lane_turn(report(CLAIM))))
+
+    def test_an_unstamped_record_after_the_tool_cutover_blocks_a_pass_claim_when_the_repo_has_no_salt(self):
+        # Catches: a repo with no salt on its default branch reading no cutover, instead of the merge tool's, so an unstamped record
+        # made after the tool's cutover is not refused.
+        tool = self.tool_checkout_with_salt()
+        self.assert_tool_cutover(tool)
+        body = unstamped(record())
+        self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body, AFTER, CUTOVER), LIVE)[0], "bad",
+                         "fixture: merge/merge.py does not read this unstamped record, made after the cutover, as bad")
+        out = self.stop_on_tool_cutover(tool, [{"body": body, "created_at": AFTER}])
+        self.assert_reads_of(PR)
+        self.assertNotIn("UNKNOWN", (out or {}).get("systemMessage", ""), out)
+        self.assert_blocked(out)
+        self.assertIn("PR #12", out["reason"], out)
+
+    def test_an_unstamped_record_before_the_tool_cutover_satisfies_a_pass_claim_when_the_repo_has_no_salt(self):
+        # Catches: a repo with no salt on its default branch reading no cutover, instead of the merge tool's. With no cutover an
+        # unstamped record is refused, though merge reads a record made before the cutover as done. Only the tool's cutover places it.
+        tool = self.tool_checkout_with_salt()
+        self.assert_tool_cutover(tool)
+        body = unstamped(record())
+        self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body, BEFORE, CUTOVER), LIVE)[0], "done",
+                         "fixture: merge/merge.py does not call this unstamped record before the cutover done")
+        out = self.stop_on_tool_cutover(tool, [{"body": body, "created_at": BEFORE}])
+        self.assert_reads_of(PR)
+        self.assertNotIn("UNKNOWN", (out or {}).get("systemMessage", ""), out)
+        self.assertIsNone(out, "an unstamped record made before the merge tool's cutover is refused in a repo with no salt:\n" + str(out))
+
+    def test_a_stamped_record_after_the_tool_cutover_satisfies_a_pass_claim_when_the_repo_has_no_salt(self):
+        # Catches: a stamped record made after the merge tool's cutover, refused in a repo with no salt on its default branch.
+        tool = self.tool_checkout_with_salt()
+        self.assert_tool_cutover(tool)
+        body = record()
+        self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body, AFTER, CUTOVER), LIVE)[0], "done",
+                         "fixture: merge/merge.py does not call this stamped record done")
+        out = self.stop_on_tool_cutover(tool, [{"body": body, "created_at": AFTER}])
+        self.assert_reads_of(PR)
+        self.assertNotIn("UNKNOWN", (out or {}).get("systemMessage", ""), out)
+        self.assertIsNone(out, out)
 
     def test_record_whose_rounds_hold_no_pass_does_not_satisfy_a_pass_claim(self):
         # Catches: a record for the live head read as satisfying a PASS claim when none of its rounds passed.
