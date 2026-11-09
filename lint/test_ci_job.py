@@ -1920,6 +1920,33 @@ class HeavyBrake(Job):
         self.release()
         self.finish(holder)
 
+    def test_a_file_deleted_after_the_listing_is_skipped_and_the_others_still_count(self):
+        """A step's script that verdict deletes can vanish between the temp dir's listing and its read. The forced race: the
+        file is deleted inside the check that precedes its read. files_naming must skip it and still count the two files that
+        stay and name the holder, and not the one that stays and names nothing."""
+        from unittest import mock
+        files = {"ci-job-heavy.lock": "4242 bin/ci-job lane --workflow holder.yml\n", "steps.log": "start: slow, pid 4242\n",
+                 "other.txt": "nothing here names the holder\n", "step.sh": "echo 4242\n"}
+        for name, text in files.items():
+            with open(os.path.join(self.tmp, name), "w", encoding="utf-8") as f:
+                f.write(text)
+        vanishing = os.path.join(self.tmp, "step.sh")
+        real_isfile = os.path.isfile
+
+        def isfile_then_vanish(path):
+            found = real_isfile(path)
+            if found and path == vanishing:
+                os.remove(vanishing)  # deleted after the check, before the read: the race
+            return found
+
+        with mock.patch("os.path.isfile", side_effect=isfile_then_vanish):
+            try:
+                named = self.files_naming(4242)
+            except FileNotFoundError as e:
+                self.fail("files_naming crashed on a file deleted between its check and its read: %s" % e)
+        self.assertFalse(os.path.exists(vanishing), "precondition: the file was not deleted inside the race window, so the case proves nothing")
+        self.assertEqual(sorted(named), ["ci-job-heavy.lock", "steps.log"], "files_naming counted the wrong files: %s" % named)
+
     def test_a_finished_run_leaves_at_most_the_lock_file_in_the_temp_dir(self):
         holder = self.start("holder", self.SLOW)
         self.wait_started(holder)
