@@ -79,10 +79,12 @@
 # are one print.
 # In a cloud session (CLAUDE_CODE_REMOTE=true) a heavy run (any run but --plan) takes a non-blocking exclusive flock on
 # one file in the temp dir (ci-job-heavy.lock) before its first step, and holds it to the end: parallel heavy runs in one
-# container starve each other past the step time limit, and the load brake reads n/a there. A run that finds the lock held
+# container starve each other past the step time limit, and the load brake reads n/a there. The running step's verdict
+# process holds the lock fd too (pass_fds, no other spawn), so a SIGKILL of this run (merge's 1200 s kill) frees the lock
+# only when the step's verdict process has ended; a nested ci-job gets no lock (CLAUDE_CODE_REMOTE stripped). A run that finds the lock held
 # starts no step: one unknown line names the holder's pid and command line (read from the file), exit 2. It never waits.
 # The file holds the holder's pid and argv; a stale one is harmless, since the flock decides. No lock off a cloud session
-# or without fcntl (Windows). Cost: one lock file, one open and flock per heavy run; no process, no timer.
+# or without fcntl (Windows). Cost: one lock file, one open and flock per heavy run, its fd shared with the running step; no process, no timer.
 import errno, os, re, shlex, shutil, subprocess, sys, tarfile, tempfile
 try:
     import fcntl
@@ -461,7 +463,7 @@ def plan(step, pr, values, top, lint=False, pinned=False):
 
 HEAVY_LOCK = "ci-job-heavy.lock"
 HEAVY_BUSY = "another heavy check runs in this container"  # the busy refusal's text; merge/merge.py (HEAVY_BUSY_TEXT) matches it to refuse without a lift
-_heavy_lock_fd = None  # held open to the end of the run, so the lock lasts as long as the process; never inherited by a child
+_heavy_lock_fd = None  # held open to the end of the run; the step's verdict child inherits it (pass_fds) and no other child does, so the lock outlives a SIGKILLed ci-job until that step ends
 
 
 def take_heavy_lock():
@@ -625,6 +627,7 @@ def main(argv):
             with _nowindow.Popen([sys.executable, os.path.join(BIN, "verdict"), *shell, script],
                                  cwd=os.path.join(top, cwd) if cwd else top, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, text=True,
+                                 pass_fds=() if _heavy_lock_fd is None else (_heavy_lock_fd,),
                                  env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV}},
                                       **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
                                       **env, "VERDICT_LOG": log}) as proc:
