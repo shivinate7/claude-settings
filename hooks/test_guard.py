@@ -597,6 +597,8 @@ ARCHINC_MERGEDMOVED = os.path.join(ROOT, "archinc-merged-moved")  # the branch's
 ARCHLEFT_NOPR = os.path.join(ROOT, "archleft-nopr")              # a left branch under the lane's slug form is ahead of main, on no pull request
 ARCHLEFT_PR = os.path.join(ROOT, "archleft-pr")                  # the same left branch, on an open pull request
 ARCHLEFT_NEAR = os.path.join(ROOT, "archleft-near")              # a branch named <slug>x, ahead, on no pull request: no slug form, so no read of it
+ARCHLEFT_REPLACED = os.path.join(ROOT, "archleft-replaced")      # lane/<slug> closed unmerged, replaced by a merged pull request on lane/<slug>-r2 that holds its tip
+ARCHLEFT_REPLACED_AHEAD = os.path.join(ROOT, "archleft-replaced-ahead")  # the same, but the replacing head is ahead of the tip: the tip is not contained
 REPLACED_TIP = "%040d" % 21       # the branch tip, which the replacing pull request's head contains
 REPLACING_HEAD = "%040d" % 24     # the head of the merged pull request that replaced the closed one
 NEW_TIP = "%040d" % 99            # the branch tip after a new commit, past the head of its merged pull request
@@ -616,6 +618,21 @@ def arch_pair(qmax=None, settings=None):
 def arch_row(ref, number, state="open", merged=False):
     """A pull request row for an arch fixture: its head ref, its number and its state. Its head sha is the number, padded to forty."""
     return {"number": number, "head": "%040d" % number, "ref": ref, "state": state, "merged": merged}
+
+
+def arch_replaced(containment):
+    """The repo of a lane whose branch lane/<slug> is closed unmerged, replaced by a merged pull request on lane/<slug>-r2.
+    The -r2 branch's tip is that merged head. The compare of the merged head with the lane branch's tip reads `containment`:
+    "behind" when the merged head holds the tip, "ahead" when it does not. Both lane branches read ahead of main."""
+    slug = ARCHIVE_SLUG
+    return {
+        "others": [arch_row("lane/" + slug, 23, state="closed"),
+                   arch_row("lane/" + slug + "-r2", 24, state="closed", merged=True)],
+        "refs": ["lane/" + slug, "lane/" + slug + "-r2"],
+        "tips": {"lane/" + slug: REPLACED_TIP, "lane/" + slug + "-r2": REPLACING_HEAD},
+        "compares": {"main...lane/" + slug: "ahead", "main...lane/" + slug + "-r2": "ahead",
+                     REPLACING_HEAD + "..." + REPLACED_TIP: containment},
+    }
 
 
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
@@ -1552,14 +1569,18 @@ def build_fixtures():
         "tips": {ARCH_BRANCH: REPLACED_TIP},
         "compares": {"main..." + ARCH_BRANCH: "ahead", REPLACING_HEAD + "..." + REPLACED_TIP: "behind"}}))
     # A left branch under the lane's slug forms: the bare slug's `-r2` variant and the `lane/` form, ahead of main.
-    make_fake_gh(ARCHLEFT_NOPR, "main", need=["o/r"], refs=["lane/" + ARCHIVE_SLUG + "-r2"],
-                 compares={"main...lane/" + ARCHIVE_SLUG + "-r2": "ahead"})
-    make_fake_gh(ARCHLEFT_PR, "main", need=["o/r"], refs=["lane/" + ARCHIVE_SLUG + "-r2"],
-                 compares={"main...lane/" + ARCHIVE_SLUG + "-r2": "ahead"},
-                 others=[{"number": 40, "head": "%040d" % 40, "ref": "lane/" + ARCHIVE_SLUG + "-r2"}])
+    # Each left-branch fake names its repo (`repos`), as the multi-read fixtures do: the repo read answers its default branch.
+    make_fake_gh(ARCHLEFT_NOPR, "main", repos={"o/r": {"refs": ["lane/" + ARCHIVE_SLUG + "-r2"],
+                 "compares": {"main...lane/" + ARCHIVE_SLUG + "-r2": "ahead"}}})
+    make_fake_gh(ARCHLEFT_PR, "main", repos={"o/r": {"refs": ["lane/" + ARCHIVE_SLUG + "-r2"],
+                 "compares": {"main...lane/" + ARCHIVE_SLUG + "-r2": "ahead"},
+                 "others": [{"number": 40, "head": "%040d" % 40, "ref": "lane/" + ARCHIVE_SLUG + "-r2"}]}})
     # A ref that starts with the slug but is no `-*` variant of it: the prefix read returns it, the form match drops it.
-    make_fake_gh(ARCHLEFT_NEAR, "main", need=["o/r"], refs=[ARCHIVE_SLUG + "x"],
-                 compares={"main..." + ARCHIVE_SLUG + "x": "ahead"})
+    make_fake_gh(ARCHLEFT_NEAR, "main", repos={"o/r": {"refs": [ARCHIVE_SLUG + "x"],
+                 "compares": {"main..." + ARCHIVE_SLUG + "x": "ahead"}}})
+    # A closed pull request on lane/<slug>, replaced by a merged one on lane/<slug>-r2: contained in the replacing head, or not.
+    make_fake_gh(ARCHLEFT_REPLACED, "main", repos={"o/r": arch_replaced("behind")})
+    make_fake_gh(ARCHLEFT_REPLACED_AHEAD, "main", repos={"o/r": arch_replaced("ahead")})
     make_fake_gh(ARCHINC_OPEN, "main", repos=arch_pair(qmax={"others": [arch_row(ARCH_BRANCH, 24)]}))
     make_fake_gh(ARCHINC_BEHIND, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "behind"}}))
     make_fake_gh(ARCHINC_IDENT, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "identical"}}))
@@ -11749,6 +11770,14 @@ archive_allow("a left branch under the slug form that has an open pull request i
               role_path("archive-lane"), fake_gh_path(ARCHLEFT_PR))
 archive_allow("a branch named <slug>x, no -* variant of the slug, is not read: allowed though ahead on no pull request",
               role_path("archive-lane"), fake_gh_path(ARCHLEFT_NEAR))
+# A closed pull request on lane/<slug> is covered by its merged replacement on lane/<slug>-r2 when the replacing head holds the
+# lane branch's tip (the compare of that head with the tip reads behind). The ruling: a closed pull request counts as cover only
+# when the branch tip is contained in an open or merged pull request's head. Its control reads ahead, so the tip is not contained.
+archive_allow("a lane branch closed unmerged, replaced by a merged pull request on its lane/<slug>-r2 form that holds the tip, is allowed",
+              role_path("archive-lane"), fake_gh_path(ARCHLEFT_REPLACED))
+archive_refuse("a lane branch closed unmerged, replaced by a merged pull request whose head does not hold the tip, is refused",
+               role_path("archive-lane"), fake_gh_path(ARCHLEFT_REPLACED_AHEAD), carries=("open a pull request", "push an archive copy"),
+               lacks=("could not be read",))
 archive_refuse("a current_branches value that is an int is refused, and the reason says the read failed",
                role_path("archive-inc-branch-int"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN,
                lacks=ARCHIVE_BRANCH_READ_LACKS)
@@ -16579,7 +16608,7 @@ def archive_branch_reads_case():
     return True, "11 gh calls: two open lists, two repo reads, two compares, one branch pulls read, four matching-refs reads"
 
 
-LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane whose record names a branch reads its repos in seven gh calls",
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane whose record names a branch reads its repos in eleven gh calls",
                          archive_branch_reads_case))
 
 
