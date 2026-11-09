@@ -138,6 +138,17 @@ labels) and fixes the Unpark sideways scroll. The cap on `.card` below is part B
   card's line breaks "cho|se" at 180 to 220 at every text size. Both exist on the base, do not depend on text size, and are left
   alone here. The sent panel's presses (Undo send, Close) pass: whole words, inside their box, 44 px.
 
+Review round 1 notes (2026-11-09), not fixed here:
+
+- Code review: `overflow-wrap: anywhere` stays on `.pkb > span` and on `.frow .ftext`. Its stated reason for `.pkb > span` (the
+  parked block must shrink) is unverified, since `.parked` is a size container. `.parked` sets `overflow-wrap`, which its
+  descendants inherit; that is wider than the presses it targets.
+- Triage sent more defects at narrow widths, outside this lane's scope until the coordinator says otherwise: the `.dcap` caption
+  (PR 2423 reverts its rem caption; size it with the text and cap it at the title's size, or let it wrap), the failure line
+  breaking "(permission|-denied)", and tab labels breaking mid-word ("Question|s") at about 180 to 310 px with 150 to 300% text.
+- Font: widths were measured with the fallback font (DejaVu Sans); Atkinson Hyperlegible Next is unmeasured. Axe and the 24 px
+  mouse target size were not run.
+
 ## 8. Shared with PR 2423 (merges first)
 
 - PR 2423 adds `--dl-fs: min(.90625rem, calc((100cqw - 24px) / 5.6))` on `.sline.dline`, `.dsh-head h2` at `min(1.0625rem, 24cqw)`,
