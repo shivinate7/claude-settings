@@ -351,7 +351,9 @@ live page.
    step 1 says.
 3. Make one new empty folder. Run
    `python3 ~/.claude/skills/waiting-page/export_page.py --rebuild <copy folder> --batches <new folder>`.
-   It prints `batches <k> docs <n>`. An empty or missing copy folder is `unknown`. Stop and say so.
+   For an artifact other than the waiting page, add `--collections <names>`: the `collections` of its registry entry,
+   or its folders are `unknown`. It prints `batches <k> docs <n>`. An empty or missing copy folder is `unknown`. Stop
+   and say so.
 4. Send each `batch-NNN.json` list to the new page as one `ArtifactData batch`, in order. Each entry is a `set`.
 5. Put the mockups back. Take main's `page.html`. Replace the text inside its `designData` script element with
    the JSON of `page/designData.json`. Write each `<` as `\u003c`, so no string can close the script. Publish

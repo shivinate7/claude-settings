@@ -36,12 +36,16 @@ longer fetched is deleted from its collection folder; a truncated fetch deletes 
 
 Rebuild, the recovery path. It reads only the repo copy, never the live page:
 
-    python3 ~/.claude/skills/waiting-page/export_page.py --rebuild WAITING_DIR --batches OUT_DIR
+    python3 ~/.claude/skills/waiting-page/export_page.py --rebuild WAITING_DIR --batches OUT_DIR [--collections NAME ...]
 
 Writes OUT_DIR/batch-NNN.json, each a JSON list of at most 50 `{op: "set", collection, doc_id, data}` entries and
 under 900,000 bytes, one entry per doc in WAITING_DIR except `page/`, and prints `batches K docs N`. The session
 sends each list as an `ArtifactData batch`. Unknown, exit 2: a missing or empty WAITING_DIR, a folder in it that is
 neither one of the five collections nor `page/`, or one doc over the byte cap.
+For an artifact other than the waiting page, `--collections NAME [NAME ...]` names its collections (the registry
+entry's `collections`). They replace the five as the allowed folders, and a batch entry's `collection` is the folder
+name. A named collection with no folder is empty and fine; a folder not named is unknown, even one of the five.
+`--collections` without `--rebuild`, a name that is not a collection slug, or the name `page` is a usage error, exit 2.
 
 Every artifact, the step "Before you switch Claude accounts":
 
@@ -79,6 +83,7 @@ import splice  # noqa: E402  the one home of the designData block's span
 # The same five as lint/layout.py WAITING_COLLECTIONS. A copy, because a single export and the rebuild must run with no
 # lint/ beside them: the recovery path may not depend on the repo it recovers (verification-recovery-independent-of-state).
 COLLECTIONS = ("items", "answers", "groups", "asks", "meta")
+COLLECTION_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")  # copy of lint/layout.py COLLECTION, for the same reason
 PAGE_FOLDER, DESIGN_FILE, PAGE_FILE, FILES_FOLDER = "page", "designData.json", "page.html", "files"
 MARKER = ".complete"  # the session touches it in a collection folder after the last list page
 BATCH_SIZE = 50
@@ -481,14 +486,14 @@ def batch_bytes(count, entries_total):
     return 3 + 2 * count + entries_total
 
 
-def rebuild(waiting, batches):
+def rebuild(waiting, batches, collections=COLLECTIONS):
     entries = []
     if os.path.isdir(waiting):
         for name in sorted(os.listdir(waiting)):
             folder = os.path.join(waiting, name)
             if name == PAGE_FOLDER:
                 continue
-            if name not in COLLECTIONS or not os.path.isdir(folder):
+            if name not in collections or not os.path.isdir(folder):
                 raise Stop("unknown - %s/%s is neither a collection folder nor %s/" % (waiting, name, PAGE_FOLDER), UNKNOWN)
             for doc_id, data in docs_in(folder, name).items():
                 entries.append({"op": "set", "collection": name, "doc_id": doc_id, "data": data})
@@ -526,7 +531,14 @@ def main(argv):
     ap.add_argument("--account", help="with --all: export only the entries of this account label; skip the rest")
     ap.add_argument("--rebuild", help="the waiting-data folder to read batches from")
     ap.add_argument("--batches", help="the folder to write batch-NNN.json into")
+    ap.add_argument("--collections", nargs="+", metavar="NAME",
+                    help="with --rebuild: the collection folders to allow, in place of the waiting page's five")
     args = ap.parse_args(argv)
+    if args.collections is not None and not args.rebuild:
+        ap.error("--collections goes with --rebuild")
+    for name in args.collections or ():
+        if not COLLECTION_SLUG.fullmatch(name) or name == PAGE_FOLDER:
+            ap.error("--collections names are collection slugs, and not %r: %r" % (PAGE_FOLDER, name))
     all_mode = bool(args.all or args.worktree)
     export_mode, rebuild_mode = bool(args.out or args.page or (args.fetched and not all_mode)), bool(args.rebuild or args.batches)
     if [all_mode, export_mode, rebuild_mode].count(True) != 1 or (all_mode and not (args.all and args.fetched and args.worktree)) \
@@ -542,7 +554,7 @@ def main(argv):
         if export_mode:
             verdict = export(args.fetched, args.out, args.page, args.allow_empty)
         else:
-            verdict = rebuild(args.rebuild, args.batches)
+            verdict = rebuild(args.rebuild, args.batches, tuple(args.collections or COLLECTIONS))
     except Stop as stop:
         print(str(stop))
         return stop.code
