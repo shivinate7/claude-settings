@@ -502,8 +502,7 @@ class ReportGuardTests(unittest.TestCase):
         self.assertEqual(out.get("decision"), "block")
 
     def test_62_git_commit_in_an_earlier_turn_passes(self):
-        # Pin: already correct before this fix. A landing in an earlier turn must not
-        # demand a report on a later turn that did nothing itself.
+        # A landing in an earlier turn must not demand a report on a later turn that did nothing itself.
         rows = [
             # Catches: a landing in an earlier turn blocks a later turn that only reads.
             [
@@ -744,12 +743,12 @@ class ReportGuardTests(unittest.TestCase):
 
     def test_73_peer_reply_does_not_move_the_turn_start_in_either_direction(self):
         rows = [
-            # Pin (green before the fix): a peer record before the commit never hides the commit.
+            # Catches: a peer record before the commit hides the commit, so a turn with no report passes.
             ("peer before commit", [human("go"), peer_msg("Answer: ok."),
                                     tool_use_msg("Bash", {"command": "git commit -m x"}),
                                     tool_result_msg(), assistant_text("done")], "block"),
-            # Pin (green before the fix): a commit from an earlier turn never counts because a peer
-            # reply came after the new human message.
+            # Catches: a peer reply after a new human message lets a commit from an earlier turn count, which
+            # would block a turn that only reads.
             ("earlier turn commit", [human("land it"), tool_use_msg("Bash", {"command": "git commit -m a"}),
                                      tool_result_msg(), human("what is the log"),
                                      peer_msg("Answer: ok."), tool_use_msg("Bash", {"command": "git log -1"}),
@@ -874,7 +873,7 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
         self.assertEqual(run_guard(REPORT_GUARD, hook).stdout.strip(), "")
 
-    # review fixes
+    # Done items: a hex-letter word is no commit hash; sub-bullets and lead-in text are details, not items.
     def test_df_red_facade_is_not_a_sha(self):
         self.assert_blocked("> **Done** BUILT facade\n> **Next** none", "BUILT facade")
 
@@ -1621,9 +1620,9 @@ class CompactionCarryTests(unittest.TestCase):
                 self.assertIsNone(self.stop(self.compacted_turn(reply)), "'%s' is refused as a source" % item)
 
     def test_cc_green_pr_hash_after_plural_or_in_parens_is_a_source(self):
-        # Catches: a PR whose "#" follows "PRs" or sits in parentheses is refused as sourceless: "PRs #978 and #979"
-        # and "PR (#978)". The "#" makes it a PR, so it is a source with or without a source word. The "(page)" twins
-        # pass on base and are the controls.
+        # Catches: a PR whose "#" follows "PRs" or sits in parentheses is refused as sourceless: "PRs #97 and #98"
+        # and "PR (#97)". The "#" makes it a PR, so it is a source with or without a source word. The "(page)" twins
+        # are the controls: they must pass too.
         items = ["PRs #978 and #979 (page)", "PRs #978 and #979", "PR (#978) (page)", "PR (#978)"]
         for item in items:
             with self.subTest(item=item):
@@ -2599,7 +2598,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
 
     def test_ln_green_send_to_parent_in_the_turn_passes(self):
         # Catches: a lane's question sent to its parent in its turn not read as sent, in any of the three forms.
-        # The human-first shape is red on main: main checks it and blocks, where a peers-only lane is skipped.
+        # Both shapes must pass. A human message before the peer message must not stop the send from counting.
         shapes = (("peers only", [peer_msg("pick?")]), ("human first", [human("decide"), peer_msg("pick?")]))
         forms = (("@parent", self.send(session_id="@parent")), ("parent id", self.send(session_id=self.PARENT)),
                  ("to parent", self.send(to="parent")))
