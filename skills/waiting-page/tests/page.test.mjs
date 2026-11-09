@@ -3406,10 +3406,9 @@ for (const width of TAB_SIZES) for (const zoom of [false, true]) for (const desi
 
 // ---------------------------------------------------------------- the tab labels at narrow widths and large text: no word breaks
 // A tab is at most the bar's width (max-inline-size: 100cqw), and that measure is 32 px narrower than the strip. A label wider than it wraps
-// inside a word (overflow-wrap: anywhere). The design review named these on a0a0e5904: "Questions 2" at 180-190 wide at 150%, 220 at 200%,
-// 300 at 300%; "Designs 2" at 180-200 at 200%, 240-260 at 300%; "Status" at 180-190 at 300%. A copy from 390dd3f97 has none of them.
-// Each case reads one tab's label: a word whose Range is in more than one box is broken across lines. The controls are widths the
-// design review did not name, so a label there is whole on a0a0e5904 and on 390dd3f97.
+// inside a word (overflow-wrap: anywhere). The rows are the widths and text sizes where a label is wider than that measure: "Questions 2"
+// at 150%, 200% and 300%, "Designs 2" at 200% and 300%, "Status" at 300%. The controls are widths where the label fits.
+// Each case reads one tab's label: a word whose Range is in more than one box is broken across lines.
 const TAB_LABEL = { tabQ: "Questions 2", tabD: "Designs 2", tabStatus: "Status" };
 const TAB_LABEL_RED = [
   ["tabQ", 180, 150], ["tabQ", 190, 150], ["tabQ", 220, 200], ["tabQ", 300, 300],
@@ -3517,7 +3516,7 @@ for (const pct of [100, 200, 300]) for (const width of SHEET_TITLE_WIDTHS) for (
 // ---------------------------------------------------------------- the Designs title's cap at 300% text: the title's text ends inside the window
 // The cap (24cqw) keeps the title's 4em floor inside the head. Without it the floor is 204 px at 300% text, and "Option a" ends at 225 px:
 // red at 180, 200 and 220 wide. 240 is the control: the text ends at 225 px, inside the window, with or without the cap.
-// The edge is a Range on the text node, so it is the text's own. "Option a" fits its box on a0a0e5904 here, so the Range is the visible text.
+// The edge is a Range on the text node, so it is the text's own. With the cap in place "Option a" fits its box, so the Range is the visible text.
 // Each width runs with the default font and with CI's wider fallback font, the stand-in the viewer's caption case uses.
 const WIDE_FONT = ".dsh-head { letter-spacing: 1.2px }";
 const TITLE_RED_300 = [180, 200, 220];
@@ -3534,7 +3533,7 @@ for (const [set, note] of [[TITLE_RED_300, ""], [TITLE_CONTROL_300, " (control)"
   });
 }
 // The Close button at 300% text stays inside the window from 180 to 240 wide. A control, not a red: the title takes the first line alone,
-// so Close wraps inside the head on a0a0e5904 and on a copy with the cap removed.
+// so Close wraps to the head's second line and stays inside the window.
 for (const width of [180, 200, 220, 240]) for (const wide of [false, true]) for (const scheme of SCHEMES) {
   const where = sizeWhere(width, 300) + (wide ? ", with CI's wider font" : "");
   test(`Designs sheet, ${scheme}: ${where}: the Close button sits inside the window (control)`, async (t) => {
