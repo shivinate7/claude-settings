@@ -3118,7 +3118,7 @@ const replyGeo = (page, root) => page.evaluate((k) => {
   if (!f || !rx || !rs) return null;
   const fb = box(f.getBoundingClientRect());
   const rel = (el) => { const b = box(el.getBoundingClientRect()); return { l: b.l - fb.l, r: b.r - fb.l, t: b.t - fb.t, b: b.b - fb.t, text: el.textContent.trim() }; };
-  return { rx: rel(rx), rs: rel(rs) };
+  return { rx: rel(rx), rs: rel(rs), hint: rel(document.getElementById("rh-" + k)) };
 }, root);
 // Close and Send reply at the default text, in px from the form's top-left corner: [left, right, top, bottom]. Tolerance is 1 px.
 const REPLY_PINS = { 360: { rx: [13, 79, 241, 289], rs: [164, 281, 241, 289] }, 390: { rx: [13, 79, 241, 289], rs: [194, 311, 241, 289] } };
@@ -3146,6 +3146,42 @@ for (const scheme of SCHEMES) {
     assert.equal(g.rx.text, "Close", "the first press in the reply form reads " + JSON.stringify(g.rx.text) + ", not Close");
     assert.equal(g.rs.text, "Send reply", "the second press in the reply form reads " + JSON.stringify(g.rs.text) + ", not Send reply");
     assert.ok(!meets(g.rx, g.rs), `Close (at x ${spanOf(g.rx)}) and Send reply (at x ${spanOf(g.rs)}) overlap at 390 wide with the root font size doubled`);
+  });
+}
+
+// The reply form at 600 wide. The control: at the default text Close sits left of Send reply on one line, as main draws it. With the root font
+// size doubled, the two sit on one line in that order or stack with Send reply first, and no press sits right of the hint while the other
+// is below it.
+async function replyFormAt(t, { width, scheme, zoom = false }) {
+  const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: RPL_NEW, viewport: { width, height: 800 }, scheme }); if (!page) return null;
+  await openReply(page, RPL_ROOT);
+  if (zoom) await zoomText(page);
+  const g = await replyGeo(page, RPL_ROOT);
+  assert.ok(g, `no reply form is drawn at ${width} wide`);
+  assert.equal(g.rx.text, "Close", "the first press in the reply form reads " + JSON.stringify(g.rx.text) + ", not Close");
+  assert.equal(g.rs.text, "Send reply", "the second press in the reply form reads " + JSON.stringify(g.rs.text) + ", not Send reply");
+  return { page, g };
+}
+for (const scheme of SCHEMES) {
+  test(`press rows, ${scheme}: at 600 wide the reply form's Close sits left of Send reply on one line`, async (t) => {
+    const r = await replyFormAt(t, { width: 600, scheme }); if (!r) return;
+    const { g } = r;
+    assert.ok(Math.abs(g.rx.t - g.rs.t) <= 1, `Close (top ${Math.round(g.rx.t)} px) and Send reply (top ${Math.round(g.rs.t)} px) are not on one line at 600 wide`);
+    assert.ok(g.rx.l < g.rs.l, `Close (x ${Math.round(g.rx.l)} px) is not left of Send reply (x ${Math.round(g.rs.l)} px) at 600 wide`);
+  });
+  test(`press rows, ${scheme}: at 600 wide with the root font size doubled, Close and Send reply sit on one line in that order, or stack with Send reply first`, async (t) => {
+    const r = await replyFormAt(t, { width: 600, scheme, zoom: true }); if (!r) return;
+    const { g } = r;
+    if (Math.abs(g.rx.t - g.rs.t) <= 1) assert.ok(g.rx.l < g.rs.l, `Close (x ${Math.round(g.rx.l)} px) is right of Send reply (x ${Math.round(g.rs.l)} px) on one line at 600 wide with the root font size doubled`);
+    else assert.ok(g.rs.t < g.rx.t, `the two presses stack with Close first (Close top ${Math.round(g.rx.t)} px, Send reply top ${Math.round(g.rs.t)} px), not Send reply first, at 600 wide with the root font size doubled`);
+  });
+  test(`press rows, ${scheme}: at 600 wide with the root font size doubled, no press sits right of the hint while the other is below it`, async (t) => {
+    const r = await replyFormAt(t, { width: 600, scheme, zoom: true }); if (!r) return;
+    const { g } = r;
+    const beside = (p) => p.l >= g.hint.r - 0.5 && p.t < g.hint.b && p.b > g.hint.t;
+    const below = (p) => p.t >= g.hint.b - 0.5;
+    assert.ok(!(beside(g.rx) && below(g.rs)), `Close sits right of the hint while Send reply is below it, at 600 wide with the root font size doubled`);
+    assert.ok(!(beside(g.rs) && below(g.rx)), `Send reply sits right of the hint while Close is below it, at 600 wide with the root font size doubled`);
   });
 }
 
@@ -3199,12 +3235,15 @@ for (const [width, zoom, label] of DROP_STACKED) for (const scheme of SCHEMES) {
   });
 }
 
-// ---------------------------------------------------------------- the tab list at narrow widths
-// The tab list wraps at 400 wide and under. The selected tab, Questions by default, sits on the list's bottom border, and the page does not
-// scroll sideways. Widths: 180, and 320 with the root font size doubled.
+// ---------------------------------------------------------------- the tab list at narrow and mid widths
+// The tab list keeps one row and scrolls sideways on its own, so the page never scrolls sideways. The selected tab sits on the bar's
+// border, and the tabs read left to right in DOM order. Widths: 180, and 320 with the root font size doubled.
 const tabGeo = (page) => page.evaluate(() => {
   const box = (el) => { const b = el.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; };
-  return { nav: box(document.getElementById("tabs")), q: box(document.getElementById("tabQ")), scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth };
+  // The shown tabs, in DOM order, each with its name and whether it is the selected one.
+  const tabs = [...document.querySelectorAll("#tabs a")].filter((el) => !el.hidden)
+    .map((el) => ({ id: el.id, name: el.childNodes[0].textContent.trim(), ...box(el), sel: el.getAttribute("aria-selected") === "true" }));
+  return { nav: box(document.getElementById("tabs")), q: box(document.getElementById("tabQ")), scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth, tabs };
 });
 const TAB_WIDTHS = [[180, false, "180 wide"], [320, true, "320 wide with the root font size doubled"]];
 for (const [width, zoom, label] of TAB_WIDTHS) for (const scheme of SCHEMES) {
@@ -3221,6 +3260,75 @@ for (const [width, zoom, label] of TAB_WIDTHS) for (const scheme of SCHEMES) {
     if (zoom) await zoomText(page);
     const g = await tabGeo(page);
     assert.ok(g.scrollW <= g.innerW, `the page is ${g.scrollW} px wide in a ${g.innerW} px window at ${label}`);
+  });
+}
+
+// Every tab set from 180 to 520 wide: two tabs, or three with Designs shown, at the default and the doubled root font size, with each
+// selectable tab selected. Each claim is one test, so a failure names one cause.
+const TAB_SIZES = [180, 240, 320, 430, 480, 520];
+// Opens the tab set, then checks its scope: the Designs tab is shown only with designs, and the tab that should be selected is.
+async function tabSetPage(t, { width, zoom, designs, scheme, sel }) {
+  const items = designs ? [mk("with-design", 1, { designs: [{ slug: "s1", label: "Option a" }, { slug: "s2", label: "Option b" }] }), mk("other", 2)] : undefined;
+  const page = await open(t, { items, designData: DESIGNS, viewport: { width, height: 900 }, scheme }); if (!page) return null;
+  if (zoom) await zoomText(page);
+  if (sel === "Status") await openStatus(page);
+  else await mustHave(page, "#tabQ", "Questions tab");
+  await mustHave(page, "#tabD", "Designs tab");
+  assert.equal(await page.locator("#tabD").isHidden(), !designs, `the Designs tab is ${designs ? "hidden" : "shown"} with ${designs ? "three" : "two"} tabs`);
+  assert.equal(await page.getAttribute(sel === "Status" ? "#tabStatus" : "#tabQ", "aria-selected"), "true", `${sel} is not the selected tab`);
+  return page;
+}
+// The sideways scroll's cause, named: null when the page fits the window. The cause is the element whose right edge sets the scroll width;
+// an element an overflow-hidden box clips does not set it, so it is left out.
+const sidewaysFault = (page) => page.evaluate(() => {
+  const sw = document.documentElement.scrollWidth, iw = window.innerWidth;
+  if (sw <= iw) return null;
+  let best = null;
+  for (const el of document.body.querySelectorAll("*")) { const r = el.getBoundingClientRect(); if (r.width > 0 && r.right <= sw + 1 && (!best || r.right > best.right)) best = { el, right: r.right }; }
+  const el = best.el, where = el.closest("#sPanel") ? "in the Status view" : el.closest("#tabs") ? "in the tab list" : "outside the tab list and the Status view";
+  const cls = typeof el.className === "string" ? el.className.trim().split(/\s+/)[0] : "";
+  const name = el.id ? "#" + el.id : el.tagName.toLowerCase() + (cls ? "." + cls : "");
+  return `the page is ${sw} px wide in a ${iw} px window: the element that sets the width, ${name}, ${where}, ends at ${Math.round(best.right)} px`;
+});
+for (const width of TAB_SIZES) for (const zoom of [false, true]) for (const designs of [false, true]) for (const sel of ["Questions", "Status"]) for (const scheme of SCHEMES) {
+  const where = `at ${width} wide${zoom ? " with the root font size doubled" : ""}, ${designs ? "three tabs" : "two tabs"}, ${sel} selected`;
+  test(`tab list, ${scheme}: ${where}: the page does not scroll sideways`, async (t) => {
+    const page = await tabSetPage(t, { width, zoom, designs, scheme, sel }); if (!page) return;
+    const fault = await sidewaysFault(page);
+    assert.ok(!fault, fault);
+  });
+  test(`tab list, ${scheme}: ${where}: all tabs share one row`, async (t) => {
+    const page = await tabSetPage(t, { width, zoom, designs, scheme, sel }); if (!page) return;
+    const g = await tabGeo(page);
+    const tops = [...new Set(g.tabs.map((x) => Math.round(x.t)))];
+    assert.equal(tops.length, 1, `the tabs sit on ${tops.length} rows, not one: ${g.tabs.map((x) => `${x.name} at ${Math.round(x.t)} px`).join(", ")}`);
+  });
+  test(`tab list, ${scheme}: ${where}: the selected tab sits on the bar's border`, async (t) => {
+    const page = await tabSetPage(t, { width, zoom, designs, scheme, sel }); if (!page) return;
+    const g = await tabGeo(page);
+    const s = g.tabs.find((x) => x.sel);
+    assert.ok(s, "no shown tab is marked selected");
+    const gap = Math.round(g.nav.b - s.b);
+    assert.ok(Math.abs(gap) <= 2, `the selected ${s.name} tab's bottom is ${Math.abs(gap)} px ${gap > 0 ? "above" : "below"} the tab list's border line`);
+  });
+  test(`tab list, ${scheme}: ${where}: the tabs read left to right in DOM order`, async (t) => {
+    const page = await tabSetPage(t, { width, zoom, designs, scheme, sel }); if (!page) return;
+    const g = await tabGeo(page);
+    const reading = [...g.tabs].sort((x, y) => (Math.abs(x.t - y.t) > 1 ? x.t - y.t : x.l - y.l)).map((x) => x.name);
+    const dom = g.tabs.map((x) => x.name);
+    assert.deepEqual(reading, dom, `the tabs read ${reading.join(", ")}, not in DOM order ${dom.join(", ")}`);
+  });
+}
+
+// The Status view at 240 and 180 wide does not scroll the page sideways, with no roadmap build and with a baked one (the full view).
+// 320 wide is the control: both fit there.
+const STATUS_STATES = [["no roadmap build", () => ({})], ["with a baked roadmap", () => ({ pageHtml: mergedPage() })]];
+for (const width of [320, 240, 180]) for (const [state, extra] of STATUS_STATES) for (const scheme of SCHEMES) {
+  test(`status view, ${scheme}: ${state}, at ${width} wide the page does not scroll sideways`, async (t) => {
+    const page = await open(t, { ...extra(), viewport: { width, height: 900 }, scheme }); if (!page) return;
+    await openStatus(page);
+    const fault = await sidewaysFault(page);
+    assert.ok(!fault, fault);
   });
 }
 
