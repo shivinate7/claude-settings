@@ -7842,6 +7842,29 @@ sh("push: grep -e of an os.system call naming a forced push in quotes, allows",
    "grep -rn src/python -e 'os.system(\"" + VCS + " push -f origin x\")'", "allow", cwd=PUSHFEAT)
 sh("push: grep -e of a forced push in quotes with no os.system call, allows (control)",
    "grep -rn src/python -e '" + VCS + " push -f origin x'", "allow", cwd=PUSHFEAT)
+# PIN, GREEN NOW. A class private field, `#x`, is JS text rather than a comment, so the execSync after it on the
+# same line still runs. A reader that takes `#` as a comment for node misses that run.
+sh("push: node -e, a class private field #x ahead of execSync of a forced push, denies",
+   "node -e \"class A { #x = 1 }; require(\\\"child_process\\\").execSync(\\\"" + VCS + " push -f origin x\\\")\"",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# CONTROL. The same class with no `#` field denies.
+sh("push: node -e, a class field with no # ahead of execSync of a forced push, denies (control)",
+   "node -e \"class A { x = 1 }; require(\\\"child_process\\\").execSync(\\\"" + VCS + " push -f origin x\\\")\"",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# PIN, GREEN NOW. A launcher runs python, and python runs its -c script, so an escaped forced push in
+# check_output denies under uv run or poetry run as it does under a bare python3.
+sh("push: uv run python -c, check_output shell=True of an escaped forced push, denies",
+   r'uv run python -c "from subprocess import check_output; check_output(\"' + VCS + r' push -f origin x\", shell=True)"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: poetry run python -c, check_output shell=True of an escaped forced push, denies",
+   r'poetry run python -c "from subprocess import check_output; check_output(\"' + VCS + r' push -f origin x\", shell=True)"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# PIN, GREEN NOW. In rg, src/python names a path to search, and the os.system call in the -e pattern is text, so
+# nothing runs and the forced push allows. The rg control below has no os.system call.
+sh("push: rg -e of an os.system call naming a forced push in quotes, allows",
+   "rg -n src/python -e 'os.system(\"" + VCS + " push -f origin x\")'", "allow", cwd=PUSHFEAT)
+sh("push: rg -e of a forced push in quotes with no os.system call, allows (control)",
+   "rg -n src/python -e '" + VCS + " push -f origin x'", "allow", cwd=PUSHFEAT)
 # ARGV CALLS. A Deno.Command call names its program and its arguments as separate strings, and the pairs
 # of one call are joined into one command line. The join keeps each argument's bounds: a quoted "my repo"
 # is one argument, so -C takes that whole path and push is the subcommand.
