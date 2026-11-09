@@ -1131,9 +1131,14 @@ def _case_header(tokens) -> bool:
     return _case_start(tokens) is not None
 
 
+_FALL = "fall"   # how an arm is entered after `;&` or `;;&`: the arm before may run on into it
+
+
 def _fall_through(tokens, before: str):
     """(the tokens without a leading `&`, whether one was there). `;&` and `;;&` split into `;` and a segment that
-    opens with `&`: it ends an arm as `;;` does. A leading `&` after anything but `;` is no arm end."""
+    opens with `&`: it ends an arm as `;;` does. The `&` may hold the next arm (`& b) cmd`) or stand alone (a
+    newline, or `_split_jobs`, cut it off): `_case_after` then carries `_FALL` to the arm. A leading `&` after
+    anything but `;` is no arm end."""
     if tokens and tokens[0] == "&" and before == ";":
         return tokens[1:], True
     return tokens, False
@@ -1179,20 +1184,20 @@ def _case_layers(tokens, starts_arm: bool):
         parens.append(step[1])
 
 
-def _case_arm(tokens, in_case: bool = False, fresh: bool = False, before: str = ""):
+def _case_arm(tokens, in_case: bool = False, fresh=False, before: str = ""):
     """(the words after the last case-arm pattern, each pattern's `(` flag, every layer of the line: see
     _case_layers, how the line's first arm is entered), else None. A pattern counts only where an arm starts: on a
     `case WORD in` head (it may follow `do` or `then`, and sit in another arm), or at the start of an arm inside
     an open block (`in_case`, and `fresh` or a `;&` end: `_case_after` says where one starts). Anywhere else a
     word that ends in `)` is the close of a subshell (`(cd x; make) > log`). The entry is "" when the first arm
-    follows a `case WORD in` head on the line, "arm" when it follows `;;` or opens the block, and "fall" after a
-    `;&`, where the arm before may run into it: the shell's folder at the entry is the one at the head, and for
-    "fall" also the one the arm before left."""
+    follows a `case WORD in` head on the line, "arm" when it follows `;;` or opens the block, and `_FALL` after
+    `;&` or `;;&`, on the same segment or carried in `fresh`, where the arm before may run into it: the shell's
+    folder at the entry is the one at the head, and for `_FALL` also the one the arm before left."""
     tokens, fell = _fall_through(tokens, before)
     layers, parens = _case_layers(tokens, in_case and (fresh or fell))
     if not parens:
         return None
-    entry = "" if _case_start(tokens) is not None else "fall" if fell else "arm"
+    entry = "" if _case_start(tokens) is not None else _FALL if fell or fresh == _FALL else "arm"
     return layers[-1], parens, layers, entry
 
 
@@ -1207,8 +1212,9 @@ def _case_change(layers) -> int:
     return change
 
 
-def _case_after(depth: int, fresh: bool, tokens, arm, before: str, end: str):
-    """(open `case` blocks, whether the next segment starts an arm) once a segment is read. An arm starts after a
+def _case_after(depth: int, fresh, tokens, arm, before: str, end: str):
+    """(open `case` blocks, whether the next segment starts an arm: True, or `_FALL` when a lone `&` ended the arm
+    before, so `_case_arm` enters the next arm as it enters `& b)`) once a segment is read. An arm starts after a
     `case WORD in` head that holds no pattern yet, after `;;` (its second `;` is a segment of its own, empty,
     between two `;`), after `;&` and `;;&` (a segment that opens with `&`), and in the middle of an
     alternation (`a|b)` is split at each `|`, so the head or an earlier pattern ends with `|`). A segment
@@ -1216,7 +1222,7 @@ def _case_after(depth: int, fresh: bool, tokens, arm, before: str, end: str):
     the `;` + newline that ends `make;` is no `;;`."""
     tokens, fell = _fall_through(tokens, before)
     if not tokens:
-        return depth, fresh or fell or (before == ";" and end == ";")
+        return depth, _FALL if fell else fresh or (before == ";" and end == ";")
     layers = arm[2] if arm else [tokens]
     depth = max(0, depth + _case_change(layers))
     last = layers[-1]
@@ -1326,7 +1332,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     depth = 0   # compound commands (`if`, `for`, ...) still open: a cd on a line of its own in one may not run
     case_depth = 0   # `case` blocks still open: only inside one is a word that ends in `)` a case-arm pattern
-    arm_fresh = False   # the next segment starts a case arm (_case_after): only there is such a word a pattern
+    arm_fresh = False   # the next segment starts a case arm, or `_FALL` (_case_after): only there is such a word a pattern
     case_frames = []   # [states at the `case` head, states each earlier arm ended in] for each `case` still open
     seen = []
 
@@ -1352,31 +1358,33 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             states = ((None, None),) if len(moved) > _STATE_LIMIT else tuple(moved)
             skipping = not each and steps[0][2] and end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
 
-    def enter_arm(entry):
-        """An arm starts: only it runs, so the folder is the one at the `case` head (a `;&` arm may also run on from
-        the arm before). The states the arm before ended in are kept for `esac`."""
+    def join_arms(arms, head):
+        """The states after the arms (`arms`) or the `case` head (`head`) may have run. A state an arm's cd left
+        comes first, so a caller that reads one folder sees that cd, as it does with no `case` around it."""
         nonlocal states, lost
+        states = tuple(dict.fromkeys([state for state in arms if state not in head] + list(head)))
+        lost = lost or len(states) > _STATE_LIMIT
+        states = ((None, None),) if len(states) > _STATE_LIMIT else states
+
+    def enter_arm(entry):
+        """An arm starts: only it runs, so the folder is the one at the `case` head (a `;&` or `;;&` arm may also run
+        on from the arm before). The states the arm before ended in are kept for `esac`."""
         if not case_frames:
             return
         frame = case_frames[-1]
         frame[1] = tuple(dict.fromkeys(frame[1] + states))
-        states = tuple(dict.fromkeys(frame[0] + states)) if entry == "fall" else frame[0]
-        lost = lost or len(states) > _STATE_LIMIT
-        states = ((None, None),) if len(states) > _STATE_LIMIT else states
+        join_arms(states if entry == _FALL else (), frame[0])
 
     def track_case(old_depth, new_depth, head_states):
         """Open a frame for each `case` this segment opened (`head_states`: the folder before its words ran), and
         close one for each it closed: after `esac` the folder may be where any arm ended, or where the head was
         (no arm matched)."""
-        nonlocal states, lost
         for _ in range(max(0, new_depth - old_depth)):
             case_frames.append([head_states, ()])
         for _ in range(max(0, old_depth - new_depth)):
             if case_frames:
                 head, ended = case_frames.pop()
-                states = tuple(dict.fromkeys(head + ended + states))
-                lost = lost or len(states) > _STATE_LIMIT
-                states = ((None, None),) if len(states) > _STATE_LIMIT else states
+                join_arms(states + ended, head)
 
     def leave():
         """Close the innermost `(`: the shell is where it was before it, unless the frame keeps a cd made inside."""
