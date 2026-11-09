@@ -4870,8 +4870,8 @@ def _push_segment_inert(segment: str):
     if tokens is None:
         return None
     words = list(tokens)
-    while words and (words[0] in GIT_PUSH_LEADING_WORDS or not words[0].strip("({")):
-        words.pop(0)
+    while words and (words[0].lstrip("({") in GIT_PUSH_LEADING_WORDS or not words[0].strip("({")):
+        words.pop(0)   # a `(` or `{` glued to a leading word (`(if true`) is no part of the word
     if not words or words[0].startswith("}"):
         return True
     head = re.split(r"[<>&]", words[0].lstrip("({"))[0].rstrip(")}")   # `done>>/dev/null` closes a loop
@@ -4935,6 +4935,8 @@ def git_push_after_check_hit(command: str) -> str:
     `A || { echo x && push; }`, and `A | B && push` unless `set -o pipefail` is sure to run first. So does a pipe
     that hides a check in the test of the compound that holds the push (`_push_test_hides_check`). A pipe that hides
     none (data sources only, no git call) does not end the walk: it goes on to the command before the pipe's `;`.
+    A `then` whose own `if` or `elif` test is a check with an `|| true` or `|| :` tail also refuses, as 'or': the
+    tail makes the test unfailing, so the push runs after a failed check (`_push_then_test_unfailing`).
     A heredoc whose unquoted body runs a substitution makes its stage a check (`_mark_heredoc_substitutions`,
     applied by the caller, since the bodies are gone by now). An interpreter
     heredoc's body is dropped before the walk, so a lone quote in it hides no `;`. A dry run
@@ -4973,6 +4975,8 @@ def git_push_after_check_hit(command: str) -> str:
                 kind = _push_body_runs_on_failure(segments, start, head)
                 if kind:
                     return kind
+                if _push_then_test_unfailing(segments, ends, start, head):
+                    return "or"
                 if _push_test_hides_check(segments, ends, start, head):
                     return "pipe"
                 position, first = head, True
@@ -5104,13 +5108,7 @@ def _push_body_runs_on_failure(segments, start: int, head: int) -> str:
             if words[:1] == ["elif"]:
                 elif_at = at
         if testing and (at == head or depth == level):
-            lead = []
-            for word in words:
-                word = word.lstrip("({")   # `(if ! pytest`: the `(` is no part of the word
-                if word not in GIT_PUSH_LEADING_WORDS and word:
-                    break
-                lead.append(word)
-            command = words[len(lead)] if len(lead) < len(words) else ""
+            lead, command = _push_test_lead(words)
             if (check_at is None and "!" not in lead and command not in GIT_PUSH_CONDITION_WORDS
                     and _push_segment_inert(part) is False and not git_calls(part)):
                 check_at = at
@@ -5122,6 +5120,38 @@ def _push_body_runs_on_failure(segments, start: int, head: int) -> str:
     if kind == "elif" and (elif_at is None or check_at >= elif_at):
         return ""   # the first `then`, or a test of this `elif` itself: the push runs only when the checks passed
     return "body-" + kind
+
+
+def _push_test_lead(words):
+    """The leading words of a test segment (`if`, `elif`, `!`, ...) and its command word, from the segment's tokens
+    WORDS."""
+    lead = []
+    for word in words:
+        word = word.lstrip("({")   # `(if ! pytest`: the `(` is no part of the word
+        if word not in GIT_PUSH_LEADING_WORDS and word:
+            break
+        lead.append(word)
+    return lead, words[len(lead)] if len(lead) < len(words) else ""
+
+
+def _push_then_test_unfailing(segments, ends, opener: int, head: int) -> bool:
+    """True when `segments[opener]` is the `then` of an `if` or `elif` whose own test ends in `|| true` or `|| :`
+    after a check: `true` and `:` exit 0 whatever the check did, so the test cannot fail and the `then` body runs
+    after a failed check. The test is the `if` or `elif` test that ends at the `then`: its last step is the tail, and
+    the check is a command before the `||` (back over its `&&`, `||` and `|` joins, no further than the compound's head)
+    that is not inert, no condition word and no git call, as in `_push_hidden_by_tail`. A `!` does not matter: the
+    tail still ends the test in success. An earlier test that cannot fail makes this `then` unreachable, so only its
+    own test is read."""
+    if (segment_tokens(segments[opener]) or [""])[0] != "then":
+        return False
+    tail = opener - 1
+    if tail - 1 < head or ends[tail - 1] != "||" or segment_tokens(segments[tail]) not in (["true"], [":"]):
+        return False
+    left = tail - 1
+    while left > head and ends[left - 1] in ("&&", "||", "|"):
+        left -= 1
+    return any(_push_test_lead(segment_tokens(part) or [])[1] not in GIT_PUSH_CONDITION_WORDS
+               and _push_segment_inert(part) is False and not git_calls(part) for part in segments[left:tail])
 
 
 def _push_test_hides_check(segments, ends, opener: int, head: int) -> bool:
