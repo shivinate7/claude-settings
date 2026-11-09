@@ -562,6 +562,8 @@ ARCHNEAR_C10 = os.path.join(ROOT, "archnear-c10")      # an open head `c10`: con
 ARCHNEAR_C10X = os.path.join(ROOT, "archnear-c10x")    # an open head `claude/c10-x1`: contains `c1`, is not it
 ARCHNEAR_CI = os.path.join(ROOT, "archnear-ci")        # an open head `claude/fix-ci-retry-x1`: contains `ci`, is not it
 ARCHOPEN_LANE = os.path.join(ROOT, "archopen-lane")    # the slug's pull request is open on the `lane/<slug>` head form
+ARCH_AGENT_SLUG = "lane-agent-own-step"                # the step an agent's own record names, a second step in the same repo
+ARCHOPEN_AGENT = os.path.join(ROOT, "archopen-agent-step")  # the agent record's step's pull request is open; the main step's is not
 # The containment read of an open lane pull request's head against main, by its status. Each fake holds one open
 # pull request on the slug, its head the slug's head sha; the read's answer is what the name says.
 ARCHDRAFT_BEHIND = os.path.join(ROOT, "archdraft-behind")      # an open draft, head behind main: its commits landed
@@ -1413,6 +1415,8 @@ def build_fixtures():
     make_fake_gh(ARCHMERGED, "main", need=["o/r"], others=[dict(slug_head, state="closed", merged=True)])
     # The same lane's pull request on the `lane/<slug>` head form (decision session-tiers names both forms).
     make_fake_gh(ARCHOPEN_LANE, "main", need=["o/r"], others=[dict(slug_head, ref="lane/" + ARCHIVE_SLUG)])
+    # The agent record's step has the open pull request, and the main record's step has none (see the agent cases).
+    make_fake_gh(ARCHOPEN_AGENT, "main", need=["o/r"], others=[dict(slug_head, ref=ARCH_AGENT_SLUG)])
     # Page two of the open list (two rows a page): the slug's pull request is the third row, so only a read of
     # every page sees it. The two rows before it name other lanes.
     make_fake_gh(ARCHPAGE, "main", need=["o/r"], page_cap=2, others=[
@@ -10430,6 +10434,8 @@ STEP_COLORS_TAGS = ["cs-build:lane", "cs-step:colors-a", "cs-topic:colors", "cs-
 
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
 ARCH_LANE_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
+# An agent's own record that is a lane on a second step, in the same repo as ARCH_LANE_TAGS.
+ARCH_AGENT_LANE_TAGS = ["cs-build:lane", "cs-step:" + ARCH_AGENT_SLUG, "cs-repo:o/r"]
 # Lanes whose step ids are a substring of a near-miss open head (see ARCHNEAR_C10): their own pull requests are absent.
 ARCH_LANE_C1_TAGS = ["cs-build:lane", "cs-step:c1", "cs-repo:o/r"]
 ARCH_LANE_CI_TAGS = ["cs-build:lane", "cs-step:ci", "cs-repo:o/r"]
@@ -10984,19 +10990,20 @@ def fake_gh_path(folder):
     return folder + os.pathsep + PY_PATH
 
 
-def archive_refuse(name, transcript, env_path, carries=(), lacks=()):
+def archive_refuse(name, transcript, env_path, carries=(), lacks=(), agent_id=None):
     """An archive_session of the target the guard refuses. The reason names its rule, never the tool. `lacks`
-    adds fragments the reason must not hold, so a case can tell one refusal reason from another."""
+    adds fragments the reason must not hold, so a case can tell one refusal reason from another. `agent_id`, when
+    given, makes the call an agent's, as the harness sends it."""
     more = (lacks,) if isinstance(lacks, str) else tuple(lacks)
     add("lane-closes-after-records: " + name, "deny", rule=ARCHIVE_RULE, tool=ARCHIVE_TOOL, cwd=NOGIT,
         lacks=ARCHIVE_NAMED + more, carries=carries, transcript=transcript, env=ROLE_ENV, env_path=env_path,
-        session_id=ROLE_OTHER)
+        session_id=ROLE_OTHER, agent_id=agent_id)
 
 
-def archive_allow(name, transcript, env_path):
-    """An archive_session of the target the guard lets through silently."""
+def archive_allow(name, transcript, env_path, agent_id=None):
+    """An archive_session of the target the guard lets through silently. `agent_id` as in archive_refuse."""
     add("lane-closes-after-records: " + name, "allow", tool=ARCHIVE_TOOL, cwd=NOGIT, silent=True,
-        transcript=transcript, env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER)
+        transcript=transcript, env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER, agent_id=agent_id)
 
 
 # A lane whose open pull request has a head exactly equal to its step slug is its own pull request: refused.
@@ -11099,6 +11106,116 @@ archive_refuse("a get_session result whose content is a dict before the lane's r
                role_path("body-dict-then-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
 archive_refuse("a get_session result whose content is an int before the lane's record: the lane's open pull request refuses",
                role_path("body-int-then-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
+
+
+# The agent's own record. An agent (a call with an `agent_id`) made its get_session call in its own transcript, which
+# sits beside the main transcript at `<transcript_path minus .jsonl>/subagents/agent-<agent_id>.jsonl`. The guard reads
+# that file for the agent's call. A lane is refused when either record says lane. An orchestrator call (no agent_id)
+# reads the main record alone. A malformed agent_id reads no file at all.
+AGENT_OWN_ID = "ab12cd34ef56a7890"  # an agent id as the harness sends it: 17 hex characters
+AGENT_QUIET = [role_use("m0", "Bash"), role_result("m0", "ok")]  # a transcript with no get_session call
+# name -> (the main transcript's lines, [(agent_id, the agent file's lines), ...]). An agent id that the guard
+# must refuse still gets its file written at the raw path it names, so a reader that skipped the check would read it.
+AGENT_FIXTURES = {
+    "agent-own-triage": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_call("g1", ARCH_TRIAGE_TAGS))]),
+    "agent-own-lane": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_call("g1", ARCH_LANE_TAGS))]),
+    "agent-no-record": (AGENT_QUIET, [(AGENT_OWN_ID, AGENT_QUIET)]),
+    "agent-quiet-main-triage": (role_target_call("g1", ARCH_TRIAGE_TAGS), [(AGENT_OWN_ID, AGENT_QUIET)]),
+    "orchestrator-agent-file": (role_target_call("g1", ARCH_TRIAGE_TAGS),
+                                [(AGENT_OWN_ID, role_target_call("g1", ARCH_LANE_TAGS))]),
+    "main-triage-agent-lane": (role_target_call("g1", ARCH_TRIAGE_TAGS),
+                               [(AGENT_OWN_ID, role_target_call("g1", ARCH_LANE_TAGS))]),
+    "main-lane-agent-triage": (role_target_call("g1", ARCH_LANE_TAGS),
+                               [(AGENT_OWN_ID, role_target_call("g1", ARCH_TRIAGE_TAGS))]),
+    "agent-malformed-id": (AGENT_QUIET, [("x.y", role_target_call("g1", ARCH_TRIAGE_TAGS))]),
+    "agent-own-triage-slug": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_call("g1", ARCH_TRIAGE_SLUG_TAGS))]),
+    "agent-file-absent": (role_target_call("g1", ARCH_TRIAGE_TAGS), []),
+    "agent-dir-at-file": (role_target_call("g1", ARCH_TRIAGE_TAGS), [(AGENT_OWN_ID, None)]),
+    "main-lane-agent-second-step": (role_target_call("g1", ARCH_LANE_TAGS),
+                                    [(AGENT_OWN_ID, role_target_call("g1", ARCH_AGENT_LANE_TAGS))]),
+}
+
+
+def agent_transcript(name, agent_id):
+    """The agent's own transcript for the main transcript role_path(name): `<main minus .jsonl>/subagents/agent-<id>.jsonl`."""
+    return os.path.join(role_path(name)[:-len(".jsonl")], "subagents", "agent-" + agent_id + ".jsonl")
+
+
+def write_agent_transcripts():
+    """Write each main transcript, and each agent file beside it, as the harness lays them out."""
+    os.makedirs(ROLE_DIR, exist_ok=True)  # this builder may run before write_role_transcripts makes the folder
+    for name, (main, agents) in AGENT_FIXTURES.items():
+        with open(role_path(name), "w", encoding="utf-8") as handle:
+            handle.write("\n".join(main) + "\n")
+        for agent_id, lines in agents:
+            path = agent_transcript(name, agent_id)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if lines is None:  # a folder where the agent's file would be: reading it fails, and not as a missing file
+                os.makedirs(path, exist_ok=True)
+                continue
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(lines) + "\n")
+        if not agents:  # the scope of the no-file case: nothing at its agent path, so the read finds no file
+            assert not os.path.exists(agent_transcript(name, AGENT_OWN_ID)), name
+
+
+lazy_fixture([role_path(name) for name in AGENT_FIXTURES], write_agent_transcripts)
+# An agent whose own record names a non-lane target: allowed, silently, though a slug pull request is open.
+archive_allow("an agent whose own record is a non-lane target is allowed: the record is read from the agent's transcript",
+              role_path("agent-own-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# An agent whose own record is a lane with an open records pull request: refused, for that pull request. The reason pin
+# proves the agent's record was read: a guard that missed it would refuse for having no record.
+archive_refuse("an agent whose own record is a lane with an open records pull request is refused, for the open pull request",
+               role_path("agent-own-lane"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# No record in either transcript: refused for no record, and the open list is not read.
+archive_refuse("an agent with no record in its own transcript or the main one is refused, for no record",
+               role_path("agent-no-record"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
+# An orchestrator call (no agent_id) reads the main transcript only: its lane record refuses for the open pull request.
+archive_refuse("an orchestrator call with a lane record in the main transcript is refused, for the open pull request",
+               role_path("archive-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# An agent whose main record is non-lane, and whose own file reads clean but holds no record of the target: the main record
+# decides, so it is allowed. A fix that refused on a clean agent read with no record would turn this allow into a false alarm.
+archive_allow("an agent whose main record is non-lane is allowed though its own file holds no record of the target",
+              role_path("agent-quiet-main-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# The same agent file, on an orchestrator call with no agent_id: the file is not its record, so the main record decides.
+archive_allow("an orchestrator call with a non-lane main record is allowed though an agent file beside it holds a lane",
+              role_path("orchestrator-agent-file"), fake_gh_path(ARCHOPEN))
+# Precedence: a lane in either record refuses. The agent's own record is a lane, the main record is not.
+archive_refuse("a lane in the agent's own record is refused though the main record says non-lane",
+               role_path("main-triage-agent-lane"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# Precedence the other way: the main record is a lane, the agent's own record is not. It still refuses.
+archive_refuse("a lane in the main record is refused though the agent's own record says non-lane",
+               role_path("main-lane-agent-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# A malformed agent_id: the file its raw text names holds a non-lane record. It is not read, so the call is refused for no
+# record. A reader that skipped the AGENT_ID check would read that record and allow the archive. The id `x.y` has a dot,
+# which AGENT_ID refuses, and its file name is legal on Windows, unlike an id with a path separator.
+archive_refuse("a malformed agent_id reads no agent file: a non-lane record at its raw path is not read, and the call is refused for no record",
+               role_path("agent-malformed-id"), fake_gh_path(ARCHOPEN), agent_id="x.y",
+               carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
+# No file at the agent's path, and a non-lane main record: no agent record is read, so the main record decides and the
+# archive is allowed. A reader that refused on a missing agent file would refuse every agent that has no file of its own.
+archive_allow("an agent with no file at its agent path is allowed: the main record is non-lane and decides",
+              role_path("agent-file-absent"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# A folder at the agent's file path, and a non-lane main record: the read fails with an error other than a missing file, so
+# the archive is refused for no record. A reader that caught every read error as a missing file would allow it.
+archive_refuse("an agent whose file path is a folder is refused, for no record: a read error is not a missing agent file",
+               role_path("agent-dir-at-file"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
+# Both records are lanes on different steps of the same repo. The open pull request is on the agent record's step only, so
+# the archive is refused for it only when the agent record's step is read too. A reader that kept only the main record's
+# step would allow it.
+archive_refuse("a lane in both records, with the open pull request on the agent record's step only, is refused for that pull request",
+               role_path("main-lane-agent-second-step"), fake_gh_path(ARCHOPEN_AGENT), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN)
+# The mirror: the open pull request is on the main record's step only. A reader that kept only the agent record's step
+# would allow it. Together with the case above, each record's step alone fails, whichever record comes first.
+archive_refuse("a lane in both records, with the open pull request on the main record's step only, is refused for that pull request",
+               role_path("main-lane-agent-second-step"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN)
 
 
 # =========================================================================== 5h. one lane, one topic
@@ -15585,14 +15702,14 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a settings.json matcher rou
 ARCHIVE_CALLS = "calls.log"  # the counted fake's log, beside its state: one line per gh call
 
 
-def archive_judged(transcript, folder):
+def archive_judged(transcript, folder, agent_id=None):
     """The guard's verdict on one archive_session of ROLE_OTHER, from the batch runner, with the fake pull request
     tool at `folder` on PATH. The payload's cwd and the guard's process both run in NOGIT, so a write into the working
     folder shows in the snapshot. MERGECFG is the config folder: its rules file points at the repo, so a guard copy
-    finds the merge tool there."""
+    finds the merge tool there. `agent_id`, when given, makes the call an agent's."""
     return decide({
         "raw": None, "tool": ARCHIVE_TOOL, "cwd": NOGIT, "process_cwd": NOGIT, "session": None,
-        "env_path": fake_gh_path(folder), "config": MERGECFG, "agent_id": None, "agent_type": None,
+        "env_path": fake_gh_path(folder), "config": MERGECFG, "agent_id": agent_id, "agent_type": None,
         "temp": None, "load": None, "env": dict(ROLE_ENV), "tool_input": {"session_id": ROLE_OTHER},
         "transcript": transcript,
     })
@@ -15679,6 +15796,24 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a non-lane archive makes no
                          archive_non_lane_no_read_case))
 LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no file in the session's folders",
                          archive_writes_nothing_case))
+
+
+def archive_agent_non_lane_no_read_case():
+    """An agent's archive of a target that is no lane is allowed and makes no gh call, though its own record carries a
+    step slug that an open-list read would find."""
+    folder = archive_counted_gh()
+    gh_calls_taken(folder)
+    decision, reason = archive_judged(role_path("agent-own-triage-slug"), folder, agent_id=AGENT_OWN_ID)
+    calls = gh_calls_taken(folder)
+    if decision != "allow" or reason:
+        return False, "an agent's non-lane target: %s (%r)" % (decision, reason)
+    if calls:
+        return False, "an agent's non-lane target made %d gh call(s): %r" % (len(calls), calls)
+    return True, "allowed, and no gh call"
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an agent's non-lane archive makes no gh call",
+                         archive_agent_non_lane_no_read_case))
 
 
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,

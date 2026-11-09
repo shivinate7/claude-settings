@@ -5477,7 +5477,9 @@ def judge(payload) -> None:
         refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
 
     # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
-    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    archive_agent = payload.get("agent_id")
+    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
+                           archive_agent if isinstance(archive_agent, str) and AGENT_ID.match(archive_agent) else None)
     if archived:
         refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
 
