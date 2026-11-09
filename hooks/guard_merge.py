@@ -11,7 +11,7 @@ import sys
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
     strip_heredoc_bodies,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
@@ -20,7 +20,7 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    push_destinations, push_refspecs, push_remote, push_target, push_text,
+    push_calls, push_destinations, push_refspecs, push_remote, push_target, push_text,
 )
 
 
@@ -405,7 +405,12 @@ def undrafted_pr_create(segment: str) -> bool:
 #
 # The page is rebuilt only at merge. The commit is refused when the page it would hold differs from
 # HEAD's page, the base tip's page AND origin/<base>'s page: a merge of the base into the lane brings
-# the base's page, so it passes. The base is `resolve_default_base`, read at its TIP.
+# the base's page, so it passes. The base is `resolve_default_base`, read at its TIP. A merge that brought
+# a page the base has since moved past also passes: the page equals MERGE_HEAD's page by exact blob id,
+# and MERGE_HEAD is on origin/<base>'s first-parent line (`rev-list --first-parent`), so a branch merged
+# into the base is no pass. Those reads run only on the path that would refuse, and a failed read is refused.
+# A rebuilt page, a page of a merge of any commit off that line, and a page taken after the merge state
+# is gone are refused.
 # The hook runs BEFORE the shell chain, so `commit -a` (a tracked page), `commit <page>` and a `git add`
 # that reaches the page earlier in the same command read the working tree, and any other commit reads
 # the index. A commit that names paths (`--`, --only) holds only those paths. A non-git segment whose
@@ -531,6 +536,19 @@ def _runs_generator(segment):
     return word == _GENERATOR and not _GENERATOR_READS & set(rest)
 
 
+def _merge_head_page(top, base):
+    """The blob id of the page at MERGE_HEAD when a merge is in progress and MERGE_HEAD is a commit on
+    origin/<base>'s first-parent line (a past base tip), else ''. A failed or short read gives ''."""
+    # One read gives MERGE_HEAD's commit and its page: it fails when no merge is in progress.
+    done = _git(top, "rev-parse", "MERGE_HEAD", "MERGE_HEAD:" + RECORDS_PAGE)
+    ids = done.stdout.split() if done is not None and done.returncode == 0 else []
+    if len(ids) != 2:
+        return ""
+    origin = base if base.startswith("origin/") else "origin/" + base
+    line = _git(top, "rev-list", "--first-parent", origin)   # one id per base tip, newest first
+    return ids[1] if line is not None and line.returncode == 0 and ids[0] in line.stdout.split() else ""
+
+
 def _commit_page_id(top, working):
     """The blob id of the page the commit will hold: the working tree's (as `git add` would store
     it) or the index's. '' for no page, None for a failed read or an unmerged page."""
@@ -548,8 +566,8 @@ def _commit_page_id(top, working):
 
 
 def records_page_hit(stripped: str, cwd: str) -> str:
-    """Return the commit when it would hold a records page that is none of HEAD's, the base tip's
-    and origin/<base>'s, else ''. Each segment is judged from its own command word."""
+    """Return the commit when it would hold a records page that is none of HEAD's, the base tip's,
+    origin/<base>'s and MERGE_HEAD's (MERGE_HEAD on origin/<base>'s first-parent line), else ''. Each segment is judged from its own command word."""
     staged = generated = False   # an earlier `git add` reaches the page / an earlier segment rewrites it
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
@@ -586,7 +604,8 @@ def records_page_hit(stripped: str, cwd: str) -> str:
             return "git commit " + RECORDS_PAGE
         page_id = _commit_page_id(top, working)
         if page_id is not None and page_id not in (head_id, base_id, origin_id):
-            return "git commit " + RECORDS_PAGE
+            if not page_id or page_id != _merge_head_page(top, base):
+                return "git commit " + RECORDS_PAGE
     return ""
 
 
@@ -1052,7 +1071,7 @@ def _push_calls(segment: str, script: str, cwd: str):
     segment hands on (`bash -c`, `sh -lc`, `eval`, `ssh`): the one reader of those wrappers is inner_commands.
     `script` is the text the segment came from, which push_target reads for a leading `cd`. A script
     runs in the folder its segment's own `cd` or `git -C` names."""
-    for subcommand, args in git_calls(push_text(segment)):
+    for subcommand, args in push_calls(segment, script):
         if subcommand == "push":
             where, overrides = push_target(segment, script, cwd)
             yield _command_words(args), where, overrides
@@ -1140,43 +1159,222 @@ ARCHIVE_READ_REASON = (
     "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "
     "records have landed. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
+ARCHIVE_NO_PR_REASON = (
+    "a branch of the lane is ahead of its repo's default branch and has no pull request that covers it, so closing "
+    "the lane now strands that work. Either open a pull request for that branch and hand it to the batch runner, or "
+    "push an archive copy of it under archive/, then retry. "
+    "(decision session-tiers, a lane closes only after its records pull request has landed)"
+)
+ARCHIVE_BRANCH_READ_REASON = (
+    "the lane's branches or their pull requests could not be read, so the guard cannot tell whether any work of "
+    "the lane is stranded. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
+)
+ARCHIVE_STRANDED_MATCH = "archive of a lane with a branch that has no pull request"
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+# A source URL on github.com (https, ssh or scp form, an optional www., any case, an optional path after owner/name): `repo`
+# is its owner/name, and is None when the host is github.com but the rest is no owner/name. Another host does not match.
+_SOURCE_REPO = re.compile(
+    r"(?:[A-Za-z][A-Za-z0-9+.-]*://)?(?:[^@/]+@)?(?:www\.)?github\.com(?=[/:]|\Z)"
+    r"(?:[/:](?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?(?:/.*)?\Z)?",
+    re.IGNORECASE,
+)
+_AHEAD = ("ahead", "diverged")
+_CONTAINED = ("behind", "identical")  # a compare of base...head where the head is already in the base
+
+
+def _read_json(host, rel: str, what: str):
+    """The parsed JSON of one REST read of `host`; a failed read or a reply that is not JSON raises RuntimeError."""
+    code, out = host.api(rel)
+    try:
+        if code:
+            raise ValueError(out)
+        return json.loads(out)
+    except ValueError as e:
+        raise RuntimeError("the " + what + " read failed: " + str(e))
+
+
+def _compare_status(module, host, base: str, head: str, missing_ok: bool = False):
+    """The status of GitHub's compare of base...head (the one read behind the draft, the ahead and the containment
+    tests). With `missing_ok`, a 404 means the head is not in that repo and gives None. Any other failed read raises."""
+    code, out = host.api("compare/" + base + "..." + head)
+    if code and missing_ok and not module.is_net(code, out) and re.search(r"\bHTTP 404\b", out):
+        return None
+    try:
+        if code:
+            raise ValueError(out)
+        return str(json.loads(out)["status"])
+    except (ValueError, KeyError, TypeError) as e:
+        raise RuntimeError("the compare read failed: " + str(e))
 
 
 def _head_landed(module, repo: str, row) -> bool:
     """True when the head commit of the pull request `row` is already in the repo's default branch: the row's
     base is that branch (base.repo.default_branch, so a draft stacked on another branch is not released), and
-    GitHub's compare of default...sha reads behind or identical. A failed read raises, and archive_hit refuses on it."""
+    GitHub's compare of default...sha reads behind or identical. A failed read raises, and archive_hit refuses on it.
+    The caller holds the one shared deadline over this read (a nested shared_deadline would reset it)."""
     base, sha = str(row["base"]["ref"]), str(row["head"]["sha"])
     if base != str(row["base"]["repo"]["default_branch"]):
         return False
-    with module.shared_deadline(MERGE_READ_TIMEOUT):
-        code, out = module.Host(repo=repo).api("compare/" + base + "..." + sha)
-    try:
-        if code:
-            raise ValueError(out)
-        return json.loads(out)["status"] in ("behind", "identical")
-    except (ValueError, KeyError, TypeError) as e:
-        raise RuntimeError("the compare read failed: " + str(e))
+    return _compare_status(module, module.Host(repo=repo), base, sha) in _CONTAINED
 
 
-def _archive_tags(transcript: str, target, agent_id):
-    """The tags that decide an archive of `target`, or None when no transcript holds a record of it. The main
-    transcript and, for an agent's call (agent_id already checked by the caller), the agent's own transcript are
-    both read. A record with the lane tag decides: its tags, or the two records' tags joined when both are lanes.
-    Else a record without one decides. An agent file that does not exist holds no record; any other read error
-    raises. cost: one more transcript read per agent archive call, no file written, no gh call."""
-    records = []
-    main = _own_get_session_tags(transcript, target)
-    if main is not None:
-        records.append(main)
-    if agent_id:
-        try:
-            own = _own_get_session_tags(own_session.agent_transcript_path(transcript, agent_id), target)
-        except FileNotFoundError:
-            own = None
-        if own is not None:
-            records.append(own)
+def _branch_repos(ccr, tag_repos):
+    """The repos a lane's branches may live in: its cs-repo tags, the github repos of
+    session_context.sources[].git_repository.url, and each current_branches key that names owner/repo, in first-seen
+    order. Shape drift raises: a sources field that is present but not a list, and a github.com URL that does not
+    parse as owner/name. A URL on another host is skipped."""
+    found = list(tag_repos)
+    sources = (ccr.get("session_context") or {}).get("sources")
+    if sources is not None and not isinstance(sources, list):
+        raise RuntimeError("sources is not a list")
+    named = []
+    for source in sources or []:
+        repo = source.get("git_repository") if isinstance(source, dict) else None
+        url = repo.get("url") if isinstance(repo, dict) else None
+        match = _SOURCE_REPO.match(url) if isinstance(url, str) else None
+        if not match:
+            continue
+        if not match.group("repo"):
+            raise RuntimeError("a github.com source URL is no owner/name")
+        named.append(match.group("repo"))
+    meta = ccr.get("external_metadata")
+    keys = meta.get("current_branches") if isinstance(meta, dict) else None
+    named += [k for k in keys if isinstance(k, str) and _REPO_NAME.fullmatch(k)] if isinstance(keys, dict) else []
+    return found + [r for r in dict.fromkeys(named) if r not in found]
+
+
+def _on_lane_form(ref: str, slugs) -> bool:
+    """True when `ref` is a head form of a slug (lane_head_refs) or a `-*` variant of one, such as `lane/<slug>-r2`."""
+    return any(ref == form or ref.startswith(form + "-") for slug in slugs for form in lane_head_refs(slug))
+
+
+def _is_merged(row) -> bool:
+    """True when the pull request row is merged: its `merged` flag, or `merged_at` (what a list read carries)."""
+    return row.get("merged") is True or bool(row.get("merged_at"))
+
+
+def _is_open(rows) -> bool:
+    return any(row["state"] == "open" for row in rows)
+
+
+def _covered(module, host, branch: str, tip, rows, pool) -> bool:
+    """True when a pull request or an archive copy holds the work of `branch`, whose pull requests in every state are
+    `rows` and whose tip is `tip` (read from the branch when None, once no open pull request covers it). An open pull
+    request covers. A merged one covers when its head is the tip. A closed unmerged one covers only when the tip is
+    contained in the head of an open or merged pull request (compare of that head...tip reads behind or identical).
+    Those heads come from `pool`, the rows already read: the repo's open list rows on a lane head form and the rows
+    of every other branch of the lane that was read. A merged pull request on a head no read reached is not seen,
+    so that case refuses. Last, an archive copy covers when the tip is contained in it (compare of copy...tip reads
+    behind or identical). The copies are those listed at git/matching-refs/heads/archive/<branch> that are named
+    exactly `archive/<branch>` or `archive/<branch>-<digits>`; any other listed name does not count, and an empty
+    listing means no copy, so the branch is not covered. This adds one tip read when the caller had none, one compare
+    per head to test, one copy listing and one compare per counted copy, all on the refusal path."""
+    if _is_open(rows):
+        return True
+    if tip is None:
+        tip = str(_read_json(host, "branches/" + branch, "branch")["commit"]["sha"])
+    if any(str(row["head"]["sha"]) == tip for row in rows if _is_merged(row)):
+        return True
+    if any(row["state"] == "closed" and not _is_merged(row) for row in rows):
+        heads = [str(row["head"]["sha"]) for row in [*rows, *pool] if row["state"] == "open" or _is_merged(row)]
+        if any(sha == tip or _compare_status(module, host, sha, tip) in _CONTAINED for sha in dict.fromkeys(heads)):
+            return True
+    copy_name = re.compile(re.escape("archive/" + branch) + r"(-[0-9]+)?")
+    for ref in host.pages("git/matching-refs/heads/archive/" + branch):
+        name = str(ref["ref"])[len("refs/heads/"):]
+        if copy_name.fullmatch(name) and _compare_status(module, host, name, tip, missing_ok=True) in _CONTAINED:
+            return True
+    return False
+
+
+def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:
+    """True when a branch of the lane is ahead of its repo's default branch (compare status ahead or diverged) and no
+    pull request covers it (_covered). The branches are the non-null values of each record's
+    external_metadata.current_branches, and, in each repo, the branches under a slug form (`<slug>`, `lane/<slug>`,
+    and their `-*` variants) that the records do not name, read from git/matching-refs/heads/<form>. A record with no
+    branch field, an empty list or map, or only null values names none. A branch field that is not a map, and a
+    value that is neither null nor a string, are shapes the read does not know, so they raise. A 404 on the compare
+    means the branch is not in that repo, so it is skipped in that repo. Any other failed read raises, and
+    archive_hit refuses on it. The caller holds one shared deadline over all the reads here (a nested
+    shared_deadline would reset it). `open_rows` is each repo's open pull request list, already read. Every pull
+    request read of a repo is judged together, so a replacement on another branch of the lane is in hand."""
+    branches, repos = [], list(tag_repos)
+    for ccr in ccrs:
+        meta = ccr.get("external_metadata")
+        named = meta.get("current_branches") if isinstance(meta, dict) else None
+        if named is None or named == []:
+            named = {}
+        if not isinstance(named, dict):
+            raise RuntimeError("current_branches is not a map")
+        if any(b is not None and not isinstance(b, str) for b in named.values()):
+            raise RuntimeError("a current_branches value is not a string")
+        branches += [b for b in named.values() if b]
+        repos += [r for r in _branch_repos(ccr, tag_repos) if r not in repos]
+    branches = list(dict.fromkeys(branches))
+    defaults = {}
+    for repo in repos:
+        host = module.Host(repo=repo)
+        owner = repo.split("/")[0]
+        pool = [row for row in open_rows.get(repo, []) if _on_lane_form(str(row["head"]["ref"]), slugs)]
+        pending = []  # (branch, tip or None, rows) of each branch ahead of the default: judged once every row is read
+
+        def ahead(branch):
+            """True when `branch` is not the default or an archive copy, and its compare with the default reads ahead."""
+            if repo not in defaults:
+                defaults[repo] = str(_read_json(host, "", "repo")["default_branch"])
+            if branch.startswith("archive/") or branch == defaults[repo]:
+                return False
+            return _compare_status(module, host, defaults[repo], branch, missing_ok=True) in _AHEAD
+
+        for branch in branches:
+            if ahead(branch):
+                rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + branch})
+                pool += rows
+                pending.append((branch, None, rows))
+        seen = set(branches)
+        for slug in slugs:
+            for form in lane_head_refs(slug):
+                for ref in host.pages("git/matching-refs/heads/" + form):
+                    name = str(ref["ref"])[len("refs/heads/"):]
+                    if name in seen or not _on_lane_form(name, [slug]):
+                        continue
+                    seen.add(name)
+                    # The branch exists (the refs read just listed it), so an open pull request covers it before any
+                    # default-branch read; its tip is on the row already in hand.
+                    rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + name})
+                    pool += rows
+                    if not _is_open(rows) and ahead(name):
+                        pending.append((name, str(ref["object"]["sha"]), rows))
+        if any(not _covered(module, host, branch, tip, rows, pool) for branch, tip, rows in pending):
+            return True
+    return False
+
+
+def _archive_transcripts(transcript: str, agent_id):
+    """The transcripts that hold the record of an archive's target: the main transcript and, for an agent's call
+    (agent_id already checked by the caller), the agent's own. The one home of that choice."""
+    return [transcript] + ([own_session.agent_transcript_path(transcript, agent_id)] if agent_id else [])
+
+
+def _archive_records(transcript: str, target, agent_id):
+    """The `ccr` of the target's newest get_session record in each transcript of _archive_transcripts, None where one
+    holds none. Each transcript is read once, and the tags and the branch read both come from that read. An agent file
+    that does not exist holds no record; one that exists and cannot be read as a file (a folder, no read access)
+    raises, because own_session_ccr reads it as no record. cost: one transcript read per transcript, no file written,
+    no gh call."""
+    ccrs = []
+    for path in _archive_transcripts(transcript, agent_id):
+        ccr = own_session.own_session_ccr(path, target)
+        if ccr is None and os.path.lexists(path) and not (os.path.isfile(path) and os.access(path, os.R_OK)):
+            raise OSError("the transcript is not a readable file: " + path)
+        ccrs.append(ccr)
+    return ccrs
+
+
+def _archive_tags(ccrs):
+    """The tags that decide an archive, or None when no record of the target exists. A record with the lane tag decides:
+    its tags, or the two records' tags joined when both are lanes. Else the first record decides."""
+    records = [c["tags"] for c in ccrs if isinstance(c, dict) and isinstance(c.get("tags"), list)]
     lanes = [tags for tags in records if ARCHIVE_LANE_TAG in tags]
     if lanes:
         return [tag for tags in lanes for tag in tags]
@@ -1187,16 +1385,21 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
     """Return (matched, reason) when this archive call must be refused, else None. A target whose newest
     get_session record in this session's transcript, or for an agent's call (`agent_id`, checked by the caller
     against guard.AGENT_ID) in the agent's own transcript too, has no cs-build:lane tag passes. A lane in either
-    record is a lane. A lane is refused while any open pull request of its cs-repo has a head ref in lane_head_refs of its cs-step slug, except an open draft whose
-    head commit is already in its base (compare: behind or identical). Fails closed:
-    any error in the reads is a refusal, because the guard-wide crash path fails open."""
+    record is a lane. A lane is refused while any open pull request of its cs-repo has a head ref in
+    lane_head_refs of its cs-step slug, except an open draft whose head commit is already in its base (compare:
+    behind or identical). A lane is also refused while a branch of it (the records' current_branches, and the
+    repos' branches under its slug forms) is ahead of the repo's default branch with no covering pull request
+    (_stranded_branch). Fails closed: any error in the reads is a refusal, because the guard-wide crash path fails
+    open. A failed open-list read (the list and the draft compares) and a failed branch read each refuse with their
+    own reason. All the gh reads share one MERGE_READ_TIMEOUT."""
     if tool != ARCHIVE_TOOL:
         return None
     target = tool_input.get("session_id") if isinstance(tool_input, dict) else None
-    try:  # cost: one transcript read per archive call, and the agent's own file as a second for an agent's call
-        tags = _archive_tags(transcript, target, agent_id) if transcript and isinstance(target, str) and target else None
+    try:  # cost: one read of each transcript per archive call (two for an agent's call), for the tags and the branches
+        ccrs = _archive_records(transcript, target, agent_id) if transcript and isinstance(target, str) and target else []
     except Exception:
-        tags = None
+        ccrs = []
+    tags = _archive_tags(ccrs)
     if tags is None:
         return "archive with no record of the target", ARCHIVE_NO_RECORD_REASON
     if ARCHIVE_LANE_TAG not in tags:
@@ -1206,22 +1409,36 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
     slugs, repos = list(dict.fromkeys(x for x in slugs if x)), list(dict.fromkeys(x for x in repos if x))
     if not slugs or not repos or not all(_REPO_NAME.fullmatch(r) for r in repos):
         return "archive of a lane with no step or repo tag", ARCHIVE_TAGS_REASON
-    try:  # cost: one paged gh REST read per cs-repo tag (one in practice), through the merge tool's page reader
+    lanes = [c for c in ccrs if isinstance(c, dict) and isinstance(c.get("tags"), list) and ARCHIVE_LANE_TAG in c["tags"]]
+    reading_branches = False  # picks the reason a failed read refuses with
+    try:  # cost, all under one shared MERGE_READ_TIMEOUT: one paged gh REST read per cs-repo tag (one in practice), through
+        # the merge tool's page reader; one compare read per open draft of the lane; per repo, one matching-refs read per
+        # slug form (a paged read); and, for each branch the records name, one repo read per repo, one compare read per
+        # repo x branch, and one pulls read per branch that is ahead. A branch under a slug form adds one pulls read, and
+        # one compare read when no open pull request covers it. A branch with a pull request adds one tip read, and a
+        # closed unmerged one adds one compare read per distinct open or merged head among the rows already read.
         module = merge_module()
         if module is None:
             raise RuntimeError("the merge tool could not be loaded")
-        for repo in repos:
-            with module.shared_deadline(MERGE_READ_TIMEOUT):
-                rows = module.Host(repo=repo).pages("pulls", fields={"state": "open"})
-            for row in rows:
-                ref = str(row["head"]["ref"])
-                slug = next((s for s in slugs if ref in lane_head_refs(s)), None)
-                if slug and row.get("draft") is True and _head_landed(module, repo, row):
-                    continue
-                if slug:
-                    return "archive of lane " + slug + " with open pull request " + str(row.get("number", "?")), ARCHIVE_OPEN_REASON
+        open_rows = {}
+        with module.shared_deadline(MERGE_READ_TIMEOUT):
+            for repo in repos:
+                rows = open_rows[repo] = module.Host(repo=repo).pages("pulls", fields={"state": "open"})
+                for row in rows:
+                    ref = str(row["head"]["ref"])
+                    slug = next((s for s in slugs if ref in lane_head_refs(s)), None)
+                    if slug and row.get("draft") is True and _head_landed(module, repo, row):
+                        continue
+                    if slug:
+                        return "archive of lane " + slug + " with open pull request " + str(row.get("number", "?")), ARCHIVE_OPEN_REASON
+            reading_branches = True
+            stranded = _stranded_branch(module, lanes, repos, slugs, open_rows)
     except (Exception, SystemExit):
+        if reading_branches:
+            return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON
         return "archive with an unreadable pull request list", ARCHIVE_READ_REASON
+    if stranded:
+        return ARCHIVE_STRANDED_MATCH, ARCHIVE_NO_PR_REASON
     return None
 
 
