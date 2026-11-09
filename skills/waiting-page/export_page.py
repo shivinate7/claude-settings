@@ -41,7 +41,7 @@ Rebuild, the recovery path. It reads only the repo copy, never the live page:
 Writes OUT_DIR/batch-NNN.json, each a JSON list of at most 50 `{op: "set", collection, doc_id, data}` entries and
 under 900,000 bytes, one entry per doc in WAITING_DIR except `page/`, and prints `batches K docs N`. The session
 sends each list as an `ArtifactData batch`. Unknown, exit 2: a missing or empty WAITING_DIR, a folder in it that is
-neither one of the five collections nor `page/`, or one doc over the byte cap.
+neither one of the five collections (or the `--collections` names) nor `page/`, or one doc over the byte cap.
 For an artifact other than the waiting page, `--collections NAME [NAME ...]` names its collections (the registry
 entry's `collections`). They replace the five as the allowed folders, and a batch entry's `collection` is the folder
 name. A named collection with no folder is empty and fine; a folder not named is unknown, even one of the five.
@@ -537,8 +537,10 @@ def main(argv):
     if args.collections is not None and not args.rebuild:
         ap.error("--collections goes with --rebuild")
     for name in args.collections or ():
-        if not COLLECTION_SLUG.fullmatch(name) or name == PAGE_FOLDER:
-            ap.error("--collections names are collection slugs, and not %r: %r" % (PAGE_FOLDER, name))
+        if not COLLECTION_SLUG.fullmatch(name):
+            ap.error("--collections names are slugs: letters, digits, _ and -, starting with a letter or digit: %r" % name)
+        if name == PAGE_FOLDER:
+            ap.error("--collections cannot name %r: that folder holds the page and its files" % PAGE_FOLDER)
     all_mode = bool(args.all or args.worktree)
     export_mode, rebuild_mode = bool(args.out or args.page or (args.fetched and not all_mode)), bool(args.rebuild or args.batches)
     if [all_mode, export_mode, rebuild_mode].count(True) != 1 or (all_mode and not (args.all and args.fetched and args.worktree)) \
