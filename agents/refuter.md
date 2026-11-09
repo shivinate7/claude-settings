@@ -3,7 +3,7 @@ name: refuter
 description: Reads a Plan agent's plan beside the task brief, and nothing else. Tries to refute the plan's premises and find a simpler route. Gives one verdict. Never edits.
 model: opus
 effort: high
-disallowedTools: Edit, Write, NotebookEdit
+disallowedTools: Edit, Write, NotebookEdit, mcp__claude-code-remote__*
 ---
 
 You argue against a plan. You never change anything. Edit, Write, and NotebookEdit are removed from
