@@ -105,7 +105,7 @@ FAMILIES = {
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "hook-bypass": "a git commit, merge or push that skips the git hooks: core.hooksPath on the command or in the environment, --no-verify, and -n on commit; the mutation tool's own exemption",
     "merge": "merge into main, draft pull requests and the merge guard",
-    "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
+    "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, while a branch of the lane is ahead of its repo's default branch with no pull request, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "sendmessage-session-id": "SendMessage whose to starts session_: refused, since a session_ id is not an agent name and delivery to one is unmeasured; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
@@ -581,6 +581,112 @@ ARCHREADY_BEHIND = os.path.join(ROOT, "archready-behind")      # an open ready (
 ARCHDRAFT_READFAIL = os.path.join(ROOT, "archdraft-readfail")  # an open draft whose containment read fails
 ARCHDRAFT_INTEG = os.path.join(ROOT, "archdraft-integ")        # an open draft based on integration/b1, not the default branch
 ARCHDRAFT_LANE_BEHIND = os.path.join(ROOT, "archdraft-lane-behind")  # an open draft on the lane/<slug> head, head behind main
+# The branch read (lane-closes-after-records). The incident: a lane tagged for claude-settings and q_max, its branch pushed
+# to q_max alone. Its fakes name both repos (make_fake_gh's `repos`), and each repo answers for itself.
+ARCH_REPO_SETTINGS = "shivinate7/claude-settings"
+ARCH_REPO_QMAX = "shivinate7/q_max"
+ARCH_BRANCH = "claude/qmax-hosted-db-gate-notes"  # ahead of main in q_max, on no pull request
+ARCH_BRANCH_OTHER = "claude/other-y1"             # another branch of q_max, on an open pull request
+ARCHINC_NOPR = os.path.join(ROOT, "archinc-nopr")              # the branch is ahead in q_max, on no pull request
+ARCHINC_OTHERPR = os.path.join(ROOT, "archinc-otherpr")        # q_max's open pull request is on another branch
+ARCHINC_MERGED = os.path.join(ROOT, "archinc-merged")          # the branch's pull request was merged (a squash: still ahead)
+ARCHINC_CLOSED = os.path.join(ROOT, "archinc-closed")          # the branch's pull request was closed as replaced
+ARCHINC_OPEN = os.path.join(ROOT, "archinc-open")              # the branch's pull request is open
+ARCHINC_BEHIND = os.path.join(ROOT, "archinc-behind")          # the branch is behind main in q_max
+ARCHINC_IDENT = os.path.join(ROOT, "archinc-identical")        # the branch is identical to main in q_max
+ARCHINC_DEFAULT = os.path.join(ROOT, "archinc-default")        # the branch is main, the default of both repos
+ARCHINC_ARCHIVE = os.path.join(ROOT, "archinc-archive")        # the branch is archive/..., ahead in both repos
+ARCHINC_404ALL = os.path.join(ROOT, "archinc-404-all")         # the branch is in neither repo: a 404 in each
+ARCHINC_COMPARE500 = os.path.join(ROOT, "archinc-compare-500") # the compare of the branch in q_max is a server error
+ARCHINC_NETWORK = os.path.join(ROOT, "archinc-network")        # the compare of the branch in q_max is a refused connection
+ARCHINC_PULLS500 = os.path.join(ROOT, "archinc-pulls-500")     # the pull request list of the branch in q_max is a server error
+ARCHINC_PULLSJUNK = os.path.join(ROOT, "archinc-pulls-junk")   # the pull request list of the branch in q_max is not JSON
+ARCHINC_REPO500 = os.path.join(ROOT, "archinc-repo-500")       # q_max's own read, its default branch, is a server error
+ARCHINC_TRUNK = os.path.join(ROOT, "archinc-trunk")            # q_max's default branch is trunk: the branch is ahead of trunk
+ARCHINC_DIVERGED = os.path.join(ROOT, "archinc-diverged")      # the branch diverged from main in q_max, on no pull request
+ARCHINC_REPO404 = os.path.join(ROOT, "archinc-repo-404")       # q_max is named only by a source; its own read answers 404
+ARCHINC_SLOW = os.path.join(ROOT, "archinc-slow")              # two branches of q_max, behind main; each compare of q_max sleeps
+ARCHDRAFT_SLOW = os.path.join(ROOT, "archdraft-slow")          # an open draft of the slug in q_max, behind main, and a branch ahead there; each compare of q_max sleeps
+ARCHINC_CLOSEDALONE = os.path.join(ROOT, "archinc-closed-alone")  # the branch's pull request was closed, and no pull request replaced it
+ARCHINC_MERGEDMOVED = os.path.join(ROOT, "archinc-merged-moved")  # the branch's pull request merged at one head, and a commit sits on the branch after it
+ARCHLEFT_NOPR = os.path.join(ROOT, "archleft-nopr")              # a left branch under the lane's slug form is ahead of main, on no pull request
+ARCHLEFT_PR = os.path.join(ROOT, "archleft-pr")                  # the same left branch, on an open pull request
+ARCHLEFT_NEAR = os.path.join(ROOT, "archleft-near")              # a branch named <slug>x, ahead, on no pull request: no slug form, so no read of it
+ARCHLEFT_REPLACED = os.path.join(ROOT, "archleft-replaced")      # lane/<slug> closed unmerged, replaced by a merged pull request on lane/<slug>-r2 that holds its tip
+ARCHLEFT_REPLACED_AHEAD = os.path.join(ROOT, "archleft-replaced-ahead")  # the same, but the replacing head is ahead of the tip: the tip is not contained
+REPLACED_TIP = "%040d" % 21       # the branch tip, which the replacing pull request's head contains
+REPLACING_HEAD = "%040d" % 24     # the head of the merged pull request that replaced the closed one
+NEW_TIP = "%040d" % 99            # the branch tip after a new commit, past the head of its merged pull request
+ARCH_SLOW_A = "claude/slow-behind-a"                           # the first slow branch: behind main in q_max
+ARCH_SLOW_B = "claude/slow-behind-b"                           # the second slow branch: behind main in q_max
+ARCH_COPY_BRANCH = "claude/x"                                  # a lane's branch in o/r, ahead of main, on no pull request
+ARCH_COPY_REF = "archive/" + ARCH_COPY_BRANCH                  # the copy the guard lists under the branch's archive/ name
+ARCH_COPY_TIP = "%040d" % 31                                   # that branch's tip: each copy's compare is keyed by this sha
+ARCHCOPY_IDENT = os.path.join(ROOT, "archcopy-identical")      # the branch's archive/ copy holds its tip
+ARCHCOPY_AHEAD = os.path.join(ROOT, "archcopy-ahead")          # the branch's archive/ copy is at an older tip: the tip is ahead of it
+ARCHCOPY_MISSING = os.path.join(ROOT, "archcopy-missing")      # the branch has no archive/ copy: the listing is empty
+# Copies under other names. The listing returns each ref under the prefix, and the guard counts only the exact name and `-<digits>`.
+ARCHCOPY_NUMBERED = os.path.join(ROOT, "archcopy-numbered")    # archive/<branch> at a diverged tip; archive/<branch>-2 holds the tip
+ARCHCOPY_NUMBERED_NONE = os.path.join(ROOT, "archcopy-numbered-none")  # archive/<branch> diverged; archive/<branch>-2 ahead: none holds the tip
+ARCHCOPY_LOOKALIKE = os.path.join(ROOT, "archcopy-lookalike")  # archive/<branch>y holds the tip: neither the exact name nor -<digits>
+ARCHCOPY_SUFFIX_R2 = os.path.join(ROOT, "archcopy-suffix-r2")  # archive/<branch>-r2 holds the tip: a suffix that is not digits
+
+
+def arch_pair(qmax=None, settings=None):
+    """The incident's two repos, as make_fake_gh's `repos` takes them. claude-settings does not hold the branch (its compare is a
+    404); q_max holds it, ahead of main. A scope given here replaces the default keys of its repo."""
+    return {
+        ARCH_REPO_SETTINGS: dict({"compares": {"main..." + ARCH_BRANCH: "missing"}}, **(settings or {})),
+        ARCH_REPO_QMAX: dict({"compares": {"main..." + ARCH_BRANCH: "ahead"}}, **(qmax or {})),
+    }
+
+
+def arch_row(ref, number, state="open", merged=False):
+    """A pull request row for an arch fixture: its head ref, its number and its state. Its head sha is the number, padded to forty."""
+    return {"number": number, "head": "%040d" % number, "ref": ref, "state": state, "merged": merged}
+
+
+def arch_replaced(containment):
+    """The repo of a lane whose branch lane/<slug> is closed unmerged, replaced by a merged pull request on lane/<slug>-r2.
+    The -r2 branch's tip is that merged head. The compare of the merged head with the lane branch's tip reads `containment`:
+    "behind" when the merged head holds the tip, "ahead" when it does not. Both lane branches read ahead of main."""
+    slug = ARCHIVE_SLUG
+    return {
+        "others": [arch_row("lane/" + slug, 23, state="closed"),
+                   arch_row("lane/" + slug + "-r2", 24, state="closed", merged=True)],
+        "refs": ["lane/" + slug, "lane/" + slug + "-r2"],
+        "tips": {"lane/" + slug: REPLACED_TIP, "lane/" + slug + "-r2": REPLACING_HEAD},
+        "compares": {"main...lane/" + slug: "ahead", "main...lane/" + slug + "-r2": "ahead",
+                     REPLACING_HEAD + "..." + REPLACED_TIP: containment},
+    }
+
+
+def arch_copies(answers, others=()):
+    """The repo of a lane whose branch ARCH_COPY_BRANCH is ahead of main on no pull request, or on the rows given. Its tip is
+    ARCH_COPY_TIP. `answers` maps each archive/ ref the listing holds (its full name) to the status of that ref's compare with
+    the tip, so a listed copy and its compare are one answer. The compare key names the tip by sha, never by the branch."""
+    compares = {"main..." + ARCH_COPY_BRANCH: "ahead"}
+    compares.update({name + "..." + ARCH_COPY_TIP: status for name, status in answers.items()})
+    return {
+        "tips": {ARCH_COPY_BRANCH: ARCH_COPY_TIP},
+        "refs": list(answers),
+        "compares": compares,
+        "others": list(others),
+    }
+
+
+def arch_copy(archive, others=()):
+    """The repo of a lane whose branch ARCH_COPY_BRANCH is ahead of main on no pull request, with its archive/<branch> copy
+    answering `archive`: "identical" when the copy holds the tip, "ahead" when it is older, "missing" when there is no copy.
+    A "missing" copy is not listed, so the listing answers []. Its compare still answers 404 for a direct read of the copy, so
+    a guard that compared the copy without the listing would read it as unreadable, and fail the case that names it."""
+    if archive == "missing":
+        copy = arch_copies({}, others)
+        copy["compares"][ARCH_COPY_REF + "..." + ARCH_COPY_TIP] = "missing"
+        return copy
+    return arch_copies({ARCH_COPY_REF: archive}, others)
+
+
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
 # `PTRMAIN`, which stands in for the machine's primary checkout: the one every session runs its
 # hooks and its lint from. `PTRWT` is a real linked worktree of it, which must stay allowed.
@@ -1112,6 +1218,16 @@ if path:
     for word in state["need"]:
         if ("/" in word and "repos/" + word + "/" not in path) or ("/" not in word and "/pulls/" in path and "/pulls/" + word not in path):
             state["broken"] = True
+    if state.get("repos") is not None:  # per-repo answers: a call to a repo the fixture does not name is a broken tool
+        named = re.match(r"^repos/([^/{}]+/[^/{}]+)(?:/|$)", path)
+        scope = state["repos"].get(named.group(1)) if named else None
+        if scope is None:
+            state["broken"] = True
+        else:
+            state.update(repo_mode=True, others=scope.get("others", []), compares=scope.get("compares", {}),
+                         default_branch=scope.get("default_branch", "main"), repo_error=scope.get("repo_error"),
+                         pulls_error=scope.get("pulls_error"), compare_delay_s=scope.get("compare_delay_s", 0),
+                         refs=scope.get("refs", []), tips=scope.get("tips", {}))
 while "-R" in args:
     i = args.index("-R")
     del args[i:i + 2]
@@ -1133,15 +1249,29 @@ else:
     head = state["pr"]["head"]["sha"]
     rows_of = {head: (state["checks"], state["statuses"])}  # the head's own rows; each other open pull request's head has its own
     rows_of.update({o["head"]: (o.get("checks", []), o.get("statuses", [])) for o in state["others"]})
-    if re.fullmatch(r"pulls/\d+", rel):
+    if state.get("repo_mode") and re.fullmatch(r"repos/[^/{}]+/[^/{}]+", path):  # the repo's own read: its default branch
+        if state["repo_error"] == "server":
+            api_error(500, "repo read broke")
+        if state["repo_error"] == "missing":  # the repo is not on GitHub: its own read answers 404
+            api_error(404, "Not Found")
+        print(json.dumps({"full_name": path[len("repos/"):], "default_branch": state["default_branch"]}))
+    elif re.fullmatch(r"pulls/\d+", rel):
         print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
     elif rel == "pulls":
+        if state.get("pulls_error") and fields.get("state") == state["pulls_error"][0]:  # a list read of that state fails
+            if state["pulls_error"][1] == "server":
+                api_error(500, "pulls read broke")
+            print("<html>a page that is not JSON</html>")
+            sys.exit(0)
         others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"]},
                        base={"ref": o.get("base", "main"), "repo": {"default_branch": o.get("default_branch", "main")}},
                        state=o.get("state", "open"), merged=o.get("merged", False)) for o in state["others"]]
-        rows = [dict(state["pr"], number=state["number"])] + others
+        rows = ([] if state.get("repo_mode") else [dict(state["pr"], number=state["number"])]) + others  # a repo scope holds its own rows only
         if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
             rows = [row for row in rows if row["state"] == "open"]
+        if "head" in fields:  # GitHub filters a list read by `head=<owner>:<branch>`: the owner is the repo's, so a bare branch matches none
+            owner, _, branch = fields["head"].partition(":")
+            rows = [row for row in rows if owner == path.split("/")[1] and row["head"]["ref"] == branch]
         print(listing(rows, None, fields, flags, rel=rel))
     elif re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel) and rel.split("/")[1] in rows_of:
         checks, statuses = rows_of[rel.split("/")[1]]
@@ -1166,10 +1296,24 @@ else:
             sys.exit(1)
         print(json.dumps(state["required"]))  # the `--jq .contexts` of the protection read: a JSON array of the required names
     elif re.fullmatch(r"compare/.+", rel):  # the containment read of "<base>...<head sha>" (a base may hold a slash): a pair not listed is diverged
+        if state.get("compare_delay_s"):  # a repo's compare reads each sleep first: one budget shared across them runs out
+            time.sleep(state["compare_delay_s"])
         status = state.get("compares", {}).get(rel[len("compare/"):], "diverged")
         if status == "server":  # the read fails, as a server error: the guard cannot tell whether the commits landed
             api_error(500, "compare read broke")
+        if status == "missing":  # the branch is not in this repo: GitHub answers 404
+            api_error(404, "Not Found")
+        if status == "network":  # no HTTP status at all: a refused connection
+            print('Get "https://api.github.com/' + rel + '": dial tcp 140.82.112.6:443: connect: connection refused')
+            sys.exit(1)
         print(json.dumps({"status": status}))
+    elif rel.startswith("git/matching-refs/heads/"):  # the refs whose name starts with the prefix, as GitHub's prefix match answers
+        prefix = rel[len("git/matching-refs/heads/"):]
+        print(json.dumps([{"ref": "refs/heads/" + name, "object": {"sha": state["tips"].get(name, "f" * 40), "type": "commit"}}
+                          for name in state["refs"] if name.startswith(prefix)]))
+    elif re.fullmatch(r"branches/.+", rel):  # a branch's tip: its commit sha, at f * 40 unless the fixture names one
+        name = rel[len("branches/"):]
+        print(json.dumps({"name": name, "commit": {"sha": state["tips"].get(name, "f" * 40)}}))
     else:
         api_error(404, "Not Found")
 '''
@@ -1177,11 +1321,19 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None, compares=None):
+                 count_file=None, compares=None, repos=None, refs=(), tips=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
+
+    `repos`, when given, maps each repo name ("owner/name") to that repo's own answers, for a case whose
+    lane spans repos: `compares` (its containment reads; "missing" is a 404, "network" a refused
+    connection), `others` (its pull requests, rows as `others` takes them), `default_branch` (what its
+    own read names; main when unset), `repo_error` ("server": its own read fails with 500; "missing": with 404), `compare_delay_s` (seconds each of its
+    compare reads sleeps before it answers) and `pulls_error`
+    ([state, "server" or "junk"]: a list read of that state fails). A repo's answers replace the
+    top-level ones for the calls that name it. A call to a repo the map does not name is a broken tool.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
@@ -1244,6 +1396,9 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
         "delay_s": delay_s,   # seconds to sleep in-process before answering; see the delay_s note above
         "count_file": count_file,  # None: no call log; a path: one line per call (see the docstring)
+        "repos": None if repos is None else dict(repos),  # None: one repo, the top-level answers; a map: see the docstring
+        "refs": list(refs),  # branch names the repo holds: the matching-refs read answers the ones under its prefix
+        "tips": dict(tips or {}),  # branch name -> the sha of its tip; a branch not listed is at f * 40
     }
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
@@ -1492,6 +1647,73 @@ def build_fixtures():
     # An open draft on the `lane/<slug>` head form, its head behind main: released as the bare-slug draft is.
     make_fake_gh(ARCHDRAFT_LANE_BEHIND, "main", need=["o/r"],
                  others=[dict(slug_head, draft=True, ref="lane/" + ARCHIVE_SLUG)], compares={draft_pair: "behind"})
+    # The branch read: each fake names both repos of the incident (`repos`), so no call may name another.
+    make_fake_gh(ARCHINC_NOPR, "main", repos=arch_pair())
+    make_fake_gh(ARCHINC_OTHERPR, "main", repos=arch_pair(qmax={"others": [arch_row(ARCH_BRANCH_OTHER, 21)]}))
+    # A merged pull request whose head is the branch tip: the squash left the branch at that head, so it is covered.
+    make_fake_gh(ARCHINC_MERGED, "main", repos=arch_pair(qmax={
+        "others": [arch_row(ARCH_BRANCH, 22, state="closed", merged=True)], "tips": {ARCH_BRANCH: "%040d" % 22}}))
+    # The same merged pull request, and a commit after it: the tip is past the head, so the merged pull request does not cover it.
+    make_fake_gh(ARCHINC_MERGEDMOVED, "main", repos=arch_pair(qmax={
+        "others": [arch_row(ARCH_BRANCH, 22, state="closed", merged=True)], "tips": {ARCH_BRANCH: NEW_TIP}}))
+    # A closed pull request with no replacement: nothing open or merged holds the branch's work, so it is not covered.
+    make_fake_gh(ARCHINC_CLOSEDALONE, "main", repos=arch_pair(qmax={"others": [arch_row(ARCH_BRANCH, 23, state="closed")]}))
+    # A closed pull request, replaced by a merged one whose head contains the tip: the one compare of the replacing head with
+    # the tip reads behind (the tip is an ancestor of it), so the closed pull request covers the branch.
+    make_fake_gh(ARCHINC_CLOSED, "main", repos=arch_pair(qmax={
+        "others": [arch_row(ARCH_BRANCH, 23, state="closed"), arch_row(ARCH_BRANCH, 24, state="closed", merged=True)],
+        "tips": {ARCH_BRANCH: REPLACED_TIP},
+        "compares": {"main..." + ARCH_BRANCH: "ahead", REPLACING_HEAD + "..." + REPLACED_TIP: "behind"}}))
+    # A left branch under the lane's slug forms: the bare slug's `-r2` variant and the `lane/` form, ahead of main.
+    # Each left-branch fake names its repo (`repos`), as the multi-read fixtures do: the repo read answers its default branch.
+    make_fake_gh(ARCHLEFT_NOPR, "main", repos={"o/r": {"refs": ["lane/" + ARCHIVE_SLUG + "-r2"],
+                 "compares": {"main...lane/" + ARCHIVE_SLUG + "-r2": "ahead"}}})
+    make_fake_gh(ARCHLEFT_PR, "main", repos={"o/r": {"refs": ["lane/" + ARCHIVE_SLUG + "-r2"],
+                 "compares": {"main...lane/" + ARCHIVE_SLUG + "-r2": "ahead"},
+                 "others": [{"number": 40, "head": "%040d" % 40, "ref": "lane/" + ARCHIVE_SLUG + "-r2"}]}})
+    # A ref that starts with the slug but is no `-*` variant of it: the prefix read returns it, the form match drops it.
+    make_fake_gh(ARCHLEFT_NEAR, "main", repos={"o/r": {"refs": [ARCHIVE_SLUG + "x"],
+                 "compares": {"main..." + ARCHIVE_SLUG + "x": "ahead"}}})
+    # A closed pull request on lane/<slug>, replaced by a merged one on lane/<slug>-r2: contained in the replacing head, or not.
+    make_fake_gh(ARCHLEFT_REPLACED, "main", repos={"o/r": arch_replaced("behind")})
+    make_fake_gh(ARCHLEFT_REPLACED_AHEAD, "main", repos={"o/r": arch_replaced("ahead")})
+    # A lane branch ahead of main on no pull request, whose archive/ copy holds its tip (identical) or is older (ahead).
+    make_fake_gh(ARCHCOPY_IDENT, "main", repos={"o/r": arch_copy("identical")})
+    make_fake_gh(ARCHCOPY_AHEAD, "main", repos={"o/r": arch_copy("ahead")})
+    make_fake_gh(ARCHCOPY_MISSING, "main", repos={"o/r": arch_copy("missing")})
+    make_fake_gh(ARCHCOPY_NUMBERED, "main", repos={"o/r": arch_copies({ARCH_COPY_REF: "diverged",
+                                                                       ARCH_COPY_REF + "-2": "identical"})})
+    make_fake_gh(ARCHCOPY_NUMBERED_NONE, "main", repos={"o/r": arch_copies({ARCH_COPY_REF: "diverged",
+                                                                            ARCH_COPY_REF + "-2": "ahead"})})
+    make_fake_gh(ARCHCOPY_LOOKALIKE, "main", repos={"o/r": arch_copies({ARCH_COPY_REF + "y": "identical"})})
+    make_fake_gh(ARCHCOPY_SUFFIX_R2, "main", repos={"o/r": arch_copies({ARCH_COPY_REF + "-r2": "identical"})})
+    make_fake_gh(ARCHINC_OPEN, "main", repos=arch_pair(qmax={"others": [arch_row(ARCH_BRANCH, 24)]}))
+    make_fake_gh(ARCHINC_BEHIND, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "behind"}}))
+    make_fake_gh(ARCHINC_IDENT, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "identical"}}))
+    # The default branch is judged by no compare: an unlisted pair is diverged (ahead), so a guard that judged it would refuse.
+    make_fake_gh(ARCHINC_DEFAULT, "main", repos=arch_pair(qmax={"compares": {}}, settings={"compares": {}}))
+    make_fake_gh(ARCHINC_ARCHIVE, "main", repos=arch_pair(qmax={"compares": {"main...archive/claude/x": "ahead"}}))
+    make_fake_gh(ARCHINC_404ALL, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "missing"}}))
+    make_fake_gh(ARCHINC_COMPARE500, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "server"}}))
+    make_fake_gh(ARCHINC_NETWORK, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "network"}}))
+    make_fake_gh(ARCHINC_PULLS500, "main", repos=arch_pair(qmax={"pulls_error": ["all", "server"]}))
+    make_fake_gh(ARCHINC_PULLSJUNK, "main", repos=arch_pair(qmax={"pulls_error": ["all", "junk"]}))
+    make_fake_gh(ARCHINC_REPO500, "main", repos=arch_pair(qmax={"repo_error": "server"}))
+    make_fake_gh(ARCHINC_TRUNK, "main", repos=arch_pair(qmax={"default_branch": "trunk",
+                                                             "compares": {"main..." + ARCH_BRANCH: "behind",
+                                                                          "trunk..." + ARCH_BRANCH: "ahead"}}))
+    make_fake_gh(ARCHINC_DIVERGED, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "diverged"}}))
+    # q_max's own read answers 404: the repo is named only through a source, and it is not on GitHub.
+    make_fake_gh(ARCHINC_REPO404, "main", repos=arch_pair(qmax={"repo_error": "missing"}))
+    # Each compare of q_max sleeps 13s, under MERGE_READ_TIMEOUT (25s) alone. The two branches are behind main, so a
+    # read that runs both sums past one budget. A delay on every call would stretch the run past a minute.
+    make_fake_gh(ARCHINC_SLOW, "main", repos=arch_pair(qmax={
+        "compares": {"main..." + ARCH_SLOW_A: "behind", "main..." + ARCH_SLOW_B: "behind"}, "compare_delay_s": 13}))
+    # One read budget runs across the slug draft's containment read and the branch read after it. Each compare of q_max
+    # sleeps 13s, under MERGE_READ_TIMEOUT (25s) alone. The draft's head is behind main, so only the branch read can refuse.
+    make_fake_gh(ARCHDRAFT_SLOW, "main", repos=arch_pair(qmax={
+        "others": [dict(slug_head, draft=True)],
+        "compares": {"main..." + slug_head["head"]: "behind", "main..." + ARCH_BRANCH: "ahead"}, "compare_delay_s": 13}))
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
@@ -11778,6 +12000,25 @@ ARCH_TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]
 # A target that is no lane, yet carries a step slug and a repo: a read of its open list would find a slug.
 ARCH_TRIAGE_SLUG_TAGS = ["cs-build:triage", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
 ARCH_UNTAGGED_TAGS = ["cs-repo:o/r"]
+# The branch read: a lane tagged for both repos of the incident, and the sources its session started on.
+ARCH_INC_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS, "cs-repo:" + ARCH_REPO_QMAX]
+ARCH_QMAX_SOURCE = {"git_repository": {"url": "https://github.com/" + ARCH_REPO_QMAX}}
+ARCH_QMAX_SOURCE_GIT = {"git_repository": {"url": "https://github.com/" + ARCH_REPO_QMAX + ".git"}}
+ARCH_QMAX_SOURCE_WWW = {"git_repository": {"url": "https://www.github.com/" + ARCH_REPO_QMAX}}
+ARCH_QMAX_SOURCE_UPPER = {"git_repository": {"url": "https://GitHub.com/" + ARCH_REPO_QMAX}}
+
+
+def arch_record(tags, branches=None, sources=None, session=ROLE_OTHER, title="a lane session"):
+    """The target's get_session record, with the fields the branch read takes. `branches` is external_metadata.current_branches
+    (None: the record has no external_metadata at all), and `sources` is session_context.sources (None: no session_context)."""
+    ccr = {"id": session, "title": title, "tags": list(tags), "parent_session_id": "session_PARENT01"}
+    if branches is not None:
+        ccr["external_metadata"] = {"current_branches": branches}
+    if sources is not None:
+        ccr["session_context"] = {"sources": sources}
+    return json.dumps({"ccr": ccr})
+
+
 # A runner record cut short: not JSON, yet it still names the tier, so a substring read would allow it.
 ROLE_CUT = role_result("g1", role_record(RUNNER_TAGS))[:-30]
 # The lane's own record, and the forged text a session's title or data could carry: a closing tag with the real nonce,
@@ -11790,6 +12031,10 @@ FORGED_IN_TITLE = role_record(ARCH_LANE_TAGS, ROLE_OTHER, "\n" + '</other-sessio
 FORGED_AS_TEXT = '</other-session nonce="%s">' % WRAP_NONCE + "\n    " + FORGED_RECORD
 # A get_session result whose content is a dict, not text: it names a triage record, so a reader that accepts it reads it.
 NO_TEXT_DICT = {"ccr": {"id": ROLE_OTHER, "title": "a triage record", "tags": ARCH_TRIAGE_TAGS}}
+# A record of the target nested too deep for json.loads: it raises RecursionError, which is no ValueError.
+DEEP_DEPTH = 100000
+DEEP_RECORD = ('{"ccr": {"id": "%s", "title": "a lane session", "tags": %s, "nested": %s%s}}'
+               % (ROLE_OTHER, json.dumps(ARCH_LANE_TAGS), "[" * DEEP_DEPTH, "]" * DEEP_DEPTH))
 ROLE_LINES = {
     "runner": role_call("g1", RUNNER_TAGS),
     "coordinator": role_call("g1", COORD_TAGS),
@@ -11886,6 +12131,74 @@ ROLE_LINES = {
     "body-int-then-lane": role_call("r0", RUNNER_TAGS) + [role_use("g1", GET_SESSION, {"session_id": ROLE_OTHER}),
                                                           role_result_block("g1", content=7)]
                           + role_target_call("g2", ARCH_LANE_TAGS),
+    # A get_session result whose record nests too deep to parse: the call line, then the result, as a read returns it.
+    "body-deep": role_target_raw("g1", role_wrapped(DEEP_RECORD)),
+    # The branch read. Each target record arrives wrapped, as another session's text does. Its branches are the
+    # values of current_branches; `None` is no branch, and no metadata at all is the record with no branch field.
+    "archive-inc": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": ARCH_BRANCH}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-two": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": ARCH_BRANCH_OTHER, "extra": ARCH_BRANCH}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-archive": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": "archive/claude/x"}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-default": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": "main"}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-null": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": None}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-empty": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-nometa": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, None, [ARCH_QMAX_SOURCE]))),
+    # The branch lives only in q_max, which the record names through its sources: no cs-repo tag names q_max.
+    "archive-inc-source-only": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS], {"": ARCH_BRANCH},
+        [ARCH_QMAX_SOURCE]))),
+    # The same lane, its source URL ending in .git: the repo it names is q_max, as the URL without the suffix.
+    "archive-inc-source-git": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS], {"": ARCH_BRANCH},
+        [ARCH_QMAX_SOURCE_GIT]))),
+    # Shape drift: current_branches is a list, then a string, where the read takes a map of branch names.
+    "archive-inc-list": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, [ARCH_BRANCH], [ARCH_QMAX_SOURCE]))),
+    "archive-inc-str": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, ARCH_BRANCH, [ARCH_QMAX_SOURCE]))),
+    # One lane on q_max alone, two branches of it, both behind main: the reads are slow, not the answers.
+    "archive-inc-slow": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_QMAX], {"": ARCH_SLOW_A, "extra": ARCH_SLOW_B}))),
+    # The same lane, its source URL on www.github.com: that host is github.com, so q_max is the repo it names.
+    "archive-inc-source-www": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS], {"": ARCH_BRANCH},
+        [ARCH_QMAX_SOURCE_WWW]))),
+    # The same lane, its source URL with the host in capitals: GitHub.com is github.com, so q_max is the repo it names.
+    "archive-inc-source-upper": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS], {"": ARCH_BRANCH},
+        [ARCH_QMAX_SOURCE_UPPER]))),
+    # Shape drift in the sources and in the branch values. The branch is behind main in q_max, so only the drift can refuse
+    # it. A source on another host is no repo of GitHub's: its lane is judged on the cs-repo tags alone.
+    "archive-inc-sources-str": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": ARCH_BRANCH}, "https://github.com/" + ARCH_REPO_QMAX))),
+    # A github.com source with a trailing path names its repo: q_max is read from the URL alone, as the lane's tags name settings.
+    "archive-inc-source-tree": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS], {"": ARCH_BRANCH},
+        [{"git_repository": {"url": "https://github.com/" + ARCH_REPO_QMAX + "/tree/main"}}]))),
+    # A github.com source that names no owner and repo: its repo cannot be read, so the archive refuses as unreadable.
+    "archive-inc-source-bare": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": ARCH_BRANCH}, [{"git_repository": {"url": "https://github.com/shivinate7"}}]))),
+    # current_branches is an empty list: no branch is named, so nothing is read for it.
+    "archive-inc-list-empty": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, [], [ARCH_QMAX_SOURCE]))),
+    # A current_branches key that names owner/repo: q_max is read for that branch, though no tag or source names it.
+    "archive-inc-key-repo": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS], {ARCH_REPO_QMAX: ARCH_BRANCH}))),
+    "archive-inc-branch-int": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": 5}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-branch-map": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": {"name": ARCH_BRANCH}}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-source-gitlab": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": ARCH_BRANCH}, [{"git_repository": {"url": "https://gitlab.com/" + ARCH_REPO_QMAX}}]))),
+    # The lane in o/r alone, whose record names the branch ARCH_COPY_BRANCH. Its repo is judged by arch_copy's answers.
+    "archive-copy-lane": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_LANE_TAGS, {"": ARCH_COPY_BRANCH}))),
 }
 
 
@@ -12388,9 +12701,14 @@ FAMILY = "lane-closes-after-records"
 # the target's newest get_session record in this session's own transcript, as merge-role-proof and
 # trust-card-in-build read theirs:
 #   - the record has no cs-build:lane tag: allow, the target is not a lane;
-#   - a lane, with no record of the target in the transcript: deny, and the remedy steers to get_session;
+#   - a lane, with no record of the target in the transcript: refuse, and the remedy steers to get_session;
 #   - a lane: the guard reads the open pull requests of the lane's cs-repo. Any open one whose head names the
-#     cs-step slug denies. None allows. A read that cannot run denies: guards fail closed.
+#     cs-step slug refuses. None allows. A read that cannot run refuses: guards fail closed.
+#   - a lane whose record names branches (external_metadata.current_branches): each branch ahead of its repo's
+#     default branch, on no pull request in any state, refuses. A 404 on the branch's compare means the branch is not
+#     in that repo. Any other failed read refuses. A branch equal to the default, or behind it, or archive/..., is skipped.
+#     A branch whose archive copy holds its tip is covered. The copies are listed under archive/<branch>, and only the
+#     exact name and `<branch>-<digits>` count; a listed copy under any other name is never compared.
 # The allows are as load-bearing as the refusals: a false alarm on a finished lane blocks the batch runner.
 ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
 ARCHIVE_RULE = "lane-closes-after-records"
@@ -12449,7 +12767,7 @@ archive_refuse("no record of the target in the transcript is refused, and the re
 # The calling session's own lane record is not the target's: a lane-tagged own record does not stand for it.
 archive_refuse("an own lane record with no record of the target is refused, and the remedy steers to get_session",
                role_path("archive-own-lane"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_STEER)
-# A read that cannot run denies: a broken gh, and a missing gh.
+# A read that cannot run refuses: a broken gh, and a missing gh.
 archive_refuse("a lane whose open pull requests cannot be read is refused", role_path("archive-lane"),
                fake_gh_path(GHBROKEN))
 archive_refuse("a lane with no gh on the path is refused", role_path("archive-lane"), GHNONE_PATH)
@@ -12521,6 +12839,168 @@ archive_refuse("a get_session result whose content is a dict before the lane's r
 archive_refuse("a get_session result whose content is an int before the lane's record: the lane's open pull request refuses",
                role_path("body-int-then-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
 
+# The branch read. The record's current_branches names each branch of the lane. A branch that is ahead of its repo's
+# default branch, on no pull request in any state, refuses the archive. The refusal names that shape, never a branch.
+# Each repo answers for itself: a 404 on a compare means the branch is not in that repo, and any other failed read refuses.
+ARCHIVE_NOPR_PIN = ("has no pull request",)
+ARCHIVE_NO_BRANCH = (ARCH_BRANCH, ARCH_BRANCH_OTHER, "could not be read")  # a no-pull-request refusal names neither branch
+ARCHIVE_READ_LACKS = (ARCHIVE_NOPR_PIN[0], ARCH_BRANCH)  # a read-failure refusal is not the no-pull-request one
+archive_refuse("an incident lane: its branch is ahead of main in q_max, on no pull request, and claude-settings has no such branch: refused",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+archive_refuse("a lane whose branch has no pull request, while another branch of its repo has an open one: refused",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_OTHERPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+archive_refuse("a lane with two branches, the first on an open pull request and the second on none: refused for the second",
+               role_path("archive-inc-two"), fake_gh_path(ARCHINC_OTHERPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+archive_refuse("a lane whose branch compare in q_max is a server error: refused, and the reason says the branch read failed, not the open list",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE500), carries=ARCHIVE_READ_PIN,
+               lacks=ARCHIVE_READ_LACKS + ("open pull requests",))
+archive_refuse("a lane whose branch compare in q_max is a refused connection, not a 404: refused, and the reason says the read failed",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_NETWORK), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+archive_refuse("a lane whose pull request list for its branch in q_max is a server error: refused, and the reason says the read failed",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_PULLS500), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+archive_refuse("a lane whose pull request list for its branch in q_max is not JSON: refused, and the reason says the read failed",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_PULLSJUNK), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+archive_refuse("a lane whose q_max default branch cannot be read: refused, and the reason says the read failed",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_REPO500), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+archive_refuse("a lane whose q_max default branch is trunk: its branch is judged against trunk, not main, and refused",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_TRUNK), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# Allowed: a branch with a pull request in any state, a branch the rule skips, and a record that names no branch.
+archive_allow("an incident lane whose branch has a merged pull request is allowed: a squash leaves the branch ahead",
+              role_path("archive-inc"), fake_gh_path(ARCHINC_MERGED))
+archive_allow("an incident lane whose branch has a closed, unmerged pull request is allowed: it was closed as replaced",
+              role_path("archive-inc"), fake_gh_path(ARCHINC_CLOSED))
+archive_allow("an incident lane whose branch has an open pull request is allowed",
+              role_path("archive-inc"), fake_gh_path(ARCHINC_OPEN))
+archive_allow("a branch named archive/... is skipped, though it is ahead with no pull request",
+              role_path("archive-inc-archive"), fake_gh_path(ARCHINC_ARCHIVE))
+archive_allow("a branch behind main with no pull request is allowed",
+              role_path("archive-inc"), fake_gh_path(ARCHINC_BEHIND))
+archive_allow("a branch identical to main with no pull request is allowed",
+              role_path("archive-inc"), fake_gh_path(ARCHINC_IDENT))
+archive_allow("a branch equal to its repo's default branch is skipped, though the compare would read it diverged",
+              role_path("archive-inc-default"), fake_gh_path(ARCHINC_DEFAULT))
+archive_allow("a branch the compare reads as a 404 in every repo is in none of them: allowed",
+              role_path("archive-inc"), fake_gh_path(ARCHINC_404ALL))
+archive_allow("a null branch value is no branch: allowed, though a read of the null as a branch would find one ahead",
+              role_path("archive-inc-null"), fake_gh_path(ARCHINC_NOPR))
+archive_allow("an empty current_branches names no branch: allowed, and reading it does not fail the archive",
+              role_path("archive-inc-empty"), fake_gh_path(ARCHINC_NOPR))
+archive_allow("a record with no external_metadata is judged as before the branch read: allowed",
+              role_path("archive-inc-nometa"), fake_gh_path(ARCHINC_NOPR))
+# A repo the record names only through session_context.sources is read too: a branch ahead there, on no pull request, refuses.
+archive_refuse("a lane whose branch lives only in a repo its record names through sources, not a cs-repo tag: refused",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# A compare that reads diverged is a branch off main that is not in it: ahead of main for the rule, so no pull request refuses.
+archive_refuse("a branch whose compare in q_max is diverged, on no pull request: refused",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_DIVERGED), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# A source URL ending in .git names the same repo: its branch, ahead there on no pull request, refuses as it does without it.
+archive_refuse("a source URL ending in .git names its repo: a branch ahead there on no pull request is refused",
+               role_path("archive-inc-source-git"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# A repo named only by a source whose own read answers 404 is unreadable, not skipped: the archive refuses as unreadable.
+archive_refuse("a sources-only repo whose own read answers 404 is refused, and the reason says the read failed",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404), carries=ARCHIVE_READ_PIN,
+               lacks=ARCHIVE_READ_LACKS)
+# Shape drift fails closed: a current_branches that is not a map is a shape the read does not know, so it refuses as unreadable.
+archive_refuse("a current_branches that is a list, not a map, is refused, and the reason says the read failed",
+               role_path("archive-inc-list"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+archive_refuse("a current_branches that is a string, not a map, is refused, and the reason says the read failed",
+               role_path("archive-inc-str"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+# One read budget covers the branch reads (MERGE_READ_TIMEOUT, 25s). Each q_max compare sleeps 13s, under the budget alone;
+# the second outlasts what the first left, so the archive refuses as unreadable. A budget per call would let both through.
+archive_refuse("a lane whose two branch compares outlast one read budget, each under it alone, is refused as unreadable",
+               role_path("archive-inc-slow"), fake_gh_path(ARCHINC_SLOW), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+# One read budget across the whole archive check, not one per read: the draft's containment read and the branch read sum
+# past MERGE_READ_TIMEOUT. The branch read runs out of the shared budget and refuses as unreadable. A budget per read lets
+# the branch read run its own 25s, and the lane is refused for its branch instead, with no read failing.
+ARCHIVE_BRANCH_READ_LACKS = ARCHIVE_READ_LACKS + ("open pull requests",)  # a branch-read refusal is neither the open-list one nor the no-pull-request one
+archive_refuse("a lane whose slug draft containment read and branch read sum past one read budget, each under it alone, is refused as unreadable",
+               role_path("archive-inc"), fake_gh_path(ARCHDRAFT_SLOW), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_BRANCH_READ_LACKS)
+# Shape drift in the record's sources and branch values fails closed, with the branch read's reason. The branch is behind main
+# in q_max (or sits in its own tagged repo), so only the drift can refuse the archive.
+archive_refuse("a session_context.sources that is a string, not a list, is refused, and the reason says the read failed",
+               role_path("archive-inc-sources-str"), fake_gh_path(ARCHINC_BEHIND), carries=ARCHIVE_READ_PIN,
+               lacks=ARCHIVE_BRANCH_READ_LACKS)
+# A github.com source with a trailing path is read as the repo it names: q_max, whose branch is ahead on no pull request.
+archive_refuse("a github.com source with a trailing /tree/main path is read as its owner/repo: the branch ahead there is refused",
+               role_path("archive-inc-source-tree"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# A github.com source that names no owner and repo is unreadable, not skipped.
+archive_refuse("a github.com source that names no owner and repo is refused, and the reason says the read failed",
+               role_path("archive-inc-source-bare"), fake_gh_path(ARCHINC_BEHIND), carries=ARCHIVE_READ_PIN,
+               lacks=ARCHIVE_BRANCH_READ_LACKS)
+# current_branches [] names no branch: allowed, and the branch read makes no call (see the call case below).
+archive_allow("a current_branches that is an empty list names no branch: allowed",
+              role_path("archive-inc-list-empty"), fake_gh_path(ARCHINC_NOPR))
+# A current_branches key that names owner/repo adds that repo to the repos read: its branch, ahead there on no pull request, refuses.
+archive_refuse("a current_branches key that names owner/repo reads that repo: its branch ahead there on no pull request is refused",
+               role_path("archive-inc-key-repo"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# A merged pull request covers its branch only while its head is the branch tip. A commit pushed after the squash, with no new
+# pull request, leaves the branch uncovered: refused. The control is the same merged pull request with the tip at its head (ARCHINC_MERGED).
+archive_refuse("a lane whose merged pull request head is not the branch tip, and no new pull request, is refused",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_MERGEDMOVED), lacks=ARCHIVE_NO_BRANCH)
+# A closed, unmerged pull request covers its branch only when the tip is contained in an open or merged pull request's head.
+# With no such pull request the branch is uncovered, and the refusal names both ways out.
+archive_refuse("a lane whose only pull request is closed unmerged, with no replacement, is refused, and names both ways out",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_CLOSEDALONE), carries=("open a pull request", "push an archive copy"),
+               lacks=ARCHIVE_NO_BRANCH)
+# A left branch: one of the repo's branches under the lane's slug forms (`<slug>` and `lane/<slug>`, and their `-*` variants),
+# ahead of main, on no pull request, and not named by current_branches. The lane's own record names no branch here.
+archive_refuse("a left branch under the lane's lane/<slug>-r2 form, ahead of main on no pull request, is refused",
+               role_path("archive-lane"), fake_gh_path(ARCHLEFT_NOPR), carries=ARCHIVE_NOPR_PIN,
+               lacks=("lane/" + ARCHIVE_SLUG + "-r2", "could not be read"))
+archive_allow("a left branch under the slug form that has an open pull request is allowed",
+              role_path("archive-lane"), fake_gh_path(ARCHLEFT_PR))
+archive_allow("a branch named <slug>x, no -* variant of the slug, is not read: allowed though ahead on no pull request",
+              role_path("archive-lane"), fake_gh_path(ARCHLEFT_NEAR))
+# A closed pull request on lane/<slug> is covered by its merged replacement on lane/<slug>-r2 when the replacing head holds the
+# lane branch's tip (the compare of that head with the tip reads behind). The ruling: a closed pull request counts as cover only
+# when the branch tip is contained in an open or merged pull request's head. Its control reads ahead, so the tip is not contained.
+archive_allow("a lane branch closed unmerged, replaced by a merged pull request on its lane/<slug>-r2 form that holds the tip, is allowed",
+              role_path("archive-lane"), fake_gh_path(ARCHLEFT_REPLACED))
+archive_refuse("a lane branch closed unmerged, replaced by a merged pull request whose head does not hold the tip, is refused",
+               role_path("archive-lane"), fake_gh_path(ARCHLEFT_REPLACED_AHEAD), carries=("open a pull request", "push an archive copy"),
+               lacks=("could not be read",))
+# A lane branch ahead of main on no pull request is covered by its archive/ copy when the copy holds the tip. The copy is
+# listed by the prefix read of archive/<branch>, then compared with the tip. The two cases differ in one value: that compare.
+archive_allow("a lane branch ahead on no pull request, whose archive/ copy holds its tip, is allowed",
+              role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_IDENT))
+archive_refuse("a lane branch ahead on no pull request, whose archive/ copy is at an older tip, is refused as no pull request",
+               role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_AHEAD), carries=ARCHIVE_NOPR_PIN,
+               lacks=(ARCH_COPY_BRANCH, "could not be read"))
+# No archive/ copy at all: the listing answers []. The refusal is the plain no-pull-request one, not a failed read.
+# A guard that read an empty listing as a failure would refuse as "could not be read" and fail here.
+archive_refuse("a lane branch ahead on no pull request, with no archive/ copy, is refused as no pull request",
+               role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_MISSING), carries=ARCHIVE_NOPR_PIN,
+               lacks=(ARCH_COPY_BRANCH, "could not be read"))
+# The copy under archive/<branch>-2 holds the tip, and the exact copy is diverged: the -2 copy is one the guard counts.
+# Red on the old code, which compares only the exact copy.
+archive_allow("a lane branch ahead on no pull request, whose archive/<branch>-2 copy holds its tip, is allowed though archive/<branch> is diverged",
+              role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_NUMBERED))
+# Neither counted copy holds the tip: the exact copy is diverged and the -2 copy is ahead. Refused as no pull request.
+archive_refuse("a lane branch ahead on no pull request, whose counted copies both miss its tip, is refused as no pull request",
+               role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_NUMBERED_NONE), carries=ARCHIVE_NOPR_PIN,
+               lacks=(ARCH_COPY_BRANCH, "could not be read"))
+# A listed copy under a name that is neither the exact one nor `-<digits>` is not counted, though it holds the tip.
+archive_refuse("a lane branch ahead on no pull request, whose only copy is archive/<branch>y holding its tip, is refused as no pull request",
+               role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_LOOKALIKE), carries=ARCHIVE_NOPR_PIN,
+               lacks=(ARCH_COPY_BRANCH, "could not be read"))
+archive_refuse("a lane branch ahead on no pull request, whose only copy is archive/<branch>-r2 holding its tip, is refused as no pull request",
+               role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_SUFFIX_R2), carries=ARCHIVE_NOPR_PIN,
+               lacks=(ARCH_COPY_BRANCH, "could not be read"))
+archive_refuse("a current_branches value that is an int is refused, and the reason says the read failed",
+               role_path("archive-inc-branch-int"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN,
+               lacks=ARCHIVE_BRANCH_READ_LACKS)
+archive_refuse("a current_branches value that is a map is refused, and the reason says the read failed",
+               role_path("archive-inc-branch-map"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN,
+               lacks=ARCHIVE_BRANCH_READ_LACKS)
+# Case-insensitive host match, with an optional www.: the source names q_max, and its branch, ahead there, is refused.
+archive_refuse("a source URL on www.github.com names its repo: a branch ahead there on no pull request is refused",
+               role_path("archive-inc-source-www"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+archive_refuse("a source URL on GitHub.com in capitals names its repo: a branch ahead there on no pull request is refused",
+               role_path("archive-inc-source-upper"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# Allowed: a source on another host is skipped, so the lane's branch, behind main in q_max, is judged on its tagged repos.
+archive_allow("a source on gitlab.com is skipped: the lane's branch behind main in q_max is allowed",
+              role_path("archive-inc-source-gitlab"), fake_gh_path(ARCHINC_BEHIND))
+
 
 # The agent's own record. An agent (a call with an `agent_id`) made its get_session call in its own transcript, which
 # sits beside the main transcript at `<transcript_path minus .jsonl>/subagents/agent-<agent_id>.jsonl`. The guard reads
@@ -12547,6 +13027,9 @@ AGENT_FIXTURES = {
     "agent-dir-at-file": (role_target_call("g1", ARCH_TRIAGE_TAGS), [(AGENT_OWN_ID, None)]),
     "main-lane-agent-second-step": (role_target_call("g1", ARCH_LANE_TAGS),
                                     [(AGENT_OWN_ID, role_target_call("g1", ARCH_AGENT_LANE_TAGS))]),
+    # The main transcript holds no record of the target: the lane's record is only in the agent's own file, with a branch.
+    "agent-own-branch-lane": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_raw("g1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": ARCH_BRANCH}, [ARCH_QMAX_SOURCE]))))]),
 }
 
 
@@ -12630,6 +13113,11 @@ archive_refuse("a lane in both records, with the open pull request on the agent 
 archive_refuse("a lane in both records, with the open pull request on the main record's step only, is refused for that pull request",
                role_path("main-lane-agent-second-step"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
                carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN)
+# The branch read takes the target's record from the main transcript only. Here the lane's record, with a branch
+# ahead of main on no pull request, is in the agent's own transcript alone, so the branch read must find it there too.
+archive_refuse("an agent's archive of a lane known only from the agent's transcript is refused for a stranded branch",
+               role_path("agent-own-branch-lane"), fake_gh_path(ARCHINC_NOPR), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH + ARCHIVE_NO_RECORD_PIN)
 
 
 # =========================================================================== 5h. one lane, one topic
@@ -17405,11 +17893,13 @@ def archive_judged(transcript, folder, agent_id=None):
     })
 
 
-def archive_counted_gh():
+def archive_counted_gh(repos=None, name="archcount"):
     """A counted pull request tool. Its one open pull request is on no slug, so an archive of a lane reads the open
-    list and is allowed: a lane archive is allowed only after that read succeeds."""
-    folder = os.path.join(ROOT, "archcount")
-    make_fake_gh(folder, "main", need=["o/r"], count_file=os.path.join(folder, ARCHIVE_CALLS))
+    list and is allowed: a lane archive is allowed only after that read succeeds. `repos`, when given, holds each
+    repo's answers (make_fake_gh's `repos`), for a lane whose record names branches; then no `need` pins a repo."""
+    folder = os.path.join(ROOT, name)
+    make_fake_gh(folder, "main", need=["o/r"] if repos is None else [], repos=repos,
+                 count_file=os.path.join(folder, ARCHIVE_CALLS))
     return folder
 
 
@@ -17436,17 +17926,33 @@ def tree_files(*roots):
     return files
 
 
+def _gh_route(call):
+    """The REST route a counted gh call names: argv[1] of `gh api <route> ...`, else ''."""
+    argv = json.loads(call)
+    return argv[1] if argv[:1] == ["api"] and len(argv) > 1 else ""
+
+
 def archive_lane_one_read_case():
-    """An archive of a lane reads the open pull requests in one gh call, and its open list names no slug: allowed."""
+    """An archive of a lane reads the open pull requests in one gh call, and its repo's branches under each slug form in one
+    call each (git/matching-refs/heads/<form>, the forms of lane_head_refs). Its open list names no slug: allowed."""
+    from shared_names import lane_head_refs
     folder = archive_counted_gh()
     gh_calls_taken(folder)
     decision, reason = archive_judged(role_path("archive-lane"), folder)
     calls = gh_calls_taken(folder)
     if decision != "allow" or reason:
         return False, "a lane with no slug pull request on its open list: %s (%r)" % (decision, reason)
-    if len(calls) != 1:
-        return False, "one gh call wanted for the open list, %d seen: %r" % (len(calls), calls)
-    return True, "one gh call, and the lane is allowed"
+    opens, prefixes = 0, []
+    for call in calls:
+        route = _gh_route(call)
+        if "/git/matching-refs/heads/" in route:
+            prefixes.append(route.split("/git/matching-refs/heads/", 1)[1])
+        elif route.endswith("/pulls"):
+            opens += 1
+    if opens != 1 or sorted(prefixes) != sorted(lane_head_refs(ARCHIVE_SLUG)) or len(calls) != 3:
+        return False, "the open list once and one matching-refs read per slug form wanted, got %d open and refs %r (%d calls)" % (
+            opens, prefixes, len(calls))
+    return True, "3 gh calls: the open list, and the branches under each slug form; the lane is allowed"
 
 
 def archive_non_lane_no_read_case():
@@ -17506,6 +18012,276 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an agent's non-lane archive
                          archive_agent_non_lane_no_read_case))
 
 
+def archive_branch_reads_case():
+    """A lane whose record names one branch, checked in each of its two repos, reads in one archive: one open list per
+    repo, one matching-refs read per repo and slug form, one repo read per repo, one compare per repo x branch, and one
+    pulls read for the branch that is ahead. The branch is ahead in q_max on an open pull request, so the archive is
+    allowed, on 2 + 4 + 2 + 2 + 1 = 11 gh calls, not counting a tip read."""
+    folder = archive_counted_gh(repos=arch_pair(qmax={"others": [arch_row(ARCH_BRANCH, 24)]}), name="archcount-branch")
+    gh_calls_taken(folder)
+    decision, reason = archive_judged(role_path("archive-inc"), folder)
+    calls = gh_calls_taken(folder)
+    if decision != "allow" or reason:
+        return False, "a lane whose branch is ahead on an open pull request: %s (%r)" % (decision, reason)
+    kinds = {"open list": 0, "repo read": 0, "compare": 0, "branch pulls": 0, "matching refs": 0}
+    tips = 0  # a branch's tip read is not pinned here: the tip is read only where a pull request needs it
+    for call in calls:
+        argv = json.loads(call)
+        route = _gh_route(call)
+        if "/compare/" in route:
+            kinds["compare"] += 1
+        elif re.fullmatch(r"repos/[^/]+/[^/]+", route):
+            kinds["repo read"] += 1
+        elif route.endswith("/pulls") and any(arg.startswith("head=") for arg in argv):
+            kinds["branch pulls"] += 1
+        elif route.endswith("/pulls"):
+            kinds["open list"] += 1
+        elif "/git/matching-refs/heads/" in route:
+            kinds["matching refs"] += 1
+        elif re.search(r"/branches/[^/]", route):
+            tips += 1
+    want = {"open list": 2, "repo read": 2, "compare": 2, "branch pulls": 1, "matching refs": 4}
+    if kinds != want or len(calls) - tips != sum(want.values()):
+        return False, "a lane with a branch in each repo made gh calls %r, want %r (%d in all): %r" % (
+            kinds, want, sum(want.values()), calls)
+    return True, "11 gh calls: two open lists, two repo reads, two compares, one branch pulls read, four matching-refs reads"
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane whose record names a branch reads its repos in eleven gh calls",
+                         archive_branch_reads_case))
+
+
+def archive_copy_reads_case():
+    """The archive copies of a stranded branch are listed once, and only the counted ones are compared with the tip. The
+    listing is one matching-refs read of archive/<branch>. It holds four refs: the exact copy and archive/<branch>-2 are
+    counted, each compared once; archive/<branch>y, which holds the tip, and archive/<branch>-r2 are listed and never
+    compared. The branch is ahead on no pull request, so the refusal stands. A branch on an open pull request reads no
+    copy at all, because that pull request covers it before any copy is read. Each run takes its own call log, and a copy
+    read is a call whose route names archive/."""
+    stranded = archive_counted_gh(repos={"o/r": arch_copies({
+        ARCH_COPY_REF: "diverged", ARCH_COPY_REF + "-2": "ahead",
+        ARCH_COPY_REF + "y": "identical", ARCH_COPY_REF + "-r2": "identical"})}, name="archcount-copy-stranded")
+    gh_calls_taken(stranded)
+    decision, reason = archive_judged(role_path("archive-copy-lane"), stranded)
+    calls = gh_calls_taken(stranded)
+    if decision != "deny" or ARCHIVE_NOPR_PIN[0] not in (reason or ""):
+        return False, "the copies that miss the tip: %s (%r), want a refusal for no pull request" % (decision, reason)
+    listings = [call for call in calls if _gh_route(call).endswith("/git/matching-refs/heads/" + ARCH_COPY_REF)]
+    if len(listings) != 1:
+        return False, "the refusal path listed the archive copies %d times, want once: %r" % (len(listings), calls)
+    compared = sorted(_gh_route(call).split("/compare/", 1)[1] for call in calls if "/compare/archive/" in _gh_route(call))
+    want = sorted([ARCH_COPY_REF + "..." + ARCH_COPY_TIP, ARCH_COPY_REF + "-2..." + ARCH_COPY_TIP])
+    if compared != want:
+        return False, "the archive copies compared were %r, want the exact copy and the -2 copy only, each once: %r" % (
+            compared, want)
+    covered = archive_counted_gh(repos={"o/r": arch_copy("identical", others=[arch_row(ARCH_COPY_BRANCH, 41)])},
+                                 name="archcount-copy-covered")
+    gh_calls_taken(covered)
+    decision, reason = archive_judged(role_path("archive-copy-lane"), covered)
+    calls = gh_calls_taken(covered)
+    if decision != "allow" or reason:
+        return False, "a branch on an open pull request: %s (%r), want allowed" % (decision, reason)
+    touched = [call for call in calls if "/compare/archive/" in _gh_route(call) or "/git/matching-refs/heads/archive/" in _gh_route(call)]
+    if touched:
+        return False, "a branch on an open pull request read its archive copies %d times, want none: %r" % (len(touched), touched)
+    return True, "the refusal path lists the archive copies once and compares the two counted ones once each; a branch on an open pull request reads none"
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an archive copy of a stranded branch is read once, and not on an open pull request",
+                         archive_copy_reads_case))
+
+
+# The cost of archive_hit's transcript reads: one open of each transcript of the archive (the target's main transcript,
+# and for an agent's call the agent's own file beside it), each read once. The count is taken in process, on
+# builtins.open, so a second read of the same file shows as a second open of its path.
+class _EmptyPulls:
+    """The merge tool's Host for one repo: the open list reads empty, and each branch prefix reads no ref."""
+
+    def __init__(self, repo):
+        self.repo = repo
+
+    def pages(self, route, **kwargs):
+        return []
+
+    def api(self, route):
+        return (0, "[]") if "git/matching-refs/heads/" in route else (1, "HTTP 404")
+
+
+_NOPULL_TIP = "%040d" % 41  # the tip of the stranded branch in _AheadNoPull
+
+
+class _AheadNoPull:
+    """The merge tool's Host for each repo of the incident: the open list reads empty, the default branch is main, every
+    compare of main and a branch reads ahead, and no pull request holds the branch. The branch's tip is _NOPULL_TIP, and
+    the branch has no archive/ copy, so a compare of archive/<branch> answers 404."""
+
+    def __init__(self, repo):
+        self.repo = repo
+
+    def pages(self, route, **kwargs):
+        return []
+
+    def api(self, route):
+        if route == "":
+            return 0, json.dumps({"default_branch": "main"})
+        if route.startswith("compare/main..."):
+            return 0, json.dumps({"status": "ahead"})
+        if route.startswith("compare/archive/"):  # no archive copy of the branch: GitHub answers 404
+            return 1, "HTTP 404"
+        if "git/matching-refs/heads/" in route:
+            return 0, "[]"
+        if route.startswith("branches/"):  # the branch's tip, which _covered reads once no pull request holds the branch
+            return 0, json.dumps({"name": route[len("branches/"):], "commit": {"sha": _NOPULL_TIP}})
+        return 1, "HTTP 404"
+
+
+def _load_guard_merge():
+    """guard_merge.py beside the guard under test (GUARD), loaded fresh, so a patch to it touches no other load."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("guard_merge_under_test",
+                                                  os.path.join(os.path.dirname(GUARD), "guard_merge.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _archive_opens(transcript, agent_id):
+    """Run one archive of ROLE_OTHER's lane in process, with an empty open list, and count the opens of each transcript
+    the archive reads. Returns (decision, {path: opens}), or (None, None) when the fixture is not as the case needs."""
+    import builtins
+    import types
+    guard_merge = _load_guard_merge()
+    expected = [os.path.abspath(transcript)]
+    if agent_id:
+        expected.append(os.path.abspath(guard_merge.own_session.agent_transcript_path(transcript, agent_id)))
+    materialize(transcript)  # the fixtures are written on first use: before the count
+    if not all(os.path.isfile(path) for path in expected):
+        return None, None
+    fake_tool = types.SimpleNamespace(Host=_EmptyPulls, shared_deadline=contextlib.nullcontext)
+    real_open = builtins.open
+    opened = {path: 0 for path in expected}
+
+    def counting_open(file, *args, **kwargs):
+        if isinstance(file, (str, os.PathLike)):
+            path = os.path.abspath(os.fspath(file))
+            if path in opened:
+                opened[path] += 1
+        return real_open(file, *args, **kwargs)
+
+    with mock.patch.object(guard_merge, "merge_module", return_value=fake_tool), \
+            mock.patch("builtins.open", counting_open):
+        decision = guard_merge.archive_hit(ARCHIVE_TOOL, {"session_id": ROLE_OTHER}, transcript, agent_id=agent_id)
+    return decision, opened
+
+
+def archive_one_read_per_transcript_case():
+    """An archive of a lane reads its target's transcript once. The open list reads empty and the record names no
+    branch, so that one open is the whole archive's read of the transcript."""
+    decision, opened = _archive_opens(role_path("archive-lane"), None)
+    if opened is None:
+        return False, "fixture: the lane transcript is not written as the case needs"
+    if decision is not None:
+        return False, "an archive of the lane with an empty open list was refused: %r" % (decision,)
+    if list(opened.values()) != [1]:
+        return False, "the archive opened the target's transcript %r times, want 1" % (list(opened.values()),)
+    return True, "the archive opened the target's transcript once, and the lane is allowed"
+
+
+def archive_agent_one_read_per_transcript_case():
+    """An agent's archive of a lane reads each of its two transcripts once: the main transcript and the agent's own
+    file beside it. The main record names no lane, and the agent's own record is the lane, with no branch to read."""
+    decision, opened = _archive_opens(role_path("agent-own-lane"), AGENT_OWN_ID)
+    if opened is None:
+        return False, "fixture: the main or the agent transcript is not written as the case needs"
+    if decision is not None:
+        return False, "an agent's archive of the lane with an empty open list was refused: %r" % (decision,)
+    if list(opened.values()) != [1, 1]:
+        return False, "the agent's archive opened its two transcripts %r times, want one each" % (list(opened.values()),)
+    return True, "the agent's archive opened its main and its own transcript once each, and the lane is allowed"
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an archive of a lane opens its target's transcript once",
+                         archive_one_read_per_transcript_case))
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an agent's archive of a lane opens each of its two transcripts once",
+                         archive_agent_one_read_per_transcript_case))
+
+
+def archive_none_ccr_case():
+    """A lane whose record reads as a lane, but whose ccr reads None, is refused. The branch read takes its branches from
+    the ccr, so with none it cannot rule out a stranded branch, and the archive is refused rather than allowed. The control
+    is the same lane with its ccr read: each repo reads the branch ahead on no pull request, so that archive is refused
+    for the branch, and the case proves the fixture can refuse at all."""
+    import types
+    guard_merge = _load_guard_merge()
+    transcript = role_path("archive-inc")
+    materialize(transcript)
+    real = guard_merge.merge_module()  # the merge tool, unpatched: its is_net reads the archive copy's 404 as the tool does
+    if real is None:
+        return False, "fixture: the merge tool does not load, so its is_net cannot read the archive copy's 404"
+    fake_tool = types.SimpleNamespace(Host=_AheadNoPull, shared_deadline=contextlib.nullcontext, is_net=real.is_net)
+    with mock.patch.object(guard_merge, "merge_module", return_value=fake_tool):
+        control = guard_merge.archive_hit(ARCHIVE_TOOL, {"session_id": ROLE_OTHER}, transcript)
+        with mock.patch.object(guard_merge.own_session, "own_session_ccr", return_value=None):
+            decision = guard_merge.archive_hit(ARCHIVE_TOOL, {"session_id": ROLE_OTHER}, transcript)
+    if control is None or control[0] != "archive of a lane with a branch that has no pull request":
+        return False, "fixture: the lane with its ccr read is not refused for its stranded branch: %r" % (control,)
+    if decision is None:
+        return False, "an archive of a lane whose ccr reads None was allowed, want refused"
+    return True, "an archive of a lane whose ccr reads None is refused: %s" % (decision[0],)
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an archive of a lane whose ccr reads None is refused",
+                         archive_none_ccr_case))
+
+
+def archive_closed_replaced_read_case():
+    """A branch whose only cover is a closed pull request, replaced by a merged one, is allowed on one compare: the replacing
+    head against the tip, one compare per closed pull request. The compare's base is the replacing head and its head is the
+    tip, so behind or identical means the tip is contained in it, as the draft containment read reads its own."""
+    replaced = {"others": [arch_row(ARCH_BRANCH, 23, state="closed"), arch_row(ARCH_BRANCH, 24, state="closed", merged=True)],
+                "tips": {ARCH_BRANCH: REPLACED_TIP},
+                "compares": {"main..." + ARCH_BRANCH: "ahead", REPLACING_HEAD + "..." + REPLACED_TIP: "behind"}}
+    folder = archive_counted_gh(repos=arch_pair(qmax=replaced), name="archcount-closed")
+    gh_calls_taken(folder)
+    decision, reason = archive_judged(role_path("archive-inc"), folder)
+    calls = gh_calls_taken(folder)
+    if decision != "allow" or reason:
+        return False, "a closed pull request replaced by a merged one holding the tip: %s (%r)" % (decision, reason)
+    replacing = [call for call in calls if _gh_route(call).endswith("/compare/" + REPLACING_HEAD + "..." + REPLACED_TIP)]
+    if len(replacing) != 1:
+        return False, "one compare of the replacing head with the tip wanted, %d seen" % len(replacing)
+    return True, "allowed, on one compare of the replacing head with the tip"
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a closed pull request replaced by a merged one reads one compare of the replacement",
+                         archive_closed_replaced_read_case))
+
+
+def archive_empty_branches_read_case():
+    """A lane whose current_branches is an empty list is allowed, and its archive makes no branch read: no repo read, no
+    compare, no pull request list of a branch and no tip read. Its open lists and slug-form reads are the only calls."""
+    folder = archive_counted_gh(repos=arch_pair(qmax={"others": []}), name="archcount-empty")
+    gh_calls_taken(folder)
+    decision, reason = archive_judged(role_path("archive-inc-list-empty"), folder)
+    calls = gh_calls_taken(folder)
+    if decision != "allow" or reason:
+        return False, "a lane whose current_branches is an empty list: %s (%r)" % (decision, reason)
+    branch_reads = []
+    for call in calls:
+        route = _gh_route(call)
+        if "/compare/" in route or re.fullmatch(r"repos/[^/]+/[^/]+", route) or re.search(r"/branches/[^/]", route):
+            branch_reads.append(call)
+        elif route.endswith("/pulls") and any(arg.startswith("head=") for arg in json.loads(call)):
+            branch_reads.append(call)
+    if branch_reads:
+        return False, "an empty current_branches made %d branch read(s): %r" % (len(branch_reads), branch_reads)
+    return True, "allowed, and the archive makes no branch read"
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a current_branches that is an empty list makes no branch read",
+                         archive_empty_branches_read_case))
+
+
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
 # where None is no record. The guard's archive and brief reads both go through this reader.
 def _load_own_session():
@@ -17563,6 +18339,65 @@ for _label, _check in (
         ("lane-closes-after-records: own_session_read skips a get_session result whose content is an int, reads no record",
          own_read_case("body-int", [None]))):
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+def _still_open(fd):
+    """True while this process holds `fd` open."""
+    try:
+        os.fstat(fd)
+    except OSError:
+        return False
+    return True
+
+
+def own_ccr_unreadable_case():
+    """A check: own_session_ccr returns None, and does not raise, for each input it cannot read, and it leaves
+    the descriptor an int path names open. The lane fixture must hold the own record first, or the non-string
+    id proves nothing."""
+    missing = os.path.join(ROLE_DIR, "no-such-transcript.jsonl")
+    folder = role_path("unreadable")
+    lane = role_path("archive-lane")
+    deep = role_path("body-deep")
+    if os.path.exists(missing) or not os.path.isdir(folder) or not os.path.isfile(lane) or not os.path.isfile(deep):
+        return False, "fixture: the missing path, the folder, the lane or the deep transcript is not as the case needs"
+    try:
+        module = _load_own_session()
+        if module.own_session_ccr(lane, ROLE_OTHER) is None:
+            return False, "fixture: the lane transcript holds no own record for a string id"
+    except Exception as error:
+        return False, "own_session_ccr raises %s on the readable lane transcript: %s" % (type(error).__name__, error)
+    with tempfile.NamedTemporaryFile(dir=ROOT) as temp:
+        live = os.dup(temp.fileno())  # a live descriptor of this run, named by the int path
+    try:
+        # The int path goes first: it is the input that can close a descriptor, so its check reads the
+        # descriptor before any other input opens a file.
+        inputs = (
+            ("an int path", live, ROLE_OTHER),
+            ("the empty path", "", ROLE_OTHER),
+            ("a path that does not exist", missing, ROLE_OTHER),
+            ("a path that is a folder", folder, ROLE_OTHER),
+            ("a None path", None, ROLE_OTHER),
+            ("a target id that is not a string", lane, 3),
+            ("a record nested too deep to parse", deep, ROLE_OTHER),
+        )
+        for label, transcript, own_id in inputs:
+            try:
+                got = module.own_session_ccr(transcript, own_id)
+            except Exception as error:
+                return False, "own_session_ccr raises %s for %s: %s" % (type(error).__name__, label, error)
+            if got is not None:
+                return False, "own_session_ccr returns a record for %s, want None" % label
+            if not _still_open(live):
+                return False, "own_session_ccr closes the descriptor named by %s, want it left open" % label
+        return True, ("own_session_ccr returns None, without a raise, for all %d unreadable inputs, "
+                      "and leaves the int path's descriptor open" % len(inputs))
+    finally:
+        if _still_open(live):
+            os.close(live)
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: own_session_ccr returns None, without a raise, for each input it cannot read",
+                         own_ccr_unreadable_case))
 FAMILY = "paths"
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
