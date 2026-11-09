@@ -13,6 +13,8 @@ No running session judges a call with a missing, short or mixed set of hook file
 
 Why: a post-merge hook that copied in place gave every session's Bash call guard-crash for a few seconds (arbiter rulings 2026-10-14 03:41 and 03:50 CDT).
 
+- `lint/report_guard.py` loads its helper modules from `hooks/guard.d/<id>/` first, then the flat `hooks/`. It reads the id from the flat `hooks/guard.py` stamp (`INSTALL_ID`) with one regex read, once per run at load. No stamp or no folder: flat only. Cost: one small file read per run, no process, no file written. `lint/test_report_guard_stamped.py` pins it; the cost tests in `lint/test_report_guard.py` and `lint/test_report_guard_handoff.py` pin the opened-file set to the transcript and `hooks/guard.py`. Ruling: coordinator, 2026-11-09 12:46 CST (roadmap step `report-guard-stamped-copy`).
+
 Kind: process
 Home: install.sh
 Home: install.ps1
