@@ -13,7 +13,8 @@ clean. With no argument it also compares the guard's role lists with the role ta
 Exits 1 and names each file that sets a Haiku model, each agent file whose `model:` pin names a different
 family than its role's row in the role table (pin_row_problem), each agent body that states the agent's own
 model in fixed text or gives a report header a model slot with no line that names the source (body_problems),
-and the model record
+each agent file that can reach the claude-code-remote server (session_tools_problem: frontmatter
+`disallowedTools` must name the whole server, or `tools` must be an allow-list with no entry for it), and the model record
 docs/decisions/agent-model-cap.md when its `lane session` row's effort cell does not start
 with the guard's LANE_EFFORT.
 """
@@ -26,12 +27,15 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
+sys.path.insert(0, os.path.join(ROOT, "hooks"))
+from tool_lists_test import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/tool_lists_test.py)
 # One home for the role list: the guard's HAIKU_ROLES. Read it, never copy it.
 _spec = importlib.util.spec_from_file_location("guard", os.path.join(ROOT, "hooks", "guard.py"))
 _guard = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_guard)
 HAIKU_ROLES = tuple(role.lower() for role in _guard.HAIKU_ROLES)
 LANE_EFFORT = _guard.LANE_EFFORT
+REMOTE_SERVER = _guard.REMOTE_SERVER
 LANE_RECORD = os.path.join(*layout.path(ROOT, "decisions").split("/"), "agent-model-cap.md")
 LANE_ROW = re.compile(r"^\|\s*lane session\b[^|]*\|[^|]*\|\s*([^|]*?)\s*\|\s*$", re.M)
 MODEL_KEY = re.compile(r"^model\s*:\s*(.*)$", re.IGNORECASE)
@@ -91,6 +95,24 @@ def pin_row_problem(text: str, table) -> str:
         return ""
     return "model pin %r does not equal the role table's row %r for role %r (the pin must name the row's model)" % (
         pin, row, name)
+
+
+def session_tools_problem(text: str) -> str:
+    """Why the agent can reach the claude-code-remote server, or "" when it cannot. It cannot when frontmatter
+    `disallowedTools` names the whole server (`<server>__*` or the bare name), or `tools` is an allow-list with no entry
+    for the server. A deny of one remote tool leaves the rest reachable, so it does not count."""
+    keys = _guard.frontmatter_keys(frontmatter(text) or [])
+    field = unread_list(keys)
+    if field:
+        return "the %s list sits below its key, which this check does not read. Write it on the key's line" % field
+    denied = tokens(scalar(keys.get("disallowedTools", "")))
+    if REMOTE_SERVER in denied or REMOTE_SERVER + "__*" in denied:
+        return ""
+    if "tools" in keys:
+        if any(item == REMOTE_SERVER or item.startswith(REMOTE_SERVER + "__") for item in tokens(scalar(keys["tools"]))):
+            return "the tools allow-list names the %s server. No agent role needs it" % REMOTE_SERVER
+        return ""
+    return "frontmatter `disallowedTools` must name %s__* (or the agent needs a `tools` allow-list with no entry for it)" % REMOTE_SERVER
 
 
 def body_chunks(text: str):
@@ -193,10 +215,10 @@ def main(argv) -> int:
             print("%s: frontmatter sets a model below Sonnet. Sonnet is the floor." % path)
             bad = 1
         elif os.path.basename(os.path.dirname(path)) == "agents":
-            problem = pin_row_problem(text, table)
-            if problem:
-                print("%s: %s." % (path, problem))
-                bad = 1
+            for problem in (pin_row_problem(text, table), session_tools_problem(text)):
+                if problem:
+                    print("%s: %s." % (path, problem))
+                    bad = 1
             for line, problem in body_problems(text):
                 print("%s:%d: %s" % (path, line, problem))
                 bad = 1
