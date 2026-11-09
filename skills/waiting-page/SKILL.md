@@ -131,6 +131,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     `pr` are a whole number above zero, or a string of digits with no leading zero; any other value reads as no wait. An item
     with `waits` and `lastAnswer` reads as answered on the page.
     `stale_pages.py --items` names each open item's wait `ended`, `waiting` or `unknown` (see "Route and close").
+  - `repo` (`owner/name`, as in `waits`) is the repo the question is about. It is required on every open decision and task. A page's own repo writes its own name.
+  - `checked_with` is the session id of the triage, coordinator or owner's-computer session of that repo that said the owner has not ruled on it. It is required when `repo` is not this page's repo. It is never the session in the item's `owner` or, in a cloud session, the session that writes the item. To change `repo` or `checked_with`, send an `update` that carries both; a `str_replace` on either, or an `update` with `checked_with` and no `repo`, is refused. The writer refuses an item without it (guard rule `question-checked-with-repo`).
   - Before writing `reply`, `replied`, `lastAnswer`, `lane` or `waits`, the writer checks that the page is current with `stale_pages.py`, the same
     check as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the five.
   - The page draws only the top-level fields that its `itemFields` block lists (`page.html`). A write that names another
@@ -281,7 +283,7 @@ repo's waiting page from a file behind main is refused, and its reason repeats s
 publish of main's page stamps main's page version, and the next session start says when the page is behind.
 
 Cost: on demand, inside a wake already running. One `Artifact read`, one python process, at most
-one short read-only git process, with no fetch, and one gh call per open item with `waits`, and with `--answers` one more `ArtifactData list answers` read. It writes `<out>` only, and no file without
+one short read-only git process, with no fetch, and one gh call per open item with `waits`. With `--answers`, one more `ArtifactData list answers` read. It writes `<out>` only, and no file without
 `--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
 
 ## Keep a copy in the repo
@@ -323,8 +325,12 @@ The scan reads shapes: tokens, keys, cookie and auth headers, named cookies set 
 passwords, URL query secrets and credentials in a URL. It reads secret, token, key or cookie names in any case form set to a random-looking value
 (`API_SECRET=...`, `apiKey: ...`). It also reads email addresses,
 phone numbers and postal addresses (street, PO box, "City, ST ZIP"). A personal fact in plain words, such as an employer or a city name alone, passes. Do not write one in an item.
-A password word with a placeholder, a mask or a plain word as its whole value, `PWD=<path>`, a no-reply address and
-the ssh remote of a public git host pass.
+A password word with a placeholder, a mask or a plain word as its value, and only blanks or plain prose after it on
+its line, passes. Prose is a function word, then letter words. After a `,` `;` or and/or/but/is/are, a later word on the
+line that is no function word refuses. The `,` `;` or `.` that ends the value does not count. So `none, then swordfish`
+passes, and `none and swordfish` does not. `PWD=<path>`, a no-reply address and the ssh remote of a public git host pass
+too. So does a `key` that ends one of nine everyday words (monkey, hotkey, turkey, turnkey, donkey, whiskey, jockey,
+hockey, lackey), when the word starts at a non-letter or the string start: `turnkey=` passes, `superturnkey=` refuses.
 
 Cost: one list call per page of each collection, one python process, and one commit when something changed. No
 timer, no watcher.
@@ -394,6 +400,34 @@ live page.
 7. Write the new URL into the repo's extras file, in a pull request. Set the `url` of the `waiting-page` role entry
    in `artifacts`. If the repo has no such entry, set the `waiting-page` key.
 
+## Merge a copy into a live page
+
+Use this when two accounts each wrote a page for the same repo. One account's page is live. The other account's
+export is in the repo copy. This adds the copy's missing items to the live page. The live page wins, so a live item
+is never changed.
+
+1. Check out the record branch in its own worktree and name the copy folder, as "Keep a copy in the repo" step 1 says.
+2. Fetch the live page's collections into one new folder, `<live folder>`, as "Keep a copy in the repo" step 2 says.
+   Touch `.complete` in each collection folder after its last page. A folder with no marker is `unknown`. Also read
+   the live page with `Artifact` action `read`, and use the file the read names as `<html file>`. A read that gives a
+   summary, not the raw page, is `unknown`.
+3. Make one new empty folder, `<out folder>`. Run
+   `python3 ~/.claude/skills/waiting-page/export_page.py --merge <copy folder> --live <live folder> --batches <out folder> --live-page <html file>`.
+   For an artifact other than the waiting page, add `--collections <names>`.
+4. Read the last line: `batches <k> docs <n> kept-live <s> renumbered <r> designs <d>`. `renumbered` counts the copied
+   items that took a new `n` because the live page holds theirs. Each such item's answer takes the same `n`. A copy
+   answer is skipped when the live page holds its item. An `unknown` line writes nothing. Say it in the reply.
+5. Send each `batch-NNN.json` list to the live page as one `ArtifactData batch`, in order. Each entry is a `set`.
+6. Read the live page's items back. Their count must equal the count of live items from step 2, plus the items among
+   the `<n>` written docs.
+7. Put the mockups in, on main's code ("Keep the page on main's code"). Run its read, `stale_pages.py --write` and copy
+   steps on the live page. The page that `--write` writes is main's `page.html` with the live roadmap block carried
+   over. In that page, replace the text inside the `designData` script element with `<out folder>/designData.json`,
+   as is. The file already writes each `<` as `\u003c`, so no string can close the script. Publish that page once to
+   the live URL, as that section's republish step says.
+8. Rewrite each `page item <n>` cite of the copy's account in the roadmap, with `<out folder>/renumbered.json`: the
+   key is the old `n`, and the value is the new one. Commit it on the record branch.
+
 ## Add an item
 
 0. A lane's question comes in the lane's report. Write the item from that report, with yourself as
@@ -408,6 +442,7 @@ live page.
    `a`, `b`, `c` in order, and no key `none`. On a look question, check that each option has its own mockup
    drawing that option's state, and that each `focus` names an element in its mockup. If a check
    fails, fix the item at once. The page refuses to send an answer to a broken item.
+   - Set `repo`. When it is not this page's repo, ask that repo's triage, coordinator or owner's-computer session whether the owner has ruled, and write its session id as `checked_with` (rule `question-checked-with-repo`).
    - Before you write a decision, run the owner-judge test: can the owner judge it from what he already knows?
      An undoable choice on internals he has no stake in is not asked. Take your own pick and set `stands: true`.
      A question stays only when it touches his goals, his money, a risk he would care about, a rule, or an act that
