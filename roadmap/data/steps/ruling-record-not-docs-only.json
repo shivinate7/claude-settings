@@ -5,7 +5,7 @@
   "order": 920,
   "owner": "coordinator",
   "why": "Decision docs-only-prs-skip-review says a record that files an owner ruling is never docs-only. The merge tool cannot tell such a record from other docs, and no check on main enforces it.",
-  "note": "Coordinator (13:06 CST Nov 9), note ruling-record-docs-only from #2452 (step docs-only-record-checks-diff). Fix: a marker line in a ruling record, which the docs-only path refuses.",
-  "updatedAt": "2026-11-09T12:44:00-06:00",
+  "note": "Coordinator (13:06 CST Nov 9), note ruling-record-docs-only from #2452 (step docs-only-record-checks-diff). Fix: a marker line in a ruling record, which the docs-only path refuses. Lane docs-only-record-checks-diff (#2452 head 0f0662c20, 12:49 CST Nov 9): a docs-only record over docs/decisions/*.md prints today, and test `test_a_docs_md_beside_a_records_file_prints_the_record` pins that. This step changes that pin, red then green. The 3000-file limit (Host.pr drops `changed_files`) is stated in decision pr-review-record.",
+  "updatedAt": "2026-11-09T12:49:00-06:00",
   "lane": ""
 }
