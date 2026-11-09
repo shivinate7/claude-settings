@@ -29,9 +29,9 @@ Before it works, the lane re-runs on main the check behind each dated Finding or
 step note. If a claim no longer holds, it stops and reports.
 Its report gives each re-run as "Checked <Mon D> on main <commit>: <result>", for triage to copy into the note.
 
-Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane hands off, run
+Batch-join check: before the lane hands off, run
 `~/.claude/bin/merge --lane-lint <pr>` once and report its verdict. It runs
-`bin/ci-job checks --lint` at the PR head: the fast lint steps of the checks job, the STE lint
+`ci-job checks --lint` (claude-settings' copy) at the PR head: the fast lint steps of the checks job, the STE lint
 among them, and no full suite. A red lane does not hand off.
 
 A fix round is a fresh isolated spawn from the branch head (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
