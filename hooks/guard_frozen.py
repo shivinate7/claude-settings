@@ -828,7 +828,10 @@ def _copy_written_hit(raw, cwd, predicate, fed, filters, made=frozenset()) -> st
     `DEST/<SRC name>/<path under SRC>` for each file) as far as the caps allow; a fed source that is a folder is a
     find root (`_fed_segments`): it is walked, as `filters` narrows it, and each file under it is judged
     as `DEST/<its name>`. A DEST that holds a variable is not judged (it stays a root, which fails closed). A
-    glob DEST, quoted or not, is judged as its own text and each path `_dest_values` lists."""
+    glob DEST, quoted or not, is judged as its own text and each path `_dest_values` lists.
+    A fed copy of one source with no `-t`, `--parents` or recursive flag, whose DEST is the source's text and a
+    suffix with no slash (`cp "$f" "$f.bak"`), writes a sibling file of each file the source names: the file's
+    path and the suffix. A source folder is walked for those files. Such a DEST is never a folder."""
     parts = _copy_parts(raw, predicate, cwd)
     if parts is None:
         return ""
@@ -843,6 +846,16 @@ def _copy_written_hit(raw, cwd, predicate, fed, filters, made=frozenset()) -> st
         capped = capped or more
     flagged = _glued_cp_target(raw[at]) is not None or at > 0 and _CP_TARGET.fullmatch(_unquoted(raw[at - 1]))
     parents = _cp_keeps_parents(raw)
+    suffix = _sibling_suffix(raw, operands, at)
+    if fed and suffix and not (flagged or parents or capped or _cp_copies_folders(raw)):
+        for _word, source in sources:
+            if os.path.isdir(_folded(_expanded(source, cwd))):
+                walked = _first_test_under(source, cwd, predicate, (filters or {}).get(source), suffix=suffix)
+                if walked:
+                    return source + _TOO_LARGE_NOTES[walked] if walked in _TOO_LARGE_NOTES else walked
+            elif predicate(source + suffix, cwd):
+                return source + suffix
+        return ""
     for dest in dests:
         into = bool(flagged or parents or dest.endswith(("/", "\\")) or len(sources) > 1
                     or os.path.normpath(_expanded(dest, cwd)) in made or os.path.isdir(_expanded(dest, cwd))
@@ -866,15 +879,42 @@ def _copy_written_hit(raw, cwd, predicate, fed, filters, made=frozenset()) -> st
     return ""
 
 
-def _cp_keeps_parents(raw) -> bool:
-    """True when a `cp` segment has `--parents`, which GNU `cp` also takes cut short to `--pa`."""
+def _cp_has_flag(raw, name, shortest, letters="") -> bool:
+    """True when a `cp` segment has the long flag `--name`, also cut short to `shortest` letters or more as GNU
+    `cp` takes it, or a short flag in `letters` in any cluster before its `t`. Words after `--` are operands."""
     start = _cp_start(raw)
     for word in ([_unquoted(word) for word in raw[start + 1:]] if start >= 0 else []):
         if word == "--":
             return False
-        if word.startswith("--pa") and "parents".startswith(word[2:]):
+        if word.startswith("--"):
+            cut = word[2:].split("=")[0]
+            if len(cut) >= shortest and name.startswith(cut):
+                return True
+        elif word.startswith("-") and set(word[1:].partition("t")[0]) & set(letters):
             return True
     return False
+
+
+def _cp_keeps_parents(raw) -> bool:
+    """True when a `cp` segment has `--parents`, which GNU `cp` also takes cut short to `--pa`."""
+    return _cp_has_flag(raw, "parents", 2)
+
+
+def _cp_copies_folders(raw) -> bool:
+    """True when a `cp` segment copies a source folder whole: `-r`, `-R`, `-a`, `--recursive` or `--archive`,
+    each cut short to any length. Without one, `cp` copies no folder."""
+    return _cp_has_flag(raw, "recursive", 1, "rRa") or _cp_has_flag(raw, "archive", 1)
+
+
+def _sibling_suffix(raw, operands, at) -> str:
+    """The suffix of a copy's DEST when the copy has one source and DEST is that source's text and a suffix with
+    no slash and no glob (`cp "$f" "$f.bak"` once `$f` is put): each file the source names is copied to a sibling
+    of itself. Else ''."""
+    if len(operands) != 1:
+        return ""
+    source, dest = _unquoted(raw[operands[0]]), _copy_target(raw[at])
+    rest = dest[len(source):] if source and dest.startswith(source) else ""
+    return "" if re.search(r"[/\\]", rest) or _LIST_MAGIC.search(rest) else rest
 
 
 def _made_folders(raw, cwd) -> set:
@@ -921,7 +961,7 @@ def _may_hold_a_test(top: str, cwd: str, predicate) -> bool:
         return True
 
 
-def _first_test_under(path: str, cwd: str, predicate, names=None, dest=None, tree=False) -> str:
+def _first_test_under(path: str, cwd: str, predicate, names=None, dest=None, tree=False, suffix="") -> str:
     """The first path under the folder `path`, at any depth, that `predicate` accepts, else ''. A
     folder that `predicate` accepts as `DIR/_` counts. `.git`, `node_modules` and the virtualenv and
     bytecode folders are not entered. An empty path names no folder.
@@ -937,6 +977,8 @@ def _first_test_under(path: str, cwd: str, predicate, names=None, dest=None, tre
     writes, and that path is the answer. A folder entry is not judged.
     `tree` (with `dest`, and no `names`) makes `dest` the folder that `path` itself becomes, as in `cp -r`:
     each file is then judged as `dest/<its path under path>`.
+    `suffix` (with no `dest`) judges each file as its own path and `suffix`, the sibling a copy writes. A folder
+    entry is not judged.
     ponytail: a checkout nested in a tree outside every checkout, past the cap, is not read.
     ponytail: the walk costs one pass over the tree, once per fed writer word that is a folder."""
     if not _unquoted(path).strip():
@@ -955,18 +997,18 @@ def _first_test_under(path: str, cwd: str, predicate, names=None, dest=None, tre
     for folder, folders, files in walk:
         folders[:] = [name for name in folders if name not in _WALK_SKIP]
         if names is None:
-            found_in = [] if dest else [os.path.join(folder, "_")]
+            found_in = [] if dest or suffix else [os.path.join(folder, "_")]
             found_in += [os.path.join(folder, name) for name in files]
         else:
             found_in = [os.path.join(folder, name) for name in files if _name_matches(names, name)]
             for name in folders:
                 if _name_matches(names, name):
-                    whole = _first_test_under(os.path.join(folder, name), cwd, predicate, None, dest)
+                    whole = _first_test_under(os.path.join(folder, name), cwd, predicate, None, dest, suffix=suffix)
                     if whole:
                         return _TOO_LARGE_FILTERED if whole == _TOO_LARGE else whole
         for found in found_in:
             written = os.path.join(dest, os.path.relpath(found, top) if tree else os.path.basename(found)) \
-                if dest else found
+                if dest else found + suffix
             if predicate(written, cwd):
                 return written
         judged += len(folders) + len(found_in)
@@ -1294,13 +1336,16 @@ def _text_roots(text: str) -> list:
 
 _VALUE = "\x03"   # wraps the number of a substitution in the outer text, so a variable that holds one carries it
 _VALUE_AT = re.compile("\x03(\\d+)\x03")
-_SED_VALUE_FLAGS = {"expression": True, "file": False, "line-length": False}   # long flags with a value
+# The long flags of `sed` that take a value: whether the value is the script, and whether the flag gives a script,
+# so that no operand is one. `--file` gives a script in a file: its value is a path, and every operand is a file.
+_SED_VALUE_FLAGS = {"expression": (True, True), "file": (False, True), "line-length": (False, False)}
 
 
 def _sed_script_words(words) -> set:
     """The indexes of the words of a `sed` segment that are its script: the value of each `-e` or
-    `--expression`, else the first word that is no flag. A script is text, never a path. A `-f` or `-l`
-    value and the words after the script are not. Empty when the segment is no `sed`."""
+    `--expression`. With no `-e`, `-f` or `--file` (spaced or glued), the first word that is no flag is
+    the script. A script is text, never a path. A `-f` or `-l` value and the words after the script are not.
+    Empty when the segment is no `sed`."""
     index = resolve_command(tuple(words))
     if index is None or _name(words[index]) != "sed":
         return set()
@@ -1314,8 +1359,9 @@ def _sed_script_words(words) -> set:
             name, glued, _value = word[2:].partition("=")
             kind = next((flag for flag in _SED_VALUE_FLAGS if name and flag.startswith(name)), None)
             if kind:
-                explicit = explicit or _SED_VALUE_FLAGS[kind]
-                if _SED_VALUE_FLAGS[kind]:
+                is_script, gives_script = _SED_VALUE_FLAGS[kind]
+                explicit = explicit or gives_script
+                if is_script:
                     scripts.add(at if glued else at + 1)
                 step = 1 if glued else 2
         else:
@@ -1324,8 +1370,8 @@ def _sed_script_words(words) -> set:
                     break   # the rest of the cluster is the backup suffix
                 if letter in "efl":
                     glued = place + 2 < len(word)
+                    explicit = explicit or letter in "ef"
                     if letter == "e":
-                        explicit = True
                         scripts.add(at if glued else at + 1)
                     step = 1 if glued else 2
                     break
@@ -1412,22 +1458,18 @@ def _run_loop_names(words, loops) -> frozenset:
                      and any(not word.startswith("'") and _loop_variable(name).search(word) for word in holders))
 
 
-def _listed_loops(loops, names, cwd):
-    """`loops` with each glob or brace word of the lists of `names` put as the paths it matches in `cwd` (as
-    `_written_sources` lists them), so each match is one run. A word that matches nothing, or whose matches
-    pass the cap, stays as written. With no `cwd` nothing is expanded."""
+def _listed_loop(items, cwd) -> list:
+    """The list words of a `for` loop with each glob or brace word put as the paths it matches in `cwd` (as
+    `_written_sources` lists them), the folder the loop starts in: the shell expands the list there, once.
+    A word that matches nothing, or whose matches pass the cap, stays as written. With no `cwd` nothing is
+    expanded."""
     if not cwd:
-        return loops
-    out = []
-    for name, items in loops:
-        if name in names:
-            listed = []
-            for item in items:
-                found, capped = _written_sources(item, cwd) if _LIST_MAGIC.search(item) else ([item], False)
-                listed.extend([item] if capped else found)
-            items = listed
-        out.append((name, items))
-    return out
+        return items
+    listed = []
+    for item in items:
+        found, capped = _written_sources(item, cwd) if _LIST_MAGIC.search(item) else ([item], False)
+        listed.extend([item] if capped else found)
+    return listed
 
 
 def _fill_loop_variables(words, loops, unroll=frozenset()):
@@ -1516,10 +1558,10 @@ def _fed_segments(segments, ends, cwd=""):
     """(segments, ends, changed): the segments with each `for` variable, xargs and `find -exec` put as
     the plain command the shell runs. An xargs command takes the roots of the segments piped into it,
     in the `-I` string's place, else as last words. A `find -exec` segment becomes its commands, with
-    `{}` put as the find roots. `_walk_wrappers` already reads the xargs flags. A glob in the list of a loop
-    that runs once per word (`_run_loop_names`) is put as its matches in `cwd` (`_listed_loops`), unless a
-    `cd` came before the loop: the matches would be those of another folder."""
-    out, out_ends, out_words, loops, changed, moved = [], [], [], [], False, False
+    `{}` put as the find roots. `_walk_wrappers` already reads the xargs flags. A glob in the list of a `for`
+    loop is put as its matches in the folder the loop starts in (`_listed_loop`): the folder a `cd` before it
+    moved to (`dir_before_segment`), else `cwd`."""
+    out, out_ends, out_words, loops, changed = [], [], [], [], False
     for number, segment in enumerate(segments):
         words = original = _quoted_words(segment)
         lead = 0
@@ -1527,15 +1569,17 @@ def _fed_segments(segments, ends, cwd=""):
             lead += 1
         head = words[lead] if lead < len(words) else ""
         if head == "for" and words[lead + 2:lead + 3] == ["in"]:
-            loops.append((words[lead + 1], words[lead + 3:]))
+            # The list is expanded in the folder the loop starts in. When a `cd` before it leaves that folder
+            # unknown, the scan judges the body in `cwd` (`_shell_write_scan`), so the list is expanded there too.
+            where = (dir_before_segment(segments, number, cwd, ends) or cwd) if cwd else ""
+            loops.append((words[lead + 1], _listed_loop(words[lead + 3:], where)))
         elif head == "select" or any(word in ("while", "until") for word in words[:lead]):
             loops.append(_read_loop(words[lead:], _piped_roots(out_ends, out_words, len(out))))
         elif head == "done" and loops:
             loops.pop()
-        moved = moved or head in ("cd", "pushd", "popd")
         pieces = []   # per word list the shell runs: (its words, the plain commands it becomes)
         runs = _run_loop_names(original, loops)
-        for words in _fill_loop_variables(original, _listed_loops(loops, runs, "" if moved else cwd), runs):
+        for words in _fill_loop_variables(original, loops, runs):
             rewritten = [words]
             index, chain = _walk_wrappers(tuple(words))
             xargs = next((flags for word, flags in chain if word == "xargs"), None)
@@ -1596,13 +1640,16 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     `read_fed` reads what main reads, and more: a path that `find`, `xargs`, a `for` list or a
     substitution feeds to a writer. It judges the command as it stands (`_copy_outer` aside), then
     each substitution's inner command as a command of its own, then the command once more as
-    `_fed_command` rewrites it. It adds refusals to main's reading, except for two reads. A `cp` source that is a
-    whole substitution (`cp $(find tests -name x) /tmp/`) is a read (`_copy_outer`). The sources of a `cp` whose
-    DEST is a word with a quote mark and a live glob (`cp x ""/tmp/run*""`) are reads when no match is a test:
-    `_copy_reads` reads that DEST through `_dest_values` for every caller, so it is the one place a caller without
-    `read_fed` can see a different verdict. A value that `$( )` or a variable holds is a path where it is a
-    writer's word, and text inside a `sed` script (`_put_values`). The builder test
-    check asks for it, from rule 7c and from `never_lifted` (both call `builder_shell_test_hit`)."""
+    `_fed_command` rewrites it. It adds refusals to main's reading, and lifts these:
+    - a `cp` source that is a whole substitution is a read (`cp $(ls src/test_a.py) backup`, `_copy_outer`);
+    - the sources of a `cp` whose DEST is a word with a quote mark and a live glob are reads when no match is a
+      test (`for d in /tmp/run*; do cp tests/a.py "$d"; done`). `_copy_reads` reads that DEST through
+      `_dest_values` for every caller, so it is the one place a caller without `read_fed` can see a different verdict;
+    - a fed `cp` whose sources are all files that exist writes DEST itself (`for f in src/test_a.py; do cp "$f" out`);
+    - a loop that runs once per list word writes each word's own DEST (`for f in tests/*.py; do cp "$f" "/tmp/$f"`);
+    - a fed `cp "$f" "$f.bak"` writes a sibling of each file (`for f in $(git ls-files src); ...`, `_copy_written_hit`);
+    - a value inside a `sed` script is text (`n=$(grep -c foo tests/a.py); sed -i "s/N/$n/" src/a.py`, `_put_values`).
+    The builder test check asks for it, from rule 7c and from `never_lifted` (both call `builder_shell_test_hit`)."""
     def scan(text, fed=None, copy_outer=False, filters=None):
         return _shell_write_scan(text, cwd, predicate, holds, follow_cd, command_position,
                                  predicate_command, fed, copy_outer, filters, read_fed)
