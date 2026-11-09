@@ -18,6 +18,8 @@ review record for its live head. Choices pinned here:
   such a claim in a lane. A failed read, or an exception in the check, never blocks: the reply gets a systemMessage
   with UNKNOWN, never "clear". The cutover read is one such read, but it never hides the record check: when the pull and
   its comments were read and hold no record for the live head, the claim is still refused.
+- The budget: every gh read and the cutover read of one Stop share REVIEW_HOOK_BUDGET. A gh read gets what is left, never
+  more than REVIEW_READ_TIMEOUT. A read that starts with nothing left is not started, and its claim gets the UNKNOWN note.
 - The remedy names `merge <n> --review-record` and never the live head sha: a record must name the head the
   reviewer read, and the refusal cannot know which head that was.
 - The installed layout: the script is a symlink in the config folder, with no merge/ beside lint/. The check still
@@ -47,6 +49,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "merge"))
 import test_report_guard as trg  # noqa: E402  the Stop runner, transcript records and run folder (one home)
 import merge as merge_mod  # noqa: E402  the review record's form and parser (one home, merge/merge.py)
+import report_guard as rg  # noqa: E402  the Stop's budget constants (one home, lint/report_guard.py)
 
 LINT_DIR = HERE
 HOOKS_DIR = os.path.join(HERE, "..", "hooks")
@@ -172,9 +175,9 @@ def write_fake_gh(folder):
         handle.write('@echo off\r\n"%s" "%s" %%*\r\n' % (sys.executable, script))
 
 
-def report(done):
-    """A report with `done` as its Done item. The other three items hold nothing a check reads."""
-    return "\n".join(["> **Done** " + done, "> **Deviations** none", "> **Input Needed** none", "> **Next** wait"])
+def report(done, deviations="none"):
+    """A report with `done` as its Done item and `deviations` as its Deviations item. The other two items hold nothing a check reads."""
+    return "\n".join(["> **Done** " + done, "> **Deviations** " + deviations, "> **Input Needed** none", "> **Next** wait"])
 
 
 def record(head=LIVE, n=PR, rounds=ROUNDS, fix=None):
@@ -222,6 +225,21 @@ try:
 finally:
     with open(%(log)r, "w", encoding="utf-8") as handle:
         json.dump({"elapsed": clock.now, "fetches": clock.fetches, "spans": spans}, handle)
+"""
+
+# The Stop hook, run as __main__ in a process of its own on the fake clock (lint/test_fake_fetch.py). The hook's time.monotonic and its
+# child starts read that clock, so each gh call's start and timeout are fake values. The driver's log: the fake seconds elapsed, and each
+# gh call's [start, timeout, argv].
+BUDGET_DRIVER = """import json, runpy, sys
+sys.path[:0] = [%(hooks)r, %(lint)r]
+import test_fake_fetch
+clock = test_fake_fetch.FakeFetchClock(step=0.0, read_steps=%(read_steps)r)
+try:
+    with clock.patched_process():
+        runpy.run_path(%(guard)r, run_name="__main__")
+finally:
+    with open(%(log)r, "w", encoding="utf-8") as handle:
+        json.dump({"elapsed": clock.now, "reads": clock.reads}, handle)
 """
 
 
@@ -328,6 +346,20 @@ class ReviewRecordTests(unittest.TestCase):
             handle.write(CUTOVER_DRIVER % {"hooks": os.path.abspath(HOOKS_DIR), "merge": os.path.abspath(MERGE_DIR), "lint": LINT_DIR,
                                            "step": step, "guard": trg.REPORT_GUARD, "log": log})
         out = self.stop(self.lane_turn(report(CLAIM)), script=driver, cwd=clone)
+        with open(log, encoding="utf-8") as handle:
+            return out, json.load(handle)
+
+    def budget_run(self, prs, read_steps, reply):
+        """The Stop hook on a lane's `reply`, for the pull requests `prs` (serve's shape), in a process of its own on the fake clock: each
+        gh call takes the fake seconds `read_steps` gives its arguments. -> (the hook's printed reply, the driver's log: the fake seconds
+        elapsed, and each gh call's [start, timeout, argv])."""
+        self.serve(prs=prs)
+        log = os.path.join(self.run_dir, "budget-log.json")
+        driver = os.path.join(self.run_dir, "budget-driver.py")
+        with open(driver, "w", encoding="utf-8") as handle:
+            handle.write(BUDGET_DRIVER % {"hooks": os.path.abspath(HOOKS_DIR), "lint": LINT_DIR, "read_steps": read_steps,
+                                          "guard": trg.REPORT_GUARD, "log": log})
+        out = self.stop(self.lane_turn(reply), script=driver)
         with open(log, encoding="utf-8") as handle:
             return out, json.load(handle)
 
@@ -916,6 +948,58 @@ class ReviewRecordTests(unittest.TestCase):
         for seconds in log["spans"]:
             self.assertGreater(seconds, 0, "the cutover budget is %r s, not above zero" % (seconds,))
             self.assertLess(seconds, timeout, "the cutover budget of %r s is not below the hook's %d s timeout" % (seconds, timeout))
+
+    # The Stop's budget: every gh read of one Stop shares REVIEW_HOOK_BUDGET, on the fake clock of budget_run.
+
+    def test_a_gh_read_that_starts_past_the_budget_is_not_started_and_the_hook_ends_inside_it(self):
+        # Catches: a gh read given no budget. Each read takes more than the whole budget, so the first pull request's head read is cut at
+        # the budget's end and spends it. The second pull request's head read must not start: its UNKNOWN read note must print, and the hook
+        # must end inside the budget. The second pull request holds a stamped record, so a read that ran would pass it silently.
+        budget = rg.REVIEW_HOOK_BUDGET
+        prs = {PR: {"head": LIVE, "comments": [CHATTER]}, PR + 1: {"head": LIVE, "comments": [record(n=PR + 1)]}}
+        out, log = self.budget_run(prs, {"pulls/": budget + 1, "/comments": budget + 1},
+                                   report(CLAIM, "OTHER: round 2 PASS on PR #%d." % (PR + 1)))
+        reads = [argv for _start, _timeout, argv in log["reads"]]
+        self.assertTrue(any(a.endswith("pulls/%d" % PR) for argv in reads for a in argv),
+                        "fixture: the first pull request's head read did not run, so the budget was not spent: %r" % (reads,))
+        self.assertFalse(any(a.endswith("pulls/%d" % (PR + 1)) for argv in reads for a in argv),
+                         "the second pull request's head was read after the budget was spent: %r" % (reads,))
+        self.assertFalse(any(a.endswith("pulls/%d" % (PR + 1)) for argv in self.gh_calls() for a in argv),
+                         "the stand-in answered the second pull request's head read: %r" % (self.gh_calls(),))
+        self.assertIsNotNone(out, "the hook printed nothing")
+        self.assertIn("Review-record guard: UNKNOWN, the check read nothing for PR #%d" % (PR + 1), out.get("systemMessage", ""),
+                      "the second pull request has no UNKNOWN read note: %r" % (out,))
+        self.assertLessEqual(log["elapsed"], budget, "the hook ended at %r s of fake time, past its %d s budget" % (log["elapsed"], budget))
+
+    def test_a_slow_gh_read_is_given_the_time_left_not_the_full_read_timeout(self):
+        # Catches: a gh read given REVIEW_READ_TIMEOUT when the Stop has less left. The head read is quick, so the comment read starts with
+        # the budget less 5 s. That read is slower than the read timeout, so it must be given what is left, and it is cut at the budget's end.
+        budget, cap, quick = rg.REVIEW_HOOK_BUDGET, rg.REVIEW_READ_TIMEOUT, 5
+        self.assertLess(budget - quick, cap, "fixture: the time left is not under the read timeout, so the two cannot be told apart")
+        out, log = self.budget_run({PR: {"head": LIVE, "comments": [record()]}}, {"pulls/": quick, "/comments": cap + 10}, report(CLAIM))
+        reads = log["reads"]
+        self.assertGreaterEqual(len(reads), 2, "fixture: PR %d made %d gh reads, not its head and its comments: %r" % (PR, len(reads), reads))
+        self.assertEqual([start for start, _timeout, _argv in reads[:2]], [0.0, quick],
+                         "fixture: the gh reads did not start at fake times on the hook's clock: %r" % (reads,))
+        for start, timeout, argv in reads:
+            self.assertLessEqual(timeout, budget - start, "a gh read that started at %r s was given %r s, more than the %r s the Stop has left: %r"
+                                 % (start, timeout, budget - start, argv))
+        self.assertLessEqual(log["elapsed"], budget, "the hook ended at %r s of fake time, past its %d s budget" % (log["elapsed"], budget))
+
+    def test_a_spent_budget_never_lets_a_claim_pass_without_a_note(self):
+        # Catches: a gh read that runs on past the Stop's budget and reads a record, so each claim passes with no note. Both pull requests
+        # hold a stamped record for the live head, which passes if read, and every read takes more than the whole budget. The hook must end
+        # inside its timeout, since a killed hook prints nothing, and each claimed pull request must carry its UNKNOWN read note.
+        timeout = self.report_hook_timeout()
+        budget = rg.REVIEW_HOOK_BUDGET
+        prs = {PR: {"head": LIVE, "comments": [record()]}, PR + 1: {"head": LIVE, "comments": [record(n=PR + 1)]}}
+        out, log = self.budget_run(prs, {"pulls/": budget + 1, "/comments": budget + 1},
+                                   report(CLAIM, "OTHER: round 2 PASS on PR #%d." % (PR + 1)))
+        self.assertLessEqual(log["elapsed"], timeout, "the hook ran %r s of fake time, past its %d s timeout: a killed hook prints nothing, a silent pass"
+                             % (log["elapsed"], timeout))
+        self.assertIsNotNone(out, "the hook printed nothing, so its claims passed with no note")
+        for n in (PR, PR + 1):
+            self.assertIn("the check read nothing for PR #%d" % n, out.get("systemMessage", ""), "PR #%d passed with no read note: %r" % (n, out))
 
 
 if __name__ == "__main__":
