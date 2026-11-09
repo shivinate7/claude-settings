@@ -5625,6 +5625,12 @@ sh('git-after-cd: UNFAILING-TAIL, an if test of pytest with || echo "$(date)", t
 sh("git-after-cd: UNFAILING-TAIL, an if test of pytest with || true && [ -f x, then a git push -u in its then body, is refused",
    "if pytest -q || true && [ -f x ]; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&",))
+# THE STEPS AFTER THE TAIL MUST ALL BE UNABLE TO FAIL. `[ -f x ]` after the `|| true` can fail, and the else body runs when
+# it does, whatever pytest did, so the push there is refused. A reader that took the `|| true` as the whole test's tail
+# would read the else as unreachable and let this push pass.
+sh("git-after-cd: UNFAILING-TAIL, an else body after an if test of pytest with || true && [ -f x, which can fail, is refused",
+   "if pytest -q || true && [ -f x ]; then :; else %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "else"))
 # THE PINS. `! pytest -q || true` runs its then body whatever pytest did, so its push is refused. An until body whose test
 # cannot fail never runs, and the decision's limit keeps its refusal.
 sh("git-after-cd: UNFAILING-TAIL, an if ! test of pytest with || true, then a git push -u in its then body, is refused",
