@@ -5,7 +5,7 @@
   "order": 1.03,
   "owner": "coordinator",
   "why": "Item 355 sort, coordinator 14:05 CST Nov 7: 9 Sonnet agents sorted 1,629 notes and debts on main 174b005c1. Fix 184 (166 small, 18 large), delete 86, keep 1,359 (146 of them unverified). Lists: branch claude/clever-planck-oynpfh 759486de5, docs/plans/notes-sort/.",
-  "note": "Its list is in docs/plans/notes-sort/ on branch claude/clever-planck-oynpfh. Each lane carries the tag cs-step:notes-fix-page.",
+  "note": "Its list is in docs/plans/notes-sort/ on branch claude/clever-planck-oynpfh. Each lane carries the tag cs-step:notes-fix-page. Owner item 448 a (page answer 00:39Z = 18:39 CST Nov 8): below 19.5em the press button moves under the row text, at its start; row text in rem, parked-line breakpoint 37.5rem. The lane was already building a.",
   "lane": "notes-fix-page",
-  "updatedAt": "2026-11-07T14:05:00-06:00"
+  "updatedAt": "2026-11-08T18:39:00-06:00"
 }
