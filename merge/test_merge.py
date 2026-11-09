@@ -12944,14 +12944,6 @@ class ReviewStampForm(unittest.TestCase):
         self.assertEqual(lines[i].split(": ", 1)[1], review_fn(self, "review_stamp")(lines[:i]),
                          "the Stamp line is not review_stamp of the lines above it:\n" + text)
 
-    def test_the_stamp_is_the_sha256_of_the_salt_and_the_lines_above_it(self):
-        # the expected value is computed here, not through review_stamp: a review_stamp without the salt would agree with itself
-        text = record_text(rounds=REVIEW_PASS)
-        lines = text.splitlines()
-        i = stamp_index(self, text)
-        want = hashlib.sha256("\n".join(["claude-settings review record stamp v1", *(line.rstrip() for line in lines[:i])]).encode("utf-8")).hexdigest()[:16]
-        self.assertEqual(lines[i].split(": ", 1)[1], want, "the Stamp line is not sha256 of the salt and the lines above it:\n" + text)
-
     def test_trailing_spaces_on_the_body_lines_still_parse_to_the_same_fields(self):
         # the MCP tool may add spaces at a line's end. This case spaces the body lines; the marker line has its own case below.
         text = record_text(rounds=REVIEW_PASS)
@@ -12965,13 +12957,6 @@ class ReviewStampForm(unittest.TestCase):
         lines = text.splitlines()
         spaced = "\n".join([lines[0] + "  "] + lines[1:]) + "\n"
         self.assertEqual(parse_text(self, spaced), parse_text(self, text), "trailing spaces on the marker line changed what the record parses to")
-
-    def test_a_stamped_line_with_trailing_spaces_still_parses(self):
-        # The merge tool stamps each line without its trailing spaces, and parse_review reads the same way. A record the tool printed with
-        # spaces on a stamped line keeps its stamp, so it round-trips. Without the rstrip in review_stamp, the stamp covers the spaces and the parse refuses.
-        text = record_text(rounds=REVIEW_PASS, net="not owed  ")
-        self.assertIn("Net value: not owed  \n", text, "the record lost the trailing spaces the case sets")
-        self.assertEqual(parse_text(self, text)["net"], "not owed", "a stamped record with trailing spaces did not parse to its net value")
 
     def test_crlf_line_ends_still_parse_to_the_same_fields(self):
         text = record_text(rounds=REVIEW_PASS)
@@ -13130,6 +13115,26 @@ class ReviewRecordRules(unittest.TestCase):
 
     def test_a_record_for_an_older_head_is_stale(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD), head=REVIEW_HEAD), "stale")
+
+class ReviewStampLines(unittest.TestCase):
+    """The Stamp line is the SHA-256 of the salt line and the lines above it, each without its trailing spaces. A stamped line with trailing
+    spaces still parses to the same fields."""
+
+    def test_the_stamp_is_the_sha256_of_the_salt_and_the_lines_above_it(self):
+        # the expected value is computed here, not through review_stamp: a review_stamp without the salt would agree with itself
+        text = record_text(rounds=REVIEW_PASS)
+        lines = text.splitlines()
+        i = stamp_index(self, text)
+        want = hashlib.sha256("\n".join(["claude-settings review record stamp v1", *(line.rstrip() for line in lines[:i])]).encode("utf-8")).hexdigest()[:16]
+        self.assertEqual(lines[i].split(": ", 1)[1], want, "the Stamp line is not sha256 of the salt and the lines above it:\n" + text)
+
+    def test_a_stamped_line_with_trailing_spaces_still_parses(self):
+        # The merge tool stamps each line without its trailing spaces, and parse_review reads the same way. A record the tool printed with
+        # spaces on a stamped line keeps its stamp, so it round-trips. Without the rstrip in review_stamp, the stamp covers the spaces and the parse refuses.
+        text = record_text(rounds=REVIEW_PASS, net="not owed  ")
+        self.assertIn("Net value: not owed  \n", text, "the record lost the trailing spaces the case sets")
+        self.assertEqual(parse_text(self, text)["net"], "not owed", "a stamped record with trailing spaces did not parse to its net value")
+
 
 class ReviewFixRules(unittest.TestCase):
     """review_state with a fix check (decision hold-unsafe-after-round-3). A fix check is not a review of its own. A FAIL is open, whatever
