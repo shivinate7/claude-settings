@@ -995,7 +995,7 @@ ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
 ARCHIVE_LANE_TAG = LANE_TAG
 ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = "cs-step:", "cs-repo:"
 ARCHIVE_NO_RECORD_REASON = (
-    "this session's transcript holds no get_session record of the target, so the guard cannot tell whether "
+    "this session's or this agent's transcript holds no get_session record of the target, so the guard cannot tell whether "
     "the target is a lane with records still to land. Run get_session on the target alone, in its own turn, "
     "then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
@@ -1031,17 +1031,41 @@ def _head_landed(module, repo: str, row) -> bool:
         raise RuntimeError("the compare read failed: " + str(e))
 
 
-def archive_hit(tool: str, tool_input, transcript: str):
+def _archive_tags(transcript: str, target, agent_id):
+    """The tags that decide an archive of `target`, or None when no transcript holds a record of it. The main
+    transcript and, for an agent's call (agent_id already checked by the caller), the agent's own transcript are
+    both read. A record with the lane tag decides: its tags, or the two records' tags joined when both are lanes.
+    Else a record without one decides. An agent file that does not exist holds no record; any other read error
+    raises. cost: one more transcript read per agent archive call, no file written, no gh call."""
+    records = []
+    main = _own_get_session_tags(transcript, target)
+    if main is not None:
+        records.append(main)
+    if agent_id:
+        try:
+            own = _own_get_session_tags(own_session.agent_transcript_path(transcript, agent_id), target)
+        except FileNotFoundError:
+            own = None
+        if own is not None:
+            records.append(own)
+    lanes = [tags for tags in records if ARCHIVE_LANE_TAG in tags]
+    if lanes:
+        return [tag for tags in lanes for tag in tags]
+    return records[0] if records else None
+
+
+def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
     """Return (matched, reason) when this archive call must be refused, else None. A target whose newest
-    get_session record in this session's transcript has no cs-build:lane tag passes. A lane is refused
-    while any open pull request of its cs-repo has a head ref in lane_head_refs of its cs-step slug, except an open draft whose
+    get_session record in this session's transcript, or for an agent's call (`agent_id`, checked by the caller
+    against guard.AGENT_ID) in the agent's own transcript too, has no cs-build:lane tag passes. A lane in either
+    record is a lane. A lane is refused while any open pull request of its cs-repo has a head ref in lane_head_refs of its cs-step slug, except an open draft whose
     head commit is already in its base (compare: behind or identical). Fails closed:
     any error in the reads is a refusal, because the guard-wide crash path fails open."""
     if tool != ARCHIVE_TOOL:
         return None
     target = tool_input.get("session_id") if isinstance(tool_input, dict) else None
-    try:  # cost: one transcript read per archive call
-        tags = _own_get_session_tags(transcript, target) if transcript and isinstance(target, str) and target else None
+    try:  # cost: one transcript read per archive call, and the agent's own file as a second for an agent's call
+        tags = _archive_tags(transcript, target, agent_id) if transcript and isinstance(target, str) and target else None
     except Exception:
         tags = None
     if tags is None:
@@ -1050,7 +1074,7 @@ def archive_hit(tool: str, tool_input, transcript: str):
         return None
     slugs = [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]
     repos = [str(t)[len(ARCHIVE_REPO_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_REPO_PREFIX)]
-    slugs, repos = [x for x in slugs if x], [x for x in repos if x]
+    slugs, repos = list(dict.fromkeys(x for x in slugs if x)), list(dict.fromkeys(x for x in repos if x))
     if not slugs or not repos or not all(_REPO_NAME.fullmatch(r) for r in repos):
         return "archive of a lane with no step or repo tag", ARCHIVE_TAGS_REASON
     try:  # cost: one paged gh REST read per cs-repo tag (one in practice), through the merge tool's page reader
