@@ -1,11 +1,11 @@
 {
   "title": "An archive of a lane is refused while that lane pushed a branch with no PR",
   "phase": "now",
-  "status": "ready",
+  "status": "done",
   "order": 103.34759,
   "owner": "coordinator",
   "lane": "session_013NEJL14UraPZKQB8r9Ue3J",
   "why": "A lane that pushes a branch with no PR and says done leaves work that no runner will ever batch.",
-  "note": "Topic guards. Extends the guard of step lane-closes-after-records. Incident: q_max lane qmax-hosted-db-probe-gate pushed claude/qmax-hosted-db-gate-notes with no PR and said done (19:28 CST Nov 7); the coordinator told it to open a draft PR for runner 9. Filed from the coordinator, 19:28 CST Nov 7. Built as draft #1744 (head 22493a990): round 1 haiku FAIL, round 2 sonnet PASS; with runner 8. Lane session_013NEJL14UraPZKQB8r9Ue3J filed note archive-branch-current-only (only the newest record's branch is read). Coordinator 20:57 CST Nov 7; updated 20:57 CST.",
-  "updatedAt": "2026-11-07T20:57:00-06:00"
+  "note": "Topic guards. Extends the guard of step lane-closes-after-records. Incident: q_max lane qmax-hosted-db-probe-gate pushed claude/qmax-hosted-db-gate-notes with no PR and said done (19:28 CST Nov 7); the coordinator told it to open a draft PR for runner 9. Filed from the coordinator, 19:28 CST Nov 7. Built as draft #1744 (head 22493a990): round 1 haiku FAIL, round 2 sonnet PASS; with runner 8. Lane session_013NEJL14UraPZKQB8r9Ue3J filed note archive-branch-current-only (only the newest record's branch is read). Coordinator 20:57 CST Nov 7; updated 20:57 CST. Done: #1744 merged in batch 69 (#2461, main 624dcc188, 2026-11-09).",
+  "updatedAt": "2026-11-09T15:14:00-06:00"
 }
