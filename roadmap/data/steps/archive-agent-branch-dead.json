@@ -1,0 +1,11 @@
+{
+  "title": "After #1674 merges, the archive guard drops its unreachable agent branch, and the notes file loses a stale duplicate",
+  "why": "Rule agent-no-remote-tools (#1674) refuses every agent call to archive_session first, so the agent-transcript branch that step lane-closes-after-records added can no longer run. Dead guard code misleads the next reader.",
+  "note": "From lane reviewer-no-session-tools (session_013NEJKzc39M5wFtru1uU5u4, 00:30 CST Nov 9). Starts after batch 68 merges #1566 and #1674. (1) Code: remove, or keep with a stated reason, the agent-transcript branch in hooks/guard.py near the archive_hit call (about 5445-5448 on #1674's head 82dc29277), and archive_hit's agent-record reading in hooks/guard_merge.py (about 1034-1048 and 1057-1068). The session-tiers.md prose goes to lane agent-transcript-path-one-home. (2) Notes: docs/debts/notes.md holds slug reviewer-no-session-tools-general-purpose-spawn twice after a union merge; delete the older line (\"Fix: none — rare and harmless. Until: 2026-11-21\").",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 885,
+  "updatedAt": "2026-11-09T00:30:00-06:00"
+}
