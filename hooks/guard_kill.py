@@ -22,7 +22,7 @@ from guard_core import (
     QUIET_COMMANDS, QUOTE_MARKS,
     ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
     POWERSHELL_CALL, PowerShellScript, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
-    _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script,
+    _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script, is_powershell,
     resolve_command, segment_tokens, split_background, split_segments,
 )
 from guard_env import _substitutions
@@ -613,10 +613,14 @@ def glued_background_hit(cmd: str) -> str:
     background job as it reads a spaced `&`, but the tokens never hold a bare `&` for `bare_background_hit`
     to find. A printer or a `cd` before it (`echo x&sed ...`, `cd sub &sed ...`) ends at once, so it
     detaches nothing. The waiter judges the command first: it reads `sleep 99 &echo ok` as a long pause."""
+    if is_powershell(cmd):
+        return ""   # PowerShell reads `&word` as its call operator, never a job
     cmd = _strip_heredoc_bodies_unconditionally(cmd)
     if "$!" in cmd:
         return ""
     for segment in split_segments(cmd):
+        if "((" in segment:
+            continue   # `((` or `$((` holds an arithmetic `&`
         pieces = split_background(segment)
         for at in range(len(pieces) - 1):
             left, right = pieces[at], pieces[at + 1]
