@@ -1035,7 +1035,7 @@ def _head_landed(module, repo: str, row) -> bool:
 
 
 def _session_records(transcript: str, agent_id, read):
-    """([tags of each file that holds a record], whether any file shows a set_session_tags call after its record).
+    """([tags of each file that holds a record], whether any file shows a set_session_tags call after its record, or with no record in that file).
     `read(path)` is one of the own_session reads, returning (tags, tagged_after). The main transcript and, for an
     agent's call (agent_id already checked by the caller), the agent's own transcript are both read. An agent file
     that does not exist holds no record; any other read error raises. cost: one transcript read, and the agent's
@@ -1146,12 +1146,13 @@ BRIEF_STEP_REASON = (
 def brief_hit(tool: str, tool_input, transcript: str, agent_id=None):
     """Return (matched, reason) when this send_message is a lane brief for a topic the target lane does not
     hold, else None. Only a message whose first non-blank line starts with LANE_BRIEF_MARKER is read; the
-    transcript is read for that message alone. A target whose newest record (get_session, or the
+    transcript is read for that message alone. A target with no record refuses. A set_session_tags call on the
+    target after a record, or with no record in that file, makes the record stale and refuses, whatever tags
+    the deciding record holds. Otherwise a target whose newest record (get_session, or the
     create_session that made it) has no cs-build:lane tag passes. A lane with a cs-topic tag is judged by the
     brief's Topic, an older lane without one by the brief's step against its cs-step tags. For an agent's call
     (`agent_id`, checked by the caller against guard.AGENT_ID) the agent's own transcript is read too: a lane record
-    in either file decides, the tags of the lane records are joined, and a set_session_tags call after the record in
-    either file makes it stale. Fails closed: any error in the reads is a refusal, because the guard-wide crash path
+    in either file decides and the tags of the lane records are joined. Fails closed: any error in the reads is a refusal, because the guard-wide crash path
     fails open."""
     if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
         return None
@@ -1168,10 +1169,10 @@ def brief_hit(tool: str, tool_input, transcript: str, agent_id=None):
         tags, tagged_after = None, False
     if tags is None:
         return "lane brief to a target with no record", BRIEF_NO_RECORD_REASON
+    if tagged_after:  # a set_session_tags call on the target followed its record, so the tags may have changed, a lane tag included
+        return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
     if ARCHIVE_LANE_TAG not in tags:
         return None
-    if tagged_after:  # a set_session_tags call on the target followed its record, so the topic or steps may have changed
-        return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
     found = _BRIEF_LINE.match(first)
     step, topic = (found.group("step"), found.group("topic")) if found else (None, None)
     topics = [str(t)[len(TOPIC_TAG_PREFIX):].strip() for t in tags if str(t).startswith(TOPIC_TAG_PREFIX)]

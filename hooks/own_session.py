@@ -1,4 +1,4 @@
-"""The one reader of a session's own get_session record in its transcript.
+"""The one reader of a session's own get_session and create_session records in its transcript.
 
 hooks/guard_merge.py (merge role, trust card, archive proofs) and lint/report_guard.py (lane or
 owner-facing pick guard) both read it. It is its own small module so the Stop hook can import it
