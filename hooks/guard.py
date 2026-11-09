@@ -1549,9 +1549,9 @@ XCODE_TEST_DIR = re.compile(r"^[A-Z]\w*Tests$")
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}
 # Dependency lists only a test-author owns. A builder may add a dev dependency.
 AUTHOR_BASENAMES = {"requirements-dev.txt"}
-# The three mutation tests are test code: a builder may not edit them and a test-author may (owner ruling
-# 447 a, 17:19 CST Nov 8: mutants are test content). Named one by one so a later product mutate_*.py stays a
-# builder's. Case folds as in `is_test_rel`.
+# The three mutation tests are test code: only a test-author edits them, since a builder that writes mutants
+# grades its own code. Named one by one so a later product mutate_*.py stays a builder's. Case folds as in
+# `is_test_rel`.
 AUTHOR_MUTATION_TESTS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
 MUTATION_TEST_NAMES = {name.rsplit("/", 1)[-1] for name in AUTHOR_MUTATION_TESTS}
 TEST_CONFIG = re.compile(
