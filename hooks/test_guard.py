@@ -12186,12 +12186,18 @@ GRAPHQL_NODE = "IC_kwDO%d" % REVIEW_COMMENT_ID   # the node id of comment 4417, 
 GRAPHQL_PLAIN = "Round 1 ran. No review record yet."
 GRAPHQL_QUERY = os.path.join(GRAPHQL_DIR, "query.graphql")     # the query `-F query=@` names
 GRAPHQL_REQUEST = os.path.join(GRAPHQL_DIR, "request.json")    # the request body `--input` names: a JSON object that holds the query
+GRAPHQL_VARIABLE_QUERY = 'mutation($b:String!){addComment(input:{subjectId:"X",body:$b}){clientMutationId}}'   # its body is the variable `b`
+GRAPHQL_VARIABLE_REQUEST = os.path.join(GRAPHQL_DIR, "variable-request.json")   # the request `--input` names, its marked record in `variables`
+GRAPHQL_VARIABLE_PLAIN_REQUEST = os.path.join(GRAPHQL_DIR, "variable-plain-request.json")   # the same request, its body unmarked
 
 
 def build_graphql_fixtures():
-    """The two request files: a marked addComment as a query, and the same mutation inside a JSON request body."""
+    """The request files: a marked addComment as a query, the same mutation inside a JSON request body, and that request with its
+    body in `variables`, once marked and once unmarked."""
     write(GRAPHQL_QUERY, graphql_add(graphql_block(review_record())))
     write(GRAPHQL_REQUEST, json.dumps({"query": graphql_add(graphql_block(review_record()))}))
+    write(GRAPHQL_VARIABLE_REQUEST, json.dumps({"query": GRAPHQL_VARIABLE_QUERY, "variables": {"b": review_record()}}))
+    write(GRAPHQL_VARIABLE_PLAIN_REQUEST, json.dumps({"query": GRAPHQL_VARIABLE_QUERY, "variables": {"b": GRAPHQL_PLAIN}}))
 
 
 lazy_fixture([GRAPHQL_DIR], build_graphql_fixtures)
@@ -12205,6 +12211,21 @@ bash_post("review-record: a marked addComment in a query file is refused, gh api
           "gh api graphql -F query=@%s" % GRAPHQL_QUERY, "deny", rule=REVIEW_RULE, carries=("node id",))
 bash_post("review-record: a marked addComment in a request body read by --input is refused, gh api graphql --input file",
           "gh api graphql --input %s" % GRAPHQL_REQUEST, "deny", rule=REVIEW_RULE, carries=("node id",))
+
+# A BODY IN `variables`. Decision pr-review-record, the gap list: the guard reads the `query` of a request body, not its `variables`, so a
+# record held in a variable passes. The control is the same request with an unmarked body.
+bash_post("review-record: a marked addComment whose body is a request variable is refused, gh api graphql --input file",
+          "gh api graphql --input %s" % GRAPHQL_VARIABLE_REQUEST, "deny", rule=REVIEW_RULE, carries=("node id",))
+bash_post("review-record: an unmarked addComment whose body is a request variable is allowed, gh api graphql --input file",
+          "gh api graphql --input %s" % GRAPHQL_VARIABLE_PLAIN_REQUEST, "allow")
+
+# AN UPDATE WHOSE NODE ID IS A VARIABLE. Decision pr-review-record, the GraphQL text: a marked updateIssueComment is refused as an edit with
+# no read. The guard reads an old body only from a literal node id, so this id is a variable and no read is made. The decision does not
+# rule on an unmarked body under a variable id, so this case pins only the marked refusal.
+UPDATE_BY_VARIABLE = 'mutation($id:ID!){updateIssueComment(input:{id:$id, body: %s}){clientMutationId}}' % graphql_block(review_record())
+REVIEW_LOG_CHECKS.append(("review-record:a marked updateIssueComment whose node id is a variable is refused with no gh read, gh api graphql -f id=",
+                         review_reads("Bash", {"command": "gh api graphql -f %s -f id=%s" % (shlex.quote("query=" + UPDATE_BY_VARIABLE), GRAPHQL_NODE)},
+                                      "deny", 0, carries=(REVIEW_RULE,))))
 
 bash_post("review-record: an unmarked addComment in a block string is allowed, gh api graphql -f query=",
           gh_graphql(graphql_add(graphql_block(GRAPHQL_PLAIN))), "allow")
