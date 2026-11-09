@@ -9,7 +9,7 @@ import os
 import re
 
 from guard_core import (
-    _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
+    _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
     strip_heredoc_bodies,
 )
@@ -698,12 +698,14 @@ def _untracked_findings(where, top, specs):
 
 def _chain_safe(segment):
     """True when the segment cannot change the tree a later commit reads: a git add, a git read,
-    `true`, `false` or `cd` (the root already resolves through a cd). A commit is judged on its own, so
+    `true`, `false`, `cd` (the root already resolves through a cd) or a plain `VAR=value`. A commit is judged on its own, so
     the caller never asks about one."""
     call = git_call_of(segment)
     if call is not None:
         return call[0] == "add" or call[0] in _READ_VERBS
     tokens = segment_tokens(segment) or []
+    if tokens and all(ASSIGNMENT.match(token) for token in tokens) and not set(segment) & set("`("):
+        return True   # a plain `VAR=value` runs nothing; a substitution could, so it stays unsafe
     index = resolve_command(tokens) if tokens else None
     return index is not None and basename(tokens[index]) in ("true", "false", "cd")
 
