@@ -643,9 +643,36 @@ PUSHLANEMASTER = os.path.join(ROOT, "pushlanemaster")
 PUSHSELF = os.path.join(ROOT, "pushself")
 PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
 PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
-# The rule ids the two new asks name. Each is the one home for its id in this file.
+# Rule push-main reads the remote a push names (ruling 207 a, judged on its URL). Every push fixture's origin is
+# PUSHREMOTE, a network URL the guard never contacts, so the existing push-main asks keep their meaning.
+# PUSHLOCAL has a local origin (a bare path), PUSHSSH an scp-form origin, and PUSHNOREMOTE no remote at all.
+# PUSHLOCALSTRAY has the same local origin, and its branch `feat` tracks origin/other, so an implied destination
+# on it is a stray push. PUSHLOCAL's `feat` has no upstream.
+PUSHREMOTE = "https://example.invalid/repo.git"
+PUSHSSHURL = "git@github.com:o/r.git"
+PUSHLOCAL = os.path.join(ROOT, "pushlocal")
+PUSHLOCALSTRAY = os.path.join(ROOT, "pushlocalstray")
+# PUSHLOCALMAIN is main with the same local origin and tracks origin/main, as PUSHMAINUP does with an https origin.
+# It is the local-origin twin of PUSHMAINUP: the two differ only in the origin's kind.
+PUSHLOCALMAIN = os.path.join(ROOT, "pushlocalmain")
+PUSHSSH = os.path.join(ROOT, "pushssh")
+PUSHNOREMOTE = os.path.join(ROOT, "pushnoremote")
+# Agent-worktree branch names (rule push-agent-branch). A branch is named by HEAD, so each name has its own
+# checkout. PUSHAGENT holds the name that a stray push sent to origin, with no upstream. The other shapes and
+# the near misses sit beside it.
+PUSHAGENT = os.path.join(ROOT, "pushagent")            # claude/agent-<hex>
+PUSHAGENTWT = os.path.join(ROOT, "pushagentwt")        # worktree-agent-<hex>
+PUSHAGENTBARE = os.path.join(ROOT, "pushagentbare")    # agent-<hex>
+PUSHAGENTNOTES = os.path.join(ROOT, "pushagentnotes")  # agent-notes: a prefix with no hex after it
+PUSHAGENTMYABC = os.path.join(ROOT, "pushagentmyabc")  # my-agent-abc: a prefix, too short to hold hex
+PUSHAGENTMYHEX = os.path.join(ROOT, "pushagentmyhex")  # my-agent-<hex>: hex behind a prefix, not the shape
+PUSHAGENTSHORT = os.path.join(ROOT, "pushagentshort")  # agent-<7 hex>: a hex tail one character short of the shape
+PUSHAGENTEIGHT = os.path.join(ROOT, "pushagenteight")  # agent-<8 hex>: the exact shape, at its lower bound
+PUSHAGENTCFG = os.path.join(ROOT, "pushagentcfg")      # claude/agent-<hex> with push.autoSetupRemote in its own config
+# The rule ids the push asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
+PUSH_AGENT_RULE = "push-agent-branch"   # a non-forced push whose destination is an agent-worktree branch name
 # roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
@@ -1827,16 +1854,21 @@ def _build_branch():
 
 def _build_push():
     """The push destinations: the feat, main, trunk and upstream repos and their remotes."""
-    materialize(BRANCHREMOTE)  # every push destination adds the bare remote _build_branch makes
+    materialize(BRANCHREMOTE)  # PUSHLOCAL's origin is this bare remote, a local path
     # ----------------------------------------------------------------- push destinations
     for where, head, branch in ((PUSHFEAT, "main", "feat"), (PUSHMAIN, "main", "main"),
                                 (PUSHTRUNK, "trunk", "feat"), (PUSHTRUNKLOCAL, "trunk", "feat"),
                                 (PUSHNOHEAD, None, "feat"), (PUSHDETACHED, "main", None),
                                 (PUSHSAMETAG, "main", "main"), (RECROADMAP, "main", "roadmap"),
-                                (RECFORK, "main", "roadmap-fork")):
+                                (RECFORK, "main", "roadmap-fork"),
+                                (PUSHLOCAL, "main", "feat"), (PUSHLOCALSTRAY, "main", "feat"),
+                                (PUSHLOCALMAIN, "main", "main"),
+                                (PUSHSSH, "main", "feat"), (PUSHNOREMOTE, None, "feat")):
         make_repo(where, {"base.txt": "base\n"})
         if head:
-            run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+            origin = {PUSHLOCAL: slash(BRANCHREMOTE), PUSHLOCALSTRAY: slash(BRANCHREMOTE),
+                      PUSHLOCALMAIN: slash(BRANCHREMOTE), PUSHSSH: PUSHSSHURL}.get(where, PUSHREMOTE)
+            run_vcs(where, "remote", "add", "origin", origin)
             run_vcs(where, "update-ref", "refs/remotes/origin/" + head, "HEAD")
             run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD",
                     "refs/remotes/origin/" + head)
@@ -1846,6 +1878,31 @@ def _build_push():
             run_vcs(where, "checkout", "-q", "--detach")
         if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
             sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    # Each remote fixture reads back the origin it was given (P7), so a case never judges a remote the build did
+    # not set. PUSHNOREMOTE must have no remote at all.
+    for where, want in ((PUSHLOCAL, slash(BRANCHREMOTE)), (PUSHLOCALSTRAY, slash(BRANCHREMOTE)),
+                        (PUSHLOCALMAIN, slash(BRANCHREMOTE)), (PUSHSSH, PUSHSSHURL)):
+        if run_vcs(where, "config", "--get", "remote.origin.url").stdout.strip() != want:
+            sys.exit("fixture setup failed in build_fixtures: %r needs origin %s" % (where, want))
+    if run_vcs(PUSHNOREMOTE, "remote").stdout.strip():
+        sys.exit("fixture setup failed in build_fixtures: PUSHNOREMOTE must have no remote")
+
+    # PUSHLOCALSTRAY's upstream is set by git (--set-upstream-to), then read back, so a case never judges a
+    # fixture without it.
+    run_vcs(PUSHLOCALSTRAY, "update-ref", "refs/remotes/origin/other", "HEAD")
+    run_vcs(PUSHLOCALSTRAY, "branch", "--set-upstream-to=origin/other", "feat")
+    if run_vcs(PUSHLOCALSTRAY, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip() \
+            != "origin/other":
+        sys.exit("fixture setup failed in build_fixtures: PUSHLOCALSTRAY needs upstream origin/other")
+
+    # PUSHLOCALMAIN tracks origin/main, set by git and read back, the same as PUSHMAINUP. Its checkout is main.
+    run_vcs(PUSHLOCALMAIN, "branch", "--set-upstream-to=origin/main", "main")
+    if run_vcs(PUSHLOCALMAIN, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip() \
+            != "origin/main":
+        sys.exit("fixture setup failed in build_fixtures: PUSHLOCALMAIN needs upstream origin/main")
+    if run_vcs(PUSHLOCALMAIN, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() != "main":
+        sys.exit("fixture setup failed in build_fixtures: PUSHLOCALMAIN must sit on main")
 
     # The feat destination holds the remote-tracking refs that the push cost case's forms read: feat for
     # a HEAD or bare push, lane/foo for a refspec push or HEAD:lane/foo. A local lane/foo is the source.
@@ -1873,7 +1930,7 @@ def _build_push():
     # A dangling origin/HEAD: it names origin/gone, which is missing. origin/main exists, so the read
     # order gives main as the default branch.
     make_repo(PUSHDANGLING, {"base.txt": "base\n"})
-    run_vcs(PUSHDANGLING, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHDANGLING, "remote", "add", "origin", PUSHREMOTE)
     run_vcs(PUSHDANGLING, "update-ref", "refs/remotes/origin/main", "HEAD")
     run_vcs(PUSHDANGLING, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone")
     run_vcs(PUSHDANGLING, "checkout", "-q", "-b", "feat")
@@ -1889,7 +1946,7 @@ def _build_push():
     for where, remote_branch, absent in ((PUSHNOHEADMAIN, "main", "master"),
                                          (PUSHONLYMASTER, "master", "main")):
         make_repo(where, {"base.txt": "base\n"})
-        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
         run_vcs(where, "update-ref", "refs/remotes/origin/" + remote_branch, "HEAD")
         run_vcs(where, "checkout", "-q", "-b", "feat")
         if (run_vcs(where, "symbolic-ref", "-q", "refs/remotes/origin/HEAD").returncode == 0
@@ -1903,7 +1960,7 @@ def _build_push():
     # Two remotes with two default branches. `feat` tracks upstream/main, so a bare push goes there.
     make_repo(PUSHUPSTREAM, {"base.txt": "base\n"})
     for remote, default in (("origin", "develop"), ("upstream", "main")):
-        run_vcs(PUSHUPSTREAM, "remote", "add", remote, slash(BRANCHREMOTE))
+        run_vcs(PUSHUPSTREAM, "remote", "add", remote, PUSHREMOTE)
         run_vcs(PUSHUPSTREAM, "update-ref", "refs/remotes/%s/%s" % (remote, default), "HEAD")
         run_vcs(PUSHUPSTREAM, "symbolic-ref", "refs/remotes/%s/HEAD" % remote,
                 "refs/remotes/%s/%s" % (remote, default))
@@ -1922,7 +1979,7 @@ def _build_push():
     for where, mode, merge in ((PUSHUP, "upstream", "main"), (PUSHUPSELF, "upstream", "feat"),
                                (PUSHNOUP, "upstream", None), (PUSHMATCH, "matching", None)):
         make_repo(where, {"base.txt": "base\n"})
-        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
         run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
         run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
         run_vcs(where, "checkout", "-q", "-b", "feat")
@@ -1936,31 +1993,31 @@ def _build_push():
     # The upstream shapes of rulings 206 a and 207 a. Each upstream is set by git itself (--track and
     # --set-upstream-to), then read back, so a case never judges a fixture that lacks its upstream.
     make_repo(PUSHSTRAY, {"base.txt": "base\n"})
-    run_vcs(PUSHSTRAY, "remote", "add", "origin", slash(BRANCHREMOTE))
-    run_vcs(PUSHSTRAY, "remote", "add", "fork", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTRAY, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHSTRAY, "remote", "add", "fork", PUSHREMOTE)
     run_vcs(PUSHSTRAY, "update-ref", "refs/remotes/origin/lane/x", "HEAD")
     run_vcs(PUSHSTRAY, "checkout", "-q", "-b", "mylocal")
     run_vcs(PUSHSTRAY, "branch", "--set-upstream-to=origin/lane/x", "mylocal")
     run_vcs(PUSHSTRAY, "config", "push.default", "simple")
 
     make_repo(PUSHSELF, {"base.txt": "base\n"})
-    run_vcs(PUSHSELF, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSELF, "remote", "add", "origin", PUSHREMOTE)
     run_vcs(PUSHSELF, "update-ref", "refs/remotes/origin/feat", "HEAD")
     run_vcs(PUSHSELF, "checkout", "-q", "--track", "-b", "feat", "origin/feat")
 
     for where, lane, base in ((PUSHLANE, "lane/foo", "main"), (PUSHLANEMASTER, "lane/bar", "master")):
         make_repo(where, {"base.txt": "base\n"})
-        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
         run_vcs(where, "update-ref", "refs/remotes/origin/" + base, "HEAD")
         run_vcs(where, "checkout", "-q", "--track", "-b", lane, "origin/" + base)
 
     make_repo(PUSHSTACK, {"base.txt": "base\n"})
-    run_vcs(PUSHSTACK, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTACK, "remote", "add", "origin", PUSHREMOTE)
     run_vcs(PUSHSTACK, "update-ref", "refs/remotes/origin/lane/base", "HEAD")
     run_vcs(PUSHSTACK, "checkout", "-q", "--track", "-b", "lane/fix", "origin/lane/base")
 
     make_repo(PUSHMAINUP, {"base.txt": "base\n"})
-    run_vcs(PUSHMAINUP, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHMAINUP, "remote", "add", "origin", PUSHREMOTE)
     run_vcs(PUSHMAINUP, "update-ref", "refs/remotes/origin/main", "HEAD")
     run_vcs(PUSHMAINUP, "branch", "--set-upstream-to=origin/main", "main")
 
@@ -1979,6 +2036,38 @@ def _build_push():
             or run_vcs(PUSHSTRAY, "config", "--get", "push.default").stdout.strip() != "simple"):
         sys.exit("fixture setup failed in build_fixtures: PUSHSTRAY needs remotes fork and origin "
                  "and push.default simple")
+
+    # The agent-worktree names and their near misses (rule push-agent-branch). Each reads back its own name
+    # in HEAD and no upstream, so a case judges the name it names and nothing inherited.
+    for where, branch in ((PUSHAGENT, "claude/agent-a22bb0ed47825117b"),
+                          (PUSHAGENTWT, "worktree-agent-a22bb0ed47825117b"),
+                          (PUSHAGENTBARE, "agent-a22bb0ed47825117b"),
+                          (PUSHAGENTNOTES, "agent-notes"),
+                          (PUSHAGENTMYABC, "my-agent-abc"),
+                          (PUSHAGENTMYHEX, "my-agent-a22bb0ed47825117b"),
+                          (PUSHAGENTSHORT, "agent-1234567"),
+                          (PUSHAGENTEIGHT, "agent-12345678")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
+        run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        run_vcs(where, "checkout", "-q", "-b", branch)
+        if run_vcs(where, "symbolic-ref", "-q", "HEAD").stdout.strip() != "refs/heads/" + branch:
+            sys.exit("fixture setup failed in build_fixtures: %r must be on branch %s" % (where, branch))
+        if run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
+            sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % where)
+    # The config-file autoSetupRemote (rule push-agent-branch). The key is written to this repo's own config,
+    # so a bare push reads it there, not from a `-c` override on the call.
+    make_repo(PUSHAGENTCFG, {"base.txt": "base\n"})
+    run_vcs(PUSHAGENTCFG, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHAGENTCFG, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHAGENTCFG, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run_vcs(PUSHAGENTCFG, "checkout", "-q", "-b", "claude/agent-0c1d2e3f4a5b6c7d")
+    run_vcs(PUSHAGENTCFG, "config", "push.autoSetupRemote", "true")
+    if run_vcs(PUSHAGENTCFG, "config", "--get", "push.autoSetupRemote").stdout.strip() != "true":
+        sys.exit("fixture setup failed in build_fixtures: %r must set push.autoSetupRemote in its config" % PUSHAGENTCFG)
+    if run_vcs(PUSHAGENTCFG, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % PUSHAGENTCFG)
 
 def _build_worktrees():
     """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
@@ -2282,7 +2371,10 @@ lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
-              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK],
+              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK,
+              PUSHLOCAL, PUSHLOCALSTRAY, PUSHLOCALMAIN, PUSHSSH, PUSHNOREMOTE,
+              PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX,
+              PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -7619,6 +7711,69 @@ push_case("stray branch, a second refspec that names the current branch asks",
 sh("push: stray branch, a bare push under push.default current asks",
    VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
 
+# ASK, rule push-agent-branch. A non-forced push whose destination is an agent-worktree name asks, with or
+# without -u. push-stray-branch stays silent on a branch with no upstream, so this rule carries that case. The
+# names are agent-<hex>, claude/agent-<hex> and worktree-agent-<hex>, with 8 or more hex characters after the
+# prefix. PUSHAGENT sits on its claude/agent- branch, with no upstream.
+push_case("agent branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+push_case("agent branch, -u HEAD asks", "-u origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+push_case("agent branch, @ asks", "origin @", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+push_case("agent branch, the current name as a colon-less refspec asks", "origin claude/agent-a22bb0ed47825117b",
+          "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+sh("push: agent branch, a bare push under push.default current asks",
+   VCS + " -c push.default=current push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+push_case("agent worktree, worktree-agent-<hex>, -u HEAD asks", "-u origin HEAD", "ask",
+          cwd=PUSHAGENTWT, rule=PUSH_AGENT_RULE)
+push_case("agent worktree, agent-<hex>, -u HEAD asks", "-u origin HEAD", "ask",
+          cwd=PUSHAGENTBARE, rule=PUSH_AGENT_RULE)
+# An explicit agent destination from a branch with no upstream (PUSHFEAT, `feat`).
+push_case("explicit agent destination from a branch with no upstream asks",
+          "origin HEAD:claude/agent-a22bb0ed47825117b", "ask", rule=PUSH_AGENT_RULE)
+# Under push.autoSetupRemote, git pushes the current name and sets its upstream itself, so a bare push, `origin`
+# or `-u origin` writes the agent name. The key rides on the call, where the guard reads it.
+sh("push: agent branch, a bare push under autoSetupRemote asks",
+   VCS + " -c push.autoSetupRemote=true push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+sh("push: agent branch, origin under autoSetupRemote asks",
+   VCS + " -c push.autoSetupRemote=true push origin", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+sh("push: agent branch, -u origin under autoSetupRemote asks",
+   VCS + " -c push.autoSetupRemote=true push -u origin", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+# The config-file form: push.autoSetupRemote is in the repo's own config, not on the call, so a bare push asks.
+sh("push: agent branch, a bare push under a config autoSetupRemote asks",
+   VCS + " push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENTCFG)
+# The exact shape: eight hex characters after the prefix ask.
+push_case("agent-12345678, -u HEAD asks (8 hex is the exact shape)", "-u origin HEAD", "ask",
+          cwd=PUSHAGENTEIGHT, rule=PUSH_AGENT_RULE)
+# A side effect pin: under push.autoSetupRemote, a bare push from main with no upstream writes main, so push-main asks.
+sh("push: main with no upstream, a bare push under autoSetupRemote asks push-main",
+   VCS + " -c push.autoSetupRemote=true push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
+
+# SILENT, rule push-agent-branch. Each is an allow that prints nothing. The lane and feature branch controls
+# are the no-upstream rows above (PUSHFEAT, `feat`): their -u and HEAD pushes stay silent under this rule too.
+push_case("agent branch, HEAD to lane-x is silent", "origin HEAD:lane-x", "allow", cwd=PUSHAGENT, silent=True)
+push_case("agent branch, HEAD to refs/heads/lane-x is silent", "origin HEAD:refs/heads/lane-x", "allow",
+          cwd=PUSHAGENT, silent=True)
+push_case("agent branch, a dry run of HEAD is not this rule", "--dry-run origin HEAD", "allow",
+          cwd=PUSHAGENT, silent=True)
+push_case("agent branch, --delete of the agent name is not this rule",
+          "--delete origin claude/agent-a22bb0ed47825117b", "allow", cwd=PUSHAGENT, silent=True)
+push_case("agent branch, a colon delete of the agent name is not this rule",
+          "origin :claude/agent-a22bb0ed47825117b", "allow", cwd=PUSHAGENT, silent=True)
+push_case("agent-notes, -u HEAD is silent (no hex after the prefix)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTNOTES, silent=True)
+push_case("my-agent-abc, -u HEAD is silent (too short to be hex)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTMYABC, silent=True)
+push_case("my-agent-<hex>, -u HEAD is silent (the shape must open the name)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTMYHEX, silent=True)
+push_case("agent-1234567, -u HEAD is silent (7 hex is one short of the shape)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTSHORT, silent=True)
+# The same autoSetupRemote forms on a lane branch with no upstream (PUSHFEAT, `feat`) stay silent.
+sh("push: lane branch, a bare push under autoSetupRemote is silent",
+   VCS + " -c push.autoSetupRemote=true push", "allow", cwd=PUSHFEAT, silent=True)
+sh("push: lane branch, origin under autoSetupRemote is silent",
+   VCS + " -c push.autoSetupRemote=true push origin", "allow", cwd=PUSHFEAT, silent=True)
+sh("push: lane branch, -u origin under autoSetupRemote is silent",
+   VCS + " -c push.autoSetupRemote=true push -u origin", "allow", cwd=PUSHFEAT, silent=True)
+
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
 push_case("main, HEAD:main from a feature branch asks", "origin HEAD:main", "ask", rule=PUSH_MAIN_RULE)
@@ -7642,6 +7797,94 @@ sh("push: main, a bare push under push.default current on main asks",
    VCS + " -c push.default=current push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
 sh("push: main, a bare push under push.default upstream from a branch tracking main asks",
    VCS + " push", "ask", PUSH_MAIN_RULE, cwd=PUSHUP)
+
+# ASK, rule push-main, judged on the remote the push names. A network remote still asks: an scp-form origin, a
+# network URL named on the command line, and a `-C` into a repo whose origin is a network URL. The https
+# origin rows above (PUSHFEAT) and the bare push resolving to main on PUSHUP are the other controls.
+push_case("main, an scp-form origin asks", "origin main", "ask", cwd=PUSHSSH, rule=PUSH_MAIN_RULE)
+push_case("main, a network URL named as the remote asks, from a repo with no remote",
+          "https://example.invalid/r.git main", "ask", cwd=PUSHNOREMOTE, rule=PUSH_MAIN_RULE)
+sh("main, git -C into a repo with a network origin asks, from a repo with no remote",
+   VCS + " -C " + slash(PUSHFEAT) + " push origin main", "ask", PUSH_MAIN_RULE, cwd=PUSHNOREMOTE)
+
+# SILENT, rule push-main. The remote the push names is a local path (absolute, relative or file://), or the
+# repo has no remote of that name, so no network remote is written. Each is an allow that prints nothing.
+push_case("main, an origin that is a local path, a push of main is silent", "origin main", "allow",
+          cwd=PUSHLOCAL, silent=True)
+push_case("main, an origin that is a local path, HEAD:main is silent", "origin HEAD:main", "allow",
+          cwd=PUSHLOCAL, silent=True)
+push_case("main, a local path named as the remote is silent", slash(BRANCHREMOTE) + " main", "allow",
+          cwd=PUSHFEAT, silent=True)
+push_case("main, a relative path named as the remote is silent", "../branchremote.git main", "allow",
+          cwd=PUSHFEAT, silent=True)
+push_case("main, a file URL named as the remote is silent", "file://" + slash(BRANCHREMOTE) + " main",
+          "allow", cwd=PUSHFEAT, silent=True)
+push_case("main, a remote the repo does not have is silent", "upstream main", "allow", cwd=PUSHFEAT,
+          silent=True)
+push_case("main, no remote in the repo is silent", "origin main", "allow", cwd=PUSHNOREMOTE, silent=True)
+sh("main, git -C into a repo with no remote is silent, from a repo with a network origin",
+   VCS + " -C " + slash(PUSHNOREMOTE) + " push origin main", "allow", cwd=PUSHFEAT, silent=True)
+
+# ASK, rules 206 a, 207 a and push-agent-branch, on a local-path origin. A main refspec there is silent, and the
+# refspec after it still decides. The controls ask with no main refspec ahead: HEAD on PUSHLOCALSTRAY (its branch
+# tracks origin/other) is stray, and the agent name on PUSHLOCAL asks the agent rule.
+push_case("local origin, main then HEAD on a branch tracking another name asks stray", "origin main HEAD", "ask",
+          cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
+push_case("local origin, main then the agent name asks the agent rule", "origin main claude/agent-deadbeef01",
+          "ask", cwd=PUSHLOCAL, rule=PUSH_AGENT_RULE)
+push_case("local origin, HEAD on a branch tracking another name asks stray (control)", "origin HEAD", "ask",
+          cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
+push_case("local origin, the agent name alone asks the agent rule (control)", "origin claude/agent-deadbeef01",
+          "ask", cwd=PUSHLOCAL, rule=PUSH_AGENT_RULE)
+# The same two commands on a network origin still ask push-main: the main refspec decides there.
+push_case("network origin, main then HEAD asks push-main", "origin main HEAD", "ask", rule=PUSH_MAIN_RULE)
+push_case("network origin, main then the agent name asks push-main", "origin main claude/agent-deadbeef01", "ask",
+          rule=PUSH_MAIN_RULE)
+# A `git -c remote.origin.url=` override names the remote's URL for the read, so the local origin is a network one.
+sh("main, a local origin made a network remote by git -c remote.origin.url asks push-main",
+   VCS + " -c remote.origin.url=https://example.invalid/r.git push origin main", "ask", PUSH_MAIN_RULE,
+   cwd=PUSHLOCAL)
+
+# ASK, rule push-main, on a remote the shell has not expanded. The token holds `$`, a backtick or `$(`. It names no
+# remote in the repo, yet the shell may expand it to a network remote, so the push asks. PUSHFEAT's origin is https,
+# so only the token decides the ask here.
+push_case("main, a double-quoted shell variable as the remote asks push-main", '"$REMOTE" main', "ask",
+          rule=PUSH_MAIN_RULE)
+push_case("main, an unquoted shell variable as the remote asks push-main", "$REMOTE HEAD:main", "ask",
+          rule=PUSH_MAIN_RULE)
+push_case("main, a backtick as the remote asks push-main", "`printf origin` main", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, a command substitution as the remote asks push-main", "$(printf origin) main", "ask",
+          rule=PUSH_MAIN_RULE)
+sh("main, a bare push with a shell variable as the remote asks push-main under push.default current",
+   VCS + ' -c push.default=current push "$REMOTE"', "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
+
+# SILENT, rule push-main, the controls of that ask. A shell-variable remote on a feature destination writes no main.
+# A `$` in the source of a push to main stays in the refspec: the remote is the local origin, so the push is silent.
+push_case("a shell variable as the remote, HEAD to a feature name, is silent", '"$REMOTE" HEAD:feat-x', "allow",
+          silent=True)
+push_case("a shell variable in the source of a push to main on a local origin is silent", 'origin "$SRC":main',
+          "allow", cwd=PUSHLOCALMAIN, silent=True)
+
+# Local origin on main (PUSHLOCALMAIN, tracking origin/main) and its network twin on the same branch and upstream
+# (PUSHMAINUP). Each form that writes main is silent on the local path and asks on the network remote.
+sh("main tracking origin/main, local origin, a bare push under push.default simple is silent",
+   VCS + " -c push.default=simple push", "allow", cwd=PUSHLOCALMAIN, silent=True)
+sh("main tracking origin/main, network origin, a bare push under push.default simple asks push-main",
+   VCS + " -c push.default=simple push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAINUP)
+push_case("main tracking origin/main, local origin, HEAD is silent", "origin HEAD", "allow", cwd=PUSHLOCALMAIN,
+          silent=True)
+push_case("main tracking origin/main, network origin, HEAD asks push-main", "origin HEAD", "ask", cwd=PUSHMAINUP,
+          rule=PUSH_MAIN_RULE)
+push_case("main tracking origin/main, local origin, --all is silent", "origin --all", "allow", cwd=PUSHLOCALMAIN,
+          silent=True)
+push_case("main tracking origin/main, network origin, --all asks push-main", "origin --all", "ask", cwd=PUSHMAINUP,
+          rule=PUSH_MAIN_RULE)
+
+# ASK, rule push-main. A folder that does not exist cannot be read, and an unreadable config is unknown, which asks.
+# The session's own folder is the local origin, so only the missing folder the push runs in can make it a network one.
+sh("main, cd into a folder that does not exist, then origin main, asks push-main",
+   "cd " + slash(os.path.join(ROOT, "pushmissing")) + " && " + VCS + " push origin main", "ask", PUSH_MAIN_RULE,
+   cwd=PUSHLOCALMAIN)
 
 # SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
 # Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.
@@ -7715,6 +7958,14 @@ chained_ask("push: a lone quote in a commit message does not hide a push to main
             VCS + ' commit -m "don\'t" && ' + VCS + " push origin main", cwd=PUSHFEAT)
 chained_ask("push: a lone quote in a commit message does not hide a stray push that follows it",
             VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHSTRAY)
+chained_ask("push: agent branch, a lone quote in a commit message does not hide a push to an agent name",
+            VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
+chained_ask("push: agent branch, a comment opener inside a string does not hide a push to an agent name",
+            'echo "#" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
+sh("push: text, an echo that names a push to an agent name, is silent",
+   'echo "' + VCS + ' push origin HEAD:claude/agent-a22bb0ed47825117b"', "allow", cwd=PUSHAGENT, silent=True)
+sh("push: text, a multi-line quoted string naming a push to an agent name, is silent",
+   'echo "one line\n' + VCS + ' push origin HEAD"', "allow", cwd=PUSHAGENT, silent=True)
 
 sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", cwd=NOGIT)
 
@@ -10904,8 +11155,9 @@ def record_push_cost_case():
     """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
-    `git symbolic-ref` and two `git config` reads, and reads push.default. A literal destination
-    (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The conflict-markers push check
+    `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
+    (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
+    `HEAD:<branch>` adds no read. The conflict-markers push check
     (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
     order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
     finds the merge base itself). A push with a tracking ref reads one base. A push with no tracking ref
@@ -10946,8 +11198,8 @@ def record_push_cost_case():
         ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1, "diff": 1}),
         ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1}),
         ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1}),
-        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "diff": 1}),
-        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "diff": 1}),
+        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "config": 1, "diff": 1}),
+        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "config": 1, "diff": 1}),
         ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1, "diff": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
          {"rev-parse": 2, "symbolic-ref": 1, "diff": 3}),
@@ -25299,7 +25551,8 @@ LOG_CHECKS = (
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
     ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for a refspec, HEAD and bare, push.default "
-     "for bare only, no read for a literal destination, and reads the transcript only at the record branch",
+     "for bare only, one config read of the remote for a literal main destination, no read for HEAD:<branch>, "
+     "and reads the transcript only at the record branch",
      record_push_cost_case),
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
@@ -27411,11 +27664,13 @@ OV_ACTS = (
      "kill %d" % FOREIGN, NOGIT, "deny", "machine-wide-kill", None),
     ("ask-linked-discard", "a hard reset in a linked worktree, which asks",
      VCS + " reset --hard", GITWT, "ask", "shared-tree", None),
-    # The two new asks of rulings 206 a and 207 a are lifted by an owner override like any ask.
+    # The asks of rulings 206 a and 207 a, and of rule push-agent-branch, are lifted by an owner override like any ask.
     ("push-stray", "a non-forced push that lands on a stray branch",
      VCS + " push origin HEAD", PUSHSTRAY, "ask", PUSH_STRAY_RULE, None),
     ("push-main", "a non-forced push of main",
      VCS + " push origin main", PUSHMAIN, "ask", PUSH_MAIN_RULE, None),
+    ("push-agent", "a non-forced push of an agent-worktree branch name",
+     VCS + " push origin HEAD", PUSHAGENT, "ask", PUSH_AGENT_RULE, None),
     # The owner's refused wait for a clock time, from the main session (no agent id, so a once override reaches it).
     ("wait-until-clock-loop", "a foreground loop that waits for a clock time",
      WAIT_UNTIL_CLOCK_LOOP, NOGIT, "deny", "waiter", None),
