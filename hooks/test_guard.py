@@ -718,6 +718,15 @@ def slash(path):
     return path.replace("\\", "/")
 
 
+def long_name(path):
+    """The long-name form of `path` on Windows, where a temp folder may be the 8.3 short name `RUNNER~1`.
+    os.path.realpath returns the final path there (ntpath, through _getfinalpathname), which expands a
+    short name, and it falls back to the existing prefix for a tail that does not exist yet. The guard's
+    in_any_session_scratchpad compares by realpath too, so this is the form it matches. Other hosts keep
+    the path as it is."""
+    return os.path.realpath(path) if os.name == "nt" else path
+
+
 def copy_guard_family(dest):
     """Every module in GUARD's folder (mutate_shared.module_files) into `dest`: guard.py, its guard_*
     siblings, and each module they may import, so a new shared module cannot crash the copy on import.
@@ -11178,9 +11187,16 @@ else:
 
 # The directory the commit runs in is set in the same command: by a variable, by pushd, or by git's own
 # -C. Each form must still deny, judged from the directory the command really runs in.
-SCRATCH_DIR = slash(os.path.dirname(SCRATCH_MSG))
-scratch_refuse("scratchpad-message: an agent's commit -F through a variable set in the same command is refused",
-             "S=" + SCRATCH_DIR + "; " + VCS + " commit -F $S/commit_msg.txt")
+# The variable binds the long-name form of the folder. A value holding `~` is no literal to the guard's
+# _rm_literal, so `$S` would stay unexpanded, cite-by-id would refuse the file as unread, and this case
+# would test a different rule on a Windows temp folder named with its 8.3 short name.
+SCRATCH_DIR = slash(long_name(os.path.dirname(SCRATCH_MSG)))
+if "~" in SCRATCH_DIR:   # no long name on this host: the case would test cite-by-id, so it does not run here
+    skip_case("scratchpad-message: an agent's commit -F through a variable set in the same command is refused",
+              "the temp folder holds ~ and has no long name here, so the variable case would test cite-by-id")
+else:
+    scratch_refuse("scratchpad-message: an agent's commit -F through a variable set in the same command is refused",
+                 "S=" + SCRATCH_DIR + "; " + VCS + " commit -F $S/commit_msg.txt")
 scratch_refuse("scratchpad-message: an agent's commit -F after pushd into its scratchpad is refused",
              "pushd " + SCRATCH_DIR + " && " + VCS + " commit -F commit_msg.txt")
 scratch_refuse("scratchpad-message: an agent's commit -C . -F after cd into its scratchpad is refused",
