@@ -15004,8 +15004,9 @@ LOG_CHECKS_EXTRA.append(("builder-cap: a filtered find past the list cap is refu
                          builder_cap_list_remedy_check))
 LOG_CHECKS_EXTRA.append(("builder-cap: an unfiltered capped walk's remedy names both a narrower path and a -name filter",
                          builder_cap_unfiltered_remedy_check))
-# ---- round 3 of PR #2211: three findings the guard still gets wrong. Each case is red on the base (6b9f338a1),
-# and MUTATE_ONLY="builder-find:" runs these alone.
+# ---- a builder's copy, move and find, judged on the files they write. The guard refuses a copy or move only when it
+# lands a test file, so a harmless one passes. The cases check that a copy's destination is not a walk root, that a
+# find's -path and -regex narrow only the names it lists, and that mv and install read a glued -t target as cp does.
 # (a) A cp destination is not a walk root. FINDDEEP holds a test two folders down, under src/, so a copy into src/
 # that writes no test is allowed.
 sh("builder-find: a for loop of cp of a and b into src/, over a test two folders down, is allowed",
@@ -15063,7 +15064,7 @@ sh("builder-find: find src *.txt piped to xargs, cp of each into hooks/, writes 
    "find src -name '*.txt' | xargs -I{} cp {} hooks/", "allow", **dict(BR, cwd=FINDCP))
 sh("builder-find: for loop of cp of a and b into src/, writes no test, is allowed",
    "for f in a b; do cp $f src/; done", "allow", **dict(BR, cwd=FINDCP))
-# ---- round 2 of PR #2305: a cp judged on the path it writes. hooks/test_x.py is the test-named source.
+# ---- a cp judged on the path it writes. hooks/test_x.py is the test-named source.
 # A destination that is a file name writes that name, so no test is written and the copy is allowed.
 sh("builder-find: cp of hooks/test_x.py to docs/y.bak, a file name, writes docs/y.bak, no test, is allowed",
    "cp hooks/test_x.py docs/y.bak", "allow", **dict(BR, cwd=FINDCP))
