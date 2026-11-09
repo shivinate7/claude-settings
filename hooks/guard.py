@@ -4972,7 +4972,7 @@ def git_push_after_check_hit(command: str) -> str:
                 head = _push_body_head(segments, start)
                 if head is None:
                     break
-                kind = _push_body_runs_on_failure(segments, start, head)
+                kind = _push_body_runs_on_failure(segments, ends, start, head)
                 if kind:
                     return kind
                 if _push_then_test_unfailing(segments, ends, start, head):
@@ -5077,7 +5077,7 @@ def _push_join_kind(segments, ends, start: int, position: int) -> str:
     return "pipe-join" if _pipe_hides_check(segments, ends, head, position) else "push"
 
 
-def _push_body_runs_on_failure(segments, start: int, head: int) -> str:
+def _push_body_runs_on_failure(segments, ends, start: int, head: int) -> str:
     """The kind of hit (`body-` and the opener, `GIT_PUSH_BODY_OPENERS`) when `segments[start]` opens a body whose
     compound starts at `segments[head]`, and the body runs when a check fails, else ''. Three bodies run on a failed
     check: the `else` of an `if` and the `do` of an `until`, when a test of the compound is a check, and the `then` of
@@ -5088,7 +5088,8 @@ def _push_body_runs_on_failure(segments, start: int, head: int) -> str:
     else git push; fi` passes). A test with a `!` runs the body when its command passes, so it is no check
     (`if ! pytest -q; then exit 1; else git push; fi`); a `(` glued to the `if` does not hide the `!`. The `then` of
     an `if !` and the `do` of a `while !` pass by lane pick 2026-11-08 20:29 CST, though bash runs a push there on a
-    failed check."""
+    failed check. An `else` after a test that ends in `|| true` or `|| :` never runs, so it passes
+    (`_push_then_test_unfailing`): `if pytest -q || true; then :; else git push; fi`."""
     opener = (segment_tokens(segments[start]) or [""])[0]
     head_words = [word.lstrip("({") for word in segment_tokens(segments[head]) or []
                   if word.strip("({") and word not in GIT_PUSH_BODY_WORDS]
@@ -5098,6 +5099,7 @@ def _push_body_runs_on_failure(segments, start: int, head: int) -> str:
         return ""
     depth, level, testing = 0, None, False
     check_at, elif_at = None, None   # the first test that is a check; the last `elif` at the compound's own level
+    unfailing = False   # a test of the compound ends in `|| true` or `|| :` (`_push_then_test_unfailing`)
     for at in range(head, start):
         part = segments[at]
         words = segment_tokens(part) or []
@@ -5107,6 +5109,8 @@ def _push_body_runs_on_failure(segments, start: int, head: int) -> str:
             testing = {"then": False, "do": False, "else": False, "elif": True}.get(words[0] if words else "", testing)
             if words[:1] == ["elif"]:
                 elif_at = at
+            if kind == "else" and words[:1] == ["then"] and _push_then_test_unfailing(segments, ends, at, head):
+                unfailing = True
         if testing and (at == head or depth == level):
             lead, command = _push_test_lead(words)
             if (check_at is None and "!" not in lead and command not in GIT_PUSH_CONDITION_WORDS
@@ -5115,8 +5119,8 @@ def _push_body_runs_on_failure(segments, start: int, head: int) -> str:
         depth += _compound_delta(part, wide=True)
         if at == head:
             level = depth
-    if check_at is None:
-        return ""
+    if check_at is None or unfailing:
+        return ""   # an unfailing test never fails, so the `else` never runs
     if kind == "elif" and (elif_at is None or check_at >= elif_at):
         return ""   # the first `then`, or a test of this `elif` itself: the push runs only when the checks passed
     return "body-" + kind
