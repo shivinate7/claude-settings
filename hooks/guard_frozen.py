@@ -778,8 +778,10 @@ def project_config_shell_hit(cmd: str, cwd: str) -> str:
 
 # ------------------------------------------------------------------ an interpreter's own writes
 #
-# A python or node script, run from a heredoc body or from `-c` / `-e`, writes a file the shell
-# never names, so `_shell_write_hit` cannot see it. `interpreter_write_hit` reads the script itself.
+# A python or node script, run from a heredoc body, from `-c` / `-e`, or from a file named on the
+# command line, writes a file the shell never names, so `_shell_write_hit` cannot see it.
+# `interpreter_write_hit` reads the script itself. A script file is read from disk (bounded), or, when
+# the same command writes it with a heredoc first, from that heredoc body.
 # A quoted `<<'EOF'` body is read too: the interpreter runs it. Python is read with `ast`, so a path
 # in a printed string or a comment is text and a path held in a variable is still found. A body
 # `ast` cannot parse is read by a literal path beside a write call. Node is read by pattern.
@@ -1041,17 +1043,137 @@ def _inline_scripts(command: str):
                 break
 
 
+_SCRIPT_READ_LIMIT = 256 * 1024
+_PY_VALUE_FLAGS = ("-W", "-X", "-Q", "--check-hash-based-pycs")
+_NODE_VALUE_FLAGS = ("-r", "--require", "--import", "--loader", "--experimental-loader", "-C", "--conditions",
+                     "--env-file", "--input-type", "--title")
+_HEREDOC_TARGET = re.compile(
+    r"""(?<![\d&<>])>>?(?![&>])\s*(?:'([^']+)'|"([^"]+)"|([^\s'"<>|;&()]+))"""
+    r"""|\btee\s+(?:-\S+\s+)*(?:'([^']+)'|"([^"]+)"|([^\s'"<>|;&()-][^\s'"<>|;&()]*))""")
+
+
+def _script_file_arg(tokens, index: int, kind: str):
+    """The script file an interpreter command runs: its first argument that is no flag, else None.
+    `-c` / `-e` / `-m` / `-` (a body, a module, stdin) name no file. A flag that takes a value is skipped
+    with it; bun and deno name the file after `run`."""
+    values = _PY_VALUE_FLAGS if kind == "py" else _NODE_VALUE_FLAGS
+    at = index + 1
+    while at < len(tokens):
+        token = str(tokens[at])
+        at += 1
+        if token == "--":
+            return str(tokens[at]) if at < len(tokens) else None
+        if kind == "py" and (_PY_C_FLAG.match(token) or token.startswith("-m")):
+            return None
+        if kind == "js" and _NODE_EVAL_FLAG.match(token):
+            return None
+        if token.startswith("-"):
+            if token == "-":
+                return None
+            if token in values:
+                at += 1
+            continue
+        if kind == "js" and token == "run" and basename(str(tokens[index])).split(".")[0] in ("bun", "deno"):
+            continue
+        return token
+    return None
+
+
+def _script_path(name: str, where: str) -> str:
+    """The absolute path a script argument names from folder `where`, else '' (it holds a variable or
+    a command substitution, so it cannot be told)."""
+    if not name or "$" in name or "`" in name:
+        return ""
+    name = os.path.expanduser(name)
+    if not os.path.isabs(name):
+        if not where:
+            return ""
+        name = os.path.join(where, name)
+    return os.path.normpath(name)
+
+
+def _read_script(path: str) -> str:
+    """The first `_SCRIPT_READ_LIMIT` bytes of a script file, or '' for a folder, a missing or an unreadable file."""
+    try:
+        if not os.path.isfile(path):
+            return ""
+        with open(path, "rb") as handle:
+            return handle.read(_SCRIPT_READ_LIMIT).decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+def _heredoc_scripts(raw: str, segments, ends, cwd: str) -> dict:
+    """{absolute path: (segment number, body)} of each file a heredoc in `raw` writes (`cat > f <<EOF`,
+    `tee f <<EOF`): the script the run of that file executes, when it runs after the write."""
+    written = {}
+    for reading in (False, True):
+        for _quote, body, header in _split_heredocs(raw, reading)[1]:
+            for number, segment in enumerate(segments):
+                if "<<" not in segment or segment.strip() not in header:
+                    continue
+                match = _HEREDOC_TARGET.search(segment)
+                if not match:
+                    continue
+                target = next(group for group in match.groups() if group)
+                at = dir_before_segment(segments, number, cwd, ends) or cwd
+                path = _script_path(target, at)
+                if path and path not in written:
+                    written[path] = (number, body)
+                break
+    return written
+
+
+def _script_file_hit(raw: str, cwd: str, predicate) -> str:
+    """The test path a script file run by `python3 f.py` or `node f.js` writes: the file as it stands on
+    disk, or the heredoc body of the same command that writes it first. A folder, a missing or an unreadable
+    file is no hit."""
+    ends = []
+    segments = split_segments(_strip_heredoc_bodies_unconditionally(raw), ends)
+    written = None
+    for number, segment in enumerate(segments):
+        if not (_PY_HEADER.search(segment) or _NODE_HEADER.search(segment)):
+            continue
+        tokens = segment_tokens(segment)
+        index = resolve_command(tokens) if tokens else None
+        if index is None:
+            continue
+        name = basename(tokens[index])
+        kind = "py" if _PY_COMMAND.match(name) else "js" if _NODE_COMMAND.match(name) else ""
+        script = _script_file_arg(tokens, index, kind) if kind else None
+        if script is None:
+            continue
+        at = dir_before_segment(segments, number, cwd, ends) or cwd
+        path = _script_path(script, at)
+        if not path:
+            continue
+        if written is None:
+            written = _heredoc_scripts(raw, segments, ends, cwd) if "<<" in raw else {}
+        made = written.get(path)
+        body = made[1] if made and made[0] < number else _read_script(path)
+        if body:
+            hit = (_py_hit if kind == "py" else _js_hit)(body, at, predicate)
+            if hit:
+                return hit
+    return ""
+
+
 def interpreter_may_write(raw: str) -> bool:
-    """True when `raw` holds a heredoc or an inline flag and a write call an interpreter body could make:
-    the cheap match that gates `interpreter_write_hit` for a caller that pays to learn its predicate."""
+    """True when `raw` could hold an interpreter write: a heredoc or an inline flag beside a write call, or
+    a python or node command (a script file it runs may write, and only a read of the file can tell).
+    The cheap match that gates `interpreter_write_hit` for a caller that pays to learn its predicate."""
+    if _PY_HEADER.search(raw) or _NODE_HEADER.search(raw):
+        return True
     return ("<<" in raw or any(flag in raw for flag in _INLINE_FLAG_WORDS)) and bool(
         _PY_WRITE_CALL.search(raw) or _JS_ONE.search(raw) or _JS_TWO.search(raw))
 
 
 def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
     """Return the path a python or node script in `raw` writes that `predicate(path, cwd)` accepts, else ''.
-    Read: the body of each heredoc fed to python or node, quoted or not, and each `python -c` and
-    `node -e` script. A script that only reads a path, or names it in a string, hits nothing.
+    Read: the body of each heredoc fed to python or node, quoted or not, each `python -c` and
+    `node -e` script, and each script file a python or node command runs by name (read from disk, or from
+    the heredoc of the same command that writes it first). A script that only reads a path, or names it in
+    a string, hits nothing.
     A crash of the scan reads as no hit: it must never skip the rules after it."""
     try:
         return _interpreter_write_hit(raw, cwd, predicate)
@@ -1081,7 +1203,7 @@ def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
             hit = (_py_hit if kind == "py" else _js_hit)(script, at, predicate)
             if hit:
                 return hit
-    return ""
+    return _script_file_hit(raw, cwd, predicate)
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
