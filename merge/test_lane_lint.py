@@ -7,14 +7,15 @@ prints scripted step lines and exits with a scripted code, so no real lint runs.
 case reads what the tool ran, in which tree, at which head. The repo builder, the fakes and the cloud-session
 fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it. The draft step's ready check
 (class ReadyChecks) runs the same stub, through CiJobStub.
-The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
+The SIGTERM case runs merge in a subprocess through RUNNER_SCRIPT, which names the same stub; it is the one case that does not patch CI_JOB.
 BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four CI step runs, 0.5 s measured (3 runs of 2 cases). Its two lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
-MutationTestRun runs the mutate step of checks-mutate-guard after the lint, on a lane whose diff touches hooks/mutate_*.py (a .mjs counts). Each case
-is one lane lint: the lane commits a logging stub as the file the head's mutate command runs, and timed_lint fakes the wall clock, so no case
-waits on real minutes. Cost per case: one stub ci-job start, one head worktree, and one mutate stub start where the step runs (the untouched
-control starts none). The lint_with_report cases and the tally form run_mutants prints cost the same per lint. The wrong-cause loop runs six
-lints. A stub exits 0, or 1 where a case says so: a readable report is judged by its counts. Measured: the 21 mutation cases (26 lint runs)
-took 5.6 s in one run, about 0.2 s a lint; the whole suite took 17.7 s in one run (noisy).
+The mutation test cases (test_mutation_test_*, in class LaneLint) run the mutate step of checks-mutate-guard after the lint, on a lane whose
+diff touches hooks/mutate_*.py (a .mjs counts). Each case is one lane lint: the lane commits a logging stub as the file the head's mutate
+command runs, and timed_lint fakes the wall clock, so no case waits on real minutes. Cost per lint: one stub ci-job start, one head worktree,
+and one mutate stub start where the step runs (the untouched controls start none). The lint_with_report cases and the tally form run_mutants
+prints cost the same per lint. The wrong-cause loop runs six lints. A stub exits 0, or 1 where a case says so: a table is judged by its counts
+at any exit code, and a tally at exit 1 fails. Measured: the 28 mutation cases (33 lint runs) took 9.2 s in one run, about 0.3 s a lint;
+the whole suite took 20.7 s in one run (noisy).
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -65,7 +66,7 @@ sys.exit(RC)
 '''
 
 # merge.py fixes CI_JOB at import, so a subprocess run names the stub here, before main runs. Same argv and exit code as merge.py's __main__.
-HARNESS = '''import sys
+RUNNER_SCRIPT = '''import sys
 sys.path.insert(0, __HERE__)
 import merge
 merge.CI_JOB = __STUB__
@@ -208,6 +209,7 @@ MUTATE_JOB = "checks-mutate-guard"  # checks.yml's job: the lane lint reads its 
 MUTATE_STEP = "Guard mutation test"  # the step of that job whose run: line is the mutate command
 WORKFLOW_REL = ".github/workflows/checks.yml"
 MUTATE_LOG = "mutate-calls.jsonl"  # one line per start of a mutate stub, in this case's folder
+TWO_DOT_LINE = re.compile(r"(?i)two[- ]dot|merge base")  # the line a lint prints when its three-dot diff has no merge base to read
 MUTATE_STUB = '''import json, os, subprocess, sys
 LOG, OUT, ERR, RC = __LOG__, __OUT__, __ERR__, __RC__
 def git(*args):
@@ -301,6 +303,11 @@ def counts_missing(text, counts):
     return None
 
 
+def fallback_lines(text):
+    """The lines of a lint's output that say it fell back to a two-dot diff, as TWO_DOT_LINE matches them. [] when none."""
+    return [ln for ln in text.splitlines() if TWO_DOT_LINE.search(ln)]
+
+
 class WallClock:
     """The wall clock of one lint run: time.time, time.monotonic and time.perf_counter read it. It starts at the real time and moves only by advance()."""
 
@@ -362,18 +369,18 @@ class LaneLint(CiJobStub, tm.CloudSession):
         sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/release")
 
     def progress_run(self, steps, rc, *argv):
-        """Run merge in a subprocess through HARNESS, with the stub of `steps` (see PROGRESS). -> (rc, stdout, stderr).
+        """Run merge in a subprocess through RUNNER_SCRIPT, with the stub of `steps` (see PROGRESS). -> (rc, stdout, stderr).
         stderr is read live: the case creates the GO file at the first `start:` line, so a stderr that merge captures
         instead of passing on reads to the end only after the stub's bound."""
         go = os.path.join(self.t, "go")
         text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
         text = text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(0)).replace("__DETAILS__", "{}")
         tm.put(self.stub, text.replace("lines = [", PROGRESS.replace("__GO__", repr(go)) + "lines = [", 1))
-        harness = os.path.join(self.t, "lane_lint_progress.py")
-        tm.put(harness, HARNESS.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
+        runner = os.path.join(self.t, "lane_lint_progress.py")
+        tm.put(runner, RUNNER_SCRIPT.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
         env = {**os.environ, "CLAUDE_CONFIG_DIR": self.cfg}
         env.pop("CLAUDE_CODE_REMOTE", None)
-        proc = subprocess.Popen([sys.executable, harness, *argv], cwd=self.co, env=env,
+        proc = subprocess.Popen([sys.executable, runner, *argv], cwd=self.co, env=env,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.addCleanup(self.stop_run, proc)
         err = []
@@ -645,14 +652,14 @@ class LaneLint(CiJobStub, tm.CloudSession):
     @unittest.skipIf(os.name == "nt", "SIGTERM is not delivered as a signal on Windows: a send ends the process at once")
     def test_a_sigterm_during_the_lint_removes_the_lint_tree_and_its_temp_dir(self):
         self.write_stub(PASSING, 0, sleep=120)
-        harness = os.path.join(self.t, "lane_lint_run.py")
-        tm.put(harness, HARNESS.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
+        runner = os.path.join(self.t, "lane_lint_run.py")
+        tm.put(runner, RUNNER_SCRIPT.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
         tmp_root = tempfile.mkdtemp(dir=self.run_dir, prefix="sigterm-")  # the lint tree's temp dir lands here, not in the system temp dir
         env = {**os.environ, "CLAUDE_CONFIG_DIR": self.cfg, "TMPDIR": tmp_root, "TMP": tmp_root, "TEMP": tmp_root}
         env.pop("CLAUDE_CODE_REMOTE", None)
         text_path = os.path.join(self.t, "lane-lint-run.txt")
         with open(text_path, "w", encoding="utf-8") as text:
-            proc = subprocess.Popen([sys.executable, harness, "--lane-lint", self.head("feat")], cwd=self.co, env=env,
+            proc = subprocess.Popen([sys.executable, runner, "--lane-lint", self.head("feat")], cwd=self.co, env=env,
                                     stdout=text, stderr=subprocess.STDOUT)
         self.addCleanup(self.stop_run, proc)
 
@@ -759,7 +766,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertNotIn("batch-runner", err.lower())
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
 
-    # MutationTestRun: the mutate step after the lint. A case's lane commits its own stub as the head's mutate script; timed_lint fakes the clock.
+    # Mutation test cases: the mutate step after the lint. A case's lane commits its own stub as the head's mutate script; timed_lint fakes the clock.
 
     def push_lane(self, files, from_main=False):
         """The lane's push: one commit of `files` (path -> text) on feat, pushed from the second clone. The commit sits on origin/feat, or on
@@ -815,10 +822,12 @@ class LaneLint(CiJobStub, tm.CloudSession):
         if os.path.exists(self.mutate_log):
             os.remove(self.mutate_log)
         real_sh, clock = merge.sh, WallClock()
+        self.mutation_test_kwargs = []  # the keyword arguments of each mutation test run's start, oldest first
 
         def sh_timed(args, *rest, **kwargs):
             result = real_sh(args, *rest, **kwargs)
             if mutation_test_run(args):
+                self.mutation_test_kwargs.append(kwargs)
                 clock.advance(seconds)  # the run took `seconds`: the clock reads that much later at its end
             return result
 
@@ -946,8 +955,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
 
     def lint_with_report(self, out, rc=0):
         """Lint a lane whose mutate command prints `out` and exits `rc` (default 0). The real command exits 1 with any wrong cause
-        (mutate_shared.run_mutants), so a readable report is judged by its counts, and the exit code matters only when no report reads.
-        -> (rc, text, head)."""
+        (mutate_shared.run_mutants). A table is judged by its counts at any exit code; a tally at a nonzero exit fails. -> (rc, text, head)."""
         body, script = real_mutate_job()
         self.use_ci_job(PASSING, 0)
         head = self.push_lane({script: mutate_script(self.mutate_log, out=out, rc=rc), WORKFLOW_REL: workflow_of(body)})
@@ -984,7 +992,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(counts_missing(text, {"survived": 1}), None, "the FAIL output does not name survived 1: " + text)
         self.assert_one_mutation_test_run(head)
 
-    # A readable report is judged by its counts. A nonzero exit fails only when no report reads.
+    # A table is judged by its counts at any exit code. A tally is CI's own verdict, so a nonzero exit on a tally fails.
 
     def test_mutation_test_tally_wrong_cause_at_exit_1_fails_and_names_the_count(self):
         rc, text, head = self.lint_with_report(tally_out(690, 0, 4), rc=1)
@@ -999,6 +1007,12 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(len(lines), 1, text)
         self.assertEqual(counts_missing(lines[0], {"killed": 694, "survived": 0, "unknown": 0}), None,
                          "the PASS line does not name the tally's counts: " + text)
+        self.assert_one_mutation_test_run(head)
+
+    def test_mutation_test_clean_tally_at_exit_1_fails_the_lint(self):  # the bypass: a clean tally that exits 1 leaves CI red, so it is no pass
+        rc, text, head = self.lint_with_report(tally_out(694, 0, 0), rc=1)
+        self.assertEqual(rc, 1, "the lint passed a clean tally of 694 of 694 killed while the command exited 1, so CI is red: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed a PASS line for a clean tally at exit 1: " + text)
         self.assert_one_mutation_test_run(head)
 
     def test_mutation_test_table_within_the_bound_passes_at_exit_1(self):
@@ -1038,8 +1052,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.push_orphan_lane({"hooks/guard.py": "GUARD = 1\n"})
         rc, text = self.timed_lint(437, "--lane-lint", "7")
         self.assertEqual(rc, 0, "the lint stopped on a lane with no merge base, though its diff holds no mutation test file: " + text)
-        fallback = [ln for ln in text.splitlines() if re.search(r"(?i)two[- ]dot|merge base", ln)]
-        self.assertEqual(len(fallback), 1, "the lint did not print one line that says it fell back to a two-dot diff: " + text)
+        self.assertEqual(len(fallback_lines(text)), 1, "the lint did not print one line that says it fell back to a two-dot diff: " + text)
         self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once on the untouched lane: " + text)
         self.assertEqual(self.mutation_test_calls(), [], "the mutation test run started on a lane whose diff holds no mutation test file: " + text)
 
@@ -1051,6 +1064,73 @@ class LaneLint(CiJobStub, tm.CloudSession):
         head = self.push_orphan_lane({script: clean + "# lane edit\n"})
         rc, text = self.timed_lint(437, "--lane-lint", "7")
         self.assertEqual(rc, 0, "the lint stopped on a touched lane with no merge base: " + text)
+        self.assert_one_mutation_test_run(head)
+
+    def test_mutation_test_run_one_second_under_the_cap_passes(self):  # the cap edge: the cap comes from checks.yml, the run ends a second under it
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        head = self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
+        rc, text = self.timed_lint(job_cap(body) * 60 - 1, "--lane-lint", "7")
+        self.assertEqual(rc, 0, "the lint refused a run one second under the %d-minute cap of checks.yml: %s" % (job_cap(body), text))
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        self.assert_one_mutation_test_run(head)
+
+    def test_mutation_test_run_one_second_over_the_cap_fails(self):  # the cap edge, the other side
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        head = self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
+        rc, text = self.timed_lint(job_cap(body) * 60 + 1, "--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint passed a run one second over the %d-minute cap of checks.yml: %s" % (job_cap(body), text))
+        self.assert_one_mutation_test_run(head)
+
+    def test_mutation_test_run_is_started_with_the_cap_in_seconds_as_its_timeout(self):
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        head = self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
+        rc, text = self.timed_lint(437, "--lane-lint", "7")
+        self.assertEqual(len(self.mutation_test_kwargs), 1, "the mutation test run started %d times, want once" % len(self.mutation_test_kwargs))
+        self.assertEqual(self.mutation_test_kwargs[0].get("timeout"), job_cap(body) * 60,
+                         "the lint started the mutation test run with a timeout other than the job's cap in seconds: " + text)
+        self.assert_one_mutation_test_run(head)
+
+    def test_mutation_test_run_that_times_out_fails_the_lint_and_names_the_cap(self):  # the runner raises TimeoutExpired: a FAIL, not a pass or a crash
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
+        real_sh = merge.sh
+
+        def sh_timing_out(args, *rest, **kwargs):
+            if mutation_test_run(args):
+                raise subprocess.TimeoutExpired(args, kwargs.get("timeout"))
+            return real_sh(args, *rest, **kwargs)
+
+        with unittest.mock.patch.object(merge, "sh", sh_timing_out):
+            rc, text = self.run_lane("--lane-lint", "7")
+        cap = job_cap(body)
+        self.assertEqual(rc, 1, "the lint did not FAIL a mutation test run that timed out at the %d-minute cap: %s" % (cap, text))
+        self.assertEqual(pass_lines(text), [], "the lint printed a PASS line for a mutation test run that timed out: " + text)
+        self.assertNotIn("Traceback", text, "the lint crashed on a mutation test run that timed out: " + text)
+        self.assertRegex(text, rf"\b{cap}\b", "the FAIL output does not name the %d-minute cap: %s" % (cap, text))
+        self.assertRegex(text, r"\bcap\b", "the FAIL output does not name the cap: " + text)
+
+    def test_mutation_test_base_only_mutate_change_starts_no_run_on_a_normal_clone(self):  # the lane's own diff holds no mutation test file
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        self.push_lane({"hooks/guard.py": "GUARD = 1\n", WORKFLOW_REL: workflow_of(body)})
+        self.push_main({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), "hooks/mutate_shared.py": "SHARED = 1\n"})
+        rc, text = self.timed_lint(437, "--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once on the lane: " + text)
+        self.assertEqual(self.mutation_test_calls(), [], "the mutation test run started on a lane whose own diff holds no mutation test file: " + text)
+        self.assertEqual(fallback_lines(text), [], "the lint printed a fallback line on a normal clone, where the three-dot diff reads: " + text)
+
+    def test_mutation_test_touched_lane_on_a_normal_clone_prints_no_fallback_line(self):
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        head = self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
+        rc, text = self.timed_lint(437, "--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(fallback_lines(text), [], "the lint printed a fallback line on a normal clone, where the three-dot diff reads: " + text)
         self.assert_one_mutation_test_run(head)
 
 
