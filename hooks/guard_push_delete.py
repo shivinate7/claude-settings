@@ -135,14 +135,22 @@ def _span_end(text: str, start: int, escapes: bool) -> int:
 SCRIPT_RUNNER = re.compile(
     r"(?:^|[\s;&|(])(?:(?:(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*-\w*c)|eval|ssh(?:\s+[^\s;&|]+)*)\s*$")
 # ... or to an interpreter that runs it: `python3 -c "..."`, `node -e "..."`, `perl -e "..."`,
-# `php -r "..."`.
+# `php -r "..."`, `deno eval -A "..."`. Deno's permission and other flags (`-A`, `--allow-run`,
+# `--allow-run=git`) sit between `eval` and the script; SCRIPT_RUNNER's `eval` reads only the
+# bare `deno eval`.
 INTERPRETER_RUNNER = re.compile(
     r"(?:^|[\s;&|(])(?:(?:python[\d.]*|node(?:js)?|ruby|perl|php|deno)\s+(?:-\w+\s+)*-\w*[ce]"
-    r"|php\s+(?:-\w+\s+)*-\w*r|deno\s+(?:-\w+\s+)*eval)\s*$")
+    r"|php\s+(?:-\w+\s+)*-\w*r|deno\s+(?:-\w+\s+)*eval(?:\s+--?[\w-]+(?:=\S*)?)*)\s*$")
 # An argv call: `new Deno.Command("git", {args: ["push", "-f"]})` names its program and its
 # arguments as separate strings, so the pairs of one call are read as one command line.
 ARGV_CALL = re.compile(r"\bDeno\.Command\s*\(\s*$")
-ARGV_GAP = re.compile(r"[\s,]*(?:\{\s*args\s*:\s*\[)?[\s,]*")
+# The text between two strings of one argv call. Each part starts with its own character, so a
+# failed fullmatch takes linear time.
+ARGV_GAP = re.compile(r"[\s,]*(?:\{\s*args\s*:\s*\[[\s,]*)?")
+# One argument as one shell word: each character the shell or shlex splits on or unquotes is
+# backslash-escaped, so an argument with a space stays one word. Backslashes, not quotes:
+# PUSH_QUOTED blanks a quoted run with a space in it.
+ARGV_UNSAFE = re.compile(r"[^\w@%+=:,./-]")
 # Inside a script, a call that runs its string argument as a command, even inside a print.
 CALL_RUNNER = re.compile(
     r"(?:\bos\.(?:system|popen|exec\w*|spawn\w*)|\bsubprocess\.\w+|\bPopen|\bexec\w*|\bsystem|\bpopen)"
@@ -152,6 +160,12 @@ CALL_RUNNER = re.compile(
 PRINT_CALL = re.compile(
     r"\b(?:print\w*|console\.\w+|puts|say|logger\.\w+|System\.out\.print\w*|Write-(?:Host|Output))\s*\(")
 PRINT_COMMAND = re.compile(r"^[\s\"'(]*(?:(?:sudo|command|builtin)\s+)?(?:echo|printf|print|puts)\b")
+
+
+def _argv_word(arg: str) -> str:
+    """One argument as one word of a command line (see ARGV_UNSAFE). An empty one is `''`."""
+    escaped = ARGV_UNSAFE.sub(lambda m: "\\ " if m.group() == "\n" else "\\" + m.group(), arg)
+    return escaped or "''"
 
 
 def _printed(script: str) -> bool:
@@ -179,7 +193,7 @@ def _nested_commands(span: str, before: str = "") -> str:
     def emit():
         nonlocal words
         if words:
-            lines.append(" ".join(words) + "\n")
+            lines.append(" ".join(map(_argv_word, words)) + "\n")
             words = []
 
     while index < len(body):
