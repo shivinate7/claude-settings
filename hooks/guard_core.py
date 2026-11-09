@@ -917,6 +917,51 @@ REDIRECTION = re.compile(
 )
 
 
+# The operator of a redirection, read at a word's start or after one: `&>`, `<`, `>`, `>>`, `2>`, with the space before its target.
+_REDIRECT_OPERATOR = re.compile(r"&>>?\s*|<\s*|\d?>>?\s*")
+
+
+def strip_redirections(segment: str) -> str:
+    """`segment` with each UNQUOTED redirection (REDIRECTION's shapes) cut to one space; a `>` or `<` inside quotes is text and stays.
+    The target is one shell word: a quoted target (`> "run log"`) goes whole, an unquoted one up to the next space, as REDIRECTION
+    reads it. Quote state comes from walk_quotes, the one quote walk. A quote left open stays open, so segment_tokens returns None
+    for the result and its caller can refuse.
+
+    One walk step can span several characters (an escape `\\x`, a `$'` opener), so each character takes the quote state of the step
+    it falls in, and only a step's first character can start a redirection or end a target word: an escaped `>` or space is text."""
+    size = len(segment)
+    quotes, step_starts = [""] * size, [False] * size
+    steps = [(at, quote) for at, _char, quote in walk_quotes(segment)]
+    for (at, quote), (after, _next) in zip(steps, steps[1:] + [(size, "")]):
+        step_starts[at] = True
+        for inside in range(at, min(after, size)):
+            quotes[inside] = quote
+
+    def unquoted_space(at: int) -> bool:
+        return step_starts[at] and not quotes[at] and segment[at].isspace()
+
+    out, index = [], 0
+    while index < size:
+        char, quote = segment[index], quotes[index]
+        word_start = index == 0 or unquoted_space(index - 1)
+        starts = not quote and step_starts[index] and (char in "<>&" or (char.isdigit() and word_start))
+        operator = REDIRECTION.match(segment, index) and _REDIRECT_OPERATOR.match(segment, index) if starts else None
+        if not operator:
+            out.append(char)
+            index += 1
+            continue
+        end = operator.end()
+        fd = re.compile(r"&(?:\d+|-)").match(segment, end)
+        if fd:
+            end = fd.end()
+        else:
+            while end < size and not unquoted_space(end):
+                end += 1
+        out.append(" ")
+        index = max(end, index + 1)
+    return "".join(out)
+
+
 def _git_subcommand_index(tokens, index: int) -> int:
     """Return the index of the subcommand of the `git` word at `index`, past git's own options."""
     cursor = index + 1
