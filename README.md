@@ -150,7 +150,11 @@ merge --reviewed --root DIR [--root DIR ...]
                         `open batch now: OWNER/NAME #a`, or `build next batch on the running head: ...`. A failed root prints unknown.
 merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
                         one line per open PR that changes a named file or adds a named case in a `+` line of its patch. --run reads the
-                        failing lines of that run's failed jobs for the cases. No lock, no merge, no post; no match, or a failed read, never reads as clear.
+                        failing lines of that run's failed jobs for the cases (and the files of a pytest or unittest line; a run by path logs
+                        `__main__.Class.name`, so its file is best-effort). No lock, no merge, no post. No match prints the clear line only
+                        when every read succeeded and every changed file had a patch. Unknown, exit 1, never clear: a failed read; a --run
+                        whose failing lines give no case and no file, or with a red job that timed out or was cancelled (the matches still
+                        print); a PR with a patch-less changed file while a case is queried. An empty value is a usage error.
                         Cost: API reads only, one pull list, one files read per open PR, and for --run one jobs read and one log read per failed job.
 merge --dev ...         run the checkout's own tree, not origin main
 ```
