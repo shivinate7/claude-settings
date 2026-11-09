@@ -5679,8 +5679,8 @@ for _label, _head in LEAK_FORMS:
        _head + "\npkill -f node", "deny", "machine-wide-kill", cwd=PROJ)
     sh("heredoc: lone-quote leak control, %s, an echo ok tail is allowed" % _label,
        _head + "\necho ok", "allow", cwd=PROJ)
-# Green on main, kept so a change to the walk cannot lose them: a bash body's lone apostrophe, and a node
-# multi-line template literal, each with the kill in view.
+# Pins two bodies the walk already reads right, so a change to it cannot lose them: a bash body's lone
+# apostrophe, and a node multi-line template literal, each with the kill in view.
 sh("heredoc: a bash heredoc whose body holds echo don't, then a kill in the body, still denies",
    "bash <<'SH'\necho don't\npkill -f node\nSH", "deny", "machine-wide-kill", cwd=PROJ)
 sh("heredoc: a node multi-line template literal, then a kill after the closer, still denies",
