@@ -6656,6 +6656,43 @@ class ConfigFile(Env):
         rc, out = self.run_merge("7")
         self.assertIn("main is not the default branch (trunk)", out)
 
+class ReadyChecksRun(unittest.TestCase):
+    """The draft step's ready checks run through ci-job with --pinned: a child's pin names a claude-settings commit, so the
+    check runs that commit's harness, never the local copy's. The argv keeps its step names and base as before."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.run_dir = _test_temp.run_folder()  # test-temp-standard: the plain repo below is made in this run's folder
+        cls.addClassCleanup(shutil.rmtree, cls.run_dir, True)
+
+    def ci_job_calls(self, checks):
+        """Runs run_ready_checks on a plain repo, with ci-job stubbed to a pass. -> the argv of each ci-job call."""
+        wt = tempfile.mkdtemp(dir=self.run_dir)
+        sh(wt, "git", "init", "-q")
+        sh(wt, "git", "checkout", "-q", "-B", "main")
+        put(os.path.join(wt, "a.txt"), "a\n"); sh(wt, "git", "add", "-A"); sh(wt, "git", "commit", "-qm", "a")
+        calls, real = [], merge.sh
+        def stub(args, *a, **k):
+            if args[1:2] == [merge.CI_JOB]:
+                calls.append(list(args))
+                return 0, ""
+            return real(args, *a, **k)
+        with unittest.mock.patch.object(merge, "sh", stub):
+            merge.run_ready_checks(wt, 7, "main", checks)
+        return calls
+
+    def test_the_ready_checks_run_ci_job_with_pinned(self):
+        calls = self.ci_job_calls(["check invariants"])
+        self.assertEqual(len(calls), 1, calls)  # precondition: one ci-job run for the one ready check
+        self.assertIn("--pinned", calls[0], "the ready checks did not pass --pinned to ci-job: %s" % calls[0])
+
+    def test_the_ready_checks_keep_their_step_names_and_base(self):  # the control: the argv --pinned joins is unchanged
+        calls = self.ci_job_calls(["check invariants", "records page"])
+        self.assertEqual(len(calls), 1, calls)
+        argv = [a for a in calls[0][2:] if a != "--pinned"]
+        self.assertEqual(argv, ["checks", "--step", "check invariants", "--step", "records page", "--base", "origin/main"], calls[0])
+
 class ClaimSkipped(Env):
     """A base with no stamp kinds: the claim and the numbering check are skipped, and stamp.mjs never runs."""
     def setUp(self):
@@ -7207,12 +7244,57 @@ class MemoKeyRead(Env):
 
 class UnknownOverride(Env):
     """Unknown has a way out that does not depend on the check: a reason flag with a reason, logged. Claude may type it; the owner is not named as who types it."""
-    def unreadable(self):
+    FINDING = "stub.md: the finding a merge put back"
+
+    def unreadable(self, problems=None):
+        """check() raises an Unknown. With `problems`, the Unknown also carries them as its findings (.problems), as the octopus read does."""
         sys.path.insert(0, os.path.join(HERE, "..", "lint"))
         import check_silent_undo as undo
         def boom(*a, **k):
-            raise undo.Unknown("git is older than 2.38")
+            e = undo.Unknown("git is older than 2.38")
+            if problems is not None:
+                e.problems, e.notes = list(problems), []
+            raise e
+        self.addCleanup(merge.UNDO_MEMO.clear)  # the memo keeps the Unknown itself
         return unittest.mock.patch.object(undo, "check", boom)
+
+    def refusal_of(self, unknown_ok=""):
+        """undo_check on the test checkout, with an Unknown that carries FINDING. -> the Stop it raised, or None when it returned."""
+        with self.unreadable(problems=[self.FINDING]):
+            try:
+                merge.undo_check(self.co, "origin/main", unknown_ok=unknown_ok)
+            except merge.Stop as e:
+                return e
+        return None
+
+    def test_an_unknown_that_carries_findings_is_refused_as_dropped_and_the_reason_flag_does_not_lift_it(self):
+        e = self.refusal_of(unknown_ok="octopus read it")
+        self.assertIsNotNone(e, "the reason flag lifted an Unknown that carries findings: undo_check returned")
+        self.assertIsInstance(e, merge.Dropped, "an Unknown that carries findings was not refused as a Dropped: %s" % type(e).__name__)
+        self.assertNotIsInstance(e, merge.Unread, "an Unknown that carries findings was refused as Unread, which no refusal is")
+        self.assertIn(self.FINDING, str(e))
+        self.assertIn("git is older than 2.38", str(e), "the refusal does not carry the UNKNOWN's own message")
+
+    def test_the_reason_flag_does_not_lift_an_unknown_that_carries_findings_at_the_merge(self):
+        before = self.refs()
+        with self.unreadable(problems=[self.FINDING]):
+            rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "octopus read it")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(self.FINDING, out)
+        self.assertEqual(self.refs(), before)
+        self.assertFalse(self.lock_ref())
+
+    def test_a_refusal_for_an_unknown_that_carries_findings_names_the_findings_and_the_unknown(self):
+        with self.unreadable(problems=[self.FINDING]):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(self.FINDING, out)
+        self.assertIn("git is older than 2.38", out)
+
+    def test_an_unknown_with_no_findings_is_still_lifted_by_the_reason_flag(self):  # control
+        with self.unreadable(problems=[]):
+            got = merge.undo_check(self.co, "origin/main", unknown_ok="octopus read it")
+        self.assertEqual(got, "octopus read it")
 
     def unreadable_after_the_claim(self):
         """The first silent-undo read passes. The second, which prove() runs after the claim push, cannot read the history."""
