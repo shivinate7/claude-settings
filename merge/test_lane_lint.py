@@ -1113,5 +1113,35 @@ class LintCheckJoin(tm.CloudSession):
         self.assertNotIn("PUT pulls/7/merge", tm.GhHalf.calls(self), "the join merged a head the lint did not read:\n" + out)
 
 
+    def feat_commit(self, files, subject, trailer=None):
+        """One commit on feat, pushed from the second clone: `files` maps a path to its text, and `trailer` (a Record-claim line, or None) ends
+        the message. -> its sha."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        for path, text in files.items():
+            tm.put(os.path.join(o, path), text)
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", subject, *(["-m", trailer] if trailer else []))
+        tm.sh(o, "git", "push", "-q", "origin", "feat")
+        return tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def test_a_pass_under_one_claim_commit_lets_the_join_go_ahead(self):
+        # the join resumed after a claim push: the PASS names the head before the claim, and the newest commit is the claim alone
+        linted = self.head("feat")
+        self.feat_commit({"docs/decisions/d901.md": "# D901\n"}, "Claim record numbers", "Record-claim: D-901")
+        rc, out = self.join([lint_comment(2, linted)])
+        self.assertEqual(rc, 0, "a claim-only commit on the linted head refused the join:\n" + out)
+        self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), out)
+
+    def test_a_pass_under_two_stacked_claim_commits_lets_the_join_go_ahead(self):
+        linted = self.head("feat")
+        self.feat_commit({"docs/decisions/d901.md": "# D901\n"}, "Claim record numbers", "Record-claim: D-901")
+        self.feat_commit({"docs/decisions/d902.md": "# D902\n"}, "Claim record numbers", "Record-claim: D-902")
+        rc, out = self.join([lint_comment(2, linted)])
+        self.assertEqual(rc, 0, "two claim-only commits on the linted head refused the join:\n" + out)
+        self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), out)
+
+
 if __name__ == "__main__":
     unittest.main()
