@@ -6711,6 +6711,17 @@ TEMP_DIR = None   # the system temp itself, for this one case
 sh("silent-write throwaway: a folder under the system temp dir counts as a throwaway",
    VCS + " commit -m x >/dev/null", "allow", cwd=NOGIT)
 TEMP_DIR = os.path.join(ROOT, "tmp")
+# A case arm whose subshell cds into the throwaway repo and closes after make) must not leak that cd past esac.
+# Read as a throwaway, the commit after esac would be allowed in a real checkout. The npm test row closes the subshell
+# on its own `)`, so no cd leaks and the commit is judged in the checkout it runs in.
+sh("silent-write throwaway: a case arm with (cd throwaway repo; make) > log.txt, then esac and a discarded commit in a "
+   "real checkout, denies [case arm subshell close red]",
+   "case x in a) (cd " + TSLASH + "; make) > log.txt ;; esac; " + VCS + " commit -m x >/dev/null", "deny",
+   "silent-write", cwd=GITMAIN)
+sh("silent-write throwaway: the same case arm with (cd throwaway repo; npm test) > log.txt, then a discarded commit "
+   "in a real checkout, denies [case arm subshell close control]",
+   "case x in a) (cd " + TSLASH + "; npm test) > log.txt ;; esac; " + VCS + " commit -m x >/dev/null", "deny",
+   "silent-write", cwd=GITMAIN)
 
 # (2, kept) A real checkout outside the throwaway folder is still judged, quiet flags too.
 sh("silent-write real: a discarded commit in a real checkout",
@@ -12942,6 +12953,30 @@ sh("frozen shell: a case arm x) bash -c with a cd into the config folder and sed
    cwd=NOGIT)
 sh("frozen shell: the same case arm with sed -i on notes.txt, from outside, allows [case arm bash -c control]",
    'case x in x) bash -c "cd ' + slash(CFG) + '; sed -i s/a/b/ notes.txt" ;; esac', "allow", cwd=NOGIT)
+# The subshell's close `)` follows `make`, and the case-arm reading takes `make)` for a pattern, so the subshell
+# never closes. From outside, its cd into the config folder ends with the subshell, so the sed after esac is allowed.
+# The npm test row is the same shape, where the `)` is not the first word of its segment, and it keeps today's verdict.
+sh("frozen shell: a case arm with (cd config folder; make) > log.txt, then esac and sed -i on settings.json, from "
+   "outside, allows [case arm subshell close red]",
+   "case x in a) (cd " + slash(CFG) + "; make) > log.txt ;; esac; sed -i s/a/b/ settings.json", "allow", cwd=NOGIT)
+sh("frozen shell: the same case arm with (cd config folder; npm test) > log.txt, then sed -i on settings.json, from "
+   "outside, allows [case arm subshell close control]",
+   "case x in a) (cd " + slash(CFG) + "; npm test) > log.txt ;; esac; sed -i s/a/b/ settings.json", "allow", cwd=NOGIT)
+# A case arm whose body is a heredoc. The body line `esac` is text, not the close of the block, so the second arm's
+# bash -c still runs in the block, and its cd into the config folder and sed -i on settings.json are judged there. The
+# body line x keeps the block open, and the notes.txt row is the same on a file that is not frozen.
+sh("frozen shell: a case arm bash <<EOF with the body line esac, then a second arm bash -c with a cd into the config "
+   "folder and sed -i on settings.json, from outside, denies [case arm heredoc body red]",
+   "case x in a) bash <<EOF\nesac\nEOF\n;; b) bash -c 'cd " + slash(CFG) + "; sed -i s/a/b/ settings.json' ;; esac",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: the same case arm with the body line x, then the second arm bash -c with sed -i on settings.json, "
+   "from outside, denies [case arm heredoc body control]",
+   "case x in a) bash <<EOF\nx\nEOF\n;; b) bash -c 'cd " + slash(CFG) + "; sed -i s/a/b/ settings.json' ;; esac",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: the same case arm with the body line esac, then the second arm bash -c with sed -i on notes.txt, "
+   "from outside, allows [case arm heredoc body notes control]",
+   "case x in a) bash <<EOF\nesac\nEOF\n;; b) bash -c 'cd " + slash(CFG) + "; sed -i s/a/b/ notes.txt' ;; esac",
+   "allow", cwd=NOGIT)
 # Five cds, then a frozen write. The absolute chain is refused. The `../` chain reaches the same folders, and the walk
 # normalises each `..` step, so it is refused too. Both chains end on the config folder, and the notes.txt rows are the
 # same chains on a file that is not frozen.
