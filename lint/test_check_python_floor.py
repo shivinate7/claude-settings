@@ -589,6 +589,8 @@ class Bootstrap(unittest.TestCase):
         python = bare_python()
         cache = fresh_cache()
         os.makedirs(cache)
+        with open(os.path.join(cache, "pyvenv.cfg"), "w", encoding="utf-8") as handle:
+            handle.write("home = /nowhere\n")  # an old venv, cut short before its .ok marker
         partial = os.path.join(cache, "half-made")
         with open(partial, "w", encoding="utf-8") as handle:
             handle.write("an install cut short\n")
