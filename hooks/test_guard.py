@@ -518,6 +518,7 @@ GHRUNBLOCK = os.path.join(ROOT, "ghrunblock")    # pull request 2's workflow `ci
 GHRUNNONE = os.path.join(ROOT, "ghrunnone")      # pull request 2's workflow `ci-checks` is queued, and it has no check rows at all
 GHRUNDONE = os.path.join(ROOT, "ghrundone")      # pull request 2's workflow finished, and its required check passed
 GHRUNIGNORED = os.path.join(ROOT, "ghrunignored")  # pull request 2's only running workflow is `sync`, which STAMPIGNORE ignores
+GHBATCHTIP = os.path.join(ROOT, "ghbatchtip")  # the same as GHBATCH, and the compare of main's own tip with the pushed head reads identical (built from PUSHMAIN)
 
 
 def batch_other(*checks, runs=None):
@@ -10138,11 +10139,16 @@ ROUTE_ON = GHBATCH + os.pathsep + PY_PATH
 ROUTE_CARRIES = ("#2", "pending", "override")
 ROUTE_LACKS = ("No override lifts",)
 GH_API_MERGE = "gh api -X PUT repos/y/x/pulls/1/merge"
+# gh's own placeholder form: gh fills {owner} and {repo} from the checkout's remote, so the endpoint names no repo itself.
+GH_API_MERGE_PLACEHOLDER = "gh api -X PUT repos/{owner}/{repo}/pulls/1/merge"
+GH_API_METHOD_PLACEHOLDER = "gh api --method PUT repos/{owner}/{repo}/pulls/1/merge"
 MCP_AUTO = "mcp__github__enable_pr_auto_merge"
 # (label, tool, shell command, MCP input): one row per form the decision's Limits name, and each push form.
 ROUTE_DENIALS = (
     ("gh api -X PUT", "Bash", GH_API_MERGE, None),
     ("gh api --method PUT", "Bash", "gh api --method PUT repos/y/x/pulls/1/merge", None),
+    ("gh api -X PUT, placeholder repo", "Bash", GH_API_MERGE_PLACEHOLDER, None),
+    ("gh api --method PUT, placeholder repo", "Bash", GH_API_METHOD_PLACEHOLDER, None),
     ("gh -R y/x api -X PUT", "Bash", "gh -R y/x api -X PUT repos/y/x/pulls/1/merge", None),
     ("enable_pr_auto_merge", MCP_AUTO, None, {"owner": "y", "repo": "x", "pullNumber": 1}),
     ("git push origin main", "Bash", VCS + " push origin main", None),
@@ -10171,6 +10177,7 @@ sh("merge-route: git push origin abc1234:refs/heads/main still asks, and is not 
 # contained head, drafts, another base, and no ready pull request), and a GET or another PUT on the same API is no merge.
 for _label, _fixture, _command in (
     ("no busy pr on main", GHMAIN, GH_API_MERGE),
+    ("no busy pr on main, with the placeholder repo", GHMAIN, GH_API_MERGE_PLACEHOLDER),
     ("a busy pr that is a draft", GHBATCHDRAFT, GH_API_MERGE),
     ("a busy pr on another base", GHBATCHBASE, GH_API_MERGE),
     ("a busy pr whose head holds this head", GHBATCHCONTAIN, GH_API_MERGE),
@@ -10203,6 +10210,29 @@ sh("merge-route: git push origin main with a busy pr on another base still asks"
 sh("merge-route: git push origin abc1234:refs/heads/main is refused when the containment read fails, unknown is red",
    VCS + " push origin abc1234:refs/heads/main", "deny", "merge-checks", carries=("#2", "override"), lacks=ROUTE_LACKS,
    cwd=NOGIT, env_path=GHBATCHCMPERR + os.pathsep + PY_PATH)
+# A no-op push: `git push origin main` whose pushed head is main's own tip. The busy pr's head lacks that tip, but the push lands
+# nothing new on main, so no run tests a different base: it stays the existing ask (ruling 207 a), not a denial. The fake's compare
+# of main's tip reads identical. The tip is read from PUSHMAIN when the fixture is built, never a fixed sha.
+def _build_batch_tip():
+    materialize(PUSHMAIN)
+    tip = run_vcs(PUSHMAIN, "rev-parse", "main").stdout.strip()
+    make_fake_gh(GHBATCHTIP, "main", others=batch_other(("checks", "pending")), compares={"main...%s" % tip: "identical"})
+
+
+lazy_fixture([GHBATCHTIP], _build_batch_tip)
+sh("merge-route: git push origin main, pushing main's own tip, is asked, not denied, while a busy pr's head lacks the tip",
+   VCS + " push origin main", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN, env_path=GHBATCHTIP + os.pathsep + PY_PATH + os.pathsep + GIT_PATH)
+# Control on the same fake and checkout: a pushed head that is not main's tip is still refused, since the busy pr's head lacks it.
+sh("merge-route: git push origin abc1234:refs/heads/main, a head that is not main's tip, is still refused on the same fake",
+   VCS + " push origin abc1234:refs/heads/main", "deny", "merge-checks", carries=ROUTE_CARRIES, lacks=ROUTE_LACKS,
+   cwd=PUSHMAIN, env_path=GHBATCHTIP + os.pathsep + PY_PATH + os.pathsep + GIT_PATH)
+# The old routes keep their text: `gh pr merge` and the host merge tool name the merge tool's act when the head is pending. The
+# head-check refusal of the two new routes is judged by head_remedy_case, below the route checks.
+sh("merge-route: gh pr merge keeps the merge tool's Remedy when the head is pending", "gh pr merge 12 --squash", "deny",
+   "merge-checks", carries=("merge <pr> --confirm",), cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-route: the host merge tool keeps the merge tool's Remedy when the head is pending", "deny", "merge-checks",
+    carries=("merge <pr> --confirm",), tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x", owner="y",
+    env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 # Limits (decision no-merge-during-batch-ci): a forced, --all or mirror push to main with a busy pull request is not denied. Each row
 # records the verdict the guard gives now, so a change to it shows here.
 sh("merge-route: limit: a forced push to main with a busy pr is asked, not denied", VCS + " push --force origin main", "ask",
@@ -15583,6 +15613,33 @@ LOG_CHECKS_EXTRA.append(("merge-route: the merge tool's batch refusal names no m
                          route_existing_merge_remedy_case))
 LOG_CHECKS_EXTRA.append(("merge-route: one attempt of each route reads the open pulls once, makes no write call, and writes no file",
                          route_cost_case))
+
+
+# The head-check refusal of the two new routes (a raw API PUT and enable_pr_auto_merge) while the head itself is pending or red,
+# with no batch pull request. Scope first: deny, the head not settled, no batch pull request named. Then the Remedy: it names
+# neither a merge nor a push act, so it hands the agent no act to copy (git-remedy-never-names-target). These checks are family
+# merge, as the merge-route cases above, so the family below is restored after them.
+def head_remedy_case(tool, command, tool_input, fake):
+    """One new route refused by a head that is not settled. The refusal is the head's own, and its Remedy names no merge or push."""
+    def check():
+        got, reason = decide(route_case(tool, command, tool_input, fake + os.pathsep + PY_PATH))
+        if got != "deny" or "not settled" not in reason or "#2" in reason:
+            return False, "%s, not the head's own refusal: %s" % (got, reason[:160])
+        problem = route_remedy_problem(reason)
+        return (not problem), (problem or "the Remedy names no merge and no push")
+    return check
+
+
+FAMILY = "merge"
+for _label, _tool, _command, _input, _fake in (
+    ("gh api -X PUT, head pending", "Bash", "gh api -X PUT repos/y/x/pulls/12/merge", None, GHPEND),
+    ("gh api -X PUT, head red", "Bash", "gh api -X PUT repos/y/x/pulls/12/merge", None, GHRED),
+    ("enable_pr_auto_merge, head pending", MCP_AUTO, None, {"owner": "y", "repo": "x", "pullNumber": 12}, GHPEND),
+    ("enable_pr_auto_merge, head red", MCP_AUTO, None, {"owner": "y", "repo": "x", "pullNumber": 12}, GHRED),
+):
+    LOG_CHECKS_EXTRA.append(("merge-route: %s is refused by its own head, and its Remedy names no merge or push act" % _label,
+                             head_remedy_case(_tool, _command, _input, _fake)))
+FAMILY = "lane-closes-after-records"
 
 
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
