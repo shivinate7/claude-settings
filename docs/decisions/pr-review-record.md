@@ -96,7 +96,7 @@ Rule `pr-review-record`, in `hooks/guard.py` (PreToolUse).
   - A new body that carries the marker is refused before any read, stamped or not. The remedy is a fresh record from `merge <pr> --review-record`.
   - Every other edit makes one read of the comment's current body (`_old_body` in `hooks/guard_merge.py`), also when the new body cannot be seen: `--input FILE` or `--input=FILE`, `-F body=@-`, or stdin not piped from `cat FILE`. A record there refuses the edit. The refusal names a separate withdrawal comment and a fresh record.
   - A read that cannot run refuses the edit and says so (decision `guard-hooks-fail-closed`). So does a body file named on the edit that is missing or unreadable.
-  - A comment id held in a shell variable (`$ID`, `${ID}`) counts as an id. A marked body is refused. Any other body cannot be read, so it is refused as a read that could not run, and the remedy says to write the literal comment id.
+  - A comment id or a repo held in a shell variable (`$ID`, `${ID}`, `$REPO`) or a `$(...)` substitution cannot be read. A marked body is refused. Any other body is refused as a read that could not run, and the remedy says to write a literal `owner/repo` and comment id, or the `{owner}/{repo}` placeholder, and never to run the edit again: a retry fails the same way. A read that fails on a literal route (a network failure) keeps the run-it-again remedy.
   - `gh pr comment -e` and `gh issue comment -e` are posts: gh's `-e` is `--editor`, and only `--edit-last` is an edit.
   - Incidents: a lane hand-edited records on #1926, #1531, #2016 and #1989. On #2063 a record was withdrawn at 09:44 CST, by an edit into a note.
   - Home of this refusal: the coordinator's step `record-comment-no-edit` (roadmap e5019fab8).

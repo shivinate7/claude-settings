@@ -379,7 +379,9 @@ REVIEW_OLD_UNREAD_REASON = (
     "(decision pr-review-record, hooks fail closed on a read that cannot run)"
 )
 REVIEW_UNREAD_REMEDY = "run the edit again when `gh` can read the comment, or post a new comment."
-REVIEW_LITERAL_ID_REMEDY = "write the literal comment id in the route, not a shell variable such as $ID, then run the edit again."
+REVIEW_LITERAL_ID_REMEDY = ("write the route with a literal `owner/repo` and a literal comment id, such as repos/owner/repo/issues/comments/<id>, "
+                            "or with the `{owner}/{repo}` placeholder, not a shell variable or `$(...)`; the guard then reads that route. "
+                            "Or post a new comment.")
 REVIEW_BODY_FILE_REASON = (
     "Rule (pr-review-record): the new body's file %s could not be read, so the check could not run and the edit is refused. "
     "The body may be a review record. "
@@ -389,7 +391,7 @@ REVIEW_BODY_FILE_REASON = (
 
 
 class _LiteralIdNeeded(RuntimeError):
-    """The comment id is not a number the guard can read, such as a shell variable."""
+    """The route's repo or comment id is not a literal the guard can read, such as a shell variable or `$(...)`."""
 
 
 _ANSI_ESCAPE = re.compile(
@@ -476,7 +478,7 @@ def _old_body(host, edit):
         if isinstance(ref, str) and ref.isdigit():
             ref = int(ref)
         if not isinstance(ref, int) or isinstance(ref, bool):
-            raise _LiteralIdNeeded("the comment id is not a number the guard can read")
+            raise _LiteralIdNeeded("the comment id is not a literal the guard can read")
         code, out = host.api("issues/comments/%d" % ref)
         if code:
             raise RuntimeError("reading the comment failed")
@@ -492,6 +494,8 @@ def _old_body_hit(edit, repo: str, where: str):
     try:
         if module is None:
             raise RuntimeError("the merge tool could not be loaded")
+        if "$" in str(repo or "") or "`" in str(repo or ""):   # no retry reads such a repo: it needs a literal route, not a read
+            raise _LiteralIdNeeded("the repo is not a literal the guard can read")
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             old = _old_body(module.Host(repo=repo or None, cwd=where or None), edit)
     except (Exception, SystemExit) as e:
