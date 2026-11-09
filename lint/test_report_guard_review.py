@@ -789,6 +789,38 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_blocked(out, "a failed cutover read let a PASS claim through on a record with a malformed field:")
         self.assertIn("PR #12", out["reason"], out)
 
+    def test_a_failed_cutover_read_still_refuses_an_unstamped_record_naming_another_pr(self):
+        # Catches: a failed cutover read passing an unstamped record for another pull request. The record is well formed and done for
+        # the live head, so only its PR line decides: the cutover could place it, but no record names PR #12, so the claim is refused.
+        body = unstamped(record(n=PR + 1))
+        self.assertIsNone(merge_mod.parse_review(body, None, None), "fixture: merge/merge.py reads the unstamped record as well formed")
+        placed = merge_mod.parse_review(body, "unknown", None)
+        self.assertIsNotNone(placed, "fixture: merge/merge.py does not parse the unstamped record the way a failed read does")
+        self.assertEqual(placed["n"], PR + 1, "fixture: the record does not name the other pull request")
+        self.assertEqual(merge_mod.review_state(placed, LIVE)[0], "done", "fixture: the record is not done for the live head")
+        self.serve(comments=[body])
+        self.delete_cutover_ref()
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assert_blocked(out, "a failed cutover read let a PASS claim through on an unstamped record for another PR:")
+        self.assertIn("PR #12", out["reason"], out)
+
+    def test_a_failed_cutover_read_still_refuses_an_unstamped_record_for_a_stale_head(self):
+        # Catches: a failed cutover read passing an unstamped record for an earlier head. The record names this pull request and is
+        # well formed, so only its head decides: merge's review_state calls it stale for the live head, and the claim is refused.
+        body = unstamped(record(head=OLD))
+        self.assertIsNone(merge_mod.parse_review(body, None, None), "fixture: merge/merge.py reads the unstamped record as well formed")
+        placed = merge_mod.parse_review(body, "unknown", None)
+        self.assertIsNotNone(placed, "fixture: merge/merge.py does not parse the unstamped record the way a failed read does")
+        self.assertEqual(placed["n"], PR, "fixture: the record does not name this pull request")
+        self.assertEqual(merge_mod.review_state(placed, LIVE)[0], "stale", "fixture: the record is not stale for the live head")
+        self.serve(comments=[body])
+        self.delete_cutover_ref()
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assert_blocked(out, "a failed cutover read let a PASS claim through on an unstamped record for a stale head:")
+        self.assertIn("PR #12", out["reason"], out)
+
 
 if __name__ == "__main__":
     unittest.main()
