@@ -155,6 +155,8 @@ INTERPRETER_RUNNER = re.compile(
 _COMMAND_START = re.compile(r"[;&|(\n`][^;&|(\n`]*$")
 # How far back a runner is read ahead of a quote, so a long segment is read in linear time.
 RUNNER_REACH = 512
+# The text search tools: an interpreter-named word in their arguments is a path or a pattern.
+TEXT_SEARCH_TOOLS = {"grep", "egrep", "fgrep", "zgrep", "rg", "ag", "ack", "ugrep"}
 # The text between two strings of one argv call. Each part starts with its own character, so a
 # failed fullmatch takes linear time.
 ARGV_GAP = re.compile(r"[\s,]*(?:\{\s*args\s*:\s*\[[\s,]*)?")
@@ -206,10 +208,9 @@ def _argv_word(arg: str) -> str:
 
 def _interpreter(text: str, end: int = -1):
     """The name of the interpreter whose script starts at `end` in `text` (`python3`, `node`, `$PYTHON`),
-    or None when no interpreter runner ends there. The interpreter must be the command: a word that
-    ends in an interpreter name is a runner only where the shell runs it, after any assignments,
-    keywords and wrappers that resolve_command skips (`FOO=1 sudo -u bob python3`). A directory word
-    (`grep -rn src/python -e`) is no runner. Words the shell cannot split are read as a runner."""
+    or None when no interpreter runner ends there. The interpreter is a runner where the shell runs it,
+    after any assignments, keywords and wrappers that resolve_command skips (`FOO=1 sudo -u bob python3`).
+    Words the shell cannot split are read as a runner."""
     end = len(text) if end < 0 else end
     reach = max(0, end - RUNNER_REACH)
     match = INTERPRETER_RUNNER.search(text, reach, end)
@@ -223,7 +224,14 @@ def _interpreter(text: str, end: int = -1):
     tokens = segment_tokens(words) if words.strip() else []
     if tokens is None or start is None and reach > 0:
         return name
-    return name if resolve_command(tokens + ["interpreter"]) == len(tokens) else None
+    at = resolve_command(tokens + ["interpreter"])
+    if at == len(tokens):
+        return name
+    # BANDAID: a launcher runs the interpreter too (`uv run python`, `strace -f python3`, `find -exec
+    # python3`), and no list names them all, so the interpreter outside command position is a runner
+    # unless the command is a text search tool, whose argument (`grep -rn src/python -e`) is a path.
+    program = basename(tokens[at]) if at is not None else ""
+    return None if program in TEXT_SEARCH_TOOLS else name
 
 
 def _handed_on(words) -> list:
