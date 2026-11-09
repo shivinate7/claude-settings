@@ -12220,8 +12220,8 @@ bash_post("review-record: an unmarked addComment whose body is a request variabl
           "gh api graphql --input %s" % GRAPHQL_VARIABLE_PLAIN_REQUEST, "allow")
 
 # AN UPDATE WHOSE NODE ID IS A VARIABLE. Decision pr-review-record, the GraphQL text: a marked updateIssueComment is refused as an edit with
-# no read. The guard reads an old body only from a literal node id, so this id is a variable and no read is made. The decision does not
-# rule on an unmarked body under a variable id, so this case pins only the marked refusal.
+# no read. The guard reads an old body only from a literal node id, so this id is a variable and no read is made. An unmarked body under a
+# variable id is refused as unreadable, in the cases after the field-id cases below.
 UPDATE_BY_VARIABLE = 'mutation($id:ID!){updateIssueComment(input:{id:$id, body: %s}){clientMutationId}}' % graphql_block(review_record())
 REVIEW_LOG_CHECKS.append(("review-record:a marked updateIssueComment whose node id is a variable is refused with no gh read, gh api graphql -f id=",
                          review_reads("Bash", {"command": "gh api graphql -f %s -f id=%s" % (shlex.quote("query=" + UPDATE_BY_VARIABLE), GRAPHQL_NODE)},
@@ -12239,6 +12239,26 @@ REVIEW_LOG_CHECKS.append(("review-record:an unmarked updateIssueComment over a s
                                       folder=GHRECORDCOUNT, bodies=REVIEW_OLD_RECORD, carries=(REVIEW_RULE,) + WITHDRAW_REMEDY)))
 sh("review-record: an unmarked updateIssueComment over a plain comment is allowed, gh api graphql -f query=",
    gh_graphql(graphql_update(GRAPHQL_NODE, GRAPHQL_PLAIN)), "allow", cwd=NOGIT, env_path=GHNODEPLAIN + os.pathsep + PY_PATH)
+
+# AN UPDATE WHOSE NODE ID IS A FIELD. Decision pr-review-record, the GraphQL text: the node id may come from a `-f id=` field, not only from a
+# literal in the query. An unmarked body over a record is refused after one read of that node, the read a literal id makes. The control is
+# the same call over a plain comment; it asserts the allow only, since the read it makes is pinned by the refusal above.
+FIELD_ID_UPDATE = 'mutation($id:ID!){updateIssueComment(input:{id:$id, body:"x"}){clientMutationId}}'
+FIELD_ID_CALL = "gh api graphql -f %s -f id=%s" % (shlex.quote("query=" + FIELD_ID_UPDATE), GRAPHQL_NODE)
+REVIEW_LOG_CHECKS.append(("review-record:an unmarked updateIssueComment whose node id is a field is refused over a stamped record after one gh read of that node, gh api graphql -f id=",
+                         review_reads("Bash", {"command": FIELD_ID_CALL}, "deny", 1, folder=GHRECORDCOUNT, bodies=REVIEW_OLD_RECORD,
+                                      carries=(REVIEW_RULE,) + WITHDRAW_REMEDY)))
+sh("review-record: an unmarked updateIssueComment whose node id is a field is allowed over a plain comment, gh api graphql -f id=",
+   FIELD_ID_CALL, "allow", cwd=NOGIT, env_path=GHNODEPLAIN + os.pathsep + PY_PATH)
+
+# AN UPDATE WHOSE NODE ID IS A SHELL VALUE. Decision pr-review-record: an unmarked updateIssueComment whose node id cannot be read is refused
+# as unreadable, with no gh read. This is the rule the REST edit through a variable comment id already follows. The id is `$ID` in quotes,
+# or a substitution, so the guard cannot name the comment and never reaches its old body.
+for _label, _id in (('"$ID"', '"$ID"'), ("$(cat f)", "$(cat f)")):
+    REVIEW_LOG_CHECKS.append(("review-record:an unmarked updateIssueComment whose node id is %s is refused as a read that could not run, with no gh read, gh api graphql -f id=" % _label,
+                             review_reads("Bash", {"command": "gh api graphql -f %s -f id=%s" % (shlex.quote("query=" + FIELD_ID_UPDATE), _id)},
+                                          "deny", 0, folder=GHRECORDCOUNT, bodies=REVIEW_OLD_RECORD,
+                                          carries=(REVIEW_RULE, "the read of the comment's current body could not run"))))
 
 # THE LOGIN READ. `--edit-last` reads the caller's login only when its listing names more than one author. Decision pr-review-record,
 # the cost paragraph. The one-author case makes the listing read and no other; the two-author case makes the login read too.
