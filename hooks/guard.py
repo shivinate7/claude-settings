@@ -4691,9 +4691,22 @@ GIT_PUSH_OR_REASON = (
     "it fails, or after a step that runs on that failure and succeeds. "
     "Remedy: join the check to the push with `&&` alone, or stop the shell on its failure with `|| exit 1`."
 )
-# The reason each kind of `git_push_after_check_hit` prints: a `;` or newline join, a pipe that hides its check, and a
-# `||` that runs the push on a failed check.
-GIT_PUSH_REASONS = {"push": GIT_PUSH_AFTER_CHECK_REASON, "pipe": GIT_PUSH_PIPE_REASON, "or": GIT_PUSH_OR_REASON}
+GIT_PUSH_EXIT_REASON = (
+    "Rule (git-after-cd, decision git-after-cd-joins-with-and): a git push after an `|| exit` still runs when the "
+    "check behind that exit fails, because the exit reads the status of another command (a substitution that holds "
+    "the check, or a step that cannot fail), not the check's. "
+    "Remedy: run the check alone and join it to the push with `&&`."
+)
+GIT_PUSH_BODY_REASON = (
+    "Rule (git-after-cd, decision git-after-cd-joins-with-and): a git push in the `else` branch of an `if` on a check, "
+    "or in the body of an `until` on a check, runs when that check fails. "
+    "Remedy: put the push in the `then` branch, or join the check to the push with `&&`."
+)
+# The reason each kind of `git_push_after_check_hit` prints: a `;` or newline join, a pipe that hides its check, a
+# `||` that runs the push on a failed check, an `|| exit` that reads another command's status, and an `else` or
+# `until` body that runs on a failed test.
+GIT_PUSH_REASONS = {"push": GIT_PUSH_AFTER_CHECK_REASON, "pipe": GIT_PUSH_PIPE_REASON, "or": GIT_PUSH_OR_REASON,
+                    "exit": GIT_PUSH_EXIT_REASON, "body": GIT_PUSH_BODY_REASON}
 
 
 # The `branch` flags that move, rename or delete a ref (a force, a move, a delete).
@@ -4819,6 +4832,14 @@ GIT_PUSH_INERT_WORDS = ("for", "select", "case", "in", "esac", "fi", "done", "{"
 # Commands that only print or set a variable: inert when no word of theirs runs a substitution. A print step
 # before a `|` is no check the pipe hides (`printf '%s' "$m" | git commit -F - && git push`).
 GIT_PUSH_PLAIN_WORDS = ("export", "echo", "printf")
+# Commands that only read or print data, so the stage of a pipe that runs one is no check the pipe hides
+# (lane pick 2026-11-08 18:50 CST): the print steps, and the readers `cat`, `ls`, `find`, `head` and `tail`. A call of
+# the version-control tool is the same kind, and `git_calls` finds it. A substitution, or a `find` that writes
+# (`GIT_FIND_WRITE_FLAGS`), makes the stage a check again (`_is_data_source`).
+GIT_PUSH_DATA_SOURCES = ("cat", "ls", "find", "head", "tail") + GIT_PUSH_PLAIN_WORDS
+# The commands that test a condition and run nothing: the test of an `else` or `until` body that is one is no check.
+GIT_PUSH_CONDITION_WORDS = ("[", "[[", "test")
+GIT_FIND_WRITE_FLAGS = {"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"}
 
 
 def _push_segment_inert(segment: str):
@@ -4838,6 +4859,20 @@ def _push_segment_inert(segment: str):
     if head in GIT_PUSH_PLAIN_WORDS:
         return not _runs_substitution(words)
     return not head or head in CD_WORDS or head in GIT_PUSH_INERT_WORDS
+
+
+def _is_data_source(segment: str) -> bool:
+    """True when SEGMENT runs one of GIT_PUSH_DATA_SOURCES with no substitution in its words, and no write flag
+    when it is a `find`: a stage that reads or prints and fails no check."""
+    words = list(segment_tokens(segment) or [])
+    while words and (words[0] in GIT_PUSH_LEADING_WORDS or not words[0].strip("({")):
+        words.pop(0)
+    if not words:
+        return False
+    head = basename(re.split(r"[<>&]", words[0].lstrip("({"))[0].rstrip(")}"))
+    if head not in GIT_PUSH_DATA_SOURCES or _runs_substitution(words):
+        return False
+    return head != "find" or not GIT_FIND_WRITE_FLAGS & set(words)
 
 
 def _runs_substitution(words) -> bool:
@@ -4894,11 +4929,13 @@ def git_push_after_check_hit(command: str) -> str:
                 start -= 1
             if not first and not all(_push_segment_inert(part) for part in segments[start:position + 1]):
                 if start < position or not _push_stops_under_errexit(segments, ends, start):
-                    return "push"
+                    return _push_join_kind(segments, ends, start, position)
             if _opens_push_body(segments, start, number):
                 head = _push_body_head(segments, start)
                 if head is None:
                     break
+                if _push_body_runs_on_failure(segments, start, head):
+                    return "body"
                 if _push_test_hides_check(segments, ends, start, head):
                     return "pipe"
                 position, first = head, True
@@ -4926,7 +4963,7 @@ def git_push_after_check_hit(command: str) -> str:
                         break
                     position, first = head - 1, False
                     continue
-                return "push"
+                return _push_join_kind(segments, ends, start, position)
             before = segment_tokens(segments[start - 1])
             if before is None:
                 break
@@ -4973,12 +5010,56 @@ def _push_hidden_by_tail(segments, ends, start: int, position: int) -> str:
         return ""
     if words[:1] == ["exit"]:
         hides = _exit_hides_check(segments, ends, head - 1)[1]
-        return "or" if hides == "push" else hides
+        return "exit" if hides == "push" else hides
     left = head - 1
     while left > 0 and ends[left - 1] in ("&&", "||", "|"):
         left -= 1
     held = any(_push_segment_inert(part) is False and not git_calls(part) for part in segments[left:head])
     return "or" if held else ""
+
+
+def _push_join_kind(segments, ends, start: int, position: int) -> str:
+    """The kind of hit for a push that follows the command `segments[start:position + 1]`, joined by `;` or a newline:
+    'pipe' when that command ends a pipe that hides its check (the remedy names `pipefail`, `_pipe_hides_check`),
+    else 'push'."""
+    head = _pipeline_head(segments, ends, start)
+    return "pipe" if _pipe_hides_check(segments, ends, head, position) else "push"
+
+
+def _push_body_runs_on_failure(segments, start: int, head: int) -> bool:
+    """True when `segments[start]` opens the `else` of an `if`, or the `do` of an `until`, whose compound starts at
+    `segments[head]`, and a test of that compound is a check: the body runs when the test fails. The tests are the
+    head's own and each `elif`'s, up to the first `then` or `do`, at the compound's own level only. A test is a check
+    when it is not inert, no git call and no condition word (`GIT_PUSH_CONDITION_WORDS`: `if [ -n "$X" ]; then :;
+    else git push; fi` passes). A test with a `!` runs the body when its command passes, so it is no check
+    (`if ! pytest -q; then exit 1; else git push; fi`)."""
+    opener = (segment_tokens(segments[start]) or [""])[0]
+    head_words = [word.lstrip("({") for word in segment_tokens(segments[head]) or []
+                  if word.strip("({") and word not in GIT_PUSH_BODY_WORDS]
+    if (opener, head_words[:1]) not in (("else", ["if"]), ("do", ["until"])):
+        return False
+    depth, level, testing = 0, None, False
+    for at in range(head, start):
+        part = segments[at]
+        words = segment_tokens(part) or []
+        if at == head:
+            testing = True
+        elif depth == level:
+            testing = {"then": False, "do": False, "else": False, "elif": True}.get(words[0] if words else "", testing)
+        if testing and (at == head or depth == level):
+            lead = []
+            for word in words:
+                if word not in GIT_PUSH_LEADING_WORDS and word.strip("({"):
+                    break
+                lead.append(word)
+            command = words[len(lead)] if len(lead) < len(words) else ""
+            if ("!" not in lead and command not in GIT_PUSH_CONDITION_WORDS
+                    and _push_segment_inert(part) is False and not git_calls(part)):
+                return True
+        depth += _compound_delta(part, wide=True)
+        if at == head:
+            level = depth
+    return False
 
 
 def _push_test_hides_check(segments, ends, opener: int, head: int) -> bool:
@@ -5003,7 +5084,8 @@ def _pipe_hides_check(segments, ends, head: int, position: int) -> bool:
     for at in range(head, position):
         if ends[at] != "|" or git_calls(segments[at]):
             continue
-        if _push_segment_inert(segments[at]) is False or _group_runs_check(segments, at):
+        if ((_push_segment_inert(segments[at]) is False and not _is_data_source(segments[at]))
+                or _group_runs_check(segments, at)):
             return not _pipefail_sure(segments, ends, head)
     return False
 
