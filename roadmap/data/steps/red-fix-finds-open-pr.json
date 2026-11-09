@@ -1,11 +1,11 @@
 {
   "title": "Before a fix lane starts for a red CI case, the start path names any open PR that already touches it",
   "why": "A fix lane can start for a red case that an open or already released PR has fixed, which costs a duplicate lane and a PR to close.",
-  "note": "Coordinator, 03:35 CST Nov 9. Incident: at 02:52 CST the coordinator started lane brief-destructive-git-windows for a red main, but #2390, already released, had fixed it with Windows proof; the result was a duplicate lane and #2407. Fix: the coordinator's lane-start path searches open PRs for the failing case names and the failing file, and names each PR that already touches them. Home: the lane picks it, perhaps the session-tiers lane-start tooling.",
+  "note": "Coordinator, 03:35 CST Nov 9. Incident: at 02:52 CST the coordinator started lane brief-destructive-git-windows for a red main, but #2390, already released, had fixed it with Windows proof; the result was a duplicate lane and #2407. Fix: the coordinator's lane-start path searches open PRs for the failing case names and the failing file, and names each PR that already touches them. Home: the lane picks it, perhaps the session-tiers lane-start tooling. Ready at #2431 (`merge --touches`), on the batch 69 list (coordinator, 06:46 CST Nov 9). Three review notes are in roadmap/outbox/triage.md; the live job-log redirect is unmeasured.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "",
-  "status": "todo",
+  "status": "ready",
   "order": 888,
-  "updatedAt": "2026-11-09T03:36:00-06:00"
+  "updatedAt": "2026-11-09T06:46:00-06:00"
 }
