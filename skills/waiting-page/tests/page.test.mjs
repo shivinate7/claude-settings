@@ -3111,6 +3111,36 @@ for (const kind of SIDE_KINDS) for (const scheme of SCHEMES) {
   });
 }
 
+// ---------------------------------------------------------------- the 641 px list: each folded row's title is at least 8em
+// The list is the .asklist, a container of its own. Its width follows the window, so the window is set by measuring the list until the list
+// reads 641 px. Each row is read with the rows' own press geometry, the same as the 8em cases above.
+const LIST_PX = 641;
+async function listPage(t, kind, scheme) {
+  let vw = LIST_PX;
+  const page = await foldedRowPage(t, kind, vw, scheme); if (!page) return null;
+  for (let i = 0; i < 4; i++) {
+    const w = await page.evaluate(() => document.querySelector(".asklist").getBoundingClientRect().width);
+    if (Math.abs(w - LIST_PX) <= 0.5) break;
+    vw = Math.round(vw + LIST_PX - w);
+    await page.setViewportSize({ width: vw, height: 800 });
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  }
+  return page;
+}
+for (const kind of Object.keys(FOLD_ROWS)) for (const scheme of SCHEMES) {
+  test(`folded rows, ${scheme}: at a ${LIST_PX} px list, the ${kind} row's title is at least 8em wide`, async (t) => {
+    const page = await listPage(t, kind, scheme); if (!page) return;
+    const id = FOLD_ROWS[kind].ask.id;
+    const list = await page.evaluate(() => { const l = document.querySelector(".asklist"); return { w: l.getBoundingClientRect().width, em: parseFloat(getComputedStyle(l).fontSize) }; });
+    assert.ok(Math.abs(list.w - LIST_PX) <= 0.5, `the list is ${list.w.toFixed(1)} px wide, not ${LIST_PX} px`);
+    assert.ok(list.w > 40 * list.em, `the list is ${list.w.toFixed(1)} px wide, not wider than 40em (${Math.round(40 * list.em)} px) of its own font size`);
+    foldedScope(await foldedDate(page, id), kind, LIST_PX);
+    const g = await pressGeo(page, id);
+    const col = g.title.r - g.title.l, need = 8 * g.rootSize;
+    assert.ok(col >= need, `the ${kind} row's title is ${Math.round(col)} px at a ${LIST_PX} px list, not at least ${need} px (8em)`);
+  });
+}
+
 // The reply box's Close and Send reply, as boxes from the form's top-left corner. Both are reached through the thread's Reply press.
 // Each press also holds its text runs, one box per line piece, and the answered row (card) holds the form: all in the form's frame.
 const replyGeo = (page, root) => page.evaluate((k) => {
@@ -3320,10 +3350,11 @@ for (const [width, zoom, label] of TAB_WIDTHS) for (const scheme of SCHEMES) {
 // selectable tab selected. Each claim is one test, so a failure names one cause.
 const TAB_SIZES = [180, 240, 320, 430, 480, 520];
 // Opens the tab set, then checks its scope: the Designs tab is shown only with designs, and the tab that should be selected is.
-async function tabSetPage(t, { width, zoom, designs, scheme, sel }) {
-  const items = designs ? [mk("with-design", 1, { designs: [{ slug: "s1", label: "Option a" }, { slug: "s2", label: "Option b" }] }), mk("other", 2)] : undefined;
+async function tabSetPage(t, { width, zoom, pct = 100, designs, scheme, sel, label = "Option a" }) {
+  const items = designs ? [mk("with-design", 1, { designs: [{ slug: "s1", label }, { slug: "s2", label: "Option b" }] }), mk("other", 2)] : undefined;
   const page = await open(t, { items, designData: DESIGNS, viewport: { width, height: 900 }, scheme }); if (!page) return null;
   if (zoom) await zoomText(page);
+  if (pct > 100) await zoomText(page, pct + "%");
   if (sel === "Status") await openStatus(page);
   else await mustHave(page, "#tabQ", "Questions tab");
   await mustHave(page, "#tabD", "Designs tab");
@@ -3370,6 +3401,242 @@ for (const width of TAB_SIZES) for (const zoom of [false, true]) for (const desi
     const reading = [...g.tabs].sort((x, y) => (Math.abs(x.t - y.t) > 1 ? x.t - y.t : x.l - y.l)).map((x) => x.name);
     const dom = g.tabs.map((x) => x.name);
     assert.deepEqual(reading, dom, `the tabs read ${reading.join(", ")}, not in DOM order ${dom.join(", ")}`);
+  });
+}
+
+// ---------------------------------------------------------------- the tab labels at narrow widths and large text: no word breaks
+// A tab is capped at the strip's own width: 100cqw, the bar's content box, plus the bar's side padding. A label wider than that wraps
+// inside a word (overflow-wrap: anywhere). The rows are the widths and text sizes where a cap measured on the bar's content box would
+// break a label that #2383 showed whole: "Questions 2" at 150%, 200% and 300%, "Designs 2" at 200% and 300%, "Status" at 300%.
+// The controls are widths where the label fits.
+// Each case reads one tab's label: a word whose Range is in more than one box is broken across lines.
+const TAB_LABEL = { tabQ: "Questions 2", tabD: "Designs 2", tabStatus: "Status" };
+const TAB_LABEL_RED = [
+  ["tabQ", 180, 150], ["tabQ", 190, 150], ["tabQ", 220, 200], ["tabQ", 300, 300],
+  ["tabD", 180, 200], ["tabD", 190, 200], ["tabD", 200, 200], ["tabD", 240, 300], ["tabD", 260, 300],
+  ["tabStatus", 180, 300], ["tabStatus", 190, 300],
+];
+const TAB_LABEL_CONTROL = [["tabQ", 390, 300], ["tabD", 390, 200], ["tabStatus", 390, 300]];
+// The words of one tab's label that break across lines, each with its box count. Empty when every word is whole.
+const tabWordFaults = (page, id) => page.evaluate((id) => {
+  const tab = document.getElementById(id), faults = [];
+  const walker = document.createTreeWalker(tab, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    for (const m of n.data.matchAll(/\S+/g)) {
+      const r = document.createRange();
+      r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
+      const boxes = [...r.getClientRects()].filter((b) => b.width > 0 && b.height > 0);
+      if (boxes.length > 1) faults.push(`"${m[0]}" in ${boxes.length} pieces`);
+    }
+  }
+  return faults;
+}, id);
+for (const [set, note] of [[TAB_LABEL_RED, ""], [TAB_LABEL_CONTROL, " (control)"]]) for (const [id, width, pct] of set) for (const scheme of SCHEMES) {
+  const where = `at ${width} wide with the root font size at ${pct}%`;
+  test(`tab list, ${scheme}: ${where}: the ${TAB_LABEL[id]} tab label breaks inside no word${note}`, async (t) => {
+    const page = await tabSetPage(t, { width, pct, designs: id === "tabD", scheme, sel: "Questions" }); if (!page) return;
+    assert.equal(await page.locator("#" + id).isVisible(), true, `the ${TAB_LABEL[id]} tab is not shown ${where}`);
+    const faults = await tabWordFaults(page, id);
+    assert.deepEqual(faults, [], `the ${TAB_LABEL[id]} tab label breaks a word ${where}: ${faults.join(", ")}`);
+  });
+}
+
+// ---------------------------------------------------------------- the Designs sheet and the tab strip at narrow widths
+// The strip scrolls on its own (#tabs, overflow-x: auto), so a tab that scrolls out of it lies outside its box. Each case is a tab set with
+// Designs shown, three tabs, and reads its scope first. Red on the old page: at 180-240 the selected Questions tab scrolls out of the strip
+// when the Designs sheet opens and closes; at 180 with the root font size doubled, and at 180-240 tripled, it is wider than the strip; at 180
+// default and 220-240 doubled the sheet's Close sits outside the window. Each control is a width the old page passes.
+// The width and the text size in a claim's name. Text at the default size is named too, so the cases below share this one.
+const sizeWhere = (width, pct) => `at ${width} wide ${pct === 100 ? "at the default text" : "with the root font size " + (pct === 200 ? "doubled" : "tripled")}`;
+// Presses the Designs tab with a real press, as the owner does. The sheet must show.
+async function openDesigns(page) {
+  await page.click("#tabD");
+  const shown = await page.locator("#dsheet").waitFor({ state: "visible" }).then(() => true, () => false);
+  assert.ok(shown, "pressing the Designs tab does not open the Designs sheet");
+}
+// Closes the sheet by script, so the close is setup and the claim after it reads the strip. The sheet must hide.
+async function closeDesigns(page) {
+  await page.evaluate(() => document.getElementById("dClose").click());
+  const gone = await page.locator("#dsheet").waitFor({ state: "hidden" }).then(() => true, () => false);
+  assert.ok(gone, "the Designs sheet does not close");
+}
+// After the sheet opens and closes, the selected tab sits inside the tab bar's box, to half a pixel.
+const SHEET_RED = [180, 200, 220, 240];
+for (const [set, note] of [[SHEET_RED, ""], [[430], " (control)"]]) for (const width of set) for (const scheme of SCHEMES) {
+  test(`tab list, ${scheme}: at ${width} wide, after the Designs sheet opens and closes, the selected tab sits inside the tab bar${note}`, async (t) => {
+    const page = await tabSetPage(t, { width, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    await openDesigns(page);
+    await closeDesigns(page);
+    const g = await tabGeo(page);
+    const s = g.tabs.find((x) => x.sel);
+    assert.ok(s, "no shown tab is marked selected");
+    assert.ok(s.l >= g.nav.l - 0.5 && s.r <= g.nav.r + 0.5, `the selected ${s.name} tab runs from ${Math.round(s.l)} to ${Math.round(s.r)} px, past the tab bar's ${Math.round(g.nav.l)} to ${Math.round(g.nav.r)} px, at ${width} wide`);
+  });
+}
+// [width, root font size in percent]. On the old page the selected tab is wider than the strip at 180 doubled and at 180-240 tripled. At
+// 200-240 doubled it fits, so those are controls.
+const TAB_WIDE_RED = [[180, 200], [180, 300], [200, 300], [220, 300], [240, 300]];
+const TAB_WIDE_CONTROL = [[200, 200], [220, 200], [240, 200], [320, 200]];
+for (const [set, note] of [[TAB_WIDE_RED, ""], [TAB_WIDE_CONTROL, " (control)"]]) for (const [width, pct] of set) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, pct);
+  test(`tab list, ${scheme}: ${where}, three tabs, Questions selected: the selected tab is no wider than the tab bar${note}`, async (t) => {
+    const page = await tabSetPage(t, { width, pct, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    const g = await tabGeo(page);
+    const s = g.tabs.find((x) => x.sel);
+    assert.ok(s, "no shown tab is marked selected");
+    assert.ok(s.r - s.l <= g.nav.r - g.nav.l + 0.5, `the selected ${s.name} tab is ${Math.round(s.r - s.l)} px wide, wider than the ${Math.round(g.nav.r - g.nav.l)} px tab bar, ${where}`);
+  });
+}
+// [width, root font size in percent]. Once the sheet opens, its Close sits inside the window: red at 180 default and at 220 and 240 doubled.
+const CLOSE_RED = [[180, 100], [220, 200], [240, 200]];
+const CLOSE_CONTROL = [[390, 100]];
+for (const [set, note] of [[CLOSE_RED, ""], [CLOSE_CONTROL, " (control)"]]) for (const [width, pct] of set) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, pct);
+  test(`Designs sheet, ${scheme}: ${where}: the Close button sits inside the window${note}`, async (t) => {
+    const page = await tabSetPage(t, { width, pct, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    await openDesigns(page);
+    const b = await page.locator("#dClose").boundingBox();
+    const vw = await page.evaluate(() => window.innerWidth);
+    assert.ok(b, "the Designs sheet's Close has no box");
+    assert.ok(b.x >= -0.5 && b.x + b.width <= vw + 0.5, `the Designs sheet's Close runs from ${Math.round(b.x)} to ${Math.round(b.x + b.width)} px in a ${vw} px window, ${where}`);
+  });
+}
+// The Designs sheet's title is a readable name: at least 4 em of its own text wide, at 180 to 390 wide at the default text and at 200% and 300%.
+// The title's text is 17 px, so 4 em is 68 px. The old page cuts the title to "O…" at 180 wide.
+const SHEET_TITLE_WIDTHS = [180, 200, 220, 240, 320, 360, 390];
+for (const pct of [100, 200, 300]) for (const width of SHEET_TITLE_WIDTHS) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, pct);
+  test(`Designs sheet, ${scheme}: ${where}: the title is at least 4 em wide`, async (t) => {
+    const page = await tabSetPage(t, { width, pct, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    await openDesigns(page);
+    const g = await page.evaluate(() => { const h = document.getElementById("dTitle"); return { w: h.getBoundingClientRect().width, em: parseFloat(getComputedStyle(h).fontSize), text: h.textContent }; });
+    assert.ok(g.w >= 4 * g.em, `the Designs sheet title ${JSON.stringify(g.text)} is ${Math.round(g.w)} px wide, under 4 em of its ${Math.round(g.em)} px text (${Math.round(4 * g.em)} px), ${where}`);
+  });
+}
+
+// ---------------------------------------------------------------- the Designs title's cap at 300% text: the title's text ends inside the window
+// The cap (24cqw) keeps the title's 4em floor inside the head. Without it the floor is 204 px at 300% text, and "Option a" ends at 225 px:
+// red at 180, 200 and 220 wide. 240 is the control: the text ends at 225 px, inside the window, with or without the cap.
+// The edge is a Range on the text node, so it is the text's own. With the cap in place "Option a" fits its box, so the Range is the visible text.
+// Each width runs with the default font and with CI's wider fallback font, the stand-in the viewer's caption case uses.
+const WIDE_FONT = ".dsh-head { letter-spacing: 1.2px }";
+const TITLE_RED_300 = [180, 200, 220];
+const TITLE_CONTROL_300 = [240];
+const titleTextEnd = (page) => page.evaluate(() => { const h = document.getElementById("dTitle"), r = document.createRange(); r.selectNodeContents(h.firstChild); return { right: r.getBoundingClientRect().right, vw: innerWidth, text: h.textContent }; });
+for (const [set, note] of [[TITLE_RED_300, ""], [TITLE_CONTROL_300, " (control)"]]) for (const width of set) for (const wide of [false, true]) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, 300) + (wide ? ", with CI's wider font" : "");
+  test(`Designs sheet, ${scheme}: ${where}: the title's text ends inside the window${note}`, async (t) => {
+    const page = await tabSetPage(t, { width, pct: 300, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    if (wide) await page.addStyleTag({ content: WIDE_FONT });
+    await openDesigns(page);
+    const g = await titleTextEnd(page);
+    assert.ok(g.right <= g.vw + 0.5, `the Designs title ${JSON.stringify(g.text)} ends at ${Math.round(g.right)} px in a ${g.vw} px window, ${where}`);
+  });
+}
+// The Close button at 300% text stays inside the window from 180 to 240 wide. A control, not a red: the title takes the first line alone,
+// so Close wraps to the head's second line and stays inside the window.
+for (const width of [180, 200, 220, 240]) for (const wide of [false, true]) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, 300) + (wide ? ", with CI's wider font" : "");
+  test(`Designs sheet, ${scheme}: ${where}: the Close button sits inside the window (control)`, async (t) => {
+    const page = await tabSetPage(t, { width, pct: 300, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    if (wide) await page.addStyleTag({ content: WIDE_FONT });
+    await openDesigns(page);
+    const b = await page.locator("#dClose").boundingBox();
+    const vw = await page.evaluate(() => window.innerWidth);
+    assert.ok(b, "the Designs sheet's Close has no box");
+    assert.ok(b.x >= -0.5 && b.x + b.width <= vw + 0.5, `the Designs sheet's Close runs from ${Math.round(b.x)} to ${Math.round(b.x + b.width)} px in a ${vw} px window, ${where}`);
+  });
+}
+
+// The caption at 300% text is no larger than the Designs title, 180 to 260 wide. The caption shows only while the head cuts the title, so the
+// label is long enough to be cut at each width here. With .dcap at .875rem (42 px) the caption is larger than the title at 180 and 200 wide,
+// where the title is 35.5 and 40.3 px. At 220 to 260 the title is 45 to 51 px, so those widths are controls.
+const CAP_LABEL = "Layout A, the phone pick";
+const CAP_RED_300 = [180, 200];
+const CAP_CONTROL_300 = [220, 240, 260];
+for (const [set, note] of [[CAP_RED_300, ""], [CAP_CONTROL_300, " (control)"]]) for (const width of set) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, 300);
+  test(`Designs sheet, ${scheme}: ${where}: the caption is no larger than the title${note}`, async (t) => {
+    const page = await tabSetPage(t, { width, pct: 300, designs: true, scheme, sel: "Questions", label: CAP_LABEL }); if (!page) return;
+    await openDesigns(page);
+    // Scope: the caption is on screen only while the head cuts the title, so its size is read with the caption shown.
+    const shown = await page.waitForFunction(() => document.getElementById("dCap").classList.contains("on"), null, { timeout: 3000 }).then(() => true, () => false);
+    assert.ok(shown, `the caption is not shown, so the head does not cut the title, ${where}`);
+    const g = await page.evaluate(() => ({ cap: parseFloat(getComputedStyle(document.getElementById("dCap")).fontSize), title: parseFloat(getComputedStyle(document.getElementById("dTitle")).fontSize) }));
+    assert.ok(g.cap <= g.title + 0.5, `the caption is ${g.cap} px and the title ${g.title} px at 300% text, so the caption is larger, ${where}`);
+  });
+}
+
+// ---------------------------------------------------------------- the Designs head: Prev and Next share a row, and the title grows with the text
+// The integers a width sweep visits: from, from + step, up to and including to.
+const widthsFrom = (from, to, step) => Array.from({ length: Math.floor((to - from) / step) + 1 }, (_, i) => from + i * step);
+// Resizes the one page to each width, waits two frames so the layout and the page's observers have run, and returns one fault per width
+// that check(page) names, each with its width. The page keeps its state across the resizes.
+async function sweepWidths(page, widths, height, check) {
+  const faults = [];
+  for (const w of widths) {
+    await page.setViewportSize({ width: w, height });
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    const f = await check(page);
+    if (f) faults.push(`${w} wide: ${f}`);
+  }
+  return faults;
+}
+// Prev and Next sit on one row of the sheet's head. The scope comes first: the sheet is open and both buttons show.
+const headRowFault = (page) => page.evaluate(() => {
+  const p = document.getElementById("dPrev"), n = document.getElementById("dNext");
+  if (document.getElementById("dsheet").hidden || !p.checkVisibility() || !n.checkVisibility()) return "the sheet's Prev or Next is not shown";
+  const a = p.getBoundingClientRect(), b = n.getBoundingClientRect();
+  return Math.abs(a.top - b.top) <= 1 ? null : `Prev sits ${Math.round(a.top)} px down and Next ${Math.round(b.top)} px down`;
+});
+// Prev and Next share one row at every width from 180 to 1280 wide, at 100%, 200% and 300% text. The sheet opens at 180 wide, then the window
+// is resized through each width in steps of 5 px. Red on the page at the widths where Next drops onto a row of its own.
+for (const pct of [100, 200, 300]) for (const scheme of SCHEMES) {
+  test(`Designs sheet, ${scheme}: with the root font size at ${pct}%, from 180 to 1280 wide, Prev and Next sit on one row`, async (t) => {
+    const page = await tabSetPage(t, { width: 180, pct, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    await openDesigns(page);
+    await mustHave(page, "#dNext", "the sheet's Next");
+    const widths = widthsFrom(180, 1280, 5);
+    const faults = await sweepWidths(page, widths, 900, headRowFault);
+    assert.equal(faults.length, 0, `${faults.length} of ${widths.length} widths split Prev and Next, the first at ${faults[0]}`);
+  });
+}
+// The sheet's title is set in rem, so it grows with the root font size: 200% is larger than 100%. The old page sets it at 17 px, so it keeps its
+// size when the text doubles. 390 and 1280 wide both show the title.
+const titleFont = (page) => page.evaluate(() => parseFloat(getComputedStyle(document.getElementById("dTitle")).fontSize));
+for (const width of [390, 1280]) for (const scheme of SCHEMES) {
+  test(`Designs sheet, ${scheme}: at ${width} wide, the title's font size at 200% text is larger than at 100%`, async (t) => {
+    const page = await tabSetPage(t, { width, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    await openDesigns(page);
+    const before = await titleFont(page);
+    await zoomedTo(page, 200);
+    const after = await titleFont(page);
+    assert.ok(after > before, `the Designs title is ${before} px at 100% text and ${after} px at 200%, not larger, at ${width} wide`);
+  });
+}
+
+// ---------------------------------------------------------------- the Designs head's position: never larger than the title
+// The position "1/2" is set in the title's own cap, so at no width from 180 to 390 is its text larger than the title's. Each sweep opens the
+// sheet at 390 wide, then runs the window through 180 to 390 wide. The head is read by its two elements' computed sizes.
+const headSizes = (page) => page.evaluate(() => {
+  const pos = document.getElementById("dPos"), title = document.getElementById("dTitle");
+  return { open: !document.getElementById("dsheet").hidden, shown: pos.checkVisibility() && title.checkVisibility(), pos: parseFloat(getComputedStyle(pos).fontSize), title: parseFloat(getComputedStyle(title).fontSize), text: pos.textContent.trim() };
+});
+for (const pct of [100, 150, 200, 300]) for (const scheme of SCHEMES) {
+  const note = pct === 300 ? "" : " (control)";
+  test(`Designs sheet, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, the position is no larger than the title${note}`, async (t) => {
+    const page = await tabSetPage(t, { width: 390, pct, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    await openDesigns(page);
+    const s = await headSizes(page);
+    assert.ok(s.open && s.shown, `the Designs head is not shown at 390 wide with the root font size at ${pct}%`);
+    assert.ok(/\d/.test(s.text), `the position reads ${JSON.stringify(s.text)} at 390 wide, not a count`);
+    const widths = widthsFrom(180, 390, 5);
+    const faults = await sweepWidths(page, widths, 900, async (p) => {
+      const h = await headSizes(p);
+      if (!h.open || !h.shown) return "the Designs head is not shown";
+      return h.pos <= h.title + 0.5 ? null : `the position "${h.text}" is ${h.pos.toFixed(1)} px, the title ${h.title.toFixed(1)} px`;
+    });
+    assert.equal(faults.length, 0, `${faults.length} of ${widths.length} widths set the position above the title, the first: ${faults[0]}`);
   });
 }
 
@@ -3422,6 +3689,61 @@ for (const [set, note] of [[ROW_RED, ""], [ROW_CONTROL, " (control)"]]) for (con
     const page = await dismissRowAt(t, { folded, width, pct, scheme }); if (!page) return;
     const fault = await ROW_CLAIMS[claim].check(page);
     assert.ok(!fault, fault && `${fault}, ${where}`);
+  });
+}
+
+// The title column of a folded row with Dismiss, at 600 wide at the default text, is at least 8 em of its own text. The old page leaves the
+// press beside it too little room there. Each control is a width the old page passes.
+// The folded row's title column, its width against its own text size, with the row folded and Dismiss beside it. `where` names the claim.
+const titleColumnCheck = async (page, where) => {
+  const g = await page.evaluate((id) => { const li = document.getElementById("row-" + id), ft = li.querySelector(".frow .ftext"), dis = document.getElementById("dis-" + id); return { folded: li.classList.contains("folded"), dis: !!dis && dis.checkVisibility(), w: ft ? ft.getBoundingClientRect().width : 0, em: ft ? parseFloat(getComputedStyle(ft).fontSize) : 0 }; }, DIS_ROW);
+  assert.ok(g.folded, `the row is not folded ${where}`);
+  assert.ok(g.dis, `Dismiss is not shown beside the folded row ${where}`);
+  assert.ok(g.w >= 8 * g.em, `the title column is ${Math.round(g.w)} px wide, under 8 em of its ${Math.round(g.em)} px text (${Math.round(8 * g.em)} px), ${where}`);
+};
+for (const [set, note] of [[[600], ""], [[1280], " (control)"]]) for (const width of set) for (const scheme of SCHEMES) {
+  test(`folded answered row with Dismiss, ${scheme}: at ${width} wide at the default text, its title column is at least 8 em${note}`, async (t) => {
+    const page = await foldedRowPage(t, "dismiss", width, scheme); if (!page) return;
+    await titleColumnCheck(page, sizeWhere(width, 100));
+  });
+}
+// The same column with the root font size at 150%, at 1100 and 1280 wide. The page passes it as it is, so it pins the column there.
+for (const width of [1100, 1280]) for (const scheme of SCHEMES) {
+  test(`folded answered row with Dismiss, ${scheme}: at ${width} wide with the root font size at 150%, its title column is at least 8 em`, async (t) => {
+    const page = await foldedRowPage(t, "dismiss", width, scheme); if (!page) return;
+    await zoomedTo(page, 150);
+    await titleColumnCheck(page, `at ${width} wide with the root font size at 150%`);
+  });
+}
+// An answered thread whose reply holds a 60-character unbroken token: its text stays inside the card at 360 and 390 wide at the default text.
+// The token sits in the reply, a child of the thread other than the filed line.
+const THREAD_TOKEN = "abcdefghij".repeat(6);
+for (const width of [360, 390]) for (const scheme of SCHEMES) {
+  test(`answered thread, ${scheme}: at ${width} wide at the default text, a 60-character token in the reply stays inside its card`, async (t) => {
+    const ask = { ...ASK_ANSWERED, id: "ask-thread-tok", reply: THREAD_TOKEN };
+    const page = await open(t, { dbExtra: { asks: { [ask.id]: ask } }, storage: RPL_NEW, viewport: { width, height: 800 }, scheme }); if (!page) return;
+    await mustHave(page, `li#row-${ask.id} .thread .reply`, "the answer's reply in its thread");
+    const g = await page.evaluate((id) => {
+      const card = document.getElementById("row-" + id), thread = card.querySelector(".thread"), walk = document.createTreeWalker(thread, NodeFilter.SHOW_TEXT);
+      let right = 0;
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) { const rg = document.createRange(); rg.selectNodeContents(n); for (const b of rg.getClientRects()) if (b.width > 0.5) right = Math.max(right, b.right); }
+      return { card: card.getBoundingClientRect().right, text: right };
+    }, ask.id);
+    assert.ok(g.text <= g.card + 0.5, `the thread's text runs to ${Math.round(g.text)} px, past the card's edge at ${Math.round(g.card)} px, at ${width} wide at the default text`);
+  });
+}
+
+// The bar status at 180 wide at the default text, beside the Send answers press, reads the open count. The old page squeezes it to 1 px
+// beside the buttons. It passes when it is at least 4 em of its own text wide, or sits on a line of its own. 390 is the control.
+for (const [set, note] of [[[180], ""], [[390], " (control)"]]) for (const width of set) for (const scheme of SCHEMES) {
+  test(`bar, ${scheme}: at ${width} wide at the default text, the bar status is at least 4 em wide or sits on its own line${note}`, async (t) => {
+    const page = await open(t, { viewport: { width, height: 800 }, scheme }); if (!page) return;
+    await mustHave(page, "#barStatus", "bar status");
+    await page.locator("#barStatus", { hasText: "stay open" }).waitFor({ state: "attached" }).catch(() => {});
+    const g = await page.evaluate(() => { const s = document.getElementById("barStatus"), sr = s.getBoundingClientRect(), b = document.getElementById("send").getBoundingClientRect(); return { text: s.textContent.replace(/\s+/g, " ").trim(), w: sr.width, em: parseFloat(getComputedStyle(s).fontSize), top: sr.top, bottom: sr.bottom, sendTop: b.top, sendBottom: b.bottom }; });
+    assert.ok(/stay open/.test(g.text), `the bar status reads ${JSON.stringify(g.text)}, not the open count`);
+    const own = g.bottom <= g.sendTop + 0.5 || g.top >= g.sendBottom - 0.5;
+    assert.ok(g.w >= 4 * g.em || own, `the bar status is ${Math.round(g.w)} px wide, under 4 em of its ${Math.round(g.em)} px text, and shares a line with Send answers, at ${width} wide at the default text`);
   });
 }
 
@@ -3573,14 +3895,13 @@ const PRESS_ASKS = () => ({
 });
 const PRESS_SEEN = { "waiting.askSeen": "2026-10-31T00:00:00Z" };
 // The page with the ask list at a width and root font size. showDismissed opens Show dismissed asks by script, so the setup is not the claim.
-async function pressListPage(t, { width, pct = 100, scheme = "light", showDismissed = false }) {
-  const page = await open(t, { dbExtra: { asks: PRESS_ASKS() }, storage: PRESS_SEEN, viewport: { width, height: 800 }, scheme }); if (!page) return null;
+async function pressListPage(t, { width, pct = 100, scheme = "light", showDismissed = false, hold = {} }) {
+  const page = await open(t, { dbExtra: { asks: PRESS_ASKS() }, storage: PRESS_SEEN, viewport: { width, height: 800 }, scheme, hold }); if (!page) return null;
   await mustHave(page, "#askDismissed", "Show dismissed asks control");
   if (pct !== 100) await zoomedTo(page, pct);
   if (showDismissed) await page.evaluate(() => document.getElementById("askDismissed").click());
   return page;
 }
-const sizeWhere = (width, pct) => `at ${width} wide with the root font size ${pct === 200 ? "doubled" : "tripled"}`;
 for (const scheme of SCHEMES) {
   test(`ask list, ${scheme}: at 180 wide at the default text, the Dismiss and Restore presses stay 44 px tall`, async (t) => {
     const page = await pressListPage(t, { width: 180, scheme, showDismissed: true }); if (!page) return;
@@ -3600,17 +3921,61 @@ for (const scheme of SCHEMES) {
 // (hold: { update: 0 }) until the case releases it, so the busy label is up while the case reads it. A wrapped label makes the press
 // 68 px tall while it reads "Dismissing…", so the case fails when the label wraps.
 for (const scheme of SCHEMES) test(`ask list, ${scheme}: at 180 wide at the default text, a Dismiss press that waits for its write says Dismissing… and stays 44 px tall`, async (t) => {
-  const page = await open(t, { dbExtra: { asks: PRESS_ASKS() }, storage: PRESS_SEEN, viewport: { width: 180, height: 800 }, scheme, hold: { update: 0 } }); if (!page) return;
-  await mustHave(page, "#dis-ask-fold-dis", "Dismiss press of the folded row");
-  await page.click("#dis-ask-fold-dis");
-  const held = await page.waitForFunction(() => window.__held === 1, null, { timeout: 3000 }).then(() => true, () => false);
-  assert.ok(held, "the Dismiss write did not reach the hold, so the busy label is not up");
-  const label = await page.locator("#dis-ask-fold-dis > span:not(.sz)").textContent();
-  assert.equal(label, "Dismissing…", `the Dismiss press reads ${JSON.stringify(label)} while its write waits, not "Dismissing…"`);
-  const h = await page.evaluate(() => document.getElementById("dis-ask-fold-dis").getBoundingClientRect().height);
-  await page.evaluate(() => window.__release());
+  const r = await heldPress(t, { kind: "dismiss", width: 180, pct: 100, scheme }); if (!r) return;
+  const h = await r.page.evaluate((id) => document.getElementById(id).getBoundingClientRect().height, r.id);
+  await r.page.evaluate(() => window.__release());
   assert.ok(Math.abs(h - 44) <= 1, `the Dismiss press is ${Math.round(h)} px tall while it reads "Dismissing…" at 180 wide at the default text, not 44 px`);
 });
+
+// A press whose write waits, with the write held (hold: { update: 0 }) so the busy state is up while the case reads it. The press is read at
+// rest first, at the same zoom, then pressed. Dismiss is the folded row's press. Restore is read in the dismissed list, as the owner opens it.
+const HELD = { dismiss: { id: "dis-" + FOLD_ROWS.dismiss.ask.id, word: "Dismissing", verb: "Dismiss" }, restore: { id: "res-" + FOLD_ROWS.restore.ask.id, word: "Restoring", verb: "Restore" } };
+// Opens the page, presses the kind's press and waits for its write at the hold. Null without a browser.
+async function heldPress(t, { kind, width, pct, scheme }) {
+  const { id, word, verb } = HELD[kind];
+  const page = await pressListPage(t, { width, pct, scheme, showDismissed: kind === "restore", hold: { update: 0 } }); if (!page) return null;
+  await mustHave(page, "#" + id, `the ${verb} press`);
+  const rest = await page.evaluate((i) => document.getElementById(i).getBoundingClientRect().height, id);
+  await page.click("#" + id);
+  const held = await page.waitForFunction(() => window.__held === 1, null, { timeout: 3000 }).then(() => true, () => false);
+  assert.ok(held, `the ${verb} write did not reach the hold, so the busy state is not up`);
+  const label = await page.locator(`#${id} > span:not(.sz)`).textContent();
+  assert.equal(label, word + "…", `the ${verb} press reads ${JSON.stringify(label)} while its write waits, not "${word}…"`);
+  return { page, id, rest, word, verb };
+}
+// [width, root font size in percent]: the Dismiss press keeps its resting height while its write waits. The control is 390 at the default text.
+const HELD_RED = [[180, 200], [180, 300], [220, 300], [240, 300]];
+const HELD_CONTROL = [[390, 100]];
+for (const [set, note] of [[HELD_RED, ""], [HELD_CONTROL, " (control)"]]) for (const [width, pct] of set) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, pct);
+  test(`ask list, ${scheme}: ${where}: a Dismiss press whose write waits keeps its resting height${note}`, async (t) => {
+    const r = await heldPress(t, { kind: "dismiss", width, pct, scheme }); if (!r) return;
+    const now = await r.page.evaluate((i) => document.getElementById(i).getBoundingClientRect().height, r.id);
+    await r.page.evaluate(() => window.__release());
+    assert.ok(Math.abs(now - r.rest) <= 1, `the Dismiss press is ${Math.round(now)} px tall while its write waits, not its resting ${Math.round(r.rest)} px, ${where}`);
+  });
+}
+// Whether the press itself says it is busy: "aria-busy" when it is aria-busy="true", or "name" when its own accessible name holds the busy
+// word. The name is aria-label when set, else the press's text without its hidden copies of the label. Empty when neither is there. Live
+// text elsewhere on the page does not count, since it is not the press. The old press names itself "Dismiss: ..." and nothing more.
+const busyExposed = (page, id, word) => page.evaluate(({ id, word }) => {
+  const b = document.getElementById(id);
+  if (!b) return "";
+  if (b.getAttribute("aria-busy") === "true") return "aria-busy";
+  const text = b.cloneNode(true);
+  text.querySelectorAll('[aria-hidden="true"]').forEach((el) => el.remove());
+  const name = b.getAttribute("aria-label") ?? text.textContent;
+  return name.includes(word) ? "name" : "";
+}, { id, word });
+for (const kind of ["dismiss", "restore"]) for (const [width, pct] of HELD_RED) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, pct);
+  test(`ask list, ${scheme}: ${where}: a ${HELD[kind].verb} press whose write waits is aria-busy="true", or its own name holds "${HELD[kind].word}"`, async (t) => {
+    const r = await heldPress(t, { kind, width, pct, scheme }); if (!r) return;
+    const how = await busyExposed(r.page, r.id, r.word);
+    await r.page.evaluate(() => window.__release());
+    assert.ok(how, `the ${r.verb} press is not busy to assistive tech while its write waits: no aria-busy="true" on it, and its own name does not hold "${r.word}"`);
+  });
+}
 
 // The list's elements under the fixed send bar, by the box that overlaps the bar's. The list's end is the page's, scrolled to the bottom.
 const underSendBar = (page) => page.evaluate(() => {
@@ -3628,6 +3993,194 @@ const toggleHit = (page) => page.evaluate(() => {
   const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
   return { ok: !!el && (el === t || t.contains(el)), what: el ? (el.id ? "#" + el.id : el.tagName.toLowerCase()) : "nothing (the point is outside the window)" };
 });
+// After a Restore in the dismissed list, the "Restored." line stays inside the window, and the page does not scroll sideways: at 180 wide
+// at 200%, and at 180 to 240 wide at 300%.
+// The dismissed list at a width and text size, with Restore pressed on the dismissed row, so its Restored. line is drawn. Null without a browser.
+async function restoredPage(t, { width, pct = 100, scheme = "light" }) {
+  const page = await pressListPage(t, { width, pct, scheme, showDismissed: true }); if (!page) return null;
+  await mustHave(page, "#res-ask-fold-res", "Restore press of the dismissed row");
+  await page.click("#res-ask-fold-res");
+  await mustHave(page, "#row-ask-fold-res p.sline.dline > span > b", "the Restored. line");
+  return page;
+}
+const RESTORED_LINE = [[180, 200], [180, 300], [200, 300], [220, 300], [240, 300]];
+for (const [width, pct] of RESTORED_LINE) for (const scheme of SCHEMES) {
+  const where = sizeWhere(width, pct);
+  test(`ask list, ${scheme}: ${where}: after a Restore in the dismissed list, the Restored. line stays inside the window with no sideways scroll`, async (t) => {
+    const page = await restoredPage(t, { width, pct, scheme }); if (!page) return;
+    const g = await page.evaluate(() => { const b = document.querySelector("#row-ask-fold-res p.sline.dline > span > b"), r = b.getBoundingClientRect(); return { text: b.textContent.replace(/­/g, ""), left: r.left, right: r.right, iw: window.innerWidth }; });
+    assert.equal(g.text, "Restored.", `the line's bold word reads ${JSON.stringify(g.text)}, not "Restored.", ${where}`);
+    assert.ok(g.left >= -0.5 && g.right <= g.iw + 0.5, `the Restored. line runs from ${Math.round(g.left)} to ${Math.round(g.right)} px in a ${g.iw} px window, ${where}`);
+    const fault = await sidewaysFault(page);
+    assert.ok(!fault, fault && `${fault}, ${where}`);
+  });
+}
+
+// ---------------------------------------------------------------- the Restored. line: no word breaks, the word stays whole when it fits, the glyph starts on the first line
+// The line is read from its text, one range per character, so a break between two lines is a real one. Each sweep resizes one page through
+// every width from 180 to 390 wide in steps of 5 px, at 100%, 200% and 300% text. Each sweep reads its scope first (the line is drawn and reads
+// Restored.), then makes one claim.
+// The line as drawn: each line's text and box, the words the message holds, the word Restored. (the lines it spans and its natural width, with no
+// break), the text column's width, and the glyph's top. One page call reads all of it.
+const restoredGeo = (page) => page.evaluate(() => {
+  const line = document.querySelector("#row-ask-fold-res p.sline.dline"), sp = line.querySelector(":scope > span:not(.g)"), b = sp.querySelector("b"), glyph = line.querySelector(":scope > .g");
+  const chars = [], lines = [];
+  const walk = document.createTreeWalker(sp, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    for (let i = 0; i < n.data.length; i++) {
+      const rg = document.createRange();
+      rg.setStart(n, i); rg.setEnd(n, i + 1);
+      // A soft hyphen drawn at a break adds a box on the line above to the next character, so the lowest box is the glyph's own.
+      const r = [...rg.getClientRects()].filter((x) => x.width > 0.5).reduce((a, b) => (!a || b.top > a.top ? b : a), null);
+      if (!r) continue;
+      const mid = (r.top + r.bottom) / 2;
+      const cur = lines[lines.length - 1];
+      if (!cur || Math.abs(mid - cur.mid) > cur.h / 2) lines.push({ text: "", t: r.top, b: r.bottom, mid, h: r.height });
+      const L = lines[lines.length - 1];
+      L.text += n.data[i]; L.t = Math.min(L.t, r.top); L.b = Math.max(L.b, r.bottom);
+      chars.push({ inB: b.contains(n), line: lines.length - 1 });
+    }
+  }
+  const words = sp.textContent.replace(/­/g, "").trim().split(/\s+/);
+  const bLines = new Set(chars.filter((c) => c.inB).map((c) => c.line)).size;
+  const saved = [b.style.whiteSpace, b.style.overflowWrap];
+  b.style.whiteSpace = "nowrap"; b.style.overflowWrap = "normal";
+  const natural = b.getBoundingClientRect().width;
+  [b.style.whiteSpace, b.style.overflowWrap] = saved;
+  return { lines: lines.map((L) => ({ text: L.text, t: L.t, b: L.b })), words, bText: b.textContent, soft: b.textContent.includes("­"), bLines, natural, column: sp.getBoundingClientRect().width, glyphTop: glyph.getBoundingClientRect().top };
+});
+// A line holds a fragment when one of its tokens is not a whole word of the message: "." or "d." is one, "Restored." is not. The one break
+// a word may take is after "Re" at a soft hyphen in the text, with "stored." on the next line.
+const restoredFragment = async (page) => {
+  const g = await restoredGeo(page);
+  const texts = g.lines.map((L) => L.text.replace(/­/g, "").trim());
+  // The soft-hyphen break: "Re" ends a line and "stored." opens the next, where more of the message may follow on that line.
+  const split = g.soft && texts[0] === "Re" && /^stored\.(\s|$)/.test(texts[1] || "");
+  const bad = texts.flatMap((t0, i) => {
+    if (split && i === 0) return [];
+    const t = split && i === 1 ? t0.replace(/^stored\.\s*/, "") : t0;
+    return t.split(/\s+/).filter((tok) => tok && !g.words.includes(tok)).map((tok) => `${JSON.stringify(tok)} on line ${i + 1}`);
+  });
+  return bad.length ? `a line holds a fragment of a word: ${bad.join(" and ")}` : null;
+};
+// Where Restored. fits its column it is one line. Where it does not fit, it is not read here: the caller counts the widths that fit.
+const restoredWhole = (g) => (g.natural > g.column + 0.5 || g.bLines === 1 ? null : `Restored. runs over ${g.bLines} lines, though it is ${Math.round(g.natural)} px wide in a ${Math.round(g.column)} px column`);
+// The glyph's top sits on the first line box. A line that does not wrap is not read.
+const restoredGlyph = (g) => {
+  if (g.lines.length < 2) return null;
+  const first = g.lines[0];
+  return g.glyphTop >= first.t - 1 && g.glyphTop <= first.b ? null : `the check glyph's top is ${Math.round(g.glyphTop)} px, outside the first line box at ${Math.round(first.t)} to ${Math.round(first.b)} px`;
+};
+// Named reds: the two sizes where a word of the Restored. message breaks. Each is one width, so a failure names it.
+for (const [width, pct] of [[220, 200], [280, 300]]) for (const scheme of SCHEMES) {
+  test(`ask list, ${scheme}: ${sizeWhere(width, pct)}: no line of the Restored. message holds a fragment of a word`, async (t) => {
+    const page = await restoredPage(t, { width, pct, scheme }); if (!page) return;
+    const fault = await restoredFragment(page);
+    assert.ok(!fault, fault && `${fault}, ${sizeWhere(width, pct)}`);
+  });
+}
+// The 100% fragment sweep passes on the old page (it breaks no word there), so it is a control.
+for (const pct of [100, 200, 300]) for (const scheme of SCHEMES) {
+  const note = pct === 100 ? " (control)" : "";
+  test(`ask list, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, no line of the Restored. message holds a fragment of a word${note}`, async (t) => {
+    const page = await restoredPage(t, { width: 180, pct, scheme }); if (!page) return;
+    const widths = widthsFrom(180, 390, 5);
+    const faults = await sweepWidths(page, widths, 800, restoredFragment);
+    assert.equal(faults.length, 0, `${faults.length} of ${widths.length} widths break a word in the Restored. message, the first: ${faults[0]}`);
+  });
+  test(`ask list, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, Restored. stays on one line wherever it fits its column (control)`, async (t) => {
+    const page = await restoredPage(t, { width: 180, pct, scheme }); if (!page) return;
+    let fits = 0;
+    const faults = await sweepWidths(page, widthsFrom(180, 390, 5), 800, async (p) => {
+      const g = await restoredGeo(p);
+      if (g.natural <= g.column + 0.5) fits++;
+      return restoredWhole(g);
+    });
+    assert.ok(fits > 0, "Restored. never fits its column from 180 to 390 wide, so the claim is not read");
+    assert.equal(faults.length, 0, `Restored. is split at ${faults.length} of ${fits} widths where it fits, the first: ${faults[0]}`);
+  });
+  test(`ask list, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, the check glyph of a wrapped Restored. line sits on its first line box`, async (t) => {
+    const page = await restoredPage(t, { width: 180, pct, scheme }); if (!page) return;
+    let wrapped = 0;
+    const faults = await sweepWidths(page, widthsFrom(180, 390, 5), 800, async (p) => {
+      const g = await restoredGeo(p);
+      if (g.lines.length >= 2) wrapped++;
+      return restoredGlyph(g);
+    });
+    assert.ok(wrapped > 0, "the Restored. line never wraps from 180 to 390 wide, so the glyph is not read");
+    assert.equal(faults.length, 0, `the glyph is off its first line box at ${faults.length} of ${wrapped} wrapped widths, the first: ${faults[0]}`);
+  });
+}
+
+// ---------------------------------------------------------------- the refusal line and the Restored. size: the text keeps the reader's size
+// A refused write says why in a line of the list: "Not dismissed (...)" under the answered row, "Not restored (...)" in the dismissed list.
+// Each sweep reads the line's text size at the window, then at each width from 180 to 390 wide, against the same line at 1024 wide. The
+// reference must be the paragraph's own size, so the line is not capped there: a shrink at a width is then the cap's, and nothing else.
+const REFUSED_WORDS = { dismiss: "Not dismissed (permission-denied)", restore: "Not restored (permission-denied)" };
+// The ask each refusal is made on. DIS_HIDDEN is declared further down the file, so this is read when a case runs.
+const refusedAsk = (kind) => (kind === "dismiss" ? ASK_ANSWERED : DIS_HIDDEN);
+// The list at 1024 px with the write refused, so its line is drawn, at the text size. Null without a browser.
+async function refusedLinePage(t, { kind, pct = 100, scheme = "light" }) {
+  const ask = refusedAsk(kind);
+  const page = await open(t, { dbExtra: { asks: { [ask.id]: ask } }, storage: RPL_NEW, failUpdate: true, viewport: { width: 1024, height: 800 }, scheme }); if (!page) return null;
+  if (pct !== 100) await zoomedTo(page, pct);
+  if (kind === "dismiss") {
+    await mustHave(page, `#dis-${ask.id}`, "Dismiss on the answered ask");
+    await page.click(`#dis-${ask.id}`);
+  } else {
+    await mustHave(page, "#askDismissed", "Show dismissed asks unfold");
+    await page.click("#askDismissed");
+    await mustHave(page, `ol#askDList #res-${ask.id}`, "Restore in the dismissed list");
+    await page.click(`ol#askDList #res-${ask.id}`);
+  }
+  const drawn = await page.waitForFunction((w) => [...document.querySelectorAll("p.sline.dline")].some((p) => p.textContent.includes(w)), REFUSED_WORDS[kind], { timeout: 3000 }).then(() => true, () => false);
+  assert.ok(drawn, `the refused write does not draw "${REFUSED_WORDS[kind]}"`);
+  return page;
+}
+// The refusal line's text: its size, its paragraph's size, and its text. Null when no line holds the words.
+const refusedSpan = (page, words) => page.evaluate((w) => {
+  const p = [...document.querySelectorAll("p.sline.dline")].find((x) => x.textContent.includes(w));
+  if (!p) return null;
+  const span = p.querySelector(":scope > span:not(.g)");
+  return { size: parseFloat(getComputedStyle(span).fontSize), para: parseFloat(getComputedStyle(p).fontSize), text: span.textContent.replace(/\s+/g, " ").trim() };
+}, words);
+for (const kind of ["dismiss", "restore"]) for (const pct of [100, 150, 200, 300]) for (const scheme of SCHEMES) {
+  const note = pct === 100 ? " (control)" : "";
+  test(`ask list, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, the "${REFUSED_WORDS[kind]}" line keeps its size${note}`, async (t) => {
+    const page = await refusedLinePage(t, { kind, pct, scheme }); if (!page) return;
+    const words = REFUSED_WORDS[kind];
+    const ref = await refusedSpan(page, words);
+    assert.ok(ref && ref.text.includes(words), `the refusal line is not drawn at 1024 wide with the root font size at ${pct}%`);
+    assert.equal(ref.size, ref.para, `the line's text is ${ref.size.toFixed(1)} px at 1024 wide, not its paragraph's ${ref.para.toFixed(1)} px, with the root font size at ${pct}%`);
+    const widths = widthsFrom(180, 390, 5);
+    const faults = await sweepWidths(page, widths, 800, async (p) => {
+      const s = await refusedSpan(p, words);
+      if (!s || !s.text.includes(words)) return "the refusal line is not drawn";
+      return s.size >= ref.size - 0.5 ? null : `the line's text is ${s.size.toFixed(1)} px, not ${ref.size.toFixed(1)} px`;
+    });
+    assert.equal(faults.length, 0, `${faults.length} of ${widths.length} widths shrink the "${words}" line, the first: ${faults[0]}`);
+  });
+}
+
+// The Restored. line's text at 180 wide, doubled and tripled, is at least 22 px: the word is read at a size a reader can read.
+for (const pct of [200, 300]) for (const scheme of SCHEMES) {
+  test(`ask list, ${scheme}: ${sizeWhere(180, pct)}: the Restored. line's text is at least 22 px`, async (t) => {
+    const page = await restoredPage(t, { width: 180, pct, scheme }); if (!page) return;
+    const s = await page.evaluate(() => { const sp = document.querySelector("#row-ask-fold-res p.sline.dline > span:not(.g)"); return { size: parseFloat(getComputedStyle(sp).fontSize), text: sp.textContent.replace(/­/g, "").replace(/\s+/g, " ").trim() }; });
+    assert.ok(s.text.startsWith("Restored."), `the line reads ${JSON.stringify(s.text)}, not "Restored."`);
+    assert.ok(s.size >= 22, `the Restored. line's text is ${s.size.toFixed(1)} px, not at least 22 px, ${sizeWhere(180, pct)}`);
+  });
+}
+// The same two sizes, no fragment: no line breaks a word, except "Re" at a soft hyphen with "stored." after it. No word breaks at these sizes
+// on the current page, so this is a control for the size claim above.
+for (const pct of [200, 300]) for (const scheme of SCHEMES) {
+  test(`ask list, ${scheme}: ${sizeWhere(180, pct)}: no line of the Restored. message holds a fragment of a word, the soft-hyphen break aside (control)`, async (t) => {
+    const page = await restoredPage(t, { width: 180, pct, scheme }); if (!page) return;
+    const fault = await restoredFragment(page);
+    assert.ok(!fault, fault && `${fault}, ${sizeWhere(180, pct)}`);
+  });
+}
+
 const BAR_SIZES = [[180, 200], [220, 200], [240, 200], [180, 300], [240, 300], [300, 300], [360, 300]];
 for (const [width, pct] of BAR_SIZES) for (const scheme of SCHEMES) {
   const where = `${sizeWhere(width, pct)}, scrolled to the end`;
@@ -4403,7 +4956,8 @@ test("dismiss: Restore writes dismissed null with update, the line says the thre
   // The line stays where it is and says when the thread returns. Dismiss takes Restore's place.
   await mustHave(page, `li#row-${root} #dis-${root}`, "Dismiss in place of Restore on the line");
   assert.equal(await page.locator(`li#row-${root} #res-${root}`).count(), 0, "Restore is still on the line");
-  const said = ((await page.locator(`li#row-${root}`).textContent()) || "").replace(/\s+/g, " ").trim();
+  // The soft hyphen after "Re" in "Restored." draws nothing on screen, so the match drops it and reads the words.
+  const said = ((await page.locator(`li#row-${root}`).textContent()) || "").replace(/­/g, "").replace(/\s+/g, " ").trim();
   assert.ok(said.includes("Restored. It joins the list at the next load."), "the line reads " + JSON.stringify(said));
   // The next load draws the thread again, and the stored record has dismissed null.
   await page.reload();
@@ -4422,7 +4976,7 @@ test("dismiss: a thread dismissed at load and restored this visit shows in the m
   const before = (await dismissWrites(page)).length;
   await page.click(`ol#askDList #res-${DIS_HIDDEN.id}`);
   await waitUpdates(page, before + 1);
-  const said = await page.waitForFunction(() => document.body.textContent.includes("Restored. It joins the list at the next load."), null, { timeout: 3000 }).then(() => true, () => false);
+  const said = await page.waitForFunction(() => document.body.textContent.replace(/­/g, "").includes("Restored. It joins the list at the next load."), null, { timeout: 3000 }).then(() => true, () => false);
   assert.equal(said, true, "the restore does not say Restored. It joins the list at the next load.");
   // A reply comes in after the restore, as a session's write after the page loaded, and waits for its answer.
   await page.evaluate((r) => window.__putDoc("asks", r.id, r), DIS_HIDDEN_REPLY);
@@ -4474,6 +5028,7 @@ test("dismiss: when the write is refused, the thread stays on the list, Dismiss 
   assert.equal(await rplLineHas(page, "The ask stays on the list."), true, "the refused Dismiss does not say The ask stays on the list.");
   await shownBox(page, ASK_ANSWERED.text, DIS_SHOWN);
   assert.notEqual(await page.getAttribute(`#dis-${root}`, "aria-disabled"), "true", "Dismiss is off after a refused write, so it cannot try again");
+  assert.equal(await page.getAttribute(`#dis-${root}`, "aria-busy"), null, "the Dismiss press is still aria-busy after the refused write");
 });
 
 test("dismiss: when Restore is refused, the thread stays dismissed and the line says it stays dismissed", async (t) => {
@@ -4485,6 +5040,7 @@ test("dismiss: when Restore is refused, the thread stays dismissed and the line 
   const said = await page.waitForFunction(() => document.body.textContent.includes("Not restored (permission-denied). It stays dismissed."), null, { timeout: 3000 }).then(() => true, () => false);
   assert.equal(said, true, "the refused Restore does not say Not restored (permission-denied). It stays dismissed.");
   await mustHave(page, `ol#askDList #res-${DIS_HIDDEN.id}`, "the thread still in the dismissed list after the refused Restore");
+  assert.equal(await page.getAttribute(`ol#askDList #res-${DIS_HIDDEN.id}`, "aria-busy"), null, "the Restore press is still aria-busy after the refused write");
 });
 
 test("dismiss: with every ask dismissed, the list says No ask on the list, and the Show dismissed unfold stays", async (t) => {
@@ -4514,6 +5070,25 @@ test("dismiss: with no store, the list says it cannot be read and no Dismiss is 
   await shownBox(page, "Your asks cannot be read in this view.");
   assert.equal(await page.locator('[id^="dis-"], .dismiss').count(), 0, "a Dismiss is drawn with no store");
 });
+
+// An answered thread with a 60-character token that has no break in it. Red on the old page at 360 and 390 wide: the filed path only. Its element
+// (.askc .thread .filed) has no overflow-wrap, so the thread's track sets the page's width. The owner's reply and the answer's reply wrap on the
+// old page, so they are controls, as is every variant at 1280.
+const TOKEN60 = "a".repeat(60);
+// [what, the records of the thread, the selector that holds the token]. The owner's reply is a reply in the thread, answered after the load.
+const TOKEN_FILED = ["filed path", [{ ...ASK_ANSWERED, home: TOKEN60 }], ".askc .thread .filed"];
+const TOKEN_OWN = ["owner's reply", [ASK_ANSWERED, { id: "ask-tok-own", text: TOKEN60, at: "2026-10-31T08:00:00Z", re: ASK_ANSWERED.id, owner: "lane tier-fold", answered: "2026-10-31T09:00:00Z", reply: "No." }], ".askc .thread .myreply .reply"];
+const TOKEN_ANSWER = ["answer's reply", [{ ...ASK_ANSWERED, reply: TOKEN60 }], ".askc .thread .reply"];
+// The filed path and the owner's reply are red at 360 and 390. The answer's reply wraps on the old page, so it is a control there, as at 1280.
+for (const [set, note, widths] of [[[TOKEN_FILED, TOKEN_OWN], "", [360, 390]], [[TOKEN_ANSWER], " (control)", [360, 390]], [[TOKEN_FILED, TOKEN_OWN, TOKEN_ANSWER], " (control)", [1280]]]) for (const width of widths) for (const scheme of SCHEMES) for (const [what, records, sel] of set) {
+  test(`answered thread, ${scheme}: at ${width} wide, a 60-character token in its ${what} does not scroll the page${note}`, async (t) => {
+    const page = await open(t, { dbExtra: { asks: Object.fromEntries(records.map((r) => [r.id, r])) }, storage: RPL_NEW, viewport: { width, height: 800 }, scheme }); if (!page) return;
+    const shown = await page.locator(sel).filter({ hasText: TOKEN60 }).first().waitFor({ state: "attached" }).then(() => true, () => false);
+    assert.ok(shown, `the answered thread does not show the token in its ${what} at ${width} wide`);
+    const fault = await sidewaysFault(page);
+    assert.ok(!fault, fault && `${fault}, with the token in the ${what} at ${width} wide`);
+  });
+}
 
 // ---------------------------------------------------------------- the ask stack: Add to list, one Send, one Undo for the batch
 
@@ -8326,6 +8901,72 @@ for (const scheme of ["light", "dark"]) test(`a long lane slug and an unbroken r
   assert.ok(m.sw <= m.iw, `the page scrolls sideways: ${m.sw} over ${m.iw}`);
   assert.deepEqual(m.out, [], "an element runs past its card's right edge");
 });
+
+// ---------------------------------------------------------------- the item card's thread: a 60-character token in the owner's note stays inside its card and adds no sideways scroll
+// The owner's last answer holds the note, and the card's thread (section#thread-<id>) draws it as a .rnote. The token is THREAD_TOKEN: 60
+// characters with no break. Each sweep resizes one page through every width from 180 to 390 wide in steps of 5 px, at 100%, 200% and 300% text.
+// 1280 wide at 100% is the control: the token fits there. The panel the thread must stay inside is its item card (article.card).
+// wideBlock: when given, a text-free block of that many px is put in the thread after the note, to test the track against a child that asks for more width.
+async function tokenCardPage(t, { width, pct = 100, scheme = "light", wideBlock = 0 }) {
+  const it = mk("tok-thread", 1, { lastAnswer: { choice: "a", note: THREAD_TOKEN, at: LA_AT } });
+  const page = await open(t, { items: [it], viewport: { width, height: 800 }, scheme }); if (!page) return null;
+  if (pct !== 100) await zoomedTo(page, pct);
+  await mustHave(page, "#thread-tok-thread .rnote", "the owner's note in the thread");
+  const said = await page.locator("#thread-tok-thread .rnote").textContent();
+  assert.ok(said.includes(THREAD_TOKEN), `the thread's note reads ${JSON.stringify(said.slice(0, 40))}, not the token`);
+  if (wideBlock) {
+    await page.evaluate((px) => document.getElementById("thread-tok-thread").insertAdjacentHTML("beforeend", `<span class="wide" style="display: block; width: ${px}px; height: 1px"></span>`), wideBlock);
+    await mustHave(page, "#thread-tok-thread > .wide", `the ${wideBlock} px block in the thread`);
+  }
+  return page;
+}
+// The thread's box, then its text, against its card's edges, to half a pixel. A box inside the card can still hold text that runs past it.
+const threadInCardFault = (page) => page.evaluate(() => {
+  const card = document.getElementById("item-tok-thread"), th = document.getElementById("thread-tok-thread");
+  const c = card.getBoundingClientRect(), r = th.getBoundingClientRect();
+  if (r.left < c.left - 0.5 || r.right > c.right + 0.5) return `the thread runs from ${Math.round(r.left)} to ${Math.round(r.right)} px, past its card at ${Math.round(c.left)} to ${Math.round(c.right)} px`;
+  let right = 0;
+  const walk = document.createTreeWalker(th, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) { const rg = document.createRange(); rg.selectNodeContents(n); for (const b of rg.getClientRects()) if (b.width > 0.5) right = Math.max(right, b.right); }
+  return right <= c.right + 0.5 ? null : `the thread's text runs to ${Math.round(right)} px, past its card's right edge at ${Math.round(c.right)} px`;
+});
+for (const pct of [100, 200, 300]) for (const scheme of SCHEMES) {
+  test(`item card, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, the thread stays inside its card with a 60-character token in the owner's note`, async (t) => {
+    const page = await tokenCardPage(t, { width: 180, pct, scheme }); if (!page) return;
+    const widths = widthsFrom(180, 390, 5);
+    const faults = await sweepWidths(page, widths, 800, threadInCardFault);
+    assert.equal(faults.length, 0, `${faults.length} of ${widths.length} widths put the thread outside its card, the first: ${faults[0]}`);
+  });
+  test(`item card, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, the same token adds no sideways scroll to the page`, async (t) => {
+    const page = await tokenCardPage(t, { width: 180, pct, scheme }); if (!page) return;
+    const widths = widthsFrom(180, 390, 5);
+    const faults = await sweepWidths(page, widths, 800, sidewaysFault);
+    assert.equal(faults.length, 0, `${faults.length} of ${widths.length} widths scroll the page sideways, the first: ${faults[0]}`);
+  });
+}
+for (const scheme of SCHEMES) {
+  test(`item card, ${scheme}: at 1280 wide, the thread stays inside its card with the token in the owner's note (control)`, async (t) => {
+    const page = await tokenCardPage(t, { width: 1280, scheme }); if (!page) return;
+    const fault = await threadInCardFault(page);
+    assert.ok(!fault, fault);
+  });
+  test(`item card, ${scheme}: at 1280 wide, the same token adds no sideways scroll to the page (control)`, async (t) => {
+    const page = await tokenCardPage(t, { width: 1280, scheme }); if (!page) return;
+    const fault = await sidewaysFault(page);
+    assert.ok(!fault, fault);
+  });
+}
+
+// A text-free block 480 px wide, wider than the thread at every width here. The thread's track is minmax(0, 1fr), so the block does not
+// widen it, and the note's text wraps inside the card. The check measures the thread and its text, not the block, which sits past the thread's edge.
+for (const pct of [100, 200, 300]) for (const scheme of SCHEMES) {
+  test(`item card, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, a 480 px block in the thread leaves the thread inside its card`, async (t) => {
+    const page = await tokenCardPage(t, { width: 180, pct, scheme, wideBlock: 480 }); if (!page) return;
+    const widths = widthsFrom(180, 390, 5);
+    const faults = await sweepWidths(page, widths, 800, threadInCardFault);
+    assert.equal(faults.length, 0, `${faults.length} of ${widths.length} widths put the thread outside its card, the first: ${faults[0]}`);
+  });
+}
 
 // The list of fields an item may carry is the page's own, in one JSON block, so a writer and a guard read it and the page warns by it.
 // The block is read from the loaded page, as a browser parses it.
