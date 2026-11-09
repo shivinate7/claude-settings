@@ -2877,7 +2877,7 @@ sh("per-file branch switch: checkout main in a worktree keeps today's answer",
 # branch has that name. checkout_names_a_path reads a single operand as a path only when it has an
 # extension, a leading ./, a backslash or a trailing slash, or when it is a folder. So `checkout
 # Makefile` and `checkout tools/runner` were never judged. Both are modified in the shared checkout
-# and in the hand-made worktree. LICENSE stays clean. Rows marked (pin) pass on main today.
+# and in the hand-made worktree. LICENSE stays clean. Rows marked (pin) hold behaviour this change keeps.
 sh("per-file bare: checkout of an extensionless file in the shared checkout denies",
    VCS + " checkout Makefile", "deny", "shared-tree", cwd=GITMAIN)
 sh("per-file bare: checkout of a folder's extensionless file in the shared checkout denies",
