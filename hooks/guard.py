@@ -4936,8 +4936,8 @@ def git_push_after_check_hit(command: str) -> str:
     that hides a check in the test of the compound that holds the push (`_push_test_hides_check`). A pipe that hides
     none (data sources only, no git call) does not end the walk: it goes on to the command before the pipe's `;`.
     A `then` or a `while` `do` whose own test is a check with a `||` tail that cannot fail (`|| true`, `|| :`,
-    `|| echo bad`) also refuses, as 'or': the tail makes the test unfailing, so the push runs after a failed check
-    (`_push_then_test_unfailing`).
+    `|| echo bad`) and no check after it also refuses, as 'or': the tail makes the test unfailing, so the push runs
+    after a failed check (`_push_then_test_unfailing`).
     A heredoc whose unquoted body runs a substitution makes its stage a check (`_mark_heredoc_substitutions`,
     applied by the caller, since the bodies are gone by now). An interpreter
     heredoc's body is dropped before the walk, so a lone quote in it hides no `;`. A dry run
@@ -5089,8 +5089,9 @@ def _push_body_runs_on_failure(segments, ends, start: int, head: int) -> str:
     else git push; fi` passes). A test with a `!` runs the body when its command passes, so it is no check
     (`if ! pytest -q; then exit 1; else git push; fi`); a `(` glued to the `if` does not hide the `!`. The `then` of
     an `if !` and the `do` of a `while !` pass by lane pick 2026-11-08 20:29 CST, though bash runs a push there on a
-    failed check. An `else` after a test that ends in `|| true` or `|| :` never runs, so it passes
-    (`_push_then_test_unfailing`): `if pytest -q || true; then :; else git push; fi`."""
+    failed check. An `elif` or `else` body after an earlier test with a tail that cannot fail (`|| true`, `|| :`,
+    `|| echo bad`) never runs, so it passes (`_push_test_cannot_fail`): `if pytest -q || true; then :; else git push;
+    fi`, and the same after `if [ -f a ] || true`."""
     opener = (segment_tokens(segments[start]) or [""])[0]
     head_words = [word.lstrip("({") for word in segment_tokens(segments[head]) or []
                   if word.strip("({") and word not in GIT_PUSH_BODY_WORDS]
@@ -5100,7 +5101,7 @@ def _push_body_runs_on_failure(segments, ends, start: int, head: int) -> str:
         return ""
     depth, level, testing = 0, None, False
     check_at, elif_at = None, None   # the first test that is a check; the last `elif` at the compound's own level
-    unfailing = False   # a test of the compound ends in `|| true` or `|| :` (`_push_then_test_unfailing`)
+    unfailing = False   # an earlier test of the compound cannot fail (`_push_test_cannot_fail`)
     for at in range(head, start):
         part = segments[at]
         words = segment_tokens(part) or []
@@ -5110,7 +5111,7 @@ def _push_body_runs_on_failure(segments, ends, start: int, head: int) -> str:
             testing = {"then": False, "do": False, "else": False, "elif": True}.get(words[0] if words else "", testing)
             if words[:1] == ["elif"]:
                 elif_at = at
-            if kind == "else" and words[:1] == ["then"] and _push_then_test_unfailing(segments, ends, at, head):
+            if kind in ("else", "elif") and _push_test_cannot_fail(segments, ends, at, head):
                 unfailing = True
         if testing and (at == head or depth == level):
             lead, command = _push_test_lead(words)
@@ -5121,7 +5122,7 @@ def _push_body_runs_on_failure(segments, ends, start: int, head: int) -> str:
         if at == head:
             level = depth
     if check_at is None or unfailing:
-        return ""   # an unfailing test never fails, so the `else` never runs
+        return ""   # a test that cannot fail always runs its `then`, so the `elif` and `else` after it never run
     if kind == "elif" and (elif_at is None or check_at >= elif_at):
         return ""   # the first `then`, or a test of this `elif` itself: the push runs only when the checks passed
     return "body-" + kind
@@ -5139,25 +5140,50 @@ def _push_test_lead(words):
     return lead, words[len(lead)] if len(lead) < len(words) else ""
 
 
-def _push_then_test_unfailing(segments, ends, opener: int, head: int) -> bool:
-    """True when `segments[opener]` is the `then` of an `if` or `elif`, or the `do` of a `while`, whose own test ends in
-    a `||` tail that cannot fail (`_cannot_fail`: `|| true`, `|| :`, `|| echo bad`, `|| true >/dev/null`) after a
-    check: the tail exits 0 whatever the check did, so the test cannot fail and the body runs after a failed check. The
-    test is the `if`, `elif` or `while` test that ends at the opener: its last step is the tail, and the check is a
-    command before the `||` (back over its `&&`, `||` and `|` joins, no further than the compound's head) that is not
-    inert, no condition word and no git call, as in `_push_hidden_by_tail`. A `!` does not matter: the tail still ends
-    the test in success. An `|| exit 1` tail is none, since it ends the shell. An earlier test that cannot fail makes
-    a `then` after it unreachable, so only its own test is read. An `until` body is `_push_body_runs_on_failure`'s."""
-    if (segment_tokens(segments[opener]) or [""])[0] not in ("then", "do"):
-        return False
+def _is_test_check(part: str) -> bool:
+    """True when the test step PART is a check: not inert, no condition word (`GIT_PUSH_CONDITION_WORDS`) and no git
+    call."""
+    return (_push_test_lead(segment_tokens(part) or [])[1] not in GIT_PUSH_CONDITION_WORDS
+            and _push_segment_inert(part) is False and not git_calls(part))
+
+
+def _push_test_tails(segments, ends, opener: int, head: int):
+    """For the test that ends at the body opener `segments[opener]`: one pair for each `||` step that cannot fail
+    (`_cannot_fail`) in the test's `&&`, `||` and `|` chain, which runs back from the opener to no further than the
+    compound's head. The pair holds the steps before that `||` and the steps after the step. An echo with a
+    substitution counts (`substitution_ok`): its status is 0 all the same, and only that status is asked here."""
     tail = opener - 1
-    if tail - 1 < head or ends[tail - 1] != "||" or not _cannot_fail(segments[tail]):
-        return False
-    left = tail - 1
+    left = tail
     while left > head and ends[left - 1] in ("&&", "||", "|"):
         left -= 1
-    return any(_push_test_lead(segment_tokens(part) or [])[1] not in GIT_PUSH_CONDITION_WORDS
-               and _push_segment_inert(part) is False and not git_calls(part) for part in segments[left:tail])
+    return [(segments[left:at], segments[at + 1:tail + 1]) for at in range(left + 1, tail + 1)
+            if ends[at - 1] == "||" and _cannot_fail(segments[at], substitution_ok=True)]
+
+
+def _push_then_test_unfailing(segments, ends, opener: int, head: int) -> bool:
+    """True when `segments[opener]` is the `then` of an `if` or `elif`, or the `do` of a `while`, whose own test has a
+    `||` tail that cannot fail (`_cannot_fail`: `|| true`, `|| :`, `|| echo bad`, `|| true >/dev/null`) after a check,
+    and no check after the tail: the tail exits 0 whatever the check did, so the body runs after a failed check. The
+    steps after the tail set the test's status, and they are no check when they are condition words, inert or git
+    calls (`if pytest -q || true && [ -f x ]` refuses; `|| true && pytest -q` passes, since that check must pass). The
+    check is a command before the `||` that is not inert, no condition word and no git call, as in
+    `_push_hidden_by_tail`. A `!` does not matter: the tail still ends the test in success. An `|| exit 1` tail is
+    none, since it ends the shell. An earlier test that cannot fail makes a `then` after it unreachable, so only its
+    own test is read. An `until` body is `_push_body_runs_on_failure`'s."""
+    if (segment_tokens(segments[opener]) or [""])[0] not in ("then", "do"):
+        return False
+    return any(any(_is_test_check(part) for part in before) and not any(_is_test_check(part) for part in after)
+               for before, after in _push_test_tails(segments, ends, opener, head))
+
+
+def _push_test_cannot_fail(segments, ends, opener: int, head: int) -> bool:
+    """True when `segments[opener]` is the `then` of an `if` or `elif` whose own test cannot fail: a `||` tail that
+    cannot fail (`_push_test_tails`) with only steps that cannot fail after it, or none. Its body always runs, so
+    each `elif` and `else` body after it never does."""
+    if (segment_tokens(segments[opener]) or [""])[0] != "then":
+        return False
+    return any(all(_cannot_fail(part, substitution_ok=True) for part in after)
+               for _, after in _push_test_tails(segments, ends, opener, head))
 
 
 def _push_test_hides_check(segments, ends, opener: int, head: int) -> bool:
@@ -5300,15 +5326,17 @@ def _exit_hides_check(segments, ends, checked: int):
     return covered, "push" if hides else ""
 
 
-def _cannot_fail(segment: str) -> bool:
+def _cannot_fail(segment: str, substitution_ok: bool = False) -> bool:
     """True when SEGMENT is an `echo`, `true` or `:`, bare or behind `command`, `builtin` or a path, or in a `( )`
-    group: it exits 0 whatever the check before it did."""
+    group: it exits 0 whatever the check before it did. A substitution in its words makes it a step that runs a
+    command (`echo $(make x) || exit 1` hides that check), so it is no such step, unless SUBSTITUTION_OK: the
+    caller asks only for the exit status, which the substitution leaves at 0."""
     words = [word.lstrip("(") for word in segment_tokens(segment) or []]
     words = [word for word in words if word]
     while words[:1] in (["command"], ["builtin"]):
         words = words[1:]
     return (bool(words) and basename(words[0].rstrip(")")) in ("echo", "true", ":")   # `(true)` closes on its head word
-            and not _runs_substitution(words))
+            and (substitution_ok or not _runs_substitution(words)))
 
 
 def _push_exit_tails(segments, ends):
