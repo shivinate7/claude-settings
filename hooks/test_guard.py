@@ -9254,6 +9254,7 @@ def build_envwalk_folders():
     write(os.path.join(ENVWALK_HELD, ENV), "FIXTURE=1\n")
     write(os.path.join(ENVWALK_HELD, "README.md"), "held\n")
     write(os.path.join(ENVWALK_HELD, "src", "app.txt"), "X\n")  # a subfolder that holds no env file
+    write(os.path.join(ENVWALK_HELD, "sub", "app.txt"), "X\n")  # a sub folder a cd can enter, that holds no env file
     write(os.path.join(ENVWALK_CLEAN, "README.md"), "clean\n")
     os.makedirs(ENVWALK_EMPTY, exist_ok=True)
 
@@ -10048,6 +10049,56 @@ _TWO_SKIPPED_CLEAN = ("test -f a && cd " + slash(ENVWALK_SUB_CLEAN)
                       + "; test -f b && cd sub; test -f c && cd sub; rg --hidden K")
 sh("env: walk control, three conditional cds, first runs and two skipped, no env file, allowed: "
    + _TWO_SKIPPED_CLEAN, _TWO_SKIPPED_CLEAN, "allow", cwd=ENVWALK_CLEAN)
+
+
+# ---- env walk: a search fed names by a pipe, a redirect in front of a wrapper, and a cd that is not the first word
+# of a then branch. Each deny row searches a folder that holds an env file, and its control is the same form over a
+# folder with no env file, which stays allowed.
+
+# xargs appends each name it reads to the program, or puts it where `{}` stands. `find` and `ls -a` list the env file
+# by name, so each form hands the env file to the search.
+_XARGS_FEEDS_ENV = ("find . -type f | xargs grep -l K", "find . -type f | xargs rg K",
+                    "ls -a | xargs rg --hidden K src", "ls -a | xargs -I{} rg --hidden K {}")
+for _cmd in _XARGS_FEEDS_ENV:
+    sh("env: walk safety hole, xargs feeds an env file name to a search, refused: " + _cmd, _cmd, "deny", "env-file",
+       cwd=ENVWALK_HELD)
+    sh("env: walk control, xargs feeds names from a folder with no env file, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVWALK_CLEAN)
+
+# A plain `ls` lists no dotfile, so no env file name reaches xargs. The search reads src, which holds no env file, so
+# the walk allows it. The `ls -a` form above is the same pipe with the env file named.
+_LS_PIPE = "ls | xargs rg --hidden K"
+sh("env: walk false alarm, plain ls lists no dotfile, src holds no env file, allowed: " + _LS_PIPE, _LS_PIPE,
+   "allow", cwd=ENVWALK_HELD)
+# The allow above holds only while the folders ls names are clean. ls names sub, and rg --hidden walks it, so the same
+# pipe over a folder whose sub folder holds an env file is refused.
+sh("env: walk pin, plain ls names a sub folder that holds an env file, refused: " + _LS_PIPE, _LS_PIPE,
+   "deny", "env-file", cwd=ENVWALK_NESTED)
+
+# A redirect before a wrapper is not the program. The search runs under sudo, so the held folder must be judged.
+_SUDO_REDIRECT = "sudo 2>/dev/null rg --hidden K"
+sh("env: walk safety hole, redirect before sudo, folder holds an env file, refused: " + _SUDO_REDIRECT, _SUDO_REDIRECT,
+   "deny", "env-file", cwd=ENVWALK_HELD)
+sh("env: walk control, redirect before sudo, folder has no env file, allowed: " + _SUDO_REDIRECT, _SUDO_REDIRECT,
+   "allow", cwd=ENVWALK_CLEAN)
+
+# A shell string runs its text as a command, so a string that names the env file reads it. Each form is refused over
+# the held folder and allowed over a folder with no env file.
+for _cmd in ("bash -c 'cat .env'", "zsh -c 'cat .env'"):
+    sh("env: shell string safety hole, names an env file, refused: " + _cmd, _cmd, "deny", "env-file", cwd=ENVWALK_HELD)
+    sh("env: shell string control, no env file in the folder, allowed: " + _cmd.replace(".env", "README.md"),
+       _cmd.replace(".env", "README.md"), "allow", cwd=ENVWALK_CLEAN)
+
+# A cd that is not the first word of a then branch may not run, and the search then runs in the held folder. Each
+# form is refused over the held folder and allowed over a folder with no env file. The second form puts `then` on its
+# own line, and the cd follows `echo x;` on the next line.
+_THEN_CD_INLINE = "if [ -d sub ]; then echo x; cd sub; fi; rg --hidden K"
+_THEN_CD_OWN_LINE = "if [ -d sub ]\nthen\necho x; cd sub\nfi\nrg --hidden K"
+for _cmd in (_THEN_CD_INLINE, _THEN_CD_OWN_LINE):
+    sh("env: walk safety hole, cd is not the first word of a then branch, folder holds an env file, refused: "
+       + repr(_cmd), _cmd, "deny", "env-file", cwd=ENVWALK_HELD)
+    sh("env: walk control, cd is not the first word of a then branch, folder has no env file, allowed: "
+       + repr(_cmd), _cmd, "allow", cwd=ENVWALK_CLEAN)
 
 
 # =========================================================================== git env set
