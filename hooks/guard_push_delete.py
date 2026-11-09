@@ -1026,7 +1026,7 @@ PUSH_STRAY_REASON = (
     "Approving the prompt lets this one push through; it is not a grant."
 )
 PUSH_AGENT_REASON = (
-    "Rule (push-agent-branch): this push writes a branch named like an agent worktree (agent-<hex>, "
+    "Rule (Git): this push writes a branch named like an agent worktree (agent-<hex>, "
     "claude/agent-<hex> or worktree-agent-<hex>), not a lane branch (decision plain-push-asks). "
     "Remedy: push the lane's own branch by name: `git push origin HEAD:<lane-branch>`."
 )
