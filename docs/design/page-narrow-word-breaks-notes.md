@@ -65,7 +65,12 @@ checks pass outside the item cards, apart from the sent-state items in §7. Also
 - Loss: alone, cause B labels clip or scroll the page (option "Whole words at the reader's size", `#o=wrap`).
 - Pick: yes, with §3.
 
-## 3. Text fits its box: one cap per section. Owner grant: yes
+## 3. Text fits its box: one cap per section. Considered, not built
+
+Ruling (coordinator, 2026-11-09 09:28 CST): build §2, §4 and §5 only. Part B (this section) is not built, so the page keeps
+a11y.md's "Text size" rule. Reason: for a reader who chose large text, a mid-word break at 180 px and 300% is the smaller harm
+than text that stops short of that size. Where one word is wider than its whole box, a mid-word break stays. The page must
+never scroll sideways. The design below is kept so a later grant can build it.
 
 - What: a section's text never runs larger than its longest fixed word allows. Three tokens on `:root`, in tokens.md's clamp() shape,
   each read by one section through a registered `--fit` (`@property`, `<length>`), so the `cqi` term resolves once, on the section:
@@ -121,6 +126,9 @@ font makes the binding word wider. Fix: none in the mockup; the builder's cases 
 5.6 divisor, and a red there adds headroom to the divisor. Until: 2026-11-21.
 
 ## 7. Found, not fixed (outside the step)
+
+Widened by the coordinator's ruling (2026-11-09 09:28 CST): the lane also applies §2 to the card text (Park, Mark done, option
+labels) and fixes the Unpark sideways scroll. The cap on `.card` below is part B and stays unbuilt.
 
 - Item cards: Park, Mark done and None of these break inside a word at 180 to 220, 300%; option labels ("Re|d", "Blu|e") at
   180 to 220, 200 to 300%; the context and steps text at 180 to 200, 300%. The same cap on `.card` (about `(100cqi - 106px) / 3`,
