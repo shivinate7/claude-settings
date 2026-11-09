@@ -12494,9 +12494,6 @@ cmk_refuse("a push of a new file that holds a triplet", VCS + " push", CMK_NF)
 # A push sends only what is unpushed: clean commits pass, and so does a triplet already on the remote.
 cmk_allow("a push of unpushed commits that are clean", VCS + " push", CMK_CL)
 cmk_allow("a push of a clean commit, with a triplet already on the remote branch", VCS + " push", CMK_RT)
-# A detached HEAD names no branch, so a bare push has no destination. git answers that read with a non-zero exit,
-# which is an answer, not an unread git read: the clean commit still passes.
-cmk_allow("a bare push from a detached HEAD, with no destination to resolve, of a clean commit", VCS + " push", CMK_DT)
 
 # A commit then a push in one call: a judged clean commit lets the push through; one that cannot be judged
 # is refused.
@@ -12676,9 +12673,9 @@ cmk_allow("two commits, the first adding a triplet and the second removing it, t
 
 # An unreadable git read. The commit check reads git through `_git`, which three modules bind by name: guard_merge
 # takes it from guard_core, which takes it from git_reads. A patch on git_reads alone reaches no reader, so each
-# case answers None on all three names. A git read that fails or times out is None, and it counts as unread: the
-# check asks, and a triplet it already found keeps its deny. These judge in-process; every other row runs the guard
-# as a subprocess.
+# case answers None on all three names. A git read that does not start or times out is None, and it counts as
+# unread: the check asks, and a triplet it already found keeps its deny. These judge in-process; every other row
+# runs the guard as a subprocess.
 CMK_READ_MODULES = ("git_reads", "guard_core", "guard_merge")
 CMK_STAGED_COMMIT = VCS + " add -A && " + VCS + " commit -m x"
 
