@@ -4,6 +4,6 @@
   "status": "done",
   "order": 103.359,
   "why": "Item 130 pick a: browser 3D is the first target, because a cloud session can build it and check it by eye.",
-  "note": "Nov 6 12:53 CST (coordinator): lane session_013NEJL1q9hiKz6bhqxDi1ik, at a new URL; it never touches the live page.\nOwner picked a on item 277, 12:43 CST: port this Cockpit page. Coordinator 12:35 CST. Which page to port is item 277; the coordinator recommends the Cockpit as a separate test copy, never the live page. Landed on main in batch 49 (#1397, merge ebc810f56, Nov 7 02:57 CST) as #1332; test copy at https://claude.ai/artifact/Hf8FFxqMsfw9ds6Pni7Vdd. Page items 291 and 292 (layout, phone) stay open for its follow-up.",
-  "updatedAt": "2026-11-07T09:04:00Z"
+  "note": "Nov 6 12:53 CST (coordinator): lane session_013NEJL1q9hiKz6bhqxDi1ik, at a new URL; it never touches the live page.\nOwner picked a on item 277, 12:43 CST: port this Cockpit page. Coordinator 12:35 CST. Which page to port is item 277; the coordinator recommends the Cockpit as a separate test copy, never the live page. Landed on main in batch 49 (#1397, merge ebc810f56, Nov 7 02:57 CST) as #1332; test copy linked in docs/plans/3d-browser-dummy/README.md (not in the artifact registry, so no artifact: cite). Page items 291 and 292 (layout, phone) stay open for its follow-up.",
+  "updatedAt": "2026-11-08T19:20:00-06:00"
 }

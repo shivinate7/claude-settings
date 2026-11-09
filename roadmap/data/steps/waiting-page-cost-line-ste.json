@@ -1,0 +1,11 @@
+{
+  "title": "The waiting-page skill's Cost line passes the STE sentence limit",
+  "why": "`python3 lint/ste_lint.py skills/waiting-page/SKILL.md` gives STE001 at line 283 on main: a 31-word sentence in the \"Cost:\" line (lane artifact-pages-other-account, via the coordinator, 19:20 CST Nov 8).",
+  "note": "Filed by triage, Nov 8 19:20 CST. The coordinator routes it. Split the sentence; no rule change.",
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "todo",
+  "order": 856,
+  "updatedAt": "2026-11-08T19:20:00-06:00"
+}
