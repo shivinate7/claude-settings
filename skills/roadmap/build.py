@@ -88,6 +88,16 @@ date with no year takes the build year, or the year before if it would be in the
 not exist is skipped. When the newest claim in a note is STALE_DAYS or more days old, the entry reads
 `<step id> (<date as written>)`. The row reads the notes only, so it needs no live file.
 
+The last upkeep row, "done without check", names each done step that closed without showing its Done check green on
+main (step done-needs-check). Only a done step whose updatedAt is on or after DONE_CHECK_SINCE (an ISO UTC time) is read.
+Its note, why and ask are searched for the whole phrase `Done check` (any case; `Done checks` does not count). With no
+such phrase the entry is `<step id>`. With the phrase, one of the three texts must hold exactly `Done check green on
+main:` (any case, single spaces), then optional spaces, then a ref that DONE_REF_RE in lint/report_guard.py accepts
+(the one home: `#<digits>`, `PR <n>`, a /pull/ or /commit/ URL, a hex commit hash) with no word between. Nothing else shows it green: not `met on main`, not a bare `green on main`.
+With none the entry is `<step id> (not shown green on main)`. A missing or
+unparsable updatedAt gives `<step id> (updatedAt unreadable)`. The row reads the step files only, so it needs no live
+file. It adds no process, file, timer or log: it reads the notes already loaded.
+
 Before it builds, it refuses a record branch with git conflict markers (step c72) in any file under
 SCANNED, and writes no page.
 
@@ -173,6 +183,13 @@ FUTURE_MINUTES = 5
 TODO_STATUS = ("todo", "ready")
 KNOWN_STATUS = TODO_STATUS + ("doing", "active", "done")
 TOP = 5
+# ISO UTC: a done step updated before this time is not read for a Done check. Set to the first midnight after this
+# row ships: the 44 done steps updated Nov 7-8 CST (measured on origin/roadmap) carry no `Done check green on main:`
+# line, so an earlier cutoff would list all 44 at launch.
+DONE_CHECK_SINCE = "2026-11-10T06:00:00Z"
+DONE_CHECK = re.compile(r"(?<![\w-])done check(?![\w-])", re.I)
+# The whole phrase a close writes to show its Done check green; DONE_REF_RE then reads the ref after it.
+GREEN_PHRASE = re.compile(r"(?<![\w-])done check green on main: *", re.I)
 DATA = "roadmap/data"
 # roadmap.html is left out: this script rewrites it, so a conflict there is resolved by building.
 SCANNED = ("roadmap", "briefs", "plans", "handoffs")
@@ -206,6 +223,11 @@ import git_reads  # noqa: E402  the one home of a checkout's GitHub repo, shared
 from shared_names import (  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names and lane head refs, shared with the guard (hooks/shared_names.py)
     BUILD_TAG, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, lane_head_refs, repo_tag_names,
 )
+sys.path.insert(0, str(LINT))
+try:
+    from report_guard import DONE_REF_RE  # noqa: E402  the one home of a source ref in a Done line (lint/report_guard.py)
+finally:
+    sys.path.remove(str(LINT))
 
 
 def step_tag_ids(tags):
@@ -1377,6 +1399,39 @@ def unfiled(steps, work):
     return out
 
 
+def shown_green(text):
+    """True when the text holds `Done check green on main:` (GREEN_PHRASE) and then, with no word between, a ref
+    that DONE_REF_RE accepts. A URL holds its ref inside the word, and `PR 12` holds a space, so a ref counts when only
+    non-space text lies between the phrase and its start."""
+    for m in GREEN_PHRASE.finditer(text):
+        ref = DONE_REF_RE.search(text, m.end())
+        if ref and not re.search(r"\s", text[m.end():ref.start()]):
+            return True
+    return False
+
+
+def done_without_check(steps):
+    """Entries for each done step updated on or after DONE_CHECK_SINCE that does not show its Done check green on main."""
+    since = zoned_time(DONE_CHECK_SINCE)
+    out = []
+    for k, d in sorted(steps.items()):
+        if d.get("status") != "done":
+            continue
+        at = zoned_time(d.get("updatedAt"))
+        if at is None:
+            out.append("%s (updatedAt unreadable)" % k)
+            continue
+        if at < since:
+            continue
+        texts = [v for v in (d.get(key) for key in MOCKUP_TEXT) if isinstance(v, str)]
+        if not any(DONE_CHECK.search(t) for t in texts):
+            out.append(k)
+            continue
+        if not any(shown_green(t) for t in texts):
+            out.append("%s (not shown green on main)" % k)
+    return out
+
+
 def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None):
     """Entries for each lane of this repo that can be archived, or one `unknown (<why>)` entry, never an empty list
     when a read could not run. Each entry reads `<session id> (<steps>; topic <topic or ->)`, sorted.
@@ -1502,7 +1557,8 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("landed, waiting for triage to close", closing),
             ("Step trailers naming no step", strays),
             ("live threads naming no open step", (work or {}).get("strays", [])),
-            ("live file entries skipped", (work or {}).get("skipped", []))]
+            ("live file entries skipped", (work or {}).get("skipped", [])),
+            ("done without check", done_without_check(steps))]
     print("upkeep: " + "; ".join(f"{label}: {len(v)}" for label, v in rows))
     for label, v in rows:
         if v:
