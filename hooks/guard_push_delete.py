@@ -183,6 +183,9 @@ def _printed(script: str) -> bool:
     return PRINT_COMMAND.search(stmt) is not None or PRINT_CALL.search(stmt) is not None
 
 
+NO_COMMAND_WORD = "x"
+
+
 def _nested_commands(span: str, before: str = "") -> str:
     """A double-quoted span that holds escaped quotes is a script handed to an interpreter
     (`python3 -c "os.system(\\"git push\\")"`). In a runner script (`bash -c`, `eval`, `ssh`,
@@ -191,7 +194,8 @@ def _nested_commands(span: str, before: str = "") -> str:
     be named any way: an alias, a from-import, `shlex.split`, a variable. A CALL_RUNNER call runs
     its pair even inside a print. Outside a runner script only a CALL_RUNNER pair is read
     (`before` is the segment text ahead of the span). Give each command its own line, so the
-    words that follow it in the script (`print(\\"+1\\")`) are not its arguments."""
+    words that follow it in the script (`print(\\"+1\\")`) are not its arguments. A span with no
+    command is one word, `NO_COMMAND_WORD`, never a line break."""
     lines, piece, inner, run, index = ["\n"], [], False, False, 1
     words, argv, closed = [], False, 0
     script = (SCRIPT_RUNNER.search(before) or INTERPRETER_RUNNER.search(before)) is not None
@@ -229,7 +233,9 @@ def _nested_commands(span: str, before: str = "") -> str:
     if inner and run:
         (words if argv else lines).append("".join(piece) if argv else "".join(piece) + "\n")
     emit()
-    return "".join(lines)
+    # No command ran: the span is plain text inside its statement, so one word stands for it and
+    # the words after it keep their `git push` head.
+    return "".join(lines) if len(lines) > 1 else NO_COMMAND_WORD
 
 
 def _push_scan(segment: str) -> str:
