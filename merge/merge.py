@@ -2606,8 +2606,8 @@ def ci_job_run(wt, *args, notes=None):
     return "unknown", [f"ci-job exited {c}"], log, False
 
 MUTATE_JOB, MUTATE_STEP = "checks-mutate-guard", "Guard mutation test"  # the job and step of checks.yml whose run: line and timeout-minutes the lint reads at the head
-MUTATE_UNKNOWN_MAX = 5  # unknown (crashed or timed-out) mutants a lint tolerates: one or two flaky mutants are noise, a harness that cannot run reads hundreds
-MUTATE_HARNESS = re.compile(r"hooks/mutate_[^/]*\.(?:py|mjs)")
+MUTATE_UNKNOWN_MAX = 5  # unknown (crashed or timed-out) mutants a lint tolerates: one or two flaky mutants are noise, a mutation test that cannot run reads hundreds
+MUTATE_TEST_FILE = re.compile(r"hooks/mutate_[^/]*\.(?:py|mjs)")
 
 def mutate_report_counts(out):
     """-> (killed, survived, unknown, unread) of a mutate run's stdout, or None when it holds no report. Two forms: the per-file table of
@@ -2687,13 +2687,13 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
             c, changed = git(root, "diff", "--name-only", f"origin/{base}...{head}")
             if c:
                 raise Stop(f"cannot list the files the head changes against {base}: {changed} {LANE_LINT_REMEDY}")
-            if any(MUTATE_HARNESS.fullmatch(f) for f in changed.splitlines()):
+            if any(MUTATE_TEST_FILE.fullmatch(f) for f in changed.splitlines()):
                 mutate, mutate_fails = mutate_run_check(wt)
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]
     if mutate_fails:
-        raise Stop("\n".join([f"the lint of {short} against {base} FAILs: the diff touches the mutation harness, and its {mutate}:", *mutate_fails, LANE_LINT_REMEDY]))
+        raise Stop("\n".join([f"the lint of {short} against {base} FAILs: the diff touches a mutation test file, and its {mutate}:", *mutate_fails, LANE_LINT_REMEDY]))
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
         say(f"PASS: lint of {short} against {base} passes{named}{'; ' + mutate if mutate else ''}. The batch runner may take this head, or join it to a batch.", *pin_notes)
