@@ -78,6 +78,9 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       .gitignore) on="$on $W $X mods code " ;;
       # bin/rm: the shim imports hooks/guard_rm_var.py (hooks/* above); it runs on posix jobs.
       bin/rm|lint/test_rm_shim.py) on="$on $X code " ;;
+      # actions/ste-lint: hooks/test_guard_ste_push.py (rule ste-push) runs the real bin/ste-changed and this action, so a change here
+      # changes the guard's verdict. bin/ste-changed and hooks/guard_ste.py already reach guard (the unmapped default, the guard_*.py arm).
+      actions/ste-lint/*) on="$on code guard " ;;
       # Linux `checks` job only: the lints and opt-in templates.
       actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml) on="$on code " ;;
       # Map skill .md files: its tests read them, so this arm turns on `mods` before the *.md arm.

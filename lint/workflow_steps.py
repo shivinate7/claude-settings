@@ -1,12 +1,17 @@
 """Read a GitHub workflow's jobs and steps by line, stdlib only: no YAML library on a fresh runner or Mac.
 
 The one home of the step parser. lint/test_windows_split.py reads the Windows split with it, and
-bin/ci-job runs a job's steps locally with it. It reads the layout checks.yml keeps: jobs at 2 spaces,
-`      - ` steps, step keys at 8 spaces, `env:` keys and `run: |` bodies at 10.
+bin/ci-job runs a job's steps locally with it. Jobs sit at 2 spaces. A step list's indent is read from its
+first `- ` line under `steps:`, so checks.yml's 6-space steps and a 4-space layout both read. A step's keys
+sit where its first key does, after the dash; `env:` and `with:` entries sit where their first entry does,
+and a `run: |` body sits deeper than the keys. A flow mapping (`- {uses: ...}`) holds no key this reads.
 """
 import os
 import re
 import sys
+
+_STEPS_LINE = re.compile(r"^( *)steps:[ \t]*(?:#.*)?$", re.M)
+_OLD_STEP = "      - "   # the step start read when the text holds no `steps:` line, such as a lone step
 
 # The Linux jobs that hold the suites of the one old `checks` job, split for wall time. merge/merge.py reads suites from each.
 CHECKS_SUITE_JOBS = ("checks", "checks-merge-install")
@@ -24,13 +29,52 @@ def job_block(text, name):
 
 
 def step_blocks(block):
-    """Each `      - ` step of a job block, as raw text. Block scalars stay whole."""
-    return [p for p in re.split(r"^(?=      - )", block or "", flags=re.M) if p.startswith("      - ")]
+    """Each step of each `steps:` list in a job block (or a whole workflow), as raw text. Block scalars stay
+    whole. A step ends at the next `- ` line at its list's indent, or at a line no deeper than that indent. Text
+    with no `steps:` line is split at `      - ` lines."""
+    text = block or ""
+    if not _STEPS_LINE.search(text):
+        return [p for p in re.split(r"^(?=%s)" % _OLD_STEP, text, flags=re.M) if p.startswith(_OLD_STEP)]
+    steps, current, dash, listing = [], None, None, None
+    for line in text.splitlines(keepends=True):
+        bare = line.rstrip("\r\n")
+        indent = len(bare) - len(bare.lstrip(" "))
+        quiet = not bare.strip() or bare.lstrip().startswith("#")
+        if current is not None and (quiet or indent > dash):
+            current.append(line)
+            continue
+        starts = bare[indent:].startswith("- ")
+        if current is not None and indent == dash and starts:
+            steps.append("".join(current))
+            current = [line]
+            continue
+        if quiet:
+            continue
+        if current is not None:
+            steps.append("".join(current))
+            current = None
+        if dash is None and listing is not None and indent >= listing and starts:
+            dash, current = indent, [line]
+            continue
+        found = _STEPS_LINE.match(bare)
+        dash, listing = None, len(found.group(1)) if found else None
+    if current is not None:
+        steps.append("".join(current))
+    return steps
+
+
+def _key_prefixes(step):
+    """(the step's first line up to its first key, the indent of its other keys). A step that does not start
+    with `- ` reads as checks.yml's: `      - ` and 8."""
+    found = re.match(r" *- +", step)
+    head = found.group(0) if found else _OLD_STEP
+    return head, len(head)
 
 
 def step_key(step, key):
-    """A step's own `key:` value (`        key:` or inline `      - key:`), or None. Body lines sit deeper."""
-    m = re.search(rf"^(?:      - |        ){re.escape(key)}:[ \t]*(.*?)[ \t]*$", step, re.M)
+    """A step's own `key:` value (on its `- ` line, or a line at its key indent), or None. Body lines sit deeper."""
+    head, keys = _key_prefixes(step)
+    m = re.search(rf"^(?:{re.escape(head)}| {{{keys}}}){re.escape(key)}:[ \t]*(.*?)[ \t]*$", step, re.M)
     return m.group(1) if m else None
 
 
@@ -76,13 +120,15 @@ def block_scalar(style, lines, floor):
 
 
 def run_body(step):
-    """A step's `run:` text: the one line, or a block scalar with its 10-space indent removed. None if absent."""
+    """A step's `run:` text: the one line, or a block scalar with its indent (10 spaces in checks.yml) removed.
+    None if absent."""
+    head, keys = _key_prefixes(step)
     lines = step.split("\n")
     for i, line in enumerate(lines):
-        m = re.match(r"^(?:      - |        )run:[ \t]*(.*?)[ \t]*$", line)
+        m = re.match(rf"^(?:{re.escape(head)}| {{{keys}}})run:[ \t]*(.*?)[ \t]*$", line)
         if not m:
             continue
-        text = block_scalar(drop_comment(m.group(1)), lines[i + 1:], 10)   # a comment after the header is no script
+        text = block_scalar(drop_comment(m.group(1)), lines[i + 1:], keys + 2)   # a comment after the header is no script; the floor follows the step indent
         return m.group(1) if text is None else text
     return None
 
@@ -111,17 +157,20 @@ def drop_comment(value):
 
 def step_map(step, key):
     """A step's own `key:` block (`env:` or `with:`) as {name: value}, or {} when it has none. A `|` or `>` value reads
-    as its lines (block_scalar, indented past the 10-space keys); other values lose an inline comment."""
+    as its lines (block_scalar, indented past the entries, which sit 2 spaces past the step's keys: 10 in checks.yml);
+    other values lose an inline comment."""
+    head, keys = _key_prefixes(step)
+    pad = " " * (keys + 2)
     found, inside = {}, False
     lines = step.split("\n")
     for i, line in enumerate(lines):
-        if re.match(rf"^(?:      - |        ){re.escape(key)}:[ \t]*$", line):
+        if re.match(rf"^(?:{re.escape(head)}| {{{keys}}}){re.escape(key)}:[ \t]*$", line):
             inside = True
-        elif inside and (m := re.match(r"^          ([\w-]+):[ \t]*(.*?)[ \t]*$", line)):
+        elif inside and (m := re.match(rf"^{pad}([\w-]+):[ \t]*(.*?)[ \t]*$", line)):
             value = drop_comment(m.group(2))
-            text = block_scalar(value, lines[i + 1:], 11)
+            text = block_scalar(value, lines[i + 1:], keys + 3)
             found[m.group(1)] = value if text is None else text
-        elif inside and line.strip() and not line.startswith("          "):
+        elif inside and line.strip() and not line.startswith(pad):
             inside = False
     return found
 

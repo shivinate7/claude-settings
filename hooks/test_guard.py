@@ -108,6 +108,7 @@ FAMILIES = {
     "sendmessage-session-id": "SendMessage whose to starts session_: refused, since a session_ id is not an agent name and delivery to one is unmeasured; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
+    "ste-push": "a git push whose net range changes a file the ste-lint step lints: the lint runs once from the pushed checkout and a FAIL verdict is denied; a push to the record branch or to archive/*, a dry run and a push that changes no linted file start no lint",
     "cite": "cite by id",
     "frozen": "frozen paths",
     "model-cap": "the agent model cap",
@@ -650,6 +651,15 @@ PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose 
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
 RECFORK = os.path.join(ROOT, "recfork")
+# PUSHSTE sits on `feat`, one commit past origin/main, and its CI pins the ste-lint step, so rule ste-push lints it.
+# The commit adds a note with a sentence over 30 words, which STE001 flags: that push is denied.
+PUSHSTE = os.path.join(ROOT, "pushste")
+STE_PIN_WORKFLOW = ("name: checks\non: [pull_request]\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n"
+                    "      - uses: example/claude-settings/actions/ste-lint@%s\n" % ("1" * 40))
+# A 35-word sentence. STE001 flags a sentence over 30 words, so the lint of a note holding it is a FAIL.
+STE_BLOATED_SENTENCE = ("Each reviewer of a pushed page reads every changed step against the current procedure "
+                        "before the release team accepts the change, so that no operator follows a stale "
+                        "instruction on the floor of the plant.")
 
 # WTMAIN is the primary checkout of its own small repository. Every linked worktree below is a
 # real one, because the rule reads `git worktree list --porcelain` and `git status --porcelain`
@@ -1980,6 +1990,19 @@ def _build_push():
         sys.exit("fixture setup failed in build_fixtures: PUSHSTRAY needs remotes fork and origin "
                  "and push.default simple")
 
+    # ste-push: a checkout whose CI pins the ste-lint step (one origin/main commit, then a note on `feat` that
+    # holds a 35-word sentence). No origin/feat ref, so the range base is origin/main, the default branch.
+    make_repo(PUSHSTE, {"base.txt": "base\n", ".github/workflows/checks.yml": STE_PIN_WORKFLOW})
+    run_vcs(PUSHSTE, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTE, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHSTE, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run_vcs(PUSHSTE, "checkout", "-q", "-b", "feat")
+    write(os.path.join(PUSHSTE, "docs", "notes", "bloated.md"),
+          "# Note\n\n" + STE_BLOATED_SENTENCE + "\n")
+    run_vcs(PUSHSTE, "add", "-A")
+    if run_vcs(PUSHSTE, *IDENT, "commit", "-q", "-m", "note").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: the note commit in PUSHSTE failed")
+
 def _build_worktrees():
     """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
     # ----------------------------------------------------------------- worktree remove/prune
@@ -2282,7 +2305,7 @@ lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
-              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK],
+              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHSTE],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -10948,6 +10971,17 @@ for _trust_tool in TRUST_TOOLS:
                _trust_tool, role_path("untagged-then-lane"))
 trust_allow("an unrelated remote tool (list_sessions) in a lane session allows", LIST_SESSIONS,
             role_path("lane"))
+
+
+# =========================================================================== 5f-2. ste-push
+#
+# Rule ste-push, hooks/guard_merge.py ste_push_hit. A push whose net range changes a file the ste-lint step
+# lints is judged by that lint: a FAIL denies the push. The full set of ste-push cases, and the record-branch
+# and archive skips, are in hooks/test_guard_ste_push.py. This section holds the one case that runs in this
+# suite, so GUARD_FAMILY=ste-push selects a case.
+FAMILY = "ste-push"
+sh("ste-push: a pushed note with a sentence over 30 words is denied, the reason naming the rule",
+   VCS + " push origin feat", "deny", "ste-push", cwd=PUSHSTE)
 
 
 # =========================================================================== 5g. archive of a lane
@@ -22291,6 +22325,9 @@ REASON_MAY_NAME = {
     # The refusal names the handoff the session must read: under the config folder, which is ROOT here
     # and ~/.claude in a session. That path is the remedy, so the rule may name its folder.
     "handoff-unread": (ROOT, slash(ROOT), ".claude"),
+    # ste-push's remedy names the lint program's folder in the config folder ($HOME/.claude/lint), the same
+    # kind of path as handoff-unread's remedy. It names no forbidden target: the push it refuses stays unnamed.
+    "ste-push": (".claude",),
 }
 
 
