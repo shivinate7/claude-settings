@@ -12161,6 +12161,135 @@ add("draft-pr: MCP create with draft true is allowed", "allow",
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
 
+# =========================================================================== 5a2. gh writes in a cloud session
+# The `gh-write-cloud` rule. A cloud session is one where is_cloud() holds: CLAUDE_CODE_REMOTE is exactly
+# "true". There the Bash guard refuses a gh write made outside the merge tool: gh pr create|merge|comment|edit|close|review|ready,
+# gh issue create|comment|edit|close, and gh api with a write method (-X or --method POST, PATCH, PUT or DELETE,
+# any case, also --method=POST and -XPOST), or with -f, -F, --field, --raw-field or --input and no GET method.
+# A read stays allowed: gh pr view|list|diff|checks|status, gh issue view|list, a plain gh api route (with --jq
+# or -q), gh api with an explicit GET, gh auth, and the merge tool's `merge <pr> --confirm`.
+# Each refused write has a twin outside a cloud session, which must allow. The twin is the green control, and
+# it pins the cloud scope.
+GH_WRITE_RULE = "gh-write-cloud"
+GH_WRITE_CLOUD = {"CLAUDE_CODE_REMOTE": "true"}
+GH_WRITE_REMEDY = ("mcp__github__",)   # the remedy names a GitHub MCP tool; which one is the builder's choice
+GH_MERGE_FIXTURE = {"env_path": GHMAIN + os.pathsep + PY_PATH, "config": MERGECFG}   # a green head, as the merge rows use
+
+
+def gh_verb(command):
+    """The words a refusal must not print: the first three words of the command, such as `gh pr comment`."""
+    return " ".join(command.split()[:3])
+
+
+def gh_write_refused(name, command, **fixture):
+    """One gh write refused in a cloud session, and the same write allowed outside one."""
+    sh("gh-write-cloud: %s is refused in a cloud session" % name, command, "deny", GH_WRITE_RULE,
+       cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(gh_verb(command),), **fixture)
+    sh("gh-write-cloud: %s is allowed outside a cloud session" % name, command, "allow", cwd=NOGIT, **fixture)
+
+
+GH_WRITES = (
+    ("pr create", "gh pr create --draft --title x --body y"),
+    ("pr comment", "gh pr comment 12 --body hi"),
+    ("pr edit", "gh pr edit 12 --title x"),
+    ("pr close", "gh pr close 12"),
+    ("pr review", "gh pr review 12 --approve"),
+    ("pr ready", "gh pr ready 12"),
+    ("issue create", "gh issue create --title x --body y"),
+    ("issue comment", "gh issue comment 3 --body hi"),
+    ("issue edit", "gh issue edit 3 --title x"),
+    ("issue close", "gh issue close 3"),
+    ("api -X POST", "gh api -X POST repos/x/y/issues -f title=x"),
+    ("api -X post, no field", "gh api -X post repos/x/y/issues"),
+    ("api --method=POST, no field", "gh api --method=POST repos/x/y/issues"),
+    ("api -XPOST", "gh api -XPOST repos/x/y/issues"),
+    ("api -X patch", "gh api -X patch repos/x/y/pulls/1 -f state=closed"),
+    ("api -X PUT", "gh api -X PUT repos/x/y/pulls/1/merge"),
+    ("api -X DELETE", "gh api -X DELETE repos/x/y/issues/comments/1"),
+    ("api with -f and no method", "gh api repos/x/y/issues -f title=x"),
+    ("api with -F and no method", "gh api repos/x/y/issues -F title=x"),
+    ("api with --field and no method", "gh api repos/x/y/issues --field title=x"),
+    ("api with --raw-field and no method", "gh api repos/x/y/issues --raw-field body=x"),
+    ("api with --input and no method", "gh api repos/x/y/issues --input body.json"),
+)
+for _name, _command in GH_WRITES:
+    gh_write_refused(_name, _command)
+gh_write_refused("pr merge", "gh pr merge 12 --squash", **GH_MERGE_FIXTURE)
+
+# A write that another rule also refuses gets the gh-write-cloud verdict in a cloud session. Its remedy
+# names an MCP tool, never the refused form. Each refusal has a twin outside a cloud session.
+sh("gh-write-cloud: a pull request opened without --draft is refused in a cloud session",
+   "gh pr create --title x --body y", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh pr create",))
+sh("gh-write-cloud: a merge with a pending head is refused in a cloud session, not by merge-checks",
+   "gh pr merge 12", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY,
+   lacks=("pending",), env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("gh-write-cloud: a merge with a pending head is judged by merge-checks outside a cloud session",
+   "gh pr merge 12", "deny", "merge-checks", cwd=NOGIT, carries="pending",
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("gh-write-cloud: a // and a /* inside a quoted body still refuse a pr comment in a cloud session",
+   'gh pr comment 12 --body "see // and /* here"', "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh pr comment",))
+sh("gh-write-cloud: a // and a /* inside a quoted body are allowed outside a cloud session",
+   'gh pr comment 12 --body "see // and /* here"', "allow", cwd=NOGIT)
+sh("gh-write-cloud: gh api with -X GET then --method POST is refused in a cloud session, the last method wins",
+   "gh api -X GET repos/o/r/issues --method POST", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh api",))
+sh("gh-write-cloud: gh api with -X GET then --method POST is allowed outside a cloud session",
+   "gh api -X GET repos/o/r/issues --method POST", "allow", cwd=NOGIT)
+sh("gh-write-cloud: gh api --input with no method is refused in a cloud session",
+   "gh api repos/o/r/issues --input -", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh api",))
+sh("gh-write-cloud: gh api --input with no method is allowed outside a cloud session",
+   "gh api repos/o/r/issues --input -", "allow", cwd=NOGIT)
+
+# Forms a naive reader misses. A `#` or a lone quote inside a quoted body is text, not a comment, and a write
+# is still a write after a root repo flag, a wrapper, a command substitution, a chain, or a comment tail.
+for _name, _command, _lacks in (
+    ("a # inside a quoted body", 'gh pr comment 12 --body "fix #12"', "gh pr comment"),
+    ("a lone quote inside a quoted body", "gh issue comment 3 --body \"Don't merge\"", "gh issue comment"),
+    ("a comment tail after the write", "gh pr comment 12 --body x  # note", "gh pr comment"),
+    ("the -R root repo flag", "gh -R o/r pr comment 12 -b x", "pr comment"),
+    ("a bash -c wrapper", "bash -c 'gh pr edit 12 -t x'", "gh pr edit"),
+    ("a command substitution", "echo $(gh api -X POST repos/x/y/issues)", "gh api -X"),
+    ("a write chained after a read", "gh pr view 12 && gh pr comment 12 --body hi", "gh pr comment"),
+):
+    sh("gh-write-cloud: %s is refused in a cloud session" % _name, _command, "deny", GH_WRITE_RULE,
+       cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(_lacks,))
+
+# Reads and the merge tool stay allowed in a cloud session.
+for _command in (
+    "gh pr view 12", "gh pr list", "gh pr diff 12", "gh pr checks 12", "gh pr status",
+    "gh issue view 3", "gh issue list", "gh auth status",
+    "gh api repos/x/y/pulls/1", "gh api repos/x/y/pulls/1 -q .body",
+    "gh api -X GET search/code -f q=foo", "gh api -X get search/code -f q=foo",
+    "gh api -XGET search/code -f q=foo", "gh api --method=GET search/code -f q=foo",
+    "gh api --method get search/code -f q=foo",
+    "merge 12 --confirm", "~/.claude/bin/merge 12 --confirm",
+):
+    sh("gh-write-cloud: %s is allowed in a cloud session" % _command, _command, "allow", cwd=NOGIT,
+       env=GH_WRITE_CLOUD)
+
+# False alarms: text that names a write is not a write. Each must allow in a cloud session.
+for _name, _command in (
+    ("a python heredoc that names a merge as text", "python3 - <<'PY'\nmsg = 'run gh pr merge 12 by hand'\nprint(msg)\nPY"),
+    ("a bash heredoc body with a comment line", "cat > notes.txt <<'EOF'\ngh pr comment 12 --body hi\nEOF"),
+    ("a python -c print of a merge", "python3 -c 'print(\"gh pr merge 12\")'"),
+    ("an echo of a create", 'echo "gh pr create"'),
+    ("a git commit message that names a close", 'git commit -m "gh issue close"'),
+    ("a gh api read with --jq", "gh api repos/x/y/pulls/1 --jq .body"),
+    ("a read with a comment tail that names a comment", "gh pr view 12  # then gh pr comment"),
+    ("a node template literal across lines", "node -e 'const s = `\ngh pr merge 12\n`; console.log(s)'"),
+):
+    sh("gh-write-cloud: %s is allowed in a cloud session" % _name, _command, "allow", cwd=NOGIT,
+       env=GH_WRITE_CLOUD)
+
+# Only the exact value "true" is a cloud session, so another value judges the write as a local one.
+for _value in ("TRUE", "1"):
+    sh("gh-write-cloud: CLAUDE_CODE_REMOTE=%s is not a cloud session, so pr comment is allowed" % _value,
+       "gh pr comment 12 --body hi", "allow", cwd=NOGIT, env={"CLAUDE_CODE_REMOTE": _value})
+
+
 # =========================================================================== 5b. the merge guard
 #
 # The `merge-checks` guard rule. A merge made outside the merge tool is refused while the head has
