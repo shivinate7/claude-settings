@@ -15500,6 +15500,10 @@ def _build_octopus_push():
     _cmk_commit(OCT_MAIN, "m.txt", "m\n", "main one, unpushed")
     _oct_merge(OCT_MAIN, "main", ["x", "y"])
     _oct_must(OCT_MAIN, "origin/main..HEAD", [3], "the unpushed three-parent merge on main")
+    # push-main reads the remote's URL, and a local bare path is no network remote, so the ask would go silent.
+    # Give origin the network URL that the push-main fixtures use (PUSHREMOTE). The guard never contacts it, and
+    # the tracking refs above stay as they are.
+    _cmk_run(OCT_MAIN, "config", "remote.origin.url", PUSHREMOTE)
 
 
 lazy_fixture([OCT_THREE, OCT_FOUR, OCT_TWO, OCT_PLAIN, OCT_REMOTE, OCT_EMPTY, OCT_MAIN], _build_octopus_push)
