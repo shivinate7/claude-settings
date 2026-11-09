@@ -1,6 +1,6 @@
 # Merge notes: lane notes-fix-large-1, main 624dcc188 into chain A and the frozen stack
 
-Written by lane notes-fix-large-1 (session_013NEJL4DPEKRiC91yHkQV7m), 2026-11-09 15:50 CST. Notes, not a record: triage's branch cleanup deletes this branch once the merges land.
+Written by lane notes-fix-large-1 (session_013NEJL4DPEKRiC91yHkQV7m), 2026-11-09 15:41 CST, U1 ruled 15:44 CST. Notes, not a record: triage's branch cleanup deletes this branch once the merges land.
 
 ## Rules for the resolver
 - One test-author owns each whole merge, product files included (ruling mixed-merge-resolver, owner item 420 a). Your hooks must be current: `grep -c merge_route_paths ~/.claude/hooks/guard.py` reads non-zero.
@@ -8,7 +8,7 @@ Written by lane notes-fix-large-1 (session_013NEJL4DPEKRiC91yHkQV7m), 2026-11-09
 - Main's behaviour stands. The branch's own changes stand. Union lists without duplicates. Each claim appears once.
 - After each merge: `python3 bin/verdict python3 lint/check_silent_undo.py --upstream <parent> --head HEAD --strict`, and the guard family tests. A Drops-lines trailer shares the last trailer paragraph with Co-Authored-By.
 - If batch 70 moved main past 624dcc188, merge the new main at #1486. Then re-read each hunk: these notes name the parent each was read against.
-- Stop and report on any hunk these notes do not cover, or on U1 below until it is ruled.
+- Stop and report on any hunk these notes do not cover. U1 below is ruled.
 
 ## Stacks, bottom first
 - Chain A: #1486 notes-fed-test-write (base main) → #2211 builder-find-cp-tests → #2305 builder-find-cap-pins-v2 → #2331 cp-written-limits → #2373 made-folder-glob → #2384 fold-root-unc → #2432 fed-cp-gaps → #2448 fed-cp-limits.
@@ -40,7 +40,7 @@ Old heads: #1613 f9fb50537, #2022 eb848f298, #2133 e94a2c537, #2288 fdae8032b, #
 - Main (e9c6e9629, "Keep a live substitution, a repo head and a frozen copy destination judged"): refuses a copy whose destination holds `$`, a backtick, `*`, `?`, `[`, `{`, `<` or `>`, unless the destination is a lone quoted variable such as `"$f"`.
 - Branch: a test copied to a fixed prefix outside the test roots is a read (`_fixed_prefix_outside`). Main's condition makes that unreachable.
 - Branch cases that go red under main's rule: `for f in tests/*.py; do cp "$f" /tmp/backup/$f; done` and `for f in tests/*.py; do cp $f /tmp/bak_$(basename $f); done`.
-- Wait for the ruling, sent with these notes. Do not resolve U1 until it arrives.
+- Ruled (coordinator 15:44 CST 2026-11-09, rule building-port-keeps-behaviour): main's refusal at e9c6e9629 stands. At each level, keep theirs (main's condition), and drop the branch's `_fixed_prefix_outside` branch and its def if nothing else calls it. Re-point the two branch cases above from allow to deny, red then green, in your own worktree. Do not stop here.
 
 ### Q2, check while resolving
 Removing the `keywords` flag drops the `$(` skip that the branch's LOOP_KEYWORDS (guard_core.py) gives fed commands. Main's resolve_command skip set lacks it. Run the frozen family tests after #1613. A red fed `cp` case starting with `$(` is a stop-and-report.
@@ -55,7 +55,7 @@ Removing the `keywords` flag drops the `$(` skip that the branch's LOOP_KEYWORDS
   - guard_frozen.py:668: same as 594, for `_cp_link_source`. Its caller (~1357) drops `bool(fed)`. Keep `return ""`.
   - guard_frozen.py:1402: "Sed 8" below.
   - guard_frozen.py:1440: ours (sed-script helpers `_BRACE_LIMIT` .. `_sed_script_words`), two blank lines, then theirs (`_PS_LAUNCHER`, `_powershell_scripts_of`).
-  - test_guard.py:18108: ours (53 allow cases), then theirs (2 lines). Two ours cases hang on U1.
+  - test_guard.py:18108: ours (53 allow cases), then theirs (2 lines). Re-point the two U1 cases to deny.
 - #2022 (tree 07eac8d8a):
   - record :66: #1613's rule, with #2022's text for the two branch bullets.
   - guard.py:2257, guard_frozen :12, :693, :767: as in #1613. :746 is U1.
