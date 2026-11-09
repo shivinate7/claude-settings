@@ -1178,6 +1178,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     doubt = False      # the last cd may have failed in an `&&` chain: a segment after it may not run
     unsure = False     # the last segment may have failed or not run: an assignment after its `&&` may not run
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
+    last_end = ""      # the operator that ended the last non-empty segment
     for at, segment in enumerate(segments[:number + 1]):
         marks = [(index, char) for index, char, quote in walk_quotes(segment) if not quote and char in "()"]
         groups = _subshell_opens(segment, marks)
@@ -1186,7 +1187,10 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         end = ends[at] if at < len(ends) else ""
         if at == number:
             return None if skipping else where
+        if not segment.strip():
+            continue   # an operator at end of line then the newline leaves an empty part: it changes nothing
         if skipping:
+            last_end = end
             skipping = end in ("&&", "|")
             unsure = True
             for _ in range(closes):
@@ -1196,7 +1200,8 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             continue
         tokens = segment_tokens(segment)
         move = _segment_cd_move(tokens) if tokens else None
-        before = ends[at - 1] if 0 < at <= len(ends) else ""
+        before = last_end
+        last_end = end
         piped = "|" in (end, before)
         if move is not None and not is_powershell(segment) and piped:
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
@@ -1209,7 +1214,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         elif move is not None:
             old = where
             if move is not CD_UNKNOWN and "$" in move:
-                move = _read_cd_variable(known, segment, move, ran)
+                move = _read_cd_variable(known, segment, move, sure)
             if move is CD_UNKNOWN:
                 where = None
             elif move == "-":
