@@ -75,6 +75,7 @@ RUN_FOLDER = None  # made in setUpModule
 TOKEN = "ghp_" + TAIL  # a GitHub-token shape, built at run time
 MAIL = "person.name" + "@" + "example.com"  # a personal-email shape, built at run time
 PASSWORD = "hunter2"  # a password value; the URLs below join it at run time, so no credential URL is a literal here
+SUP_PASSWORD = "Sup3r" + "S3cret"  # letters, digits and capitals, joined from parts, for the concatenated and templated URL rows
 DB_IP_URL = "postgres://app:" + PASSWORD + "@10.0.0.5:5432/db"  # credentials on an IP host, with a port
 BUILD_IP_URL = "https://svc:" + PASSWORD + "@10.0.0.5/build"  # credentials on an IP host, with no port
 DB_NAME_URL = "postgres://app:" + PASSWORD + "@db.example.com:5432/db"  # the control: a host name refuses today
@@ -323,6 +324,27 @@ RED = [
     ("password word, a boolean, then pass with a real value", "password:" + "!0," + "pass:" + "Tr0ub4dor", "Tr0ub4dor"),
     ("password word, a boolean, then a semicolon assignment", "password:" + "!0;" + "a=" + "hunter2", "hunter2"),
     ("password word, a boolean, then a brace and a pwd assignment", "password:" + "!0};" + "pwd=" + "hunter2", "hunter2"),
+    # Hole 1: a connection string built by concatenation. The password before the `@` is a literal, and the host after
+    # the `@` is code, so the literal is still a credential in the URL.
+    ("concatenated postgres DSN with a literal password and a code host",
+     'dsn = "postgres://admin:' + SUP_PASSWORD + '@" + host + "/app"', SUP_PASSWORD),
+    ("concatenated mongodb URL with a literal password and a code host",
+     "'mongodb://admin:" + SUP_PASSWORD + "@' + HOST", SUP_PASSWORD),
+    ("concatenated mysql URL with a literal password and an environ host",
+     '"mysql://root:' + PASSWORD + '@" + os.environ["DB_HOST"]', PASSWORD),
+    # Hole 2: a literal password before a template or shell host. The host is a placeholder, so the password is a secret.
+    ("postgres URL with a literal password and a braced template host",
+     "postgres://admin:" + SUP_PASSWORD + "@{db_host}/app", SUP_PASSWORD),
+    ("postgres URL with a literal password and a double-braced template host",
+     "postgres://admin:" + SUP_PASSWORD + "@{{ db_host }}/app", SUP_PASSWORD),
+    ("postgres URL with a literal password and a braced host with a port",
+     "postgres://admin:" + SUP_PASSWORD + "@{host}:5432", SUP_PASSWORD),
+    ("postgres URL with a literal password and an angle-bracket host",
+     "postgres://admin:" + SUP_PASSWORD + "@<host>/app", SUP_PASSWORD),
+    ("postgres URL with a literal password and a bare shell host",
+     "postgres://admin:" + SUP_PASSWORD + "@$HOST/app", SUP_PASSWORD),
+    ("postgres URL with a literal password and a braced shell host",
+     "postgres://admin:" + SUP_PASSWORD + "@${HOST}/app", SUP_PASSWORD),
 ]
 # Dashed and short vendor-style keys, each set in four credential-name carriers. Each value is joined from parts, so no
 # key-looking literal sits whole in the source. A hyphen-joined value of letters and digits is a key shape, so the
@@ -373,6 +395,10 @@ GREEN = [
     ("minified void 0 after a token word", "token:void 0,"),
     ("minified JS boolean after a password word", "password:!0"),
     ("minified code with :// and a colon and @ across quotes and brackets", '"https://a"})];U&&(c=I==null||x:y@b'),
+    # A password made of code, a quote and `+`, then `@` and a quote, is code and not a credential. It must stay green
+    # once the hole rows above refuse a literal password before the `@`.
+    ("code password joined by plus, then @ and a quote", '"http://h:"+port+"@"'),
+    ("code password joined by plus, then @[ and code", '"http://h:"+p+"@["+x'),
     ("minified keyCode comparison", "e.keyCode===13&&e.preventDefault()"),
     # The same shapes as a real bundled page has them: booleans in a run, and a switch case on a key event name.
     ("minified JS booleans in a run after a password word", "password:!0,range:!0,search:!0,tel:!0};function"),
