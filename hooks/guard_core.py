@@ -1115,12 +1115,16 @@ def is_print_step(segment: str, may_fail: bool) -> bool:
     return not redirect_can_fail(segment)
 
 
-def redirect_can_fail(segment: str, null_ok: bool = False) -> bool:
+def redirect_can_fail(segment: str, null_ok: bool = False, writes: bool = True) -> bool:
     """True when SEGMENT holds a redirect that can fail: any `<` or `>` outside quotes, past the fd copies of
     `FD_COPY` (a file may be missing, a descriptor closed). Quoted text is no redirect. With NULL_OK a redirect to a
-    null device (`NULL_DEVICE_REDIRECT`) opens always and is no such redirect; a closed descriptor (`>&-`) stays one."""
+    null device (`NULL_DEVICE_REDIRECT`) opens always and is no such redirect; a closed descriptor (`>&-`) stays one.
+    A closed descriptor fails only a step that writes to it, so with WRITES false (a step that prints nothing, `true`)
+    `>&-` is no such redirect either."""
     if null_ok:
         segment = NULL_DEVICE_REDIRECT.sub("", segment)
+    if not writes:
+        segment = re.sub(CLOSED_FD_REDIRECT, "", segment)
     bare = "".join("x" if quote else char for _, char, quote in walk_quotes(segment))
     return any(char in "<>" for char in FD_COPY.sub("", bare))
 

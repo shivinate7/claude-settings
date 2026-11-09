@@ -5151,8 +5151,11 @@ def _step_never_fails(segment: str) -> bool:
     """True when the test step SEGMENT exits 0 whatever stands before it (`_cannot_fail`, an echo with a substitution
     too: its status is 0 all the same) and nothing in it can fail to open. A redirect to a file or a closed
     descriptor can fail, as in `is_print_step` (decision step 5), so `echo bad >/no/dir` is none; an fd copy (`>&2`)
-    and a null device cannot fail. The `|| exit` read keeps `_cannot_fail` alone."""
-    return _cannot_fail(segment, substitution_ok=True) and not redirect_can_fail(segment, null_ok=True)
+    and a null device cannot fail. A closed descriptor (`>&-`) fails only an `echo`, which writes to it: `true >&-`
+    and `: >&-` print nothing and return 0. The `|| exit` read keeps `_cannot_fail` alone."""
+    words = _plain_words(segment)
+    return (_cannot_fail(segment, substitution_ok=True)
+            and not redirect_can_fail(segment, null_ok=True, writes=basename(words[0].rstrip(")")) == "echo"))
 
 
 def _push_test_tails(segments, ends, opener: int, head: int):
@@ -5341,12 +5344,19 @@ def _cannot_fail(segment: str, substitution_ok: bool = False) -> bool:
     group: it exits 0 whatever the check before it did. A substitution in its words makes it a step that runs a
     command (`echo $(make x) || exit 1` hides that check), so it is no such step, unless SUBSTITUTION_OK: the
     caller asks only for the exit status, which the substitution leaves at 0."""
+    words = _plain_words(segment)
+    return (bool(words) and basename(words[0].rstrip(")")) in ("echo", "true", ":")   # `(true)` closes on its head word
+            and (substitution_ok or not _runs_substitution(words)))
+
+
+def _plain_words(segment: str):
+    """The words of SEGMENT past a `(` group opener and the `command` and `builtin` wrappers, so the first is the
+    command."""
     words = [word.lstrip("(") for word in segment_tokens(segment) or []]
     words = [word for word in words if word]
     while words[:1] in (["command"], ["builtin"]):
         words = words[1:]
-    return (bool(words) and basename(words[0].rstrip(")")) in ("echo", "true", ":")   # `(true)` closes on its head word
-            and (substitution_ok or not _runs_substitution(words)))
+    return words
 
 
 def _push_exit_tails(segments, ends):
