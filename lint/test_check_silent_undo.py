@@ -44,6 +44,23 @@ def without_opt_out(env):
     return {k: v for k, v in env.items() if not k.startswith(OPT_OUT_KEYS)}
 
 
+REWRITE = "hand-edited"  # the rewrite kind's finding word (roadmap step merge-keeps-main-verbatim); a lost-line finding never has it
+
+
+def rewrites(got):
+    """The rewrite-kind findings of a verdict: a hand edit of a line main added, outside a conflict block."""
+    return [p for p in got if REWRITE in p]
+
+
+def assert_rewrite_kind(tc, got):
+    """A hand rewrite of a main line outside a conflict block is its own finding kind, not a lost line
+    (roadmap step merge-keeps-main-verbatim). So the verdict holds no other finding, and the rewrite finding
+    never reads as a lost line."""
+    tc.assertEqual([p for p in got if REWRITE not in p], [], "the verdict holds a finding that is not the rewrite kind")
+    tc.assertTrue(rewrites(got), "a hand rewrite of a main line outside a conflict is not a rewrite finding")
+    tc.assertEqual([p for p in rewrites(got) if "drops" in p], [], "the rewrite finding carries the lost-line wording")
+
+
 class Repo:
     def __init__(self):
         self.signs = False  # a case that signs on purpose sets this, and its git runs without the opt-out
@@ -675,7 +692,8 @@ class Flips(unittest.TestCase):
         self.red("", "timeout = 60", "# was timeout = 60 before")
 
     def test_a_line_that_only_gained_an_argument_passes(self):
-        self.assertEqual(self.resolve("run(a, b)", "run(a, b, env=e)", "run(a, b, env=e, timeout=T)"), [])
+        # Roadmap step merge-keeps-main-verbatim: the hand edit of main's line is a rewrite finding, and no lost line is read.
+        assert_rewrite_kind(self, self.resolve("run(a, b)", "run(a, b, env=e)", "run(a, b, env=e, timeout=T)"))
 
     def test_a_third_value_still_passes(self):
         self.assertEqual(self.resolve("RULE_FLOOR = 80", "RULE_FLOOR = 91", "RULE_FLOOR = 94"), [])
@@ -2950,7 +2968,7 @@ class MergeKeepsMain(unittest.TestCase):
             self.assertNotIn(marker, text, "premise: the merge still holds %r" % marker)
 
     def hand_edits(self, got):
-        return [p for p in got if p.startswith("lib.txt:") and "hand-edited" in p]
+        return [p for p in rewrites(got) if p.startswith("lib.txt:")]
 
     def check_excused_hand_edit(self, reason):
         """Premise: the old reads still excuse lib.txt by its trailer. Claim: the hand edit is still a finding."""
