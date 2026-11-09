@@ -1318,14 +1318,17 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
 
 
 # ---- a reviewer brief names its pull request (rule review-needs-pr, decision pr-review-record)
-# A spawn of a RECORD_REVIEWER_ROLES role whose brief carries a round marker must name the pull request it reviews.
+# An orchestrator's spawn of `reviewer` must name the pull request it reviews; a `design-reviewer` spawn must when its
+# brief carries a round marker. Between the PR word and the number the form may hold space, hyphen, `#`, `:`, `(`,
+# markdown bold or code marks, and the word `number`; a letter other than that word breaks it ("a PR will follow").
 NEEDS_PR_NAMED = re.compile(
-    r"(?:\bPRs?|\bpull\s+requests?)[\s-]*#?\d+|github\.com/[^/\s]+/[^/\s]+/pull/\d+"
-    r"|(?:\bPRs?|\bpull\s+requests?)\s*(?::|\(|\bnumber\b)\s*\(?#?\d+", re.IGNORECASE)
+    r"(?:\bPRs?|\bpull\s+requests?)(?:[\s\-#:(*_`]|\bnumber\b)*\d+|github\.com/[^/\s]+/[^/\s]+/pull/\d+",
+    re.IGNORECASE)
 NEEDS_PR_REMOTE_URL = re.compile(r"(?:^|[/@])github\.com[:/]", re.IGNORECASE)
 NEEDS_PR_REASON = (
-    "review-needs-pr: this reviewer brief names no pull request. Open the draft pull request first and name it in "
-    "the reviewer brief (`PR #<n>`), so each round's review record can post. "
+    "review-needs-pr: this reviewer brief names no pull request. Name the pull request in the brief (`PR #<n>`; "
+    "open the draft pull request first), so each round's review record can post. For a read with no pull request, "
+    "spawn the Plan or Explore role. "
     "(decision pr-review-record, a lane posts the record after each round)"
 )
 
@@ -1358,8 +1361,8 @@ def _has_github_remote(folder: str) -> bool:
 
 def review_needs_pr_hit(tool: str, tool_input, cwd: str, agent: bool = False):
     """(reason, matched): the refusal when an orchestrator's Agent or Task spawn of a reviewer or design-reviewer
-    names no pull request in a brief that carries a review-round marker (BRIEF_MARKERS kind round), in a repo with a
-    github.com remote, else ("", ""). A brief with no round marker is not judged. A call with an agent_id
+    names no pull request, in a repo with a github.com remote, else ("", ""). A reviewer is judged with or without a
+    round marker (BRIEF_MARKERS kind round); a design-reviewer only with one. A call with an agent_id
     is an agent's and is not judged. No cwd, or a repo with no readable github remote, allows."""
     if agent or tool not in RECORD_SPAWN_TOOLS or not isinstance(tool_input, dict) or not cwd:
         return "", ""
@@ -1367,7 +1370,7 @@ def review_needs_pr_hit(tool: str, tool_input, cwd: str, agent: bool = False):
     if role not in RECORD_REVIEWER_ROLES:
         return "", ""
     prompt = tool_input.get("prompt")
-    if not any(kind == "round" for kind, _ in marker_hits(prompt)):
+    if role != "reviewer" and not any(kind == "round" for kind, _ in marker_hits(prompt)):
         return "", ""
     if isinstance(prompt, str) and NEEDS_PR_NAMED.search(prompt):
         return "", ""
