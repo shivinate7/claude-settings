@@ -350,8 +350,10 @@ def _dq_end(text: str, j: int, depth: int = 0) -> int:
         if text[j] == "\\":
             j += 2
         elif text[j] == "$" and text.startswith("(", j + 1):
-            end = _subst_end(text, j + 2, depth)
-            j = end + 1 if end >= 0 else j + 1
+            j = _subst_end(text, j + 2, depth)   # no mate for the body: no mate for the quote either
+            if j < 0:
+                return -1
+            j += 1
         else:
             j += 1
     return j if j < n else -1
@@ -404,9 +406,11 @@ def _expand(text: str, table: dict) -> str:
     return _VAR_USE.sub(lambda m: table.get(m.group(1) or m.group(2), m.group(0)), text)
 
 
-def _dq_text(text: str, table: dict) -> str:
+def _dq_text(text: str, table: dict, depth: int = 0) -> str:
     """Double-quoted text with each `$VAR` read. A `$(...)` or backtick body is a command, read on a copy
-    of the table so its assignments end with it."""
+    of the table so its assignments end with it. Past `_NEST_LIMIT` levels a body is plain text."""
+    if depth >= _NEST_LIMIT:
+        return _expand(text, table)
     out, i, start, n = [], 0, 0, len(text)
     while i < n:
         c = text[i]
@@ -424,24 +428,24 @@ def _dq_text(text: str, table: dict) -> str:
             i += 1
             continue
         out.append(_expand(text[start:i], table))
-        out.append(text[i:i + skip] + _resolve_into(text[i + skip:end], dict(table))[0] + text[end])
+        out.append(text[i:i + skip] + _resolve_into(text[i + skip:end], dict(table), depth + 1)[0] + text[end])
         i = start = end + 1
     out.append(_expand(text[start:], table))
     return "".join(out)
 
 
-def _rebuild(parts, table: dict, as_script: bool = False):
+def _rebuild(parts, table: dict, as_script: bool = False, depth: int = 0):
     """(the word's text with each `$VAR` outside single quotes read as its value, the table after it).
     `as_script` reads a double-quoted span as a command that runs here (`eval "D=x"`)."""
     out = []
     for kind, text in parts:
         if kind == "s":
             out.append("'" + text + "'")
-        elif kind == "d" and as_script:
-            text, table = _resolve_into(text, table)
+        elif kind == "d" and as_script and depth < _NEST_LIMIT:
+            text, table = _resolve_into(text, table, depth + 1)
             out.append('"' + text + '"')
         elif kind == "d":
-            out.append('"' + _dq_text(text, table) + '"')
+            out.append('"' + _dq_text(text, table, depth) + '"')
         else:
             out.append(_expand(text, table))
     return "".join(out), table
@@ -478,7 +482,7 @@ def _resolve_vars(cmd: str) -> str:
     return _resolve_into(cmd, {"HOME": "~"})[0]
 
 
-def _resolve_into(cmd: str, table: dict):
+def _resolve_into(cmd: str, table: dict, depth: int = 0):
     """(`cmd` with each `$VAR` read, the table after it): `_resolve_vars` from a given table."""
     out, stack = [], []   # stack: (table to restore where the group ends, glued to a `$`, closer)
     n, i = len(cmd), 0
@@ -547,7 +551,7 @@ def _resolve_into(cmd: str, table: dict):
                         else mode if mode == "eval" else "")
             elif mode == "unset" and re.fullmatch(r"\w+", word):
                 table.pop(word, None)
-            text, table = _rebuild(parts, table, mode == "eval")
+            text, table = _rebuild(parts, table, mode == "eval", depth)
             out.append(text)
             i = end
     return "".join(out), table
