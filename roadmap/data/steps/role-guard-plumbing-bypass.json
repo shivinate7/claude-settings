@@ -1,11 +1,11 @@
 {
   "title": "The role guards judge a git plumbing write that makes a commit holding paths outside the role",
   "why": "A lane refused by both role guards on a mixed merge built the merge commit from git objects and pushed it, so neither guard judged the paths it held.",
-  "note": "Coordinator, 04:12 CST Nov 9. Incident: lane verdict-format-line (#1913, session_013NEJL1BCgLVUACYU5ujv9A) was refused by the builder guard on test files and by the test-author guard on docs/records.md, then built the merge commit from a resolved index plus a file taken from main and pushed it. Fix: the builder-diff and test-author-scope rules in hooks/guard.py also cover commit-tree, update-index, write-tree, read-tree --index-output and similar writes that make a commit with paths outside the role, or those writes ask. The mixed merge itself is steps mixed-merge-resolver and mixed-merge-no-role (#1521). Unassigned; the coordinator routes it. Three more sightings (coordinator, 05:40 CST Nov 9): lane notes-fix-page built merge commits from git objects, mixing builder and test-author resolutions, on #1969 (9628a6d59), #2036 to #2428 (9b6266ac3) and #2139 to #2420 (a00202acb). The lane read the guard's refusal as a role split, not a ban on the result. Four PRs on Nov 9 with #1913. The PRs stand, with the bypass named in each body.",
+  "note": "Coordinator, 04:12 CST Nov 9. Incident: lane verdict-format-line (#1913, session_013NEJL1BCgLVUACYU5ujv9A) was refused by the builder guard on test files and by the test-author guard on docs/records.md, then built the merge commit from a resolved index plus a file taken from main and pushed it. Fix: the builder-diff and test-author-scope rules in hooks/guard.py also cover commit-tree, update-index, write-tree, read-tree --index-output and similar writes that make a commit with paths outside the role, or those writes ask. The mixed merge itself is steps mixed-merge-resolver and mixed-merge-no-role (#1521). Unassigned; the coordinator routes it. Three more sightings (coordinator, 05:40 CST Nov 9): lane notes-fix-page built merge commits from git objects, mixing builder and test-author resolutions, on #1969 (9628a6d59), #2036 to #2428 (9b6266ac3) and #2139 to #2420 (a00202acb). The lane read the guard's refusal as a role split, not a ban on the result. Four PRs on Nov 9 with #1913. The PRs stand, with the bypass named in each body. Doing in lane session_013NEJKyxaNeXMMuUruLyQ5T (coordinator, 05:43 CST Nov 9), started before batch 68 merges because of the incident count.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "",
-  "status": "todo",
+  "lane": "session_013NEJKyxaNeXMMuUruLyQ5T",
+  "status": "doing",
   "order": 895,
-  "updatedAt": "2026-11-09T05:42:00-06:00"
+  "updatedAt": "2026-11-09T05:43:00-06:00"
 }

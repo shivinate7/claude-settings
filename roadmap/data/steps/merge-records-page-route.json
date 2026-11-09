@@ -1,11 +1,11 @@
 {
   "title": "A test-author may commit a merge whose docs/records.md equals the merged base's page",
   "why": "When a lane merges main and its branch carries a docs/records.md row, no role can commit the merge: the records-page rule refuses the test-author, and builder-cannot-edit-tests refuses the builder.",
-  "note": "Lane verdict-format-line, 04:13 CST Nov 9. Incident: #1913 at 03:50 CST; the test-author was refused on both acts, which led to the plumbing-built commit in step role-guard-plumbing-bypass. #1521 changes only the role paths, not the records-page rule in hooks/guard.py (lane mixed-merge-no-role, 04:15 CST). Proposed fix: the records-page rule accepts a merge whose docs/records.md equals the merged base's blob exactly (the rule's own stated remedy), and the test-author may run `git checkout <base> -- docs/records.md` for that one path during a merge. Unassigned; the coordinator routes it.",
+  "note": "Lane verdict-format-line, 04:13 CST Nov 9. Incident: #1913 at 03:50 CST; the test-author was refused on both acts, which led to the plumbing-built commit in step role-guard-plumbing-bypass. #1521 changes only the role paths, not the records-page rule in hooks/guard.py (lane mixed-merge-no-role, 04:15 CST). Proposed fix: the records-page rule accepts a merge whose docs/records.md equals the merged base's blob exactly (the rule's own stated remedy), and the test-author may run `git checkout <base> -- docs/records.md` for that one path during a merge. Unassigned; the coordinator routes it. Doing in lane session_013NEJL3qKvwXBThPagV7fsa (coordinator, 05:43 CST Nov 9), started before batch 68 merges because of the incident count.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "",
-  "status": "todo",
+  "lane": "session_013NEJL3qKvwXBThPagV7fsa",
+  "status": "doing",
   "order": 896,
-  "updatedAt": "2026-11-09T04:16:00-06:00"
+  "updatedAt": "2026-11-09T05:43:00-06:00"
 }
