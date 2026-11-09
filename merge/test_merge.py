@@ -12198,6 +12198,17 @@ class MergeRoleCheck(CloudSession):
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(self.host.merged)
 
+    def test_a_review_record_confirm_with_no_role_posts_once_and_a_plain_confirm_is_still_refused(self):
+        # decision pr-review-record: the record's post needs no merge role, so a cloud session with no role file posts it once.
+        # The same case keeps the control: the plain merge form with no role is still refused before any host read or lock.
+        self.assertFalse(os.path.exists(self.role_file), "the case needs no role file")
+        rc, out, err = self.run_main("7", "--review-record", "--head", self.head(), "--kind", "normal", "--guard", "no",
+                                     "--round", "1:reviewer:haiku:PASS", "--confirm")
+        self.assertEqual(rc, 0, "the review record was refused with no merge role:\n" + out + err)
+        self.assertEqual(len(self.host.posted_comments), 1, "the review record was not posted once:\n" + out + err)
+        self.assertEqual(self.host.posted_comments[0][0], 7)
+        self.assert_refused()
+
     # ---- not checked: these pass before the role check exists, and stop a check that is too wide
     def test_a_preview_in_the_cloud_needs_no_role(self):
         for role in (None, "lane"):
