@@ -4717,7 +4717,8 @@ GIT_PUSH_BODY_OPENERS = {
 }
 # The reason each kind of `git_push_after_check_hit` prints: a `;` or newline join, a pipe that hides its check, a
 # pipe joined to the push by `;` or a newline, a `||` that runs the push on a failed check, an `|| exit` that reads
-# another command's status, and a body that runs on a failed test, named by its opener (`else`, `until`).
+# another command's status, and a body that runs on a failed test, named by its opener (`else`, `until`,
+# `elif`).
 GIT_PUSH_REASONS = {"push": GIT_PUSH_AFTER_CHECK_REASON, "pipe": GIT_PUSH_PIPE_REASON,
                     "pipe-join": GIT_PUSH_PIPE_JOIN_REASON, "or": GIT_PUSH_OR_REASON, "exit": GIT_PUSH_EXIT_REASON,
                     **{"body-" + opener: GIT_PUSH_BODY_REASON % words
