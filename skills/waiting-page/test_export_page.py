@@ -345,6 +345,26 @@ RED = [
      "postgres://admin:" + SUP_PASSWORD + "@$HOST/app", SUP_PASSWORD),
     ("postgres URL with a literal password and a braced shell host",
      "postgres://admin:" + SUP_PASSWORD + "@${HOST}/app", SUP_PASSWORD),
+    # A literal password may hold a code character, one of + | ( ) [ ] { }, and the host after its @ may be code, a quote,
+    # a brace or a bracket. The password is still a literal before the @, so the URL carries a credential.
+    ("concatenated DSN with a plus in the literal password, then @ and a quote",
+     'dsn = "postgres://admin:' + "Pa+ss" + '@" + host', "Pa+ss"),
+    ("postgres URL with a plus in the literal password and a braced template host",
+     "postgres://admin:" + "Pa+ss" + "@{db_host}/app", "Pa+ss"),
+    ("https URL with two bars in the literal password, then @ and a quote",
+     "https://u:" + "p||" + '@"+h', "p||"),
+    ("https URL with two bars in the literal password and a braced host",
+     "https://u:" + "p||" + "@{h}", "p||"),
+    ("postgres URL with parens in the literal password and a braced host",
+     "postgres://admin:" + "p(w)" + "@{host}/app", "p(w)"),
+    # A templated or shell user does not make the password a placeholder. The literal after the user's colon is the credential,
+    # whatever the host is: a dotless host, a templated host or a braced one.
+    ("postgres URL with a templated user, a literal password and a dotless host",
+     "postgres://{user}:" + SUP_PASSWORD + "@localhost:5432/app", SUP_PASSWORD),
+    ("f-string postgres URL with a templated user, a literal password and a templated host",
+     'f"postgres://{user}:' + SUP_PASSWORD + '@{host}/app"', SUP_PASSWORD),
+    ("postgres URL with a shell-variable user, a literal password and a braced template host",
+     "postgres://${USER}:" + SUP_PASSWORD + "@{db_host}/app", SUP_PASSWORD),
 ]
 # Dashed and short vendor-style keys, each set in four credential-name carriers. Each value is joined from parts, so no
 # key-looking literal sits whole in the source. A hyphen-joined value of letters and digits is a key shape, so the
