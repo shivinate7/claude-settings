@@ -7625,6 +7625,26 @@ sh("push: single-quoted python -c, sys.stdout.write prints a forced push, allows
    "python3 -c 'import sys; sys.stdout.write(\"" + VCS + " push -f origin x\")'", "allow", cwd=PUSHFEAT)
 sh("push: nested quote, sys.stdout.write prints a forced push, allows",
    r'python3 -c "import sys; sys.stdout.write(\"' + VCS + r' push -f origin x\")"', "allow", cwd=PUSHFEAT)
+# PRINTER AROUND A NON-FORMATTER CALL. A printer runs its string only when the call that holds the string is a
+# run call. guard.check, len, json_encode and path.basename are not run calls, so a forced push in their string
+# is data and allows.
+sh("push: single-quoted python -c, print of guard.check of a forced push, allows",
+   "python3 -c 'import guard; print(guard.check(\"" + VCS + " push -f origin x\"))'", "allow", cwd=PUSHFEAT)
+sh("push: nested quote, print of guard.check of a forced push, allows",
+   r'python3 -c "import guard; print(guard.check(\"' + VCS + r' push -f origin x\"))"', "allow", cwd=PUSHFEAT)
+sh("push: single-quoted python -c, print of len of a forced push, allows",
+   "python3 -c 'print(len(\"" + VCS + " push -f origin x\"))'", "allow", cwd=PUSHFEAT)
+sh("push: single-quoted php -r, echo of json_encode of a forced push, allows",
+   "php -r 'echo json_encode(\"" + VCS + " push -f origin x\");'", "allow", cwd=PUSHFEAT)
+sh("push: single-quoted node -e, console.log of path.basename of a forced push, allows",
+   "node -e 'console.log(path.basename(\"" + VCS + " push -f origin x\"))'", "allow", cwd=PUSHFEAT)
+# PINS, GREEN NOW. A run call under a wrapper still runs: os.system under str(), and check_output under print.
+sh("push: single-quoted python -c, os.system of str of a forced push, denies",
+   "python3 -c 'import os; os.system(str(\"" + VCS + " push -f origin x\"))'",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: single-quoted python -c, print of check_output of a forced push, denies",
+   "python3 -c 'import subprocess; print(subprocess.check_output(\"" + VCS + " push -f origin x\", shell=True))'",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
 # ARGV LIST RUN. subprocess.run and check_call run the words of their list, so a forced push written as a list
 # runs, and denies the way a plain force-push does.
 sh("push: single-quoted python -c, subprocess.run takes a list of a forced push, denies",
@@ -7636,6 +7656,28 @@ sh("push: single-quoted python -c, subprocess.check_call takes a list of a force
 sh("push: nested quote, subprocess.run takes a list of a forced push, denies",
    r'python3 -c "import subprocess; subprocess.run([\"' + VCS + r'\",\"push\",\"-f\",\"origin\",\"x\"])"',
    "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# ARGV LIST, A COMMAND-LINE ELEMENT. ssh, su -c and watch run a list element as a command line, so a forced push
+# in that element runs and denies the way a plain force-push does.
+sh("push: python -c, ssh runs a list element that is a forced push, denies",
+   r'python3 -c "import subprocess; subprocess.run([\"ssh\",\"host\",\"' + VCS + r' push -f origin x\"])"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: python -c, ssh runs a list element that is a cd and a forced push, denies",
+   r'python3 -c "import subprocess; subprocess.run([\"ssh\",\"host\",\"cd /srv && ' + VCS + r' push -f origin x\"])"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: python -c, su -c runs a list element that is a forced push, denies",
+   r'python3 -c "import subprocess; subprocess.run([\"su\",\"-c\",\"' + VCS + r' push -f origin x\",\"user\"])"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: python -c, watch runs a list element that is a forced push, denies",
+   r'python3 -c "import subprocess; subprocess.run([\"watch\",\"' + VCS + r' push -f origin x\"])"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# PINS, GREEN NOW. A list of git status, echo of a forced push, and a git commit with one in its message: all allow.
+sh("push: python -c, subprocess.run takes git status as a list, allows (control)",
+   "python3 -c 'import subprocess; subprocess.run([\"" + VCS + "\",\"status\"])'", "allow", cwd=PUSHFEAT)
+sh("push: python -c, subprocess.run takes echo of a forced push as a list, allows (control)",
+   "python3 -c 'import subprocess; subprocess.run([\"echo\",\"" + VCS + " push -f origin x\"])'", "allow", cwd=PUSHFEAT)
+sh("push: python -c, subprocess.run takes git commit with a forced push in its message, allows (control)",
+   "python3 -c 'import subprocess; subprocess.run([\"" + VCS + "\",\"commit\",\"-m\",\"fix; " + VCS + " push -f origin x\"])'",
+   "allow", cwd=PUSHFEAT)
 # CONTROL. Printed text with no escaped quote allows.
 sh("push: python -c prints hello, allows (control)", r'python3 -c "print(\"hello\")"', "allow", cwd=PUSHFEAT)
 # ARGV CALLS. A Deno.Command call names its program and its arguments as separate strings, and the pairs
