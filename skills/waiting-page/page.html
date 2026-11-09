@@ -972,7 +972,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 
 <!-- The one list of top-level item fields. The page warns on a field outside it, and the guard (rule item-field-rendered) refuses a write of one.
      Add a field here when the page draws it. A key inside options or steps is not listed. -->
-<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits"]</script>
+<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits", "repo", "checked_with"]</script>
 
 <!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The page writer replaces it on each publish
      (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
@@ -3068,8 +3068,8 @@ const reason = (r) => { const m = /^unknown \(([\s\S]*)\)$/.exec(String(r == nul
 const segs = (c, n) => ["done", "act", "stl", "pzd", "blk"].map((k) => `<i class="${k}"></i>`.repeat(c[k])).join("") + "<i></i>".repeat(Math.max(0, n - c.done - c.act - c.stl - c.pzd - c.blk)) + (n ? "" : "<i></i>");
 // The bar's cell counts for a phase's steps, one per cell kind. shownState decides in progress, stalled and paused; the tallies read status for done and blocked.
 const tally = (ss) => ({ done: ss.filter((s) => s.status === "done").length, act: ss.filter((s) => shownState(s) === "active").length, stl: ss.filter((s) => shownState(s) === "stalled").length, pzd: ss.filter((s) => shownState(s) === "paused").length, blk: ss.filter((s) => s.status === "blocked").length });
-// ", 3 stalled, 1 paused, 1 blocked", with a kind left out when it has no steps.
-const stallWords = (c) => (c.stl ? ", " + c.stl + " stalled" : "") + (c.pzd ? ", " + c.pzd + " paused" : "") + (c.blk ? ", " + c.blk + " blocked" : "");
+// ", 2 in progress, 3 stalled, 1 paused, 1 blocked", with a kind left out when it has no steps.
+const stallWords = (c) => (c.act ? ", " + c.act + " in progress" : "") + (c.stl ? ", " + c.stl + " stalled" : "") + (c.pzd ? ", " + c.pzd + " paused" : "") + (c.blk ? ", " + c.blk + " blocked" : "");
 
 /* Status marks: shape and colour together, never colour alone. */
 const GLY = {

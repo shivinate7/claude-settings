@@ -3,6 +3,7 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import bisect
 import os
 import re
 import stat
@@ -11,7 +12,7 @@ import guard_core
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
     _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
-    _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
+    _SHELLS, _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
     is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
 
@@ -121,9 +122,414 @@ def push_target(segment: str, cmd: str, cwd: str):
     return where, overrides
 
 
-def push_text(segment: str) -> str:
-    """The segment with quoted multi-word text blanked: a quoted `--force` is text, not a push."""
+def _span_end(text: str, start: int, escapes: bool) -> int:
+    """The index of the quote that closes the one at `start`, or -1 when none does. Inside double
+    quotes (and `$'..'`) a backslash escapes the next character, so `\\"` closes nothing."""
+    quote, index = text[start], start + 1
+    while index < len(text):
+        if escapes and text[index] == "\\":
+            index += 2
+        elif text[index] == quote:
+            return index
+        else:
+            index += 1
+    return -1
+
+
+# The outer call hands its quoted script to a shell that runs it: `bash -c "..."`, `eval "..."`,
+# `ssh host "..."`.
+SCRIPT_RUNNER = re.compile(
+    r"(?:^|[\s;&|(])(?:(?:(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*-\w*c)|eval|ssh(?:\s+[^\s;&|]+)*)\s*$")
+# ... or to an interpreter that runs it: `python3 -c "..."`, `node -e "..."`, `perl -e "..."`,
+# `php -r "..."`, `deno eval -A "..."`. Deno's flags sit between `eval` and the script: `-A`,
+# `--allow-run=git`, and a flag with its value as the next word (`--ext ts`, `--config x.json`);
+# SCRIPT_RUNNER's `eval` reads only the bare `deno eval`. A flag starts with `-` and a value word
+# never does, so each word has one parse and a failed match stays linear. The interpreter may be
+# named by a path (`.venv/bin/python`, `/usr/bin/python3`), by a quoted path with a space in it, or by
+# a variable (`$PYTHON`, `${VENV_PYTHON}`), and python takes `-W` and `-X` with a value word ahead of
+# `-c` (`python3 -W ignore -c`). The word starts at a word start; `_interpreter` then checks that it is
+# the command (see there). `php -r` and `deno eval` are checked against their own name there too.
+_INTERPRETER_NAME = r"python[\d.]*|pypy[\d.]*|node(?:js)?|ruby|perl|php|deno|\$\{?\w*PYTHON\w*\}?"
+INTERPRETER_RUNNER = re.compile(
+    r"(?<![^\s;&|(`])(?:\"(?:[^\"]*/)?(?P<double>" + _INTERPRETER_NAME + r")\""
+    r"|'(?:[^']*/)?(?P<single>" + _INTERPRETER_NAME + r")'"
+    r"|(?:[^\s;&|()\"'`]*/)?(?P<bare>" + _INTERPRETER_NAME + r"))"
+    r"(?:\s+(?:-\w+\s+|-[WX]\s+[^\s\"'-]\S*\s+)*-\w*(?P<flag>[cer])"
+    r"|\s+(?:-\w+\s+)*(?P<eval>eval)(?:\s+-{1,2}\w[\w-]*(?:=\S*)?(?:\s+[^\s\"'-]\S*)?)*)\s*$")
+# Where a command starts: the text after the last of these is the command's own words.
+_COMMAND_START = re.compile(r"[;&|(\n`][^;&|(\n`]*$")
+# How far back a runner is read ahead of a quote, so a long segment is read in linear time.
+RUNNER_REACH = 512
+# The text search tools: an interpreter-named word in their arguments is a path or a pattern.
+TEXT_SEARCH_TOOLS = {"grep", "egrep", "fgrep", "zgrep", "rg", "ag", "ack", "ugrep"}
+# The text between two strings of one argv call. Each part starts with its own character, so a
+# failed fullmatch takes linear time.
+ARGV_GAP = re.compile(r"[\s,]*(?:\{\s*args\s*:\s*\[[\s,]*)?")
+# One argument as one shell word: each character the shell or shlex splits on is
+# backslash-escaped, so an argument with a space stays one word. The word holds no quote:
+# PUSH_QUOTED reads raw quotes and ignores backslashes, so a quote here could pair with a
+# quote in a neighbouring word and blank the words between.
+ARGV_UNSAFE = re.compile(r"[^\w@%+=:,./-]")
+# The names of a call that runs its string argument as a command, even inside a print: the one list
+# of run calls. RUN_NAME_ANYWHERE is read in any quoted text. RUN_NAME adds the bare names a script
+# imports (`check_output`, `shell_exec`, `spawn`), which in a commit message or an echo are words.
+RUN_NAME_ANYWHERE = (r"\bos\.(?:system|popen|exec\w*|spawn\w*)|\bsubprocess\.\w+|\bPopen|\bexec\w*|\bsystem"
+                     r"|\bpopen")
+RUN_NAME = RUN_NAME_ANYWHERE + r"|\bcheck_(?:output|call)|\bshell_exec|\bspawn\w*"
+RUN_NAME_END = re.compile(r"(?:" + RUN_NAME + r")$")
+RUN_CALL = r"(?:" + RUN_NAME + r")\s*\(\s*"
+CALL_RUNNER = re.compile(RUN_CALL + r"\[?\s*$")
+CALL_RUNNER_ANYWHERE = re.compile(r"(?:" + RUN_NAME_ANYWHERE + r")\s*\(\s*\[?\s*$")
+# An argv call: `new Deno.Command("git", {args: ["push", "-f"]})` and a run call with a list
+# (`subprocess.run(["git", "push", "-f"])`) name the program and its arguments as separate strings,
+# so the pairs of one call are read as one command line.
+ARGV_CALL = re.compile(r"\bDeno\.Command\s*\(\s*$|" + RUN_CALL + r"\[\s*$")
+# The printers: the one place that names the calls and commands that show their string and run
+# nothing. A pair inside a runner script is a command unless a printer holds it.
+PRINT_NAME = (r"print\w*|console\.\w+|puts|say|logger\.\w+|System\.out\.print\w*"
+              r"|sys\.std(?:out|err)\.write|Write-(?:Host|Output)")
+PRINT_CALL_NAME = re.compile(r"\b(?:" + PRINT_NAME + r")$")
+PRINT_COMMAND = re.compile(r"[\s\"'(]*(?:(?:sudo|command|builtin)\s+)?(?:echo|printf|print|puts)\b")
+# The call name that ends the text ahead of an open `(`. Words that take a `(` and call nothing
+# (`if (`, `return (`) are no call.
+CALL_NAME = re.compile(r"([\w.-]+)\s*$")
+NOT_A_CALL = {"if", "while", "for", "switch", "return", "and", "or", "not", "in", "is", "else", "elif",
+              "await", "yield", "do"}
+STATEMENT_END = re.compile(r"[;&|\n]")
+# What a pipe feeds: a shell, which runs the printed text as a script.
+PIPE_INTO_SHELL = re.compile(
+    r"\s*(?:(?:sudo|exec|env)\s+)?(?:[^\s|;&]*/)?(?:" + _SHELLS + r")(?![\w.-])")
+
+
+def _argv_word(arg: str) -> str:
+    """One argument as one word of a command line (see ARGV_UNSAFE). Its quote characters are
+    dropped, as _push_parse drops them from every push argument. An argument left empty is an
+    escaped space, since the shell has no empty word without quotes. This is a bandaid: the push
+    reader sees a one-space word, which keeps its place, so the words after it keep theirs."""
+    arg = arg.replace("'", "").replace('"', "")
+    escaped = ARGV_UNSAFE.sub(lambda m: "\\ " if m.group() == "\n" else "\\" + m.group(), arg)
+    return escaped or "\\ "
+
+
+def _interpreter(text: str, end: int = -1):
+    """The name of the interpreter whose script starts at `end` in `text` (`python3`, `node`, `$PYTHON`),
+    or None when no interpreter runner ends there. The interpreter is a runner where the shell runs it,
+    after any assignments, keywords and wrappers that resolve_command skips (`FOO=1 sudo -u bob python3`).
+    Words the shell cannot split are read as a runner."""
+    end = len(text) if end < 0 else end
+    reach = max(0, end - RUNNER_REACH)
+    match = INTERPRETER_RUNNER.search(text, reach, end)
+    if match is None:
+        return None
+    name = match.group("double") or match.group("single") or match.group("bare")
+    if (match.group("flag") == "r" and name != "php") or (match.group("eval") and name != "deno"):
+        return None
+    start = _COMMAND_START.search(text, reach, match.start())
+    words = text[start.start() + 1 if start else reach:match.start()]
+    tokens = segment_tokens(words) if words.strip() else []
+    if tokens is None or start is None and reach > 0:
+        return name
+    at = resolve_command(tokens + ["interpreter"])
+    if at == len(tokens):
+        return name
+    # BANDAID: a launcher runs the interpreter too (`uv run python`, `strace -f python3`, `find -exec
+    # python3`), and no list names them all, so the interpreter outside command position is a runner
+    # unless the command is a text search tool, whose argument (`grep -rn src/python -e`) is a path.
+    program = basename(tokens[at]) if at is not None else ""
+    return None if program in TEXT_SEARCH_TOOLS else name
+
+
+def _handed_on(words) -> list:
+    """Every command line a list hands on, however deep: `sh -c` inside `docker exec` inside `flock`. Each
+    text that inner_commands returns is read again, one segment at a time, until no new text turns up.
+    A text already read is skipped, so the walk ends."""
+    found, queue = [], [words]
+    while queue:
+        for text in inner_commands(queue.pop()):
+            if text not in found:
+                found.append(text)
+                queue.extend(tokens for part in split_segments(text) if (tokens := segment_tokens(part)))
+    return found
+
+
+BRACKET = "["   # the calls entry of an open list or block
+
+
+class _Statement:
+    """The statement a script walk is in: where it starts and which calls are open in it. A pair is
+    held as printed text when a printer holds it: the statement starts with a printer command
+    (`echo`, `printf`), or an open call is a printer (`print(`, `console.log(`). Inside a printer a
+    pair runs only when a run call (RUN_NAME) sits between it and the printer (`echo shell_exec(`,
+    `print(check_output(`); any other call (`print(len(`, `echo json_encode(`) prints its result.
+    With no printer, every pair runs, whatever call holds it."""
+
+    def __init__(self, body: str, first: int = 0, quotes=(), hash_comments: bool = True, brackets: bool = False):
+        self.body, self.start, self.calls, self.command = body, 0, [], None
+        self.first = first     # where the script's text starts: a span's own quote sits ahead of it
+        self.comment_end = 0   # a `#` comment runs to here: its text opens no call and ends no statement
+        # The script's other string quotes, as they sit in its text (`'`, `\\"`, a backtick): inside one,
+        # `#`, `;` and brackets are text. A `'` or `"` string ends at its line's end, so a lone apostrophe
+        # hides no later line; a template literal may span lines.
+        self.quotes, self.quote = quotes, ""
+        self.hash_comments = hash_comments   # False for a language that reads `#` as text (node, deno)
+        self.brackets = brackets   # `[` and `{` open a BRACKET entry, so a list element is no call argument
+
+    def advance(self, index: int, width: int = 1):
+        """Read the unquoted text at `index`, `width` characters (2 for a backslash pair): a statement
+        end clears the state, a `(` opens a call or a group, a `)` closes one."""
+        if index < self.comment_end:
+            return
+        token = self.body[index:index + width]
+        if self.quote:
+            if token == self.quote or (token == "\n" and not self.quote.endswith("`")):
+                self.quote = ""
+            return
+        if token in self.quotes:
+            self.quote = token
+            return
+        if width > 1:
+            return
+        char = token
+        if char == "#" and self.hash_comments and (index == self.first or self.body[index - 1] in " \t\n;|&("):
+            end = self.body.find("\n", index)
+            self.comment_end = len(self.body) if end < 0 else end
+            return
+        if char == "\n" and any(name and name != BRACKET for name in self.calls):
+            return   # a call split over lines (`print(` and its string) is still one statement
+        if char in ";&|\n":
+            self.start, self.calls, self.command = index + 1, [], None
+        elif char == "(":
+            name = CALL_NAME.search(self.body, max(0, index - 48), index)
+            name = name.group(1) if name and name.group(1) not in NOT_A_CALL else ""
+            self.calls.append(name)
+        elif char == ")":
+            while self.calls and self.calls[-1] == BRACKET:
+                self.calls.pop()
+            if self.calls:
+                self.calls.pop()
+        elif self.brackets and char in "[{":
+            self.calls.append(BRACKET)
+        elif self.brackets and char in "]}" and self.calls and self.calls[-1] == BRACKET:
+            self.calls.pop()
+
+    def runs(self) -> bool:
+        """True when a run call (RUN_NAME) is open: the pair at the cursor is its argument or inside one."""
+        return any(RUN_NAME_END.search(name) for name in self.calls)
+
+    def printed(self, index: int) -> bool:
+        # A run call named some other way (`sh = os.system; print(sh(...))`) reads as printed: only
+        # a writer who means to hide the call takes that shape.
+        for name in reversed(self.calls):
+            if RUN_NAME_END.search(name):
+                return False
+            if PRINT_CALL_NAME.search(name):
+                return True
+        if self.command is None:
+            self.command = PRINT_COMMAND.match(self.body, self.start, index) is not None
+        return self.command
+
+
+# The other string quotes of a script, by the quote its pairs use (see _Statement).
+OTHER_QUOTES = {'\\"': ("'", "\\`", "`"), '"': ("'", "`"), "'": ('\\"', "\\`", "`")}
+
+
+def _nested_commands(span: str, before: str = "", mark: str = '\\"', held_only: bool = False,
+                     hash_comments=None) -> str:
+    """A quoted span that holds quote marks is a script handed to an interpreter
+    (`python3 -c "os.system(\\"git push\\")"`, `python3 -c 'os.system("git push")'`). `mark` is the
+    pair's quote as it sits in the span: `\\"` in a double-quoted span, `"` in a single-quoted one. In a
+    runner script (`bash -c`, `eval`, `ssh`, `python -c`, `node -e`) each pair is a command unless a
+    printer holds it (`print`, `echo`, `printf`, `console.log`: see _Statement). The call may be named
+    any way: an alias, a from-import, `shlex.split`, a variable. Printed text that a pipe feeds into a
+    shell (`echo \\"git push\\" | sh`) is a script and runs. A CALL_RUNNER call runs its pair even inside
+    a print. Outside a runner script only a CALL_RUNNER pair is read (`before` is the segment text
+    ahead of the span). Give each command its own line, so the words that follow it in the script
+    (`print(\\"+1\\")`) are not its arguments. `held_only` reads a pair as a command only when a run call
+    holds it or a pipe feeds it to a shell: the single-quoted strings of a double-quoted script are
+    assigned, written and asserted as often as they are run. `hash_comments` says whether `#` opens a
+    comment; by default the runner ahead of the span tells: a shell, python, ruby, perl or php."""
+    lines, piece, inner, run, index = ["\n"], [], False, False, 1
+    words, argv, closed = [], False, 0
+    shell = SCRIPT_RUNNER.search(before) is not None
+    language = "" if shell else _interpreter(before)
+    script = shell or language is not None
+    body = span[:-1]
+    if hash_comments is None:
+        # Node and deno read `#` as text, so for them a ` #` hides nothing.
+        hash_comments = basename(language or "") not in ("node", "nodejs", "deno")
+    statement = _Statement(body, 1, OTHER_QUOTES[mark], hash_comments)
+    # Each statement end, found once: a pair is fed to a shell when its statement ends in a pipe to one.
+    ends = [match.start() for match in STATEMENT_END.finditer(body)] if script else []
+    mark_width = len(mark)
+
+    def emit():
+        nonlocal words
+        if words:
+            # A list whose program runs an element as a command line (`sh -c`, `ssh`, `su -c`,
+            # `watch`: inner_commands) hands that line on as it stands. Any other element is one word.
+            handed = _handed_on(words)
+            # A list of one string runs as a command line under shell=True, so it is read as one.
+            lines.append("".join(text + "\n" for text in handed) if handed else words[0] + "\n"
+                         if len(words) == 1 else " ".join(map(_argv_word, words)) + "\n")
+            words = []
+
+    def piped_into_shell(close: int) -> bool:
+        """True when the statement of the pair that closes at `close` ends in a pipe into a shell."""
+        at = bisect.bisect_left(ends, close + mark_width)
+        return (at < len(ends) and body[ends[at]] == "|"
+                and PIPE_INTO_SHELL.match(body, ends[at] + 1) is not None)
+
+    while index < len(body):
+        if not inner and index < statement.comment_end:
+            index += 1
+            continue
+        if body.startswith(mark, index):
+            if inner:
+                if run:
+                    # an argv call's pairs gather as words; any other pair is a line of its own
+                    (words if argv else lines).append("".join(piece) if argv else "".join(piece) + "\n")
+                piece = []
+                closed = index + mark_width
+            else:
+                ahead = body[max(0, index - 256):index]
+                if not (argv and ARGV_GAP.fullmatch(body[closed:index])):
+                    emit()
+                    run = (CALL_RUNNER if script else CALL_RUNNER_ANYWHERE).search(ahead) is not None
+                    if script and not run:
+                        close = body.find(mark, index + mark_width)
+                        run = (statement.runs() if held_only else not statement.printed(index)) or (
+                            close >= 0 and piped_into_shell(close))
+                    argv = run and script and ARGV_CALL.search(ahead) is not None
+            inner = not inner
+            width = mark_width
+        else:
+            width = 2 if body[index] == "\\" else 1
+            if inner:
+                if run:
+                    piece.append(body[index:index + width])
+            else:
+                statement.advance(index, width)
+        index += width
+    if inner and run:
+        (words if argv else lines).append("".join(piece) if argv else "".join(piece) + "\n")
+    emit()
+    return "".join(lines)
+
+
+def _joined_splices(segment: str, start: int, end: int):
+    """(span, end) of the single-quoted span at `start`, with each `'\\''` splice that follows it joined in.
+    The shell closes the quote, writes one apostrophe and reopens it, so the pieces are one script and
+    the splice is an apostrophe in its text. `end` is where the last piece closes."""
+    pieces = [segment[start + 1:end]]
+    while segment.startswith("\\''", end + 1):
+        more = _span_end(segment, end + 3, False)
+        if more < 0:
+            break
+        pieces.append(segment[end + 4:more])
+        end = more
+    return "'" + "'".join(pieces) + "'", end
+
+
+_RUN_LINES = {}   # script -> the lines that begin inside an open run call, for the life of one hook process
+
+
+def _lines_in_run_call(script: str):
+    """The stripped text of each line of `script` that begins inside an open run call (`os.system(` with
+    its string on the next line). A list (`items = [`) and any other call (`print(`) hold text, and so
+    does a list inside a run call (`subprocess.run([`): its element is no command line. The walk skips
+    strings, template literals and `#` comments, and reads the script once however many lines ask."""
+    found = _RUN_LINES.get(script)
+    if found is None:
+        found, statement, index, length = set(), _Statement(script, brackets=True), 0, len(script)
+        while index < length:
+            char = script[index]
+            if char in "'\"`" and index >= statement.comment_end:
+                end = _span_end(script, index, True)
+                index = end + 1 if end >= 0 else index + 1
+                continue
+            statement.advance(index)
+            index += 1
+            if char == "\n" and index > statement.comment_end and statement.calls \
+                    and RUN_NAME_END.search(statement.calls[-1]):
+                end = script.find("\n", index)
+                found.add(script[index:length if end < 0 else end].strip())
+        _RUN_LINES[script] = found
+    return found
+
+
+def _push_scan(segment: str, script: str = "") -> str:
+    """The segment read the way the shell reads its quotes, comments and escapes, so what the
+    quote pattern sees is a whole span. A backslash pair is text (`it\\'s` opens no quote). A
+    `#` that starts a word is a comment to the line's end. A quote the shell leaves open hides
+    the rest of the line from it, so that rest, when it holds a space, is blanked. A
+    double-quoted span with escaped quotes is read by _nested_commands. PowerShell escapes
+    with a backtick, and a segment of it is left to the pattern. `script` is the text the segment is
+    a line of, which tells a line that holds the string of a split run call from one that holds text."""
+    if is_powershell(segment):
+        return segment
+    out, index, length = [], 0, len(segment)
+    while index < length:
+        char = segment[index]
+        if char == "\\":
+            out.append(segment[index:index + 2])
+            index += 2
+        elif char == "#" and (index == 0 or segment[index - 1] in " \t\n;|&("):
+            while index < length and segment[index] != "\n":
+                index += 1
+        elif char in "'\"":
+            end = _span_end(segment, index, char == '"' or segment[index - 1:index] == "$")
+            if end < 0:
+                tail = segment[index + 1:]
+                out.append(" " if re.search(r"\s", tail) else char + tail)
+                index = length
+                continue
+            span = segment[index:end + 1]
+            ahead = segment[max(0, index - 512):index]
+            if char == '"' and '\\"' in span:
+                span = _nested_commands(span, segment[:index])
+            elif char == "'" and _interpreter(segment, index) and '"' in (
+                    joined := _joined_splices(segment, index, end))[0]:
+                # The runner's script sits in single quotes, so its own strings are plain pairs.
+                span, end = _nested_commands(joined[0], segment[:index], '"'), joined[1]
+            elif char == '"' and "'" in span and _interpreter(segment, index):
+                # The runner's script sits in double quotes, so its own strings are single-quoted pairs.
+                span = _nested_commands(span, segment[:index], "'", True)
+            elif char == '"' and ARGV_CALL.search(ahead[-256:]):
+                # An argv call on a heredoc line (see below): the rest of the line is the call's
+                # arguments, so its pairs join into one command line as in a deno eval script. The
+                # heredoc's language is unknown, so `#` keeps its comment reading.
+                out.append(_nested_commands("'" + segment[max(0, index - 256):] + "'", "deno eval ", '"',
+                                            hash_comments=True))
+                break
+            elif CALL_RUNNER.search(ahead[-256:]) or (
+                    not (ahead.strip() or segment[end + 1:].strip()) and segment.strip() in _lines_in_run_call(script)):
+                # BANDAID: an interpreter heredoc body reaches this reader a line at a time, with
+                # no runner word ahead of it. A string handed to a call that runs it is a command
+                # wherever the call stands, and so is a line that is one string alone when a run
+                # call is open ahead of it in `script` (the string of a call split over lines).
+                # No shell line has either shape.
+                span = "\n" + span[1:-1] + "\n"
+            out.append(span)
+            index = end + 1
+        else:
+            out.append(char)
+            index += 1
+    return "".join(out)
+
+
+def push_text(segment: str, script: str = "") -> str:
+    """The segment with quoted multi-word text blanked: a quoted `--force` is text, not a push.
+    A script handed to an interpreter in a string with escaped quotes keeps its commands, one
+    to a line; push_calls reads them line by line."""
+    segment = _push_scan(segment, script)
     return PUSH_QUOTED.sub(" ", segment)
+
+
+def push_calls(segment: str, script: str = ""):
+    """(subcommand, arguments) of each `git` call in the live text of one segment: the one
+    reader of git calls for a push. Each line of push_text is its own command."""
+    for line in push_text(segment, script).split("\n"):
+        yield from guard_core.git_calls(line)
 
 
 def _push_parse(args):
@@ -696,13 +1102,16 @@ def _git_subcommands(words):
     return found
 
 
-def _command_hit(segment: str, names, judge, raw=None, by_word=False) -> str:
+def _command_hit(segment: str, names, judge, raw=None, by_word=False, flagged=False) -> str:
     """The first text `judge` returns for the arguments of a command named in `names`, in one parsed
     segment, else ''. The command word sits behind its wrappers or a
     subshell, or inside the script a shell, `eval` or `ssh` hands on. The one reader of these forms.
     A group's closing `)` is no part of the last argument. A segment shlex cannot parse is read as
     raw text with the pattern `raw`, when there is one. With `by_word`, `judge` also gets the
-    command word it judges."""
+    command word it judges. With `flagged`, `judge` is known to answer '' for arguments that hold no
+    word starting with `-` or `/`, so a command word with no such word after it is not judged: a
+    chain of command words (`echo rm rm rm ...`) then costs one pass, not one pass per word. This is a
+    bandaid: a chain with a flag at its end is still judged word by word."""
     tokens = segment_tokens(segment)
     if tokens is None:
         found = raw.search(segment) if raw else None
@@ -721,17 +1130,19 @@ def _command_hit(segment: str, names, judge, raw=None, by_word=False) -> str:
                 if found:
                     return found
     words, bare = bare_words(segment)
+    last_flag = max((i for i, w in enumerate(words) if w[:1] in ("-", "/")), default=-1) if flagged else len(words)
     for at in sorted(bare - _git_subcommands(words)):
         opened = SUBST_OPEN.match(words[at])
         word = words[at][opened.end():] if opened else words[at]
+        if basename(word) not in names or at >= last_flag:
+            continue   # reading the group only for a named command keeps the loop linear in the words
         args = _in_group(words[at + 1:], bool(opened) and opened.group(1) == "`")
-        found = basename(word) in names and (
-            judge(args, basename(word)) if by_word else judge(args))
+        found = judge(args, basename(word)) if by_word else judge(args)
         if found:
             return found
     for script in inner_commands(tokens):
         for inner in split_segments(script):
-            found = _command_hit(inner, names, judge, raw, by_word)
+            found = _command_hit(inner, names, judge, raw, by_word, flagged)
             if found:
                 return found
     return ""
@@ -745,7 +1156,7 @@ def _rm_wide_text(args) -> str:
 def rm_delete_hit(segment: str) -> str:
     """Return the matched text when one segment runs `rm -rf` at a root, a home, the working
     directory or a glob, else ''. A segment shlex cannot parse is read as raw text."""
-    return _command_hit(segment, ("rm",), _rm_wide_text, RM_RAW)
+    return _command_hit(segment, ("rm",), _rm_wide_text, RM_RAW, flagged=True)
 
 
 # ------------------------------------------------------------ `.`, a parent, the working folder
@@ -845,7 +1256,7 @@ def parent_delete_hit(segments, number: int, cwd: str):
     segment = segments[number]
     matched = _command_hit(
         segment, DELETE_WORDS, lambda args, word: _parent_delete_text(args, word, cwd, moved),
-        RM_PARENT_RAW, by_word=True)
+        RM_PARENT_RAW, by_word=True, flagged=True)
     if not matched:
         return "", ""
     if moved and REL_PARENT.fullmatch(_pwd_as_dot(matched.split()[-1].strip("'\""))):
@@ -990,7 +1401,8 @@ def linked_nm_hit(segment: str, where: str) -> str:
             return "npm " + subcommand + " in a folder whose node_modules is a link"
         return ""
 
-    return _command_hit(segment, DELETE_WORDS, delete) or _command_hit(segment, ("npm", "npm.cmd"), install)
+    return (_command_hit(segment, DELETE_WORDS, delete, flagged=True)
+            or _command_hit(segment, ("npm", "npm.cmd"), install))
 
 
 LINKED_NM_REASON = (
