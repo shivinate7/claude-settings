@@ -14200,17 +14200,17 @@ LOG_CHECKS_EXTRA = _TaggedLogs([
 ])
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
+# The conflict-markers checks are defined beside their rows and register here, once LOG_CHECKS_EXTRA
+# exists. _TaggedLogs.append would take the family in force at this line, which belongs to another section.
+for _label, _check in CMK_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = "conflict-markers"
 # The base-copy cost check is appended here because LOG_CHECKS_EXTRA is defined here. Its family is the
 # base-copy section's, set by hand. MUTATE_ONLY="base copies" runs it.
 BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree stays within its stated git "
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
-# The conflict-markers checks are defined beside their rows and register here, once LOG_CHECKS_EXTRA
-# exists. _TaggedLogs.append would take the family in force at this line, which belongs to another section.
-for _label, _check in CMK_CHECKS:
-    LOG_CHECKS_EXTRA.append((_label, _check))
-    LOG_FAMILY[_label] = "conflict-markers"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
