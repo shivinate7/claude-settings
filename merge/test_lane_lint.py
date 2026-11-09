@@ -1228,6 +1228,22 @@ class StepCites(CiJobStub, tm.CloudSession):
         self.assertIn("roadmap-only-step", text, "the refusal does not name the step missing from the named record branch: " + text)
         self.assertEqual(pass_lines(text), [], "the lint printed PASS over a step missing from the named record branch: " + text)
 
+    def test_a_record_branch_key_the_layout_rejects_refuses_as_unknown_and_never_fetches(self):  # the control
+        self.put_roadmap(["real-step"])  # on the default branch, so only the rejected key can refuse the cite
+        self.write_layout_extras({"record-branch": "bad..name"})
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "Builds on `step:real-step`.")})
+        with self.git_spy() as calls:
+            try:
+                rc, text = self.run_lane("--lane-lint", "7")
+            except Exception as e:
+                self.fail("the lint raised %s rather than refusing as unknown: %s" % (type(e).__name__, e))
+        self.assertTrue(calls, "the spy saw no git call, so the case proves nothing")
+        self.assertEqual(rc, 1, "a record-branch key the layout rejects passed the lint: " + text)
+        self.assertIn("unknown, not a pass", text, "the refusal does not say unknown, not a pass: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed PASS over a record-branch key the layout rejects: " + text)
+        fetches = [argv for argv in calls if "fetch" in argv and (names_roadmap(argv) or any("bad..name" in arg for arg in argv))]
+        self.assertEqual(fetches, [], "a record-branch key the layout rejects was fetched: %s" % fetches)
+
     def test_a_changed_record_with_an_open_fence_refuses_as_unknown_even_with_no_cite(self):
         self.put_roadmap(["real-step"])
         self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "```bash\nnpm test")})
