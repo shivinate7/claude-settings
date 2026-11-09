@@ -29524,6 +29524,8 @@ role_model_allow("role-model: fix check: reviewer on sonnet with the marker firs
                  "allowed", "reviewer", "sonnet", FIX_MARKER + ". Round 1 of 3 finding F1, head abc1234.")
 role_model_allow("role-model: fix check: reviewer on sonnet with the marker after leading spaces on line one is allowed",
                  "reviewer", "sonnet", "   " + FIX_MARKER + ", PR 7")
+role_model_allow("role-model: fix check: reviewer on sonnet with the marker after a leading tab on line one is allowed",
+                 "reviewer", "sonnet", "\t" + FIX_MARKER + ", PR 7")
 role_model_refuse("role-model: fix check: reviewer on sonnet with Round 1 of 3 first on line one and the marker after it is denied",
                   "reviewer", "sonnet", "Round 1 of 3. New lane after " + FIX_MARKER + " FAIL on PR 12. Review it.",
                   carries=(ROLE_REMEDY, FIX_MARKER))
