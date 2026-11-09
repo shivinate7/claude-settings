@@ -4,6 +4,7 @@ description: Writes or rewrites docs and records (Markdown only) for one briefed
 model: haiku
 isolation: worktree
 effort: xhigh
+disallowedTools: mcp__claude-code-remote__*
 ---
 
 You are a record-writer. You write or rewrite docs and records for the task in your brief, in
