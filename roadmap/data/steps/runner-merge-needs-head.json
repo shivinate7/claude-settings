@@ -1,0 +1,11 @@
+{
+  "title": "The batch runner merges only the commit CI ran on",
+  "why": "A merge go with no head can land a commit CI never ran on; #2274 makes the auto-mode entry \"Batch Runner Merge\" allow only `merge <pr> --confirm --head <sha>`.",
+  "note": "PR #2274 (head 289711ca7), round 3 passed. Blocked on owner page item 461 (runner-merge-needs-head): a settings.json change needs the owner's word. It narrows the entry. On a yes, #2274 joins batch 69. Filed from the coordinator, 04:28 CST Nov 9.",
+  "phase": "now",
+  "owner": "lane",
+  "lane": "session_013NEJKzw6Mmu5eviHC3vobt",
+  "status": "blocked",
+  "order": 900,
+  "updatedAt": "2026-11-09T04:29:00-06:00"
+}
