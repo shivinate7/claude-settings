@@ -1,11 +1,11 @@
 {
   "title": "The gh-write guard reads a gh command whose repo flag comes before the subcommand",
   "why": "Coordinator 10:04 CST Nov 9, from #2444 (gh-write-cloud guard, step gh-search-only): `gh pr -R o/r comment` is allowed, because gh_call_of stops at the -R flag. Harm: a cloud session can post a PR comment outside the merge tool, which the guard is meant to refuse.",
-  "note": "Fix: gh_call_of skips -R/--repo and its value before the subcommand. It changes the local verdict too, so it runs in its own lane, with a red row first. The coordinator starts the lane after batch 68 merges. Source note gh-write-repo-flag-gap in roadmap/outbox/triage.md.",
+  "note": "Fix: gh_call_of skips -R/--repo and its value before the subcommand. It changes the local verdict too, so it runs in its own lane, with a red row first. The coordinator starts the lane after batch 68 merges. Source note gh-write-repo-flag-gap in roadmap/outbox/triage.md. Batch 68 merged (#2449, 11:55 CST Nov 9): free to start.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "",
   "status": "todo",
   "order": 915,
-  "updatedAt": "2026-11-09T10:06:00-06:00"
+  "updatedAt": "2026-11-09T11:59:00-06:00"
 }

@@ -1,11 +1,11 @@
 {
   "title": "A test pins that a bare (<id>, round 3) gloss is still flagged",
   "why": "lint/check_comment_narration.py:61 requires the word \"decision\" or backticks when a gloss opens with the id, and no test pins that (round 3 of #1840, lane comment-shell-round2-fixes, 03:01 CST Nov 8).",
-  "note": "Fix: add a case where a bare `(<id>, round 3)` is flagged, and show it red on a mutant that drops the \"decision\"-or-backticks test. Built as a follow-up from #1840's head in lane comment-check-scans-shell (coordinator, 03:02 CST Nov 8). Queue fix (owner 13:20 CST Nov 7). Title and slug by triage. Filed 03:03 CST Nov 8. Built as PR #1856 (draft, head 8859ba6b0, merges after #1840), with runner 8; review round 1 PASS (lane, 03:07 CST Nov 8).",
+  "note": "Fix: add a case where a bare `(<id>, round 3)` is flagged, and show it red on a mutant that drops the \"decision\"-or-backticks test. Built as a follow-up from #1840's head in lane comment-check-scans-shell (coordinator, 03:02 CST Nov 8). Queue fix (owner 13:20 CST Nov 7). Title and slug by triage. Filed 03:03 CST Nov 8. Built as PR #1856 (draft, head 8859ba6b0, merges after #1840), with runner 8; review round 1 PASS (lane, 03:07 CST Nov 8). Done: #1840 and #1856 merged in batch 68 (#2449, 8bc28980b, 11:55 CST Nov 9).",
   "phase": "now",
-  "status": "ready",
+  "status": "done",
   "order": 576,
   "owner": "triage",
   "lane": "session_013NEJL37UFXTQuAcox7s8fD",
-  "updatedAt": "2026-11-08T03:09:00-06:00"
+  "updatedAt": "2026-11-09T11:59:00-06:00"
 }
