@@ -13,7 +13,9 @@ whole point of `cp` is that the guard cannot see what it carries.
 """
 
 import base64
+import contextlib
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -21,11 +23,15 @@ import subprocess
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
 sys.path.insert(0, HERE)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup
+sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 
 # Git Bash by full path, never a bare "bash" (hooks/git_bash.py says why). `to_bash_path` below builds the
@@ -703,6 +709,562 @@ def sweep_session_check():
     return True, "the revert line ends in the session_id, and in '-' with none"
 
 
+# --------------------------------------------------------------------------- the pointer checkout's HEAD
+#
+# The Stop watch reads the pointer checkout's HEAD once per turn, with the git read set that
+# hooks/session_start.sh uses, and prints one line when that HEAD is off main. Every row first runs a
+# Stop to record the baseline, so the measured Stop takes the fast exit that a long session's turns
+# take: a read placed after that exit makes no call and fails the row. A PostToolUse call reads nothing.
+
+POINTER_NAME = "pointer-checkout"  # a distinctive basename: realpath and normcase change the full path
+POINTER_GIT_MAX = 4  # the fixed read set: HEAD's name, HEAD's sha, local main, origin/main
+GIT_IDENTITY = ["-c", "user.name=pointer-test", "-c", "user.email=pointer-test@example.invalid",
+                "-c", "commit.gpgsign=false"]
+
+
+def _git(where, *args, stdin=None):
+    """One git call in a fixture. The identity is pinned, so no commit reads the machine's config."""
+    done = _nowindow.run(["git"] + GIT_IDENTITY + ["-C", where] + list(args),
+                         capture_output=True, text=True, input=stdin)
+    if done.returncode != 0:
+        raise RuntimeError("git %s: %s" % (" ".join(args), done.stderr.strip()))
+    return done.stdout.strip()
+
+
+def _commit(where, name):
+    write(os.path.join(where, name + ".txt"), name + "\n")
+    _git(where, "add", "-A")
+    _git(where, "commit", "-q", "-m", name)
+    return _git(where, "rev-parse", "HEAD")
+
+
+def _reads(trace):
+    """The git calls one run made, from GIT_TRACE's built-in lines. Each is the argv after `git`."""
+    try:
+        with open(trace, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return []
+    return [line.split("built-in: ", 1)[1] for line in lines if "built-in: " in line]
+
+
+def _snapshot(*folders):
+    """Every path under `folders` with its mtime, size and content hash: a write of any kind changes one."""
+    state = {}
+    for folder in folders:
+        for dirpath, dirnames, filenames in os.walk(folder):
+            for name in dirnames + filenames:
+                path = os.path.join(dirpath, name)
+                info = os.lstat(path)
+                digest = ""
+                if os.path.isfile(path):
+                    with open(path, "rb") as handle:
+                        digest = hashlib.sha256(handle.read()).hexdigest()
+                state[path] = (info.st_mtime_ns, info.st_size, digest)
+    return state
+
+
+def _stderr(err):
+    lines = err.strip().splitlines()
+    return " (hook stderr: %s)" % lines[-1] if lines else ""
+
+
+class Pointer(object):
+    """One global rules file pointing at one checkout: main, origin/main one commit ahead, an older commit."""
+
+    def __init__(self, root):
+        self.root = root
+        self.cfg = os.path.join(root, "cfg")
+        self.proj = os.path.join(root, "proj")
+        self.checkout = os.path.join(root, POINTER_NAME)
+        for folder in (self.cfg, self.proj, self.checkout):
+            os.makedirs(folder)
+        _git(self.checkout, "init", "-q")
+        _git(self.checkout, "symbolic-ref", "HEAD", "refs/heads/main")
+        self.old = _commit(self.checkout, "old")
+        self.main = _commit(self.checkout, "main")
+        # origin/main is one commit past local main, as after a fetch that moved origin first.
+        tree = _git(self.checkout, "rev-parse", "main^{tree}")
+        self.origin = _git(self.checkout, "commit-tree", tree, "-p", self.main, "-m", "origin")
+        _git(self.checkout, "update-ref", "refs/remotes/origin/main", self.origin)
+        self.point(self.checkout)
+        self.runs = 0
+
+    def point(self, folder):
+        """Write the global rules file so its `@` line names `folder`."""
+        write(os.path.join(self.cfg, "CLAUDE.md"), "@%s/CLAUDE.md\n" % folder.replace(os.sep, "/"))
+
+    def detach(self, sha):
+        _git(self.checkout, "update-ref", "--no-deref", "HEAD", sha)
+
+    def branch(self, name):
+        _git(self.checkout, "checkout", "-q", "-b", name)
+
+    def fire(self, payload):
+        """Run the watch once: (message, git reads, stderr). message is None when stdout is not one JSON object."""
+        self.runs += 1
+        trace = os.path.join(self.root, "trace-%02d.log" % self.runs)
+        env = dict(os.environ)
+        env["CLAUDE_CONFIG_DIR"] = self.cfg
+        env["GIT_TRACE"] = trace
+        env.pop("GUARD_UNDER_TEST", None)
+        for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+            env.pop(key, None)
+        done = _nowindow.run([sys.executable, WATCH], input=json.dumps(payload),
+                             capture_output=True, text=True, env=env)
+        message = ""
+        if done.stdout.strip():
+            try:
+                message = json.loads(done.stdout).get("systemMessage", "")
+            except Exception:
+                message = None
+        return message, _reads(trace), done.stderr
+
+    def stop(self):
+        return self.fire({"hook_event_name": "Stop", "session_id": "pointer", "cwd": self.proj,
+                          "stop_hook_active": False})
+
+    def tool(self):
+        return self.fire({"hook_event_name": "PostToolUse", "tool_name": "Bash",
+                          "tool_input": {"command": "true"}, "cwd": self.proj, "session_id": "pointer"})
+
+
+def _warm_on_main(p):
+    """Baseline Stop on main, before any move. Returns a cause when it already printed something."""
+    message, reads, err = p.stop()
+    if message != "":
+        return "before the move a Stop on main already printed %r" % message
+    return None
+
+
+def _expect_flag(message, err, state):
+    """The cause when a Stop's message is not the one-line pointer flag for a checkout on `state`, else None."""
+    if message is None:
+        return "the Stop printed text that is not one JSON object"
+    if not message:
+        return "no pointer flag after the move: the Stop printed nothing" + _stderr(err)
+    if POINTER_NAME not in message or "not main" not in message:
+        return "the Stop after the move printed a line that is not the pointer flag: %r" % message
+    if state not in message:
+        return "the pointer flag does not name the state %r: %r" % (state, message)
+    if "\n" in message:
+        return "the pointer flag spans more than one line"
+    return None
+
+
+def _expect_unknown(message, err):
+    """The cause unless the Stop says the pointer is unknown, and never says it is off main."""
+    if message is None:
+        return "the Stop printed text that is not one JSON object"
+    if "unknown" not in message.lower():
+        return "the Stop did not say the pointer is unknown (printed %r)" % message + _stderr(err)
+    if "not main" in message:
+        return "an unreadable pointer was reported as off main: %r" % message
+    return None
+
+
+def row_flag_detached_mid_session(p):
+    cause = _warm_on_main(p)
+    if cause:
+        return cause
+    p.detach(p.old)
+    message, reads, err = p.stop()
+    return _expect_flag(message, err, "detached")
+
+
+def row_flag_branch_not_main(p):
+    cause = _warm_on_main(p)
+    if cause:
+        return cause
+    p.branch("feature-x")
+    message, reads, err = p.stop()
+    return _expect_flag(message, err, "feature-x")
+
+
+def row_flag_many_refs(p):
+    refs = "".join("create refs/heads/topic-%03d %s\n" % (n, p.main) for n in range(200))
+    _git(p.checkout, "update-ref", "--stdin", stdin=refs)
+    _git(p.checkout, "pack-refs", "--all")
+    cause = _warm_on_main(p)
+    if cause:
+        return cause
+    p.detach(p.old)
+    message, reads, err = p.stop()
+    return _expect_flag(message, err, "detached")
+
+
+def _control(p, move):
+    """A Stop in a state that must stay quiet. The read must have run before quiet proves anything."""
+    p.stop()  # the baseline: the measured Stop takes the fast exit, as a long session's turns do
+    move(p)
+    message, reads, err = p.stop()
+    if len(reads) < 1:
+        return "the Stop read the pointer HEAD 0 times, so a quiet result proves nothing"
+    if message is None:
+        return "the Stop printed text that is not one JSON object"
+    if POINTER_NAME in message or "not main" in message:
+        return "a checkout that is on main printed a pointer flag: %r" % message
+    return None
+
+
+def row_quiet_on_main(p):
+    return _control(p, lambda q: None)
+
+
+def row_quiet_detached_at_local_main(p):
+    return _control(p, lambda q: q.detach(q.main))
+
+
+def row_quiet_detached_at_origin_main(p):
+    return _control(p, lambda q: q.detach(q.origin))
+
+
+def row_unknown_dir_missing(p):
+    p.stop()  # the baseline, on main
+    p.point(os.path.join(p.root, "missing"))
+    message, reads, err = p.stop()
+    return _expect_unknown(message, err)
+
+
+def row_unknown_head_garbage(p):
+    p.stop()  # the baseline, on main
+    write(os.path.join(p.checkout, ".git", "HEAD"), "garbage\n")
+    message, reads, err = p.stop()
+    return _expect_unknown(message, err)
+
+
+def row_plain_dir_in_other_repo_names_no_outer_branch(p):
+    # The pointer is a plain folder inside a repo on feature-x. The read must not climb to that repo's HEAD, so the
+    # Stop never names feature-x. Silence and unknown both pass: a folder with no .git has no branch to report.
+    outer = os.path.join(p.root, "outer")
+    inner = os.path.join(outer, "inner")
+    os.makedirs(inner)
+    _git(outer, "init", "-q")
+    _git(outer, "symbolic-ref", "HEAD", "refs/heads/main")
+    _commit(outer, "outer")
+    _git(outer, "checkout", "-q", "-b", "feature-x")
+    p.stop()  # the baseline, on main
+    p.point(inner)
+    message, reads, err = p.stop()
+    if message is None:
+        return "the Stop printed text that is not one JSON object"
+    if "feature-x" in message or "not main" in message:
+        return "the Stop read the outer repo's branch: %r" % message
+    return None
+
+
+def row_cost_stop_read_count(p):
+    p.stop()  # the baseline, on main
+    p.detach(p.old)
+    message, reads, err = p.stop()
+    if not reads:
+        return "the Stop made no git read of the pointer HEAD, so the count proves nothing"
+    if len(reads) > POINTER_GIT_MAX:
+        return "the Stop ran %d git calls, over the fixed read set of %d: %s" % (
+            len(reads), POINTER_GIT_MAX, reads[-1])
+    for call in reads:
+        if call.split()[1:2] != ["rev-parse"]:
+            return "the Stop ran a git call that is not rev-parse: %s" % call
+    return None
+
+
+def row_cost_tool_call_reads_nothing(p):
+    p.stop()  # the baseline, on main
+    p.detach(p.old)
+    message, reads, err = p.tool()
+    if reads:
+        return "a PostToolUse call ran %d git call(s): the read is once per turn, at Stop (%s)" % (
+            len(reads), reads[0])
+    if message and (POINTER_NAME in message or "not main" in message):
+        return "a PostToolUse call printed the pointer flag: %r" % message
+    return None
+
+
+def row_cost_stop_writes_nothing(p):
+    p.stop()  # the baseline, on main
+    p.detach(p.old)
+    before = _snapshot(p.cfg, p.proj, p.checkout)
+    p.stop()
+    after = _snapshot(p.cfg, p.proj, p.checkout)
+    changed = set(before) ^ set(after)
+    changed |= {path for path in before if path in after and before[path] != after[path]}
+    if changed:
+        changed = sorted(changed)
+        return "the Stop run changed %d path(s), first %s" % (len(changed), changed[0])
+    return None
+
+
+# The rows below pin the pointer read's fault paths: a folder with no .git, a rules file that cannot be read, the order
+# of the Stop's calls, and a ref read that fails or times out on a detached HEAD. Each row names its state first (P7).
+
+
+def _expect_silent(message, err, why):
+    """The cause unless the Stop printed nothing. `why` names the state the silence is for."""
+    if message is None:
+        return "the Stop printed text that is not one JSON object"
+    if message:
+        return "the Stop printed %r %s" % (message, why) + _stderr(err)
+    return None
+
+
+def row_silent_tarball_folder_without_git(p):
+    # A tarball install: the pointer names a folder with files and no .git. session_start.sh is silent there.
+    folder = os.path.join(p.root, "tarball")
+    os.makedirs(folder)
+    write(os.path.join(folder, "CLAUDE.md"), "rules from a tarball\n")
+    write(os.path.join(folder, "settings.json"), "{}\n")
+    p.stop()  # the baseline, on main
+    if os.path.exists(os.path.join(folder, ".git")):
+        return "FIXTURE the tarball folder holds a .git"
+    p.point(folder)
+    message, reads, err = p.stop()
+    return _expect_silent(message, err, "for a folder with no .git, where session_start.sh is silent")
+
+
+def row_silent_empty_folder_without_git(p):
+    folder = os.path.join(p.root, "empty")
+    os.makedirs(folder)
+    p.stop()  # the baseline, on main
+    if os.listdir(folder):
+        return "FIXTURE the empty folder is not empty"
+    p.point(folder)
+    message, reads, err = p.stop()
+    return _expect_silent(message, err, "for an empty folder with no .git, where session_start.sh is silent")
+
+
+def row_unknown_rules_file_unreadable(p):
+    # The rules file exists but every read of it raises OSError. A directory in its place does that. A chmod would
+    # not: this process runs as root, and root reads through a chmod.
+    p.stop()  # the baseline, on main
+    rules = os.path.join(p.cfg, "CLAUDE.md")
+    os.remove(rules)
+    os.makedirs(rules)
+    if not os.path.isdir(rules):
+        return "FIXTURE the rules path is not a directory"
+    message, reads, err = p.stop()
+    return _expect_unknown(message, err)
+
+
+def row_quiet_rules_file_missing(p):
+    p.stop()  # the baseline, on main
+    p.detach(p.old)  # off main: a rules file that named the checkout would flag this Stop
+    os.remove(os.path.join(p.cfg, "CLAUDE.md"))
+    message, reads, err = p.stop()
+    return _expect_silent(message, err, "with no rules file, so there is no pointer to check")
+
+
+def row_quiet_rules_file_without_at_line(p):
+    p.stop()  # the baseline, on main
+    p.detach(p.old)  # off main: a parsed pointer would flag this Stop
+    write(os.path.join(p.cfg, "CLAUDE.md"), "# global rules, with no pointer line\n")
+    message, reads, err = p.stop()
+    return _expect_silent(message, err, "with no @ line in the rules file")
+
+
+def row_flag_rules_file_with_crlf(p):
+    # Control. Text-mode reads fold \r\n to \n, so this passes on the tip. It guards a rewrite that reads bytes.
+    p.stop()  # the baseline, on main
+    p.detach(p.old)
+    with open(os.path.join(p.cfg, "CLAUDE.md"), "wb") as handle:
+        handle.write(("@%s/CLAUDE.md\r\n" % p.checkout.replace(os.sep, "/")).encode("utf-8"))
+    message, reads, err = p.stop()
+    return _expect_flag(message, err, "detached")
+
+
+def _stop_in_process(p, fast):
+    """One Stop in this process, with the cap check, the sweep and the git boundary replaced by recorders.
+
+    Returns (calls, printed): the calls in the order they ran, and the text the Stop printed. A child process cannot
+    report its own call order, and a real stall would wait out the hook's cap on the wall clock, which an assert must
+    not do. So each git call records itself, then fails the way a call past its cap does (TimeoutExpired).
+    """
+    watch = _load_watch()
+    calls = []
+    real_run = _nowindow.run
+
+    def cap_check(payload, clock=None):
+        calls.append("unchanged")
+        return fast
+
+    def sweep(payload, clock=None):
+        calls.append("sweep")
+        return ["SWEEP-LINE"]
+
+    def git_boundary(args, *rest, **kwargs):
+        if not args or args[0] != "git":
+            return real_run(args, *rest, **kwargs)
+        calls.append("pointer")
+        raise subprocess.TimeoutExpired(args, kwargs.get("timeout"))
+
+    payload = {"hook_event_name": "Stop", "session_id": "pointer", "cwd": p.proj, "stop_hook_active": False}
+    printed = io.StringIO()
+    with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": p.cfg}), \
+            mock.patch.object(sys, "stdin", io.StringIO(json.dumps(payload))), \
+            mock.patch.object(watch, "unchanged", cap_check), \
+            mock.patch.object(watch, "sweep", sweep), \
+            mock.patch.object(watch.guard, "_force_utf8_streams", lambda: None), \
+            mock.patch.object(_nowindow, "run", git_boundary), \
+            contextlib.redirect_stdout(printed):
+        try:
+            watch.main()
+        except SystemExit:
+            pass
+    return calls, printed.getvalue()
+
+
+def row_order_sweep_runs_before_pointer_read(p):
+    calls, printed = _stop_in_process(p, fast=False)
+    if "pointer" not in calls:
+        return "FIXTURE the Stop never reached the pointer read: calls %s" % (calls,)
+    if "sweep" not in calls or calls.index("sweep") > calls.index("pointer"):
+        return "the pointer read ran before the sweep, so a stalled read can hold up the cap revert: calls %s" % (
+            calls,)
+    if "SWEEP-LINE" not in printed:
+        return "the sweep result did not print after the pointer read stalled: %r" % printed
+    return None
+
+
+def row_order_cap_check_runs_before_pointer_read(p):
+    calls, printed = _stop_in_process(p, fast=True)
+    if "pointer" not in calls:
+        return "FIXTURE the Stop never reached the pointer read: calls %s" % (calls,)
+    if "unchanged" not in calls or calls.index("unchanged") > calls.index("pointer"):
+        return "the pointer read ran before the cap check on the fast exit: calls %s" % (calls,)
+    return None
+
+
+REF_MAIN = ("--verify", "-q", "refs/heads/main")
+REF_ORIGIN = ("--verify", "-q", "refs/remotes/origin/main")
+OK, MISSING, FAILED, TIMED_OUT = "ok", "missing", "failed", "timed out"
+
+
+def _detached_line(p, main_read, origin_read):
+    """pointer_line() once, in this process, on a checkout detached at an older commit. Returns (line, rev-parse calls).
+
+    The git boundary is faked, and every other call runs for real. A real `rev-parse --verify -q` answers 0 or 1 for a
+    ref it cannot use, so exit 128 and a timeout cannot be made on demand, and a fake git binary does not run on
+    Windows. Each answer is (kind, sha): ok prints the sha, missing exits 1 (an absent ref), failed exits 128, and
+    timed out raises TimeoutExpired the way the cap does.
+    """
+    watch = _load_watch()
+    answers = {
+        ("--abbrev-ref", "HEAD"): (OK, "HEAD"),
+        ("HEAD",): (OK, p.old),
+        REF_MAIN: main_read,
+        REF_ORIGIN: origin_read,
+    }
+    calls = []
+    real_run = _nowindow.run
+
+    def boundary(args, *rest, **kwargs):
+        if not args or args[0] != "git":
+            return real_run(args, *rest, **kwargs)
+        query = tuple(args[4:])  # git -C <folder> rev-parse <query>
+        calls.append(query)
+        kind, sha = answers.get(query, (MISSING, None))
+        if kind == TIMED_OUT:
+            raise subprocess.TimeoutExpired(args, kwargs.get("timeout"))
+        if kind == OK:
+            return subprocess.CompletedProcess(args, 0, sha + "\n", "")
+        return subprocess.CompletedProcess(args, 1 if kind == MISSING else 128, "", "fatal: answered %s" % kind)
+
+    with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": p.cfg}), mock.patch.object(_nowindow, "run", boundary):
+        line = watch.pointer_line()
+    return line, calls
+
+
+def _detached_row(p, main_read, origin_read, must_read, judge):
+    line, calls = _detached_line(p, main_read, origin_read)
+    if ("--abbrev-ref", "HEAD") not in calls or ("HEAD",) not in calls:
+        return "FIXTURE the read did not reach the detached HEAD: calls %s" % (calls,)
+    if must_read not in calls:
+        return "FIXTURE the read never asked for %s: calls %s" % (" ".join(must_read), calls)
+    return judge(line)
+
+
+def _unknown_line(line):
+    if "unknown" not in line.lower():
+        return "a failed or timed-out ref read did not print unknown: %r" % line
+    if "not main" in line:
+        return "a failed or timed-out ref read was reported as off main: %r" % line
+    return None
+
+
+def _flag_line(line):
+    if "not main" not in line or "detached" not in line:
+        return "an absent ref (exit 1) on a detached HEAD that matches neither ref did not flag: %r" % line
+    return None
+
+
+def row_unknown_main_ref_read_fails(p):
+    return _detached_row(p, (FAILED, None), (OK, p.origin), REF_MAIN, _unknown_line)
+
+
+def row_unknown_main_ref_read_times_out(p):
+    return _detached_row(p, (TIMED_OUT, None), (OK, p.origin), REF_MAIN, _unknown_line)
+
+
+def row_unknown_origin_ref_read_fails(p):
+    return _detached_row(p, (OK, p.main), (FAILED, None), REF_ORIGIN, _unknown_line)
+
+
+def row_unknown_origin_ref_read_times_out(p):
+    return _detached_row(p, (OK, p.main), (TIMED_OUT, None), REF_ORIGIN, _unknown_line)
+
+
+def row_flag_when_refs_absent(p):
+    # Control. An absent ref is a normal answer, not a failed read: this passes on the tip and must keep passing.
+    return _detached_row(p, (MISSING, None), (MISSING, None), REF_MAIN, _flag_line)
+
+
+POINTER_ROWS = [
+    ("pointer flag: detached at an older commit after a quiet Stop on main", row_flag_detached_mid_session),
+    ("pointer flag: on a branch other than main", row_flag_branch_not_main),
+    ("pointer flag: detached, with 200 packed refs (full size)", row_flag_many_refs),
+    ("quiet: on main (the read must run)", row_quiet_on_main),
+    ("quiet: detached at local main's commit", row_quiet_detached_at_local_main),
+    ("quiet: detached at origin/main's tip, one commit past local main", row_quiet_detached_at_origin_main),
+    ("unknown: the @ line names a missing folder", row_unknown_dir_missing),
+    ("unknown: .git/HEAD is garbage", row_unknown_head_garbage),
+    ("quiet or unknown: a plain folder inside a repo on feature-x never names that repo's branch",
+     row_plain_dir_in_other_repo_names_no_outer_branch),
+    ("silent: a tarball folder with files and no .git, where session_start.sh is silent",
+     row_silent_tarball_folder_without_git),
+    ("silent: an empty folder with no .git", row_silent_empty_folder_without_git),
+    ("unknown: the rules file is unreadable (a directory in its place)", row_unknown_rules_file_unreadable),
+    ("quiet (control): the rules file is missing, off main", row_quiet_rules_file_missing),
+    ("quiet (control): the rules file has no @ line, off main", row_quiet_rules_file_without_at_line),
+    ("pointer flag (control): a CRLF rules file still names the checkout", row_flag_rules_file_with_crlf),
+    ("order: the sweep runs before a pointer read that stalls", row_order_sweep_runs_before_pointer_read),
+    ("order: on the fast exit, the cap check runs before a pointer read that stalls",
+     row_order_cap_check_runs_before_pointer_read),
+    ("unknown: the main ref read fails (exit 128) on a detached HEAD", row_unknown_main_ref_read_fails),
+    ("unknown: the main ref read times out on a detached HEAD", row_unknown_main_ref_read_times_out),
+    ("unknown: the origin ref read fails (exit 128) on a detached HEAD", row_unknown_origin_ref_read_fails),
+    ("unknown: the origin ref read times out on a detached HEAD", row_unknown_origin_ref_read_times_out),
+    ("pointer flag (control): an absent ref (exit 1) on a detached HEAD still flags",
+     row_flag_when_refs_absent),
+    ("cost: a Stop runs 1 to %d git calls, all rev-parse" % POINTER_GIT_MAX, row_cost_stop_read_count),
+    ("cost: a PostToolUse call runs no git call and prints no pointer flag", row_cost_tool_call_reads_nothing),
+    ("cost: a Stop writes no file under the config dir or the pointer checkout", row_cost_stop_writes_nothing),
+]
+
+
+def pointer_checks():
+    """Run every pointer row in one run folder, removed at teardown. Returns (ok, name, note) per row."""
+    own = _test_temp.run_folder()
+    results = []
+    try:
+        for index, (name, row) in enumerate(POINTER_ROWS):
+            root = os.path.join(own, "row%02d" % index)
+            os.makedirs(root)
+            cause = row(Pointer(root))
+            results.append((cause is None, name, cause or "as specified"))
+    finally:
+        shutil.rmtree(own, ignore_errors=True)
+    return results
+
+
 def main() -> int:
     print("config_watch cases, %d in all" % len(CASES))
     print()
@@ -748,11 +1310,19 @@ def main() -> int:
         failed += 0 if sweep_ok else 1
         print("%s  [sweep]  config_watch names the session in its revert line  (%s)" % (
             "PASS" if sweep_ok else "FAIL", sweep_note))
+    pointer_total = 0
+    if not only:
+        for pointer_ok, pointer_name, pointer_note in pointer_checks():
+            pointer_total += 1
+            failed += 0 if pointer_ok else 1
+            print("%s  [pointer]  %s  (%s)" % (
+                "PASS" if pointer_ok else "FAIL", pointer_name, pointer_note))
     print()
+    total = len(CASES) + pointer_total
     if failed:
-        print("test_config_watch FAIL: %d of %d cases wrong" % (failed, len(CASES)))
+        print("test_config_watch FAIL: %d of %d cases wrong" % (failed, total))
         return 1
-    print("test_config_watch PASS: %d of %d cases right" % (len(CASES), len(CASES)))
+    print("test_config_watch PASS: %d of %d cases right" % (total, total))
     return 0
 
 
