@@ -463,7 +463,7 @@ MUTATIONS = [
      '            dest = cur if merge == cur or (not merge and auto.lower() in ("true", "yes", "on", "1")) else None',
      '            dest = cur if merge == cur else None', "guard",
      'agent branch, a bare push under autoSetupRemote asks'),
-    ("push-agent-branch: the ask is not wired",
+    ("push-agent-branch: the refusal is not wired",
      '                elif kind == "agent":',
      '                elif kind == "agent-off":', "guard", 'agent branch, HEAD asks'),
     ("env-file: a search command's pattern is read as a path",

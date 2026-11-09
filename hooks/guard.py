@@ -106,7 +106,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        current branch) that writes a name other than the branch's upstream. It is silent
                        when the clone holds `refs/remotes/<remote>/<name>`. It asks only with an
                        upstream on the pushed remote that is not main or master.
-  push-agent-branch    ask. A non-forced push whose destination branch name is an agent-worktree name
+  push-agent-branch    deny. A non-forced push whose destination branch name is an agent-worktree name
                        (agent-<hex>, claude/agent-<hex>, worktree-agent-<hex>, 8+ hex), with or without
                        -u. No upstream is needed. A delete, a mirror and a dry run pass.
   env-file             deny. Any read or write of an environment file.
@@ -4186,16 +4186,15 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
             elif not read_verb("push", args):
-                # A non-forced push that writes main or master (rule push-main), an agent-worktree
-                # branch name (rule push-agent-branch), or an implied destination off the branch's
-                # upstream (rule push-stray-branch). A dry run writes nothing.
+                # A non-forced push that writes main or master (rule push-main, asks), an agent-worktree
+                # branch name (rule push-agent-branch, denies), or an implied destination off the branch's
+                # upstream (rule push-stray-branch, asks). A dry run writes nothing.
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
                     ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
                                 "push to the default branch")
                 elif kind == "agent":
-                    ask_command("push-agent-branch", PUSH_AGENT_REASON, "git push " + " ".join(args),
-                                "push to an agent-worktree branch")
+                    refuse(tool, "deny", "push-agent-branch", PUSH_AGENT_REASON, "git push " + " ".join(args))
                 elif kind == "stray":
                     ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
                                 "push to a stray branch")

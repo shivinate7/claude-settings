@@ -346,7 +346,7 @@ def _push_goes_to_network(remote: str, cwd: str, current, overrides=None) -> boo
 def push_ask_hit(args, cwd: str, overrides=None) -> str:
     """'main', 'agent', 'stray' or '' for the `git push` arguments `args`, a push `push_verdict` let through.
 
-    'agent' (rule push-agent-branch): a push whose destination name is an agent-worktree branch name
+    'agent' (rule push-agent-branch, which refuses where the other two kinds ask): a push whose destination name is an agent-worktree branch name
     (`AGENT_BRANCH`), with or without `-u`, checked before 'stray'. An implied destination is the current
     branch (a bare push with no upstream too, under push.autoSetupRemote); an explicit one is the part
     after `:`, `refs/heads/` stripped; a colon-less refspec is its own name. A destination after `:` adds
@@ -1026,10 +1026,9 @@ PUSH_STRAY_REASON = (
     "Approving the prompt lets this one push through; it is not a grant."
 )
 PUSH_AGENT_REASON = (
-    "Rule (Git): this push writes a branch named like an agent worktree (agent-<hex>, claude/agent-<hex> or "
-    "worktree-agent-<hex>), not a lane branch (decision plain-push-asks). Push the lane branch by name: "
-    "`git push origin HEAD:<lane-branch>`. "
-    "Approving the prompt lets this one push through; it is not a grant."
+    "Rule (push-agent-branch): this push writes a branch named like an agent worktree (agent-<hex>, "
+    "claude/agent-<hex> or worktree-agent-<hex>), not a lane branch (decision plain-push-asks). "
+    "Remedy: push the lane's own branch by name: `git push origin HEAD:<lane-branch>`."
 )
 PUSH_ASK_REASON = (
     "Rule (Git): this forced push may rewrite the default branch, or its target is unreadable. "
