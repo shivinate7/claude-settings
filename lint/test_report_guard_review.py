@@ -749,6 +749,46 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_reads_of(PR)
         self.assertNotEqual((out or {}).get("decision"), "block", out)
 
+    def test_a_failed_cutover_read_gives_an_unstamped_record_the_unknown_note_and_no_refusal(self):
+        # Catches: a failed cutover read refusing a record that has no Stamp line and is otherwise well formed. Without the cutover
+        # the record is unknown, so the claim gets the UNKNOWN note and no refusal.
+        body = unstamped(record())
+        self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body, BEFORE, CUTOVER), LIVE)[0], "done",
+                         "fixture: merge/merge.py does not read the unstamped record as well formed and done")
+        self.serve(comments=[body])
+        self.delete_cutover_ref()
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assertNotEqual((out or {}).get("decision"), "block", "a failed cutover read refused an unstamped record: %r" % (out,))
+        self.assertIn("UNKNOWN", (out or {}).get("systemMessage", ""), out)
+
+    def test_a_failed_cutover_read_still_refuses_a_record_whose_stamp_does_not_match(self):
+        # Catches: a newest record whose Stamp line does not match its lines (here FAIL edited to PASS) read as an unstamped record
+        # the cutover could place, so a failed cutover read lets the PASS claim through. A Stamp line that is there must match.
+        body = record(rounds=[(1, "reviewer", "sonnet", "FAIL")]).replace("Round 1: reviewer, sonnet, FAIL",
+                                                                          "Round 1: reviewer, sonnet, PASS", 1)
+        self.assertIn("Round 1: reviewer, sonnet, PASS", body, "fixture: the edit did not reach the round line")
+        self.assertIsNone(merge_mod.parse_review(body), "fixture: merge/merge.py reads the edited record as well formed")
+        self.serve(comments=[body])
+        self.delete_cutover_ref()
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assert_blocked(out, "a failed cutover read let a PASS claim through on a record whose Stamp line does not match:")
+        self.assertIn("PR #12", out["reason"], out)
+
+    def test_a_failed_cutover_read_still_refuses_a_record_with_a_malformed_field(self):
+        # Catches: a newest record with a malformed field (Kind: weird, under a Stamp line that matches its text) read as no record
+        # when the cutover read fails, so a failed cutover read lets the PASS claim through. A malformed record is refused.
+        body = merge_mod.review_body(PR, LIVE, "weird", "no", ROUNDS, "not owed")
+        self.assertIn("Kind: weird", body, "fixture: the record does not carry the malformed field")
+        self.assertIsNone(merge_mod.parse_review(body), "fixture: merge/merge.py reads the record with Kind: weird as well formed")
+        self.serve(comments=[body])
+        self.delete_cutover_ref()
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assert_blocked(out, "a failed cutover read let a PASS claim through on a record with a malformed field:")
+        self.assertIn("PR #12", out["reason"], out)
+
 
 if __name__ == "__main__":
     unittest.main()
