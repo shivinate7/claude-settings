@@ -23947,27 +23947,29 @@ def tick_safe_mean(run_once, cap):
     return True, total / runs, ""
 
 
-def rm_var_batch(cmd, must, cwd=NOGIT, want="deny"):
+def rm_var_batch(cmd, must, cwd=NOGIT, want="deny", cap=RM_VAR_BATCH_CAP):
     """Return tick_safe_mean of judging cmd in cwd. Every run must give `want` with a reason holding `must`.
 
-    The reason is the rule name, so an empty `must` checks the verdict alone.
+    The reason is the rule name, so an empty `must` checks the verdict alone. `cap` bounds the runs.
     """
     def run_once():
         got, reason, took = judge_in_process(cmd, cwd)
         if got != want or must not in reason:
             return False, 0.0, "judged %s, not the expected %s" % (got, want)
         return True, took, ""
-    return tick_safe_mean(run_once, RM_VAR_BATCH_CAP)
+    return tick_safe_mean(run_once, cap)
 
 
-def rm_var_ratio(make, small_n, big_n, must="rm-var-unguarded", cwd=NOGIT, want="deny"):
+def rm_var_ratio(make, small_n, big_n, must="rm-var-unguarded", cwd=NOGIT, want="deny",
+                 cap=RM_VAR_BATCH_CAP):
     """Return (ok, text) for make(big_n) against make(small_n) scaled by big_n / small_n, judged in cwd.
 
     Every run must give the verdict `want`, so a case whose command is an allow passes want="allow".
+    `cap` bounds the runs in each small batch.
     """
     small, big = [], []
     for _ in range(RM_VAR_REPEATS):
-        ok, mean, text = rm_var_batch(make(small_n), must, cwd, want)
+        ok, mean, text = rm_var_batch(make(small_n), must, cwd, want, cap)
         if not ok:
             return False, "small n=%d: %s" % (small_n, text)
         small.append(mean)
@@ -24044,13 +24046,14 @@ def argv_gap_case():
 
 # A run of deno eval flags before a nested quote. Each `--a` has two parses in the flag pattern, one with
 # `--` and one with `-`, so a failed match tries every split and its CPU doubles per flag. The command
-# names no push, so it allows, and the ratio compares allow runs.
+# names no push, so it allows, and the ratio compares allow runs. The small side is 14 flags, about 4 ms a
+# judge, so the default cap of 100 runs ends short of RM_VAR_FLOOR. The cap here is 1000.
 def argv_flag_gap_cmd(n):
     return "deno eval " + "--a " * n + 'x "a \\"b\\""'
 
 
 def argv_flag_gap_case():
-    return rm_var_ratio(argv_flag_gap_cmd, 14, 20, must="", cwd=PUSHFEAT, want="allow")
+    return rm_var_ratio(argv_flag_gap_cmd, 14, 20, must="", cwd=PUSHFEAT, want="allow", cap=1000)
 
 
 _section_family = FAMILY
