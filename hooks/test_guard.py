@@ -9149,6 +9149,24 @@ sh("env-child: deny, sh -c set > out.txt writes the shell variables to a file, u
 sh("env-child: deny, sh -c printenv >> log appends the environment to a file, uv run",
    "uv run --env-file " + ENV + " sh -c 'printenv >> log'", "deny", "env-file", cwd=NOGIT)
 
+# A $( ) or backtick body in the child's shell string that reads the env file. The child shell runs the body,
+# so it reads the file as `cat .env` does, and each deny is one such body. The allows put a date and a
+# different file in the same substitution, so the deny turns on the read and not on the substitution.
+sh("env-child: deny, sh -c echo a double-quoted $(cat .env) reads the env file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo \"$(cat " + ENV + ")\"'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c printf a double-quoted $(cat .env) reads the env file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'printf %s \"$(cat " + ENV + ")\"'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c echo an unquoted $(cat .env) reads the env file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo $(cat " + ENV + ")'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c echo a backtick `cat .env` reads the env file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo `cat " + ENV + "`'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker run sh -c echo a double-quoted $(cat .env) reads the env file in img",
+   "docker run --env-file " + ENV + " img sh -c 'echo \"$(cat " + ENV + ")\"'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, sh -c echo a double-quoted $(date) runs date, the control for the read, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo \"$(date)\"'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c echo a double-quoted $(cat README.md) reads another file, the control, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo \"$(cat README.md)\"'", "allow", cwd=NOGIT)
+
 # A double-quoted substitution is expanded by the parent shell before uv runs, and the parent holds no
 # file value, so it prints HOME and nothing from the file. docker compose config prints service names
 # or nothing. perl -pe rewrites text in a file it reads and prints no variable.
@@ -9346,6 +9364,28 @@ for test in ("-iname " + ENV, "-path './" + ENV + "'", "-wholename './" + ENV + 
 # The env file as the start path is judged as a name word, so it is denied.
 sh("env-child form: deny, find with the env file as its start path refuses",
    "find " + ENV + " -print", "deny", "env-file", cwd=NOGIT)
+
+# Pins for the find pipe stage and its output redirect. Dropping the stage-redirect clause of
+# _find_output_on_screen allows the list file the first deny names. Counting `2>` as stdout denies the
+# stderr redirect the first allow keeps. Counting a descriptor dup as stdout denies the `2>&1` pipe the
+# second allow keeps. A background filter passes detached-launch only with a pid captured (`echo $!`), so
+# the env layer judges it: a backgrounded filter whose list goes to the screen is allowed, and the cat
+# after it is the later stage that a removed branch would deny.
+sh("env-child form: deny, find -name piped to sort then a redirect writes the name list to a file",
+   "find . -name " + ENV + " | sort > list", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: allow, find -name with a 2> stderr redirect lists the env file name, reads no contents",
+   "find . -name " + ENV + " 2>/dev/null", "allow", cwd=NOGIT)
+sh("env-child form: allow, find -name -print with 2>&1 piped to sort lists the env file name, reads no contents",
+   "find . -name " + ENV + " -print 2>&1 | sort", "allow", cwd=NOGIT)
+# A trailing pipe is a shell syntax error, so the shell never runs it. Its empty stage is the command '', which
+# fails the filter check and is denied. No valid command reaches the `not parts` branch: a piece follows every
+# separator.
+sh("env-child form: deny, find -name with a trailing pipe and no stage after it refuses",
+   "find . -name " + ENV + " |", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: allow, find -name piped to sort in the background, pid captured, cat to tee, lists to the screen",
+   "find . -name " + ENV + " | sort & cat | tee out; echo $!", "allow", cwd=NOGIT)
+sh("env-child form: deny, find -name piped to sort in the background, then cat reads the env file, the control",
+   "find . -name " + ENV + " | sort & cat " + ENV + "; echo $!", "deny", "env-file", cwd=NOGIT)
 
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
