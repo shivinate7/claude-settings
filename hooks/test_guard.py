@@ -12497,7 +12497,7 @@ sh("frozen pin: gh pr create --title naming the global CLAUDE.md allows [cap-ask
 
 # READER LIMITS. The guard reads a segment's words as text when every command the segment runs is a known
 # reader (`_reads_only`, `_READERS`). Each case below is one way a write reaches a frozen file past those reads,
-# or a read the guard must still allow. The red cases are allowed on e94a2c537 and must be refused. The green
+# or a read the guard must still allow. The red cases were allowed before this change and must be refused. The green
 # cases already hold and must keep holding.
 
 # A STAGED SCRIPT. One call writes a script that names a frozen write, then runs it.
