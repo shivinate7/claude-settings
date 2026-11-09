@@ -709,6 +709,85 @@ class UncommittedTests(Fixture):
         self.assertNotIn("Traceback", out)
         self.assertNotIn("UNKNOWN", out)
 
+    def test_tracked_symlink_replaced_by_a_file_with_an_avoided_slug_fails(self):
+        try:
+            os.symlink("handoff.md", os.path.join(self.tree, "docs", "link.md"))
+        except (OSError, NotImplementedError):
+            self.skipTest("the file system refuses symlinks")
+        self.base_repo()
+        os.remove(os.path.join(self.tree, "docs", "link.md"))
+        self.put("docs/link.md", "Fix in `block-the-act-early`.\n")
+        self.assertState(" T docs/link.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "a symlink replaced by a file with an avoided slug passed\n" + out)
+        self.assertIn("docs/link.md:1", out, "the replaced file's line was not read\n" + out)
+
+    def test_untracked_utf16_file_is_unknown_and_red_in_ci(self):
+        self.base_repo()
+        with open(os.path.join(self.tree, "hooks", "wide.py"), "wb") as f:
+            f.write("bundle = 1\n".encode("utf-16"))  # a byte-order mark, then UTF-16: no UTF-8 reading decodes it
+        self.assertState("?? hooks/wide.py")
+        code, out = self.run_check()
+        self.assertIn("UNKNOWN", out, "an untracked file that will not decode passed silently\n" + out)
+        code, out = self.run_check(ci=True)
+        self.assertEqual(code, 1, "an untracked file that will not decode is not red in CI\n" + out)
+
+    def test_untracked_cp1252_file_is_unknown_and_red_in_ci(self):
+        self.base_repo()
+        with open(os.path.join(self.tree, "docs", "debts", "latin.md"), "wb") as f:
+            f.write(b"Caf\xe9 notes.\n")  # a cp1252 byte, not valid UTF-8
+        self.assertState("?? docs/debts/latin.md")
+        code, out = self.run_check()
+        self.assertIn("UNKNOWN", out, "an untracked cp1252 file passed silently\n" + out)
+        code, out = self.run_check(ci=True)
+        self.assertEqual(code, 1, "an untracked cp1252 file is not red in CI\n" + out)
+
+    def test_staged_file_does_not_make_an_untracked_neighbour_count(self):
+        """newtop is new on base: only the index holds it, so its folder is not one that holds tracked files."""
+        self.base_repo()
+        self.put("newtop/a.md", "Fine.\n")
+        self.git("add", "newtop/a.md")
+        self.put("newtop/b.md", "Fix in `block-the-act-early`.\n")
+        self.assertState("A  newtop/a.md")
+        self.assertState("?? newtop/b.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "an untracked file in a folder that only the index holds was read\n" + out)
+
+    def test_untracked_file_that_base_already_has_is_skipped(self):
+        """docs/old.md is untracked now but kept, and its avoided slug is already on base: nothing is new."""
+        self.put("docs/old.md", "Fix in `block-the-act-early`.\n")
+        self.base_repo()
+        self.git("rm", "-q", "--cached", "docs/old.md")
+        self.assertState("D  docs/old.md")
+        self.assertState("?? docs/old.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "an untracked file that base already has was read\n" + out)
+
+    def git_starts(self):
+        """The git processes the check starts with no arguments, counted from git's own trace.
+
+        The trace file sits in .git, which git never lists as an untracked file."""
+        trace = os.path.join(self.tree, ".git", "gls-trace.log")
+        env = {k: v for k, v in os.environ.items() if k != "CI"}
+        env["GIT_TRACE"] = trace
+        subprocess.run([sys.executable, os.path.join(self.tree, "lint", "check_glossary.py")],
+                       cwd=self.tree, capture_output=True, encoding="utf-8", env=env)
+        self.assertTrue(os.path.isfile(trace), "fixture state: git wrote no trace")
+        with open(trace, encoding="utf-8", errors="replace") as f:
+            starts = sum(1 for line in f if "built-in: git " in line)
+        self.assertGreater(starts, 0, "fixture state: the trace holds no git process")
+        return starts
+
+    def test_no_argument_run_starts_at_most_four_git_processes(self):
+        self.put("hooks/x.py", "x = 1\n")
+        self.base_repo()
+        self.put("hooks/x.py", "x = 1\nfine = 2\n")
+        self.put("docs/debts/clean.md", "Fine.\n")
+        self.assertState(" M hooks/x.py")
+        self.assertState("?? docs/debts/clean.md")
+        starts = self.git_starts()
+        self.assertLessEqual(starts, 4, "the check started %d git processes with no arguments; the budget is 4" % starts)
+
 
 def load_check():
     """The check module, loaded from MODULE, so a case reads the real table through the check's own rows()."""
