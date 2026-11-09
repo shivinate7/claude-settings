@@ -3,7 +3,7 @@
 
 Four modes: export (--fetched, --out), rebuild (--rebuild, --batches), merge (--merge, --live, --batches) and --all.
 
-Export,the writer's step at each wake and before each republish:
+Export, the writer's step at each wake and before each republish:
 
     python3 ~/.claude/skills/waiting-page/export_page.py --fetched DIR --out WAITING_DIR [--page FETCHED.html]
         [--allow-empty COLLECTION]
@@ -322,6 +322,12 @@ def scan(node, path, out):
 def canonical(data):
     """The text a copy holds for `data`: sorted keys, two-space indent, a final newline."""
     return json.dumps(data, sort_keys=True, indent=2) + "\n"
+
+
+def script_safe(text):
+    """JSON `text` with each `<` written as the escape \\u003c, so it pastes into a <script> block as is: no value can
+    close the script, and the text parses to the same values. A `<` in JSON text sits only inside a string."""
+    return text.replace("<", "\\u003c")
 
 
 def load_json(path, label):
@@ -680,7 +686,7 @@ def merge(copy, live, batches, collections=COLLECTIONS, live_page=None):
         handle.write(canonical(numbers))
     if design is not None:
         with open(os.path.join(batches, DESIGN_FILE), "w", encoding="utf-8", newline="") as handle:
-            handle.write(canonical(design))
+            handle.write(script_safe(canonical(design)))
     return "batches %d docs %d kept-live %d renumbered %d designs %d" % (count, len(fresh), kept, moved, added)
 
 
