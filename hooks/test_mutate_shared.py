@@ -40,6 +40,8 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 import mutate_guard  # noqa: E402
 import mutate_shared  # noqa: E402
 import mutate_sweep  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(HOOKS), "testing"))
+import tracked_tree  # noqa: E402  git's tracked files under a folder, suites left out (testing/tracked_tree.py)
 
 REQUIRED = "case: the rule under test"
 RED_RIGHT = ["FAIL  allow (want deny) [Bash] case: the rule under test"]
@@ -206,19 +208,35 @@ class GuardTreeImportsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, module + ": " + result.stderr[-300:])
 
 
+MOCKUP_HOME_ARM = "mockup-home: the refuse arm is dropped"  # the label prefix of the mockup-home guard mutant
+ROLE_MODEL_ARM = "role-model: Explore loses its audit exemption"  # the label prefix of a role-model guard mutant
+
+
+def git_listed(folder):
+    """The paths git lists under `folder`, suites left out as tracked_tree.is_suite leaves them. The expectation
+    comes from git itself, not from tracked_tree, so it does not share the helper the fix builds the root with."""
+    done = subprocess.run(["git", "ls-files", "-z", "--", folder], cwd=tracked_tree.REPO, capture_output=True)
+    if done.returncode != 0:
+        raise RuntimeError("git ls-files failed for %s: %s" % (folder, done.stderr.decode(errors="replace")))
+    names = done.stdout.decode("utf-8", "surrogateescape").split("\0")
+    return sorted(name for name in names if name and not tracked_tree.is_suite(name))
+
+
 class GuardMutantLayoutTests(unittest.TestCase):
     """A guard mutant runs from <root>/hooks, so its ../lint is <root>/lint. guard.py reads lint/layout.py
     from there (role_model_table, record_branch_of). Without that folder the import fails, the role-model
     table reads as unread, and every role-model arm passes unjudged: a survivor that has no bearing on
-    its mutation."""
+    its mutation. The same root holds the skills/ files a guard reads, from git's own list: the mockup-home
+    check imports skills/waiting-page/stale_pages.py, and a root without it crashes that case."""
 
     def setUp(self):
         self.run = _test_temp.run_folder()
         self.addCleanup(shutil.rmtree, self.run, True)
 
-    def test_copied_guard_imports_the_lint_layout_from_its_own_root(self):
-        entry = next(e for e in mutate_guard.MUTATIONS
-                     if mutate_guard.mutation_parts(e)[0].startswith("role-model: Explore loses its audit exemption"))
+    def built_root(self, prefix):
+        """(root, copy path) of the guard mutant whose label starts with `prefix`, as run_mutant builds it. The
+        suite is stubbed out, so this builds the root and runs no case."""
+        entry = next(e for e in mutate_guard.MUTATIONS if mutate_guard.mutation_parts(e)[0].startswith(prefix))
         copies = []
 
         def record(suite, variable, copy_path, config_dir, only=None):
@@ -233,7 +251,27 @@ class GuardMutantLayoutTests(unittest.TestCase):
                 mock.patch.object(mutate_shared, "staged_suite", side_effect=one_stage):
             mutate_guard.run_mutant({}, self.run, entry)
         self.assertEqual(len(copies), 1)
-        hooks = os.path.dirname(copies[0])
+        self.assertTrue(os.path.isfile(copies[0]), "run_mutant wrote no guard.py for %s" % prefix)
+        return os.path.dirname(os.path.dirname(copies[0])), copies[0]
+
+    def stage_one(self, prefix):
+        """run_mutant on the guard mutant whose label starts with `prefix`, its suite run for real, stage 1 only:
+        the required case alone, never the full suite. Return (run_mutant's tuple, the case lines stage 1 printed)."""
+        entry = next(e for e in mutate_guard.MUTATIONS if mutate_guard.mutation_parts(e)[0].startswith(prefix))
+        lines = []
+
+        def one_stage(run, required):
+            code, red, ran = run(required)
+            lines.extend(ran)
+            return code, red
+
+        with mock.patch.object(mutate_shared, "staged_suite", side_effect=one_stage):
+            result = mutate_guard.run_mutant({}, self.run, entry)
+        return result, lines
+
+    def test_copied_guard_imports_the_lint_layout_from_its_own_root(self):
+        _root, copy_path = self.built_root(ROLE_MODEL_ARM)
+        hooks = os.path.dirname(copy_path)
         # -I drops the cwd from sys.path, so a lint/ in the working directory cannot satisfy the import.
         result = subprocess.run(
             [sys.executable, "-I", "-c",
@@ -242,6 +280,34 @@ class GuardMutantLayoutTests(unittest.TestCase):
             capture_output=True, text=True)
         self.assertEqual(result.returncode, 0,
                          "the copied guard cannot import lint/layout.py from its root: " + result.stderr[-300:])
+
+    def test_mockup_home_mutant_dies_on_its_own_case(self):
+        # One real stage-1 run serves the three claims, in order. A crashed suite's orphan sleep holds its stdout
+        # pipe, so run_suite waits that out (see its comment): this case is slow only while the crash is there.
+        (_label, _code, red, required, _skip, seen), lines = self.stage_one(MOCKUP_HOME_ARM)
+        # Scope before subject: the FAIL line below means something only if stage 1 reached its required case.
+        self.assertTrue(any(required in line for line in lines),
+                        "stage 1 printed no line for %r: the suite died before its own case" % required)
+        # run_mutant returns no stderr, so this stays green until the diagnostics carry a traceback.
+        crashed = [line for line in red + seen if "ModuleNotFoundError" in line]
+        self.assertEqual(crashed, [], "a returned line holds ModuleNotFoundError: %r" % crashed)
+        own = [line for line in red if line.startswith("FAIL") and required in line]
+        self.assertTrue(own, "the mutant did not die on its own case %r: no FAIL line names it" % required)
+
+    def test_guard_mutant_root_holds_every_tracked_waiting_page_file(self):
+        root, _copy = self.built_root(MOCKUP_HOME_ARM)
+        listed = git_listed("skills/waiting-page")
+        self.assertIn("skills/waiting-page/stale_pages.py", listed,
+                      "scope: git lists no stale_pages.py under skills/waiting-page")
+        missing = [rel for rel in listed if not os.path.isfile(os.path.join(root, *rel.split("/")))]
+        self.assertEqual(missing, [], "the mutant root lacks tracked skills/waiting-page files")
+
+    def test_guard_mutant_root_holds_the_impeccable_skill_file(self):
+        root, _copy = self.built_root(MOCKUP_HOME_ARM)
+        self.assertTrue(os.path.isfile(os.path.join(tracked_tree.REPO, "skills", "impeccable", "SKILL.md")),
+                        "scope: the checkout holds no skills/impeccable/SKILL.md")
+        self.assertTrue(os.path.isfile(os.path.join(root, "skills", "impeccable", "SKILL.md")),
+                        "the mutant root lacks skills/impeccable/SKILL.md, which guard.py reads")
 
 
 def scaffold_sources(**extra):
@@ -424,7 +490,7 @@ def verdict_seen(code, red, seen):
 
 
 class SeenNeverChangesTheVerdictTests(unittest.TestCase):
-    """Controls, green on the head. `seen` is diagnostics only: the verdict reads `red` alone, so an ERROR
+    """Pins that `seen` is diagnostics only: the verdict reads `red` alone, so an ERROR
     block that names the required case must not turn a WRONG CAUSE into a kill."""
 
     def test_an_error_in_the_required_case_with_no_fail_line_is_wrong_cause(self):
