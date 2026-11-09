@@ -1,10 +1,10 @@
 {
   "title": "Re-cap CI jobs over 80% of their timeout, and set measured caps",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 103.352,
   "why": "A job near its timeout fails at random on a slow day.",
-  "note": "Coordinator 12:10 CST. Debt jobs-over-80pct-of-cap: windows-guard and windows-guard-2 at 99%, windows-merge* at 82-94%, checks-guard at 84%, shell-macos at 83%. checks-macos-b and checks-merge-install still have the provisional 60 min cap after 29-30 green runs. A verdict change, so it needs a review. Sighting (runner 8 via the coordinator, 15:16 CST Nov 9): in batch 69 checks-guard used 27 of 27 min and one attempt hit the cap; checks-macos-b ran 26 of 31 and checks-windows-rest 26 of 28. A cap hit turns a batch red and costs a rebuild. Fix to weigh: split checks-guard, or give it headroom (skill ci-hygiene). Coordinator filed it as ci-guard-headroom; folded here.",
-  "updatedAt": "2026-11-09T15:27:00-06:00",
+  "note": "Coordinator 12:10 CST. Debt jobs-over-80pct-of-cap: windows-guard and windows-guard-2 at 99%, windows-merge* at 82-94%, checks-guard at 84%, shell-macos at 83%. checks-macos-b and checks-merge-install still have the provisional 60 min cap after 29-30 green runs. A verdict change, so it needs a review. Sighting (runner 8 via the coordinator, 15:16 CST Nov 9): in batch 69 checks-guard used 27 of 27 min and one attempt hit the cap; checks-macos-b ran 26 of 31 and checks-windows-rest 26 of 28. A cap hit turns a batch red and costs a rebuild. Fix to weigh: split checks-guard, or give it headroom (skill ci-hygiene). Coordinator filed it as ci-guard-headroom; folded here. Done: PR #1347 merged 2026-11-08 04:06 UTC and its lane is archived (coordinator 15:45 CST Nov 9). The checks-guard headroom sighting moved to step ci-guard-headroom.",
+  "updatedAt": "2026-11-09T15:29:00-06:00",
   "lane": "session_013NEJKzpnqotWqxGxrfi4Sa"
 }

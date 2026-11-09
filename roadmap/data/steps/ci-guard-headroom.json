@@ -1,0 +1,10 @@
+{
+  "title": "checks-guard and the other CI jobs near their cap get headroom, so a batch does not go red on a cap hit",
+  "phase": "now",
+  "status": "todo",
+  "order": 930,
+  "owner": "coordinator",
+  "why": "Runner 8, 15:16 CST Nov 9 (via the coordinator): in batch 69 checks-guard used 27 of 27 min and one attempt hit the cap; checks-macos-b ran 26 of 31 and checks-windows-rest 26 of 28. A cap hit turns a batch red and costs a rebuild.",
+  "note": "Fix: split checks-guard, or give it headroom (skill ci-hygiene). Follows ci-recap-jobs (done, #1347). The coordinator starts a lane (15:45 CST Nov 9).",
+  "updatedAt": "2026-11-09T15:29:00-06:00"
+}
