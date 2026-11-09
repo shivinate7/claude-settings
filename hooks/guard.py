@@ -1481,7 +1481,10 @@ def message_texts(segment: str, raw: str, where: str, before: int, titles: bool 
 GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
 _ROUTE_NUMBER = r"(\d+|\$\w+|\$\{\w+\})"   # a number, or a shell variable holding one: the guard sees the word before the shell fills it
 _COMMENTS_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/" + _ROUTE_NUMBER + r"/comments/?")
-_COMMENT_EDIT_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/comments/" + _ROUTE_NUMBER + r"/?")   # a comment edited in place, by comment id
+# A comment edited in place, by comment id. The route is read in every form gh takes: a full URL, a query string or fragment after the id, and a
+# command substitution (`$(...)`) in the id or in the repo. The guard judges the route it reads, so a form this pattern misses is an edit it never judges.
+_EDIT_ID = r"(\d+|\$\w+|\$\{\w+\}|\$\([^)]*\))"
+_COMMENT_EDIT_ROUTE = re.compile(r"(?:https?://[^/\s]+)?/?repos/(.+?)/issues/comments/" + _EDIT_ID + r"/?(?:[?#].*)?", re.DOTALL)
 PR_COMMENT_VALUE_FLAGS = {"-b", "--body", "-F", "--body-file", "-R", "--repo"}
 _CAT_BODY = re.compile(r"\$\(\s*cat\s+([^|;&<>()]+?)\s*\)")
 

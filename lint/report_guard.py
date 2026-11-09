@@ -131,7 +131,7 @@ that holds `round <N>` or `reviewer` and a capital PASS or PASSED claims a PASS,
 "did not PASS") claims nothing, nor does a PASS whose clause places it in the past ("was before the fix", "went stale"). Clauses split on `,`, `;` and `--`; a
 history word in another clause hides no claim. The line claims it for each PR it names, as
 `#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
-the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
+the review marker (merge/merge.py review_newest: an edited newest record, or an edited comment after it, reads as no record), read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
 PR on its line is refused and asks for the PR. The remedy names the act (`merge <pr> --review-record ...`, then post the
 record) and never the live head. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
 checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
@@ -1693,17 +1693,17 @@ def _gh_json(args, cwd):
 
 
 def _newest_marked(comments, merge_mod):
-    """The newest comment of `comments` (oldest first) that merge's review_marked calls a record, else None."""
-    marked = [c for c in comments if isinstance(c, dict) and merge_mod.review_marked(c.get("body") or "")]
-    return marked[-1] if marked else None
+    """The newest comment of `comments` (oldest first) that merge's review_marked calls a record, else None. merge's review_newest is the one home."""
+    return merge_mod.review_newest(comments)[0]
 
 
 def _newest_record(n, comments, merge_mod, cutover=None):
-    """The parsed newest review record comment of `comments` (oldest first), else None. With a `cutover` (merge's review_stamp_since), the
-    comment's last edit time (updated_at, else created_at) goes to parse_review, so an unstamped record from before the cutover reads as
-    merge --reviewed reads it. With no cutover, the Stamp line is required."""
-    newest = _newest_marked(comments, merge_mod)
-    if newest is None:
+    """The parsed newest review record comment of `comments` (oldest first), else None. None as well when merge's review_newest says it
+    cannot be trusted: the newest record, or a comment after it, was edited, so a PASS claim reads as merge --reviewed reads it, bad. With a
+    `cutover` (merge's review_stamp_since), the comment's last edit time (updated_at, else created_at) goes to parse_review, so an unstamped
+    record from before the cutover reads as merge --reviewed reads it. With no cutover, the Stamp line is required."""
+    newest, why = merge_mod.review_newest(comments)
+    if newest is None or why:
         return None
     edited = (newest.get("updated_at") or newest.get("created_at")) if cutover else None
     return merge_mod.parse_review(newest.get("body") or "", edited, cutover)

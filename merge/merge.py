@@ -880,19 +880,29 @@ class Host:
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
-    def review_comments(self, since):
-        """-> {PR number: [(review record body, time, edited), oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts only
-        when the review record marker is its whole first line. The time is the comment's last edit (updated_at, else created_at), because an edit keeps
-        created_at and the cutover must date the body as it now reads. `edited` is True when updated_at is set and differs from created_at: the body was
-        edited by hand, since the merge tool never edits a comment (decision pr-review-record). A missing or null updated_at is not an edit. The number
+    def review_read(self, since):
+        """-> {PR number: ([(review record body, time, edited), oldest first], why)}: one list read of the repo's issue comments updated since `since`. A body
+        counts only when the review record marker is its whole first line. The time is the comment's last edit (updated_at, else created_at), because an edit
+        keeps created_at and the cutover must date the body as it now reads. `edited` is True when updated_at is set and differs from created_at: the body
+        was edited by hand, since the merge tool never edits a comment (decision pr-review-record). `why` is review_newest's read of that pull request's
+        comments, all of them, marked or not: None, or why the newest record cannot be trusted. A pull request with no record has no entry. The number
         comes from the comment's issue_url. A failed read is a Stop."""
-        found = {}
+        grouped = {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
-            body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
-            if m and review_marked(body):
-                upd = c.get("updated_at")
-                found.setdefault(int(m.group(1)), []).append((body, upd or c.get("created_at"), bool(upd) and upd != c.get("created_at")))
+            m = re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
+            if m:
+                grouped.setdefault(int(m.group(1)), []).append(c)
+        found = {}
+        for n, comments in grouped.items():
+            records = [(c.get("body") or "", c.get("updated_at") or c.get("created_at"), comment_edited(c))
+                       for c in comments if review_marked(c.get("body") or "")]
+            if records:
+                found[n] = (records, review_newest(comments)[1])
         return found
+
+    def review_comments(self, since):
+        """-> {PR number: [(review record body, time, edited), oldest first]}: the records of review_read, without its `why`."""
+        return {n: records for n, (records, _why) in self.review_read(since).items()}
 
     def open_heads(self):
         """-> {head branch name: (head sha, PR base)} of the open pull requests, every page. A failed read raises Stop: never an empty set,
@@ -3238,6 +3248,29 @@ def review_marked(text):
     """True when the first line of `text` is exactly the review-record marker: the one test of whether a body is a record."""
     return [line.rstrip() for line in text.splitlines()[:1]] == [REVIEW_MARKER]
 
+def comment_edited(c):
+    """True when the comment `c` (a GitHub comment dict) was edited: updated_at is set and differs from created_at. A missing or null updated_at is not an edit."""
+    upd = c.get("updated_at")
+    return bool(upd) and upd != c.get("created_at")
+
+def review_newest(comments):
+    """-> (newest, why): the one home of the newest-record read, for `merge --reviewed`, the fix check and the PASS-claim guard (decision pr-review-record).
+    `comments` are one pull request's GitHub comments, oldest first, all of them. `newest` is the last comment whose first line is the record marker, or None.
+    `why` is None when it can be trusted, else the reason it cannot: it was edited, or a comment after it was edited, marked or not. An edit strips a
+    marker as well as it changes a verdict, and the tool cannot tell a stripped record from an edited comment. An edited comment before the newest
+    record does not count. A reaction does not move updated_at, so it is no edit."""
+    comments = [c for c in comments if isinstance(c, dict)]
+    marked = [i for i, c in enumerate(comments) if review_marked(c.get("body") or "")]
+    if not marked:
+        return None, None
+    newest = comments[marked[-1]]
+    if comment_edited(newest):
+        return newest, REVIEW_EDITED_WHY
+    for c in comments[marked[-1] + 1:]:
+        if comment_edited(c):
+            return newest, REVIEW_NEWER_EDITED_WHY.format(who=c.get("html_url") or f"comment {c.get('id')}")
+    return newest, None
+
 
 _stamp_since = {}
 
@@ -3353,7 +3386,9 @@ def review_state(rec, head):
         return "done", "docs-only change, no round owed"
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
-REVIEW_EDITED_WHY = "hand-edited (its updated_at differs from its created_at), so it does not count and an older record does not stand in for it."
+REVIEW_EDITED_WHY = "the newest record is hand-edited (its updated_at differs from its created_at), so it does not count and an older record does not stand in for it."
+REVIEW_NEWER_EDITED_WHY = ("{who} is newer than the newest record and hand-edited (its updated_at differs from its created_at), so it may be a record "
+                           "whose marker was taken out. Post a fresh record through the tool: `merge <pr> --review-record`.")
 REVIEW_BATCH_OPEN = "open batch now: "  # the batch line of a --root block when no ready pull request on the base has CI running
 REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when one has
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
@@ -3366,16 +3401,16 @@ def reviewed_read(h, cutover=None):
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
         return ["no open pull requests."], [], pulls
-    records = h.review_comments(min(d["created_at"] for d in pulls))
+    records = h.review_read(min(d["created_at"] for d in pulls))
     lines, bare, done = [], [], []
     for d in sorted(pulls, key=lambda d: d["number"]):
-        n, sha, bodies = d["number"], d["head"]["sha"], records.get(d["number"])
-        if not bodies:
+        n, sha, found = d["number"], d["head"]["sha"], records.get(d["number"])
+        if not found:
             bare.append(f"#{n}")
             continue
-        body, time, edited = bodies[-1]
-        if edited:  # the newest record decides: a hand-edited one reads bad, and an older record under it does not count
-            state, why = "bad", REVIEW_EDITED_WHY
+        (body, time, _edited), why = found[0][-1], found[1]
+        if why:  # the newest record decides: a hand-edited one, or an edited comment after it, reads bad, and an older record does not count
+            state = "bad"
         else:
             rec = parse_review(body, time, cutover)
             state, why = review_state(rec if rec and rec["n"] == n else None, sha)
@@ -3673,9 +3708,9 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
                 cutover = review_stamp_since(root, info["base"])
-                earlier = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
-                if earlier and earlier[-1][2]:  # the newest record decides: a hand-edited one names no reviewed head, and an older record does not stand in
-                    print("merge: --fix-check: the newest earlier review record on this pull request was " + REVIEW_EDITED_WHY + " " + REVIEW_CITE, file=sys.stderr)
+                earlier, why = h.review_read(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, ([], None))
+                if why:  # the newest record decides: a hand-edited one names no reviewed head, and an edited comment after it may be a record with its marker taken out
+                    print("merge: --fix-check: " + why + " " + REVIEW_CITE, file=sys.stderr)
                     return 2
                 last = parse_review(earlier[-1][0], earlier[-1][1], cutover) if earlier else None
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
