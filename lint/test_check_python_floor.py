@@ -11,7 +11,8 @@ Interface the check must meet (the builder builds to it):
 - A `# novermin` line comment excuses its line, as vermin's marker does. The same text in a string does not.
 - Exit 0 with no output when clean. Exit 1 with one line per offending file, naming the file and the
   feature, when a file needs more than 3.9. Exit 2, naming the cause, when vermin cannot run. The vermin
-  command is FLOOR_VERMIN_CMD when set, so a test makes vermin missing or odd with that variable.
+  command is FLOOR_VERMIN_CMD when set. Otherwise the check runs a cached venv that holds the pin in VERMIN_PIN,
+  built on first use; FLOOR_VENV_DIR overrides the cache path. That bootstrap is the check's only network use.
 - A `|` between types needs 3.10 when it runs. In an annotation (not evaluated under `from __future__
   import annotations`) the check flags any `|`, since a flag OR is never an annotation. In a module or class
   assignment value, or as isinstance/issubclass's second argument, it flags a `|` with a None, builtin-type or
@@ -31,6 +32,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHECK = os.path.join(HERE, "check_python_floor.py")
+REPO = os.path.dirname(HERE)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
@@ -77,19 +79,100 @@ def tree(files):
     return root
 
 
-def run_check(root=None, env=None):
-    """Run the check on `root`, or on the repo root when none is given. -> (exit code, stdout and stderr).
+def pinned_version():
+    """The pin the check holds in its one home, VERMIN_PIN. None when the check holds none."""
+    need_check()
+    with open(CHECK, encoding="utf-8") as handle:
+        match = re.search(r'^VERMIN_PIN = "([^"]+)"', handle.read(), re.M)
+    return match.group(1) if match else None
 
-    An inherited FLOOR_VERMIN_CMD is removed, so each case sets its own vermin or uses the default.
+
+def require_pin():
+    pin = pinned_version()
+    if pin is None:
+        raise AssertionError("lint/check_python_floor.py has no VERMIN_PIN constant: the vermin pin has no home")
+    return pin
+
+
+_WHEELS = []  # the one local index, made on first use
+
+
+def index_env():
+    """Pip reads only a local index that holds the pinned vermin, so the suite reaches the network once."""
+    pin = pinned_version()
+    if pin is None:
+        return {}  # no pin yet: the check runs on the test python's own vermin
+    if not _WHEELS:
+        wheels = os.path.join(RUN_FOLDER, "wheels")
+        os.makedirs(wheels, exist_ok=True)
+        proc = subprocess.run([sys.executable, "-m", "pip", "download", "--no-deps", "-q", "-d", wheels,
+                               "vermin==" + pin], capture_output=True, text=True, timeout=300)
+        if proc.returncode != 0:
+            raise AssertionError("could not download vermin==%s for the local index: %s"
+                                 % (pin, proc.stderr.strip()[-300:]))
+        _WHEELS.append(wheels)
+    return {"PIP_NO_INDEX": "1", "PIP_FIND_LINKS": _WHEELS[0]}
+
+
+def shared_cache():
+    """One cache for the suite's fixtures, so they share one bootstrap."""
+    return os.path.join(RUN_FOLDER, "shared-vermin")
+
+
+def fresh_cache():
+    """A cache path that does not exist yet, under the run folder."""
+    return os.path.join(tempfile.mkdtemp(prefix="cache_", dir=RUN_FOLDER), "vermin")
+
+
+def empty_index():
+    path = os.path.join(RUN_FOLDER, "empty-index")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+_BARE = []  # a python with no vermin, made on first use
+
+
+def bare_python():
+    """A python with no vermin in it, made once per run. The lint's python3 has none either."""
+    if not _BARE:
+        path = os.path.join(RUN_FOLDER, "bare-venv")
+        proc = subprocess.run([sys.executable, "-m", "venv", "--without-pip", path], capture_output=True,
+                              text=True, timeout=300)
+        if proc.returncode != 0:
+            raise AssertionError("could not make a python without vermin: %s" % proc.stderr.strip()[-300:])
+        exe = os.path.join(path, "Scripts", "python.exe") if os.name == "nt" else os.path.join(path, "bin", "python")
+        probe = subprocess.run([exe, "-c", "import vermin"], capture_output=True, text=True, timeout=120)
+        if probe.returncode == 0:
+            raise AssertionError("the python without vermin imports vermin: a bootstrap case would prove nothing")
+        _BARE.append(exe)
+    return _BARE[0]
+
+
+def run_check(root=None, env=None, python=None):
+    """Run the check on `root` (or the repo root) with `python` (default: this one). -> (exit code, stdout and stderr).
+
+    The suite's environment: no inherited FLOOR_VERMIN_CMD, one shared vermin cache, and a local index when the check
+    holds a pin. A value of None in `env` removes that variable.
     """
     need_check()
-    cmd = [sys.executable, CHECK] + (["--root", root] if root else [])
+    cmd = [python or sys.executable, CHECK] + (["--root", root] if root else [])
     environ = dict(os.environ)
     environ.pop("FLOOR_VERMIN_CMD", None)
-    environ.update(env or {})
+    environ["FLOOR_VENV_DIR"] = shared_cache()
+    environ.update(index_env())
+    for key, value in (env or {}).items():
+        if value is None:
+            environ.pop(key, None)
+        else:
+            environ[key] = value
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          timeout=120, env=environ)
+                          timeout=300, env=environ)
     return proc.returncode, proc.stdout + proc.stderr
+
+
+def is_test_name(name):
+    return name.startswith("test_") or name.startswith("_test") or name.endswith("_test.py")
 
 
 def naming(out, name):
@@ -450,6 +533,103 @@ class AnnotationPositions(unittest.TestCase):
                     self.assertTrue(any("union" in line and "3.10" in line for line in named),
                                     "union type `|` at the %s, hooks/x.py:%d, was not flagged: exit %d, output %r"
                                     % (label, lineno, code, out))
+
+
+class Bootstrap(unittest.TestCase):
+    """With no FLOOR_VERMIN_CMD, the check runs a cached venv holding the pin, built on first use."""
+
+    def marker(self, cache):
+        return os.path.join(cache, ".ok")
+
+    def test_fresh_cache_bootstraps_vermin_and_flags_the_fixture(self):
+        python = bare_python()
+        cache = fresh_cache()
+        code, out = run_check(tree({"hooks/x.py": IGLOB}), env={"FLOOR_VENV_DIR": cache}, python=python)
+        self.assertEqual(code, 1, "with no vermin in its python and a fresh cache, the check exited %d, not 1: %r"
+                         % (code, out))
+        self.assertTrue(any("iglob" in line for line in naming(out, "x.py")),
+                        "the bootstrapped check did not flag hooks/x.py's iglob: %r" % out)
+        self.assertTrue(os.path.isfile(self.marker(cache)), "the bootstrap left no .ok marker in the cache")
+
+    def test_second_run_reuses_the_cache_and_installs_nothing(self):
+        python = bare_python()
+        cache = fresh_cache()
+        code, out = run_check(tree({"hooks/x.py": IGLOB}), env={"FLOOR_VENV_DIR": cache}, python=python)
+        self.assertEqual(code, 1, "the first run did not bootstrap: exit %d, output %r" % (code, out))
+        self.assertTrue(os.path.isfile(self.marker(cache)), "the first run wrote no .ok marker: nothing was cached")
+        stamp = os.stat(self.marker(cache)).st_mtime_ns
+        # An empty index: a second install would fail, so exit 1 proves the run installed nothing.
+        code, out = run_check(tree({"hooks/x.py": IGLOB}),
+                              env={"FLOOR_VENV_DIR": cache, "PIP_NO_INDEX": "1", "PIP_FIND_LINKS": empty_index()},
+                              python=python)
+        self.assertEqual(code, 1, "the second run reinstalled: with an empty index it exited %d, not 1: %r"
+                         % (code, out))
+        self.assertEqual(os.stat(self.marker(cache)).st_mtime_ns, stamp, "the second run rewrote the cache marker")
+
+    def test_offline_with_a_fresh_cache_exits_two_naming_the_pin(self):
+        python = bare_python()
+        pin = require_pin()
+        cache = fresh_cache()
+        code, out = run_check(tree({"hooks/x.py": IGLOB}),
+                              env={"FLOOR_VENV_DIR": cache, "PIP_NO_INDEX": "1", "PIP_FIND_LINKS": empty_index()},
+                              python=python)
+        self.assertEqual(code, 2, "an offline bootstrap exited %d, not 2: %r" % (code, out))
+        self.assertTrue(out.strip(), "exit 2 printed nothing: an unread check is never clean")
+        self.assertIn(pin, out, "exit 2 does not name vermin %s, the pin that failed to install: %r" % (pin, out))
+        self.assertFalse(os.path.exists(self.marker(cache)), "a failed install left a .ok marker")
+
+    def test_half_made_cache_without_the_marker_is_rebuilt(self):
+        python = bare_python()
+        cache = fresh_cache()
+        os.makedirs(cache)
+        partial = os.path.join(cache, "half-made")
+        with open(partial, "w", encoding="utf-8") as handle:
+            handle.write("an install cut short\n")
+        code, out = run_check(tree({"hooks/x.py": IGLOB}), env={"FLOOR_VENV_DIR": cache}, python=python)
+        self.assertEqual(code, 1, "a half-made cache without .ok was not rebuilt: exit %d, output %r" % (code, out))
+        self.assertTrue(os.path.isfile(self.marker(cache)), "the rebuilt cache has no .ok marker")
+        self.assertFalse(os.path.exists(partial), "the half-made file survived: the cache was reused, not rebuilt")
+
+    def test_cache_for_another_pin_is_not_used(self):
+        python = bare_python()
+        pin = require_pin()
+        tmp = tempfile.mkdtemp(prefix="tmp_", dir=RUN_FOLDER)
+        other = os.path.join(tmp, "floor-vermin-0.0.1-py%d%d" % sys.version_info[:2])
+        os.makedirs(other)
+        with open(os.path.join(other, ".ok"), "w", encoding="utf-8") as handle:
+            handle.write("0.0.1\n")
+        ours = os.path.join(tmp, "floor-vermin-%s-py%d%d" % ((pin,) + tuple(sys.version_info[:2])))
+        env = {"FLOOR_VENV_DIR": None, "TMPDIR": tmp, "TEMP": tmp, "TMP": tmp}
+        code, out = run_check(tree({"hooks/x.py": IGLOB}), env=env, python=python)
+        self.assertEqual(code, 1, "a cache for another pin was used instead of the pinned one: exit %d, output %r"
+                         % (code, out))
+        self.assertTrue(os.path.isfile(os.path.join(ours, ".ok")), "the pinned cache %s was not built" % ours)
+
+
+class OneHome(unittest.TestCase):
+    """The pin is written in one place, and CI installs no vermin of its own."""
+
+    def test_checks_yml_installs_no_vermin(self):
+        with open(os.path.join(REPO, ".github", "workflows", "checks.yml"), encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertNotIn("pip install vermin", text, "checks.yml still installs vermin: the check bootstraps its own")
+        self.assertNotIn("Install vermin", text, "checks.yml still has an Install vermin step")
+
+    def test_pin_string_lives_only_in_the_check(self):
+        pin = require_pin()
+        hits = set()
+        for folder in ("lint", ".github"):
+            for base, dirs, names in os.walk(os.path.join(REPO, folder)):
+                dirs[:] = [d for d in dirs if d != "__pycache__"]
+                for name in names:
+                    if is_test_name(name):
+                        continue
+                    path = os.path.join(base, name)
+                    with open(path, encoding="utf-8", errors="replace") as handle:
+                        if pin in handle.read():
+                            hits.add(os.path.relpath(path, REPO).replace(os.sep, "/"))
+        self.assertEqual(hits, {"lint/check_python_floor.py"},
+                         "the pin %s is written outside the check: %s" % (pin, sorted(hits)))
 
 
 if __name__ == "__main__":
