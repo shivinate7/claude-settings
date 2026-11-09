@@ -135,10 +135,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (commit-refuses-conflict-markers)
   octopus-push         deny. A `git push` whose range (the pushed ref, else HEAD, less every ref of the pushed
                        remote, else origin) adds a merge commit of more than two parents; a merge that a
-                       remote ref already holds passes. A dry run and a destination named main or master are
+                       ref of the pushed remote already holds passes. A dry run and a destination named main or master are
                        left out; push-main asks about the latter. A remote named by a URL or a path
                        counts every remote's refs. Cost: one `git rev-list` per pushed ref, and one `git
-                       config` more for such a remote. (octopus-push-refused)
+                       config` more per pushed ref for such a remote. (octopus-push-refused)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
