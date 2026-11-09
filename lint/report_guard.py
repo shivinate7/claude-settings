@@ -173,6 +173,7 @@ HOOKS_DIR = os.path.join(HERE, "..", "hooks")
 _STAMP = re.compile(rb'^INSTALL_ID = "([^"]+)"', re.MULTILINE)
 # The stamp sits near byte 30000 of the 320 KB hooks/guard.py; the cap leaves room for the file to grow.
 _STAMP_HEAD_BYTES = 64 * 1024
+_hooks_dirs_answer = None  # hooks_dirs() sets it on its first call
 
 
 def hooks_dirs():
@@ -183,14 +184,16 @@ def hooks_dirs():
     unreadable file or no folder gives the flat folder alone.
 
     The stamp is matched in the first 64 KB of bytes, never an import and never a strict decode, so a stray non-UTF-8
-    byte in guard.py cannot stop this module importing. question_form imports this module a second time (a fresh
-    module, so no module global survives), and an install lands between processes, not inside one. So an import
-    (not a run as the script, which is a new hook process) that finds shared_names already loaded from the flat
-    folder or a guard.d folder takes that folder as the answer and skips the 64 KB read."""
-    loaded = _loaded_hooks_dir() if __name__ != "__main__" else None
-    if loaded is not None:
-        return loaded
-    return _find_hooks_dirs()
+    byte in guard.py cannot stop this module importing. The answer is kept in a module global, so a run reads guard.py
+    once however many lazy helper imports ask. A run as the script starts from a fresh module, so each hook run reads
+    it once. question_form imports this module a second time, as a fresh module whose global starts empty; an install
+    lands between processes, not inside one. So an import (not a run as the script) that finds shared_names already
+    loaded from the flat folder or a guard.d folder takes that folder as the answer and skips the read."""
+    global _hooks_dirs_answer
+    if _hooks_dirs_answer is None:
+        loaded = _loaded_hooks_dir() if __name__ != "__main__" else None
+        _hooks_dirs_answer = loaded if loaded is not None else _find_hooks_dirs()
+    return list(_hooks_dirs_answer)
 
 
 def _loaded_hooks_dir():
