@@ -303,18 +303,19 @@ class Env(unittest.TestCase):
         self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
         self.addCleanup(lambda: os.environ.pop("MERGE_TEST_HOOK", None))
 
-    def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None, hosts=None):
+    def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None, hosts=None, cwd=None):
         """-> (rc, stdout + stderr). Pass a StringIO as stderr to read the error stream on its own afterwards. `hosts` is the --root seam, one
-        Host per --root string. It is passed only when merge.main takes it: on a main without it, argparse refuses --root first."""
+        Host per --root string. It is passed only when merge.main takes it: on a main without it, argparse refuses --root first.
+        `cwd` is the clone merge runs in; self.co when not given."""
         out, err = stdout or io.StringIO(), stderr or io.StringIO()
-        cwd = os.getcwd()
-        os.chdir(self.co)
+        prior = os.getcwd()
+        os.chdir(cwd or self.co)
         seam = {"hosts": hosts} if hosts is not None and "hosts" in inspect.signature(merge.main).parameters else {}
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 rc = merge.main(list(args), host=host or self.host, lock=lock or self.lock, **seam)
         finally:
-            os.chdir(cwd)
+            os.chdir(prior)
         return rc, out.getvalue() + err.getvalue()
 
     def refs(self):
@@ -15022,12 +15023,21 @@ def freeze_inner(name, lanes, dropped=(), on=None):
 def freeze_body(inner):
     return "\n".join([BATCH_BEGIN, *inner, BATCH_END]) + "\n"
 
-def block_lines(body):
+def block_raw(body):
     """The lines between a PR body's one begin marker line and its one end marker line, or None when it holds no single block."""
     lines = body.split("\n")
     if lines.count(BATCH_BEGIN) != 1 or lines.count(BATCH_END) != 1 or lines.index(BATCH_BEGIN) > lines.index(BATCH_END):
         return None
     return lines[lines.index(BATCH_BEGIN) + 1:lines.index(BATCH_END)]
+
+def block_lines(body):
+    """block_raw without the Base line: the lane-set cases compare the lines a build or a drop owns. block_base reads Base."""
+    lines = block_raw(body)
+    return None if lines is None else [x for x in lines if not x.startswith("Base: ")]
+
+def block_base(body):
+    """The sha on the block's `Base:` line, or None when the block has none."""
+    return next((m.group(1) for x in block_raw(body) or [] if (m := re.fullmatch(r"Base: ([0-9a-f]{40})", x))), None)
 
 
 class BatchFreeze(CloudSession):
@@ -15133,11 +15143,11 @@ class BatchFreeze(CloudSession):
         except FileNotFoundError:
             return []
 
-    def run_batch(self, *argv):
-        """-> (rc, output) of merge.main on argv, run in the clone. argparse exits 2 through SystemExit: that is the rc, and what it printed is kept."""
+    def run_batch(self, *argv, cwd=None):
+        """-> (rc, output) of merge.main on argv, run in the clone (`cwd`, or self.co). argparse exits 2 through SystemExit: that is the rc, and what it printed is kept."""
         out, err = io.StringIO(), io.StringIO()
         try:
-            rc = self.run_merge(*argv, stdout=out, stderr=err)[0]
+            rc = self.run_merge(*argv, stdout=out, stderr=err, cwd=cwd)[0]
         except SystemExit as e:
             rc = e.code
         return rc, out.getvalue() + err.getvalue()
@@ -15537,6 +15547,172 @@ class BatchFreeze(CloudSession):
         for n in (101, 102, 103):
             self.assertTrue(self.ancestor(self.heads[n], nightly_new), "the rebuild dropped lane #%d's head from batch/nightly: %s" % (n, out))
         self.assertEqual(rc, 0, "the rebuild exited %s: %s" % (rc, out))
+
+    # Review round 1: a stacked lane needs its base lane, a lane's pull request targets the batch's base, a failed body write, a
+    # dependent on a later batch's On chain, a shallow clone, an unrelated body quoting a marker, and the base recorded at build.
+
+    def fail_the_next_body_write(self):
+        """The host refuses the next body write, by raising Stop; each write after it is kept as usual."""
+        real, calls = self.host.set_body, []
+
+        def set_body(n, body):
+            calls.append(n)
+            if len(calls) == 1:
+                raise merge.Stop("the host refused the body write of #%d" % n)
+            real(n, body)
+
+        self.host.set_body = set_body
+
+    def lanes_on_branch_and_listed(self, pr, numbers):
+        """-> (the lanes of `numbers` that batch/nightly holds, the lanes that pull request pr's block lists as Lane lines)."""
+        lines = block_lines(self.body(pr)) or []
+        held = {n for n in numbers if self.on_origin(self.heads[n], "batch/nightly")}
+        listed = {n for n in numbers if f"Lane: #{n} {self.heads[n]}" in lines}
+        return held, listed
+
+    def test_a_stacked_lane_without_its_base_lane_is_refused_and_nothing_moves(self):
+        self.lane(101)
+        self.lane(102, on=101)
+        self.assertTrue(self.ancestor(self.heads[101], self.heads[102]), "setup: lane #102 does not contain lane #101's head")
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "102")
+        self.assertEqual(rc, 1, "a stacked lane without its base lane was not refused with exit 1: %s" % out)
+        self.assertIn("#101", out, "the refusal does not name the base lane #101, which is missing from the request: %s" % out)
+        self.assertEqual(self.host.created, [], "the refused build opened a pull request: %s" % out)
+        self.assertEqual(self.head("batch/nightly"), "", "the refused build pushed batch/nightly: %s" % out)
+        self.assertEqual(self.pushes(), [], "the refused build pushed: %s" % out)
+
+    def test_a_lane_whose_pr_targets_another_base_is_refused_and_nothing_moves(self):
+        for n in (101, 102):
+            self.lane(n)
+        self.host.prs[101]["base"] = "release"  # lane #101's pull request targets release, and the batch targets main
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 1, "a lane whose pull request targets another base was not refused with exit 1: %s" % out)
+        self.assertIn("#101", out, "the refusal does not name the lane whose pull request targets another base: %s" % out)
+        self.assertEqual(self.host.created, [], "the refused build opened a pull request: %s" % out)
+        self.assertEqual(self.head("batch/nightly"), "", "the refused build pushed batch/nightly: %s" % out)
+        self.assertEqual(self.pushes(), [], "the refused build pushed: %s" % out)
+
+    def test_stacked_lanes_requested_together_with_their_base_lane_are_allowed(self):
+        self.lane(101)
+        self.lane(102, on=101)
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 0, "stacked lanes requested together, base lane included, were refused: %s" % out)
+        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
+        self.assertTrue(self.on_origin(self.heads[101], "batch/nightly") and self.on_origin(self.heads[102], "batch/nightly"),
+                        "batch/nightly does not hold both stacked lanes: %s" % out)
+
+    def test_a_failed_body_write_on_drop_leaves_the_branch_and_the_body_agreeing(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        self.fail_the_next_body_write()
+        rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertEqual(rc, 1, "a drop whose body write was refused did not exit 1: %s" % out)
+        held, listed = self.lanes_on_branch_and_listed(pr, (101, 102, 103))
+        self.assertEqual(held, listed, "after a refused body write batch/nightly holds lanes %s but its body lists %s: %s"
+                         % (sorted(held), sorted(listed), out))
+
+    def test_a_rerun_of_the_original_set_after_a_failed_body_write_pushes_nothing(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        self.fail_the_next_body_write()
+        self.run_batch("--batch-drop", "nightly", "102")  # the refusal itself is the case above
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
+        self.assertEqual(self.pushes(), [], "the rerun of the original set pushed batch/nightly after a drop whose body write failed: "
+                         "the frozen set regrew silently: %s" % out)
+        held, listed = self.lanes_on_branch_and_listed(pr, (101, 102, 103))
+        self.assertEqual(held, listed, "after the rerun batch/nightly holds lanes %s but its body lists %s: %s" % (sorted(held), sorted(listed), out))
+
+    def test_a_drop_takes_the_stacked_dependents_off_a_later_batch_on_its_branch(self):
+        for n in (101, 102, 104):
+            self.lane(n)
+        self.lane(103, on=101)  # lane #103 stacks on #101: its head contains #101's head
+        self.frozen_batch("bx", [101, 102])
+        by_pr = self.frozen_batch("by", [103, 104], on="batch/bx")  # batch/by holds #101's commit through #103
+        self.assertTrue(self.ancestor(self.heads[101], "origin/batch/by"), "setup: batch/by does not hold lane #101's commit")
+        with self.no_lint_or_ready_check() as mocks:
+            rc, out = self.run_batch("--batch-drop", "bx", "101")
+        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
+        self.assertFalse(self.ancestor(self.heads[101], "origin/batch/by"),
+                         "the drop of #101 from batch/bx left its commit on batch/by, through the stacked lane #103: %s" % out)
+        new_bx = self.head("batch/bx")
+        self.assertTrue(self.ancestor(new_bx, "origin/batch/by"), "batch/by was not rebuilt on the new head of batch/bx: %s" % out)
+        lines = block_lines(self.body(by_pr))
+        self.assertIsNotNone(lines, "batch/by's pull request holds no single frozen block after the drop: %s" % out)
+        self.assertEqual([x for x in lines if x.startswith("Lane: ")], [f"Lane: #104 {self.heads[104]}"],
+                         "batch/by's block still lists the dependent #103, or lost #104: %s" % out)
+        self.assertIn(f"On: batch/bx {new_bx}", lines, "batch/by's block does not record the new head of batch/bx: %s" % out)
+        self.assertIn("Dropped: #103", lines, "batch/by's block does not record the dependent #103 as dropped: %s" % out)
+        for name, mock in mocks.items():
+            self.assertFalse(mock.called, "the drop called merge.%s: a rebuild runs no lane lint and no ready check" % name)
+
+    def test_a_drop_in_a_shallow_clone_with_two_lanes_left_does_not_stop_on_an_unreadable_ancestor(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        pin = self.head("batch/nightly")
+        shallow = os.path.join(self.t, "shallow")
+        error = shallow_clone.make(self.bare, shallow, pin)
+        self.assertEqual(error, "", "setup: the shallow clone of batch/nightly could not be made: %s" % error)
+        self.assertTrue(shallow_clone.facts(shallow, pin)["shallow"], "setup: the clone is not shallow")
+        self.assertIsNone(merge.ancestor(shallow, self.heads[101], self.heads[103]), "setup: the shallow clone reads lane #101 against lane #103 as known")
+        rc, out = self.run_batch("--batch-drop", "nightly", "102", cwd=shallow)
+        self.assertEqual(rc, 0, "a drop in a shallow clone with two lanes left exited %s: %s" % (rc, out))
+        self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the drop did not take lane #102 off batch/nightly: %s" % out)
+        self.assertTrue(self.on_origin(self.heads[101], "batch/nightly") and self.on_origin(self.heads[103], "batch/nightly"),
+                        "the drop took a kept lane off batch/nightly: %s" % out)
+        self.assertEqual(block_lines(self.body(pr)), freeze_inner("nightly", [(101, self.heads[101]), (103, self.heads[103])], dropped=[102]),
+                         "the frozen block does not drop #102 with a Dropped line: %s" % out)
+
+    def test_an_unrelated_pr_body_quoting_a_lone_begin_marker_does_not_fail_a_good_drop(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        self.frozen_batch("nightly", [101, 102, 103])
+        self.lane(990)  # an ordinary lane pull request, not a batch: its body quotes the begin marker on a line of its own
+        self.host.prs[990]["body"] = "A note that quotes the marker:\n" + BATCH_BEGIN + "\nand goes on.\n"
+        self.assertIsNone(block_raw(self.host.prs[990]["body"]), "setup: the quoted marker is read as a whole block")
+        rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertEqual(rc, 0, "a good drop exited %s because an unrelated pull request quotes a lone begin marker: %s" % (rc, out))
+        self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the drop did not take lane #102 off batch/nightly: %s" % out)
+
+    def test_a_batch_whose_block_is_unreadable_is_named_when_restack_cannot_rebuild_it(self):
+        for n in (101, 102, 103, 104):
+            self.lane(n)
+        self.frozen_batch("nightly", [101, 102])
+        late = self.frozen_batch("late", [104], on="batch/nightly")
+        self.host.prs[late]["body"] = "\n".join([BATCH_BEGIN, "Batch: late", "Lane: #104 not-a-sha", BATCH_END]) + "\n"
+        rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertIn(f"#{late}", out, "the drop did not name batch/late, whose frozen block it cannot read: %s" % out)
+        self.assertFalse(self.on_origin(self.heads[102], "batch/nightly"), "the drop did not take lane #102 off batch/nightly: %s" % out)
+
+    def test_a_build_records_the_base_sha_in_the_block(self):
+        for n in (101, 102):
+            self.lane(n)
+        base = self.head("main")
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
+        self.assertEqual(block_base(self.host.created[0]["body"]), base,
+                         "the block does not record Base: the main sha the batch was built on: %s" % out)
+
+    def test_a_drop_after_main_moves_rebuilds_on_the_base_recorded_at_build(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+        recorded = self.head("main")
+        self.main_moves()
+        moved = self.head("main")
+        self.assertNotEqual(moved, recorded, "setup: main did not move after the build")
+        rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
+        self.assertFalse(self.ancestor(moved, "origin/batch/nightly"),
+                         "the drop rebuilt batch/nightly on main's live tip, not on the base recorded at build: %s" % out)
+        self.assertTrue(self.ancestor(recorded, "origin/batch/nightly"), "the drop left batch/nightly off the base recorded at build: %s" % out)
 
     # Green control: the fixtures and the push recorder work on main, where no batch code exists.
 
