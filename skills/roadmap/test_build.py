@@ -64,8 +64,8 @@ TODAY_STUB = """<script>
 })();
 </script>
 """
-# sha256 of the roadmap branch's roadmap/page/index.html, the page the old script used.
-TODAY_TEMPLATE_SHA256 = "d85749d3c60d117cc9415cc4cfbb5238347357833f9d7714c331482ee71c2ab6"
+# sha256 of skills/roadmap/page/index.html outside the build blocks.
+TODAY_TEMPLATE_SHA256 = "892fe2d3b677613a1da99d068ed4570b49a169a915bca5e64aab7a809783abd3"
 BLOCK = re.compile(r"<!-- build:([a-z-]+) -->.*?<!-- /build:\1 -->\n?", re.S)
 
 
