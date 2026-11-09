@@ -31520,9 +31520,9 @@ role_model_allow("role-model: fix check: reviewer on haiku with the marker is al
 role_model_refuse("role-model: fix check: reviewer on sonnet with no marker is denied, and its remedy names the marker",
                   "reviewer", "sonnet", "Check the diff for typos.",
                   carries=(ROUND_MARKER, FIX_MARKER) + FREE_ROUND_MARKERS)
-# A reviewer on Sonnet with no free marker is refused with the facts it needs: round 1 runs the role's own model, and Sonnet needs a
-# Round 2 of 3, a Round 3 of 3 or a fix check first line. The reason names no model, so it holds no model name. Its refusal never tells the caller to drop the model field. The case holds
-# those facts, not the whole sentence.
+# A reviewer on Sonnet with no free marker is refused with the facts it needs: the first review runs the role's own model, and a
+# later-review marker or the fix check marker lifts Sonnet. The reason names no model, and never tells the caller to drop the model
+# field. The case holds those facts, not the whole sentence.
 role_model_refuse("role-model: reviewer on sonnet with no marker says round 1 runs the role's own model and names the three markers, "
                   "not a model name or drop the model field",
                   "reviewer", "sonnet", "Check the diff for typos.",

@@ -13578,7 +13578,7 @@ class ReviewFixFlag(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
 
     def test_a_fix_check_naming_a_model_other_than_sonnet_is_refused(self):
-        # A fix check runs sonnet (agent-model-cap, the reviewer row; owner item 444 a, 2026-11-08 15:04 CST). The merge tool refuses the
+        # A fix check runs sonnet (agent-model-cap, the reviewer row; owner item 444 a, the fix check on every pull request). The merge tool refuses the
         # record that names another model: exit 2, no record, and an error that names the fix check and sonnet. Each refusal has the sonnet
         # value beside it on the same earlier host, so a base refusal cannot pass for the model refusal.
         rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(model="sonnet"), host=self.earlier_host())
@@ -13671,8 +13671,8 @@ class ReviewFixBase(ReviewEnv):
         self.assert_refused(rc, out, err)
 
 class ReviewRoundModel(ReviewEnv):
-    """The --round values against the reviewer row (agent-model-cap): a round 2 or round 3 names sonnet, round 3 names opus only by the owner's
-    override, round 1 names haiku or sonnet, and a design reviewer names opus. Each refusal sits beside its sonnet twin, which must print a
+    """The --round values against the reviewer row (agent-model-cap): a review after the first names sonnet, the last review names opus only by
+    the owner's override, the first review names haiku or sonnet, and a design reviewer names opus. Each refusal sits beside its sonnet twin, which must print a
     record first, so a missing flag cannot pass for the refusal."""
 
     def round_flags(self, *rounds):
@@ -13696,7 +13696,7 @@ class ReviewRoundModel(ReviewEnv):
                 self.assertNotIn("Traceback", err)
 
     def test_the_rounds_the_row_allows_still_print(self):
-        # controls: round 1 on haiku or sonnet, a design reviewer on opus in rounds 1 to 3, and round 3 on opus by the owner's override
+        # controls: the first review on haiku or sonnet, a design reviewer on opus in every review, and the last review on opus by the owner's override
         cases = (
             ("1:reviewer:haiku:PASS",),
             ("1:reviewer:sonnet:PASS",),
@@ -13711,7 +13711,7 @@ class ReviewRoundModel(ReviewEnv):
                 parse_text(self, posted_body(self, out))
 
     def test_a_posted_round_two_on_haiku_still_parses_and_judges_as_its_sonnet_twin(self):
-        # History is never re-judged: a round 2 posted before the rule parses and reads the same state as its sonnet twin.
+        # History is never re-judged: a later review on haiku, posted before the rule, parses and reads the same state as its sonnet twin.
         haiku = record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, haiku, PASS"))
         sonnet = record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))
         parse_text(self, haiku)
