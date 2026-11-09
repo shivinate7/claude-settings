@@ -12908,6 +12908,40 @@ sh("frozen shell: source /dev/stdin <<X <<Y && cd into the config folder on the 
    cwd=NOGIT)
 sh("frozen shell: the same header, then sed -i on notes.txt, from outside, allows [two heredocs header cd control]",
    "source /dev/stdin <<X <<Y && cd " + slash(CFG) + "\nx\nX\ny\nY\nsed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
+# A subshell closes at its own `)` even when the command before it ends in `)`, as `make)` does. The cd inside the
+# subshell ends with it, so the sed after the redirect runs in the folder the subshell started from. The notes.txt rows
+# are the same commands on a file that is not frozen.
+sh("frozen shell: (cd ../nogit; make) > log.txt, then sed -i on settings.json from the config folder, denies "
+   "[subshell close red]", "(cd ../nogit; make) > log.txt; sed -i s/a/b/ settings.json", "deny", "frozen-path",
+   cwd=CFG)
+sh("frozen shell: the same subshell, then sed -i on notes.txt from the config folder, allows [subshell close control]",
+   "(cd ../nogit; make) > log.txt; sed -i s/a/b/ notes.txt", "allow", cwd=CFG)
+sh("frozen shell: the same subshell with 2>&1, then sed -i on settings.json from the config folder, denies "
+   "[subshell close 2>&1 red]", "(cd ../nogit; make) > log.txt 2>&1; sed -i s/a/b/ settings.json", "deny",
+   "frozen-path", cwd=CFG)
+sh("frozen shell: the same subshell with 2>&1, then sed -i on notes.txt from the config folder, allows "
+   "[subshell close 2>&1 control]", "(cd ../nogit; make) > log.txt 2>&1; sed -i s/a/b/ notes.txt", "allow", cwd=CFG)
+# The same cause, the other way. The cd into the config folder ends with the subshell, so the sed runs outside it, in a
+# folder whose settings.json is not frozen.
+sh("frozen shell: (cd config folder; make) > log.txt, then sed -i on settings.json from outside, allows "
+   "[subshell close false alarm]", "(cd " + slash(CFG) + "; make) > log.txt; sed -i s/a/b/ settings.json", "allow",
+   cwd=NOGIT)
+# Controls on the same shape that stay green. The last command has two words, or the redirect has no space before it.
+sh("frozen shell: (cd ../nogit; npm test) > log.txt, then sed -i on settings.json from the config folder, denies "
+   "[multi-word last command pin]", "(cd ../nogit; npm test) > log.txt; sed -i s/a/b/ settings.json", "deny",
+   "frozen-path", cwd=CFG)
+sh("frozen shell: (cd ../nogit; make)> log.txt, no space before the redirect, then sed -i on settings.json from the "
+   "config folder, denies [no-space redirect pin]", "(cd ../nogit; make)> log.txt; sed -i s/a/b/ settings.json", "deny",
+   "frozen-path", cwd=CFG)
+# A case arm that runs bash -c with a cd into the config folder and a sed -i on the frozen file, both in the -c string.
+# The arm wraps the string, so the guard must still follow the cd. The notes.txt row is the same on a file that is not
+# frozen.
+sh("frozen shell: a case arm x) bash -c with a cd into the config folder and sed -i on settings.json, from outside, "
+   "denies [case arm bash -c red]",
+   'case x in x) bash -c "cd ' + slash(CFG) + '; sed -i s/a/b/ settings.json" ;; esac', "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen shell: the same case arm with sed -i on notes.txt, from outside, allows [case arm bash -c control]",
+   'case x in x) bash -c "cd ' + slash(CFG) + '; sed -i s/a/b/ notes.txt" ;; esac', "allow", cwd=NOGIT)
 # Five cds, then a frozen write. The absolute chain is refused. The `../` chain reaches the same folders, and the walk
 # normalises each `..` step, so it is refused too. Both chains end on the config folder, and the notes.txt rows are the
 # same chains on a file that is not frozen.
