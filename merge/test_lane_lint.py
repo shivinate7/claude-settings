@@ -985,13 +985,13 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(len(pass_lines(text)), 1, text)
         self.assert_one_mutate_run(head)
 
-    def test_a_tally_with_one_survivor_still_fails_at_exit_1_and_names_it(self):  # the control: green on 13df8e522
+    def test_a_tally_with_one_survivor_still_fails_at_exit_1_and_names_it(self):  # the control: a survivor fails whatever the exit code
         rc, text, head = self.lint_with_report(tally_out(689, 1, 4), rc=1)
         self.assertEqual(rc, 1, "the lint passed a tally with 1 survivor at exit 1: " + text)
         self.assertEqual(counts_missing(text, {"survived": 1}), None, "the FAIL output does not name survived 1: " + text)
         self.assert_one_mutate_run(head)
 
-    def test_a_tally_with_unknown_past_the_bound_still_fails_at_exit_1_and_names_it(self):  # the control: green on 13df8e522
+    def test_a_tally_with_unknown_past_the_bound_still_fails_at_exit_1_and_names_it(self):  # the control: unknown past the bound fails whatever the exit code
         n = merge.MUTATE_UNKNOWN_MAX + 1
         rc, text, head = self.lint_with_report(tally_out(694 - n, 0, n), rc=1)
         self.assertEqual(rc, 1, "the lint passed a tally with %d unknown, past MUTATE_UNKNOWN_MAX, at exit 1: %s" % (n, text))
