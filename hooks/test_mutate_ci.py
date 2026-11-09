@@ -27,10 +27,11 @@ The modes, as the builder implements them. This file is their interface.
   reads `CHANGED <id>` and exits 1, unless a commit in `REF..HEAD` has a `Known-defect-changed: <id>` trailer. A
   `Known-defect-removed` trailer does not count for it.
 - `--tests-for PATH`. It prints the REPORT_TARGETS suites for PATH when listed, and nothing else. A path with a row in
-  GUARD_MODULE_FAMILIES prints its `hooks/test_guard.py::<family>` lines and nothing else. Else it prints each
-  tracked `test_<stem>.py` and `test_<stem>_*.py` beside PATH. A .py PATH also gets each tracked `test_*.py` in the
-  repository that loads the module `<stem>`: an `import`, an `importlib.import_module` or `__import__` call, or a file
-  loader (`spec_from_file_location`, `SourceFileLoader`, `runpy.run_path`) whose path names `<stem>.py`. The loads are
+  GUARD_MODULE_FAMILIES prints its `hooks/test_guard.py::<family>` lines plus the walk's suites below, except the whole
+  `hooks/test_guard.py`, once each, sorted. Else it prints each tracked `test_<stem>.py` and `test_<stem>_*.py` beside
+  PATH. A .py PATH also gets each tracked `test_*.py` in the repository that loads the module `<stem>`: an `import`, an
+  `importlib.import_module` or `__import__` call, or a file loader (`spec_from_file_location`, `SourceFileLoader`,
+  `runpy.run_path`) whose path names `<stem>.py`. The loads are
   found with `ast`, never a grep. A path that a function takes as a parameter counts too: a call of a function defined in
   the same file counts when its argument for that parameter, by position or by keyword, names `<stem>.py`. Calls through
   an attribute, such as `json.load`, are not followed. A tracked test that fails to parse is skipped.
@@ -1524,7 +1525,7 @@ class TestsForTests(unittest.TestCase):
             with self.subTest(extra=name):
                 self.assertRegex(show(REPO, "HEAD", name), r"\bguard\b", "%s is printed but names no guard" % name)
 
-    def test_a_load_bound_inside_a_function_prints_its_suite_for_guard_rm_var(self):
+    def test_a_load_bound_inside_a_function_is_the_rm_var_family_line_for_guard_rm_var(self):
         target = "hooks/guard_rm_var.py"
         self.assertNotIn(target, dict(mutate_guard.REPORT_TARGETS), "the fixture: %s must be unlisted" % target)
         loader = "hooks/test_guard.py"
@@ -1533,7 +1534,8 @@ class TestsForTests(unittest.TestCase):
         code, out, err = run_cli(["--tests-for", target])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
         self.assertEqual(out.splitlines(), ["%s::rm-var" % loader],
-                         "guard_rm_var is a family row, so its suite is the rm-var family line of %s, not the file" % loader)
+                         "guard_rm_var's only walk suite is the whole %s, which is dropped: its rm-var family line "
+                         "stands in for it" % loader)
 
     def test_the_real_suites_that_load_a_module_through_a_parameter_are_printed(self):
         """Each suite passes the module's path to a function of its own, which loads it by that parameter. The call text is
@@ -1555,9 +1557,23 @@ class TestsForTests(unittest.TestCase):
                               "%s loads %s through a parameter, so --tests-for %s must print it" % (suite, target, target))
 
 
-# GUARD_MODULE_FAMILIES (hooks/mutate_guard.py) sends a guard module to its family suites, hooks/test_guard.py::<family>, in
-# place of the import walk. A name these cases read from mutate_guard has a default, so a case fails on the row it lacks, not
-# on a missing name.
+# GUARD_MODULE_FAMILIES (hooks/mutate_guard.py) gives a guard module its family suites, hooks/test_guard.py::<family>,
+# and the import walk's suites come with them. WALK_SUITES holds those walk suites for each row: the walk of the tracked
+# tree with the row left out, minus the whole hooks/test_guard.py. A row with no entry fails by name. A name these cases
+# read from mutate_guard has a default, so a case fails on the row it lacks, not on a missing name.
+WALK_SUITES = {
+    "hooks/guard_kill.py": ["hooks/test_checks_never_raise.py"],
+    "hooks/guard_env.py": ["janitor/test_session_end_sweep.py"],
+    "hooks/guard_frozen.py": ["hooks/test_shared_names.py"],
+    "hooks/guard_pointer.py": [],
+    "hooks/guard_rm_var.py": [],
+    "hooks/guard_shared_tree.py": ["hooks/test_checks_never_raise.py"],
+    "hooks/guard_stream.py": [],
+    "hooks/guard_push_delete.py": ["hooks/test_auto_mode_allow.py"],
+    "hooks/guard_branch_worktree.py": ["hooks/test_auto_mode_allow.py"],
+    "hooks/guard_merge.py": ["lint/test_hook_catalog.py"],
+    "hooks/guard_mask_script.py": [],
+}
 
 
 def guard_table():
@@ -1643,28 +1659,64 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertEqual(sorted(named - guard_family_names()), [],
                          "a row names a family that hooks/test_guard.py does not have")
 
-    def test_tests_for_guard_kill_prints_the_kill_and_git_env_lines(self):
+    def test_tests_for_guard_kill_prints_its_family_lines_and_its_import_walk_suite(self):
         code, out, err = run_cli(["--tests-for", "hooks/guard_kill.py"])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        self.assertEqual(out.splitlines(), ["hooks/test_guard.py::git-env", "hooks/test_guard.py::kill"],
-                         "guard_kill.py's suites are the git-env and kill families, one line each, sorted: "
-                         "guard_kill.py holds the GIT_ENV_WATCH walk")
+        self.assertEqual(out.splitlines(), ["hooks/test_checks_never_raise.py", "hooks/test_guard.py::git-env",
+                                            "hooks/test_guard.py::kill"],
+                         "guard_kill.py's suites are the git-env and kill family lines, plus the import walk's "
+                         "test_checks_never_raise.py, which reaches the kill checks the families miss, sorted")
 
-    def test_tests_for_guard_env_prints_its_two_family_lines(self):
+    def test_tests_for_guard_env_prints_its_family_lines_and_its_import_walk_suite(self):
         code, out, err = run_cli(["--tests-for", "hooks/guard_env.py"])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        self.assertEqual(out.splitlines(), ["hooks/test_guard.py::env", "hooks/test_guard.py::git-env"],
-                         "guard_env.py's suites are the env and git-env families, one line each")
+        self.assertEqual(out.splitlines(), ["hooks/test_guard.py::env", "hooks/test_guard.py::git-env",
+                                            "janitor/test_session_end_sweep.py"],
+                         "guard_env.py's suites are the env and git-env family lines, plus the import walk's "
+                         "janitor/test_session_end_sweep.py, sorted")
 
-    def test_every_table_module_prints_exactly_its_family_lines(self):
+    def test_every_table_module_prints_its_family_lines_and_its_walk_suites(self):
         table = guard_table()
         self.assertIn("hooks/guard_kill.py", table, "GUARD_MODULE_FAMILIES has no row for hooks/guard_kill.py")
         for module, families in sorted(table.items()):
             with self.subTest(module=module):
+                self.assertIn(module, WALK_SUITES, "%s has a row but no WALK_SUITES entry: name its import-walk suites"
+                              % module)
                 code, out, err = run_cli(["--tests-for", module])
                 self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-                self.assertEqual(out.splitlines(), sorted("hooks/test_guard.py::%s" % family for family in families),
-                                 "%s prints its family lines and no other suite" % module)
+                expected = {"hooks/test_guard.py::%s" % family for family in families} | set(WALK_SUITES[module])
+                self.assertEqual(out.splitlines(), sorted(expected),
+                                 "%s prints its family lines and its import-walk suites, each once, sorted" % module)
+
+    def test_no_table_module_prints_the_whole_test_guard_file(self):
+        """The whole file takes minutes per mutant, so a table module's family lines stand in for it, never the file."""
+        table = guard_table()
+        self.assertIn("hooks/guard_kill.py", table, "GUARD_MODULE_FAMILIES has no row for hooks/guard_kill.py")
+        for module in sorted(table):
+            with self.subTest(module=module):
+                code, out, err = run_cli(["--tests-for", module])
+                self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+                self.assertNotIn("hooks/test_guard.py", out.splitlines(),
+                                 "%s prints the whole hooks/test_guard.py, which takes minutes per mutant" % module)
+
+    def test_a_suite_that_loads_a_table_module_inside_a_function_is_kept(self):
+        """lint/test_hook_catalog.py imports guard_merge inside a test method, so the import walk finds it only
+        through a function-bound load. The union keeps it beside the family line. The scope is asserted first, then
+        the print."""
+        target, suite = "hooks/guard_merge.py", "lint/test_hook_catalog.py"
+        self.assertIn(target, guard_table(), "the fixture: %s keeps its GUARD_MODULE_FAMILIES row" % target)
+        tree = ast.parse(show(REPO, "HEAD", suite))
+        module_level = [node for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "guard_merge"]
+        self.assertEqual(module_level, [], "the fixture: %s has no module-level import of guard_merge" % suite)
+        in_def = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                  and any(isinstance(inner, ast.ImportFrom) and inner.module == "guard_merge"
+                          for inner in ast.walk(node))]
+        self.assertTrue(in_def, "the fixture: %s imports guard_merge inside a def" % suite)
+        code, out, err = run_cli(["--tests-for", target])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertEqual(out.splitlines(), sorted(["hooks/test_guard.py::merge", suite]),
+                         "%s loads guard_merge only inside a def, so the import walk finds it through a function-bound "
+                         "load, and the union keeps it beside the merge family line" % suite)
 
     def test_guard_wsl_is_report_gold_and_no_row_and_no_report_target(self):
         gold = mutate_guard.REPORT_GOLD[0]
