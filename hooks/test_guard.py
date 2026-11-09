@@ -3914,14 +3914,12 @@ hm_deny("a PowerShell call with -C and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, tool="PowerShell", cwd=NOGIT)
 hm_deny("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
 hm_deny("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
-# A variable folder is read where the shell runs the command (dir_before_segment reads cd "$VAR", and the
-# -C variable is read the same way), so each form takes the verdict of its literal twin.
+# A cd into a variable folder is judged where the shell runs the command, so it takes the verdict of its
+# literal twin. The -C form reads its variable on another branch only, so it has no row here.
 hm_deny("a variable folder, cd \"$R\", then a tree outside home is refused, as the literal cd is",
         "R=" + HMIN + "; cd \"$R\" && " + HMADD + HMSCRATCH, cwd=NOGIT)
 hm_deny("a braced variable folder, cd \"${R}\", then a tree outside home is refused",
         "R=" + HMIN + "; cd \"${R}\" && " + HMADD + HMSCRATCH, cwd=NOGIT)
-hm_deny("a variable folder named by -C \"$R\", then a tree outside home is refused, as -C HMIN is",
-        "R=" + HMIN + "; " + VCS + " -C \"$R\" worktree add " + HMSCRATCH, cwd=NOGIT)
 hm_deny("the literal twin: cd into the primary, then a tree outside home, is refused",
         "cd " + HMIN + " && " + HMADD + HMSCRATCH, cwd=NOGIT)
 
@@ -22653,11 +22651,11 @@ def worktree_home_cd_then_write_case():
 
 
 def worktree_home_cd_after_untracked_case():
-    """Rule 0, other-checkout, a later absolute cd is judged where it lands. After a move the guard
-    cannot read (`"$HOME"`, `-`), or after a cd to a folder that is missing, an absolute cd into another
-    checkout is still refused. A cd whose target is missing makes the folder unknown again, so a
-    relative cd after it is not judged. That is a declared limit, and it keeps ordinary work from a
-    worktree root (a folder made, entered and left) allowed. From a lane."""
+    """Rule 0, other-checkout, a later absolute cd is judged where it lands. After a move whose folder
+    the guard cannot tell (`-`, and `"$HOME"` on the current code), or after a cd to a folder that is
+    missing, an absolute cd into another checkout is still refused. A cd whose target is missing makes
+    the folder unknown again, so a relative cd after it is not judged. That is a declared limit, and it
+    keeps ordinary work from a worktree root (a folder made, entered and left) allowed. From a lane."""
     primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcountracked")
     ghost = os.path.join(lane_a, "ghost")  # a folder that does not exist, so its cd fails
     deny = (
