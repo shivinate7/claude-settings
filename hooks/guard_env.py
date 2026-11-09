@@ -11,9 +11,9 @@ import re
 import warnings
 
 from guard_core import (
-    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
-    POWERSHELL_CALL, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _git, _split_heredocs,
-    _segment_cd_move, _without_message_values, dir_before_segment, is_powershell, norm, resolve_command,
+    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, FIND_EXEC_ACTIONS, INTERPRETER_HEREDOC, POWERSHELL_CALL,
+    REDIRECT, SHELL_HEREDOC, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _git, _segment_cd_move,
+    _split_heredocs, _without_message_values, dir_before_segment, is_powershell, norm, resolve_command,
     segment_tokens, split_segments,
 )
 
@@ -93,6 +93,18 @@ ENV_INLINE_FLAG = re.compile(r"^(?:-[ep]{1,2}|--eval|--print)(?:=.*)?$")
 
 # Commands that ask whether the file is THERE. They read no contents.
 ENV_EXISTENCE_COMMANDS = ("ls", "test", "[", "[[")
+
+# `find` tests that take a name pattern, and the actions that act on a match. A pattern after one of
+# those tests lists the file's name and reads no contents, as `ls` does, when the segment holds no
+# action that runs a command, deletes, or writes the match list to a file, and its output goes to the
+# terminal or a message value, straight or through a chain of filters that run no command
+# (`ENV_FIND_FILTERS`). A redirect to a file, another substitution, or any other pipe stage hands the
+# names to a command that may read them (`_find_output_on_screen`).
+ENV_FIND_NAME_TESTS = (
+    "-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex")
+ENV_FIND_ACTIONS = FIND_EXEC_ACTIONS + ("-delete", "-fprint", "-fprint0", "-fprintf", "-fls")
+# Commands that read a pipe and run nothing and open no file named by it.
+ENV_FIND_FILTERS = ("wc", "sort", "uniq", "head", "tail", "cut", "tr", "nl")
 
 # Commands that only print their own arguments. An env name among the arguments is TEXT, printed to
 # stdout or written to a file that is NOT an environment file (`echo <name> > .worktreeinclude`),
@@ -569,7 +581,10 @@ def substitution_commands(raw: str, stripped: str, outer: bool = False):
 # ACCEPTED LIMITS, each named so nobody trusts this layer past them:
 #   - a brace or variable split (`.env{,.x}`, `.e$Xnv`) cannot be read statically;
 #   - a dot glob such as `cat .*` or `tar .*` refuses, on purpose, as it sweeps in `.env`;
-#   - `find -name '.env*'` refuses, and `ls` or `git ls-files` is the way to list;
+#   - `find -name '.env*'` lists names and is allowed, as `ls` is, while its output goes to the
+#     terminal or a message value, straight or through filters that run no command
+#     (`ENV_FIND_FILTERS`); a redirect to a file, another substitution, or any other pipe stage
+#     refuses. `find .env -print` is judged as a name word and refuses;
 #   - a relay split across two separate tool calls (write the name to a file in one, read the file
 #     in the next) cannot be seen by a per-command guard;
 #   - the relay check matches the literal path, so another spelling of the same file (`./f`, or
@@ -2185,8 +2200,13 @@ def _shell_string_prints(text: str, depth: int = 0) -> bool:
             texts, too_deep = _substitutions(segment)
             if too_deep:
                 return True
-            for body, _ in texts:
-                # Each text has its own substitutions cut to `x`, so a `$` in it is a variable.
+            for number, (body, in_message) in enumerate(texts):
+                # Each text has its own substitutions cut to `x`, so a `$` in it is a variable. The
+                # child shell runs each body, so a file name in one is read as `cat .env` reads it.
+                # The segment itself is last: its text is data to an `echo`. A body is an argument of
+                # the command around it, as in `env_refusal`.
+                if _env_flat(body, in_message or number == len(texts) - 1)[0]:
+                    return True
                 if _segments_print(body, depth):
                     return True
     return False
@@ -2475,6 +2495,29 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
     return False
 
 
+# A redirect of stdout. `2>` sends errors only; `&>` reaches here as `>` (`_env_parts`). guard_core
+# `REDIRECT` is not used here: it matches `2>` too, and a find name test with `2>/dev/null` lists to the screen.
+ENV_STDOUT_REDIRECTS = (">", ">>", "1>", "1>>")
+
+
+def _find_output_on_screen(words, piped: bool, pieces, ends, at: int) -> bool:
+    """True when a find segment's output reaches only the screen: no stdout redirect to a file,
+    and, when `piped`, each stage of the pipe that the piece `at` opens is a filter
+    (`ENV_FIND_FILTERS`) with no such redirect."""
+    if any(w in ENV_STDOUT_REDIRECTS for w in words):
+        return False
+    while piped and ends[at] == "|":
+        at += 1
+        # A piece follows each `|` (`split_segments`), and `_env_parts` returns at least one part.
+        parts = _env_parts(pieces[at])
+        stage, _, command = _env_words(parts[0])
+        if command not in ENV_FIND_FILTERS or any(w in ENV_STDOUT_REDIRECTS for w in stage):
+            return False
+        if len(parts) > 1:
+            return True  # the filter is sent to the background, and its output goes to the screen
+    return True
+
+
 def _env_flat(cmd: str, text_ok: bool = False):
     """The segment rules over one text whose substitutions are already cut out."""
     ends = []
@@ -2565,6 +2608,12 @@ def _env_flat(cmd: str, text_ok: bool = False):
                     continue  # the name is data, and no contents are read or written
                 if command in ENV_EXISTENCE_COMMANDS:
                     continue  # asking whether the file is there reads none of it
+                # `text_ok` is false for a substitution that is not a message value: its output is an
+                # argument of the command around it. Every pipe stage must be a filter, not a runner.
+                if (command == "find" and previous in ENV_FIND_NAME_TESTS and text_ok
+                        and not any(w in ENV_FIND_ACTIONS for w in words)
+                        and _find_output_on_screen(words, piped, pieces, ends, at)):
+                    continue  # a name test lists the name, as ls does
                 if command in ENV_FOLDER_COMMANDS:
                     continue  # a folder is made, and none of it is read
                 actor = "'%s'" % command if command else "this command"
