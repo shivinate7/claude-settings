@@ -4,7 +4,8 @@
     python3 lint/test_check_hook_output_pins.py
 
 A hook names the text it prints in PRINTED_LINES. A test file that starts with that text holds a
-literal copy of the printed line, and goes stale when the line changes.
+literal copy of the printed line, and goes stale when the line changes. A declaration the check cannot
+read is UNKNOWN: exit 2, never a pass.
 
 Each case writes a fixture root under this run's folder (test-temp-standard, lint/_test_temp.py).
 find_pins is read in process, and main is run as a script for the exit codes.
@@ -30,9 +31,9 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 
 MODULE = os.path.abspath(os.environ.get("CHECK_HOOK_OUTPUT_PINS_UNDER_TEST")
                          or os.path.join(HERE, "check_hook_output_pins.py"))
-# Built from two pieces, so no literal in this file starts with a printed text: the repo scan reads this file.
-PREFIX = "Local" + " time: "
-FLAG = "Decision" + " watch: FLAG. "
+# Fixture text that no real hook prints, so a literal of it in this file is never a pin of the repo.
+PREFIX = "Fixture line: "
+FLAG = "Fixture flag: "
 HOOK = "hooks/local_time.py"
 SIBLING = "lint/test_sibling.py"
 HOOK_TEXT = 'TIME_PREFIX = "%s"\nPRINTED_LINES = ("TIME_PREFIX",)\n' % PREFIX
@@ -78,10 +79,18 @@ def top_value(tree, name):
     return None
 
 
-def real_hook_tree():
-    path = os.path.join(ROOT, "hooks", "local_time.py")
-    with open(path, encoding="utf-8") as f:
-        return ast.parse(f.read(), filename=path)
+def printed_names(tree):
+    """The values of the PRINTED_LINES tuple or list, or None when the module declares neither."""
+    value = top_value(tree, "PRINTED_LINES")
+    if not isinstance(value, (ast.Tuple, ast.List)):
+        return None
+    return [e.value for e in value.elts if isinstance(e, ast.Constant)]
+
+
+def str_value(tree, name):
+    """The text of a module-level name bound to a plain str constant, or None."""
+    value = top_value(tree, name)
+    return value.value if isinstance(value, ast.Constant) and isinstance(value.value, str) else None
 
 
 class PinCase(unittest.TestCase):
@@ -111,11 +120,25 @@ class PinCase(unittest.TestCase):
                            encoding="utf-8", errors="replace")
         return r.returncode, r.stdout + r.stderr
 
-    def assert_unknown(self, rc, out, name):
-        # Exit 2 alone is not enough: a missing module also exits 2, so the output must name the input.
+    def real_tree(self, rel):
+        """The ast of a file in this repo. Scope first: the file must exist before its text is read."""
+        path = os.path.join(ROOT, *rel.split("/"))
+        self.assertTrue(os.path.isfile(path), "scope: no %s under %s" % (rel, ROOT))
+        with open(path, encoding="utf-8") as f:
+            return ast.parse(f.read(), filename=path)
+
+    def assert_unknown(self, rc, out, *names):
+        # Exit 2 alone is not enough: a missing module also exits 2, so the output must name each input.
         self.assertEqual(rc, 2, "an unreadable input must exit 2, never pass:\n" + out)
-        self.assertIn(name, out, "exit 2 does not name the unreadable input %s:\n%s" % (name, out))
+        for name in names:
+            self.assertIn(name, out, "exit 2 does not name %s:\n%s" % (name, out))
         self.assertNotIn("Traceback", out, "an unreadable input must not crash:\n" + out)
+
+    def assert_unknown_declaration(self, *names):
+        """The root's declaration cannot be read: find_pins raises Unknown, and main exits 2 naming each of names."""
+        self.assertRaises(load_check().Unknown, self.find)
+        rc, out = self.run_main()
+        self.assert_unknown(rc, out, *names)
 
     def test_0_control_fixture_is_written_under_the_run_folder(self):
         # Green on any check: it shows the fixture lands under this run's folder and reads back.
@@ -146,12 +169,38 @@ class PinCase(unittest.TestCase):
         self.assertEqual(self.find(), [pin("lint/test_big.py", 401)],
                          "a pin at line 401 of a 401-line test file was not found")
 
+    def test_1d_leading_space_on_the_body_is_ignored_for_a_constant_without_one(self):
+        # The body is lstripped like the constant: a body that starts with a space still pins.
+        self.hook()
+        self.write_lines("lint/test_lead.py", ['LEAD = " %s2026-07-04 10:30 CDT (UTC-05:00)"' % PREFIX])
+        self.assertEqual(self.find(), [pin("lint/test_lead.py", 1)],
+                         "a body with a leading space was not read as a pin of a constant without one")
+
+    def test_1e_leading_space_on_the_constant_is_ignored_for_a_body_with_one(self):
+        # The constant is lstripped as before, so a constant with leading spaces matches a body with one.
+        self.write_lines(HOOK, ['TIME_PREFIX = "  %s"' % PREFIX, 'PRINTED_LINES = ("TIME_PREFIX",)'])
+        self.write_lines("lint/test_lead.py", ['LEAD = " %s2026-07-04 10:30 CDT (UTC-05:00)"' % PREFIX])
+        self.assertEqual(self.find(), [pin("lint/test_lead.py", 1)],
+                         "a body with a leading space was not read as a pin of a constant with leading spaces")
+
     def test_2_incident_shape_pin_in_test_shared_names_is_found(self):
         # The shape of the TIME_LINE pin in hooks/test_shared_names.py, at its real line.
         self.hook()
         self.write_lines("hooks/test_shared_names.py", filler(63) + [REAL_PIN])
         self.assertEqual(self.find(), [pin("hooks/test_shared_names.py", 64)],
                          "the TIME_LINE pin at line 64 of hooks/test_shared_names.py was not found")
+
+    def test_2b_lint_test_file_with_the_suffix_is_scanned(self):
+        self.hook()
+        self.write_lines("lint/traps_test.py", ["X = 1", REAL_PIN])
+        self.assertEqual(self.find(), [pin("lint/traps_test.py", 2)],
+                         "the literal copy in lint/traps_test.py was not found: *_test.py is not scanned")
+
+    def test_2c_hooks_test_file_with_the_suffix_is_scanned(self):
+        self.hook()
+        self.write_lines("hooks/runner_test.py", ["Y = 1", REAL_PIN])
+        self.assertEqual(self.find(), [pin("hooks/runner_test.py", 2)],
+                         "the literal copy in hooks/runner_test.py was not found: *_test.py is not scanned")
 
     def test_3_use_of_the_constant_is_not_a_pin(self):
         self.hook()
@@ -172,6 +221,17 @@ class PinCase(unittest.TestCase):
             'FLAG_LINE = "%sthe judge model reported"' % FLAG])
         self.assertEqual(self.find(), [pin("hooks/test_local_time.py", 3, "hooks/decision_watch.py", "FLAG_PREFIX")],
                          "hooks/test_local_time.py may pin local_time's own text, and no other hook's text")
+
+    def test_4b_hook_suffix_test_file_may_pin_its_own_hook_but_not_another_hooks_text(self):
+        # hooks/<hook>_test.py is an own test too: exempt for its hook, scanned for every other one.
+        self.hook()
+        self.write_lines("hooks/decision_watch.py", [
+            'FLAG_PREFIX = "%s"' % FLAG, 'PRINTED_LINES = ("FLAG_PREFIX",)'])
+        self.write_lines("hooks/local_time_test.py", [
+            REAL_PIN,
+            'FLAG_LINE = "%sthe judge model reported"' % FLAG])
+        self.assertEqual(self.find(), [pin("hooks/local_time_test.py", 2, "hooks/decision_watch.py", "FLAG_PREFIX")],
+                         "hooks/local_time_test.py may pin local_time's own text, and no other hook's text")
 
     def test_5_docstrings_bare_strings_labels_and_comments_are_not_pins(self):
         self.hook()
@@ -225,16 +285,10 @@ class PinCase(unittest.TestCase):
         self.assertEqual(self.find(), [pin("hooks/test_shared_names.py", 2)],
                          "an f-string that starts with the printed text was not found")
 
-    def test_8a_names_not_declared_as_string_constants_add_no_pins(self):
-        self.hook()
-        self.write_lines("hooks/plain.py", ['GREETING = "Hello there, friend"'])
-        self.write_lines("hooks/counted.py", ["COUNT = 1234567890", 'PRINTED_LINES = ("COUNT", "NOPE")'])
-        self.write_lines("hooks/quiet.py", ["PRINTED_LINES = ()"])
-        self.write_lines("lint/test_other.py", [
-            'HELLO = "Hello there, friend"', 'NUM = "1234567890 items"'])
-        sibling = self.plant_sibling()
-        self.assertEqual(self.find(), [sibling],
-                         "text of an undeclared hook, a non-string name or a missing name was read as a pin")
+    def test_8a_declared_name_missing_from_the_hook_is_unknown(self):
+        # A rename without a tuple update: PRINTED_LINES still names the old constant.
+        self.write_lines("hooks/renamed.py", ['TIME_LINE_PREFIX = "%s"' % PREFIX, 'PRINTED_LINES = ("TIME_PREFIX",)'])
+        self.assert_unknown_declaration("hooks/renamed.py", "TIME_PREFIX")
 
     def test_8b_a_constant_of_seven_characters_is_ignored_and_eight_is_counted(self):
         self.hook()
@@ -245,6 +299,44 @@ class PinCase(unittest.TestCase):
             'EIGHT_TEXT = "Ready ok, go"'])
         self.assertEqual(self.find(), [pin("lint/test_lengths.py", 2, "hooks/eight.py", "EIGHT")],
                          "a 7-character constant was counted, or an 8-character one was not")
+
+    def test_8c_declared_name_bound_to_a_concatenation_is_unknown(self):
+        self.write_lines("hooks/concat.py", ['TIME_PREFIX = "Fixture" + " line: "', 'PRINTED_LINES = ("TIME_PREFIX",)'])
+        self.assert_unknown_declaration("hooks/concat.py", "TIME_PREFIX")
+
+    def test_8d_declared_name_bound_to_a_number_is_unknown(self):
+        self.write_lines("hooks/counted.py", ["COUNT = 1234567890", 'PRINTED_LINES = ("COUNT",)'])
+        self.assert_unknown_declaration("hooks/counted.py", "COUNT")
+
+    def test_8e_bare_name_element_of_printed_lines_is_unknown(self):
+        self.write_lines("hooks/bare.py", ['TIME_PREFIX = "%s"' % PREFIX, "PRINTED_LINES = (TIME_PREFIX,)"])
+        self.assert_unknown_declaration("hooks/bare.py", "TIME_PREFIX")
+
+    def test_8f_printed_lines_that_is_a_str_and_not_a_tuple_or_list_is_unknown(self):
+        self.write_lines("hooks/shape.py", ['TIME_PREFIX = "%s"' % PREFIX, 'PRINTED_LINES = "TIME_PREFIX"'])
+        self.assert_unknown_declaration("hooks/shape.py", "PRINTED_LINES")
+
+    def test_8g_annotated_printed_lines_tuple_is_read(self):
+        self.write_lines(HOOK, ['TIME_PREFIX = "%s"' % PREFIX, 'PRINTED_LINES: tuple = ("TIME_PREFIX",)'])
+        self.write_lines("lint/test_planted.py", [REAL_PIN])
+        self.assertEqual(self.find(), [pin("lint/test_planted.py", 1)],
+                         "an annotated PRINTED_LINES tuple was not read: the planted pin was not found")
+
+    def test_8h_printed_lines_list_is_read(self):
+        self.write_lines(HOOK, ['TIME_PREFIX = "%s"' % PREFIX, 'PRINTED_LINES = ["TIME_PREFIX"]'])
+        self.write_lines("lint/test_planted.py", [REAL_PIN])
+        self.assertEqual(self.find(), [pin("lint/test_planted.py", 1)],
+                         "a PRINTED_LINES list was not read: the planted pin was not found")
+
+    def test_8i_hook_without_printed_lines_or_with_an_empty_one_adds_no_pins(self):
+        # A hook with no PRINTED_LINES is not opted in. An empty PRINTED_LINES names nothing: both are silent.
+        self.hook()
+        self.write_lines("hooks/plain.py", ['GREETING = "Hello there, friend"'])
+        self.write_lines("hooks/quiet.py", ["PRINTED_LINES = ()"])
+        self.write_lines("lint/test_other.py", ['HELLO = "Hello there, friend"'])
+        sibling = self.plant_sibling()
+        self.assertEqual(self.find(), [sibling],
+                         "text of an undeclared hook or of an empty PRINTED_LINES was read as a pin")
 
     def test_9a_root_with_no_test_files_is_clean(self):
         # Empty state, a green control: no test file, so nothing to pin.
@@ -309,15 +401,27 @@ class PinCase(unittest.TestCase):
         self.assertEqual((rc, out), (0, ""), "main on the real repo must exit 0 and print nothing:\n" + out)
 
     def test_11b_local_time_declares_printed_lines_naming_time_prefix(self):
-        names = top_value(real_hook_tree(), "PRINTED_LINES")
-        declared = [e.value for e in names.elts if isinstance(e, ast.Constant)] if isinstance(names, ast.Tuple) else None
-        self.assertTrue(declared is not None and "TIME_PREFIX" in declared,
-                        "hooks/local_time.py does not declare PRINTED_LINES naming TIME_PREFIX: %r" % (declared,))
+        names = printed_names(self.real_tree("hooks/local_time.py"))
+        self.assertTrue(names is not None and "TIME_PREFIX" in names,
+                        "hooks/local_time.py does not declare PRINTED_LINES naming TIME_PREFIX: %r" % (names,))
 
-    def test_11c_time_prefix_is_the_printed_text(self):
-        value = top_value(real_hook_tree(), "TIME_PREFIX")
-        got = value.value if isinstance(value, ast.Constant) else None
-        self.assertEqual(got, PREFIX, "hooks/local_time.py TIME_PREFIX is not the printed text %r: got %r" % (PREFIX, got))
+    def test_11d_local_time_printed_lines_names_the_override_prefix(self):
+        tree = self.real_tree("hooks/local_time.py")
+        names = printed_names(tree)
+        self.assertTrue(names is not None and "OVERRIDE_ONCE_PREFIX" in names,
+                        "hooks/local_time.py PRINTED_LINES does not name OVERRIDE_ONCE_PREFIX: %r" % (names,))
+        self.assertIsNotNone(str_value(tree, "OVERRIDE_ONCE_PREFIX"),
+                             "OVERRIDE_ONCE_PREFIX is not a str constant of hooks/local_time.py")
+
+    def test_11e_decision_watch_printed_lines_name_str_constants_of_that_module(self):
+        rel = "hooks/decision_watch.py"
+        tree = self.real_tree(rel)
+        names = printed_names(tree)
+        self.assertEqual(names, ["UNKNOWN_PREFIX", "FLAG_PREFIX"],
+                         "%s PRINTED_LINES is not (UNKNOWN_PREFIX, FLAG_PREFIX): %r" % (rel, names))
+        for name in names:
+            self.assertIsNotNone(str_value(tree, name),
+                                 "%s names %s, which is not a str constant of that module" % (rel, name))
 
 
 if __name__ == "__main__":
