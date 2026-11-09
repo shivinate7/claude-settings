@@ -492,6 +492,7 @@ function Set-InstallId([string]$Path) {
 # Returns 'linked', 'copied', or 'failed'. The temp name ends in .cs-new, so it does not match a
 # name a person gives a file.
 $FailedFiles = [ordered]@{}   # dest -> src, for each file Install-File could not replace
+$FailedSkills = [ordered]@{}  # dest -> @{ Src; Old; Keep; Rel }, for each skill folder Install-Dir could not replace
 function Install-File([string]$Src, [string]$Dest) {
     $new = "$Dest.cs-new"
     try {
@@ -515,7 +516,7 @@ function Install-File([string]$Src, [string]$Dest) {
 # $KeepOld: it is a backup). If the second rename fails the first is undone.
 # Named gap: Windows cannot swap a directory in one call, so a real directory replaced by a
 # link (or a link by a copy) is absent for the time between the two renames. Skills are not
-# guard scripts; no hook fails closed on one. Returns 'linked', 'copied', or 'failed'.
+# guard scripts. Returns 'linked', 'copied', or 'failed'.
 function Install-Dir([string]$Src, [string]$Dest, [string]$Old, [bool]$KeepOld) {
     $new = "$Dest.cs-new"
     $state = 'unchanged'   # unchanged | refreshing | moved-away | rollback-failed
@@ -818,7 +819,7 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
             if ($keep) { New-Item -ItemType Directory -Force -Path $skillBakDir | Out-Null }
             $old  = if ($keep) { $bak } else { "$dest.cs-old" }
             $how  = Install-Dir $src.FullName $dest $old $keep
-            if ($how -eq 'failed') { $AgentFailed = $true; $FailedSubs[$sub] = $true; continue }
+            if ($how -eq 'failed') { $FailedSkills[$dest] = @{ Src = $src.FullName; Old = $old; Keep = $keep; Rel = "$sub/$($src.Name)" }; continue }
             $LandedList.Add(@{ Rel = "$sub/$($src.Name)"; Dest = $dest })
             if ($keep) { Log "existing $dest moved to $bak" }
             if ($how -eq 'linked') {
@@ -909,10 +910,11 @@ if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and -not (Get-Comm
     Log "python3 not found on PATH; the guard and the other guards refuse Bash, Write and Edit calls until Python 3 is installed"
 }
 
-# Retries each file Install-File could not replace, with a longer back-off (2, 4, 8 s), then re-reads
-# the stamp of every copied guard.py and guard_*.py: a copy that does not carry this run's id is a half install,
-# so it is retried the same way. A file that still fails is named here and the run exits non-zero
-# at its end; the guard then fails closed and its text names this installer as the remedy.
+# Retries each file Install-File could not replace and each skill folder Install-Dir could not replace,
+# with a longer back-off (2, 4, 8 s), then re-reads the stamp of every copied guard.py and guard_*.py:
+# a copy that does not carry this run's id is a half install, so it is retried the same way. A file
+# or skill folder that still fails is named here and the run exits non-zero at its end. For a file
+# the guard then fails closed and its text names this installer as the remedy.
 # Links are skipped: a link reads the repo file, and the repo copy holds the placeholder.
 $StillFailed = [ordered]@{}
 if ($GuardStageFailed) { $StillFailed['the new guard set'] = '' }
@@ -938,9 +940,9 @@ function Resolve-Failures {
             }
             if (-not $ok -and -not $FailedFiles.Contains($d)) { $FailedFiles[$d] = $f.FullName }
         }
-        if ($FailedFiles.Count -eq 0) { return }
+        if ($FailedFiles.Count -eq 0 -and $FailedSkills.Count -eq 0) { return }
         if ($delay -eq 0) { break }
-        Log "$($FailedFiles.Count) file(s) not replaced; retrying in $delay s"
+        Log "$($FailedFiles.Count + $FailedSkills.Count) file(s) or skill folder(s) not replaced; retrying in $delay s"
         Start-Sleep -Seconds $delay
         foreach ($d in @($FailedFiles.Keys)) {
             $src = $FailedFiles[$d]
@@ -948,9 +950,21 @@ function Resolve-Failures {
             $r = Install-File $src $d
             if ($r -eq 'copied') { $script:AgentCopied = $true }
         }
+        foreach ($d in @($FailedSkills.Keys)) {
+            $s = $FailedSkills[$d]
+            $FailedSkills.Remove($d)
+            $had = [bool](Get-Item -LiteralPath $d -Force -ErrorAction SilentlyContinue)
+            $r = Install-Dir $s.Src $d $s.Old $s.Keep
+            if ($r -eq 'failed') { $FailedSkills[$d] = $s; continue }
+            $LandedList.Add(@{ Rel = $s.Rel; Dest = $d })
+            if ($s.Keep -and $had) { Log "existing $d moved to $($s.Old)" }
+            if ($r -eq 'copied') { $script:AgentCopied = $true; Log "copied $d (symlink not permitted)" } else { Log "linked $d -> $($s.Src)" }
+        }
     }
     foreach ($d in @($FailedFiles.Keys)) { $StillFailed[$d] = $FailedFiles[$d]; Log "could not replace $d after retries; it is not this install's version" }
     $FailedFiles.Clear()
+    foreach ($d in @($FailedSkills.Keys)) { $StillFailed[$d] = $FailedSkills[$d].Src; $FailedSubs['skills'] = $true; Log "could not replace $d after retries; Install-Dir logged its state above" }
+    $FailedSkills.Clear()
 }
 Resolve-Failures
 if ($GuardSetMode) { Remove-StaleSets }
