@@ -57,16 +57,14 @@ Not read:
 - A decode piped to `source /dev/stdin`, `. /dev/stdin` or `python3`, as `base64 -d f | source /dev/stdin`.
 - A refused word rebuilt at runtime by string assembly, such as `$(printf '%s%s' …)` or a python string join. Tracked as the debt `encoded-retry-runtime-assembly`.
 
-Kind: process
-Home: hooks/guard_encoded.py
-
-## The question
-
-**Open, awaiting the owner's ruling.** Debt `encoded-retry-runtime-assembly`, a refused word rebuilt at runtime, needs this choice for its Retire part.
+**Open question, awaiting the owner's ruling.** Debt `encoded-retry-runtime-assembly`, a refused word rebuilt at runtime, needs this choice for its Retire part.
 
 - **Narrow.** Keep the refused command text in the refusal row, and refuse a command whose assembled text equals it.
 - **General.** Refuse string assembly by its shape.
 
 Against the general option: string assembly is ordinary shell and python, so a shape rule would refuse real work after any refusal. That is a false alarm, and a guard that cries wolf is spent (decision `guard-that-cries-wolf-is-spent`).
 
-The debt's unrelated-assembly Retire case depends on this choice: its no-refusal twin and an unrelated assembly both pass.
+The debt's Retire case also needs an unrelated assembly to pass. Under narrow it passes. Under general it is refused after any refusal, so that case holds only under narrow.
+
+Kind: process
+Home: hooks/guard_encoded.py
