@@ -1,0 +1,10 @@
+{
+  "title": "A fix-check record the merge tool prints carries the chain's round lines",
+  "why": "Lane commit-refuses-conflict-markers (session_013NEJKzXJPDWrSRe3i1fGJd), 23:24 CST Nov 8: `merge <pr> --review-record --fix-check OLD:...` prints a record with no Round lines, and `merge --reviewed` then rejects it (\"open: the fix check passed, but no round is recorded\"). The tool also refuses `--round` with `--fix-check`. Hit #2083 and #1937 tonight; each now needs a fresh round 3. Harm: one wasted reviewer round per PR, and a held batch.",
+  "note": "Fix: the printer carries the chain's round lines into the record, or refuses to print one that --reviewed will reject. Related: steps fix-check-chain, record-tool-posts-itself.",
+  "phase": "now",
+  "owner": "coordinator",
+  "status": "todo",
+  "order": 877,
+  "updatedAt": "2026-11-08T23:24:00-06:00"
+}
