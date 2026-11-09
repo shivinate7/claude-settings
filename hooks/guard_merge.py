@@ -116,8 +116,12 @@ GH_API_MERGE_PATH = re.compile(r"/?(?:repos/([^/{}\s]+/[^/{}\s]+)/)?pulls/(\d+)/
 
 
 def api_merge_call_of(rest):
-    """Return (selector, repo) for an `api` call with an explicit PUT to a pull request's `/merge` endpoint, else None.
-    A GET merges nothing. A POST (gh's default once a field is given) merges nothing. Another endpoint merges nothing.
+    """Return (selector, repo) for an `api` call with an explicit PUT to a pull request's merge endpoint, else None.
+
+    A GET merges nothing.
+    A POST merges nothing. It is the method gh picks once a field is given.
+    Another endpoint merges nothing.
+
     The repo comes from the endpoint path, else from the root repo flag.
     """
     method, endpoint, repo, index, args = "", "", "", 0, rest[1:]
@@ -149,8 +153,9 @@ def api_merge_call_of(rest):
 
 
 def merge_call_of(segment: str):
-    """Return (selector, repo) for a `gh pr merge` segment, else None. A `gh api` PUT to a merge endpoint counts too.
+    """Return (selector, repo) for a `gh pr merge` segment, else None.
 
+    A `gh api` PUT to a merge endpoint counts too.
     `selector` is the first positional word, '' for the current branch's pull request. `--auto` is
     judged like any merge: GitHub's auto-merge waits only on REQUIRED checks, and a base with none
     merges at once.
@@ -234,8 +239,11 @@ def has_workflows(where: str) -> bool:
 def merge_check(selector, repo: str, where: str, landing=None):
     """Return (verdict, detail) for the head of the named pull request: green, pending, red,
     batch (another ready PR on the base has a workflow run or a required check pending), or unknown. One read, no
-    wait, run in `where` so `gh` names the repo the command names. `landing` is (base, head sha) for a push that
-    writes the base with no pull request: only the batch read runs, and the verdict is green, batch or unknown."""
+    wait, run in `where` so `gh` names the repo the command names.
+
+    `landing` is (base, head sha) for a push that writes the base with no pull request.
+    Then only the batch read runs, and the verdict is green, batch or unknown.
+    """
     module = merge_module()
     if module is None:
         return "unknown", "the merge tool's check reader could not be loaded"
