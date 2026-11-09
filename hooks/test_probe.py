@@ -457,6 +457,41 @@ def judge_crash_is_never_allow():
     return problems
 
 
+# A guard.log line the reader parses as a refusal. The probe must read it, and only the reader can.
+LOG_LINE = "2026-11-09T10:00:00-06:00\tBash\tdeny\tshared-tree\tgit reset --hard origin/main\n"
+
+
+def log_line_guard(line):
+    """A stub guard that writes one guard.log line into its config dir and prints no verdict."""
+    return (
+        "import json, os, sys\n"
+        "json.load(sys.stdin)\n"
+        "with open(os.path.join(os.environ['CLAUDE_CONFIG_DIR'], 'guard.log'), 'w', encoding='utf-8') as handle:\n"
+        "    handle.write(%r)\n" % line
+    )
+
+
+@case
+def missing_reader_is_unknown_never_allow():
+    """Probe: a guard.log line with no reader beside hooks/ gives `cannot read the guard log (...), verdict unknown`,
+    exit 1, and no verdict on stdout, never allow."""
+    with_reader = install_layout(new_dir())
+    write(os.path.join(with_reader, "guard.py"), log_line_guard(LOG_LINE).encode("utf-8"))
+    # Scope first: with the reader beside hooks/, the same stub's line gives the verdict allow, exit 0.
+    rc, out, err = probe(flags(HARMLESS), script=os.path.join(with_reader, "probe.py"))
+    bad = scope(rc, out, err)
+    if bad or out != "allow\n":
+        return ["control, reader present: " + (bad[0] if bad else "printed %r, want 'allow'" % out[:60])]
+    without_reader = install_layout(new_dir(), reader=False)
+    write(os.path.join(without_reader, "guard.py"), log_line_guard(LOG_LINE).encode("utf-8"))
+    rc, out, err = probe(flags(HARMLESS), script=os.path.join(without_reader, "probe.py"))
+    problems = bad_input_problems(rc, out, err)
+    problems += expect(rc == 1, "exit %d, want 1" % rc)
+    problems += expect("probe: cannot read the guard log (" in err, "stderr does not say the guard log cannot be read")
+    problems += expect("verdict unknown" in err, "stderr does not say the verdict is unknown")
+    return problems
+
+
 @case
 def session_fields_stay_out_of_the_guard():
     """Probe: a stdin payload's session_id and agent_id never reach the guard."""
