@@ -839,9 +839,9 @@ class Host:
         finally:
             self.once = False
         if c and is_net(c, out):
-            raise Stop(f"the post of the review record on pull request #{n} hit a network error, so the comment may or may not have posted. Read the comments with `merge --reviewed` before you run again: {out.strip()}")
+            raise Stop(f"the post of the review record on pull request #{n} hit a network error, so the comment may or may not have posted. Read the comments with `merge --reviewed` before you run again: {out.strip()} " + REVIEW_CITE)
         if c:
-            raise Stop(f"posting the review record on pull request #{n} failed: {out.strip()}")
+            raise Stop(f"posting the review record on pull request #{n} failed: {out.strip()} " + REVIEW_CITE)
         return c, out
 
     def pages(self, rel, key=None, fields=None):
