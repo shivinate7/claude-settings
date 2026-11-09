@@ -1194,6 +1194,14 @@ class StepCites(CiJobStub, tm.CloudSession):
         self.assertIn("prose-ghost", text, "the refusal does not name the real missing step: " + text)
         self.assertNotIn("prose-word", text, "prose 'next step: foo' was read as a cite: " + text)
 
+    def test_a_missing_step_cited_bare_in_prose_refuses_and_names_it(self):  # a cite needs no backticks: the repo's cite regex ignores them
+        self.put_roadmap(["real-step"])
+        self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "Builds on step:bare-ghost in prose.")})
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a missing step cited bare, without backticks, passed the lint: " + text)
+        self.assertIn("bare-ghost", text, "the refusal does not name the bare missing step: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed PASS over a bare missing step: " + text)
+
     def test_a_lone_quote_or_a_comment_opener_before_a_cite_does_not_hide_it(self):
         lines = ["Don't: `step:lone-ghost`.", "Note // `step:slash-ghost`.", "Note # `step:hash-ghost`.",
                  "Note /* `step:block-ghost`.", 'He said "`step:double-ghost`".']
