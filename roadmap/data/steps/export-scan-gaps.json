@@ -1,0 +1,11 @@
+{
+  "title": "The export secret scan closes two named limits: a value whose first digit sits past 256 characters, and a password after a 'none' decoy",
+  "why": "Two pasted secret forms pass the export scan today, and a found gap gets a fix (owner, 13:20 CST Nov 7).",
+  "note": "From #2139's review record 6737386649 (reviewer sonnet), via lane notes-fix-page, 04:09 CST Nov 9. (1) skills/waiting-page/export_page.py:105-107: a random value whose first digit sits past 256 characters passes. (2) export_page.py:~118-135: `password: none, then swordfish` passes; it is documented as a limit. The same file is under change in #2372 (step export-scan-key-false-alarms, parked on page item 456), so build on the branch the owner's answer leaves. Lane notes-fix-page, session_013NEJKzjkypcToggneCjJN8.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJKzjkypcToggneCjJN8",
+  "status": "todo",
+  "order": 894,
+  "updatedAt": "2026-11-09T04:09:00-06:00"
+}
