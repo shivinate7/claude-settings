@@ -30,8 +30,9 @@
 //   1c. The same through a junction to the skill folder, the way `~/.claude/skills/<name>` reaches it.
 //   2a. A second run changes no file. The first run did change files.
 //   2b. A run on a map of the current version changes no file, also where a sentence holds a line reference.
-//   2c. Versions 2 to 5 (steps 3 to 5 change no file): only the formatVersion line changes, and a second run changes no file.
-//   2d. Version 4 to 5 alone: the same, from version 4. Version 5 adds the tested-by line and MAP11, and changes no file.
+//   2c. Versions 2 to the current one (steps 3 to 6 change no file): only the formatVersion line changes, and a second run changes no file.
+//   2d. Version 4 to the current one alone: the same, from version 4. Version 5 adds the tested-by line and MAP11, and changes no file.
+//   2e. Version 5 to the current one alone: the same, from version 5. Version 6 changes no file.
 //   3a, 3b, 3c. A config with a newer `formatVersion` than the skill: the check command, the picture command and the upgrade
 //       command each refuse, say to update the skill, exit non-zero, and write nothing.
 //   4a, 4b. An older version (a missing key, and 1): the check command fails, names the upgrade command, and writes nothing.
@@ -196,7 +197,7 @@ test('2b. a run on a map of the current version changes no file, also where a se
   assert.ok(same(before, snapshot(dir)), 'a step must run only for a map that is older than its target version');
 });
 
-// Versions 2 and 4 to 5. The upgrade writes the config in two-space JSON, so each case starts from that form, and a second run must change nothing.
+// Versions 2, 4 and 5 to the current one. The upgrade writes the config in two-space JSON, so each case starts from that form, and a second run must change nothing.
 // The step from 4 to 5 (version 5 adds the tested-by line and MAP11) is case 2d, and it runs on its own, from version 4.
 const upgradeOnlyVersionLine = (from) => {
   needFile('scripts/map-upgrade.mjs');
@@ -209,11 +210,11 @@ const upgradeOnlyVersionLine = (from) => {
   const r = run([UPGRADE], dir);
   assert.equal(r.status, 0, `the upgrade must exit 0\n${out1500(r)}`);
   const afterText = readFileSync(cfg, 'utf8');
-  assert.equal(JSON.parse(afterText).formatVersion, 5, `the upgrade must set formatVersion to 5\n${out1500(r)}`);
+  assert.equal(JSON.parse(afterText).formatVersion, CURRENT, `the upgrade must set formatVersion to ${CURRENT}\n${out1500(r)}`);
   const lines = (s) => s.split('\n');
   assert.equal(lines(afterText).length, lines(beforeText).length, 'the upgrade must keep the config line count');
   const changed = lines(beforeText).flatMap((l, i) => (l === lines(afterText)[i] ? [] : [[l, lines(afterText)[i]]]));
-  assert.deepEqual(changed, [[`  "formatVersion": ${from},`, '  "formatVersion": 5,']], 'only the formatVersion line may change');
+  assert.deepEqual(changed, [[`  "formatVersion": ${from},`, `  "formatVersion": ${CURRENT},`]], 'only the formatVersion line may change');
   const once = snapshot(dir);
   assert.deepEqual([...once.keys()].sort(), [...before.keys()].sort(), 'the upgrade must add and remove no file');
   for (const [f, sig] of once) if (f !== 'map.config.json') assert.equal(sig, before.get(f), `the upgrade must not write ${f}`);
@@ -222,8 +223,9 @@ const upgradeOnlyVersionLine = (from) => {
   assert.ok(same(once, snapshot(dir)), 'the second run must write no file, add none and remove none');
 };
 
-test('2c. a version 2 map upgraded to version 5 changes only the formatVersion line, and a second run changes no file', () => upgradeOnlyVersionLine(2));
-test('2d. a version 4 map upgraded to version 5 changes only the formatVersion line, and a second run changes no file', () => upgradeOnlyVersionLine(4));
+test('2c. a version 2 map upgraded to the current version changes only the formatVersion line, and a second run changes no file', () => upgradeOnlyVersionLine(2));
+test('2d. a version 4 map upgraded to the current version changes only the formatVersion line, and a second run changes no file', () => upgradeOnlyVersionLine(4));
+test('2e. a version 5 map upgraded to the current version changes only the formatVersion line, and a second run changes no file', () => upgradeOnlyVersionLine(5));
 
 // A refusal: exit non-zero, a message that says to update the skill and is no "unknown key" error, no PASS line, and no write.
 const assertRefusesNewer = (r, dir, before) => {
