@@ -129,6 +129,7 @@ def record(id_, slug):
 class FakeHost:
     """The GitHub half, scripted. `other` is a second clone that plays a competing pusher and the merger."""
     built = True
+    own_number = 7  # the lane's own PR: pr() serves its head from the branch; the lane-lint cases name it 7
 
     def __init__(self, root, other, branch="feat"):
         self.root, self.other, self.branch = root, other, branch
@@ -142,13 +143,27 @@ class FakeHost:
         self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
         self.pr_calls = []  # each n the run read through pr(): a refusal before any host read leaves it empty
         self.readies, self.ready_refuse = [], None  # readies: each n a draft confirm asked to mark ready; ready_refuse: the reason the host refuses
+        self.pulls, self.pull_list_reads = None, 0  # pulls: {number: REST row} of the other PRs a case scripts (None: the own PR only); pull_list_reads: each open_pulls call
 
     def pr(self, n):
         self.pr_calls.append(n)
+        if self.pulls is not None and n != self.own_number:  # a scripted PR: its row, or the 404 Host.pr raises for a PR that is not there
+            if n not in self.pulls:
+                raise merge.Stop(f"reading the pull request failed: HTTP 404: Not Found (#{n})")
+            row = self.pulls[n]
+            return {"head": row["head"]["sha"], "branch": row["head"]["ref"], "base": row["base"]["ref"], "state": row["state"].upper(),
+                    "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": bool(row["draft"]), "body": row["body"] or ""}
         head = merge.origin_head(self.root, self.branch)
         base = (self.base_seq.pop(0) if len(self.base_seq) > 1 else self.base_seq[0]) if self.base_seq else self.base
         return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
                 "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": self.draft, "body": self.body}
+
+    def open_pulls(self):
+        """-> the open pull requests as `GET pulls` lists them: the own PR, then each scripted row that is open. Each call is one list read."""
+        self.pull_list_reads += 1
+        head = self.head_override or merge.origin_head(self.root, self.branch)
+        own = REST.list_item(self.own_number, head, self.branch, self.base, body=self.body, draft=self.draft)
+        return [own] + [row for row in (self.pulls or {}).values() if row["state"] == "open"]
 
     def required_names(self):
         return ["checks"]
@@ -3826,9 +3841,9 @@ def pull(number, head, head_ref, base_ref, state="open", merged=False, draft=Fal
             "mergeable_state": mergeable_state, "merge_commit_sha": merge_commit_sha, "html_url": "https://github.com/o/r/pull/%d" % number,
             "head": {"ref": head_ref, "sha": head, "label": "o:" + head_ref}, "base": {"ref": base_ref, "sha": "b" * 40, "label": "o:" + base_ref}}
 
-def list_item(number, head, head_ref, base_ref):
-    """An open pull request as `GET pulls` lists it: no mergeable, merged or mergeable_state."""
-    full = pull(number, head, head_ref, base_ref)
+def list_item(number, head, head_ref, base_ref, body="", draft=False, state="open"):
+    """A pull request as `GET pulls` lists it: no mergeable, merged or mergeable_state. An empty body is null, as on GitHub."""
+    full = pull(number, head, head_ref, base_ref, state=state, draft=draft, body=body)
     return {k: v for k, v in full.items() if k not in ("merged", "mergeable", "mergeable_state")}
 '''
 
