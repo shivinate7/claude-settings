@@ -1,0 +1,11 @@
+{
+  "title": "A cloud coordinator may start a plan refuter, as decision plan-refuter requires",
+  "why": "Ruling 111 a lets a cloud coordinator start only Plan, Explore and claude-code-guide agents, so on #1971's head the guard refuses the refuter that decision plan-refuter runs after each Plan agent.",
+  "note": "Blocked on page item 460 (04:20 CST Nov 9): changing ruling 111 a's list (COORDINATOR_AGENT_ROLES in hooks/guard.py) needs the owner's word. From lane revive-1042 (session_013NEJL2GCahFnLKLzmw1JAM) via the coordinator: #1971's Sonnet fix check failed on this one clash. Options: a, add the refuter in #2123 (recommended); b, add it on #1971 now; c, no refuter.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJL2GCahFnLKLzmw1JAM",
+  "status": "blocked",
+  "order": 897,
+  "updatedAt": "2026-11-09T04:19:00-06:00"
+}
