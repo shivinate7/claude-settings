@@ -12963,6 +12963,57 @@ sh("frozen resolve-vars: an ambiguous redirect from a value with an escaped spac
 sh("frozen resolve-vars: control, the same assignment with no escaped space, then a write to it, denies",
    'D=' + CFG_SETTINGS + '; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
 
+# A backslash-newline joins two lines into one. So `X=1 && \` with `D=v` on the next line is `X=1 && D=v`,
+# and `D=v \` with `&& cmd` on the next line is `D=v && cmd`: the assignment still starts its command.
+sh("frozen resolve-vars: a backslash-newline after && does not hide an assignment, so a write to it denies",
+   "X=1 && \\\n  D=" + CFG_SETTINGS + " && \\\n  echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a backslash-newline after ; does not hide an assignment, so a write to it denies",
+   "true;\\\nD=" + CFG_SETTINGS + "; echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a backslash-newline before export does not hide it, so sed -i of the assigned path denies",
+   "cd /tmp && \\\n export D=" + CFG_SETTINGS + " && \\\n sed -i s/a/b/ $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a backslash-newline after an assignment keeps it for the next command, so a write to it denies",
+   "D=" + CFG_SETTINGS + " \\\n  && echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, a backslash-newline chain of a safe path, then a write to it, allows",
+   "X=1 && \\\n  D=/tmp/o && \\\n  echo y > $D", "allow", cwd=NOGIT)
+sh("frozen resolve-vars: control, a backslash-newline after a safe assignment, then a write to it, allows",
+   "D=/tmp/o \\\n  && echo y > $D", "allow", cwd=NOGIT)
+sh("frozen resolve-vars: control, the same chain on one line, denies",
+   "X=1 && D=" + CFG_SETTINGS + " && echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+
+# PowerShell reads `$D='v'` and `$D="v"` as an assignment with or without spaces around the equals.
+sh("frozen resolve-vars: PowerShell $D='path' with no spaces, then Set-Content to $D, denies",
+   "$D='" + CFG_SETTINGS + "'; Set-Content $D x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: PowerShell $D=\"path\" with no spaces, then Set-Content to $D, denies",
+   '$D="' + CFG_SETTINGS + '"; Set-Content $D x', "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: PowerShell $D= 'path', a space after the equals only, then Set-Content to $D, denies",
+   "$D= '" + CFG_SETTINGS + "'; Set-Content $D x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: control, PowerShell $D='safe path' with no spaces, then Set-Content to $D, allows",
+   "$D='/tmp/o'; Set-Content $D x", "allow", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: control, PowerShell $D = 'path' with spaces, then Set-Content to $D, denies",
+   "$D = '" + CFG_SETTINGS + "'; Set-Content $D x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+
+# A prefix assignment is in the environment of its command, and a heredoc is that command's input: the child
+# shell reads the value. `env NAME=v` gives the same environment. An export is in the environment too.
+sh("frozen resolve-vars: a prefix assignment into a bash heredoc script reaches the script, so its write denies",
+   "OUT=" + CFG_SETTINGS + " bash <<'EOF'\necho y > \"$OUT\"\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: an env assignment before sh with a heredoc script reaches the script, so its write denies",
+   "env OUT=" + CFG_SETTINGS + " sh <<'EOF'\necho y > $OUT\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, a prefix assignment of a safe path into a heredoc script, then its write, allows",
+   "OUT=/tmp/o bash <<'EOF'\necho y > \"$OUT\"\nEOF", "allow", cwd=NOGIT)
+sh("frozen resolve-vars: control, an export of the frozen path before a heredoc script, then its write, denies",
+   "export OUT=" + CFG_SETTINGS + "; bash <<'EOF'\necho y > \"$OUT\"\nEOF", "deny", "frozen-path", cwd=NOGIT)
+
+# A run of heredoc blocks before an assignment must not hide the write after it. Each block nests the resolver
+# one level deeper, and past `_NEST_LIMIT` (20) a body is read as plain text. So 20 blocks stay green, and
+# 21 and 30 must deny.
+_HEREDOC_BLOCK = "cat > f <<EOF\nline\nEOF\n"
+for _blocks in (20, 21, 30):
+    sh("frozen resolve-vars: %d heredoc blocks, then an assignment to the frozen path and a write to it, denies"
+       % _blocks, _HEREDOC_BLOCK * _blocks + "D=" + CFG_SETTINGS + "\necho y > $D", "deny", "frozen-path",
+       cwd=NOGIT)
+sh("frozen resolve-vars: control, 21 heredoc blocks, then an assignment to a safe path and a write to it, allows",
+   _HEREDOC_BLOCK * 21 + "D=/tmp/o\necho y > $D", "allow", cwd=NOGIT)
+
 # A TOKEN IN THE COMMAND LIFTS NOTHING. `DESTRUCTIVE_OK=1` and `GIT_DISCARD_OK=1` are plain env
 # assignments that the guard does not read. The one lift is the owner override (family
 # `override`): the owner types it as a prompt, and the guard reads it from a state file.
