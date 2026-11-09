@@ -837,6 +837,8 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=Non
     command; one left unresolved (or a substitution) is refused from a non-temp repo, since its
     value is unknown; a `-C` variable is read the same way. Other unreadable parts (a repo, a
     cwd) allow."""
+    if "worktree" not in segments[number]:
+        return ""   # cheap gate: resolving variables re-reads every earlier segment, so it runs only for a possible add
     read = _segment_with_vars(segments, number)
     tokens = segment_tokens(read)
     index = resolve_command(tokens) if tokens else None
@@ -888,7 +890,8 @@ WORKTREE_HAND_MADE_REASON = (
     "A hand-made tree sends an agent or a session to work in the main clone and loses the isolation. "
     "Remedy: start the work with one of those two tools. Call EnterWorktree with a `name` and no "
     "`path`. A path the guard cannot read, such as one held in a variable or a substitution, is "
-    "refused too. If the tool's isolation was refused, "
+    "refused too. If the tree is your own red-run checkout, write its path out in full, with no "
+    "variable or substitution. If the tool's isolation was refused, "
     "make no tree by hand: stop and report to the owner which layer refused and its exact "
     "message. A guard refusal starts \"Rule (\" and names its rule. Any other refusal is the "
     "harness's."
