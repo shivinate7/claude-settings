@@ -33,4 +33,3 @@ Per rule `outcomes-mechanize-rules`:
 Kind: process
 Home: rule:outcomes-mechanize-rules
 Home: hooks/config_watch.py
-Home: install.sh
