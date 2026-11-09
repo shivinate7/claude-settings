@@ -12741,16 +12741,18 @@ sh("frozen shell: five cds with ../ steps into the config folder, then sed -i on
    "denies [chain of five pin]", FIVE_DOTDOT + " && sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen shell: five cds with ../ steps, then sed -i on notes.txt, allows [chain of five control]",
    FIVE_DOTDOT + " && sed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
-# A chain that passes the walk limit keeps every folder it visited, so the config folder stays among them and the
-# overflow chain is refused. A `;` cd runs unconditionally, so a later cd into the docs folder returns the walk to that
-# one folder, and the sed after it is judged there and allowed.
-OVERFLOW = "true && cd " + CFG_SUB_DIR + " && cd " + CFG_DOCS_DIR + " && cd " + CFG_SUB_DIR + " && cd " + slash(CFG)
-sh("frozen shell: a chain past the walk limit ends in the config folder, then sed -i on settings.json, "
-   "denies [overflow pin]", OVERFLOW + " && sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
+# The || separators branch the walk, and a chain of them past the walk limit keeps every folder it visited. The chain
+# visits the config folder first and ends in a sed: a cd into the config folder as its last step would reset the walk,
+# and the sed would then be judged exactly and allowed. The notes.txt row is the same chain on a file that is not frozen.
+OVERFLOW = ("cd " + slash(CFG) + " ; cd " + CFG_SUB_DIR + " || cd " + CFG_DOCS_DIR + " || cd " + slash(NOGIT)
+            + " || cd " + slash(PROJ) + " || cd " + slash(CLONE))
+sh("frozen shell: a || chain past the walk limit that visited the config folder, then sed -i on settings.json, "
+   "denies [overflow pin]", OVERFLOW + " ; sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen shell: the same chain, then sed -i on notes.txt, allows [overflow control]",
-   OVERFLOW + " && sed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
-sh("frozen shell: a chain past the walk limit, then a later cd into the docs folder, then sed -i on settings.json, "
-   "allows [reset pin]", "true && cd " + CFG_SUB_DIR + " && cd " + CFG_DOCS_DIR + " && cd " + CFG_SUB_DIR
+   OVERFLOW + " ; sed -i s/a/b/ notes.txt", "allow", cwd=NOGIT)
+# The && chain before this row holds its folders rather than overflowing, so the row pins exact tracking after a `;` cd.
+sh("frozen shell: a chain of && cds, then a later cd into the docs folder, then sed -i on settings.json, "
+   "allows [reset pin]","true && cd " + CFG_SUB_DIR + " && cd " + CFG_DOCS_DIR + " && cd " + CFG_SUB_DIR
    + " && cd " + CFG_DOCS_DIR + " && cd " + slash(CFG) + "; cd " + CFG_DOCS_DIR + "; sed -i s/a/b/ settings.json",
    "allow", cwd=NOGIT)
 # A cd after && may not run, but a failed one stops the chain, so the sed runs only in the docs folder. Only a settings.json
