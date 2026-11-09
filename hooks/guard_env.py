@@ -1033,6 +1033,9 @@ def _env_words(segment: str, walk: bool = False, keep_newlines: bool = False):
     # Look through exactly these wrapper shapes, each by its exact form, so a flag value of some
     # other wrapper (`env -u ls cat .env`) can never pose as the command word.
     while position < len(words):
+        if walk and (REDIRECT.fullmatch(words[position]) or words[position] == "<"):
+            position += 2   # a redirect in front of the program: the operator and its target
+            continue
         word = words[position].rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
         after = position + 1
         if word == "timeout":
@@ -1073,10 +1076,17 @@ def _env_words(segment: str, walk: bool = False, keep_newlines: bool = False):
         elif walk and word in ENV_RUNNER_WRAPPERS:
             # The program behind `sudo`, `nohup`, `exec` and `xargs` is read by guard_core's wrapper walk,
             # which knows each one's value flags (`sudo -u root`, `xargs -n 1`).
-            behind = resolve_command(tuple(words[position:]))
+            kept, at = [], position
+            while at < len(words):
+                if REDIRECT.fullmatch(words[at]) or words[at] == "<":
+                    at += 2   # a redirect and its target are no part of the program
+                    continue
+                kept.append(at)
+                at += 1
+            behind = resolve_command(tuple(words[i] for i in kept))
             if not behind:
                 break
-            position += behind
+            position = kept[behind]
         elif word == "time":
             position = after + (after < len(words) and words[after] == "-p")
         elif _wrapper_name(word) in ("python", "python3", "py"):
@@ -1420,32 +1430,52 @@ def _shell_string(words, position: int, command: str) -> str:
 ENV_PLACE_MARK = "\ue000"
 
 
-ENV_BRANCH_WORDS = ("then", "else", "do")
 # Past this many cds that might not run, every combination is not tried: all run, all skipped and each
 # skipped alone are.
 ENV_SKIP_LIMIT = 6
 
 
+def _branch_bodies(pieces):
+    """The branch bodies each segment sits in, one tuple of body numbers per segment, outermost first.
+    A body opens at a segment that starts `then`, `do` or `else`, and closes at one that starts `fi`,
+    `done`, `else` or `elif`, so a `cd` after `echo x;` in a `then` branch, or on a line of its own, is in
+    the body as well. ACCEPTED LIMIT: a `case` branch is not read as a body."""
+    paths, stack, opened = [], [], 0
+    for piece in pieces:
+        first = piece.split(None, 1)[:1]
+        word = first[0] if first else ""
+        if word in ("fi", "done", "elif", "else") and stack:
+            stack.pop()
+        if word in ("then", "do", "else"):
+            opened += 1
+            stack.append(opened)
+        paths.append(tuple(stack))
+    return paths
+
+
 def _folders_at(pieces, number: int, bases, ends):
     """The folders the shell may be in when `pieces[number]` runs, started from each folder in `bases`
     (`dir_before_segment`, which falls back to the base when it cannot tell). A `cd` after `&&` or `||`,
-    or in the branch or body of an `if` or loop (a segment that starts `then`, `else` or `do`), might not
+    or in a branch body of an `if` or a loop that closes before the segment (`_branch_bodies`), might not
     run, so the segment is judged with each combination of those `cd`s run and skipped. With more than
-    ENV_SKIP_LIMIT of them, only all run, all skipped and each skipped alone are tried.
+    ENV_SKIP_LIMIT of them, only all run, all skipped and each skipped alone are tried. The combinations
+    run through `dir_before_segment`, the one place that reads `cd -`, a subshell paren and a failed `cd`.
 
-    A skipped `cd` is judged only when the segment can still run without it: the `cd` follows `||`, or a
-    connector from the `cd` up to the segment is not `&&` or `|`. After `&&` with only `&&` up to the
+    A skipped `cd` after `&&` is judged only when the segment can still run without it: a connector
+    from the `cd` up to the segment is not `&&` or `|`. After `&&` with only `&&` up to the
     segment (`test -d D && cd D && rg K`), the `&&` before the `cd` failed, so the chain stops there
     and the segment never runs in the folder before the `cd`. A pipe up to the segment does not break the
-    chain: `cd D && echo | rg K` runs the whole pipe or none of it."""
+    chain: `cd D && echo | rg K` runs the whole pipe or none of it. A `cd` after `||` is always judged
+    skipped. A `cd` in a body that does not hold the segment is always judged skipped, since the body may
+    not run."""
+    bodies = _branch_bodies(pieces)
+
     def conditional_cd(at):
         if at > len(ends) or not (tokens := segment_tokens(pieces[at])) or _segment_cd_move(tokens) is None:
             return False
-        if ends[at - 1] == "||":
+        if ends[at - 1] == "||" or (bodies[at] and bodies[number][:len(bodies[at])] != bodies[at]):
             return True
-        first = pieces[at].split(None, 1)[:1]
-        branch = ends[at - 1] in (";", "\n") and bool(first) and first[0] in ENV_BRANCH_WORDS
-        return (ends[at - 1] == "&&" or branch) and any(end not in ("&&", "|") for end in ends[at:number])
+        return ends[at - 1] == "&&" and any(end not in ("&&", "|") for end in ends[at:number])
 
     conditional = [at for at in range(1, number) if conditional_cd(at)]
     skips = [[]]
@@ -1502,6 +1532,63 @@ def _every_folder(texts, cwd):
     return found
 
 
+ENV_FIND_EXPRESSION = ("(", "\\(", "!", "-not", "-o", "-or")
+ENV_WALK_REASON_FED = ("this command would search a name that a lister hands to xargs, and the name is an "
+                       "environment file")
+
+
+def _xargs_source(pieces, ends, number: int, part: int, here: str):
+    """What the segment before an `xargs` puts on its stdin: (the env file it names, whether the search
+    may walk `here`, the folders it names). The env file is '' for none, a path, or ENV_TOO_LARGE.
+
+    `find` names every file under each folder it is given (default `.`), and `ls -a` or `ls -A` names each
+    entry of the folder, dotfiles too. Each name reaches the search as a path, which `rg` and `grep` read
+    whatever their flags. A `find` `-name` or `-iname` glob that no env file name fits (`*.py`) names none,
+    and `-type d` names folders alone. A plain `ls` names no dotfile, so only the folders it names are
+    walked. `ls -a` also names `.`. Any other source, or a pipe that is not directly before the xargs,
+    names paths the guard cannot see, so `here` is walked."""
+    unknown = ("", True, [])
+    if not (part == 0 and number > 0 and ends[number - 1] == "|"):
+        return unknown
+    words, position, command = _env_words(_env_parts(pieces[number - 1])[-1], walk=True)
+    rest = words[position + 1:]
+    flags = [w for w in rest if w.startswith("-")]
+    paths = [w for w in rest if not w.startswith("-")]
+    if command == "ls":
+        letters = "".join(w[1:] for w in flags if not w.startswith("--"))
+        if paths or "R" in letters or "--recursive" in flags:
+            return unknown
+        dotfiles = "a" in letters or "A" in letters or "--all" in flags or "--almost-all" in flags
+        try:
+            entries = sorted(os.listdir(here))
+        except OSError:
+            return unknown
+        folders = [os.path.join(here, n) for n in entries
+                   if (dotfiles or not n.startswith(".")) and os.path.isdir(os.path.join(here, n))]
+        named = next((os.path.join(here, n) for n in entries if dotfiles and names_env_file(n)), "")
+        return named, "a" in letters or "--all" in flags, folders
+    if command == "find":
+        starts = []
+        for word in rest:
+            if word.startswith("-") or word in ENV_FIND_EXPRESSION:
+                break
+            starts.append(word)
+        if any(rest[i + 1:i + 2] == ["d"] for i, w in enumerate(rest) if w == "-type"):
+            return unknown
+        globs = [(rest[i + 1], w == "-iname") for i, w in enumerate(rest[:-1]) if w in ("-name", "-iname")]
+        if globs and not any(w in ENV_FIND_EXPRESSION for w in rest) and not any(
+                _glob_could_name_env(g, fold) for g, fold in globs):
+            return "", False, []
+        for start in starts or ["."]:
+            folder = os.path.join(here, os.path.expanduser(start))
+            if os.path.isdir(folder):
+                found = _env_file_in(folder)
+                if found:
+                    return found, False, []
+        return "", False, []
+    return unknown
+
+
 def _env_walk(texts, cwd, depth: int = 0, places=None):
     """Return (reason, log) when `rg` or `ag` with a hidden flag, `rg` with a positive glob, or a
     recursive grep, walks a folder that holds an env file on disk. The
@@ -1518,8 +1605,10 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
     `cwd` is a folder, or a list of them for a string that a conditional `cd` may run in.
 
     The search is found behind a subshell paren, a brace group, `command`, `env`, `nice`, `sudo`, `nohup`,
-    `exec` and `xargs` (`_env_words`). Under `xargs` stdin feeds xargs, so a `<` or a pipe in front does not
-    spare the folder. A string that `bash -c`, `sh -c`, `zsh -c`, `dash -c`, `ksh -c` or `eval` runs is a command of its own: it is cut
+    `exec` and `xargs` (`_env_words`), and past a redirect in front of the program. Under `xargs` stdin feeds
+    xargs, so a `<`, a pipe, a path or `{}` in the command does not spare the folder. A `find` or `ls -a`
+    before the xargs names each env file under the folder it lists, and the search is refused over it
+    (`_xargs_source`). A string that `bash -c`, `sh -c`, `zsh -c`, `dash -c`, `ksh -c` or `eval` runs is a command of its own: it is cut
     by `_substitutions` and walked from the folder the shell command runs in. An unquoted comma brace
     list in a word (`{a,b}`) is expanded as bash expands it. A path word that starts with `$PWD`,
     `${PWD}` or a `pwd` substitution is that folder. A glob word is expanded against it as the shell
@@ -1545,7 +1634,8 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
 
     ACCEPTED LIMITS: a path word with any other variable or substitution is not resolved, a wrapper
     that changes folder (`env -C`, `sudo -D`), any other wrapper, or a shell given a script file is
-    not looked through, a search in the body of a heredoc is not walked, an rg `!` glob is not read,
+    not looked through, a program other than a search that xargs feeds an env file name is not judged
+    here, a `cd` in a `case` branch is not read, a search in the body of a heredoc is not walked, an rg `!` glob is not read,
     a brace sequence (`{a..c}`) is not expanded, past the cap a glob that no sample name matches
     (`*.py`) is allowed though a name with an env stem and a `.py` suffix would match it, a `cd` that
     only one of two chained commands needs is judged in both folders, more than ENV_SKIP_LIMIT cds that
@@ -1589,6 +1679,18 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
                     words, position, "grep" if grep else command)
                 if extras["lists_files"]:
                     continue
+                heres = _folders_at(pieces, number, text_folders[index], ends)
+                via_xargs = "xargs" in (_wrapper_name(w.rsplit("/", 1)[-1].rsplit("\\", 1)[-1])
+                                        for w in words[:position])
+                # Under xargs, stdin feeds xargs and not the search, and the names it reads are appended
+                # as paths, so a path or `{}` in the command does not spare the folder.
+                sources = {here: _xargs_source(pieces, ends, number, part, here) for here in heres
+                           } if via_xargs else {}
+                for here, (listed, _, _) in sources.items():
+                    if listed == ENV_TOO_LARGE:
+                        return ENV_WALK_LARGE_REASON, "xargs is fed names from '%s', which is past the walk cap" % here
+                    if listed:
+                        return ENV_WALK_REASON_FED, "xargs is fed the env file '%s'" % listed
                 if grep:
                     if command != ENV_GREP_RECURSIVE_COMMAND and not _grep_recursive(words, position):
                         continue
@@ -1602,10 +1704,6 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
                     rules, exclude_dir = (_rg_rules(extras) if command == "rg" else []), ()
                 # Past the cap an rg type is refused: its globs name a suffix, which an env stem can carry.
                 cap_clear = (grep or not extras["types"]) and _rules_skip_env(rules)
-                # Under xargs, stdin feeds xargs, which may run the search with no path: the folder is walked.
-                via_xargs = "xargs" in (_wrapper_name(w.rsplit("/", 1)[-1].rsplit("\\", 1)[-1])
-                                        for w in words[:position])
-                heres = _folders_at(pieces, number, text_folders[index], ends)
                 for here in heres:
                     # A `<` and the word after it are stdin, not a path the search reads.
                     paths = [i for i in plain if i not in skip and i != extras["pattern"]
@@ -1623,8 +1721,12 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
                         expand = re.search(r"[*?\[]", word) and words[i] == word
                         folders += [f for f in (glob.glob(target) if expand else [target])
                                     if os.path.isdir(f) and f not in folders]
-                    if len(paths) <= extras["unknown"] and (
-                            grep or via_xargs or not ((fed and part == 0) or "<" in words)):
+                    if via_xargs:
+                        _, walks_here, named = sources[here]
+                        folders += [d for d in named if d not in folders]
+                        folders += [here] * (walks_here and here not in folders)
+                    elif len(paths) <= extras["unknown"] and (
+                            grep or not ((fed and part == 0) or "<" in words)):
                         folders += [here] * (here not in folders)
                     for folder in folders:
                         anchor = _glob_anchor(folder, here)
@@ -1695,6 +1797,14 @@ def _env_flat(cmd: str, text_ok: bool = False):
             words, position, command = _env_words(segment)
             if not words:
                 continue
+            if command in ENV_SHELL_STRING_COMMANDS:
+                # The string is one quoted word, and it runs as a command line of its own.
+                words, position, command = _env_words(segment, keep_newlines=True)
+                inner = _shell_string(words, position, command)
+                refusal = env_refusal(inner) if inner else ("", "")
+                if refusal[0]:
+                    return refusal
+                words, position, command = _env_words(segment)
             # The first segment of a piece reads the pipe that the piece before it closed with.
             stdin_piped = number == 0 and previous_end == "|"
             # A segment that pipes onward hands its output to another command, which may read it
