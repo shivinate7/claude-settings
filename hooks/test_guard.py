@@ -30675,7 +30675,7 @@ role_model_refuse("role-model: the same spawn as a Task is denied", "test-author
           "Write the failing cases.", tool="Task")
 role_model_refuse("role-model: reviewer on sonnet with no round line is denied, and names the Round N of 3 marker",
           "reviewer", "sonnet", "Check the diff for typos.",
-          carries=(ROLE_REMEDY, ROUND_MARKER) + FREE_ROUND_MARKERS)
+          carries=(ROUND_MARKER,) + FREE_ROUND_MARKERS)
 # The marker is a reviewer's remedy only: a test-author whose brief opens with a round line is still denied, and its
 # refusal names no round marker, so no agent reads one as a way past its row.
 role_model_refuse("role-model: test-author on sonnet with a Round 2 of 3 line is denied and names no round marker",
@@ -30683,7 +30683,7 @@ role_model_refuse("role-model: test-author on sonnet with a Round 2 of 3 line is
           lacks=ROLE_LACKS + (ROUND_MARKER,) + FREE_ROUND_MARKERS)
 role_model_refuse("role-model: reviewer on sonnet with a Round 1 of 3 line is denied (round 1 runs on the row)",
           "reviewer", "sonnet", "Round 1 of 3. Check the diff for typos.",
-          carries=(ROLE_REMEDY, ROUND_MARKER) + FREE_ROUND_MARKERS)
+          carries=(ROUND_MARKER,) + FREE_ROUND_MARKERS)
 role_model_refuse("role-model: record-writer on sonnet is denied", "record-writer", "sonnet", "Record the decision.")
 role_model_refuse("role-model: claude-code-guide on sonnet is denied", "claude-code-guide", "sonnet",
           "How do the hooks load?")
@@ -31491,9 +31491,9 @@ for _label, _check in _FIX_CHECK_CHECKS:
 role_model_allow("role-model: fix check: reviewer on sonnet with the marker on line one is allowed", "reviewer", "sonnet",
                  FIX_MARKER + ". Re-run the cases.")
 role_model_refuse("role-model: fix check: reviewer on sonnet with a role word ahead of the marker on line one is denied",
-                  "reviewer", "sonnet", "Reviewer, " + FIX_MARKER + ". Re-run the cases.", carries=(ROLE_REMEDY, FIX_MARKER))
+                  "reviewer", "sonnet", "Reviewer, " + FIX_MARKER + ". Re-run the cases.", carries=(FIX_MARKER,))
 role_model_refuse("role-model: fix check: reviewer on sonnet with markup ahead of the marker on line one is denied",
-                  "reviewer", "sonnet", "**" + FIX_MARKER + ":** re-run the cases.", carries=(ROLE_REMEDY, FIX_MARKER))
+                  "reviewer", "sonnet", "**" + FIX_MARKER + ":** re-run the cases.", carries=(FIX_MARKER,))
 role_model_allow("role-model: fix check: reviewer on sonnet with the marker first on line one and a Round 1 of 3 after it is "
                  "allowed", "reviewer", "sonnet", FIX_MARKER + ". Round 1 of 3 finding F1, head abc1234.")
 role_model_allow("role-model: fix check: reviewer on sonnet with the marker after leading spaces on line one is allowed",
@@ -31502,13 +31502,13 @@ role_model_allow("role-model: fix check: reviewer on sonnet with the marker afte
                  "reviewer", "sonnet", "\t" + FIX_MARKER + ", PR 7")
 role_model_refuse("role-model: fix check: reviewer on sonnet with Round 1 of 3 first on line one and the marker after it is denied",
                   "reviewer", "sonnet", "Round 1 of 3. New lane after " + FIX_MARKER + " FAIL on PR 12. Review it.",
-                  carries=(ROLE_REMEDY, FIX_MARKER))
+                  carries=(FIX_MARKER,))
 role_model_refuse("role-model: fix check: reviewer on sonnet with Re: ahead of the marker on line one is denied",
-                  "reviewer", "sonnet", "Re: " + FIX_MARKER + " of PR 7", carries=(ROLE_REMEDY, FIX_MARKER))
+                  "reviewer", "sonnet", "Re: " + FIX_MARKER + " of PR 7", carries=(FIX_MARKER,))
 # The row ends on \b, so a longer word that starts with the marker does not lift a reviewer on Sonnet.
 role_model_refuse("role-model: fix check: reviewer on sonnet with Fix checkpoint on line one is denied",
                   "reviewer", "sonnet", FIX_MARKER + "point for PR 2296",
-                  carries=(ROLE_REMEDY, ROUND_MARKER, FIX_MARKER) + FREE_ROUND_MARKERS)
+                  carries=(ROUND_MARKER, FIX_MARKER) + FREE_ROUND_MARKERS)
 role_model_allow("role-model: fix check: reviewer on sonnet with the marker after blank lines, as its first non-blank "
                  "line, is allowed", "reviewer", "sonnet", "\n\n" + FIX_MARKER + ". Re-run the cases.")
 role_model_allow("role-model: fix check: the same reviewer spawn as a Task on sonnet is allowed", "reviewer", "sonnet",
@@ -31519,13 +31519,13 @@ role_model_allow("role-model: fix check: reviewer on haiku with the marker is al
                  "haiku", FIX_MARKER + ". Re-run the cases.")
 role_model_refuse("role-model: fix check: reviewer on sonnet with no marker is denied, and its remedy names the marker",
                   "reviewer", "sonnet", "Check the diff for typos.",
-                  carries=(ROLE_REMEDY, ROUND_MARKER, FIX_MARKER) + FREE_ROUND_MARKERS)
+                  carries=(ROUND_MARKER, FIX_MARKER) + FREE_ROUND_MARKERS)
 role_model_refuse("role-model: fix check: the marker on line two does not lift a reviewer on sonnet, and the remedy names it",
                   "reviewer", "sonnet", "Check the diff.\n" + FIX_MARKER + ". Re-run the cases.",
-                  carries=(ROLE_REMEDY, FIX_MARKER))
+                  carries=(FIX_MARKER,))
 role_model_refuse("role-model: fix check: a lowercase marker on line one does not lift a reviewer on sonnet, and the "
                   "remedy names the marker", "reviewer", "sonnet", FIX_MARKER_LOWER + ". Re-run the cases.",
-                  carries=(ROLE_REMEDY, FIX_MARKER))
+                  carries=(FIX_MARKER,))
 # The lift reaches only a model below the top rank. A model the table does not rank counts above it, so the marker does not
 # lift a reviewer on it. Its refusal still names the marker, as every reviewer refusal does.
 role_model_refuse("role-model: fix check: reviewer on claude-fable-5-1 with the marker on line one is denied, the lift "
