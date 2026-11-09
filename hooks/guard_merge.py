@@ -10,7 +10,7 @@ import re
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, git_calls, inline_script, inner_commands, record, resolve_command, resolve_default_base, segment_tokens,
+    branch_is_ancestor, dir_before_segment, git_calls, inline_script, inner_commands, record, resolve_command, resolve_default_base, segment_tokens,
     split_segments, strip_heredoc_bodies,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
@@ -230,8 +230,8 @@ def merge_check_reason(verdict: str, detail: str) -> str:
 
 
 PUSH_BATCH_REASON = (
-    "Rule (Git, push-batch-held): this push moves a lane branch that a ready batch holds: %s holds this branch's "
-    "remote tip in its head. A batch is built from that head, so a moved head breaks its confirm "
+    "Rule (Git, push-batch-held): this push moves a lane branch that the ready integration PR holds: %s holds this "
+    "branch's remote tip in its head. The batch is built from that head, so a moved head breaks its confirm "
     "(decision batch-freeze-lane-set). Remedy: wait for the batch to merge, or drop the lane from the batch. "
     "New work goes in a new lane."
 )
@@ -250,21 +250,47 @@ def batch_held_hit(args, where: str, overrides, tool: str) -> str:
     (decision batch-freeze-lane-set): a ready pull request on the default base, from another branch, holds the
     branch's remote tip (the compare `tip...head` reads ahead or identical). The tip is the local
     `refs/remotes/<remote>/<branch>`. A push with no remote tip, or one that moves nothing, is silent. A list or
-    compare that cannot be read allows the push and logs one `push-batch-unread` line.
+    compare that cannot be read, or a destination name the shell fills in (`$X`), allows the push and logs one
+    `push-batch-unread` line. A tip the default branch already holds (merged) is silent, with no gh call. A move is
+    a destination with no deletion part: `HEAD:lane :old` judges `lane`. `--all` judges each local branch that differs
+    from its remote-tracking ref.
     Cost: one `git rev-parse` of the tip per branch written (none for main, master or a forced push), a second
-    for the source when a tip exists, the default-branch reads only when the push moves a tip; the gh reads only then: one open
-    list (one call per 100 rows) and one compare per ready pull request on the base, through the merge tool's own
-    Host.pages and Host.holds_head. None for a push of main, a dry run (the caller skips it) or a read verb."""
+    for the source when a tip exists, the default-branch reads and one `git merge-base --is-ancestor` per default name
+    (plus one `git rev-parse --is-shallow-repository` when it answers no) only when the push moves a tip, and one
+    `git for-each-ref` for `--all`; the gh reads only for a tip not merged: one open list (one call per 100 rows) and
+    one compare per ready pull request on the base, through the merge tool's own Host.pages and Host.holds_head, under
+    one MERGE_READ_TIMEOUT deadline, past which the push is allowed and logged unread. None for a push of main, a
+    dry run (the caller skips it) or a read verb."""
     moves = []   # (branch, its remote tip, the default branches)
+    unread = ""
     for remote, dest, source in push_moves(args, where, overrides):
+        if "$" in dest or "`" in dest:   # a name the shell fills in: the guard cannot read it
+            unread = "the destination name %s cannot be read" % dest
+            continue
         tip = _rev(where, "refs/remotes/%s/%s" % (remote, dest))
         if not tip or _rev(where, source) in (None, tip):
             continue
         defaults = _push_default_branches(where, remote)   # read only for a push that moves a tip
-        if defaults is not None and dest not in defaults:
-            moves.append((dest, tip, defaults))
-    if not moves:
-        return ""
+        if defaults is None or dest in defaults:
+            continue
+        # A tip the default branch already holds is merged: no pull request needs it frozen, and no gh read is made.
+        # Only a True answer counts; a read that could not tell goes on to the gh read.
+        if any(branch_is_ancestor(where, "refs/remotes/%s/%s" % (remote, name), tip) for name in defaults):
+            continue
+        moves.append((dest, tip, defaults))
+    if moves:
+        holder, failed = _batch_holder(where, moves)
+        if holder:
+            return holder
+        unread = failed or unread
+    if unread:
+        record(tool, "noted", "push-batch-unread", "git push " + " ".join(args) + ": " + " ".join(unread.split()))
+    return ""
+
+
+def _batch_holder(where: str, moves):
+    """(holder, unread): the ready pull request that holds a move's tip as `#n (head branch)` or '', and the text of
+    the last read that failed or ''. One open list, then one compare per ready pull request on the base."""
     unread = ""
     try:
         module = merge_module()
@@ -279,14 +305,12 @@ def batch_held_hit(args, where: str, overrides, tool: str) -> str:
                         continue
                     try:
                         if host.holds_head(tip, row["head"]["sha"]):
-                            return "#%s (%s)" % (row["number"], row["head"]["ref"])
+                            return "#%s (%s)" % (row["number"], row["head"]["ref"]), unread
                     except Exception as e:  # one compare unread: the others are still read, and a hold still wins
                         unread = str(e)
     except Exception as e:  # Stop, a timeout, a missing gh, malformed JSON: unread
         unread = str(e)
-    if unread:
-        record(tool, "noted", "push-batch-unread", "git push " + " ".join(args) + ": " + " ".join(unread.split()))
-    return ""
+    return "", unread
 
 
 def _merge_config_at(root: str):

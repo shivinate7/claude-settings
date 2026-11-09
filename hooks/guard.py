@@ -113,7 +113,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (refs/remotes/<remote>/<branch>) an open, ready pull request on the default
                        base holds in its head, from another head branch. Wins over push-agent-branch.
                        No remote tip, a push that moves nothing, a draft holder, another base, a dry run
-                       and a push of main pass. A list or compare that cannot be read allows the push and
+                       and a push of main pass, and so does a tip the default branch already holds. A
+                       delete part of a push is no move; `--all` judges each branch. A list or compare
+                       that cannot be read, or a `$NAME` destination, allows the push and
                        logs `push-batch-unread`. (decision batch-freeze-lane-set)
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
@@ -708,6 +710,19 @@ FETCH_VALUE_FLAGS = {"--depth", "-j", "--jobs", "--upload-pack", "--refmap", "-o
                      "--deepen", "--shallow-since", "--shallow-exclude"}
 
 
+def _short_dry_run(token: str) -> bool:
+    """True for a push short-flag word that holds `n`, alone or in a cluster (`-nu`). A letter `o` takes the rest of
+    the word as its value, so nothing after it is a flag."""
+    if not token.startswith("-") or token.startswith("--"):
+        return False
+    for letter in token[1:]:
+        if letter == "n":
+            return True
+        if letter == "o":
+            return False
+    return False
+
+
 def read_verb(subcommand: str, args) -> bool:
     """True when the call's own argv names a read: help, a dry run, a tag listing, a dry-run
     push. Argv tokens only, never the value of `-m` or `-F`, and nothing after `--`."""
@@ -717,7 +732,7 @@ def read_verb(subcommand: str, args) -> bool:
             skip = False
         elif token == "--":
             return False
-        elif token in ("--help", "-h", "--dry-run") or (subcommand == "push" and token == "-n") or (
+        elif token in ("--help", "-h", "--dry-run") or (subcommand == "push" and _short_dry_run(token)) or (
                 subcommand == "tag" and (token == "--list" or LISTING.fullmatch(token))):
             return True
         elif takes_next(subcommand, token):
@@ -4194,8 +4209,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif not read_verb("push", args):
                 # A non-forced push that writes main or master (rule push-main), an agent-worktree
                 # branch name (rule push-agent-branch), or an implied destination off the branch's
-                # upstream (rule push-stray-branch). A dry run writes nothing. A lane branch a ready
-                # batch holds is refused first, so the deny wins over the agent-branch ask (rule push-batch-held).
+                # upstream (rule push-stray-branch). A dry run writes nothing. A lane branch the
+                # integration PR holds is refused first, so the deny wins over the agent-branch ask (rule push-batch-held).
                 holder = batch_held_hit(args, where, overrides, tool)
                 if holder:
                     refuse(tool, "deny", "push-batch-held", PUSH_BATCH_REASON % holder, "git push " + " ".join(args))
