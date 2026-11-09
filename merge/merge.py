@@ -282,7 +282,7 @@ def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, 
 
 UNDO_MEMO = {}
 UNDO_FLAG, RED_FLAG = "--undo-check-unknown-ok", "--base-red-ok"  # the reason flags: Claude may type each with a reason (decisions silent-undo-check-design, no-merge-onto-red-main)
-CLOSE_CITE = "(decisions silent-undo-check-design and no-merge-onto-red-main, a reason flag's reason lands in the merge commit)"
+CLOSE_CITE = "(decision silent-undo-check-design, a reason flag's reason lands in the merge commit)"
 CLOSE_FORM = re.compile(r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*(?:[\w.-]+/[\w.-]+)?#\d+")  # GitHub closes the issue that a commit message names after one of these words
 
 def refuse_closing_reason(*reasons):
