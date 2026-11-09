@@ -16698,9 +16698,13 @@ class _EmptyPulls:
         return (0, "[]") if "git/matching-refs/heads/" in route else (1, "HTTP 404")
 
 
+_NOPULL_TIP = "%040d" % 41  # the tip of the stranded branch in _AheadNoPull
+
+
 class _AheadNoPull:
     """The merge tool's Host for each repo of the incident: the open list reads empty, the default branch is main, every
-    compare of main and a branch reads ahead, and no pull request holds the branch."""
+    compare of main and a branch reads ahead, and no pull request holds the branch. The branch's tip is _NOPULL_TIP, and
+    the branch has no archive/ copy, so a compare of archive/<branch> answers 404."""
 
     def __init__(self, repo):
         self.repo = repo
@@ -16713,8 +16717,12 @@ class _AheadNoPull:
             return 0, json.dumps({"default_branch": "main"})
         if route.startswith("compare/main..."):
             return 0, json.dumps({"status": "ahead"})
+        if route.startswith("compare/archive/"):  # no archive copy of the branch: GitHub answers 404
+            return 1, "HTTP 404"
         if "git/matching-refs/heads/" in route:
             return 0, "[]"
+        if route.startswith("branches/"):  # the branch's tip, which _covered reads once no pull request holds the branch
+            return 0, json.dumps({"name": route[len("branches/"):], "commit": {"sha": _NOPULL_TIP}})
         return 1, "HTTP 404"
 
 
@@ -16798,7 +16806,10 @@ def archive_none_ccr_case():
     guard_merge = _load_guard_merge()
     transcript = role_path("archive-inc")
     materialize(transcript)
-    fake_tool = types.SimpleNamespace(Host=_AheadNoPull, shared_deadline=contextlib.nullcontext)
+    real = guard_merge.merge_module()  # the merge tool, unpatched: its is_net reads the archive copy's 404 as the tool does
+    if real is None:
+        return False, "fixture: the merge tool does not load, so its is_net cannot read the archive copy's 404"
+    fake_tool = types.SimpleNamespace(Host=_AheadNoPull, shared_deadline=contextlib.nullcontext, is_net=real.is_net)
     with mock.patch.object(guard_merge, "merge_module", return_value=fake_tool):
         control = guard_merge.archive_hit(ARCHIVE_TOOL, {"session_id": ROLE_OTHER}, transcript)
         with mock.patch.object(guard_merge.own_session, "own_session_ccr", return_value=None):
