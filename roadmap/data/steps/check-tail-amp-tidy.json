@@ -1,11 +1,11 @@
 {
   "title": "The check-tail guard reads `&` inside expansions and arithmetic correctly",
   "why": "Lane bg-tail-loses-verdict, 16:00 CST Nov 8, from round-3 or later reviews; queued follow-up the lane starts when its wait ends. Waits on #2156. Allowed where main refuses: `echo ${x:-$(npm start & )}` and `i { &`. False alarms: `for((i=0;i&1;i++))`, `while((i&1))`, `echo $[5&3]`. Allowed on base too: `echo a & ci-job x | tail -3 & echo $!` and `ci-job x | tail -3 &&`+newline+`echo done & echo $!`.",
-  "note": " Folded finding (#1717 round 3, sonnet, via lane bg-tail-loses-verdict 22:30 CST Nov 8): `check_tail_hit` reads no `$( )` or backtick text, so `x=$(merge --lane-lint 7 2>&1 | tail -3)` passes on main and head. Main has `substitution_commands` (hooks/guard_env.py) to reuse. Debt note check-tail-no-nested-read lists only bash -c and `{ }`; extend it.",
+  "note": " Folded finding (#1717 round 3, sonnet, via lane bg-tail-loses-verdict 22:30 CST Nov 8): `check_tail_hit` reads no `$( )` or backtick text, so `x=$(merge --lane-lint 7 2>&1 | tail -3)` passes on main and head. Main has `substitution_commands` (hooks/guard_env.py) to reuse. Debt note check-tail-no-nested-read lists only bash -c and `{ }`; extend it. From #2015 (check-tail-any-filter, round 3 passed, net value positive; lane bg-tail-loses-verdict 22:32 CST Nov 8): (1) stale notes in docs/debts/notes.md say `Select-Object -Last` and a trailing `& echo $!` pass; both are now refused, and the decision's Known gaps lists three notes, not five. (2) Rare false alarm in hooks/guard_stream.py: `ci-job checks --lint & echo $! | cat` is refused, since the `&` stays in the stage and `cat` reads as a filter. (3) No named mutant covers the `|&` skip in `_ends_in_ampersand`; the allowed row `ci-job checks --lint |& tail -3` has not been shown red.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85)",
   "status": "todo",
   "order": 832,
-  "updatedAt": "2026-11-08T22:26:00-06:00"
+  "updatedAt": "2026-11-08T22:32:00-06:00"
 }
