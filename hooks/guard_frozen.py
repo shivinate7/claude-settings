@@ -1522,7 +1522,14 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
         reads_only = all(own[k] for k in chain) and not _stages_a_script(parsed, chain)
         verb = _segment_command(words)[0] if predicate_command else ""
         # A cd that might not run leaves the segment two possible folders: it is judged in each.
+        # A `sh -c` or `bash -c` string is a script of its own: its cds move the commands after them in the string, so
+        # it is walked as one, from each folder the segment may run in.
+        tokens = segment_tokens(segments[number]) if follow_cd else None
+        body = guard_core.inline_script(tokens) if tokens else ""
         for at in dict.fromkeys((folder or cwd) for folder in places[number]) if follow_cd else (cwd,):
+            hit = _shell_write_scan(body, at, predicate, holds, follow_cd, command_position, predicate_command) if body else ""
+            if hit:
+                return _from_cwd(hit, at, cwd)
             for _files, commands in sed_targets.values():
                 for command in commands:   # a sed `e` runs a shell command in the sed's folder: its redirects are read too
                     hit = _shell_write_scan(command, at, predicate, holds, follow_cd, command_position,

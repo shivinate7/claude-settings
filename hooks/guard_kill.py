@@ -674,7 +674,13 @@ def glued_background_hit(cmd: str, trailing: bool = False) -> str:
     shell = _strip_heredoc_bodies_unconditionally(cmd)
     if "$!" in shell:
         return ""
-    for segment in split_segments(shell):
+    ends = []
+    segments = split_segments(shell, ends)
+    for number, segment in enumerate(segments):
+        script = inline_script(segment_tokens(segment) or ())   # a `sh -c` string is a command list of its own
+        hit = glued_background_hit(script, trailing) if script else ""
+        if hit:
+            return hit
         pieces = split_background(_mask_arithmetic(segment))
         for at in range(len(pieces) - 1):
             left, right = pieces[at], pieces[at + 1]
@@ -683,9 +689,16 @@ def glued_background_hit(cmd: str, trailing: bool = False) -> str:
             if ends_segment != trailing or not glued:
                 continue   # a spaced `&` is bare_background_hit's
             tokens = segment_tokens(left) if left.strip() else None
-            index = resolve_command(tokens) if tokens else None
-            if index is not None and basename(tokens[index]) not in QUIET_COMMANDS:
-                return tokens[-1] + " &"
+            parts = [tokens]
+            if ends_segment:   # the `&` ends the whole pipeline, so every part of it runs in the job
+                back = number
+                while back and ends[back - 1] == "|":
+                    back -= 1
+                    parts.append(segment_tokens(segments[back]))
+            for part in parts:
+                index = resolve_command(part) if part else None
+                if index is not None and basename(part[index]) not in QUIET_COMMANDS:
+                    return (tokens or part)[-1] + " &"
     return ""
 
 

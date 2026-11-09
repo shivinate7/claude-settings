@@ -1105,6 +1105,19 @@ def _block_change(tokens) -> int:
     return 1 if word in _BLOCK_OPENERS else -1 if word in _BLOCK_CLOSERS else 0
 
 
+def _case_arm(tokens):
+    """(the words after a case-arm pattern, whether the pattern opens with `(`), else None. The pattern is the
+    first word of the segment, or the one after a `case WORD in` header, and ends with `)` (`x)`, `a|b)` once
+    split at its `|`, `*)`, `(x)`). Nothing after it means it is no arm (`(cd)` is a subshell)."""
+    start = 3 if len(tokens) > 3 and tokens[0].lstrip("(") == "case" and tokens[2] == "in" else 0
+    if start >= len(tokens):
+        return None
+    pattern = tokens[start]
+    if not pattern.endswith(")") or len(tokens) == start + 1:
+        return None
+    return list(tokens[start + 1:]), pattern.startswith("(")
+
+
 def _cd_may_not_run(tokens, before: str, nested: bool = False) -> str:
     """How a `cd` segment might not move the shell. '' when it moves it. '&&' when it follows `&&` alone: a
     skipped or failed cd stops that `&&` chain as well, so the folder before it is reached only after the
@@ -1180,12 +1193,14 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     frames = []   # (states, list_start, held, keeps) for each `(` still open; `keeps` leaves a cd in it standing
     heredoc = None   # (closing words still to come, states and held before the bodies) while inside heredoc bodies
     stdin_bodies = []   # closing words of the heredoc bodies a `source /dev/stdin` skips, ahead of the last one
+    on_header = False   # the segments left on the header's own line of those bodies: they run, and are no body
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     depth = 0   # compound commands (`if`, `for`, ...) still open: a cd on a line of its own in one may not run
     seen = []
 
-    def run_cd(tokens, segment, before, end):
-        """Move each state by the `cd` this segment holds, if it holds one."""
+    def run_cd(tokens, segment, before, end, arm=False):
+        """Move each state by the `cd` this segment holds, if it holds one. `arm`: it follows a case-arm pattern, so
+        it may not run."""
         nonlocal states, held, lost, skipping
         move = _segment_cd_move(tokens) if tokens else None
         if move is not None and not is_powershell(segment) and "|" in (end, before):
@@ -1195,7 +1210,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         elif move is not None:
             steps = [_cd_step(move, folder, prev, failed_cd_stays and not each) for folder, prev in states]
             moved = [(folder, old) for folder, old, _ in steps]
-            may_not_run = _cd_may_not_run(tokens, before, depth > 0) if each else ""
+            may_not_run = _cd_may_not_run(tokens, before, depth > 0 or arm) if each else ""
             if may_not_run == "&&":
                 held = tuple(dict.fromkeys(held + states))
             elif may_not_run:
@@ -1219,6 +1234,14 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
         end = ends[at] if at < len(ends) else ""
         before = ends[at - 1] if 0 < at <= len(ends) else ""
+        arm_tokens = segment_tokens(segment)
+        arm = _case_arm(arm_tokens) if arm_tokens else None
+        if arm:
+            for mark in ("(", ")") if arm[1] else (")",):
+                if mark in marks:
+                    marks.remove(mark)   # a case-arm pattern's parentheses are no subshell's
+            if before == "|":
+                before = ";"   # `a|b)` was split at its `|`: the arm's cd follows no pipe
         if held and before not in AND_ENDS:
             states, held = tuple(dict.fromkeys(states + held)), ()
             lost = lost or len(states) > _STATE_LIMIT
@@ -1247,10 +1270,11 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                     skipping = False
             depth = max(0, depth + _block_change(segment_tokens(segment)))
             continue
-        if stdin_bodies:
+        if stdin_bodies and not on_header:
             if segment.strip() == stdin_bodies[0]:
                 stdin_bodies.pop(0)
             continue   # a body bash does not read: its cd never runs
+        on_header = on_header and end != "\n"
         if heredoc and segment.strip() == heredoc[0][0]:
             heredoc[0].pop(0)
             if not heredoc[0]:
@@ -1259,7 +1283,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                 (states, held), depth, heredoc = heredoc[1], heredoc[2], None
             continue
         tokens = segment_tokens(segment)
-        run_cd(tokens, segment, before, end)
+        run_cd(arm[0] if arm else tokens, segment, before, end, bool(arm))
         index = resolve_command(tokens) if tokens else None
         if index is not None and basename(tokens[index]) == "eval":
             # eval runs its heredoc bodies, or else its words joined, as commands in this shell, so their cds move it.
@@ -1282,6 +1306,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             heredoc = ([delimiter for _, delimiter in heads], (states, held), depth)
         elif heads and not heredoc and not stdin_bodies and tokens and _sources_stdin(tokens):
             stdin_bodies = [delimiter for _, delimiter in heads[:-1]]   # bash reads only the last body as stdin
+            on_header = end != "\n"
         for _ in range(marks.count(")")):
             if frames:
                 leave()
