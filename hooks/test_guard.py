@@ -14825,6 +14825,85 @@ sh("builder join: a temp folder from mkdtemp() joined inline to tests is allowed
 sh("builder join: a TemporaryDirectory held in a variable, joined through .name to tests is allowed",
    '''python3 -c "import os, tempfile; td = tempfile.TemporaryDirectory(); open(os.path.join(td.name, 'tests', 'test_x.py'), 'w')"''',
    "allow", **B)
+
+# ---- a script file a builder runs by name (debt script-file-runs-test-write)
+# A shell call that runs a python or node file by name is judged by the writes that file's body makes,
+# as a heredoc body is. Each script name says nothing about its body: probe.py writes a test path,
+# reads_test.py only reads one. SCRIPTREPO is one real checkout that holds every script the cases run.
+SCRIPTREPO = os.path.join(ROOT, "scriptrepo")
+SCRIPTFRESH = os.path.join(SCRIPTREPO, "fresh")   # empty, so no probe.py sits beside the heredoc case
+SB = dict(B, cwd=SCRIPTREPO)   # a builder, run in SCRIPTREPO
+SA = dict(A, cwd=SCRIPTREPO)   # a test-author, run in SCRIPTREPO
+
+
+def _build_scriptrepo():
+    """SCRIPTREPO: the scripts the script-file cases run, committed in one real checkout."""
+    make_repo(SCRIPTREPO, {
+        "probe.py": "open('tests/test_x.py', 'w').write('x')\n",
+        "probe.js": "const fs = require('fs');\nfs.writeFileSync('tests/test_x.js', 'x');\n",
+        "tools/probe_abs.py": "open('tests/test_x.py', 'w').write('x')\n",
+        "sub/probe_cd.py": "open('tests/test_x.py', 'w').write('x')\n",
+        "tools/reads_test.py": "import tests.helper\nprint(open('tests/test_x.py').read())\n",
+        "tools/names_test.py": "print('tests/test_x.py is named here, and not written')\n",
+        "tools/writes_doc.py": "open('docs/out.md', 'w').write('x')\n",
+        "scan/slash.js": "const fs = require('fs');\nconst u = '//host'; fs.writeFileSync('tests/test_x.js', 'x');\n",
+        "scan/block.js": "const fs = require('fs');\nconst g = '/*'; fs.writeFileSync('tests/test_x.js', 'x');\n",
+        "scan/quote.py": "print(\"Don't stop\")\nopen('tests/test_x.py', 'w').write('x')\n",
+        "probe_dir.py/notes.txt": "a folder named like a script\n",
+    })
+    os.makedirs(SCRIPTFRESH, exist_ok=True)
+    # The scope before the subject: a case expects these to be there, or to be absent.
+    if (os.listdir(SCRIPTFRESH) or os.path.exists(os.path.join(SCRIPTREPO, "tools", "missing.py"))
+            or not os.path.isfile(os.path.join(SCRIPTREPO, "probe.py"))
+            or not os.path.isdir(os.path.join(SCRIPTREPO, "probe_dir.py"))):
+        sys.exit("fixture setup failed in _build_scriptrepo: %r lacks the scripts the cases name"
+                 % SCRIPTREPO)
+
+
+lazy_fixture([SCRIPTREPO], _build_scriptrepo)
+
+# RED: the write is in the script's body, and the shell call runs that body by name, by path, after a cd,
+# or with a heredoc that writes it in the same command. Each must be refused as a heredoc body is.
+sh("builder script file: a python file made beforehand, writing a test path, run by name, is refused",
+   "python3 probe.py", "deny", rule=BT, **SB)
+sh("builder script file: the same python file run by its absolute path is refused",
+   "python3 " + slash(os.path.join(SCRIPTREPO, "tools", "probe_abs.py")), "deny", rule=BT, **SB)
+sh("builder script file: a node file that writes a test path with fs.writeFileSync, run by name, is refused",
+   "node probe.js", "deny", rule=BT, **SB)
+sh("builder script file: a heredoc that writes a script and runs it in one command is refused",
+   "cat > probe.py <<'EOF'\nopen('tests/test_x.py', 'w').write('x')\nEOF\npython3 probe.py", "deny",
+   rule=BT, **dict(SB, cwd=SCRIPTFRESH))
+sh("builder script file: a script run after a cd in the same command is refused",
+   "cd sub && python3 probe_cd.py", "deny", rule=BT, **SB)
+# RED, scanner: the body is read as source text, so a comment opener or a lone quote inside a string
+# must not hide a write that follows it.
+sh("builder script file: a // inside a string in a node file does not hide the test write after it",
+   "node scan/slash.js", "deny", rule=BT, **SB)
+sh("builder script file: a /* inside a string in a node file does not hide the test write after it",
+   "node scan/block.js", "deny", rule=BT, **SB)
+sh("builder script file: a lone quote in a string in a python file does not hide the test write after it",
+   "python3 scan/quote.py", "deny", rule=BT, **SB)
+# GREEN: a script that only reads a test path, names one in a string, or writes outside the tests stays
+# allowed; so does a test-author's run, a script path that is no file, and a run that is only named.
+sh("builder script file: a script that only reads a test path is allowed",
+   "python3 tools/reads_test.py", "allow", **SB)
+sh("builder script file: a script that names a test path only in a string it prints is allowed",
+   "python3 tools/names_test.py", "allow", **SB)
+sh("builder script file: a script that writes a non-test path is allowed",
+   "python3 tools/writes_doc.py", "allow", **SB)
+sh("builder script file: a test-author running the script that writes a test path is allowed",
+   "python3 probe.py", "allow", **SA)
+sh("builder script file: a script path that does not exist is allowed, as today",
+   "python3 tools/missing.py", "allow", **SB)
+sh("builder script file: a script path that is a folder, not a readable file, is allowed",
+   "python3 probe_dir.py", "allow", **SB)
+sh("builder script file: a run named in a double-quoted echo is allowed",
+   'echo "python3 probe.py"', "allow", **SB)
+sh("builder script file: a run named in a trailing # comment is allowed",
+   "ls  # python3 probe.py", "allow", **SB)
+sh("builder script file: a run named in a double-quoted string with an apostrophe is allowed",
+   "echo \"don't run python3 probe.py\"", "allow", **SB)
+
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
