@@ -8247,8 +8247,22 @@ class ShardSelector(unittest.TestCase):
     def test_no_value_keeps_every_test(self):
         self.assertEqual(self.ids(select_shard(self.all_tests(), "")), self.ids(self.all_tests()))
 
+    def refusal_or_ids(self, value):
+        """The ids select_shard keeps for `value`, or its refusal text when it stops the run."""
+        try:
+            return self.ids(select_shard(self.all_tests(), value))
+        except SystemExit as e:
+            return f"refused: {e}"
+
+    def test_the_dash_form_selects_the_same_shard_as_the_slash_form(self):
+        for dash, slash in (("1-3", "1/3"), ("2-3", "2/3"), ("3-3", "3/3")):
+            self.assertEqual(self.refusal_or_ids(dash), self.ids(select_shard(self.all_tests(), slash)),
+                             f"MERGE_SHARD={dash} must select the shard that MERGE_SHARD={slash} selects")
+
     def test_a_bad_value_fails_loudly_and_runs_nothing(self):
-        for bad in ("0/2", "3/2", "1", "1/0", "a/b", "1/2/3"):
+        for bad in ("0/2", "3/2", "1", "1/0", "a/b", "1/2/3", "01/2",
+                    "0-2", "3-2", "1-0", "a-b", "1-2-3", " 1-2", "1-2 ", "1-", "-2", "1/2-3", "1-2/3", "01-2",
+                    "1-2\n", "12", "1.2", "1 2", "1--2"):
             with self.assertRaises(SystemExit) as cm:
                 select_shard(self.all_tests(), bad)
             self.assertIn("MERGE_SHARD", str(cm.exception))
