@@ -3447,6 +3447,54 @@ for (const pct of [100, 200, 300]) for (const width of SHEET_TITLE_WIDTHS) for (
   });
 }
 
+// ---------------------------------------------------------------- the Designs head: Prev and Next share a row, and the title grows with the text
+// The integers a width sweep visits: from, from + step, up to and including to.
+const widthsFrom = (from, to, step) => Array.from({ length: Math.floor((to - from) / step) + 1 }, (_, i) => from + i * step);
+// Resizes the one page to each width, waits two frames so the layout and the page's observers have run, and returns one fault per width
+// that check(page) names, each with its width. The page keeps its state across the resizes.
+async function sweepWidths(page, widths, height, check) {
+  const faults = [];
+  for (const w of widths) {
+    await page.setViewportSize({ width: w, height });
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    const f = await check(page);
+    if (f) faults.push(`${w} wide: ${f}`);
+  }
+  return faults;
+}
+// Prev and Next sit on one row of the sheet's head. The scope comes first: the sheet is open and both buttons show.
+const headRowFault = (page) => page.evaluate(() => {
+  const p = document.getElementById("dPrev"), n = document.getElementById("dNext");
+  if (document.getElementById("dsheet").hidden || !p.checkVisibility() || !n.checkVisibility()) return "the sheet's Prev or Next is not shown";
+  const a = p.getBoundingClientRect(), b = n.getBoundingClientRect();
+  return Math.abs(a.top - b.top) <= 1 ? null : `Prev sits ${Math.round(a.top)} px down and Next ${Math.round(b.top)} px down`;
+});
+// Prev and Next share one row at every width from 180 to 1280 wide, at 100%, 200% and 300% text. The sheet opens at 180 wide, then the window
+// is resized through each width in steps of 5 px. Red on the page at the widths where Next drops onto a row of its own.
+for (const pct of [100, 200, 300]) for (const scheme of SCHEMES) {
+  test(`Designs sheet, ${scheme}: with the root font size at ${pct}%, from 180 to 1280 wide, Prev and Next sit on one row`, async (t) => {
+    const page = await tabSetPage(t, { width: 180, pct, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    await openDesigns(page);
+    await mustHave(page, "#dNext", "the sheet's Next");
+    const widths = widthsFrom(180, 1280, 5);
+    const faults = await sweepWidths(page, widths, 900, headRowFault);
+    assert.equal(faults.length, 0, `${faults.length} of ${widths.length} widths split Prev and Next, the first at ${faults[0]}`);
+  });
+}
+// The sheet's title is set in rem, so it grows with the root font size: 200% is larger than 100%. The old page sets it at 17 px, so it keeps its
+// size when the text doubles. 390 and 1280 wide both show the title.
+const titleFont = (page) => page.evaluate(() => parseFloat(getComputedStyle(document.getElementById("dTitle")).fontSize));
+for (const width of [390, 1280]) for (const scheme of SCHEMES) {
+  test(`Designs sheet, ${scheme}: at ${width} wide, the title's font size at 200% text is larger than at 100%`, async (t) => {
+    const page = await tabSetPage(t, { width, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    await openDesigns(page);
+    const before = await titleFont(page);
+    await zoomedTo(page, 200);
+    const after = await titleFont(page);
+    assert.ok(after > before, `the Designs title is ${before} px at 100% text and ${after} px at 200%, not larger, at ${width} wide`);
+  });
+}
+
 // ---------------------------------------------------------------- an answered row at large text: its presses sit in the row, and the page does not scroll sideways
 // The row with Dismiss, unfolded (not seen before its answer, so the answer is new and the row stays open, with Reply and Dismiss at its
 // end) or folded (seen on an earlier visit, so Dismiss is the row's side press). Each case reads its scope first (the fold, the root font
@@ -3802,19 +3850,111 @@ const toggleHit = (page) => page.evaluate(() => {
 });
 // After a Restore in the dismissed list, the "Restored." line stays inside the window, and the page does not scroll sideways: at 180 wide
 // at 200%, and at 180 to 240 wide at 300%.
+// The dismissed list at a width and text size, with Restore pressed on the dismissed row, so its Restored. line is drawn. Null without a browser.
+async function restoredPage(t, { width, pct = 100, scheme = "light" }) {
+  const page = await pressListPage(t, { width, pct, scheme, showDismissed: true }); if (!page) return null;
+  await mustHave(page, "#res-ask-fold-res", "Restore press of the dismissed row");
+  await page.click("#res-ask-fold-res");
+  await mustHave(page, "#row-ask-fold-res p.sline.dline > span > b", "the Restored. line");
+  return page;
+}
 const RESTORED_LINE = [[180, 200], [180, 300], [200, 300], [220, 300], [240, 300]];
 for (const [width, pct] of RESTORED_LINE) for (const scheme of SCHEMES) {
   const where = sizeWhere(width, pct);
   test(`ask list, ${scheme}: ${where}: after a Restore in the dismissed list, the Restored. line stays inside the window with no sideways scroll`, async (t) => {
-    const page = await pressListPage(t, { width, pct, scheme, showDismissed: true }); if (!page) return;
-    await mustHave(page, "#res-ask-fold-res", "Restore press of the dismissed row");
-    await page.click("#res-ask-fold-res");
-    await mustHave(page, "#row-ask-fold-res p.sline.dline > span > b", "the Restored. line");
+    const page = await restoredPage(t, { width, pct, scheme }); if (!page) return;
     const g = await page.evaluate(() => { const b = document.querySelector("#row-ask-fold-res p.sline.dline > span > b"), r = b.getBoundingClientRect(); return { text: b.textContent, left: r.left, right: r.right, iw: window.innerWidth }; });
     assert.equal(g.text, "Restored.", `the line's bold word reads ${JSON.stringify(g.text)}, not "Restored.", ${where}`);
     assert.ok(g.left >= -0.5 && g.right <= g.iw + 0.5, `the Restored. line runs from ${Math.round(g.left)} to ${Math.round(g.right)} px in a ${g.iw} px window, ${where}`);
     const fault = await sidewaysFault(page);
     assert.ok(!fault, fault && `${fault}, ${where}`);
+  });
+}
+
+// ---------------------------------------------------------------- the Restored. line: no word breaks, the word stays whole when it fits, the glyph starts on the first line
+// The line is read from its text, one range per character, so a break between two lines is a real one. Each sweep resizes one page through
+// every width from 180 to 390 wide in steps of 5 px, at 100%, 200% and 300% text. Each sweep reads its scope first (the line is drawn and reads
+// Restored.), then makes one claim.
+// The line as drawn: each line's text and box, the words the message holds, the word Restored. (the lines it spans and its natural width, with no
+// break), the text column's width, and the glyph's top. One page call reads all of it.
+const restoredGeo = (page) => page.evaluate(() => {
+  const line = document.querySelector("#row-ask-fold-res p.sline.dline"), sp = line.querySelector(":scope > span:not(.g)"), b = sp.querySelector("b"), glyph = line.querySelector(":scope > .g");
+  const chars = [], lines = [];
+  const walk = document.createTreeWalker(sp, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    for (let i = 0; i < n.data.length; i++) {
+      const rg = document.createRange();
+      rg.setStart(n, i); rg.setEnd(n, i + 1);
+      const r = [...rg.getClientRects()].find((x) => x.width > 0.5);
+      if (!r) continue;
+      const mid = (r.top + r.bottom) / 2;
+      const cur = lines[lines.length - 1];
+      if (!cur || Math.abs(mid - cur.mid) > cur.h / 2) lines.push({ text: "", t: r.top, b: r.bottom, mid, h: r.height });
+      const L = lines[lines.length - 1];
+      L.text += n.data[i]; L.t = Math.min(L.t, r.top); L.b = Math.max(L.b, r.bottom);
+      chars.push({ inB: b.contains(n), line: lines.length - 1 });
+    }
+  }
+  const words = sp.textContent.trim().split(/\s+/);
+  const bLines = new Set(chars.filter((c) => c.inB).map((c) => c.line)).size;
+  const saved = [b.style.whiteSpace, b.style.overflowWrap];
+  b.style.whiteSpace = "nowrap"; b.style.overflowWrap = "normal";
+  const natural = b.getBoundingClientRect().width;
+  [b.style.whiteSpace, b.style.overflowWrap] = saved;
+  return { lines: lines.map((L) => ({ text: L.text, t: L.t, b: L.b })), words, bText: b.textContent, bLines, natural, column: sp.getBoundingClientRect().width, glyphTop: glyph.getBoundingClientRect().top };
+});
+// A line holds a fragment when one of its tokens is not a whole word of the message: "." or "d." is one, "Restored." is not.
+const restoredFragment = async (page) => {
+  const g = await restoredGeo(page);
+  const bad = g.lines.flatMap((L, i) => L.text.trim().split(/\s+/).filter((tok) => tok && !g.words.includes(tok)).map((tok) => `${JSON.stringify(tok)} on line ${i + 1}`));
+  return bad.length ? `a line holds a fragment of a word: ${bad.join(" and ")}` : null;
+};
+// Where Restored. fits its column it is one line. Where it does not fit, it is not read here: the caller counts the widths that fit.
+const restoredWhole = (g) => (g.natural > g.column + 0.5 || g.bLines === 1 ? null : `Restored. runs over ${g.bLines} lines, though it is ${Math.round(g.natural)} px wide in a ${Math.round(g.column)} px column`);
+// The glyph's top sits on the first line box. A line that does not wrap is not read.
+const restoredGlyph = (g) => {
+  if (g.lines.length < 2) return null;
+  const first = g.lines[0];
+  return g.glyphTop >= first.t - 1 && g.glyphTop <= first.b ? null : `the check glyph's top is ${Math.round(g.glyphTop)} px, outside the first line box at ${Math.round(first.t)} to ${Math.round(first.b)} px`;
+};
+// Named reds: the two sizes the round 2 review named. Each is one width, so a failure names it.
+for (const [width, pct] of [[220, 200], [280, 300]]) for (const scheme of SCHEMES) {
+  test(`ask list, ${scheme}: ${sizeWhere(width, pct)}: no line of the Restored. message holds a fragment of a word`, async (t) => {
+    const page = await restoredPage(t, { width, pct, scheme }); if (!page) return;
+    const fault = await restoredFragment(page);
+    assert.ok(!fault, fault && `${fault}, ${sizeWhere(width, pct)}`);
+  });
+}
+// The 100% fragment sweep passes on the old page (it breaks no word there), so it is a control.
+for (const pct of [100, 200, 300]) for (const scheme of SCHEMES) {
+  const note = pct === 100 ? " (control)" : "";
+  test(`ask list, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, no line of the Restored. message holds a fragment of a word${note}`, async (t) => {
+    const page = await restoredPage(t, { width: 180, pct, scheme }); if (!page) return;
+    const widths = widthsFrom(180, 390, 5);
+    const faults = await sweepWidths(page, widths, 800, restoredFragment);
+    assert.equal(faults.length, 0, `${faults.length} of ${widths.length} widths break a word in the Restored. message, the first: ${faults[0]}`);
+  });
+  test(`ask list, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, Restored. stays on one line wherever it fits its column (control)`, async (t) => {
+    const page = await restoredPage(t, { width: 180, pct, scheme }); if (!page) return;
+    let fits = 0;
+    const faults = await sweepWidths(page, widthsFrom(180, 390, 5), 800, async (p) => {
+      const g = await restoredGeo(p);
+      if (g.natural <= g.column + 0.5) fits++;
+      return restoredWhole(g);
+    });
+    assert.ok(fits > 0, "Restored. never fits its column from 180 to 390 wide, so the claim is not read");
+    assert.equal(faults.length, 0, `Restored. is split at ${faults.length} of ${fits} widths where it fits, the first: ${faults[0]}`);
+  });
+  test(`ask list, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, the check glyph of a wrapped Restored. line sits on its first line box`, async (t) => {
+    const page = await restoredPage(t, { width: 180, pct, scheme }); if (!page) return;
+    let wrapped = 0;
+    const faults = await sweepWidths(page, widthsFrom(180, 390, 5), 800, async (p) => {
+      const g = await restoredGeo(p);
+      if (g.lines.length >= 2) wrapped++;
+      return restoredGlyph(g);
+    });
+    assert.ok(wrapped > 0, "the Restored. line never wraps from 180 to 390 wide, so the glyph is not read");
+    assert.equal(faults.length, 0, `the glyph is off its first line box at ${faults.length} of ${wrapped} wrapped widths, the first: ${faults[0]}`);
   });
 }
 
@@ -8348,6 +8488,56 @@ for (const scheme of ["light", "dark"]) test(`a long lane slug and an unbroken r
   assert.ok(m.sw <= m.iw, `the page scrolls sideways: ${m.sw} over ${m.iw}`);
   assert.deepEqual(m.out, [], "an element runs past its card's right edge");
 });
+
+// ---------------------------------------------------------------- the item card's thread: a 60-character token in the owner's note stays inside its card and adds no sideways scroll
+// The owner's last answer holds the note, and the card's thread (section#thread-<id>) draws it as a .rnote. The token is THREAD_TOKEN: 60
+// characters with no break. Each sweep resizes one page through every width from 180 to 390 wide in steps of 5 px, at 100%, 200% and 300% text.
+// 1280 wide at 100% is the control: the token fits there. The panel the thread must stay inside is its item card (article.card).
+async function tokenCardPage(t, { width, pct = 100, scheme = "light" }) {
+  const it = mk("tok-thread", 1, { lastAnswer: { choice: "a", note: THREAD_TOKEN, at: LA_AT } });
+  const page = await open(t, { items: [it], viewport: { width, height: 800 }, scheme }); if (!page) return null;
+  if (pct !== 100) await zoomedTo(page, pct);
+  await mustHave(page, "#thread-tok-thread .rnote", "the owner's note in the thread");
+  const said = await page.locator("#thread-tok-thread .rnote").textContent();
+  assert.ok(said.includes(THREAD_TOKEN), `the thread's note reads ${JSON.stringify(said.slice(0, 40))}, not the token`);
+  return page;
+}
+// The thread's box, then its text, against its card's edges, to half a pixel. A box inside the card can still hold text that runs past it.
+const threadInCardFault = (page) => page.evaluate(() => {
+  const card = document.getElementById("item-tok-thread"), th = document.getElementById("thread-tok-thread");
+  const c = card.getBoundingClientRect(), r = th.getBoundingClientRect();
+  if (r.left < c.left - 0.5 || r.right > c.right + 0.5) return `the thread runs from ${Math.round(r.left)} to ${Math.round(r.right)} px, past its card at ${Math.round(c.left)} to ${Math.round(c.right)} px`;
+  let right = 0;
+  const walk = document.createTreeWalker(th, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) { const rg = document.createRange(); rg.selectNodeContents(n); for (const b of rg.getClientRects()) if (b.width > 0.5) right = Math.max(right, b.right); }
+  return right <= c.right + 0.5 ? null : `the thread's text runs to ${Math.round(right)} px, past its card's right edge at ${Math.round(c.right)} px`;
+});
+for (const pct of [100, 200, 300]) for (const scheme of SCHEMES) {
+  test(`item card, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, the thread stays inside its card with a 60-character token in the owner's note`, async (t) => {
+    const page = await tokenCardPage(t, { width: 180, pct, scheme }); if (!page) return;
+    const widths = widthsFrom(180, 390, 5);
+    const faults = await sweepWidths(page, widths, 800, threadInCardFault);
+    assert.equal(faults.length, 0, `${faults.length} of ${widths.length} widths put the thread outside its card, the first: ${faults[0]}`);
+  });
+  test(`item card, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, the same token adds no sideways scroll to the page`, async (t) => {
+    const page = await tokenCardPage(t, { width: 180, pct, scheme }); if (!page) return;
+    const widths = widthsFrom(180, 390, 5);
+    const faults = await sweepWidths(page, widths, 800, sidewaysFault);
+    assert.equal(faults.length, 0, `${faults.length} of ${widths.length} widths scroll the page sideways, the first: ${faults[0]}`);
+  });
+}
+for (const scheme of SCHEMES) {
+  test(`item card, ${scheme}: at 1280 wide, the thread stays inside its card with the token in the owner's note (control)`, async (t) => {
+    const page = await tokenCardPage(t, { width: 1280, scheme }); if (!page) return;
+    const fault = await threadInCardFault(page);
+    assert.ok(!fault, fault);
+  });
+  test(`item card, ${scheme}: at 1280 wide, the same token adds no sideways scroll to the page (control)`, async (t) => {
+    const page = await tokenCardPage(t, { width: 1280, scheme }); if (!page) return;
+    const fault = await sidewaysFault(page);
+    assert.ok(!fault, fault);
+  });
+}
 
 // The list of fields an item may carry is the page's own, in one JSON block, so a writer and a guard read it and the page warns by it.
 // The block is read from the loaded page, as a browser parses it.
