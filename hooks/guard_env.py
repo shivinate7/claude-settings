@@ -1239,10 +1239,39 @@ def _brace_list(word: str):
 
 
 def _brace_expand(word: str):
-    """The words bash makes of one unquoted word with a brace list: `--exclude-dir={a,b}` is
-    `--exclude-dir=a --exclude-dir=b`. A word with a quote, a backslash or a `$` is returned as it
-    stands, because bash leaves a quoted brace list literal."""
-    return [word] if re.search(r"[\"'\\$]", word) else _brace_list(word)
+    """The words bash makes of one word with a brace list: `--exclude-dir={a,b}` is `--exclude-dir=a
+    --exclude-dir=b`, and `"su"b/{x,y}` is `"su"b/x "su"b/y`. Only an unquoted brace or comma counts, so
+    a list inside quotes, after a backslash or inside `${...}` or `$(...)` stays literal. The quotes stay
+    in each word for the reader that removes them."""
+    if not any(c in word for c in "{,}"):
+        return [word]
+    hidden = {"{": "", "}": "", ",": ""}
+    masked, i, quote = [], 0, ""
+    while i < len(word):
+        char = word[i]
+        if quote:
+            if char == "\\" and quote == '"' and i + 1 < len(word):
+                masked.append(char + hidden.get(word[i + 1], word[i + 1]))
+                i += 1
+            else:
+                masked.append(hidden.get(char, char))
+                quote = "" if char == quote else quote
+        elif char in "\"'":
+            quote = char
+            masked.append(char)
+        elif char == "\\" and i + 1 < len(word):
+            masked.append(char + hidden.get(word[i + 1], word[i + 1]))
+            i += 1
+        elif char == "$" and word[i + 1:i + 2] in ("{", "("):
+            end = word.find("}" if word[i + 1] == "{" else ")", i + 2)
+            end = len(word) - 1 if end == -1 else end
+            masked.append("".join(hidden.get(c, c) for c in word[i:end + 1]))
+            i = end
+        else:
+            masked.append(char)
+        i += 1
+    back = {v: k for k, v in hidden.items()}
+    return ["".join(back.get(c, c) for c in e) for e in _brace_list("".join(masked))]
 
 
 def _zero_folder_forms(glob: str):
@@ -1304,12 +1333,14 @@ def _glob_bracket(glob: str, at: int):
         chars |= _class_chars(low + "-" + high) if high != low else {low}
     if i >= len(glob):
         return None
-    # `]` goes first and `-` last, and `^` is never first, so every fnmatch reads the set the same way.
-    body = "".join(sorted(chars - set("]^-")))
-    text = ("]" if "]" in chars else "") + body + ("^" if "^" in chars else "")
-    text += "-" if "-" in chars else ""
-    if text.startswith("^"):
-        text = text[1:] + "^"
+    # `]` goes first and `-` last, and `!` and `^` are never first, so every fnmatch reads the set the same
+    # way. Only a leading `!` or `^` in the glob negates; a `!` elsewhere is a member.
+    body = "".join(sorted(chars - set("]!^-")))
+    text = ("]" if "]" in chars else "") + body + "".join(c for c in "!^-" if c in chars)
+    if text[:1] in ("!", "^") and len(text) > 1:
+        text = text[1:] + text[0]
+    if not negated and text == "!":
+        return "!", i + 1
     return "[%s%s]" % ("!" if negated else "", text), i + 1
 
 
@@ -1398,7 +1429,7 @@ def _env_file_in(folder: str, rules=(), exclude_dir=(), ignored=frozenset(), by_
         relative = os.path.relpath(top, folder).replace(os.sep, "/")
         prefix = "" if relative == "." else relative + "/"
         dirs[:] = [d for d in dirs if d != ".git"
-                   and not any(fnmatch.fnmatchcase(d, g) for g in exclude_dir)
+                   and not any(_glob_picks(d, d, g, False, by_name=True) for g in exclude_dir)
                    and (prefix + d + "/" not in ignored
                         or any(_glob_picks(d, anchor + prefix + d, glob_text, fold)
                                for _, glob_text, fold, _ in overriding))]
@@ -1423,6 +1454,9 @@ def _search_walk(folder: str, here: str, rules, exclude_dir, grep: bool, no_igno
     front. For rg and ag with the ignore rules on, a file the checkout ignores is skipped
     (`_ignored_paths`, read only when the first walk found a file or ran past the cap)."""
     anchor = _glob_anchor(folder, here)
+    base = os.path.basename(os.path.normpath(folder))
+    if any(_glob_picks(base, base, g, False, by_name=True) for g in exclude_dir):
+        return ""  # grep 3.11 skips a command-line folder whose name matches `--exclude-dir`
     found = _env_file_in(folder, rules, exclude_dir, by_name=grep, anchor=anchor)
     if found and not grep and not no_ignore:
         found = _env_file_in(folder, rules, exclude_dir, ignored=_ignored_paths(folder), anchor=anchor)
@@ -1746,8 +1780,7 @@ def _find_folder_env(folder: str, globs, base: str, low: int, high, walk=_env_fi
     for the walk or for a printed folder that is too large to judge."""
     def printed(path: str, name: str, level: int) -> str:
         if level >= low and (high is None or level <= high) and any(
-                fnmatch.fnmatchcase(name.lower() if fold else name, pattern.lower() if fold else pattern)
-                for pattern, fold in globs):
+                _glob_picks(name, name, pattern, fold, by_name=True) for pattern, fold in globs):
             return walk(path)
         return ""
 
