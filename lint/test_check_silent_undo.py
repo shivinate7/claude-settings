@@ -681,31 +681,47 @@ class Flips(unittest.TestCase):
         self.assertEqual(self.resolve("RULE_FLOOR = 80", "RULE_FLOOR = 91", "RULE_FLOOR = 94"), [])
 
 
-class OwnHistory(unittest.TestCase):
-    """A line the branch alone added is the branch's work. Removing it later, or in a merge, is no loss."""
+class MainLineDrop:
+    """The one home of the fixture for a case that merges main into a feat branch and drops lines main added to
+    app.txt. main is pushed with app.txt at BODY, and feat is cut from it with the commit `cut_feat` writes."""
     T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
 
-    def setUp(self):
+    def cut_feat(self, msg, **files):
         r = self.r = Repo()
         r.put("app.txt", BODY)
         r.commit("base", date="2025-12-01T10:00:00", other_txt="o1\n")
         r.push()
         r.sh("checkout", "-q", "-b", "feat")
-        r.commit("feat adds a line", date=self.T0, app_txt=BODY + "own line one\nown line two\n")
+        r.commit(msg, date=self.T0, **files)
 
-    def main_moves(self, n, date):
+    def main_commit(self, msg, date, **files):
+        """A commit on main, pushed; the checkout goes back to feat."""
         r = self.r
         r.sh("checkout", "-q", "main")
-        r.commit("main moves %d" % n, date=date, other_txt="o%d\n" % n)
+        r.commit(msg, date=date, **files)
         r.push()
         r.sh("checkout", "-q", "feat")
 
-    def merge_dropping_own_lines(self, date):
+    def merge_main_dropping(self, msg, date):
+        """Merges main into feat, then sets app.txt back to BODY: every line main added to it, with no conflict."""
         r = self.r
         r.sh("merge", "--no-commit", "--no-ff", "main")
         r.put("app.txt", BODY)
         r.sh("add", "-A")
-        r.sh("commit", "-q", "-m", "Merge main, drop my own lines", date=date)
+        r.sh("commit", "-q", "-m", msg, date=date)
+
+
+class OwnHistory(MainLineDrop, unittest.TestCase):
+    """A line the branch alone added is the branch's work. Removing it later, or in a merge, is no loss."""
+
+    def setUp(self):
+        self.cut_feat("feat adds a line", app_txt=BODY + "own line one\nown line two\n")
+
+    def main_moves(self, n, date):
+        self.main_commit("main moves %d" % n, date, other_txt="o%d\n" % n)
+
+    def merge_dropping_own_lines(self, date):
+        self.merge_main_dropping("Merge main, drop my own lines", date)
 
     def test_a_merge_that_removes_the_branchs_own_lines_is_green(self):
         self.main_moves(2, self.T1)
@@ -741,97 +757,6 @@ class OwnHistory(unittest.TestCase):
         got = "\n".join(r.verdict())
         for i in range(8):
             self.assertIn("main added line number %d with a long tail %s" % (i, "x" * 150), got)
-
-
-class RestoredLine(unittest.TestCase):
-    """A line a merge drops stays refused until a later commit on the branch puts it back in the same file, at least
-    as many times as the parent had it. A restore in another file, or a partial one, clears nothing."""
-    T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
-
-    def setUp(self):
-        r = self.r = Repo()
-        r.put("app.txt", BODY)
-        r.commit("base", date="2025-12-01T10:00:00", other_txt="o1\n")
-        r.push()
-        r.sh("checkout", "-q", "-b", "feat")
-        r.commit("feat", date=self.T0, other_txt="o2\n")
-
-    def main_adds(self, *lines):
-        r = self.r
-        r.sh("checkout", "-q", "main")
-        r.commit("main adds", date=self.T1, app_txt=BODY + "".join(line + "\n" for line in lines))
-        r.push()
-        r.sh("checkout", "-q", "feat")
-
-    def merge_dropping_main_lines(self):
-        """Merges main into feat, then hand-drops every line main added to app.txt, with no conflict."""
-        r = self.r
-        r.sh("merge", "--no-commit", "--no-ff", "main")
-        r.put("app.txt", BODY)
-        r.sh("add", "-A")
-        r.sh("commit", "-q", "-m", "Merge main, drop its lines", date=self.T2)
-
-    def at(self, rev, path):
-        return self.r.sh("show", "%s:%s" % (rev, path))
-
-    def test_a_dropped_line_a_later_commit_puts_back_in_the_same_file_is_green(self):
-        self.main_adds("added by main")
-        self.merge_dropping_main_lines()
-        self.r.commit("put the line back", date=self.T2, app_txt=BODY + "added by main\n")
-        self.assertIn("added by main", self.at("HEAD", "app.txt"), "premise: the head holds the line again")
-        self.assertEqual(self.r.verdict(), [], "a line a later commit put back in the same file was still refused")
-
-    def test_a_line_put_back_in_a_different_file_is_still_refused(self):  # guard
-        self.main_adds("added by main")
-        self.merge_dropping_main_lines()
-        self.r.commit("put the line back in another file", date=self.T2, other_txt="o2\nadded by main\n")
-        self.assertNotIn("added by main", self.at("HEAD", "app.txt"), "premise: the head lacks the line in app.txt")
-        self.assertIn("added by main", self.at("HEAD", "other.txt"), "premise: the head holds the line in other.txt")
-        got = self.r.verdict()
-        self.assertTrue(got, "a line restored in another file cleared the drop")
-        self.assertTrue(any(p.startswith("app.txt:") and "added by main" in p for p in got), got)
-
-    def test_a_line_main_added_twice_and_restored_once_is_still_refused(self):  # guard
-        self.main_adds("twice-added line", "twice-added line")
-        self.merge_dropping_main_lines()
-        self.r.commit("put one copy back", date=self.T2, app_txt=BODY + "twice-added line\n")
-        self.assertEqual(self.at("origin/main", "app.txt").count("twice-added line"), 2, "premise: main added the line twice")
-        self.assertEqual(self.at("HEAD", "app.txt").count("twice-added line"), 1, "premise: the head holds one copy")
-        got = self.r.verdict()
-        self.assertTrue(got, "one restored copy of a line main added twice cleared the drop")
-        self.assertTrue(any(p.startswith("app.txt:") and "twice-added line" in p for p in got), got)
-
-    def test_a_line_main_added_twice_and_restored_twice_is_green(self):
-        self.main_adds("twice-added line", "twice-added line")
-        self.merge_dropping_main_lines()
-        self.r.commit("put both copies back", date=self.T2, app_txt=BODY + "twice-added line\ntwice-added line\n")
-        self.assertEqual(self.at("HEAD", "app.txt").count("twice-added line"), 2, "premise: the head holds both copies")
-        self.assertEqual(self.r.verdict(), [], "a line restored at the count main added it was still refused")
-
-    def test_a_dropped_line_with_no_later_commit_is_refused_and_the_remedy_names_the_trailer(self):  # guard
-        self.main_adds("added by main")
-        self.merge_dropping_main_lines()
-        self.assertNotIn("added by main", self.at("HEAD", "app.txt"), "premise: the head is the merge, which dropped the line")
-        got = self.r.verdict()
-        self.assertTrue(got, "a merge that dropped a line main added passed")
-        self.assertTrue(any(p.startswith("app.txt:") and "added by main" in p for p in got), got)
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            rc = C.main(["--repo", self.r.dir, "--upstream", "origin/main"])
-        remedy = [line for line in out.getvalue().splitlines() if "put the work back" in line]
-        self.assertEqual(rc, 1, "the refused merge did not exit 1")
-        self.assertTrue(remedy and ("%s:" % C.TRAILER) in remedy[0], "the remedy line does not name the %s trailer" % C.TRAILER)
-
-    def test_two_dropped_lines_one_put_back_names_only_the_other(self):
-        self.main_adds("restored alpha", "still missing beta")
-        self.merge_dropping_main_lines()
-        self.r.commit("put alpha back", date=self.T2, app_txt=BODY + "restored alpha\n")
-        self.assertNotIn("still missing beta", self.at("HEAD", "app.txt"), "premise: the head lacks the second line")
-        got = self.r.verdict()
-        self.assertTrue(any(p.startswith("app.txt:") for p in got), got)
-        text = "\n".join(got)
-        self.assertIn("still missing beta", text, "the line the head still lacks was not named")
-        self.assertNotIn("restored alpha", text, "a line a later commit put back in the same file was still named")
 
 
 class IntegrationBase(unittest.TestCase):
@@ -1972,6 +1897,86 @@ class SpawnCount:
 
     def armed(self):
         return unittest.mock.patch.object(subprocess, "Popen", self.popen)
+
+
+class RestoredLine(MainLineDrop, unittest.TestCase):
+    """A line a merge drops stays refused until a later commit on the branch puts it back in the same file, at least
+    as many times as the parent had it. A restore in another file, or a partial one, clears nothing."""
+    run_main = PrintedFindings.run_main
+
+    def setUp(self):
+        self.cut_feat("feat", other_txt="o2\n")
+
+    def main_adds(self, *lines):
+        self.main_commit("main adds", self.T1, app_txt=BODY + "".join(line + "\n" for line in lines))
+
+    def merge_dropping_main_lines(self):
+        self.merge_main_dropping("Merge main, drop its lines", self.T2)
+
+    def at(self, rev, path):
+        return self.r.sh("show", "%s:%s" % (rev, path))
+
+    def test_a_dropped_line_a_later_commit_puts_back_in_the_same_file_is_green(self):
+        self.main_adds("added by main")
+        self.merge_dropping_main_lines()
+        self.r.commit("put the line back", date=self.T2, app_txt=BODY + "added by main\n")
+        self.assertIn("added by main", self.at("HEAD", "app.txt"), "premise: the head holds the line again")
+        self.assertEqual(self.r.verdict(), [], "a line a later commit put back in the same file was still refused")
+
+    def test_a_line_put_back_in_a_different_file_is_still_refused(self):  # guard
+        self.main_adds("added by main")
+        self.merge_dropping_main_lines()
+        self.r.commit("put the line back in another file", date=self.T2, other_txt="o2\nadded by main\n")
+        self.assertNotIn("added by main", self.at("HEAD", "app.txt"), "premise: the head lacks the line in app.txt")
+        self.assertIn("added by main", self.at("HEAD", "other.txt"), "premise: the head holds the line in other.txt")
+        got = self.r.verdict()
+        self.assertTrue(got, "a line restored in another file cleared the drop")
+        self.assertTrue(any(p.startswith("app.txt:") and "added by main" in p for p in got),
+                        "no finding names the dropped line in app.txt: %r" % got)
+
+    def test_a_line_main_added_twice_and_restored_once_is_still_refused(self):  # guard
+        self.main_adds("twice-added line", "twice-added line")
+        self.merge_dropping_main_lines()
+        self.r.commit("put one copy back", date=self.T2, app_txt=BODY + "twice-added line\n")
+        self.assertEqual(self.at("origin/main", "app.txt").count("twice-added line"), 2, "premise: main added the line twice")
+        self.assertEqual(self.at("HEAD", "app.txt").count("twice-added line"), 1, "premise: the head holds one copy")
+        got = self.r.verdict()
+        self.assertTrue(got, "one restored copy of a line main added twice cleared the drop")
+        self.assertTrue(any(p.startswith("app.txt:") and "twice-added line" in p for p in got),
+                        "no finding names the dropped line in app.txt: %r" % got)
+
+    def test_a_line_main_added_twice_and_restored_twice_is_green(self):
+        self.main_adds("twice-added line", "twice-added line")
+        self.merge_dropping_main_lines()
+        self.r.commit("put both copies back", date=self.T2, app_txt=BODY + "twice-added line\ntwice-added line\n")
+        self.assertEqual(self.at("HEAD", "app.txt").count("twice-added line"), 2, "premise: the head holds both copies")
+        self.assertEqual(self.r.verdict(), [], "a line restored at the count main added it was still refused")
+
+    def test_a_dropped_line_with_no_later_commit_is_refused_and_the_remedy_names_the_trailer(self):  # guard
+        self.main_adds("added by main")
+        self.merge_dropping_main_lines()
+        self.assertNotIn("added by main", self.at("HEAD", "app.txt"), "premise: the head is the merge, which dropped the line")
+        got = self.r.verdict()
+        self.assertTrue(got, "a merge that dropped a line main added passed")
+        self.assertTrue(any(p.startswith("app.txt:") and "added by main" in p for p in got),
+                        "no finding names the dropped line in app.txt: %r" % got)
+        rc, text = self.run_main(["--repo", self.r.dir, "--upstream", "origin/main"], "utf-8")
+        remedy = [line for line in text.splitlines() if "put the work back" in line]
+        self.assertEqual(rc, 1, "the refused merge did not exit 1")
+        self.assertTrue(remedy and ("%s:" % C.TRAILER) in remedy[0],
+                        "the remedy line does not name the %s trailer" % C.TRAILER)
+
+    def test_two_dropped_lines_one_put_back_names_only_the_other(self):
+        self.main_adds("restored alpha", "still missing beta")
+        self.merge_dropping_main_lines()
+        self.r.commit("put alpha back", date=self.T2, app_txt=BODY + "restored alpha\n")
+        self.assertIn("restored alpha", self.at("HEAD", "app.txt"), "premise: the head holds the restored line")
+        self.assertNotIn("still missing beta", self.at("HEAD", "app.txt"), "premise: the head lacks the second line")
+        got = self.r.verdict()
+        self.assertTrue(any(p.startswith("app.txt:") for p in got), "no finding names app.txt: %r" % got)
+        text = "\n".join(got)
+        self.assertIn("still missing beta", text, "the line the head still lacks was not named")
+        self.assertNotIn("restored alpha", text, "a line a later commit put back in the same file was still named")
 
 
 class DropsLinesHint(unittest.TestCase):
