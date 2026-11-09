@@ -140,13 +140,21 @@ SCRIPT_RUNNER = re.compile(
 # `--allow-run=git`, and a flag with its value as the next word (`--ext ts`, `--config x.json`);
 # SCRIPT_RUNNER's `eval` reads only the bare `deno eval`. A flag starts with `-` and a value word
 # never does, so each word has one parse and a failed match stays linear. The interpreter may be
-# named by a path (`.venv/bin/python`, `/usr/bin/python3`), and python takes `-W` and `-X` with a
-# value word ahead of `-c` (`python3 -W ignore -c`).
+# named by a path (`.venv/bin/python`, `/usr/bin/python3`), by a quoted path with a space in it, or by
+# a variable (`$PYTHON`, `${VENV_PYTHON}`), and python takes `-W` and `-X` with a value word ahead of
+# `-c` (`python3 -W ignore -c`). The word starts at a word start; `_interpreter` then checks that it is
+# the command (see there). `php -r` and `deno eval` are checked against their own name there too.
+_INTERPRETER_NAME = r"python[\d.]*|pypy[\d.]*|node(?:js)?|ruby|perl|php|deno|\$\{?\w*PYTHON\w*\}?"
 INTERPRETER_RUNNER = re.compile(
-    r"(?:^|[\s;&|(])(?:[^\s;&|()\"']*/)?"
-    r"(?:(?:python[\d.]*|node(?:js)?|ruby|perl|php|deno)\s+(?:-\w+\s+|-[WX]\s+[^\s\"'-]\S*\s+)*-\w*[ce]"
-    r"|php\s+(?:-\w+\s+)*-\w*r"
-    r"|deno\s+(?:-\w+\s+)*eval(?:\s+-{1,2}\w[\w-]*(?:=\S*)?(?:\s+[^\s\"'-]\S*)?)*)\s*$")
+    r"(?<![^\s;&|(`])(?:\"(?:[^\"]*/)?(?P<double>" + _INTERPRETER_NAME + r")\""
+    r"|'(?:[^']*/)?(?P<single>" + _INTERPRETER_NAME + r")'"
+    r"|(?:[^\s;&|()\"'`]*/)?(?P<bare>" + _INTERPRETER_NAME + r"))"
+    r"(?:\s+(?:-\w+\s+|-[WX]\s+[^\s\"'-]\S*\s+)*-\w*(?P<flag>[cer])"
+    r"|\s+(?:-\w+\s+)*(?P<eval>eval)(?:\s+-{1,2}\w[\w-]*(?:=\S*)?(?:\s+[^\s\"'-]\S*)?)*)\s*$")
+# Where a command starts: the text after the last of these is the command's own words.
+_COMMAND_START = re.compile(r"[;&|(\n`][^;&|(\n`]*$")
+# How far back a runner is read ahead of a quote, so a long segment is read in linear time.
+RUNNER_REACH = 512
 # The text between two strings of one argv call. Each part starts with its own character, so a
 # failed fullmatch takes linear time.
 ARGV_GAP = re.compile(r"[\s,]*(?:\{\s*args\s*:\s*\[[\s,]*)?")
@@ -196,6 +204,28 @@ def _argv_word(arg: str) -> str:
     return escaped or "\\ "
 
 
+def _interpreter(text: str, end: int = -1):
+    """The name of the interpreter whose script starts at `end` in `text` (`python3`, `node`, `$PYTHON`),
+    or None when no interpreter runner ends there. The interpreter must be the command: a word that
+    ends in an interpreter name is a runner only where the shell runs it, after any assignments,
+    keywords and wrappers that resolve_command skips (`FOO=1 sudo -u bob python3`). A directory word
+    (`grep -rn src/python -e`) is no runner. Words the shell cannot split are read as a runner."""
+    end = len(text) if end < 0 else end
+    reach = max(0, end - RUNNER_REACH)
+    match = INTERPRETER_RUNNER.search(text, reach, end)
+    if match is None:
+        return None
+    name = match.group("double") or match.group("single") or match.group("bare")
+    if (match.group("flag") == "r" and name != "php") or (match.group("eval") and name != "deno"):
+        return None
+    start = _COMMAND_START.search(text, reach, match.start())
+    words = text[start.start() + 1 if start else reach:match.start()]
+    tokens = segment_tokens(words) if words.strip() else []
+    if tokens is None or start is None and reach > 0:
+        return name
+    return name if resolve_command(tokens + ["interpreter"]) == len(tokens) else None
+
+
 def _handed_on(words) -> list:
     """Every command line a list hands on, however deep: `sh -c` inside `docker exec` inside `flock`. Each
     text that inner_commands returns is read again, one segment at a time, until no new text turns up.
@@ -209,6 +239,9 @@ def _handed_on(words) -> list:
     return found
 
 
+BRACKET = "["   # the calls entry of an open list or block
+
+
 class _Statement:
     """The statement a script walk is in: where it starts and which calls are open in it. A pair is
     held as printed text when a printer holds it: the statement starts with a printer command
@@ -217,22 +250,38 @@ class _Statement:
     `print(check_output(`); any other call (`print(len(`, `echo json_encode(`) prints its result.
     With no printer, every pair runs, whatever call holds it."""
 
-    def __init__(self, body: str, first: int = 0):
+    def __init__(self, body: str, first: int = 0, quotes=(), hash_comments: bool = True, brackets: bool = False):
         self.body, self.start, self.calls, self.command = body, 0, [], None
         self.first = first     # where the script's text starts: a span's own quote sits ahead of it
         self.comment_end = 0   # a `#` comment runs to here: its text opens no call and ends no statement
+        # The script's other string quotes, as they sit in its text (`'`, `\\"`, a backtick): inside one,
+        # `#`, `;` and brackets are text. A `'` or `"` string ends at its line's end, so a lone apostrophe
+        # hides no later line; a template literal may span lines.
+        self.quotes, self.quote = quotes, ""
+        self.hash_comments = hash_comments   # False for a language that reads `#` as text (node, deno)
+        self.brackets = brackets   # `[` and `{` open a BRACKET entry, so a list element is no call argument
 
-    def advance(self, index: int):
-        """Read the unquoted character at `index`: a statement end clears the state, a `(` opens a
-        call or a group, a `)` closes one."""
+    def advance(self, index: int, width: int = 1):
+        """Read the unquoted text at `index`, `width` characters (2 for a backslash pair): a statement
+        end clears the state, a `(` opens a call or a group, a `)` closes one."""
         if index < self.comment_end:
             return
-        char = self.body[index]
-        if char == "#" and (index == self.first or self.body[index - 1] in " \t\n;|&("):
+        token = self.body[index:index + width]
+        if self.quote:
+            if token == self.quote or (token == "\n" and not self.quote.endswith("`")):
+                self.quote = ""
+            return
+        if token in self.quotes:
+            self.quote = token
+            return
+        if width > 1:
+            return
+        char = token
+        if char == "#" and self.hash_comments and (index == self.first or self.body[index - 1] in " \t\n;|&("):
             end = self.body.find("\n", index)
             self.comment_end = len(self.body) if end < 0 else end
             return
-        if char == "\n" and any(self.calls):
+        if char == "\n" and any(name and name != BRACKET for name in self.calls):
             return   # a call split over lines (`print(` and its string) is still one statement
         if char in ";&|\n":
             self.start, self.calls, self.command = index + 1, [], None
@@ -240,7 +289,14 @@ class _Statement:
             name = CALL_NAME.search(self.body, max(0, index - 48), index)
             name = name.group(1) if name and name.group(1) not in NOT_A_CALL else ""
             self.calls.append(name)
-        elif char == ")" and self.calls:
+        elif char == ")":
+            while self.calls and self.calls[-1] == BRACKET:
+                self.calls.pop()
+            if self.calls:
+                self.calls.pop()
+        elif self.brackets and char in "[{":
+            self.calls.append(BRACKET)
+        elif self.brackets and char in "]}" and self.calls and self.calls[-1] == BRACKET:
             self.calls.pop()
 
     def runs(self) -> bool:
@@ -260,7 +316,12 @@ class _Statement:
         return self.command
 
 
-def _nested_commands(span: str, before: str = "", mark: str = '\\"', held_only: bool = False) -> str:
+# The other string quotes of a script, by the quote its pairs use (see _Statement).
+OTHER_QUOTES = {'\\"': ("'", "\\`", "`"), '"': ("'", "`"), "'": ('\\"', "\\`", "`")}
+
+
+def _nested_commands(span: str, before: str = "", mark: str = '\\"', held_only: bool = False,
+                     hash_comments=None) -> str:
     """A quoted span that holds quote marks is a script handed to an interpreter
     (`python3 -c "os.system(\\"git push\\")"`, `python3 -c 'os.system("git push")'`). `mark` is the
     pair's quote as it sits in the span: `\\"` in a double-quoted span, `"` in a single-quoted one. In a
@@ -272,12 +333,18 @@ def _nested_commands(span: str, before: str = "", mark: str = '\\"', held_only: 
     ahead of the span). Give each command its own line, so the words that follow it in the script
     (`print(\\"+1\\")`) are not its arguments. `held_only` reads a pair as a command only when a run call
     holds it or a pipe feeds it to a shell: the single-quoted strings of a double-quoted script are
-    assigned, written and asserted as often as they are run."""
+    assigned, written and asserted as often as they are run. `hash_comments` says whether `#` opens a
+    comment; by default the runner ahead of the span tells: a shell, python, ruby, perl or php."""
     lines, piece, inner, run, index = ["\n"], [], False, False, 1
     words, argv, closed = [], False, 0
-    script = (SCRIPT_RUNNER.search(before) or INTERPRETER_RUNNER.search(before)) is not None
+    shell = SCRIPT_RUNNER.search(before) is not None
+    language = "" if shell else _interpreter(before)
+    script = shell or language is not None
     body = span[:-1]
-    statement = _Statement(body, 1)
+    if hash_comments is None:
+        # Node and deno read `#` as text, so for them a ` #` hides nothing.
+        hash_comments = basename(language or "") not in ("node", "nodejs", "deno")
+    statement = _Statement(body, 1, OTHER_QUOTES[mark], hash_comments)
     # Each statement end, found once: a pair is fed to a shell when its statement ends in a pipe to one.
     ends = [match.start() for match in STATEMENT_END.finditer(body)] if script else []
     mark_width = len(mark)
@@ -327,8 +394,8 @@ def _nested_commands(span: str, before: str = "", mark: str = '\\"', held_only: 
             if inner:
                 if run:
                     piece.append(body[index:index + width])
-            elif width == 1:
-                statement.advance(index)
+            else:
+                statement.advance(index, width)
         index += width
     if inner and run:
         (words if argv else lines).append("".join(piece) if argv else "".join(piece) + "\n")
@@ -355,14 +422,15 @@ _RUN_LINES = {}   # script -> the lines that begin inside an open run call, for 
 
 def _lines_in_run_call(script: str):
     """The stripped text of each line of `script` that begins inside an open run call (`os.system(` with
-    its string on the next line). A list (`items = [`) and any other call (`print(`) hold text. The
-    walk skips strings and `#` comments, and reads the script once however many lines ask."""
+    its string on the next line). A list (`items = [`) and any other call (`print(`) hold text, and so
+    does a list inside a run call (`subprocess.run([`): its element is no command line. The walk skips
+    strings, template literals and `#` comments, and reads the script once however many lines ask."""
     found = _RUN_LINES.get(script)
     if found is None:
-        found, statement, index, length = set(), _Statement(script), 0, len(script)
+        found, statement, index, length = set(), _Statement(script, brackets=True), 0, len(script)
         while index < length:
             char = script[index]
-            if char in "'\"" and index >= statement.comment_end:
+            if char in "'\"`" and index >= statement.comment_end:
                 end = _span_end(script, index, True)
                 index = end + 1 if end >= 0 else index + 1
                 continue
@@ -406,17 +474,19 @@ def _push_scan(segment: str, script: str = "") -> str:
             ahead = segment[max(0, index - 512):index]
             if char == '"' and '\\"' in span:
                 span = _nested_commands(span, segment[:index])
-            elif char == "'" and INTERPRETER_RUNNER.search(ahead) and '"' in (
+            elif char == "'" and _interpreter(segment, index) and '"' in (
                     joined := _joined_splices(segment, index, end))[0]:
                 # The runner's script sits in single quotes, so its own strings are plain pairs.
-                span, end = _nested_commands(joined[0], ahead, '"'), joined[1]
-            elif char == '"' and "'" in span and INTERPRETER_RUNNER.search(ahead):
+                span, end = _nested_commands(joined[0], segment[:index], '"'), joined[1]
+            elif char == '"' and "'" in span and _interpreter(segment, index):
                 # The runner's script sits in double quotes, so its own strings are single-quoted pairs.
-                span = _nested_commands(span, ahead, "'", True)
+                span = _nested_commands(span, segment[:index], "'", True)
             elif char == '"' and ARGV_CALL.search(ahead[-256:]):
                 # An argv call on a heredoc line (see below): the rest of the line is the call's
-                # arguments, so its pairs join into one command line as in a deno eval script.
-                out.append(_nested_commands("'" + segment[max(0, index - 256):] + "'", "deno eval ", '"'))
+                # arguments, so its pairs join into one command line as in a deno eval script. The
+                # heredoc's language is unknown, so `#` keeps its comment reading.
+                out.append(_nested_commands("'" + segment[max(0, index - 256):] + "'", "deno eval ", '"',
+                                            hash_comments=True))
                 break
             elif CALL_RUNNER.search(ahead[-256:]) or (
                     not (ahead.strip() or segment[end + 1:].strip()) and segment.strip() in _lines_in_run_call(script)):
