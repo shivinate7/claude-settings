@@ -31520,6 +31520,17 @@ role_model_allow("role-model: fix check: reviewer on haiku with the marker is al
 role_model_refuse("role-model: fix check: reviewer on sonnet with no marker is denied, and its remedy names the marker",
                   "reviewer", "sonnet", "Check the diff for typos.",
                   carries=(ROUND_MARKER, FIX_MARKER) + FREE_ROUND_MARKERS)
+# A reviewer on Sonnet with no free marker is refused with the facts it needs: round 1 runs the role's model, haiku, and Sonnet needs a
+# Round 2 of 3, a Round 3 of 3 or a fix check first line. Its refusal never tells the caller to drop the model field. The case holds
+# those facts, not the whole sentence.
+role_model_refuse("role-model: reviewer on sonnet with no marker says round 1 runs haiku and names the three markers, not drop the model field",
+                  "reviewer", "sonnet", "Check the diff for typos.",
+                  carries=(("round 1", "Round 1"), "haiku") + FREE_ROUND_MARKERS + (FIX_MARKER,),
+                  lacks=ROLE_LACKS + ("drop the model field",))
+# Control: the other roles keep the drop-the-model remedy. A test-author's refusal names none of the reviewer's markers.
+role_model_refuse("role-model: control: test-author on sonnet keeps the drop-the-model remedy and names no marker",
+                  "test-author", "sonnet", "Write the failing cases.", carries=(ROLE_REMEDY,),
+                  lacks=ROLE_LACKS + (ROUND_MARKER, FIX_MARKER) + FREE_ROUND_MARKERS)
 role_model_refuse("role-model: fix check: the marker on line two does not lift a reviewer on sonnet, and the remedy names it",
                   "reviewer", "sonnet", "Check the diff.\n" + FIX_MARKER + ". Re-run the cases.",
                   carries=(FIX_MARKER,))
