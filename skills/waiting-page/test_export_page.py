@@ -22,10 +22,22 @@ Contract the page cases assume (the builder builds to it):
     still export. A supporting file that is not UTF-8 is scanned as cp1252 text, so a cp1252 note holding an email
     refuses. A file is binary only with a NUL byte, whatever its name: a binary file with no shape in it exports, and a
     text file under an image or font name is scanned.
+  --all, a page-only entry (`collections` []) exports its page and files and no database.
+  --all --account LABEL. An entry whose account differs prints `<id>: skipped - account <its account>`, needs no fetched
+    folder, writes nothing and exits 0 for it. Without the flag every entry exports as before.
+    A LABEL no registry entry holds, the empty label included, prints one `unknown` line that names the label, writes
+    nothing, exits 2.
+  --all, a page-only entry whose fetched folder holds no page.html prints `<id>: unknown - ...` that names page.html,
+    writes nothing for it, and the run exits 2.
   Retina names are not emails: `logo@2x.png`, as a file name or in page text, exports; `jane@2x.com` refuses.
   Digit-led domains are emails: jane@1st.example.com, jane@12.34.example.com and jane@1.2.3.com refuse in page text.
   URL credentials refuse on an IP host as on a host name: postgres://app:<password>@10.0.0.5:5432/db refuses; an IP
     host with no credentials passes.
+  --rebuild DIR --batches OUT --collections NAME [NAME ...]. The named collections are the only folders allowed besides
+    page/, and a batch entry's `collection` is its folder name. A named collection with no folder is empty. A folder not
+    named is unknown, exit 2, even one of the five waiting collections. Without --collections the five are allowed.
+    --collections without --rebuild, or a name that is not a collection slug, is a usage error: exit 2, an argparse
+    `error:` line, nothing written. The error for --collections without --rebuild names --rebuild.
   Verdict words: `changed N`, `same`, `refused` (exit 1), `unknown` (exit 2), and a crash (exit 3, one line).
   Not pinned here: whether a supporting file no longer fetched is deleted.
 """
@@ -125,6 +137,26 @@ assert DIGITS_300_THEN_LETTER.index("a") == 300, "the letter must sit at index 3
 # scan takes about 4 times. The bound sits between them. RUN_N is the shorter run, the longer run is four times it.
 RUN_N = 20000
 GROWTH_BOUND = 10
+# Hyphenated letters for the words test, built from parts. Each comment names the check the value fails.
+TIGHT_COMPACT = "tight-" + "compact"  # a plain option key that passes: each part holds a vowel, and no part has five consonants in a row
+ICON_COMPACT = "icon-" + "compact"  # a plain option key that passes: a vowel in each part
+PAGE_LENGTH_LIMIT = "page-" + "length-limit"  # a plain option key that passes: `length` has four consonants in a row, one short of the five that refuse
+STRENGTH_METER = "strength-" + "meter"  # a plain option key that passes: `strength` has runs of three and four consonants, under the five that refuse
+BRIGHT_LIGHTS_CITY = "bright-" + "lights-" + "city"  # a plain option key that passes: `lights` has four consonants in a row, under the five that refuse
+TIGHT_SNAKE = "tight_" + "compact"  # the snake_case form passes: each part holds a vowel, and no part has five consonants in a row
+PAGE_SNAKE = "page_" + "length_" + "limit"  # the snake_case form passes: no part has five consonants in a row
+MIXED_HYPHEN = "QwErTy-" + "UiOpAs"  # mixed case in each part: refused by the word form alone; the vowel rule reads only all-lower values
+CONSONANT_HYPHEN = "xkcdqwrt-" + "plmnvbz"  # all-lower, no vowel in either part: refused by the run (eight and seven consonants) and by the vowel rule
+UPPER_HYPHEN = "XKQ-ZVB-" + "WTR-PLS"  # upper-case parts with no vowel: refused by the vowel share and by the joined run; the all-lower rules do not reach it
+RUN_PART = "aeibcdfgt" + "-uaei"  # a run of six consonants inside one part, with a vowel in each part: refused by that run alone
+SHORT_VOWELS = "bbabbab" + "bbabbb"  # three vowels in thirteen letters and no run: fails the vowel share alone
+RUN5_HYPHEN = "aeixkcdqo" + "-uaei"  # a run of five consonants inside one part, with a vowel in each part: refused by that run alone
+RUN5_UNDERSCORE = "aeixkcdqo" + "_uaei"  # the same run with an underscore: refused by it, as the hyphen twin is
+FEW_VOWEL_WORD = "bcdafgh" + "ejklomnp"  # lower case, no separator, three vowels in fifteen letters and no run: fails the share alone
+# Each comment names the check the value fails. The vowel rule refuses an all-lower value split on `-` or `_` when a part of
+# four or more letters holds no vowel (a, e, i, o, u or y). A part of one to three letters is exempt from it.
+VOWELLESS_SNAKE = "kqzv_" + "bxjw_" + "tmrl"  # snake_case, four consonants and no vowel in each part: fails the vowel rule
+VOWELLESS_HYPHEN = "kqzv-" + "bxjw-" + "tmrl"  # the hyphen twin, four consonants and no vowel in each of three parts: fails the vowel rule
 
 # (label, the note's value, the text that must never be printed). A dict or a list nests the secret.
 RED = [
@@ -269,6 +301,22 @@ RED = [
     ("api_key of sixteen capitals with four vowels", "api_key: " + FEW_VOWELS_16, FEW_VOWELS_16),
     ("API_KEY of sixteen capitals with an eleven-consonant run", "API_KEY: " + LONG_CONSONANT_RUN_16, LONG_CONSONANT_RUN_16),
     ("api_key set to twelve underscores and no letter", "api_key: " + "_" * 12, "_" * 12),
+    # A `:` value of letters passes only when every words check passes. The mixed-case row fails the word form alone, and
+    # the vowel row fails the vowel share alone, so removing that check lets its row through. The run row fails the consonant
+    # run alone: each of its parts holds a vowel. The lower-case row is refused by its run and by the vowel rule, so
+    # removing one check does not let it through. The upper-case row has no vowel, and the share and the joined run refuse
+    # it. The `=` row is refused whatever its value.
+    ("a key name set with = to a hyphenated word", "key = '" + TIGHT_COMPACT + "'", TIGHT_COMPACT),
+    ("secret of mixed-case words joined by a hyphen", "secret: '" + MIXED_HYPHEN + "'", MIXED_HYPHEN),
+    ("secret of thirteen letters with three vowels", "secret: '" + SHORT_VOWELS + "'", SHORT_VOWELS),
+    ("secret of a consonant run inside one word", "secret: '" + RUN_PART + "'", RUN_PART),
+    ("secret of lower-case letters with no vowel", "secret: '" + CONSONANT_HYPHEN + "'", CONSONANT_HYPHEN),
+    ("secret of upper-case three-letter parts joined by hyphens", "secret: '" + UPPER_HYPHEN + "'", UPPER_HYPHEN),
+    ("secret of five consonants in one hyphen part", "secret: '" + RUN5_HYPHEN + "'", RUN5_HYPHEN),
+    ("secret of five consonants in one part joined by an underscore", "secret: '" + RUN5_UNDERSCORE + "'", RUN5_UNDERSCORE),
+    ("secret of lower-case letters with few vowels and no separator", "secret: '" + FEW_VOWEL_WORD + "'", FEW_VOWEL_WORD),
+    ("secret of all-lower snake_case parts with no vowel", "secret: '" + VOWELLESS_SNAKE + "'", VOWELLESS_SNAKE),
+    ("secret of all-lower hyphen parts with no vowel", "secret: '" + VOWELLESS_HYPHEN + "'", VOWELLESS_HYPHEN),
     ("street with the suffix Park", "1400 Lakeshore Park", "1400 Lakeshore Park"),
     ("street with the suffix Trail", "2500 Maple Trail", "2500 Maple Trail"),
     ("street with the suffix Cir", "1200 Oak Cir", "1200 Oak Cir"),
@@ -461,6 +509,28 @@ GREEN = [
     ("api_key set to an upper-case placeholder with underscores", "api_key: REPLACE_WITH_YOUR_KEY"),
     ("Key set to a lower-case label word", "Key: infrastructure"),
     ("--key-color set to a CSS keyword before a semicolon", "--key-color: currentcolor;"),
+    # A plain option key whose value is a hyphenated word is no secret, in a line of text or in a JS object line.
+    ("option key icon-compact", "key: '" + ICON_COMPACT + "'"),
+    ("option key tight-compact", "key: '" + TIGHT_COMPACT + "'"),
+    ("option key tight-compact in a JS object line", "{ key: '" + TIGHT_COMPACT + "', label: 'Tight' }"),
+    # A hyphen or underscore option key with a word of four consonants, and the snake_case form, is no secret.
+    ("option key page-length-limit", "key: '" + PAGE_LENGTH_LIMIT + "'"),
+    ("option key strength-meter", "key: '" + STRENGTH_METER + "'"),
+    ("option key bright-lights-city", "key: '" + BRIGHT_LIGHTS_CITY + "'"),
+    ("option key tight_compact in snake case", "key: '" + TIGHT_SNAKE + "'"),
+    ("option key page_length_limit in snake case", "key: '" + PAGE_SNAKE + "'"),
+    # A part of one to three letters is exempt from the vowel rule, so `db` and `btn` pass. A part of four or more letters
+    # holds a vowel, and `y` is one, so `lynx` and `sync` pass on their `y`. The values run 12 characters or more, the length
+    # the words check needs to reach them.
+    ("option key db-connection-pool, with a two-letter part", "key: 'db-connection-pool'"),
+    ("option key db_connection_pool in snake case, with a two-letter part", "key: 'db_connection_pool'"),
+    ("option key btn-primary-hover, with a three-letter part", "key: 'btn-primary-hover'"),
+    ("option key lynx_sync_mode, whose parts have y as their only vowel", "key: 'lynx_sync_mode'"),
+    # `text-transform` is the green control beside the red rows: each part holds a vowel, and no part has five consonants in a
+    # row, so it passes. `flex_shrink` is 11 characters, under the 12-character length, so it never reaches the words check and
+    # pins nothing about the vowel rule.
+    ("option key text-transform", "key: 'text-transform'"),
+    ("option key flex_shrink", "key: 'flex_shrink'"),
     # The names that do not count under the rule (bare token, camelCase, a hyphenated or a non-credential name) pass.
     # These four are false alarms today: each refuses on its value's length, so they are red on the builder's head.
     ("destructured token alias", "const { token: accessTokenValue } = await getSession();"),
@@ -544,6 +614,12 @@ def verdict_lines(r):
 def says(r, word):
     """True when a line the run printed starts with the verdict word, as `unknown` or `unknown - asks missing` does."""
     return any(re.match(re.escape(word) + r"\b", line) for line in verdict_lines(r))
+
+
+def error_line(r):
+    """The `error:` line argparse prints for a usage error, or None."""
+    found = [line.strip() for line in r.stderr.splitlines() if "error:" in line]
+    return found[-1] if found else None
 
 
 def changed_count(r):
@@ -1049,9 +1125,33 @@ class Rebuild(Base):
             entries.extend(batch)
         return files, entries, sizes
 
-    def rebuild(self, waiting, batches):
+    def rebuild(self, waiting, batches, collections=()):
         os.makedirs(batches, exist_ok=True)
-        return self.run_cmd("--rebuild", waiting, "--batches", batches)
+        args = ["--rebuild", waiting, "--batches", batches]
+        if collections:
+            args += ["--collections", *collections]
+        return self.run_cmd(*args)
+
+    def copy_of(self, folders, name="copy"):
+        """A copy of a registry artifact: `folders` maps each folder name to {doc_id: data}, and each doc is written as
+        `<doc_id>.json`, as an export holds it. A rebuild reads no marker, so none is written. An empty folder is kept."""
+        root = self.out(name)
+        for folder, docs in folders.items():
+            os.makedirs(os.path.join(root, folder), exist_ok=True)
+            for doc_id, data in docs.items():
+                write_text(os.path.join(root, folder, doc_id + ".json"), canonical(data))
+        return root
+
+    def assertOptionBuilt(self, r):
+        """The script knows --collections. argparse rejects an option it does not know, so this red names the cause."""
+        self.assertNotIn("unrecognized arguments", shown(r), "the option is not built: argparse rejects --collections")
+
+    def assertUnknownNames(self, r, folder):
+        """Exit 2 and an `unknown` line that names `folder` as neither a named collection nor page/."""
+        self.assertEqual(r.returncode, 2, shown(r))
+        lines = [line for line in verdict_lines(r) if line.startswith("unknown")]
+        self.assertTrue(any(("/%s is neither" % folder) in line for line in lines),
+                        "no unknown line names the folder %s. Output:\n%s" % (folder, shown(r)))
 
     def exported(self, docs, page=True):
         fetched = self.fetch(**docs)
@@ -1147,6 +1247,90 @@ class Rebuild(Base):
         self.assertVerdict(r, "unknown")
         self.assertEqual(r.returncode, 2, shown(r))
 
+    def test_named_collections_rebuild_their_docs_under_their_folder_names(self):
+        # 30 + 30 docs need two batches of at most 50. `receipts` is named but has no folder: it is empty, not unknown.
+        steps = {"step-%03d" % n: {"n": n, "title": "Step %d" % n} for n in range(1, 31)}
+        topics = {"topic-%03d" % n: {"n": n, "title": "Topic %d" % n} for n in range(1, 31)}
+        waiting = self.copy_of({"steps": steps, "topics": topics})
+        write_text(os.path.join(waiting, "page", "page.html"), "<!doctype html>\n<title>registry</title>\n")
+        write_text(os.path.join(waiting, "page", "files", "x.css"), "body {}\n")
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.rebuild(waiting, batches, collections=("steps", "topics", "receipts"))
+        self.assertOptionBuilt(r)
+        self.assertEqual(r.returncode, 0, shown(r))
+        files, entries, sizes = self.batch_entries(batches)
+        self.assertEqual(len(files), 2, "60 docs in batches of at most 50 make two batches, not %d" % len(files))
+        self.assertBatches(r, 2, 60)
+        for entry in entries:
+            self.assertEqual(set(entry), {"op", "collection", "doc_id", "data"}, "an entry has the wrong keys")
+            self.assertEqual(entry["op"], "set")
+        self.assertEqual({entry["collection"] for entry in entries}, {"steps", "topics"},
+                         "the batches name a collection other than the two folders that exist")
+        want = collections.Counter([("steps", doc_id, canonical(doc)) for doc_id, doc in steps.items()]
+                                   + [("topics", doc_id, canonical(doc)) for doc_id, doc in topics.items()])
+        got = collections.Counter((e["collection"], e["doc_id"], canonical(e["data"])) for e in entries)
+        self.assertEqual(got, want, "the batches do not hold each named folder's docs under its folder name")
+
+    def test_a_folder_not_named_with_collections_is_unknown_and_exits_2(self):
+        waiting = self.copy_of({"steps": {"step-001": {"n": 1}}, "topics": {"topic-001": {"n": 1}}})
+        r = self.rebuild(waiting, os.path.join(self.tmp.name, "batches"), collections=("steps",))
+        self.assertOptionBuilt(r)
+        self.assertUnknownNames(r, "topics")
+
+    def test_named_collections_replace_the_five_so_a_waiting_folder_not_named_is_unknown(self):
+        waiting = self.copy_of({"items": {"item-001": item(1)}, "steps": {"step-001": {"n": 1}}})
+        r = self.rebuild(waiting, os.path.join(self.tmp.name, "batches"), collections=("steps",))
+        self.assertOptionBuilt(r)
+        self.assertUnknownNames(r, "items")
+
+    def test_without_collections_a_non_waiting_folder_is_still_unknown(self):
+        waiting = self.copy_of({"steps": {"step-001": {"n": 1}}})
+        r = self.rebuild(waiting, os.path.join(self.tmp.name, "batches"))
+        self.assertUnknownNames(r, "steps")
+
+    def test_collections_without_rebuild_is_a_usage_error_that_names_rebuild(self):
+        fetched, out = self.fetch(), self.out()
+        forms = {
+            "export mode": ["--fetched", fetched, "--out", out, "--collections", "steps"],
+            "batches without rebuild": ["--batches", os.path.join(self.tmp.name, "batches"), "--collections", "steps"],
+        }
+        for label, args in forms.items():
+            with self.subTest(form=label):
+                r = self.run_cmd(*args)
+                self.assertOptionBuilt(r)
+                self.assertEqual(r.returncode, 2, shown(r))
+                err = error_line(r)
+                self.assertIsNotNone(err, "no usage error line. Output:\n" + shown(r))
+                self.assertIn("--rebuild", err, "the usage error does not name --rebuild: %s" % err)
+        self.assertFalse(os.path.exists(out), "a usage error wrote the export folder")
+
+    def test_a_collection_name_that_is_not_a_slug_is_a_usage_error(self):
+        waiting = self.copy_of({"steps": {"step-001": {"n": 1}}})
+        names = [("../steps",), ("a/b",), (".hidden",), ("",), ("steps", "a b")]
+        for number, bad in enumerate(names):
+            batches = os.path.join(self.tmp.name, "batches-%d" % number)
+            with self.subTest(names=bad):
+                r = self.rebuild(waiting, batches, collections=bad)
+                self.assertOptionBuilt(r)
+                self.assertEqual(r.returncode, 2, shown(r))
+                self.assertIsNotNone(error_line(r), "a name that is not a slug is not a usage error. Output:\n" + shown(r))
+                self.assertEqual(glob.glob(os.path.join(batches, "batch-*.json")), [], "a bad name still wrote batches")
+
+    def test_the_reserved_page_folder_name_is_a_usage_error_that_writes_nothing(self):
+        waiting = self.copy_of({"steps": {"step-001": {"n": 1}}})
+        write_text(os.path.join(waiting, "page", "page.html"), "<!doctype html>\n<title>registry</title>\n")
+        for number, names in enumerate((("page",), ("steps", "page"))):
+            batches = os.path.join(self.tmp.name, "batches-%d" % number)
+            with self.subTest(names=names):
+                r = self.rebuild(waiting, batches, collections=names)
+                self.assertOptionBuilt(r)
+                self.assertEqual(r.returncode, 2,
+                                 "--collections page is not a usage error: exit 2 expected. Output:\n" + shown(r))
+                err = error_line(r)
+                self.assertIsNotNone(err, "--collections page has no usage error line. Output:\n" + shown(r))
+                self.assertIn("'page'", err, "the usage error does not name page: %s" % err)
+                self.assertEqual(os.listdir(batches), [], "--collections page still wrote files")
+
 
 class All(Base):
     """--all: each artifact in the repo's registry (the "artifacts" key of its extras file) exports its collections to
@@ -1155,12 +1339,16 @@ class All(Base):
     WAIT, QUEUE = "page01", "queue02"
     VERDICT = r"\b(changed\s+\d+|same|refused|unknown)\b"
 
-    def repo(self):
+    def queue_entry(self, **changes):
+        return dict({"id": self.QUEUE, "url": "https://claude.ai/artifact/" + self.QUEUE, "role": "queue-page", "account": "work",
+                     "collections": ["items"]}, **changes)
+
+    def repo(self, queue=None):
+        """The registry: the waiting page, then the queue entry. `queue` replaces the queue entry for a case of another shape."""
         root = os.path.join(self.tmp.name, "repo")
         registry = {"kinds": {}, "artifacts": [
             {"id": self.WAIT, "url": "https://claude.ai/artifact/" + self.WAIT, "role": "waiting-page", "account": "work"},
-            {"id": self.QUEUE, "url": "https://claude.ai/artifact/" + self.QUEUE, "role": "queue-page", "account": "work",
-             "collections": ["items"]}]}
+            queue or self.queue_entry()]}
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps(registry))
         return root
 
@@ -1172,10 +1360,11 @@ class All(Base):
 
     def fetched_all(self, docs, pages=None, files=None):
         """One fetched folder per artifact id, each shaped as a single fetch is. `pages` maps an id to its page.html
-        bytes; `files` maps an id to {path under files/: bytes}, the page's supporting files."""
+        bytes; `files` maps an id to {path under files/: bytes}, the page's supporting files. An id whose `docs` value is
+        None is a page-only fetch: its folder holds the page and files and no collection folder."""
         root = tempfile.mkdtemp(prefix="fetched-all-", dir=self.tmp.name)
         for artifact_id, parts in docs.items():
-            folder = self.fetch(**parts)
+            folder = self.fetch(**parts) if parts is not None else tempfile.mkdtemp(prefix="fetched-page-", dir=self.tmp.name)
             if pages and artifact_id in pages:
                 write_bytes(os.path.join(folder, "page.html"), pages[artifact_id])
             for rel, data in ((files or {}).get(artifact_id) or {}).items():
@@ -1292,6 +1481,52 @@ class All(Base):
         self.assertTrue(os.path.isfile(landed), "the empty artifact's page/page.html was not exported. Output:\n" + shown(r))
         self.assertEqual(read_bytes(landed), QUEUE_PAGE, "the empty artifact's page/page.html is not byte-identical")
         self.assertVerdictOf(r, self.QUEUE, r"changed\s+1\b")
+
+    def test_a_page_only_entry_of_the_flag_account_exports_its_page_and_file_then_reports_same(self):
+        """--all --account other, with a page-only entry (`collections` []) whose fetch holds page.html and files/x.js: both
+        export under artifacts/<id>/page/ and the run prints `changed 2`, exit 0. A second run prints `same`."""
+        script = b'console.log("page only");\n'
+        page_only = self.queue_entry(account="other", collections=[])
+        fetched = self.fetched_all({self.QUEUE: None}, pages={self.QUEUE: QUEUE_PAGE}, files={self.QUEUE: {"x.js": script}})
+        root, worktree = self.repo(queue=page_only), self.out("worktree")
+        args = ("--all", root, "--fetched", fetched, "--worktree", worktree, "--account", "other")
+        first = self.run_cmd(*args)
+        self.assertEqual(first.returncode, 0,
+                         "a page-only entry of the flag's account was not exported. Output:\n" + shown(first))
+        self.assertVerdictOf(first, self.QUEUE, r"changed\s+2\b")
+        base = os.path.join(self.export_folder(worktree, self.QUEUE), "page")
+        self.assertEqual(read_bytes(os.path.join(base, "page.html")), QUEUE_PAGE, "page/page.html is not byte-identical")
+        self.assertEqual(read_bytes(os.path.join(base, "files", "x.js")), script, "page/files/x.js is not byte-identical")
+        self.assertIn("%s: skipped - account work" % self.WAIT, verdict_lines(first),
+                      "the waiting page of another account was not skipped")
+        second = self.run_cmd(*args)
+        self.assertEqual(second.returncode, 0, "the second run of a page-only entry failed. Output:\n" + shown(second))
+        self.assertVerdictOf(second, self.QUEUE, r"\bsame\b")
+
+    def test_a_page_only_entry_with_no_page_html_is_unknown_and_writes_nothing(self):
+        """--all --account work, with a page-only entry (`collections` []) whose fetched folder exists and holds no page.html:
+        its line is `<id>: unknown - ...` naming page.html, nothing lands under its export path, and the run exits 2."""
+        fetched = self.fetched_all({self.WAIT: self.docs()[self.WAIT], self.QUEUE: None})  # the queue's folder: no page.html
+        root, worktree = self.repo(queue=self.queue_entry(collections=[])), self.out("worktree")
+        r = self.run_cmd("--all", root, "--fetched", fetched, "--worktree", worktree, "--account", "work")
+        line = self.verdict_of(r, self.QUEUE)  # the scope: the page-only artifact's own verdict line
+        self.assertTrue(line.startswith(self.QUEUE + ": unknown - "),
+                        "a page-only entry whose folder has no page.html is not unknown: %r. Output:\n%s" % (line, shown(r)))
+        self.assertIn("page.html", line, "the unknown line does not name the missing page.html: %r" % line)
+        self.assertEqual(r.returncode, 2, "an unknown artifact must make the run exit 2. Output:\n" + shown(r))
+        self.assertFalse(os.path.exists(self.export_folder(worktree, self.QUEUE)),
+                         "the page-only entry wrote into its export path although its page is missing")
+
+    def test_a_page_only_entry_with_page_html_still_exports_its_page_and_exits_0(self):
+        """Control beside the case above: the same page-only entry with its page.html exports as today, `changed 1`, exit 0."""
+        fetched = self.fetched_all({self.WAIT: self.docs()[self.WAIT], self.QUEUE: None}, pages={self.QUEUE: QUEUE_PAGE})
+        root, worktree = self.repo(queue=self.queue_entry(collections=[])), self.out("worktree")
+        r = self.run_cmd("--all", root, "--fetched", fetched, "--worktree", worktree, "--account", "work")
+        self.assertEqual(r.returncode, 0, "a page-only entry with its page.html must exit 0. Output:\n" + shown(r))
+        self.assertVerdictOf(r, self.QUEUE, r"changed\s+1\b")
+        landed = os.path.join(self.export_folder(worktree, self.QUEUE), "page", "page.html")
+        self.assertTrue(os.path.isfile(landed), "page/page.html was not exported for the page-only entry. Output:\n" + shown(r))
+        self.assertEqual(read_bytes(landed), QUEUE_PAGE, "the page-only entry's page/page.html is not byte-identical")
 
     def test_a_secret_in_an_artifacts_page_refuses_only_that_artifact(self):
         root, worktree = self.repo(), self.out("worktree")
@@ -1444,32 +1679,42 @@ class All(Base):
 class NoExport(Base):
     """`"export": false` (decision waiting-data-in-repo): an artifact the repo holds and does not export, such as a page in
     an account this session cannot read. `--all` prints `<id>: skipped - no export` for it, exits 0 for it and needs no
-    fetched folder for it. The other artifacts export as in class All."""
+    fetched folder for it. The other artifacts export as in class All.
+    The same registry takes `--account LABEL`: an entry whose account differs prints `<id>: skipped - account <its account>`,
+    needs no fetched folder, writes nothing and exits 0 for it. Without the flag every entry exports as before."""
     WAIT = "page01"
     EXTERNAL = ["ext%03d" % n for n in range(1, 9)]  # the eight pages of the other account, with synthetic ids
 
     def waiting(self):
         return {"id": self.WAIT, "url": "https://claude.ai/artifact/" + self.WAIT, "role": "waiting-page", "account": "work"}
 
-    def external(self, entry_id, **changes):
-        return dict({"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": "page",
-                     "account": "other-account", "export": False}, **changes)
+    def external(self, entry_id, held=True, **changes):
+        """An artifact of the other account. `held` (the default) adds `export` false: the repo holds the page, never exports it."""
+        entry = {"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": "page", "account": "other-account"}
+        if held:
+            entry["export"] = False
+        return dict(entry, **changes)
 
     def repo(self, entries):
         root = os.path.join(self.tmp.name, "repo")
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "artifacts": entries}))
         return root
 
-    def fetched_waiting(self):
-        """The fetched folder a session makes when the other account cannot be read: the waiting page's folder only."""
+    def fetched_waiting(self, also=()):
+        """The fetched folder a session makes when the other account cannot be read: the waiting page's folder only. `also`
+        names more ids whose folders are fetched too, each shaped as the waiting page's."""
         root = tempfile.mkdtemp(prefix="fetched-all-", dir=self.tmp.name)
-        fetched = self.fetch(items={"i1": item(1)}, answers={"a1": {"item": "i1", "pick": "a"}},
-                             groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META})
-        os.rename(fetched, os.path.join(root, self.WAIT))
+        for entry_id in (self.WAIT,) + tuple(also):
+            fetched = self.fetch(items={"i1": item(1)}, answers={"a1": {"item": "i1", "pick": "a"}},
+                                 groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META})
+            os.rename(fetched, os.path.join(root, entry_id))
         return root
 
-    def run_all(self, root, fetched, worktree):
-        return self.run_cmd("--all", root, "--fetched", fetched, "--worktree", worktree)
+    def run_all(self, root, fetched, worktree, account=None):
+        args = ["--all", root, "--fetched", fetched, "--worktree", worktree]
+        if account is not None:
+            args += ["--account", account]
+        return self.run_cmd(*args)
 
     def test_each_export_false_entry_prints_skipped_and_the_run_exits_0(self):
         root = self.repo([self.waiting()] + [self.external(i) for i in self.EXTERNAL])
@@ -1513,6 +1758,80 @@ class NoExport(Base):
         self.assertTrue(says(r, "unknown"), "no unknown verdict printed for a waiting-page entry with export false. Output:\n" + shown(r))
         self.assertNotIn("%s: skipped - no export" % self.WAIT, verdict_lines(r),
                          "the waiting page was skipped instead of refused. Output:\n" + shown(r))
+
+    def test_each_other_account_entry_prints_skipped_and_the_run_exits_0(self):
+        """--account LABEL: an entry whose account differs prints `<id>: skipped - account <its account>`, exits 0 for it, and
+        needs no fetched folder. The eight entries here have none."""
+        entries = [self.waiting()] + [self.external(i, held=False, collections=["items"]) for i in self.EXTERNAL]
+        r = self.run_all(self.repo(entries), self.fetched_waiting(), self.out("worktree"), account="work")
+        self.assertEqual(r.returncode, 0, "a run with --account must exit 0 when its other-account entries are skipped. Output:\n"
+                         + shown(r))
+        for entry_id in self.EXTERNAL:
+            self.assertIn("%s: skipped - account other-account" % entry_id, verdict_lines(r),
+                          "%s has no `skipped - account` line. Output:\n%s" % (entry_id, shown(r)))
+
+    def test_an_entry_of_the_flag_account_exports_as_today_beside_the_skipped_one(self):
+        """--account LABEL: an entry whose account matches exports as it does without the flag, and the waiting page does too."""
+        own, other = "own001", self.EXTERNAL[0]
+        matching = {"id": own, "url": "https://claude.ai/artifact/" + own, "role": "page", "account": "work",
+                    "collections": ["items"]}
+        entries = [self.waiting(), matching, self.external(other, held=False, collections=["items"])]
+        r = self.run_all(self.repo(entries), self.fetched_waiting(also=(own,)), self.out("worktree"), account="work")
+        self.assertEqual(r.returncode, 0, "a run with --account must exit 0. Output:\n" + shown(r))
+        self.assertIn("%s: skipped - account other-account" % other, verdict_lines(r),
+                      "the other-account entry was not skipped. Output:\n" + shown(r))
+        self.assertIn("%s: changed 5" % self.WAIT, verdict_lines(r),
+                      "the waiting page of the flag's account did not export. Output:\n" + shown(r))
+        self.assertIn("%s: changed 1" % own, verdict_lines(r),
+                      "the entry of the flag's account did not export as it does without the flag. Output:\n" + shown(r))
+
+    def test_a_skipped_entry_writes_nothing_even_when_its_folder_was_fetched(self):
+        worktree, other = self.out("worktree"), self.EXTERNAL[0]
+        r = self.run_all(self.repo([self.waiting(), self.external(other, held=False, collections=["items"])]),
+                         self.fetched_waiting(also=(other,)), worktree, account="work")
+        self.assertEqual(r.returncode, 0, "a run with --account must exit 0. Output:\n" + shown(r))
+        self.assertIn("%s: skipped - account other-account" % other, verdict_lines(r),
+                      "the other-account entry was not skipped. Output:\n" + shown(r))
+        self.assertFalse(os.path.exists(os.path.join(worktree, "artifacts")),
+                         "a skipped entry wrote an artifacts folder although its account was not the flag's")
+
+    def test_without_the_flag_an_other_account_entry_exports_as_today(self):
+        """Control: with no --account every entry exports whatever its account, and no line says skipped."""
+        other = self.EXTERNAL[0]
+        r = self.run_all(self.repo([self.waiting(), self.external(other, held=False, collections=["items"])]),
+                         self.fetched_waiting(also=(other,)), self.out("worktree"))
+        self.assertEqual(r.returncode, 0, "a run without --account must exit 0. Output:\n" + shown(r))
+        self.assertIn("%s: changed 1" % other, verdict_lines(r),
+                      "an other-account entry did not export without the flag. Output:\n" + shown(r))
+        self.assertEqual([line for line in verdict_lines(r) if "skipped - account" in line], [],
+                         "a run without --account skipped an entry")
+
+    def label_run(self, label):
+        """--all --account LABEL over the waiting page and one other-account entry, both fetched: the run and its worktree."""
+        worktree, other = self.out("worktree"), self.EXTERNAL[0]
+        entries = [self.waiting(), self.external(other, held=False, collections=["items"])]
+        return self.run_all(self.repo(entries), self.fetched_waiting(also=(other,)), worktree, account=label), worktree
+
+    def test_an_account_label_no_entry_holds_is_one_unknown_line_and_exits_2(self):
+        """--account LABEL that no registry entry holds: one `unknown` line that names the label, exit 2, and nothing written,
+        though the fetched folders are there for the run to export."""
+        r, worktree = self.label_run("nobody")
+        unknown = [line for line in verdict_lines(r) if line.startswith("unknown")]
+        self.assertTrue(unknown, "a label no entry holds printed no `unknown` line. Output:\n" + shown(r))
+        self.assertIn("nobody", unknown[0], "the unknown line does not name the label. Output:\n" + shown(r))
+        self.assertEqual(len(verdict_lines(r)), 1, "a label no entry holds must print one line. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 2, "a label no entry holds must exit 2. Output:\n" + shown(r))
+        self.assertFalse(os.path.exists(worktree), "a run whose label matched no entry wrote into the copy")
+
+    def test_an_empty_account_label_is_one_unknown_line_and_exits_2(self):
+        """--account "" (an empty label), which no registry entry holds: one `unknown` line, exit 2, and nothing written."""
+        r, worktree = self.label_run("")
+        lines = verdict_lines(r)
+        unknown = [line for line in lines if line.startswith("unknown")]
+        self.assertTrue(unknown, "an empty label printed no `unknown` line. Output:\n" + shown(r))
+        self.assertEqual(len(lines), 1, "an empty label must print one line. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 2, "an empty label must exit 2. Output:\n" + shown(r))
+        self.assertFalse(os.path.exists(worktree), "a run whose empty label matched no entry wrote into the copy")
 
 
 if __name__ == "__main__":
