@@ -505,6 +505,8 @@ GHBATCHRED = os.path.join(ROOT, "ghbatchred")    # the same, with pull request 2
 GHBATCHCONTAIN = os.path.join(ROOT, "ghbatchcontain")  # the same as GHBATCH, but pull request 2's head holds pull request 1's head (compare "ahead")
 GHBATCHDIVERGED = os.path.join(ROOT, "ghbatchdiverged")  # the same as GHBATCH, and pull request 2's head does not hold pull request 1's (compare "diverged")
 GHBATCHBEHIND = os.path.join(ROOT, "ghbatchbehind")  # the same as GHBATCHCONTAIN, but pull request 1's head is behind main (compare "main...<head>" "behind")
+GHBATCHDRAFT = os.path.join(ROOT, "ghbatchdraft")    # the same as GHBATCH, but pull request 2 is a draft: CI skips a draft, so it never blocks
+GHBATCHBASE = os.path.join(ROOT, "ghbatchbase")      # the same as GHBATCH, but pull request 2 is on the base `release`, not main
 GHPINNED = os.path.join(ROOT, "ghpinned")        # the same, with the protection naming `gate`: STAMPREPO pins `checks`, and only the pin counts
 GHNOPROT = os.path.join(ROOT, "ghnoprot")        # no branch protection: pull request 2's pending check counts, whatever its name
 GHNOPROTDONE = os.path.join(ROOT, "ghnoprotdone")  # the same, with pull request 2's check passed
@@ -1348,6 +1350,8 @@ def build_fixtures():
     make_fake_gh(GHBATCHDIVERGED, "main", others=batch_other(("checks", "pending")), compares={"abc1234...pr-two-head": "diverged"})
     make_fake_gh(GHBATCHBEHIND, "main", others=batch_other(("checks", "pending")),
                  compares={"abc1234...pr-two-head": "ahead", "main...abc1234": "behind"})
+    make_fake_gh(GHBATCHDRAFT, "main", others=[dict(batch_other(("checks", "pending"))[0], draft=True)])
+    make_fake_gh(GHBATCHBASE, "main", others=[dict(batch_other(("checks", "pending"))[0], base="release")])
     # the guard's required names: a pinned list, or the branch protection (none, failed, or a list that is not pinned)
     make_fake_gh(GHPINNED, "main", others=batch_other(("checks", "pass"), ("gate", "pending")), required=["gate"])
     make_fake_gh(GHNOPROT, "main", others=batch_other(("sync", "pending")), protection="absent")
@@ -10115,6 +10119,62 @@ add("merge-batch: the merge tool of the host is allowed past an ignored running 
 add("merge-batch: a pinned merge.requiredChecks list is the required list, so a pending `gate` check on pr 2 does not block", "allow",
     tool="mcp__github__merge_pull_request", cwd=STAMPREPO, pullNumber=1, repo="x", owner="y", env_path=GHPINNED + os.pathsep + PY_PATH)
 
+# ---- merge-route: the routes the batch brake does not refuse yet (decision no-merge-during-batch-ci, its Limits). Each route
+# merges pull request 1, or writes main, while GHBATCH's pull request 2 runs CI: ready on main, required check pending, head
+# pr-two-head, which does not hold pull request 1's head. A refusal names pull request 2 and its pending check, offers `override`
+# (refuse() prints that line for every refusal the veto does not stop), and keeps `merge` and `push` out of its Remedy sentence.
+# The route cases are red on main, where the route is allowed or asked. The controls pin today's allow or ask, so they are green.
+# The checks on the refusal text and on the cost of one attempt are registered with the log checks, below the archive checks.
+ROUTE_ON = GHBATCH + os.pathsep + PY_PATH
+ROUTE_CARRIES = ("#2", "pending", "override")
+ROUTE_LACKS = ("No override lifts",)
+GH_API_MERGE = "gh api -X PUT repos/y/x/pulls/1/merge"
+MCP_AUTO = "mcp__github__enable_pr_auto_merge"
+# (label, tool, shell command, MCP input): one row per form the decision's Limits name, and each push form.
+ROUTE_DENIALS = (
+    ("gh api -X PUT", "Bash", GH_API_MERGE, None),
+    ("gh api --method PUT", "Bash", "gh api --method PUT repos/y/x/pulls/1/merge", None),
+    ("gh -R y/x api -X PUT", "Bash", "gh -R y/x api -X PUT repos/y/x/pulls/1/merge", None),
+    ("enable_pr_auto_merge", MCP_AUTO, None, {"owner": "y", "repo": "x", "pullNumber": 1}),
+    ("git push origin main", "Bash", VCS + " push origin main", None),
+    ("git push origin HEAD:main", "Bash", VCS + " push origin HEAD:main", None),
+    ("git push origin <sha>:refs/heads/main", "Bash", VCS + " push origin abc1234:refs/heads/main", None),
+)
+for _label, _tool, _command, _input in ROUTE_DENIALS:
+    _name = "merge-route: %s is refused while another ready pr's required check is pending" % _label
+    if _command is None:
+        add(_name, "deny", "merge-checks", carries=ROUTE_CARRIES, lacks=ROUTE_LACKS, tool=_tool, cwd=NOGIT,
+            env_path=ROUTE_ON, **_input)
+    else:
+        sh(_name, _command, "deny", "merge-checks", carries=ROUTE_CARRIES, lacks=ROUTE_LACKS, cwd=NOGIT, env_path=ROUTE_ON)
+# With no ready pull request on main, a push to main still asks as it does today.
+sh("merge-route: git push origin main with no ready pr on main still asks", VCS + " push origin main", "ask", PUSH_MAIN_RULE,
+   cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
+sh("merge-route: git push origin HEAD:main with no ready pr on main still asks", VCS + " push origin HEAD:main", "ask",
+   PUSH_MAIN_RULE, cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
+# Controls: a push of another branch is no merge, and a push to main whose busy pull request holds this head stays an ask.
+sh("merge-route: git push origin some-branch is allowed while another ready pr's required check is pending",
+   VCS + " push origin some-branch", "allow", silent=True, cwd=NOGIT, env_path=ROUTE_ON)
+sh("merge-route: git push origin abc1234:refs/heads/main still asks, and is not denied, when the busy pr holds this head",
+   VCS + " push origin abc1234:refs/heads/main", "ask", PUSH_MAIN_RULE, cwd=NOGIT,
+   env_path=GHBATCHCONTAIN + os.pathsep + PY_PATH)
+# Controls for a raw merge call: each lets the merge through where the brake does not hold it (the owner's Nov 1 reading for the
+# contained head, drafts, another base, and no ready pull request), and a GET or another PUT on the same API is no merge.
+for _label, _fixture, _command in (
+    ("no ready pr on main", GHMAIN, GH_API_MERGE),
+    ("a busy pr that is a draft", GHBATCHDRAFT, GH_API_MERGE),
+    ("a busy pr on another base", GHBATCHBASE, GH_API_MERGE),
+    ("a busy pr whose head holds this head", GHBATCHCONTAIN, GH_API_MERGE),
+    ("a GET of the merge endpoint, which reads and merges nothing", ROUTE_ON, "gh api repos/y/x/pulls/1/merge"),
+    ("a PUT to another pull request endpoint", ROUTE_ON, "gh api -X PUT repos/y/x/pulls/1/requested_reviewers"),
+):
+    sh("merge-route: gh api, %s, is allowed: %s" % (_label, _command), _command, "allow", silent=True, cwd=NOGIT,
+       env_path=_fixture + os.pathsep + PY_PATH)
+for _label, _fixture in (("no ready pr on main", GHMAIN), ("a busy pr that is a draft", GHBATCHDRAFT),
+                         ("a busy pr on another base", GHBATCHBASE), ("a busy pr whose head holds this head", GHBATCHCONTAIN)):
+    add("merge-route: enable_pr_auto_merge with %s is allowed" % _label, "allow", tool=MCP_AUTO, cwd=NOGIT,
+        pullNumber=1, repo="x", owner="y", env_path=_fixture + os.pathsep + PY_PATH, silent=True)
+
 _BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
 # ASK: the repo uses the merge tool, and the call skips it.
 sh("bare-merge: gh pr merge in a repo with a merge block asks",
@@ -15371,6 +15431,96 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a non-lane archive makes no
                          archive_non_lane_no_read_case))
 LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no file in the session's folders",
                          archive_writes_nothing_case))
+
+
+# ---- merge-route checks: the refusal text and the cost of each route the batch brake refuses (the merge-route cases above).
+WRITE_VERBS = ("PUT", "POST", "PATCH", "DELETE")
+
+
+def route_case(tool, command, tool_input, env_path):
+    """The payload fields of one route case, as decide() reads them: a shell route names its command, an MCP route its input."""
+    return {"raw": None, "tool": tool, "cwd": NOGIT, "session": None, "env_path": env_path,
+            "tool_input": {"command": command} if command is not None else dict(tool_input)}
+
+
+def route_remedy_problem(reason):
+    """'' when the Remedy sentence of a refusal names neither `merge` nor `push`, else what it names, with the words around it."""
+    if "Remedy:" not in reason:
+        return "no Remedy sentence"
+    remedy = reason.split("Remedy:", 1)[1].split("To allow this act", 1)[0].lower()
+    named = [word for word in ("merge", "push") if word in remedy]
+    if not named:
+        return ""
+    at = min(remedy.find(word) for word in named)
+    return "the Remedy names %s: ...%s..." % (" and ".join(repr(word) for word in named),
+                                              remedy[max(0, at - 30):at + 20].strip())
+
+
+def route_remedy_case():
+    """Each route the brake refuses (ROUTE_DENIALS) is refused, its Remedy names neither merge nor push, and it offers override."""
+    problems = []
+    for label, tool, command, tool_input in ROUTE_DENIALS:
+        got, reason = decide(route_case(tool, command, tool_input, ROUTE_ON))
+        if got != "deny":
+            problems.append("%s: %s, not deny" % (label, got))
+            continue
+        problem = route_remedy_problem(reason) or ("" if "override" in reason else "no override offer")
+        if problem:
+            problems.append("%s: %s" % (label, problem))
+    if problems:
+        return False, "; ".join(problems)[:300]
+    return True, "%d routes refused, each with a clean Remedy and an override offer" % len(ROUTE_DENIALS)
+
+
+def route_existing_merge_remedy_case():
+    """The merge tool's batch refusal, which the brake already has, names no merge in its Remedy. Every route prints this reason."""
+    got, reason = decide(route_case("mcp__github__merge_pull_request", None,
+                                    {"owner": "y", "repo": "x", "pullNumber": 1}, ROUTE_ON))
+    if got != "deny":
+        return False, "the merge tool was %s, not deny" % got
+    problem = route_remedy_problem(reason)
+    return (not problem), (problem or "the Remedy names neither merge nor push")
+
+
+def _guard_log_free(files):
+    """A file snapshot without the guard's own log: every refusal appends a line to it (guard_core.record)."""
+    return {path: digest for path, digest in files.items() if os.path.basename(path) != "guard.log"}
+
+
+def route_cost_case():
+    """One attempt of each route refuses after one batch read: one open pull-list call, no write call, and no file written
+    but the guard's own log (decision no-merge-during-batch-ci, Cost). The head's own reads are not counted here."""
+    problems = []
+    for index, (label, tool, command, tool_input) in enumerate(ROUTE_DENIALS):
+        folder = os.path.join(ROOT, "routecount-%d" % index)
+        make_fake_gh(folder, "main", others=batch_other(("checks", "pending")), count_file=os.path.join(folder, ARCHIVE_CALLS))
+        gh_calls_taken(folder)
+        before = _guard_log_free(tree_files(CFG))
+        got, _ = decide(route_case(tool, command, tool_input, folder + os.pathsep + PY_PATH))
+        after = _guard_log_free(tree_files(CFG))
+        calls = [json.loads(line) for line in gh_calls_taken(folder)]
+        lists = [argv for argv in calls if any(token.endswith("/pulls") for token in argv)]
+        writes = [argv for argv in calls if any(token in WRITE_VERBS for token in argv)]
+        if got != "deny":
+            problems.append("%s: %s, not deny, so the route is not judged" % (label, got))
+        if len(lists) != 1:
+            problems.append("%s: %d open pull-list reads, want 1" % (label, len(lists)))
+        if writes:
+            problems.append("%s: a write call %r" % (label, writes[0]))
+        changed = sorted(set(before) ^ set(after)) + sorted(p for p in before if p in after and before[p] != after[p])
+        if changed:
+            problems.append("%s: wrote %s" % (label, changed[0]))
+    if problems:
+        return False, "; ".join(problems)[:300]
+    return True, "%d routes: one open pull-list read each, no write call, no file written but the guard log" % len(ROUTE_DENIALS)
+
+
+LOG_CHECKS_EXTRA.append(("merge-route: every route the batch brake refuses has a clean Remedy and offers override",
+                         route_remedy_case))
+LOG_CHECKS_EXTRA.append(("merge-route: the merge tool's batch refusal names no merge in its Remedy",
+                         route_existing_merge_remedy_case))
+LOG_CHECKS_EXTRA.append(("merge-route: one attempt of each route reads the open pulls once, makes no write call, and writes no file",
+                         route_cost_case))
 
 
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
