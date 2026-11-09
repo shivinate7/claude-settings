@@ -1059,12 +1059,12 @@ MUTATIONS = [
      'role-model: fix check: reviewer on sonnet with Fix checkpoint on line one is denied'),
     # The fix check chain (decision hold-unsafe-after-round-3): the guard reads the pull request's review chain and asks the merge tool's own rule.
     ("role-model: the fix check lift never reads the chain, so a fix check on an ineligible chain walks past",
-     '            return fix_check_chain_hit(tool_input.get("prompt"), pointer)\n        if named > ROLE_MODEL_RANK.index(row):',
-     '            return "", "", False\n        if named > ROLE_MODEL_RANK.index(row):', "guard",
+     '            return fix_check_chain_hit(tool_input.get("prompt"), pointer)\n        if role == "reviewer" and named < top and any(kind.lower() == "round"',
+     '            return "", "", False\n        if role == "reviewer" and named < top and any(kind.lower() == "round"', "guard",
      "role-model: fix check chain: a fix check whose newest record has a fix check is refused, with the tool's reason"),
     ("role-model: a fix check chain read that raises is refused, so the guard fails closed on its own error",
-     '    except (Exception, SystemExit):\n        return "", pointer, True\n    return (ROLE_FIX_CHECK_REASON',
-     '    except (Exception, SystemExit):\n        return ROLE_FIX_CHECK_REASON % "the chain could not be read", head.group(1), False\n    return (ROLE_FIX_CHECK_REASON', "guard",
+     '        FIX_CHECK_MEMO[key] = ("", pointer, True)\n',
+     '        FIX_CHECK_MEMO[key] = (ROLE_FIX_CHECK_REASON % ("the chain could not be read", ROLE_FIX_CHECK_CHAIN_REMEDY), key[1], False)\n', "guard",
      "role-model: fix check chain: a chain read that raises fails open, allows the spawn and logs the unread row"),
     ("role-model: the fix check reads its pull request from a later line, so a PR named in the context is judged",
      '    pr = ROLE_FIX_CHECK_PR_LINE.match(rest[0]) if rest else None',
@@ -1074,6 +1074,30 @@ MUTATIONS = [
      '                                                      for kind, n in brief_markers(tool_input.get("prompt"))):\n            return "", "", False',
      '                                                      for kind, n in brief_markers(tool_input.get("prompt"))):\n            return fix_check_chain_hit(tool_input.get("prompt"), pointer)', "guard",
      "role-model: fix check chain: a round 2 reviewer brief reads no chain (control)"),
+    ("role-model: the fix check is judged below the round lift again, so a fix check with a Round 2 of 3 line skips its chain",
+     '        if role == "reviewer" and named < top and ("fixcheck", None) in marker_hits(tool_input.get("prompt")):\n'
+     '            return fix_check_chain_hit(tool_input.get("prompt"), pointer)\n'
+     '        if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS\n'
+     '                                                      for kind, n in brief_markers(tool_input.get("prompt"))):\n'
+     '            return "", "", False\n',
+     '        if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS\n'
+     '                                                      for kind, n in brief_markers(tool_input.get("prompt"))):\n'
+     '            return "", "", False\n'
+     '        if role == "reviewer" and named < top and ("fixcheck", None) in marker_hits(tool_input.get("prompt")):\n'
+     '            return fix_check_chain_hit(tool_input.get("prompt"), pointer)\n', "guard",
+     "role-model: fix check chain: a round 2 of 3 line below the PR line does not skip the chain, and a fixed chain is refused"),
+    ("role-model: a fix check with no model is judged after the agent file pin returns, so it is allowed on the pin",
+     '    if (role == "reviewer" and table.get(role) is not None and ("fixcheck", None) in marker_hits(tool_input.get("prompt"))\n',
+     '    if (False and role == "reviewer" and table.get(role) is not None and ("fixcheck", None) in marker_hits(tool_input.get("prompt"))\n', "guard",
+     "role-model: fix check chain: a fix check with no model on a fixed chain is refused, not allowed on the agent file's pin"),
+    ("role-model: the fix check judgment is not memoized, so a refused fix check reads its chain twice",
+     '    if key in FIX_CHECK_MEMO:\n        return FIX_CHECK_MEMO[key]\n',
+     '    if False:\n        return FIX_CHECK_MEMO[key]\n', "guard",
+     "role-model: fix check chain: a refused fix check reads its chain once on the refuse path"),
+    ("role-model: an empty fix diff gets the chain remedy, so it tells the orchestrator to brief the same head again",
+     'remedy = ROLE_FIX_CHECK_EMPTY_REMEDY if why == merge.FIX_CHECK_EMPTY else ROLE_FIX_CHECK_CHAIN_REMEDY',
+     'remedy = ROLE_FIX_CHECK_CHAIN_REMEDY', "guard",
+     "role-model: fix check chain: an empty fix diff's remedy says to push the fix, not to brief the newest head"),
     # The rule's one home is merge.fix_check_refusal; each mutant breaks one arm and the guard's chain cases read it.
     ("fix-check-rule: a newest record with a fix check no longer refuses",
      'if not last or last["head"] != reviewed_head or last["fix"]:', 'if not last or last["head"] != reviewed_head:', "mergefix",

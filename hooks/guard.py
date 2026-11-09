@@ -2985,10 +2985,17 @@ ROLE_REVIEWER_FIX_CHECK_REMEDY = ", or, when this brief is a fix check, open its
 ROLE_FIX_CHECK_PR_LINE = re.compile(r"[ \t]*PR[ \t]+(\d+)\b")
 ROLE_FIX_CHECK_HEAD_LINE = re.compile(r"(?m)^[ \t]*Reviewed head:[ \t]*([0-9a-f]{40})\b")
 ROLE_FIX_CHECK_REASON = (
-    "Rule (configuration): the merge tool would refuse to record this fix check: %s. Remedy: preview "
-    "`merge <pr> --review-record ... --fix-check` first, then brief the reviewer with the newest earlier record's Head as `Reviewed head:`. "
+    "Rule (configuration): the merge tool would refuse to record this fix check: %s. Remedy: %s "
     "(decision hold-unsafe-after-round-3)"
 )
+ROLE_FIX_CHECK_CHAIN_REMEDY = ("preview `merge <pr> --review-record ... --fix-check` first, then brief the reviewer with the newest earlier "
+                               "record's Head as `Reviewed head:`.")
+# An empty fix diff means the reviewed head is the live head: briefing that head again stays empty, so the fix is pushed first.
+ROLE_FIX_CHECK_EMPTY_REMEDY = "push the fix to the pull request first, then brief the reviewer with the head you reviewed as `Reviewed head:`."
+# One hook process judges one spawn call, and never_lifted judges it a second time on the refuse path. The memo holds the first judgment, keyed by
+# the pull request and the reviewed head the brief names, so that second judgment reuses it and the chain is read once. It is per process and
+# dies with it: a later spawn is a later process and reads fresh. A Workflow with several fix checks keys each by its own pull request and head.
+FIX_CHECK_MEMO = {}
 # An Explore has a second way past its row, so only its refusal names it, and only for a ranked model: the marker
 # does not lift a model the table does not rank.
 ROLE_EXPLORE_AUDIT_REMEDY = ", or, when this brief is an audit, open its first line with the `%s` marker"
@@ -3198,7 +3205,7 @@ def fix_check_chain_hit(brief, pointer):
     """(reason, matched, unread) for a fix check brief judged on its pull request's review chain. The pull request is read from the line after the
     first non-blank line only, the reviewed head from any later line, and the verdict is merge.fix_check_refusal's. A brief that names no pull
     request or no reviewed head, a tool that does not load and a read that raises each pass as unread (fail open). Cost: one chain read (gh REST
-    calls through the merge tool) per fix check spawn."""
+    calls through the merge tool) per fix check spawn, however many times the judgment runs in the process (FIX_CHECK_MEMO)."""
     lines = brief.split("\n") if isinstance(brief, str) else []
     first = next((i for i, line in enumerate(lines) if line.strip()), None)
     rest = lines[first + 1:] if first is not None else []
@@ -3206,12 +3213,19 @@ def fix_check_chain_hit(brief, pointer):
     head = ROLE_FIX_CHECK_HEAD_LINE.search("\n".join(rest))
     if not pr or not head:
         return "", pointer, True
+    key = (int(pr.group(1)), head.group(1))
+    if key in FIX_CHECK_MEMO:
+        return FIX_CHECK_MEMO[key]
     try:
-        records, live = fix_check_read(int(pr.group(1)))
-        why = merge_module().fix_check_refusal(records, head.group(1), live)
+        records, live = fix_check_read(key[0])
+        merge = merge_module()
+        why = merge.fix_check_refusal(records, key[1], live)
     except (Exception, SystemExit):
-        return "", pointer, True
-    return (ROLE_FIX_CHECK_REASON % why, head.group(1), False) if why else ("", "", False)
+        FIX_CHECK_MEMO[key] = ("", pointer, True)
+        return FIX_CHECK_MEMO[key]
+    remedy = ROLE_FIX_CHECK_EMPTY_REMEDY if why == merge.FIX_CHECK_EMPTY else ROLE_FIX_CHECK_CHAIN_REMEDY
+    FIX_CHECK_MEMO[key] = (ROLE_FIX_CHECK_REASON % (why, remedy), key[1], False) if why else ("", "", False)
+    return FIX_CHECK_MEMO[key]
 
 
 def role_model_one(tool_input):
@@ -3241,11 +3255,12 @@ def role_model_one(tool_input):
             return "", "", False
         if role == EXPLORE_ROLE and named < top and ("audit", None) in marker_hits(tool_input.get("prompt")):
             return "", "", False
+        # The fix check is judged before the round lift: a `Round N of 3` line below its first line does not take it past its chain.
+        if role == "reviewer" and named < top and ("fixcheck", None) in marker_hits(tool_input.get("prompt")):
+            return fix_check_chain_hit(tool_input.get("prompt"), pointer)
         if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS
                                                       for kind, n in brief_markers(tool_input.get("prompt"))):
             return "", "", False
-        if role == "reviewer" and named < top and ("fixcheck", None) in marker_hits(tool_input.get("prompt")):
-            return fix_check_chain_hit(tool_input.get("prompt"), pointer)
         if named > ROLE_MODEL_RANK.index(row):
             extra = ""
             if role == EXPLORE_ROLE and named < top:
@@ -3258,7 +3273,13 @@ def role_model_one(tool_input):
                 extra += ", or " + BRIEF_LITERAL_REMEDY
             return ROLE_MODEL_REASON % extra, model, False
         return "", "", False
-    if os.environ.get(ROLE_MODEL_ENV, "").strip():
+    default_model = os.environ.get(ROLE_MODEL_ENV, "").strip()
+    # A fix check with no model field runs on the default model or the agent file's pin, so it is judged on its chain before either returns.
+    # A default that ranks top (Opus) is left to the ceiling, as a spawn that names Opus is.
+    if (role == "reviewer" and table.get(role) is not None and ("fixcheck", None) in marker_hits(tool_input.get("prompt"))
+            and (not default_model or role_model_rank(default_model) != len(ROLE_MODEL_RANK) - 1)):
+        return fix_check_chain_hit(tool_input.get("prompt"), pointer)
+    if default_model:
         return "", "", False
     pinned = role_has_model_pin(pointer, role)
     if pinned is None:
