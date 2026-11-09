@@ -2838,10 +2838,10 @@ const FOLD_ROWS = {
 };
 // Opens the page with the one folded row of the kind, seen on an earlier visit so the answer folds at load. A restore row is
 // opened from the dismissed list, as the owner opens it. Null when there is no browser, so the case returns without a verdict.
-async function foldedRowPage(t, kind, width) {
+async function foldedRowPage(t, kind, width, scheme = "light") {
   const { ask, reply } = FOLD_ROWS[kind];
   const asks = { [ask.id]: ask, ...(reply ? { [reply.id]: reply } : {}) };
-  const page = await open(t, { dbExtra: { asks }, storage: { "waiting.askSeen": "2026-10-31T00:00:00Z" }, viewport: { width, height: 800 } }); if (!page) return null;
+  const page = await open(t, { dbExtra: { asks }, storage: { "waiting.askSeen": "2026-10-31T00:00:00Z" }, viewport: { width, height: 800 }, scheme }); if (!page) return null;
   if (kind === "restore") { await mustHave(page, "#askDismissed", "Show dismissed asks control"); await page.click("#askDismissed"); }
   await mustHave(page, `#row-${ask.id}`, `the folded row for ${kind}`);
   return page;
@@ -2913,6 +2913,179 @@ for (const kind of Object.keys(FOLD_ROWS)) {
     const g = await foldedDate(page, FOLD_ROWS[kind].ask.id);
     foldedScope(g, kind, 440);
     assert.equal(g.lines, 1, `the date line wraps to ${g.lines} lines at 440 wide, not one`);
+  });
+}
+
+// ---------------------------------------------------------------- press rows at narrow widths and large text
+// Contract: docs/design/press-row-reflow-notes.md, sections 0, 2 and 4. The mockup is docs/design/press-row-reflow.html, option
+// "Press under the text, at its start". A side press row is a folded row with Dismiss or Restore. The waiting-reply row's press is
+// Show answer, which has no side press. The text column is the title's box, which the row's grid sizes. The row text is the title's
+// runs, clipped to that box, and the date's runs. Text zoom sets html's font size to 200%, as the mockup's zoom does.
+const SCHEMES = ["light", "dark"];
+const SIDE_KINDS = ["dismiss", "restore"];
+const PRESS_KINDS = ["dismiss", "restore", "wait"];
+const meets = (a, b) => Math.min(a.r, b.r) - Math.max(a.l, b.l) > 0.5 && Math.min(a.b, b.b) - Math.max(a.t, b.t) > 0.5;
+const spanOf = (b) => `${Math.round(b.l)} to ${Math.round(b.r)} px`;
+const zoomText = (page) => page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+// Boxes in the page's own px: the row, its title's column, its press, its text runs, the Ask box's two presses, and the page's scroll width.
+const pressGeo = (page, id) => page.evaluate((id) => {
+  const box = (r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom });
+  const li = document.getElementById("row-" + id), row = li.querySelector(".frow"), title = row.querySelector(".ftext"), when = row.querySelector(".fwhen");
+  const press = li.querySelector(":scope > button.btn") || row.querySelector(".fgo");
+  const tb = box(title.getBoundingClientRect());
+  const runs = (el, clip) => {
+    const out = [], walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      const rg = document.createRange(); rg.selectNodeContents(n);
+      for (const r of rg.getClientRects()) {
+        const b = clip ? { l: Math.max(r.left, tb.l), t: Math.max(r.top, tb.t), r: Math.min(r.right, tb.r), b: Math.min(r.bottom, tb.b) } : box(r);
+        if (b.r - b.l > 0.5 && b.b - b.t > 0.5) out.push(b);
+      }
+    }
+    return out;
+  };
+  return { li: box(li.getBoundingClientRect()), row: box(row.getBoundingClientRect()), title: tb, press: box(press.getBoundingClientRect()),
+    titleSize: parseFloat(getComputedStyle(title).fontSize), rootSize: parseFloat(getComputedStyle(document.documentElement).fontSize),
+    text: runs(title, true).concat(runs(when, false)), add: box(document.getElementById("askAdd").getBoundingClientRect()),
+    send: box(document.getElementById("askSend").getBoundingClientRect()), scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth };
+}, id);
+
+// Add to list and Send ask do not overlap, and no press covers the row's text, at 280, 240 and 180 wide.
+for (const width of [280, 240, 180]) for (const scheme of SCHEMES) {
+  test(`press rows, ${scheme}: at ${width} wide Add to list and Send ask do not overlap`, async (t) => {
+    const page = await foldedRowPage(t, "dismiss", width, scheme); if (!page) return;
+    const g = await pressGeo(page, FOLD_ROWS.dismiss.ask.id);
+    assert.ok(!meets(g.add, g.send), `Add to list (${spanOf(g.add)}) and Send ask (${spanOf(g.send)}) overlap at ${width} wide`);
+  });
+  for (const kind of PRESS_KINDS) test(`press rows, ${scheme}: at ${width} wide the ${FOLD_ROWS[kind].press} press does not cover the ${kind} row's text`, async (t) => {
+    const page = await foldedRowPage(t, kind, width, scheme); if (!page) return;
+    const id = FOLD_ROWS[kind].ask.id;
+    foldedScope(await foldedDate(page, id), kind, width);
+    const g = await pressGeo(page, id);
+    const hit = g.text.find((b) => meets(b, g.press));
+    assert.ok(!hit, `the ${FOLD_ROWS[kind].press} press at ${spanOf(g.press)} covers the row's text at ${hit && spanOf(hit)}, at ${width} wide`);
+  });
+}
+
+// The text column beside a side press is at least 8em of the root font size at 280 and 240 wide, and at least 90 px at 180 (the mockup's floor).
+for (const width of [280, 240]) for (const kind of SIDE_KINDS) for (const scheme of SCHEMES) {
+  test(`press rows, ${scheme}: at ${width} wide the ${kind} row's text column beside its press is at least 8em`, async (t) => {
+    const page = await foldedRowPage(t, kind, width, scheme); if (!page) return;
+    const id = FOLD_ROWS[kind].ask.id;
+    foldedScope(await foldedDate(page, id), kind, width);
+    const g = await pressGeo(page, id);
+    const col = g.title.r - g.title.l, need = 8 * g.rootSize;
+    assert.ok(col >= need, `the text column beside the ${FOLD_ROWS[kind].press} press is ${Math.round(col)} px at ${width} wide, not at least ${need} px (8em)`);
+  });
+}
+for (const kind of SIDE_KINDS) for (const scheme of SCHEMES) {
+  test(`press rows, ${scheme}: at 180 wide the ${kind} row's text column beside its press is at least 90 px`, async (t) => {
+    const page = await foldedRowPage(t, kind, 180, scheme); if (!page) return;
+    const id = FOLD_ROWS[kind].ask.id;
+    foldedScope(await foldedDate(page, id), kind, 180);
+    const g = await pressGeo(page, id);
+    const col = g.title.r - g.title.l;
+    assert.ok(col >= 90, `the text column beside the ${FOLD_ROWS[kind].press} press is ${Math.round(col)} px at 180 wide, not at least 90 px`);
+  });
+}
+
+// At 180 wide the page does not scroll sideways: a row or the Ask box must not run past the window.
+for (const scheme of SCHEMES) {
+  test(`press rows, ${scheme}: at 180 wide the page does not scroll sideways`, async (t) => {
+    const page = await foldedRowPage(t, "dismiss", 180, scheme); if (!page) return;
+    const g = await pressGeo(page, FOLD_ROWS.dismiss.ask.id);
+    assert.ok(g.scrollW <= g.innerW, `the page is ${g.scrollW} px wide in a ${g.innerW} px window at 180 wide`);
+  });
+}
+
+// With the root font size doubled at 360 wide, the title's font size doubles, the column beside a side press is at least 8em of the
+// doubled root, and no press covers the row's text or the other Ask box press. Sizes are px, so the title does not grow with the root.
+for (const scheme of SCHEMES) {
+  test(`press rows, ${scheme}: with the root font size doubled at 360 wide, the row title's font size doubles`, async (t) => {
+    const page = await foldedRowPage(t, "dismiss", 360, scheme); if (!page) return;
+    const id = FOLD_ROWS.dismiss.ask.id;
+    const before = await pressGeo(page, id);
+    await zoomText(page);
+    const g = await pressGeo(page, id);
+    assert.equal(g.rootSize, 2 * before.rootSize, `the root font size is ${g.rootSize} px after the zoom, not ${2 * before.rootSize} px`);
+    assert.equal(g.titleSize, 2 * before.titleSize, `the row title is ${g.titleSize} px with the root font size doubled, not ${2 * before.titleSize} px, at 360 wide`);
+  });
+  for (const kind of SIDE_KINDS) test(`press rows, ${scheme}: with the root font size doubled at 360 wide, the ${kind} row's text column beside its press is at least 8em`, async (t) => {
+    const page = await foldedRowPage(t, kind, 360, scheme); if (!page) return;
+    const id = FOLD_ROWS[kind].ask.id;
+    await zoomText(page);
+    foldedScope(await foldedDate(page, id), kind, 360);
+    const g = await pressGeo(page, id);
+    const col = g.title.r - g.title.l, need = 8 * g.rootSize;
+    assert.ok(col >= need, `the text column beside the ${FOLD_ROWS[kind].press} press is ${Math.round(col)} px with the root font size at ${g.rootSize} px, not at least ${need} px (8em)`);
+  });
+  for (const kind of PRESS_KINDS) test(`press rows, ${scheme}: with the root font size doubled at 360 wide, the ${FOLD_ROWS[kind].press} press does not cover the ${kind} row's text`, async (t) => {
+    const page = await foldedRowPage(t, kind, 360, scheme); if (!page) return;
+    const id = FOLD_ROWS[kind].ask.id;
+    await zoomText(page);
+    foldedScope(await foldedDate(page, id), kind, 360);
+    const g = await pressGeo(page, id);
+    const hit = g.text.find((b) => meets(b, g.press));
+    assert.ok(!hit, `the ${FOLD_ROWS[kind].press} press at ${spanOf(g.press)} covers the row's text at ${hit && spanOf(hit)}, at 360 wide with the root font size doubled`);
+  });
+  test(`press rows, ${scheme}: with the root font size doubled at 360 wide, Add to list and Send ask do not overlap`, async (t) => {
+    const page = await foldedRowPage(t, "dismiss", 360, scheme); if (!page) return;
+    await zoomText(page);
+    const g = await pressGeo(page, FOLD_ROWS.dismiss.ask.id);
+    assert.ok(!meets(g.add, g.send), `Add to list (${spanOf(g.add)}) and Send ask (${spanOf(g.send)}) overlap at 360 wide with the root font size doubled`);
+  });
+}
+
+// Controls at 1440, 820, 390 and 360 wide, pinned from the page as it draws now so the fix keeps them. Each row's box is [left, right, height] of the folded
+// row's li; the row and press are [right, top offset from the li, height] and [left, right, top offset, height]. A box that moves fails by
+// name. The Ask box presses are [Add left, Add right, Send left, Send right]. Tolerance is 1 px.
+const PINS = {
+  1440: {
+    dismiss: { li: [424, 1284, 50], row: [1151, 1, 48], press: [1155, 1275, 3, 44] },
+    restore: { li: [424, 1284, 50], row: [1147, 1, 48], press: [1151, 1275, 3, 44] },
+    wait: { li: [424, 1284, 128], row: [1283, 1, 48], press: [1173, 1267, 14, 22] },
+  },
+  820: {
+    dismiss: { li: [16, 804, 50], row: [671, 1, 48], press: [675, 795, 3, 44] },
+    restore: { li: [16, 804, 50], row: [667, 1, 48], press: [671, 795, 3, 44] },
+    wait: { li: [16, 804, 128], row: [803, 1, 48], press: [693, 787, 14, 22] },
+  },
+  390: {
+    dismiss: { li: [16, 374, 115], row: [241, 1, 113], press: [245, 365, 35, 44] },
+    restore: { li: [16, 374, 115], row: [237, 1, 113], press: [241, 365, 36, 44] },
+    wait: { li: [16, 374, 218], row: [373, 1, 113], press: [263, 357, 46, 23] },
+  },
+  360: {
+    dismiss: { li: [16, 344, 115], row: [211, 1, 113], press: [215, 335, 36, 44] },
+    restore: { li: [16, 344, 115], row: [207, 1, 113], press: [211, 335, 35, 44] },
+    wait: { li: [16, 344, 218], row: [343, 1, 113], press: [233, 327, 47, 22] },
+  },
+};
+const PIN_ASK = { 1440: [1005, 1117, 1129, 1267], 820: [525, 637, 649, 787], 390: [33, 144, 219, 357], 360: [33, 144, 189, 327] };
+const near = (got, pin) => got.length === pin.length && got.every((v, i) => Math.abs(v - pin[i]) <= 1);
+for (const width of [1440, 820, 390, 360]) for (const kind of PRESS_KINDS) for (const scheme of SCHEMES) {
+  test(`press rows, ${scheme}: at ${width} wide the ${kind} row and its press keep their boxes`, async (t) => {
+    const page = await foldedRowPage(t, kind, width, scheme); if (!page) return;
+    const id = FOLD_ROWS[kind].ask.id;
+    foldedScope(await foldedDate(page, id), kind, width);
+    const g = await pressGeo(page, id), pin = PINS[width][kind];
+    const got = {
+      li: [g.li.l, g.li.r, g.li.b - g.li.t],
+      row: [g.row.r, g.row.t - g.li.t, g.row.b - g.row.t],
+      press: [g.press.l, g.press.r, g.press.t - g.li.t, g.press.b - g.press.t],
+    };
+    for (const part of ["li", "row", "press"]) {
+      const v = got[part].map(Math.round);
+      assert.ok(near(v, pin[part]), `the ${kind} row's ${part} is [${v}] at ${width} wide, not the pinned [${pin[part]}]`);
+    }
+  });
+}
+for (const width of [1440, 820, 390, 360]) for (const scheme of SCHEMES) {
+  test(`press rows, ${scheme}: at ${width} wide Add to list and Send ask keep their x positions`, async (t) => {
+    const page = await foldedRowPage(t, "dismiss", width, scheme); if (!page) return;
+    const g = await pressGeo(page, FOLD_ROWS.dismiss.ask.id);
+    const v = [g.add.l, g.add.r, g.send.l, g.send.r].map(Math.round);
+    assert.ok(near(v, PIN_ASK[width]), `the Ask box presses are at x [${v}] at ${width} wide, not the pinned [${PIN_ASK[width]}]`);
   });
 }
 
