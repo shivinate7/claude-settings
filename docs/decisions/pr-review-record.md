@@ -98,12 +98,13 @@ Rule `pr-review-record`, in `hooks/guard.py` (PreToolUse).
   - a body from `$(printf ...)` or `$(echo ...)`, since only a body of exactly `$(cat FILE)` is read;
   - a stdin body that is neither a heredoc nor piped from `cat FILE`;
   - a `gh api --input` body;
-  - a post to a full-URL endpoint, `gh api https://api.github.com/repos/...` (an edit by full URL is judged, see the edit bullet).
+  - a post to a full-URL endpoint, `gh api https://api.github.com/repos/...` (an edit by full URL is judged, see the edit bullet);
   - an unquoted `$(...)` route with a `|`, `;` or `&&` inside, such as `comments/$(cat idfile | head -1)`, since `split_segments` (`hooks/guard_core.py`) cuts the command there;
   - a backtick id, such as ``comments/`cat idfile` ``;
   - a `$(...)` id that holds a `)`, such as `$(echo $(cat idfile))` or a jq `select(...)`, since `_EDIT_ID` (`hooks/guard.py`) cannot pass one;
   - a post route with `$(...)` in the number or the repo, such as `repos/y/x/issues/$(cat n)/comments`, since `_COMMENTS_ROUTE` (`hooks/guard.py`) takes none.
-  - Main allows all four forms too. Home of their fix: step `record-guard-wrapper-forms`.
+
+  Main allows the last four forms too. Step `record-guard-wrapper-forms` is the home of their fix.
 
 ## The limits
 
