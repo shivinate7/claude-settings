@@ -146,13 +146,14 @@ def _list_rows(body):
 
 
 def session_rows_read(transcript):
-    """(records, listing, unknown): `records` maps each session id this transcript has seen to (tags, archived), the
+    """(records, listing, unknown, listed): `records` maps each session id this transcript has seen to (tags, archived), the
     newest sight deciding. A sight is a row of a list_sessions result, a get_session result, or a create_session call
     whose result names the id (its tags are the call's input.tags). A session is archived when its newest sight has an
     ARCHIVED session_status, or an archive_session call on it, answered without error, follows that sight; an
     unarchive_session call answered without error makes it live again. `unknown` is the ids whose tags a
     set_session_tags call may have changed after their newest sight (a call with no readable id list may have named
     any of them), because the call's result does not say what the tags are now.
+    `listed` is the ids that are rows of a page of a whole read: a get_session sight or a row of a partial read adds none.
     `listing` is LIST_FULL when the transcript holds a whole list_sessions read: a later partial read does not cancel
     it, because every session it missed is a sight in `records`. A read is whole when it is a chain: a read with no
     cursor, then reads whose after_id is the previous page's last row id, the last with has_more false (the tool caps
@@ -162,6 +163,7 @@ def session_rows_read(transcript):
     does not finish a chain is LIST_MORE; a body that is not a whole list page is LIST_BAD; no read is LIST_NONE.
     Cost: one read of the transcript; no file written, no process."""
     records, listing, whole, unknown = {}, LIST_NONE, False, set()
+    listed, chain_ids = set(), set()  # the ids of the whole chains so far; the ids of the chain being read
     chain = None  # the last row id of the newest page of a chain that no filter or stray cursor has broken, else None
     uses = {}  # tool_use id -> (kind, the id acted on, or the (after_id, partial) of a list read) of a call whose result is judged
     creates = {}  # tool_use id -> the tags a create_session call set
@@ -223,7 +225,7 @@ def session_rows_read(transcript):
                         try:
                             rows, more = _list_rows(body)
                         except (ValueError, KeyError, TypeError, AttributeError):
-                            listing, chain = LIST_BAD, None
+                            listing, chain, chain_ids = LIST_BAD, None, set()
                             continue
                         for sid, tags, archived in rows:
                             records[sid] = (tags, archived)
@@ -231,9 +233,12 @@ def session_rows_read(transcript):
                         after, partial = uses[key][1]
                         # A page opens a chain with no cursor, or continues it with the previous page's last row id.
                         linked = not partial and (after is None or (chain is not None and after == chain))
+                        chain_ids = (chain_ids if after is not None else set()) | {sid for sid, _, _ in rows} if linked else set()
                         if linked and not more:
                             listing, whole, chain = LIST_FULL, True, None
+                            listed |= chain_ids
+                            chain_ids = set()
                         else:
                             listing = LIST_MORE
                             chain = rows[-1][0] if linked and rows else None
-    return records, LIST_FULL if whole else listing, unknown
+    return records, LIST_FULL if whole else listing, unknown, listed

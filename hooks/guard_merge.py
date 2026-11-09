@@ -1184,8 +1184,8 @@ STEP_DUP_PR_REASON = (
     "show, and this would start a second one. Send the work to that lane, or close the pull request, then retry." + STEP_DUP_TAIL
 )
 STEP_DUP_RECORD_REASON = (
-    "the step record of %s on origin/roadmap names %s as its lane, and the list read did not show that session as a "
-    "carrier. Send the work to that session, or fix the record's lane field, then retry." + STEP_DUP_TAIL
+    "the step record of %s on origin/roadmap names %s as its lane, and no row of the whole list read shows that "
+    "session. Send the work to that session, or fix the record's lane field, then retry." + STEP_DUP_TAIL
 )
 STEP_DUP_UNKNOWN_REASON = (
     "this session's transcript does not prove that no other live lane carries cs-step:%s in this repo: it holds no "
@@ -1244,7 +1244,7 @@ def step_dup_hit(tool: str, tool_input, transcript: str, cwd: str = ""):
     try:  # cost: one transcript read per brief or create with a step
         if not transcript:
             raise ValueError("no transcript")
-        records, listing, retagged = own_session.session_rows_read(transcript)
+        records, listing, retagged, listed = own_session.session_rows_read(transcript)
         mine = set()  # the steps the brief's target carries itself
         if tool == BRIEF_TOOL:
             if not isinstance(target, str) or target not in records or target in retagged:
@@ -1266,7 +1266,7 @@ def step_dup_hit(tool: str, tool_input, transcript: str, cwd: str = ""):
                         return "deny", "lane step " + step + " carried by " + sid, STEP_DUP_REASON % (sid, step)
         if not repos or listing != own_session.LIST_FULL or any(not records[sid][1] for sid in retagged if sid != target):
             raise ValueError("not proved")
-        held = _step_held_hit(steps, subject, records.get(target, ([], False))[0], target, cwd)
+        held = _step_held_hit(steps, subject, records.get(target, ([], False))[0], target, cwd, listed)
         if held:
             return held
     except (Exception, SystemExit):
@@ -1274,11 +1274,13 @@ def step_dup_hit(tool: str, tool_input, transcript: str, cwd: str = ""):
     return None
 
 
-def _step_held_hit(steps, subject, target_tags, target, cwd: str):
+def _step_held_hit(steps, subject, target_tags, target, cwd: str, rows=frozenset()):
     """("ask", matched, reason) when a step is held by a lane the list read did not show, else None; raises when a read fails.
     An open pull request in a cs-repo of `subject` whose head is lane_head_refs(step), unless the target's own tags
-    carry the step, or the step record's `lane` field names a session id other than `target`. The pull request read
-    is open_pull_rows, the one reader archive_hit uses; the record is read from override.STEP_REF."""
+    carry the step, or the step record's `lane` field names a session id other than `target` that is not in `rows`
+    (a row of the whole list read, which already showed whether that session carries the step, so the record adds
+    nothing). The pull request read is open_pull_rows, the one reader archive_hit uses; the record is read from
+    override.STEP_REF."""
     import override  # lazy: holds the one name of the record branch and its step folder
     module = merge_module()
     if module is None:
@@ -1304,7 +1306,7 @@ def _step_held_hit(steps, subject, target_tags, target, cwd: str):
             raise ValueError("the step record could not be read")
         lane = json.loads(shown.stdout).get("lane")
         # A lane field that begins with `coordinator` names the router the step is sent through, never the lane.
-        named = [i for i in re.findall(r"session_[A-Za-z0-9_-]+", lane) if i != target] \
+        named = [i for i in re.findall(r"session_[A-Za-z0-9_-]+", lane) if i != target and i not in rows] \
             if isinstance(lane, str) and not lane.strip().lower().startswith("coordinator") else []
         if named:
             return ("ask", "lane step " + step + " recorded for " + named[0], STEP_DUP_RECORD_REASON % (step, named[0]))
