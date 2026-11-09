@@ -15908,10 +15908,10 @@ rr_allow("a deletion push, git push origin :feat, sends no commit, so the gap at
          VCS + " push origin :feat", RR_PLAIN)
 rr_refuse("two refspecs, git push origin clean:clean topic:topic, where only the second names the gap",
           VCS + " push origin clean:clean topic:topic", RR_CLEANREF)
-# Known limit: `--all` names no refspec, and it sends main, so push-main asks before the red-run check. The check
-# reads no branch that `--all` sends, the gapped one included, and the ask is what stands.
-sh("red-run: known limit: git push --all origin asks on push-main first, so red-run reads none of the branches it sends",
-   VCS + " push --all origin", "ask", "push-main", cwd=RR_PLAIN)
+# Known limit: `--all` names no refspec, so red-run reads no branch it sends, the gapped one included. Main's
+# push-main verdict allows `--all` on this fixture too (measured on main's guard, 624dcc188), so the allow stands.
+rr_allow("known limit: git push --all origin is allowed, and red-run reads none of the branches it sends",
+         VCS + " push --all origin", RR_PLAIN)
 rr_allow("known limit: git push --tags origin is allowed, though the tag it sends names the gap",
          VCS + " push --tags origin", RR_TAG)
 
@@ -15983,7 +15983,9 @@ rr_allow("commit -m m, then cd /tmp and echo, with no push in the call, and a st
 # gives the spawns (see record_push_cost_case).
 RR_COST_LABEL = ("red-run: a lone commit with no push in its call makes the git spawns pinned before red-run, "
                  "and no git diff --cached --numstat")
-RR_COST_SPAWNS = {"diff": 1, "ls-tree": 3, "rev-parse": 4, "symbolic-ref": 1}
+# rev-parse 3: main's _repo_of reads a commit's top folder once, where the branch read it twice (measured on main's
+# guard, 624dcc188). The count is main's; the red-run check adds no git spawn for a lone commit.
+RR_COST_SPAWNS = {"diff": 1, "ls-tree": 3, "rev-parse": 3, "symbolic-ref": 1}
 
 
 def rr_commit_cost_case():
@@ -21342,7 +21344,9 @@ def _author_test_commit(w):
     """Cut at main. The test-author edits its test file and commits: an ordinary commit, no merge."""
     write(os.path.join(w, TEST_A), BASE_FILES[TEST_A] + "def test_author_ordinary():\n    assert 6\n\n")
     _must(w, "add", "-A")
-    _must(w, *IDENT, "commit", "-q", "-m", "test-author case")
+    # The push of this test commit is judged by red-run, which needs a valid Red-run line (decision
+    # red-run-trailer-on-test-commits). The case's claim is the author-diff silence, so the fixture carries one.
+    _must(w, *IDENT, "commit", "-q", "-m", "test-author case", "-m", "Red-run: none: fixture")
 
 
 def _author_merge_test_edit(w):
