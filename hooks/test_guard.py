@@ -11722,6 +11722,7 @@ VARIABLE_POST_ROUTES = (
     ("backticks with a pipe", "repos/y/x/issues/`echo 12 | cat`/comments"),
     ("backticks with a semicolon", "repos/y/x/issues/`echo 12; echo 12`/comments"),
     ("backticks with and", "repos/y/x/issues/`true && echo 12`/comments"),
+    ("a backtick in the repo beside literal text", "repos/o/`cat n`/issues/12/comments"),
 )
 # The five plain-id forms run in the loop above, so the list starts empty.
 VARIABLE_FORMS = ()
@@ -12167,6 +12168,10 @@ UNREADABLE_ROUTE_FORMS = (
     ("a command substitution in the id", "\"repos/y/x/issues/comments/$(echo %d)\"" % REVIEW_COMMENT_ID),
     ("an unquoted command substitution with a space in the id", "repos/y/x/issues/comments/$(cat idfile)"),
     ("an unquoted gh call in the id", "repos/y/x/issues/comments/$(gh api repos/y/x/issues/%d/comments --jq .[0].id)" % REVIEW_PR),
+    ("a command substitution in the owner, no space", "repos/$(o)/r/issues/comments/5"),
+    ("shell variables in the owner and the repo", "repos/$OWNER/$NAME/issues/comments/5"),
+    ("a shell variable in the repo beside literal owner text", "repos/o/$R/issues/comments/5"),
+    ("a fully quoted route with a substitution in the repo", "\"repos/o/$(cat n)/issues/comments/5\""),
 )
 for _what, _route in EDIT_ROUTE_FORMS + UNREADABLE_ROUTE_FORMS:
     bash_post("review-record: a marked edit is refused, %s, gh api -X PATCH" % _what,
