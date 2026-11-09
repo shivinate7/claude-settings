@@ -13530,8 +13530,9 @@ class ReviewRecordWrite(ReviewEnv):
                 self.assertNotIn(REVIEW_MARKER, out)
 
 class ReviewDocsOnlyDiff(ReviewEnv):
-    """A docs-only review record reads the pull request's changed paths and refuses when one is not a doc. A doc is a .md path that is not
-    a rule file. Cases 1-5, 7 and 8 fail on a merge.py that never reads the diff. Cases 6 and 9 are controls: they hold on both."""
+    """A docs-only review record reads the pull request's changed paths and refuses when one is not a doc. A doc is a .md file under docs/,
+    or the root README.md, matched without regard to letter case (decision docs-only-prs-skip-review). Any other path is not a doc, a .md
+    included: a file that steers behaviour is a rule."""
 
     def docs_flags(self, *extra):
         """The docs-only review flags with --head set to the live head, then `extra`. A docs-only change has no rounds, so no --round."""
@@ -13625,6 +13626,79 @@ class ReviewDocsOnlyDiff(ReviewEnv):
         rc, out, err = self.run_docs()
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only", "the printed record is not docs-only")
+
+    def assert_printed(self, rc, out, err):
+        """A printed docs-only record: exit 0, and the record on stdout reads docs-only."""
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only", "the printed record is not docs-only")
+
+    def test_a_claude_rules_file_refuses_the_docs_only_record(self):
+        rc, out, err = self.run_docs(".claude/rules/hooks.md")
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_refused(rc, out, err)
+        self.assertIn(".claude/rules/hooks.md", err, "the refusal does not name the rule file")
+
+    def test_a_hook_prompt_refuses_the_docs_only_record(self):
+        rc, out, err = self.run_docs("hooks/precompact_handoff_prompt.md")
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_refused(rc, out, err)
+        self.assertIn("hooks/precompact_handoff_prompt.md", err, "the refusal does not name the hook prompt")
+
+    def test_a_skill_file_refuses_the_docs_only_record(self):
+        rc, out, err = self.run_docs("skills/waiting-page/SKILL.md")
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_refused(rc, out, err)
+        self.assertIn("skills/waiting-page/SKILL.md", err, "the refusal does not name the skill file")
+
+    def test_an_agent_file_refuses_the_docs_only_record(self):
+        rc, out, err = self.run_docs("agents/builder.md")
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_refused(rc, out, err)
+        self.assertIn("agents/builder.md", err, "the refusal does not name the agent file")
+
+    def test_a_nested_readme_refuses_the_docs_only_record(self):
+        # Only the root README.md is a doc. A README in a folder steers nothing, but it is not under docs/ either.
+        rc, out, err = self.run_docs("hooks/README.md")
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_refused(rc, out, err)
+        self.assertIn("hooks/README.md", err, "the refusal does not name the nested README")
+
+    def test_a_non_md_file_under_docs_refuses_the_docs_only_record(self):
+        # A folder does not make a doc: the file must be .md too. The old check refuses this path as well, so this guards the new rule.
+        rc, out, err = self.run_docs("docs/design/page.html")
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_refused(rc, out, err)
+        self.assertIn("docs/design/page.html", err, "the refusal does not name the docs/ file that is not .md")
+
+    def test_a_space_around_the_name_refuses_the_docs_only_record(self):
+        # A space is part of the name, so neither path is under docs/. The leading one is the red: the old check reads it as a doc, since it
+        # ends in .md. The trailing one stays a guard against a whitespace strip.
+        for path in (" docs/a.md", "docs/a.md "):
+            with self.subTest(path=path):
+                rc, out, err = self.run_docs(path)
+                self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+                self.assert_refused(rc, out, err)
+                self.assertIn(path, err, "the refusal does not name the path with the space")
+
+    def test_a_docs_md_prints_the_record(self):
+        rc, out, err = self.run_docs("docs/a.md")
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_printed(rc, out, err)
+
+    def test_an_upper_case_docs_md_prints_the_record(self):
+        rc, out, err = self.run_docs("DOCS/Notes.MD")
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_printed(rc, out, err)
+
+    def test_a_root_readme_alone_prints_the_record(self):
+        rc, out, err = self.run_docs("README.md")
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_printed(rc, out, err)
+
+    def test_a_docs_md_beside_a_records_file_prints_the_record(self):
+        rc, out, err = self.run_docs("docs/decisions/x.md", "docs/records.md")
+        self.assertEqual(self.host.files_calls, [7], "the docs-only record never read the pull request's files")
+        self.assert_printed(rc, out, err)
 
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
