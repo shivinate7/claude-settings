@@ -10739,6 +10739,9 @@ DUP_UPPER_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:DUP-STEP-A", "
 DUP_OTHER_LANE = "session_DUPOTHERLANE01"
 DUP_OTHER_STEP_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:dup-step-c", "cs-repo:o/r"]  # that session, on another step
 DUP_OTHER_STEER = (DUP_OTHER_LANE, "send")  # the reason names the live session that carries the step, and says to send it there
+# The record check's reason names the session whose step record it read. The asks below pin that fragment, so an ask that
+# comes from the unknown path, which names no session, does not pass them.
+DUP_RECORD_NAMES = (DUP_OTHER_LANE,)
 UNARCHIVE_TOOL = "mcp__claude-code-remote__unarchive_session"
 
 
@@ -11097,6 +11100,23 @@ ROLE_LINES = {
                           + dup_get("g1", DUP_OTHER_LANE, DUP_LIVE, DUP_NEW_TAGS) + dup_list("l1", []),
     "dup-named-archived-partial": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
                                   + dup_list("l1", [dup_row(DUP_OTHER_LANE, DUP_ARCHIVED, DUP_CARRIER_TAGS)], more=True),
+    # The named session is live and carries the step in another repo. The shared-repo carrier check passes it, so the
+    # record check decides, and the newest sight carries the step.
+    "dup-named-other-repo-live": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                                 + dup_list("l1", [dup_row(DUP_OTHER_LANE, DUP_LIVE, DUP_OTHER_REPO_TAGS)]),
+    # The whole read shows the named session with no step. A later get_session shows it live with the step in another repo.
+    # The newest sight is that get_session, and it carries the step.
+    "dup-named-list-then-get-other-repo": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                                          + dup_list("l1", [dup_row(DUP_OTHER_LANE, DUP_LIVE, DUP_NEW_TAGS)])
+                                          + dup_get("g1", DUP_OTHER_LANE, DUP_LIVE, DUP_OTHER_REPO_TAGS),
+    # Control, green on the old code: archived with the step in another repo is not live, so the record gives no verdict.
+    "dup-named-archived-other-repo": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                                     + dup_list("l1", [dup_row(DUP_OTHER_LANE, DUP_ARCHIVED, DUP_OTHER_REPO_TAGS)]),
+    # Control, green on the old code: a get_session sight carrying the step is older than the whole read. The read is the
+    # newest sight, with no step, so the record gives no verdict.
+    "dup-named-get-then-list": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                               + dup_get("g1", DUP_OTHER_LANE, DUP_LIVE, DUP_OTHER_REPO_TAGS)
+                               + dup_list("l1", [dup_row(DUP_OTHER_LANE, DUP_LIVE, DUP_NEW_TAGS)]),
 }
 
 
@@ -11895,8 +11915,9 @@ FAMILY = "lane-step-dup"
 # cs-repo tag is asked. A brief or a step-tagged create with no read of a carrier is asked, never allowed, except a brief
 # to a target that carries the step: it starts no new lane, so it passes before any read. A list read with has_more set
 # that finds no carrier is asked. A read that ran in full and found none allows. After a whole read, a step record that
-# names a session the read's rows show, live or archived, gives no verdict: the read already shows whether that session
-# holds the step. A session the rows do not show is unknown, and is asked. A get_session sight is not a row of the read.
+# names a session whose rows the read shows gives no verdict, unless that session's newest sight is live and carries the
+# step in any repo: a live sight that carries the step asks. A session the rows do not show is unknown, and is asked. A
+# get_session sight is not a row of the read, and the newest sight of a session decides.
 # A message without the marker, and a create_session with no cs-step tag, read no transcript and pass.
 BRIEF_DUP = "Lane brief: dup-step-a. Topic: dup-topic.\n\nDo the step."
 DUP_STEER = (DUP_CARRIER, "send")  # the reason names the live carrier's id, and says to send the work there
@@ -12120,6 +12141,30 @@ dup_send("a step record naming a session that only a get_session record shows, n
 # A read with more pages is not whole, so the row it shows does not decide the record: asked.
 dup_send("a step record naming a session that a partial read shows archived is asked: the read is not whole",
          "ask", role_path("dup-named-archived-partial"), BRIEF_DUP, cwd=DUP_STEP_OTHER, env_path=dup_gh_path(DUP_PRS_NONE))
+# A named session that is live and carries the step in another repo passes the shared-repo carrier check, since its cs-repo
+# tag differs from the subject's. The record check asks, since the newest sight carries the step, for a brief and for a create.
+dup_send("a step record naming a session the whole read shows live with the step in another repo is asked, for a brief",
+         "ask", role_path("dup-named-other-repo-live"), BRIEF_DUP, carries=DUP_RECORD_NAMES,
+         cwd=DUP_STEP_OTHER, env_path=dup_gh_path(DUP_PRS_NONE))
+dup_create("a create tagged cs-step:dup-step-a is asked when the named session is live with the step in another repo",
+           "ask", role_path("dup-named-other-repo-live"), ["cs-build:lane", "cs-step:dup-step-a", "cs-repo:o/r"],
+           carries=DUP_RECORD_NAMES, cwd=DUP_STEP_OTHER, env_path=dup_gh_path(DUP_PRS_NONE))
+# The whole read shows the named session with no step, then a get_session shows it live with the step in another repo. The
+# newest sight decides, so the record asks.
+dup_send("a step record naming a session that a later get_session shows live with the step in another repo is asked",
+         "ask", role_path("dup-named-list-then-get-other-repo"), BRIEF_DUP, carries=DUP_RECORD_NAMES,
+         cwd=DUP_STEP_OTHER, env_path=dup_gh_path(DUP_PRS_NONE))
+# Controls, green on the old code. Archived with the step in another repo is not live, so the record gives no verdict.
+dup_send("a step record naming a session the whole read shows archived with the step in another repo is allowed",
+         "allow", role_path("dup-named-archived-other-repo"), BRIEF_DUP, cwd=DUP_STEP_OTHER,
+         env_path=dup_gh_path(DUP_PRS_NONE))
+dup_create("a create tagged cs-step:dup-step-a is allowed when the named session is archived with the step in another repo",
+           "allow", role_path("dup-named-archived-other-repo"), ["cs-build:lane", "cs-step:dup-step-a", "cs-repo:o/r"],
+           cwd=DUP_STEP_OTHER, env_path=dup_gh_path(DUP_PRS_NONE))
+# Control, green on the old code. The get_session sight is older than the whole read, which shows no step: no verdict.
+dup_send("a step record naming a session that a get_session showed with the step, then a whole read showed without it, is allowed",
+         "allow", role_path("dup-named-get-then-list"), BRIEF_DUP, cwd=DUP_STEP_OTHER,
+         env_path=dup_gh_path(DUP_PRS_NONE))
 
 # =========================================================================== 5i. SendMessage to a cloud session
 FAMILY = "sendmessage-session-id"
