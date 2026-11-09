@@ -281,12 +281,12 @@ class ReviewGrantFlag(tm.ReviewEnv):
         out, _err = self.assert_usage_error(*self.granted("--grant", REVIEW_GRANT, rounds=self.THREE))
         self.assertNotIn(tm.REVIEW_MARKER, out)
 
-    def test_without_a_grant_the_usage_line_is_the_one_the_tool_has_always_printed(self):
-        # with no --grant, the flags that go with --review-record are named exactly as before, so the whole line is compared
+    def test_without_a_grant_the_usage_line_is_the_one_the_tool_prints(self):
+        # with no --grant, the flags that go with --review-record are named exactly as main names them, so the whole line is compared
         rc, out, err = self.run_args("7", "--head", tm.REVIEW_HEAD)
         self.assertEqual(rc, 2, out + err)
         messages = [line.split(": error: ", 1)[1] for line in err.splitlines() if ": error: " in line]
-        self.assertIn("--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record", messages,
+        self.assertIn("--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record (--head also goes with --confirm)", messages,
                       "the usage line changed:\n" + err)
 
     def test_a_grant_on_an_impossible_date_is_a_usage_error(self):
