@@ -7723,6 +7723,61 @@ sh("push: watch -n 2 of git status, allows",
    "watch -n 2 " + VCS + " status", "allow", cwd=PUSHFEAT)
 # CONTROL. Printed text with no escaped quote allows.
 sh("push: python -c prints hello, allows (control)", r'python3 -c "print(\"hello\")"', "allow", cwd=PUSHFEAT)
+# A PYTHON REACHED BY A PATH OR WITH A VALUE FLAG. `.venv/bin/python`, `/usr/bin/python3` and `python3 -W ignore`
+# run their -c script as a bare python3 does, so a single-quoted forced push in its check_output, or in its
+# argv list, runs and denies.
+sh("push: .venv/bin/python -c, check_output shell=True of a single-quoted forced push, denies",
+   ".venv/bin/python -c \"import subprocess; subprocess.check_output('" + VCS + " push -f origin x', shell=True)\"",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: /usr/bin/python3 -c, check_output shell=True of a single-quoted forced push, denies",
+   "/usr/bin/python3 -c \"import subprocess; subprocess.check_output('" + VCS + " push -f origin x', shell=True)\"",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: python3 -W ignore -c, check_output shell=True of a single-quoted forced push, denies",
+   "python3 -W ignore -c \"import subprocess; subprocess.check_output('" + VCS + " push -f origin x', shell=True)\"",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# PIN, GREEN NOW. The same call with the forced push in escaped double quotes denies, whatever the interpreter's path.
+sh("push: .venv/bin/python -c, check_output shell=True of an escaped forced push, denies (control)",
+   r'.venv/bin/python -c "import subprocess; subprocess.check_output(\"' + VCS + r' push -f origin x\", shell=True)"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: /usr/bin/python3 -c, subprocess.run takes a forced push as a list, denies",
+   r'/usr/bin/python3 -c "import subprocess; subprocess.run([\"' + VCS + r'\",\"push\",\"-f\",\"origin\",\"x\"])"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: .venv/bin/python -c, os.system of a single-quoted forced push, denies",
+   ".venv/bin/python -c \"import os; os.system('" + VCS + " push -f origin x')\"",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# A COMMENT OPENER. `# print(` is a python comment, so it opens no call, and the os.system on the next line is code
+# that runs. The comment's text is not a call that holds the lines after it.
+sh("push: heredoc into python3 -, a comment with print( ahead of os.system of a forced push, denies",
+   "python3 - <<'EOF'\n# print(\nos.system('" + VCS + " push -f origin x')\nEOF",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# PIN, GREEN NOW. In a -c script the same run denies too, since the call it sits in is the innermost open one.
+sh("push: python3 -c, a comment with print( ahead of os.system of a forced push, denies (control)",
+   "python3 -c \"# print(\nos.system('" + VCS + " push -f origin x')\"",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# A SINGLE-QUOTED STRING NO RUN CALL TAKES. An assignment, a write to a file and an assert hold text, not a command,
+# so each allows, even with a forced push in its quotes.
+sh("push: python3 -c, assigns a single-quoted forced push then prints it, allows",
+   "python3 -c \"x = '" + VCS + " push -f origin x'; print(x)\"", "allow", cwd=PUSHFEAT)
+sh("push: python3 -c, open().write of a single-quoted forced push, allows",
+   "python3 -c \"open('notes.txt','w').write('" + VCS + " push -f origin x')\"", "allow", cwd=PUSHFEAT)
+sh("push: python3 -c, assert of a single-quoted push -f text, allows",
+   "python3 -c \"s = 'ok'; assert '" + VCS + " push -f' not in s\"", "allow", cwd=PUSHFEAT)
+sh("push: python3 -c, assigns a single-quoted push origin main then prints it, allows",
+   "python3 -c \"msg = '" + VCS + " push origin main'; print(msg)\"", "allow", cwd=PUSHFEAT)
+# A HEREDOC LINE THAT IS ONE STRING. A list item alone on its line, and a print( split over lines, hold text when no
+# run call takes the string. Each allows.
+sh("push: heredoc into python3 -, a last list item alone on its line holds a forced push, allows",
+   "python3 - <<'EOF'\nitems = [\n    \"" + VCS + " push -f origin x\"\n]\nEOF", "allow", cwd=PUSHFEAT)
+# PIN, GREEN NOW. The same list item with a comma after it allows.
+sh("push: heredoc into python3 -, a list item with a comma alone on its line holds a forced push, allows (control)",
+   "python3 - <<'EOF'\nitems = [\n    \"" + VCS + " push -f origin x\",\n]\nEOF", "allow", cwd=PUSHFEAT)
+sh("push: heredoc into python3 -, print split over lines of a forced push, allows",
+   "python3 - <<'EOF'\nprint(\n\"" + VCS + " push -f origin x\"\n)\nEOF", "allow", cwd=PUSHFEAT)
+# PIN, GREEN NOW. A comment opener inside a string is text, so the os.system after it still runs and denies. A
+# reader that stops at `#` would miss this run.
+sh("push: python3 -c, a # inside a single-quoted string ahead of os.system of a forced push, denies",
+   "python3 -c \"x = '# print('\nimport os; os.system('" + VCS + " push -f origin x')\"",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
 # ARGV CALLS. A Deno.Command call names its program and its arguments as separate strings, and the pairs
 # of one call are joined into one command line. The join keeps each argument's bounds: a quoted "my repo"
 # is one argument, so -C takes that whole path and push is the subcommand.
