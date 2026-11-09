@@ -1,0 +1,11 @@
+{
+  "title": "The docs-only review path refuses a record that files an owner ruling",
+  "phase": "now",
+  "status": "todo",
+  "order": 920,
+  "owner": "coordinator",
+  "why": "Decision docs-only-prs-skip-review says a record that files an owner ruling is never docs-only. The merge tool cannot tell such a record from other docs, and no check on main enforces it.",
+  "note": "Coordinator (13:06 CST Nov 9), note ruling-record-docs-only from #2452 (step docs-only-record-checks-diff). Fix: a marker line in a ruling record, which the docs-only path refuses.",
+  "updatedAt": "2026-11-09T12:44:00-06:00",
+  "lane": ""
+}
