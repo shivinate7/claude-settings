@@ -597,6 +597,7 @@ def bare_background_hit(cmd: str) -> str:
     if "$!" in cmd:
         return ""
     for segment in split_segments(cmd):
+        segment = _mask_arithmetic(segment)   # the `&` of `(( a & b ))` is an AND, not a job
         tokens = segment_tokens(segment) if segment.strip() else None
         if not tokens:
             continue
@@ -628,7 +629,7 @@ def _mask_arithmetic(segment: str) -> str:
 
 def glued_background_hit(cmd: str) -> str:
     """The matched text when a lone `&` with a word after it touches a word on either side (`sleep 2 &echo ok`,
-    `sleep 2& echo ok`, `a&b`) after a command word, with no pid captured anywhere in the command, else ''. Bash reads it as a
+    `sleep 2& echo ok`, `a&b`, a trailing `rm -rf ..&`) after a command word, with no pid captured anywhere in the command, else ''. Bash reads it as a
     background job as it reads a spaced `&`, but the tokens never hold a bare `&` for `bare_background_hit`
     to find. A printer or a `cd` before it (`echo x&sed ...`, `cd sub &sed ...`) ends at once, so it
     detaches nothing. The waiter judges the command first: it reads `sleep 99 &echo ok` as a long pause."""
@@ -641,8 +642,8 @@ def glued_background_hit(cmd: str) -> str:
         pieces = split_background(_mask_arithmetic(segment))
         for at in range(len(pieces) - 1):
             left, right = pieces[at], pieces[at + 1]
-            if not right.strip() or not (left[-1:] not in (" ", "\t") or right[:1] not in (" ", "\t")):
-                continue   # a `&` that ends the segment (`sleep 2&`) is not read: other rules pin that verdict today
+            if not (left[-1:] not in (" ", "\t") or (right.strip() and right[:1] not in (" ", "\t"))):
+                continue   # a spaced `&` is bare_background_hit's; one that ends the segment is read when glued (`rm -rf ..&`)
             tokens = segment_tokens(left) if left.strip() else None
             index = resolve_command(tokens) if tokens else None
             if index is not None and basename(tokens[index]) not in QUIET_COMMANDS:

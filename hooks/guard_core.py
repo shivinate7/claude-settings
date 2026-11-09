@@ -1094,17 +1094,37 @@ def _sources_stdin(tokens) -> bool:
             and any(_STDIN_PATH.fullmatch(token) for token in tokens[index + 1:]))
 
 
-def _cd_may_not_run(tokens, before: str) -> str:
+_BLOCK_OPENERS = ("if", "for", "while", "until", "select", "case")
+_BLOCK_CLOSERS = ("fi", "done", "esac")
+
+
+def _block_change(tokens) -> int:
+    """+1 for a segment that opens a compound command (`if`, `for`, `while`, `until`, `select`, `case`), -1 for
+    one that closes it (`fi`, `done`, `esac`), else 0. A later line of its body may not run."""
+    word = tokens[0].strip("()") if tokens else ""
+    return 1 if word in _BLOCK_OPENERS else -1 if word in _BLOCK_CLOSERS else 0
+
+
+def _cd_may_not_run(tokens, before: str, nested: bool = False) -> str:
     """How a `cd` segment might not move the shell. '' when it moves it. '&&' when it follows `&&` alone: a
     skipped or failed cd stops that `&&` chain as well, so the folder before it is reached only after the
-    chain ends. 'both' when it follows `||`, sits in a `then`, `else`, `elif` or `do` body, or names more than
-    one folder (bash refuses that and stays): the next segment may run in either folder."""
+    chain ends. 'both' when it follows `||`, sits in a `then`, `else`, `elif` or `do` body (`nested`: on a line
+    of its own inside an open compound command), or names more than one folder (bash refuses that and stays):
+    the next segment may run in either folder."""
     index = resolve_command(tokens)
     operands = [t for t in tokens[index + 1:]
                 if t == "-" or not (t.startswith("-") or t[:1] in "<>" or REDIRECTION.match(t))]
-    if before == "||" or any(word in _BODY_WORDS for word in tokens[:index]) or len(operands) > 1:
+    if before == "||" or nested or any(word in _BODY_WORDS for word in tokens[:index]) or len(operands) > 1:
         return "both"
     return "&&" if before == "&&" else ""
+
+
+def _fed_to_shell(tokens, open_quote: str) -> bool:
+    """True when a heredoc header opened inside a substitution (`source <(cat <<EOF`) on a `source`, `.` or `eval`
+    line: the shell runs what the substitution prints, so the body runs here."""
+    index = resolve_command(tokens)
+    return (index is not None and open_quote.endswith("(")
+            and basename(tokens[index]) in ("source", ".", "eval"))
 
 
 def _cd_step(move, where, prev, failed_cd_stays):
@@ -1137,7 +1157,9 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     that a lone `&` ends is a background job in a subshell: a `cd` in it moves the later segments of
     that list, and the shell is back where the list began once the list ends. A heredoc body works
     the same way, up to its closing line, unless the command sources it (`source /dev/stdin <<EOF`):
-    that body runs in this shell, so its `cd` moves the later segments.
+    that body runs in this shell, so its `cd` moves the later segments. So does a body that `eval`, or a
+    `source` or `.` of a `<(...)` substitution, reads from its own heredoc. With several headers on one line
+    the bodies end at the last closing line.
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
@@ -1147,17 +1169,51 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     segment may run in. A `cd` that might not run (`_cd_may_not_run`) adds its folder beside the one
     before it, so the segment is judged in both. After a `cd` that follows `&&` alone, the segments
     its `&&` or `|` chain joins run only in its folder: the folder before it is held back until that
-    chain ends. One call per command keeps the cost linear."""
+    chain ends. A `cd` on a line of its own inside an open `if`, loop or `case` may not run either.
+    One call per command keeps the cost linear."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     states = ((where, None),)   # each possible (folder, folder before the last move)
     visited = dict.fromkeys((where,)) if where else {}   # every folder a state has held
     lost = False   # the states passed _STATE_LIMIT: a segment is judged in every folder visited
     list_start = states
     held = ()   # states a `&&` cd may have left behind: reached only once its `&&` chain ends
-    frames = []   # (states, list_start, held) for each `(` still open
-    heredoc = None   # (closing word, states and held before the body) while inside a heredoc body
+    frames = []   # (states, list_start, held, keeps) for each `(` still open; `keeps` leaves a cd in it standing
+    heredoc = None   # (closing words still to come, states and held before the bodies) while inside heredoc bodies
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
+    depth = 0   # compound commands (`if`, `for`, ...) still open: a cd on a line of its own in one may not run
     seen = []
+
+    def run_cd(tokens, segment, before, end):
+        """Move each state by the `cd` this segment holds, if it holds one."""
+        nonlocal states, held, lost, skipping
+        move = _segment_cd_move(tokens) if tokens else None
+        if move is not None and not is_powershell(segment) and "|" in (end, before):
+            move = None   # a bash pipe's part: a subshell, so the shell stays where it was
+        if tokens is None:
+            states = ((None, None),)
+        elif move is not None:
+            steps = [_cd_step(move, folder, prev, failed_cd_stays and not each) for folder, prev in states]
+            moved = [(folder, old) for folder, old, _ in steps]
+            may_not_run = _cd_may_not_run(tokens, before, depth > 0) if each else ""
+            if may_not_run == "&&":
+                held = tuple(dict.fromkeys(held + states))
+            elif may_not_run:
+                moved = list(dict.fromkeys(list(states) + moved))
+            visited.update(dict.fromkeys(folder for folder, _ in moved if folder))
+            lost = (lost and not all(folder for folder, _ in moved)) or len(moved) > _STATE_LIMIT
+            states = ((None, None),) if len(moved) > _STATE_LIMIT else tuple(moved)
+            skipping = not each and steps[0][2] and end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
+
+    def leave():
+        """Close the innermost `(`: the shell is where it was before it, unless the frame keeps a cd made inside."""
+        nonlocal states, list_start, held
+        before_states, list_start, before_held, keeps = frames.pop()
+        if keeps:
+            states = tuple(dict.fromkeys(states + held))
+        else:
+            states = before_states
+        held = before_held
+
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
         end = ends[at] if at < len(ends) else ""
@@ -1168,8 +1224,13 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             states = ((None, None),) if len(states) > _STATE_LIMIT else states
         if before not in CHAIN_ENDS:
             list_start = states
-        for _ in range(marks.count("(")):
-            frames.append((states, list_start, held))
+        opens = marks.count("(")
+        feeds = False   # a `(` of a substitution whose output the shell runs: its cd moves this shell
+        if opens and "<<" in segment:
+            fed_tokens = segment_tokens(segment)
+            feeds = bool(fed_tokens) and _fed_to_shell(fed_tokens, heredoc_heads(segment)[1])
+        for _ in range(opens):
+            frames.append((states, list_start, held, feeds))
             list_start, held = states, ()
         here = tuple(dict.fromkeys(folder for folder, _ in states))
         if lost:
@@ -1181,36 +1242,33 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             skipping = end in ("&&", "|")
             for _ in range(marks.count(")")):
                 if frames:
-                    states, list_start, held = frames.pop()
+                    leave()
                     skipping = False
+            depth = max(0, depth + _block_change(segment_tokens(segment)))
             continue
-        if heredoc and segment.strip() == heredoc[0]:
-            (states, held), heredoc = heredoc[1], None
+        if heredoc and segment.strip() == heredoc[0][0]:
+            heredoc[0].pop(0)
+            if not heredoc[0]:
+                (states, held), heredoc = heredoc[1], None   # the last body ended: the cds in the bodies moved a child shell
             continue
         tokens = segment_tokens(segment)
-        move = _segment_cd_move(tokens) if tokens else None
-        if move is not None and not is_powershell(segment) and "|" in (end, before):
-            move = None   # a bash pipe's part: a subshell, so the shell stays where it was
-        if tokens is None:
-            states = ((None, None),)
-        elif move is not None:
-            steps = [_cd_step(move, folder, prev, failed_cd_stays and not each) for folder, prev in states]
-            moved = [(folder, old) for folder, old, _ in steps]
-            may_not_run = _cd_may_not_run(tokens, before) if each else ""
-            if may_not_run == "&&":
-                held = tuple(dict.fromkeys(held + states))
-            elif may_not_run:
-                moved = list(dict.fromkeys(list(states) + moved))
-            visited.update(dict.fromkeys(folder for folder, _ in moved if folder))
-            lost = (lost and not all(folder for folder, _ in moved)) or len(moved) > _STATE_LIMIT
-            states = ((None, None),) if len(moved) > _STATE_LIMIT else tuple(moved)
-            skipping = not each and steps[0][2] and end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
-        heads = heredoc_heads(segment)[0]
-        if heads and not heredoc and not (tokens and _sources_stdin(tokens)):
-            heredoc = (heads[0][1], (states, held))
+        run_cd(tokens, segment, before, end)
+        index = resolve_command(tokens) if tokens else None
+        if index is not None and "<<" in segment and basename(tokens[index]) == "eval":
+            # eval runs the bodies of its own heredocs as commands, in this shell, so their cds move it.
+            for _, body, _ in _split_heredocs(segment)[1]:
+                inner_ends = []
+                inner = split_segments(body, inner_ends)
+                for number_in, part in enumerate(inner):
+                    run_cd(segment_tokens(part), part, inner_ends[number_in - 1] if number_in else "", inner_ends[number_in])
+            skipping = False
+        heads, open_quote = heredoc_heads(segment)
+        if heads and not heredoc and not (tokens and (_sources_stdin(tokens) or _fed_to_shell(tokens, open_quote))):
+            heredoc = ([delimiter for _, delimiter in heads], (states, held))
         for _ in range(marks.count(")")):
             if frames:
-                states, list_start, held = frames.pop()
+                leave()
+        depth = max(0, depth + _block_change(tokens))
         if end == "&":
             states, held = list_start, ()   # the list ran in a subshell: the shell is where the list began
     return seen if each else states[0][0]
