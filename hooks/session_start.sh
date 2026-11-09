@@ -1,7 +1,7 @@
 #!/bin/sh
 # Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. On resume it says when the session's recorded worktree is gone. Names the clone to cd to when the checkout is a live pin of the claude-settings clone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, the repo's waiting page was last published from a version other than main's, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
 # Outside a git tree or when git is missing, prints only the tier line (cloud or own id). Always exits 0, nothing on stderr.
-# When CLAUDE_ENV_FILE is set and ~/.claude/bin is not on PATH, appends one PATH line to it first, once.
+# When CLAUDE_ENV_FILE is set and ~/.claude/bin does not start PATH, appends one PATH line to it first, once.
 
 input=$(cat 2>/dev/null)
 cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
@@ -22,18 +22,28 @@ tier_line() {
   fi
 }
 
-# env_path_line: puts ~/.claude/bin on PATH for the session's later Bash calls, through the file Claude Code
+# env_path_line: puts ~/.claude/bin first on PATH for the session's later Bash calls, through the file Claude Code
 # sources first (CLAUDE_ENV_FILE), so the guard's bare `wait-until` and `wait-pid` remedies and the rm shim resolve
-# in a cloud session too. Runs before any exit below. Writes nothing when no env file is set, when PATH already holds
-# the folder, or when the file already holds the line. Cost: one append per session start, no process, no timer, no log.
+# in a cloud session too, ahead of a system rm. Runs before any exit below. Writes nothing when no env file is set,
+# when PATH already starts with the folder, when the env file is a directory, or when the file already holds the
+# line. A missing file is created. A seed with no final newline gets one before the line. Cost: one append per
+# session start, no process, no timer, no log.
 env_path_line() {
   [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -n "${HOME:-}" ] || return 0
-  case ":$PATH:" in *":$HOME/.claude/bin:"*) return 0 ;; esac
+  case "$PATH" in "$HOME/.claude/bin" | "$HOME/.claude/bin:"*) return 0 ;; esac
+  [ -d "$CLAUDE_ENV_FILE" ] && return 0
   epl_line='export PATH="$HOME/.claude/bin:$PATH"'
-  while IFS= read -r epl_have || [ -n "$epl_have" ]; do
-    [ "$epl_have" = "$epl_line" ] && return 0
-  done <"$CLAUDE_ENV_FILE" 2>/dev/null
-  printf '%s\n' "$epl_line" >>"$CLAUDE_ENV_FILE" 2>/dev/null
+  epl_have=''
+  epl_open=''
+  # The group takes the stderr redirect first, so a failed open of the file stays silent.
+  # A read that fails with text in epl_have saw a last line with no newline: epl_open records it.
+  if [ -f "$CLAUDE_ENV_FILE" ]; then
+    { while IFS= read -r epl_have || { [ -n "$epl_have" ] && epl_open=1; }; do
+      [ "$epl_have" = "$epl_line" ] && return 0
+    done <"$CLAUDE_ENV_FILE"; } 2>/dev/null
+  fi
+  [ -z "$epl_open" ] || { printf '\n' >>"$CLAUDE_ENV_FILE"; } 2>/dev/null
+  { printf '%s\n' "$epl_line" >>"$CLAUDE_ENV_FILE"; } 2>/dev/null
   return 0
 }
 env_path_line
