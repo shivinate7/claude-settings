@@ -309,6 +309,20 @@ RED = [
      "return-9fQ2xZ7Lk3"),
     ("token with a keyword prefix, a plus and a real value", "token=" + "void+" + "Ab3dEf7Hi9", "void+Ab3dEf7Hi9"),
     ("SECRET with a keyword prefix, a tilde and a real value", "SECRET=" + "typeof~" + "Kq8LmZ2xW", "typeof~Kq8LmZ2xW"),
+    # A URL password may hold a closing paren, a quote, a brace or a pair of bars, and an IPv6 host is in brackets: the
+    # credential is still in the URL, so each row refuses.
+    ("URL password with a closing paren on a host name", "postgres://app:" + "Qz9Lk2Xm7)" + "@localhost:5432/db", "Qz9Lk2Xm7)"),
+    ("URL password with a quote inside it", "postgres://app:" + "O'Neil2020" + "@localhost/db", "O'Neil2020"),
+    ("URL password with a brace on a MySQL host with a port", "mysql://root:" + "pa}ss" + "@db:3306/app", "pa}ss"),
+    ("URL password on a bracketed IPv6 host", "postgres://app:" + "Qz9Lk2Xm7" + "@[::1]:5432/db", "Qz9Lk2Xm7"),
+    ("URL password with two bars and a bare host", "https://u:" + "p||" + "@h", "p||"),
+    # A minified boolean is no value, and a member after it can hold one: each member after the boolean is checked alone.
+    ("password word, a boolean, then pwd with a real value", "password:" + "!0," + "pwd:" + "hunter2", "hunter2"),
+    ("password word, a boolean, then password with a real value", "password:" + "!0," + "password:" + "hunter2", "hunter2"),
+    ("password word, a boolean, then token with a real value", "password:" + "!0," + "token:" + "hunter2", "hunter2"),
+    ("password word, a boolean, then pass with a real value", "password:" + "!0," + "pass:" + "Tr0ub4dor", "Tr0ub4dor"),
+    ("password word, a boolean, then a semicolon assignment", "password:" + "!0;" + "a=" + "hunter2", "hunter2"),
+    ("password word, a boolean, then a brace and a pwd assignment", "password:" + "!0};" + "pwd=" + "hunter2", "hunter2"),
 ]
 # Dashed and short vendor-style keys, each set in four credential-name carriers. Each value is joined from parts, so no
 # key-looking literal sits whole in the source. A hyphen-joined value of letters and digits is a key shape, so the
