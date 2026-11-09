@@ -10394,17 +10394,15 @@ def review_counter_works():
     return True, "the counter logs a direct call"
 
 
-def review_reads(tool, tool_input, want, reads, cwd=NOGIT, path_dirs=(), folder=GHRECORDCOUNT, bodies=None, carries=(), note=None):
+def review_reads(tool, tool_input, want, reads, cwd=NOGIT, path_dirs=(), folder=GHRECORDCOUNT, bodies=None, carries=()):
     """A checker for one post: the guard says `want`, and the post makes `reads` gh calls, the one live-head read. `cwd` is the
     folder the post runs in. `path_dirs` are folders the guard's PATH adds after the fake gh's, such as git's for a post with no number.
-    `folder` is the counted fake the post runs against, with the comment `bodies` it names. `carries` are fragments the reason must hold.
-    `note`, when given, says whether the run's stderr must carry the not-checked line (True) or must not (False). It is judged after
-    the decision and the reads, so a run that never reached the read is not read for its stderr."""
+    `folder` is the counted fake the post runs against, with the comment `bodies` it names. `carries` are fragments the reason must hold."""
     def check():
         if reads == 0:
-            ok, counted = review_counter_works()
+            ok, note = review_counter_works()
             if not ok:
-                return False, counted
+                return False, note
         review_counted_fake(folder, bodies)
         env_path = os.pathsep.join((folder,) + tuple(path_dirs) + (PY_PATH,))
         decision, reason = decide(review_case(tool, tool_input, env_path, cwd))
@@ -10416,11 +10414,6 @@ def review_reads(tool, tool_input, want, reads, cwd=NOGIT, path_dirs=(), folder=
             return False, "refused, but the reason lacks %s: %s" % (missing, reason[:90])
         if len(calls) != reads:
             return False, "%d gh call(s) wanted for the live head, %d seen: %r" % (reads, len(calls), calls)
-        if note is not None:
-            printed = REVIEW_NOT_CHECKED in LAST_RUN.get("stderr", "")
-            if printed != note:
-                return False, "stderr %s the not-checked line, want it %s: %r" % (
-                    "carries" if printed else "lacks", "printed" if note else "absent", LAST_RUN.get("stderr", "").strip()[:120])
         return True, "%s, with %d gh call(s)" % (want, reads)
     FIXTURELESS_CHECKS.add(check)
     return check
@@ -10436,6 +10429,24 @@ def review_note(tool, tool_input, env_path):
         if "review" not in note.lower():
             return False, "allowed, but no note on stderr names the review record: %r" % note[:120]
         return True, "allowed, with a note on stderr"
+    FIXTURELESS_CHECKS.add(check)
+    return check
+
+
+def review_reads_noted(tool, tool_input, want, reads, note, **kw):
+    """review_reads, and the run's stderr must carry the not-checked line when `note` is True, and must not when it is False.
+    It is judged after the decision and the reads, so a run that never reached the read is not read for its stderr."""
+    inner = review_reads(tool, tool_input, want, reads, **kw)
+    FIXTURELESS_CHECKS.discard(inner)
+    def check():
+        ok, why = inner()
+        if not ok:
+            return ok, why
+        printed = REVIEW_NOT_CHECKED in LAST_RUN.get("stderr", "")
+        if printed != note:
+            return False, "stderr %s the not-checked line, want it %s: %r" % (
+                "carries" if printed else "lacks", "printed" if note else "absent", LAST_RUN.get("stderr", "").strip()[:120])
+        return True, why
     FIXTURELESS_CHECKS.add(check)
     return check
 
@@ -10549,121 +10560,6 @@ def review_fails_closed(tool, tool_input, env_path):
     return check
 
 
-# Read counts: a marked new body is refused with no read. An unmarked new body reads the old body once.
-REVIEW_LOG_CHECKS.append(("review-record:a marked edit is refused with no gh read, gh issue comment 12 --edit-last --body",
-                         review_reads("Bash", {"command": "%s --edit-last --body '%s'" % (ISSUE_CMD, review_record())}, "deny", 0)))
-REVIEW_LOG_CHECKS.append(("review-record:a marked edit with a wrong head tail is refused with no gh read, gh issue comment 12 --edit-last",
-                         review_reads("Bash", {"command": "%s --edit-last --body '%s'" % (ISSUE_CMD, review_record(head=REVIEW_TAIL))},
-                                      "deny", 0)))
-REVIEW_LOG_CHECKS.append(("review-record:a well-formed record in a PATCH is refused with no gh read, gh api -X PATCH",
-                         review_reads("Bash", {"command": "%s -f 'body=%s'" % (API_EDIT_CMD, review_record())}, "deny", 0)))
-# An edit with no marker in either body is allowed, on its one read.
-REVIEW_LOG_CHECKS.append(("review-record:an edit whose old and new bodies hold no marker is allowed with one gh read, gh api -X PATCH",
-                         review_reads("Bash", {"command": "%s -f 'body=%s'" % (API_EDIT_CMD, UNMARKED_BODY)}, "allow", 1)))
-REVIEW_LOG_CHECKS.append(("review-record:an edit whose old and new bodies hold no marker is allowed with one gh read, gh pr comment --edit-last",
-                         review_reads("Bash", {"command": "%s --edit-last --body '%s'" % (PR_CMD, UNMARKED_BODY)}, "allow", 1)))
-REVIEW_LOG_CHECKS.append(("review-record:an edit whose old and new bodies hold no marker is allowed with one gh read, gh issue comment --edit-last",
-                         review_reads("Bash", {"command": "%s --edit-last --body '%s'" % (ISSUE_CMD, UNMARKED_BODY)}, "allow", 1)))
-REVIEW_LOG_CHECKS.append(("review-record:an update whose old and new bodies hold no marker is allowed with one gh read, MCP update_issue_comment",
-                         review_reads(MCP_UPDATE, mcp_input(UNMARKED_BODY, comment_id=REVIEW_COMMENT_ID), "allow", 1)))
-# A read that cannot run refuses the edit, and the refusal says so: hooks fail closed.
-REVIEW_LOG_CHECKS.append(("review-record:an edit whose comment cannot be read is refused, gh api -X PATCH",
-                         review_fails_closed("Bash", {"command": "%s -f 'body=%s'" % (API_EDIT_CMD, UNMARKED_BODY)},
-                                             GHRECORDBROKEN + os.pathsep + PY_PATH)))
-REVIEW_LOG_CHECKS.append(("review-record:an edit whose comment cannot be read is refused, gh pr comment --edit-last",
-                         review_fails_closed("Bash", {"command": "%s --edit-last --body '%s'" % (PR_CMD, UNMARKED_BODY)},
-                                             GHRECORDBROKEN + os.pathsep + PY_PATH)))
-REVIEW_LOG_CHECKS.append(("review-record:an update whose comment cannot be read is refused, MCP update_issue_comment",
-                         review_fails_closed(MCP_UPDATE, mcp_input(UNMARKED_BODY, comment_id=REVIEW_COMMENT_ID),
-                                             GHRECORDBROKEN + os.pathsep + PY_PATH)))
-# The update tool names a comment, not a pull request. A marked update is refused on its edit before any read: the guard has no
-# pull request number to read, and the refusal needs none.
-mcp_post("review-record: a record at the live head is refused on an edit, MCP update_issue_comment", review_record(), "deny",
-         rule=REVIEW_RULE, carries=(EDIT_REFUSAL,), comment_id=REVIEW_COMMENT)
-mcp_post("review-record: a full-size record with its footer is refused on an edit, MCP update_issue_comment", REVIEW_FULL, "deny",
-         rule=REVIEW_RULE, carries=(EDIT_REFUSAL,), comment_id=REVIEW_COMMENT)
-mcp_post("review-record: a comment with no marker is allowed, MCP update_issue_comment", "Round 1 ran. No review record yet.",
-         "allow", comment_id=REVIEW_COMMENT)
-mcp_post("review-record: a marker in prose below the first line is allowed, MCP update_issue_comment", REVIEW_PROSE, "allow",
-         comment_id=REVIEW_COMMENT)
-mcp_post("review-record: a wrong head tail is refused, MCP update_issue_comment", review_record(head=REVIEW_TAIL), "deny",
-         rule=REVIEW_RULE, carries=(EDIT_REFUSAL,), comment_id=REVIEW_COMMENT)
-mcp_post("review-record: a stale record is refused, MCP update_issue_comment", review_record(head=REVIEW_OLD), "deny",
-         rule=REVIEW_RULE, carries=(EDIT_REFUSAL,), comment_id=REVIEW_COMMENT)
-# An update is refused on its edit before the pull request check, so the pull request check is pinned on a post: the record names
-# pull request 13, and the post is on 12.
-bash_post("review-record: a record for another pull request is refused, gh issue comment --body",
-          "%s --body '%s'" % (ISSUE_CMD, review_record(n=REVIEW_PR + 1)), "deny", rule=REVIEW_RULE)
-mcp_post("review-record: a marker with no record is refused, MCP update_issue_comment", REVIEW_MARKER_TEXT, "deny",
-         rule=REVIEW_RULE, comment_id=REVIEW_COMMENT)
-mcp_post("review-record: a record with a round skipped is refused, MCP update_issue_comment", REVIEW_SKIPPED_ROUND, "deny",
-         rule=REVIEW_RULE, comment_id=REVIEW_COMMENT)
-
-
-def comment_read_check():
-    """The record fakes answer the comment read with the pull request the comment sits on (issue_url ends /issues/12). Without
-    this, a fake that answers wrong would look like a guard bug."""
-    materialize(GHRECORDREPO)
-    env = dict(os.environ, PATH=fake_gh_path(GHRECORDREPO))
-    program = shutil.which("gh", path=env["PATH"])
-    if not program:
-        return False, "the record pull request tool is not on PATH, so the comment read cannot be checked"
-    done = subprocess.run([program, "api", "repos/y/x/issues/comments/%d" % REVIEW_COMMENT], capture_output=True, text=True,
-                          env=env, timeout=60)
-    try:
-        issue = json.loads(done.stdout).get("issue_url", "")
-    except (ValueError, AttributeError):
-        return False, "the comment read does not answer a JSON object: %r" % done.stdout[:120]
-    if not issue.endswith("/issues/%d" % REVIEW_PR):
-        return False, "the comment read names %r, want an issue_url ending /issues/%d" % (issue, REVIEW_PR)
-    return True, "the comment read names pull request %d" % REVIEW_PR
-
-
-REVIEW_LOG_CHECKS.append(("review-record:the record fake answers the comment read with the pull request the comment sits on",
-                         comment_read_check))
-def review_matcher_case():
-    """A guard matcher in settings.json covers update_issue_comment, so the guard sees an edit made through the MCP tool at all."""
-    with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
-        entries = json.load(handle)["hooks"]["PreToolUse"]
-    matchers = [entry.get("matcher", "") for entry in entries
-                if any("guard.py" in hook.get("command", "") for hook in entry.get("hooks", []))]
-    if any(re.fullmatch(matcher, MCP_UPDATE) for matcher in matchers):
-        return True, "a guard matcher covers update_issue_comment"
-    return False, "no guard matcher covers update_issue_comment: %r" % (matchers,)
-
-
-FIXTURELESS_CHECKS.add(review_matcher_case)
-REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused with no gh read, MCP update_issue_comment",
-                         review_reads(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT), "deny", 0)))
-REVIEW_LOG_CHECKS.append(("review-record:a marked update with a wrong head tail is refused with no gh read, MCP update_issue_comment",
-                         review_reads(MCP_UPDATE, mcp_input(review_record(head=REVIEW_TAIL), comment_id=REVIEW_COMMENT), "deny", 0)))
-# Decision pr-review-record, the edit-read cost: an unmarked edit makes exactly 1 read of the old body.
-REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker makes one gh read, MCP update_issue_comment",
-                         review_reads(MCP_UPDATE, mcp_input("Round 1 ran. No review record yet.", comment_id=REVIEW_COMMENT), "allow", 1)))
-# Decision pr-review-record, the edit-read cost: an unmarked edit makes exactly 1 read of the old body.
-REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line makes one gh read, MCP update_issue_comment",
-                         review_reads(MCP_UPDATE, mcp_input(REVIEW_PROSE, comment_id=REVIEW_COMMENT), "allow", 1)))
-REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused under pr-review-record even when its comment cannot be read, MCP update_issue_comment",
-                         review_refused_under(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT),
-                                              GHRECORDBROKEN + os.pathsep + PY_PATH, REVIEW_RULE)))
-REVIEW_LOG_CHECKS.append(("review-record:a settings.json matcher routes update_issue_comment to the guard", review_matcher_case))
-
-
-# THE OLD BODY. An edit replaces a body, so the guard reads the comment's current body first, one read per edit. The red form is
-# pull request #2063's: the old body is a stamped record, and the new body is a withdrawal note that holds no marker. It is refused
-# on every route, since the body an edit removes is the record. The remedy names a separate withdrawal and a fresh record.
-WITHDRAW_REMEDY = ("withdrawal", "--review-record")
-WITHDRAW_FILE = os.path.join(GHRECORDDIR, "withdrawn.md")
-for _label, _command in (("gh api -X PATCH -f body=", "%s -f 'body=%s'" % (API_EDIT_CMD, WITHDRAW)),
-                         ("gh api -X PATCH -F body=@", "%s -F body=@%s" % (API_EDIT_CMD, WITHDRAW_FILE)),
-                         ("gh api --method PATCH -f body=", "%s -f 'body=%s'" % (API_METHOD_EDIT_CMD, WITHDRAW)),
-                         ("gh pr comment --edit-last --body", "%s --edit-last --body '%s'" % (PR_CMD, WITHDRAW)),
-                         ("gh issue comment --edit-last --body", "%s --edit-last --body '%s'" % (ISSUE_CMD, WITHDRAW))):
-    old_bash("review-record: a withdrawal note over a stamped record is refused, %s" % _label, _command, "deny",
-             rule=REVIEW_RULE, carries=WITHDRAW_REMEDY)
-old_mcp("review-record: a withdrawal note over a stamped record is refused, MCP update_issue_comment", WITHDRAW, "deny",
-        rule=REVIEW_RULE, carries=WITHDRAW_REMEDY)
-
 # A VARIABLE ID OR NUMBER. A comment id or an issue number held in a shell variable is still a comment or an issue, so the edit and
 # the post routes judge it. A hand-typed record under a number the guard cannot read is refused: its pull request cannot be checked.
 # The same holds for a route with a command substitution, an arithmetic or default expansion, or a variable repo. The inner call of
@@ -10709,13 +10605,8 @@ VARIABLE_POST_ROUTES = (
     ("backticks with a semicolon", "repos/y/x/issues/`echo 12; echo 12`/comments"),
     ("backticks with and", "repos/y/x/issues/`true && echo 12`/comments"),
 )
-VARIABLE_FORMS = (
-    ("gh api -X PATCH, $ID", "gh api -X PATCH repos/y/x/issues/comments/$ID -f 'body=%s'" % review_record()),
-    ("gh api -X PATCH, ${ID}", "gh api -X PATCH repos/y/x/issues/comments/${ID} -f 'body=%s'" % review_record()),
-    ("gh api -X PATCH, quoted \"$ID\"", "gh api -X PATCH \"repos/y/x/issues/comments/$ID\" -f 'body=%s'" % review_record()),
-    ("gh api --method PATCH, $ID", "gh api --method PATCH repos/y/x/issues/comments/$ID -f 'body=%s'" % review_record()),
-    ("gh api post, issues/$N/comments", "gh api repos/y/x/issues/$N/comments -f 'body=%s'" % review_record()),
-)
+# The five plain-id forms run in the loop above, so the list starts empty.
+VARIABLE_FORMS = ()
 VARIABLE_FORMS += tuple(("gh api -X PATCH, " + label, "gh api -X PATCH %s -f 'body=%s'" % (route, review_record()))
                         for label, route in VARIABLE_EDIT_ROUTES)
 VARIABLE_FORMS += tuple(("gh api post, " + label, "gh api %s -f 'body=%s'" % (route, review_record()))
@@ -10875,6 +10766,133 @@ bash_post("review-record: a marked post to repos/$REPO/issues/12/comments names 
 bash_post("review-record: an unmarked body in a substitution-repo post is allowed, gh api post, repos/$(..)/issues/12/comments",
           "gh api repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/12/comments -f 'body=%s'" % UNMARKED_BODY, "allow")
 
+
+# Read counts: a marked new body is refused with no read. An unmarked new body reads the old body once.
+REVIEW_LOG_CHECKS.append(("review-record:a marked edit is refused with no gh read, gh issue comment 12 --edit-last --body",
+                         review_reads("Bash", {"command": "%s --edit-last --body '%s'" % (ISSUE_CMD, review_record())}, "deny", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:a marked edit with a wrong head tail is refused with no gh read, gh issue comment 12 --edit-last",
+                         review_reads("Bash", {"command": "%s --edit-last --body '%s'" % (ISSUE_CMD, review_record(head=REVIEW_TAIL))},
+                                      "deny", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:a well-formed record in a PATCH is refused with no gh read, gh api -X PATCH",
+                         review_reads("Bash", {"command": "%s -f 'body=%s'" % (API_EDIT_CMD, review_record())}, "deny", 0)))
+# An edit with no marker in either body is allowed, on its one read.
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose old and new bodies hold no marker is allowed with one gh read, gh api -X PATCH",
+                         review_reads("Bash", {"command": "%s -f 'body=%s'" % (API_EDIT_CMD, UNMARKED_BODY)}, "allow", 1)))
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose old and new bodies hold no marker is allowed with one gh read, gh pr comment --edit-last",
+                         review_reads("Bash", {"command": "%s --edit-last --body '%s'" % (PR_CMD, UNMARKED_BODY)}, "allow", 1)))
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose old and new bodies hold no marker is allowed with one gh read, gh issue comment --edit-last",
+                         review_reads("Bash", {"command": "%s --edit-last --body '%s'" % (ISSUE_CMD, UNMARKED_BODY)}, "allow", 1)))
+REVIEW_LOG_CHECKS.append(("review-record:an update whose old and new bodies hold no marker is allowed with one gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(UNMARKED_BODY, comment_id=REVIEW_COMMENT_ID), "allow", 1)))
+# A read that cannot run refuses the edit, and the refusal says so: hooks fail closed.
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose comment cannot be read is refused, gh api -X PATCH",
+                         review_fails_closed("Bash", {"command": "%s -f 'body=%s'" % (API_EDIT_CMD, UNMARKED_BODY)},
+                                             GHRECORDBROKEN + os.pathsep + PY_PATH)))
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose comment cannot be read is refused, gh pr comment --edit-last",
+                         review_fails_closed("Bash", {"command": "%s --edit-last --body '%s'" % (PR_CMD, UNMARKED_BODY)},
+                                             GHRECORDBROKEN + os.pathsep + PY_PATH)))
+REVIEW_LOG_CHECKS.append(("review-record:an update whose comment cannot be read is refused, MCP update_issue_comment",
+                         review_fails_closed(MCP_UPDATE, mcp_input(UNMARKED_BODY, comment_id=REVIEW_COMMENT_ID),
+                                             GHRECORDBROKEN + os.pathsep + PY_PATH)))
+# The update tool names a comment, not a pull request. A marked update is refused on its edit before any read: the guard has no
+# pull request number to read, and the refusal needs none.
+mcp_post("review-record: a record at the live head is refused on an edit, MCP update_issue_comment", review_record(), "deny",
+         rule=REVIEW_RULE, carries=(EDIT_REFUSAL,), comment_id=REVIEW_COMMENT)
+mcp_post("review-record: a full-size record with its footer is refused on an edit, MCP update_issue_comment", REVIEW_FULL, "deny",
+         rule=REVIEW_RULE, carries=(EDIT_REFUSAL,), comment_id=REVIEW_COMMENT)
+mcp_post("review-record: a comment with no marker is allowed, MCP update_issue_comment", "Round 1 ran. No review record yet.",
+         "allow", comment_id=REVIEW_COMMENT)
+mcp_post("review-record: a marker in prose below the first line is allowed, MCP update_issue_comment", REVIEW_PROSE, "allow",
+         comment_id=REVIEW_COMMENT)
+mcp_post("review-record: a wrong head tail is refused, MCP update_issue_comment", review_record(head=REVIEW_TAIL), "deny",
+         rule=REVIEW_RULE, carries=(EDIT_REFUSAL,), comment_id=REVIEW_COMMENT)
+mcp_post("review-record: a stale record is refused, MCP update_issue_comment", review_record(head=REVIEW_OLD), "deny",
+         rule=REVIEW_RULE, carries=(EDIT_REFUSAL,), comment_id=REVIEW_COMMENT)
+# An update is refused on its edit before the pull request check, so the pull request check is pinned on a post: the record names
+# pull request 13, and the post is on 12.
+bash_post("review-record: a record for another pull request is refused, gh issue comment --body",
+          "%s --body '%s'" % (ISSUE_CMD, review_record(n=REVIEW_PR + 1)), "deny", rule=REVIEW_RULE)
+mcp_post("review-record: a marker with no record is refused, MCP update_issue_comment", REVIEW_MARKER_TEXT, "deny",
+         rule=REVIEW_RULE, comment_id=REVIEW_COMMENT)
+mcp_post("review-record: a record with a round skipped is refused, MCP update_issue_comment", REVIEW_SKIPPED_ROUND, "deny",
+         rule=REVIEW_RULE, comment_id=REVIEW_COMMENT)
+
+
+def comment_read_check():
+    """The record fakes answer the comment read with the pull request the comment sits on (issue_url ends /issues/12). Without
+    this, a fake that answers wrong would look like a guard bug."""
+    materialize(GHRECORDREPO)
+    env = dict(os.environ, PATH=fake_gh_path(GHRECORDREPO))
+    program = shutil.which("gh", path=env["PATH"])
+    if not program:
+        return False, "the record pull request tool is not on PATH, so the comment read cannot be checked"
+    done = subprocess.run([program, "api", "repos/y/x/issues/comments/%d" % REVIEW_COMMENT], capture_output=True, text=True,
+                          env=env, timeout=60)
+    try:
+        issue = json.loads(done.stdout).get("issue_url", "")
+    except (ValueError, AttributeError):
+        return False, "the comment read does not answer a JSON object: %r" % done.stdout[:120]
+    if not issue.endswith("/issues/%d" % REVIEW_PR):
+        return False, "the comment read names %r, want an issue_url ending /issues/%d" % (issue, REVIEW_PR)
+    return True, "the comment read names pull request %d" % REVIEW_PR
+
+
+REVIEW_LOG_CHECKS.append(("review-record:the record fake answers the comment read with the pull request the comment sits on",
+                         comment_read_check))
+def review_matcher_case():
+    """A guard matcher in settings.json covers update_issue_comment, so the guard sees an edit made through the MCP tool at all."""
+    with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
+        entries = json.load(handle)["hooks"]["PreToolUse"]
+    matchers = [entry.get("matcher", "") for entry in entries
+                if any("guard.py" in hook.get("command", "") for hook in entry.get("hooks", []))]
+    if any(re.fullmatch(matcher, MCP_UPDATE) for matcher in matchers):
+        return True, "a guard matcher covers update_issue_comment"
+    return False, "no guard matcher covers update_issue_comment: %r" % (matchers,)
+
+
+FIXTURELESS_CHECKS.add(review_matcher_case)
+REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused with no gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT), "deny", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:a marked update with a wrong head tail is refused with no gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(review_record(head=REVIEW_TAIL), comment_id=REVIEW_COMMENT), "deny", 0)))
+# Decision pr-review-record, the edit-read cost: an unmarked edit makes exactly 1 read of the old body.
+REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker makes one gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input("Round 1 ran. No review record yet.", comment_id=REVIEW_COMMENT), "allow", 1)))
+# Decision pr-review-record, the edit-read cost: an unmarked edit makes exactly 1 read of the old body.
+REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line makes one gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(REVIEW_PROSE, comment_id=REVIEW_COMMENT), "allow", 1)))
+REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused under pr-review-record even when its comment cannot be read, MCP update_issue_comment",
+                         review_refused_under(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT),
+                                              GHRECORDBROKEN + os.pathsep + PY_PATH, REVIEW_RULE)))
+REVIEW_LOG_CHECKS.append(("review-record:a settings.json matcher routes update_issue_comment to the guard", review_matcher_case))
+
+
+# THE OLD BODY. An edit replaces a body, so the guard reads the comment's current body first, one read per edit. The red form is
+# pull request #2063's: the old body is a stamped record, and the new body is a withdrawal note that holds no marker. It is refused
+# on every route, since the body an edit removes is the record. The remedy names a separate withdrawal and a fresh record.
+WITHDRAW_REMEDY = ("withdrawal", "--review-record")
+WITHDRAW_FILE = os.path.join(GHRECORDDIR, "withdrawn.md")
+for _label, _command in (("gh api -X PATCH -f body=", "%s -f 'body=%s'" % (API_EDIT_CMD, WITHDRAW)),
+                         ("gh api -X PATCH -F body=@", "%s -F body=@%s" % (API_EDIT_CMD, WITHDRAW_FILE)),
+                         ("gh api --method PATCH -f body=", "%s -f 'body=%s'" % (API_METHOD_EDIT_CMD, WITHDRAW)),
+                         ("gh pr comment --edit-last --body", "%s --edit-last --body '%s'" % (PR_CMD, WITHDRAW)),
+                         ("gh issue comment --edit-last --body", "%s --edit-last --body '%s'" % (ISSUE_CMD, WITHDRAW))):
+    old_bash("review-record: a withdrawal note over a stamped record is refused, %s" % _label, _command, "deny",
+             rule=REVIEW_RULE, carries=WITHDRAW_REMEDY)
+old_mcp("review-record: a withdrawal note over a stamped record is refused, MCP update_issue_comment", WITHDRAW, "deny",
+        rule=REVIEW_RULE, carries=WITHDRAW_REMEDY)
+
+# A VARIABLE ID OR NUMBER. A comment id or an issue number held in a shell variable is still a comment or an issue, so the edit and
+# the post routes judge it. A hand-typed record under a number the guard cannot read is refused: its pull request cannot be checked.
+for _label, _command in (
+        ("gh api -X PATCH, $ID", "gh api -X PATCH repos/y/x/issues/comments/$ID -f 'body=%s'" % review_record()),
+        ("gh api -X PATCH, ${ID}", "gh api -X PATCH repos/y/x/issues/comments/${ID} -f 'body=%s'" % review_record()),
+        ("gh api -X PATCH, quoted \"$ID\"", "gh api -X PATCH \"repos/y/x/issues/comments/$ID\" -f 'body=%s'" % review_record()),
+        ("gh api --method PATCH, $ID", "gh api --method PATCH repos/y/x/issues/comments/$ID -f 'body=%s'" % review_record()),
+        ("gh api post, issues/$N/comments", "gh api repos/y/x/issues/$N/comments -f 'body=%s'" % review_record())):
+    bash_post("review-record: a hand-typed record under a variable id or number is refused, %s" % _label, _command, "deny",
+              rule=REVIEW_RULE)
+
 # `-e` is gh's --editor, not --edit-last. A post with -e is a post: judged on its pull request, with one head read, and allowed.
 REVIEW_LOG_CHECKS.append(("review-record:a fresh post with -e (--editor) is judged as a post, gh pr comment -e --body",
                          review_reads("Bash", {"command": "%s -e --body '%s'" % (PR_CMD, review_record())}, "allow", 1)))
@@ -10909,8 +10927,8 @@ REVIEW_LOG_CHECKS.append(("review-record:an edit whose new body the guard cannot
 # comment it is allowed on its one read, and the guard still prints the not-checked line, since the new body was never read. The line is
 # judged after the read, so it is read from a run that reached the old body.
 REVIEW_LOG_CHECKS.append(("review-record:an edit whose stdin body the guard cannot see is allowed over an unmarked comment after one gh read, and prints the not-checked line, gh api -X PATCH -F body=@-",
-                         review_reads("Bash", {"command": "%s -F body=@-" % API_EDIT_CMD}, "allow", 1,
-                                      folder=GHRECORDCOUNT, bodies=REVIEW_OLD_UNMARKED, note=True)))
+                         review_reads_noted("Bash", {"command": "%s -F body=@-" % API_EDIT_CMD}, "allow", 1, True,
+                                            folder=GHRECORDCOUNT, bodies=REVIEW_OLD_UNMARKED)))
 
 # The `=` form of --input is the same unseen body as the bare token. The method may be `-X PATCH` or `--method=PATCH`; the edit
 # route judges both alike. Decision pr-review-record, the edit-read cost: each form reads the old body once.
