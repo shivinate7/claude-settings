@@ -903,7 +903,7 @@ class Host:
         """Post `body` as a comment on pull request n (REST POST issues/n/comments, through gh). A failed post is a Stop."""
         c, out = self.api(f"issues/{n}/comments", method="POST", body={"body": body})
         if c:
-            raise Stop(f"posting the comment on #{n} failed: {out}")
+            raise Stop(f"posting the comment on #{n} failed {LANE_LINT_CITE}: {out}")
 
     def open_heads(self):
         """-> {head branch name: (head sha, PR base)} of the open pull requests, every page. A failed read raises Stop: never an empty set,
