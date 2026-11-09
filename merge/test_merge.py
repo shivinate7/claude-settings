@@ -1278,6 +1278,22 @@ class SmallBaseMove(Env):
         self.assertIsNotNone(refusal)
         self.assertIn("does not hold main", refusal)
 
+    def test_a_batch_rename_of_a_path_main_changed_is_a_shared_path(self):
+        # --no-renames in small_base_move: the batch's rename names its old path too, so main's change to base.txt is shared.
+        # With rename detection the batch names moved.txt only, the shared check passes, and the green run stands.
+        repo, _ = self.batch_repo()
+        sh(repo, "git", "mv", "base.txt", "moved.txt"); sh(repo, "git", "commit", "-qm", "N renames base")
+        n_head = sh(repo, "git", "rev-parse", "HEAD")
+        base = sh(repo, "git", "merge-base", "main", n_head)
+        sh(repo, "git", "checkout", "-q", "main"); put(os.path.join(repo, "base.txt"), "main changed\n")
+        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "main changes base")
+        scope = sh(repo, "git", "diff", "--name-status", "-M", base, n_head)
+        self.assertIn("R100\tbase.txt\tmoved.txt", scope, "the batch is not an exact rename, so the case proves nothing:\n" + scope)
+        with tempfiles_in_run_folder():
+            ok, why = merge.small_base_move(repo, "main", n_head)
+        self.assertFalse(ok, "the batch's rename hid main's change to base.txt, so the green run stands: " + why)
+        self.assertIn("main and the batch both change base.txt", why, "the batch's rename hid main's change to base.txt from the shared-path check")
+
     def scoped(self, workflow=CHECKS_YML, scope=True):
         """Main and feat both gain the CI files; feat then holds main's tip."""
         o = self.other
@@ -12649,6 +12665,8 @@ REVIEW_CUTOVER_PAST = "2000-01-01T00:00:00Z"  # a cutover before every record: t
 REVIEW_CUTOVER = "2026-10-20T00:00:00Z"  # records created before it may be unstamped
 REVIEW_BEFORE = "2026-10-02T00:00:00Z"  # a comment created before REVIEW_CUTOVER
 REVIEW_AFTER = "2026-11-01T00:00:00Z"  # a comment created after REVIEW_CUTOVER
+REVIEW_EDIT_EARLY = "2026-10-05T00:00:00Z"  # an edit made after REVIEW_BEFORE and before REVIEW_AFTER
+REVIEW_EDIT_LATE = "2026-11-02T00:00:00Z"  # an edit made after REVIEW_AFTER
 
 def cutover_at(value):
     """review_stamp_since answers `value` for the case. create=True: the name is new, and a build without it still runs the case."""
@@ -12695,9 +12713,18 @@ def posted_body(test, out):
     test.assertTrue(ends, "the printed record has no CI line:\n" + out)
     return "\n".join(lines[start:ends[0] + 1]) + "\n"
 
-def review_comment(cid, number, body, created="2026-10-02T00:00:00Z"):
-    """A comment on issue or pull request `number`, as the repo-wide comment list gives it."""
-    return {"id": cid, "created_at": created, "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
+NO_UPDATED_AT = object()  # review_comment's `updated` for a comment with no updated_at key
+NULL_UPDATED_AT = object()  # review_comment's `updated` for a comment whose updated_at is null
+
+def review_comment(cid, number, body, created="2026-10-02T00:00:00Z", updated=None):
+    """A comment on issue or pull request `number`, as the repo-wide comment list gives it. GitHub keeps created_at when a comment is
+    edited and sets updated_at to the edit's time; `updated` is that time, and without it the comment was never edited. The two sentinels
+    give the shapes a comment with no edit time can take."""
+    comment = {"id": cid, "created_at": created, "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
+    if updated is NO_UPDATED_AT:
+        return comment
+    comment["updated_at"] = None if updated is NULL_UPDATED_AT else (updated or created)
+    return comment
 
 def list_line(test, out, n):
     """The one `merge --reviewed` line for pull request n."""
@@ -13487,6 +13514,41 @@ class ReviewFixBase(ReviewEnv):
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(typed))
         self.assert_refused(rc, out, err)
 
+    def test_a_newest_earlier_record_hand_edited_after_posting_refuses_the_base(self):
+        # The newest record decides, and a hand-edited record is not a record (decision pr-review-record). The write path reads the
+        # same comments, so an edited newest record names no reviewed head for the fix diff. The older record below it has the same head and would
+        # pass, so a fallback to it is refused as well.
+        older = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        edited = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, edited))
+        self.assert_refused(rc, out, err)
+        self.assertIn("hand-edited", err, "the refused fix check does not name the hand-edited record:\n" + err)
+
+    def test_an_edited_comment_newer_than_the_base_record_refuses_the_fix_check(self):
+        # A comment newer than the newest record that was edited makes the pull request read bad (decision pr-review-record). The fix
+        # check starts from that record, so an edited comment above it refuses the check: the tool cannot tell a stripped record from an
+        # edited comment.
+        record = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        lgtm = review_comment(2, 7, "LGTM", created=REVIEW_AFTER, updated=REVIEW_EDIT_LATE)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(record, lgtm))
+        self.assert_refused(rc, out, err)
+
+    def test_an_edited_comment_older_than_the_base_record_does_not_refuse_the_fix_check(self):
+        # The control: an edited comment below the newest record does not count, so the fix check passes from that record.
+        lgtm = review_comment(1, 7, "LGTM", created=REVIEW_BEFORE, updated=REVIEW_EDIT_EARLY)
+        record = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_AFTER)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(lgtm, record))
+        self.assertEqual(rc, 0, "an edited comment below the newest record refused the fix check:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
+    def test_an_unedited_comment_newer_than_the_base_record_does_not_refuse_the_fix_check(self):
+        # The control: the same newer comment, never edited, is no edit, so the fix check still passes from the newest record.
+        record = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        lgtm = review_comment(2, 7, "LGTM", created=REVIEW_AFTER)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(record, lgtm))
+        self.assertEqual(rc, 0, "an unedited comment above the base record refused the fix check:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
 class ReviewLaneLint(ReviewEnv):
     """`merge <pr> --review-record` prints a record whose newest round, or whose fix check, is PASS only when `merge --lane-lint` passes on that
     head. The incident: a pull request was handed off with its lint red and no CI run. lane_lint is stubbed, so the lint verdict is the case's:
@@ -13778,13 +13840,134 @@ class ReviewedList(ReviewEnv):
         a, b, c = record_text(rounds=REVIEW_PASS), record_text(n=8, rounds=REVIEW_PASS), record_text(rounds=REVIEW_FAILED_THREE)
         host = PullsHost([batch_pull(7, REVIEW_HEAD), batch_pull(8, REVIEW_OLD_HEAD)], {},
                          comments=[review_comment(1, 7, a, created="2026-10-02T00:00:00Z"), review_comment(2, 8, b, created="2026-10-03T00:00:00Z"),
-                                   review_comment(3, 7, c, created="2026-10-04T00:00:00Z")])
+                                   review_comment(3, 7, c, created="2026-10-04T00:00:00Z", updated="2026-10-05T00:00:00Z")])
         self.assertEqual(host.review_comments("2026-10-01T00:00:00Z"),
-                         {7: [("2026-10-02T00:00:00Z", a), ("2026-10-04T00:00:00Z", c)], 8: [("2026-10-03T00:00:00Z", b)]},
-                         "review_comments gives (created_at, body) pairs per pull request, oldest first")
+                         {7: [(a, "2026-10-02T00:00:00Z", False), (c, "2026-10-05T00:00:00Z", True)], 8: [(b, "2026-10-03T00:00:00Z", False)]},
+                         "review_comments gives (body, time, edited) triples per pull request, oldest first; time is updated_at, else created_at; "
+                         "edited is True when updated_at differs from created_at")
         reads = [f for rel, f in host.list_calls if rel == "issues/comments"]
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
+
+    # A review record whose updated_at differs from its created_at was hand-edited (decision pr-review-record). It is not counted as a
+    # record, and the list names it hand-edited. The comments are already read, so the rule adds no gh read.
+    def test_an_edited_record_is_not_counted_as_a_record(self):
+        edited = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [edited])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(out, r"(?m)^(#7 |no record: .*#7\b)", "pull request 7 is not named in the output:\n" + out)
+        self.assertNotRegex(out, r"(?m)^#7 .* done: ", "an edited record was counted as a record:\n" + out)
+
+    def test_an_edited_record_is_named_as_hand_edited(self):
+        edited = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [edited])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(out, r"(?m)^(#7 |no record: .*#7\b)", "pull request 7 is not named in the output:\n" + out)
+        self.assertIn("hand-edited", out, "the edited record is not named hand-edited:\n" + out)
+
+    def test_an_edited_record_flags_its_own_pull_request_only(self):
+        # Full size: pull request 7 has an older record that failed and a newer one that was edited; pull request 8 has one unedited record.
+        older = record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))
+        newer = record_text(rounds=REVIEW_PASS)
+        comments = [review_comment(1, 7, older, created=REVIEW_BEFORE),
+                    review_comment(2, 7, newer, created=REVIEW_BEFORE, updated=REVIEW_AFTER),
+                    review_comment(3, 8, record_text(n=8, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_BEFORE)]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD), batch_pull(8, REVIEW_OLD_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 8), rf"^#8 feat8 {REVIEW_OLD_HEAD[:9]} done: ", "the unedited record on pull request 8 is not done")
+        self.assertRegex(out, r"#7\b", "pull request 7 is not named in the output:\n" + out)
+        self.assertNotRegex(out, r"(?m)^#7 .* done: ", "the edited record on pull request 7 was counted as a record:\n" + out)
+        self.assertIn("hand-edited", out, "the edited record on pull request 7 is not named hand-edited:\n" + out)
+
+    def test_an_unedited_record_still_counts(self):
+        # The control: updated_at equal to created_at is an unedited record, and it is counted.
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS))])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+        self.assertNotIn("hand-edited", out)
+
+    def test_a_record_with_no_updated_at_still_counts(self):
+        # The control: review_comments reads a comment with no updated_at, or a null one, at its created_at, as it does today. Neither is an edit.
+        for label, updated in (("no updated_at key", NO_UPDATED_AT), ("updated_at null", NULL_UPDATED_AT)):
+            with self.subTest(label):
+                host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS), updated=updated)])
+                self.assertEqual(rc, 0, out + err)
+                self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", label + ": the record is not counted")
+                self.assertNotIn("hand-edited", out, label + ": the record is named hand-edited")
+
+    def test_an_edited_record_adds_no_gh_read(self):
+        # The control: the edited record's run reads no route its unedited twin does not, and reads the comments once.
+        runs = {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}
+        edited = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
+        twin = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        host_e, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [edited], runs, count_gh=True)
+        host_t, _rc, _out, _err = self.listing([batch_pull(7, REVIEW_HEAD)], [twin], runs, count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host_e.gh_calls.count("issues/comments"), 1, "the comments are read more than once:\n" + str(host_e.gh_calls))
+        extra = sorted(set(host_e.gh_calls) - set(host_t.gh_calls))
+        self.assertEqual(extra, [], "the edited record's run reads routes its unedited twin does not")
+        repeated = sorted({rel for rel in host_e.gh_calls if host_e.gh_calls.count(rel) > 1})
+        self.assertEqual(repeated, [], "the edited record's run reads a route more than once")
+
+    def test_an_older_unedited_record_under_an_edited_record_reads_bad(self):
+        # The newest record decides (decision pr-review-record). A newest record that was hand-edited reads bad, and an older
+        # unedited record below it does not count. The edited text is unknown, so a fallback could pass on an older verdict. The older record
+        # here passes, so a fallback would read the pull request done.
+        older = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        edited = review_comment(2, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [older, edited])
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: ", "the older unedited record counted under the hand-edited newest record")
+        self.assertIn("hand-edited", line, "the hand-edited newest record is not named hand-edited on pull request 7's line:\n" + out)
+
+    def test_an_older_unedited_pass_does_not_read_done_under_a_newer_edited_comment_whose_marker_is_gone(self):
+        # The newest record decides (decision pr-review-record). A newer comment that was a record, and was then edited so that its marker
+        # line is gone, is not a record to review_comments. Left there, the older unedited record is the newest one it sees, and it reads
+        # done. The edit marks the newer comment hand-edited, so the pull request must not read done.
+        stripped = record_text(rounds=REVIEW_PASS).split("\n", 1)[1]  # the marker line taken out, the rest of the record kept
+        self.assertFalse(merge.review_marked(stripped), "fixture: the body with its marker line taken out still reads as a record")
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE),
+                    review_comment(2, 7, stripped, created=REVIEW_BEFORE, updated=REVIEW_AFTER)]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(out, r"(?m)^(#7 |no record: .*#7\b)", "pull request 7 is not named in the output:\n" + out)
+        self.assertNotRegex(out, r"(?m)^#7 .* done: ", "the older unedited record read done under a newer edited comment whose marker is gone:\n" + out)
+
+    def test_an_unedited_comment_with_no_marker_leaves_the_older_record_done(self):
+        # The control for the case above: the same newer comment, never edited, is no record, so the older record still reads done.
+        stripped = record_text(rounds=REVIEW_PASS).split("\n", 1)[1]
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE),
+                    review_comment(2, 7, stripped, created=REVIEW_BEFORE)]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "the older unedited record is not done under an unedited comment with no marker")
+
+    def test_an_edited_comment_newer_than_the_newest_record_reads_bad(self):
+        # A comment newer than the newest record that was edited makes the pull request read bad, and the line names it hand-edited
+        # (decision pr-review-record). The tool cannot tell a stripped record from an edited comment, so the edit is the sign.
+        record = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        lgtm = review_comment(2, 7, "LGTM", created=REVIEW_AFTER, updated=REVIEW_EDIT_LATE)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [record, lgtm])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(out, rf"(?m)^#7 feat7 {REVIEW_HEAD[:9]} bad: ", "an edited comment newer than the newest record did not read bad:\n" + out)
+        self.assertIn("hand-edited", out, "the edited comment newer than the newest record is not named hand-edited:\n" + out)
+
+    def test_an_edited_comment_older_than_the_newest_record_leaves_it_done(self):
+        # The control: an edited comment below the newest record does not count, so the record still reads done.
+        lgtm = review_comment(1, 7, "LGTM", created=REVIEW_BEFORE, updated=REVIEW_EDIT_EARLY)
+        record = review_comment(2, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_AFTER)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [lgtm, record])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "an edited comment below the newest record changed its reading")
+
+    def test_an_unedited_comment_newer_than_the_newest_record_leaves_it_done(self):
+        # The control: the same newer comment, never edited, is no edit, so the record still reads done.
+        record = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        lgtm = review_comment(2, 7, "LGTM", created=REVIEW_AFTER)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [record, lgtm])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "an unedited comment newer than the newest record changed its reading")
 
     def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
         # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection
@@ -14501,11 +14684,12 @@ def setUpModule():
 
 
 class ProseJudge(Env):
-    def setup_range(self, main_files, feat_files, links=None, later=None):
+    def setup_range(self, main_files, feat_files, links=None, later=None, renames=None):
         """main gains `main_files` ({path: text}), so their lines are in no added line. Then feat removes the pending record
         (second.md, governed prose with no cite) and changes `feat_files`, and makes each `links` ({path: target}) a symlink to
         target. Feat then takes main's base, and `later` ({path: text}) is one more feat commit after that: the lines it adds to
-        a prose file are selected through the diff base, and a cited line through the backing file it cites."""
+        a prose file are selected through the diff base, and a cited line through the backing file it cites. `renames` ({old: new})
+        is one more feat commit after the base too: a git mv of each old path to its new one."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
@@ -14522,12 +14706,14 @@ class ProseJudge(Env):
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: drop the pending record, change the backing")
         sh(o, "git", "push", "-q", "origin", "feat")
         head_takes_base(self)
-        if later:  # after the base is taken: a prose file that main and feat both add would conflict in head_takes_base's merge
+        if later or renames:  # after the base is taken: a prose file that main and feat both add would conflict in head_takes_base's merge
             sh(o, "git", "fetch", "-q", "origin")
             sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-            for path, text in later.items():
+            for old, new in (renames or {}).items():
+                sh(o, "git", "mv", old, new)  # the new path keeps the old text, so git reads a pure rename
+            for path, text in (later or {}).items():
                 put(os.path.join(o, path), text)
-            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: add lines to the prose")
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: move the prose file" if renames and not later else "feat: add lines to the prose")
             sh(o, "git", "push", "-q", "origin", "feat")
 
     def run_capped(self, cap=PROSE_CAP):
@@ -14798,6 +14984,18 @@ class ProseJudge(Env):
             with self.assertRaises(ModelStarted):
                 decision_watch._nowindow.run(["claude", "-p"])
         self.assertEqual(started, [], "the refused claude start still reached the runner")
+
+    def test_a_renamed_prose_file_has_its_lines_judged_as_added(self):
+        # --no-renames in prose_judge_lines: the moved file's lines read as added, so each is judged. Under rename detection a pure
+        # rename adds no line, and its lines go unjudged. Scope first: the range is one pure rename of the prose file.
+        moved = "docs/notes/moved.md"
+        self.setup_range({PROSE: "# Cloud notes\n\nThe cloud runner is idle on weekends.\n"}, {}, renames={PROSE: moved})
+        base = sh(self.other, "git", "merge-base", "origin/main", "origin/feat")
+        scope = sh(self.other, "git", "diff", "--name-status", "-M", base, "origin/feat")
+        self.assertIn("R100\t%s\t%s" % (PROSE, moved), scope, "the range is not a pure rename of %s, so the case proves nothing:\n%s" % (PROSE, scope))
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the moved %s adds its line, so the line is judged\n%s" % (len(stub.prompts), moved, out))
+        self.assertIn("idle on weekends", stub.prompts[0], "the call does not carry the moved file's line")
 
     def test_no_backed_line_and_no_added_prose_makes_no_model_call(self):
         # The range changes code only, and the prose on main cites a file the range does not change.
@@ -15334,6 +15532,18 @@ class ReviewCutover(ReviewEnv):
             rc, out, err = self.run_args("--reviewed", host=host)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "the unstamped record created before the cutover is not done")
+
+    def test_edited_record_after_the_cutover_is_hand_edited_and_not_counted(self):
+        # The comment was created before the cutover and its body was edited after it, with no stamp. The newest record decides, and a
+        # hand-edited newest record reads bad, named hand-edited (decision pr-review-record).
+        comment = review_comment(1, 7, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
+        with cutover_at(REVIEW_CUTOVER):
+            host = PullsHost([batch_pull(7, REVIEW_HEAD)], {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}, comments=[comment])
+            rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: ", "the lone hand-edited newest record did not read bad:\n" + out)
+        self.assertIn("hand-edited", line, "the hand-edited newest record is not named hand-edited on pull request 7's line:\n" + out)
 
     def test_an_unstamped_record_created_after_the_cutover_reads_bad(self):
         rec = parse_at(self, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_AFTER, cutover=REVIEW_CUTOVER)

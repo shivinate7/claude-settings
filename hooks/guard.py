@@ -1481,7 +1481,12 @@ def message_texts(segment: str, raw: str, where: str, before: int, titles: bool 
 GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
 _ROUTE_NUMBER = r"(\d+|\$\w+|\$\{\w+\})"   # a number, or a shell variable holding one: the guard sees the word before the shell fills it
 _COMMENTS_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/" + _ROUTE_NUMBER + r"/comments/?")
-_COMMENT_EDIT_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/comments/" + _ROUTE_NUMBER + r"/?")   # a comment edited in place, by comment id
+# A comment edited in place, by comment id. The route is read in every form gh takes.
+# These are a full URL, a query string or fragment after the id, and a `$(...)` in the id or the repo (substitution_words joins an unquoted one).
+# The guard judges the route it reads. A form this pattern misses is an edit it never judges.
+# Those forms are a `)` inside the id, a backtick id, and a `|`, `;` or `&&` inside an unquoted `$(...)` (step record-guard-wrapper-forms).
+_EDIT_ID = r"(\d+|\$\w+|\$\{\w+\}|\$\([^)]*\))"
+_COMMENT_EDIT_ROUTE = re.compile(r"(?:https?://[^/\s]+)?/?repos/(.+?)/issues/comments/" + _EDIT_ID + r"/?(?:[?#].*)?", re.DOTALL)
 PR_COMMENT_VALUE_FLAGS = {"-b", "--body", "-F", "--body-file", "-R", "--repo"}
 _CAT_BODY = re.compile(r"\$\(\s*cat\s+([^|;&<>()]+?)\s*\)")
 
@@ -1518,11 +1523,31 @@ def _api_input_named(args) -> bool:
     return any(a == "--input" or a.startswith("--input=") for a in args)
 
 
+def substitution_words(args):
+    """`args` with each word that opens a `$(` it does not close joined, with single spaces, to the words up to the one that
+    closes it. The guard splits a command into words before it reads a route, so an unquoted `$(cat idfile)` arrives as two
+    words and no route pattern matches either. A `$(` never closed leaves the words as they are. The words inside a
+    substitution are not the call's own, so a route there is not the call's route."""
+    words, index = [], 0
+    while index < len(args):
+        word, end = args[index], index
+        depth = word.count("(") - word.count(")") if "$(" in word else 0
+        while depth > 0 and end + 1 < len(args):
+            end += 1
+            depth += args[end].count("(") - args[end].count(")")
+        if depth > 0:
+            end = index   # never closed: no join
+        words.append(" ".join(args[index:end + 1]))
+        index = end + 1
+    return words
+
+
 def _api_post_bodies(args, routes=_COMMENTS_ROUTE):
     """Return (repo, number, texts, files, stdin) for a `gh api repos/O/R/issues/<n>/comments` call, else None; `routes`
-    names another route to read (the edit route returns the comment id as `number`). A `body` field
+    names another route to read (the edit route returns the comment id as `number`). The route is read from
+    substitution_words. A `body` field
     is text for -f and --raw-field, and for -F and --field text too unless it starts with `@`, which names a file (`@-` is stdin)."""
-    route = next((a for a in args if routes.fullmatch(a)), None)
+    route = next((a for a in substitution_words(args) if routes.fullmatch(a)), None)
     if route is None or args[:1] != ["api"]:
         return None
     repo, number = routes.fullmatch(route).groups()
@@ -1698,6 +1723,7 @@ AUTHOR_BASENAMES = {"requirements-dev.txt"}
 # The three mutation tests are test code for a test-author, named one by one so a later product
 # mutate_*.py stays a builder's. A builder keeps editing them: they are not test paths. Case folds as in `is_test_rel`.
 AUTHOR_MUTATION_TESTS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
+MUTATION_TEST_NAMES = {name.rsplit("/", 1)[-1] for name in AUTHOR_MUTATION_TESTS}
 TEST_CONFIG = re.compile(
     r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
     r"|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+|\.mocharc(?:\.\w+)?|[^/]+\.xctestplan)$")
@@ -1805,7 +1831,7 @@ WORKFLOW_VALUE_FLAGS = {"-X", "-W", "-r", "--require", "--import", "-o"}
 # Interpreter flags after which a command or module follows, so no script path does (`python -m`, `bash -c`).
 WORKFLOW_NO_PATH_FLAGS = {"-c", "-m"}
 WORKFLOW_DISABLE_STEP = re.compile(
-    r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:false|\$\{\{\s*false\s*\}\}))\s*$")
+    r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:false|\$\{\{\s*false\s*\}\}))(?:\s+#.*)?\s*$")  # YAML: a comment needs space before `#`
 
 
 def is_workflow_rel(rel: str) -> bool:
@@ -1835,6 +1861,50 @@ def workflow_script_index(args):
     return index if index < len(args) else None
 
 
+# Commands that run the command after them. Each maps to the flags that take a value (their next token is
+# not the wrapped command); `timeout` also takes a duration, and `coverage` and `uv` run their subcommand `run`.
+WORKFLOW_WRAPPERS = {
+    "timeout": {"-k", "-s", "--kill-after", "--signal"},
+    "xvfb-run": {"-e", "-n", "-f", "-s", "-w", "--error-file", "--server-num", "--auth-file",
+                 "--server-args", "--wait"},
+    "env": {"-u", "-C", "--unset", "--chdir"},
+    "nice": {"-n", "--adjustment"},
+    "coverage": {"--rcfile", "--include", "--omit", "--source", "--data-file", "--context"},
+    "uv": {"--with", "--python", "-p", "--project", "--directory", "--group", "--extra", "--env-file",
+           "--package", "-w", "--with-requirements"},
+}
+WORKFLOW_RUN_SUBCOMMAND = {"coverage", "uv"}
+
+
+def workflow_unwrap(tokens):
+    """`tokens` without the wrapper commands before the command they run (`timeout 600`, `xvfb-run -a`,
+    `env FOO=1`, `nice`, `coverage run`, `uv run`, `python -m coverage run`), each with its own flags and
+    values. A wrapper that wraps nothing, or `coverage` or `uv` with another subcommand, is left as it is."""
+    tokens = list(tokens)
+    while tokens:
+        if (tokens[0] in WORKFLOW_INTERPRETERS and tokens[1:4] == ["-m", "coverage", "run"]):
+            tokens = tokens[4:]
+            name = "coverage"
+        elif tokens[0] in WORKFLOW_WRAPPERS:
+            name, tokens = tokens[0], tokens[1:]
+            if name in WORKFLOW_RUN_SUBCOMMAND:
+                # `uv` takes global flags before `run`; skip them to find it.
+                probe = 0
+                while probe < len(tokens) and tokens[probe].startswith("-"):
+                    probe += 2 if tokens[probe] in WORKFLOW_WRAPPERS[name] else 1
+                if tokens[probe:probe + 1] != ["run"]:
+                    return [name] + tokens
+                tokens = tokens[probe + 1:]
+        else:
+            break
+        values = WORKFLOW_WRAPPERS[name]
+        while tokens and (tokens[0].startswith("-") or (name == "env" and re.match(r"^\w+=", tokens[0]))):
+            tokens = tokens[2:] if tokens[0] in values else tokens[1:]
+        if name == "timeout" and tokens:
+            tokens = tokens[1:]   # the duration
+    return tokens
+
+
 def workflow_step_disables(line: str) -> bool:
     """True when one step line is `continue-on-error: true` or `if: false`, so the step runs no test that counts."""
     return bool(WORKFLOW_DISABLE_STEP.match(line))
@@ -1857,6 +1927,7 @@ def workflow_run_is_test(value: str) -> bool:
     if any(set(tok) <= set(lexer.punctuation_chars) for tok in tokens):
         return False
     script = 0
+    tokens = workflow_unwrap(tokens)
     if tokens and tokens[0] in WORKFLOW_INTERPRETERS:
         tokens = tokens[1:]
         script = workflow_script_index(tokens)
@@ -1920,15 +1991,34 @@ WORKFLOW_RUN_PREFIX = re.compile(r"^\s*(?:-\s+)?run:\s*")
 WORKFLOW_RUN_BLOCK = re.compile(r"^(\s*)(?:-\s+)?run:\s*[|>][+-]?\s*$")
 
 
+def workflow_runs_test(path: str) -> bool:
+    """A run of this path is a test run: a test path, or a mutation test (not a test path for edit ownership).
+    A mutation test counts by file name, so `cd hooks && python3 mutate_guard.py` and a `working-directory`
+    step are runs too."""
+    return is_test_rel(path) or basename(norm(path).lower()) in MUTATION_TEST_NAMES
+
+
 def workflow_command_tests(command: str) -> set:
     """The test paths one shell command line runs, each in its `workflow_path` spelling: the script an
     interpreter runs past its flags, every test path after a test runner, or the command itself when it is a
     test path. A lint tool that is given a test folder (`ruff check tests/`) runs none."""
     found = set()
     for segment in WORKFLOW_COMMAND_SPLIT.split(command):
-        tokens = [tok.strip("\"'") for tok in segment.split()]
-        while tokens and (re.match(r"^\w+=", tokens[0]) or tokens[0] in ("npx", "sudo", "time")):
-            tokens.pop(0)
+        # A quoted value with a space is one word. No escape character, so a Windows `tests\x.py` keeps its
+        # backslash for `workflow_path` to turn into `/`.
+        lexer = shlex.shlex(segment, posix=True)
+        lexer.whitespace_split, lexer.commenters, lexer.escape = True, "", ""
+        try:
+            tokens = list(lexer)
+        except ValueError:
+            tokens = [tok.strip("\"'") for tok in segment.split()]
+        while tokens:
+            if re.match(r"^\w+=", tokens[0]) or tokens[0] in ("npx", "sudo", "time"):
+                tokens.pop(0)
+            elif workflow_unwrap(tokens) != tokens:
+                tokens = workflow_unwrap(tokens)
+            else:
+                break
         if not tokens:
             continue
         runner = bool(TEST_RUNNER_CONTEXT.search(segment))
@@ -1937,7 +2027,7 @@ def workflow_command_tests(command: str) -> set:
             args = tokens[1:] if runner else ([] if script is None else [tokens[1 + script]])
         else:
             args = tokens if runner else tokens[:1]
-        found.update(workflow_path(tok) for tok in args if is_test_rel(workflow_path(tok)))
+        found.update(workflow_path(tok) for tok in args if workflow_runs_test(workflow_path(tok)))
     return found
 
 
@@ -2499,7 +2589,7 @@ SESSION_TOOL = "mcp__ccd_session__start_session"
 CREATE_SESSION_TOOL = "mcp__claude-code-remote__create_session"
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
-LANE_TAG = "cs-build:lane"
+from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with lint/report_guard.py
 LANE_EFFORT_REASON = (
     "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
     "prompt. Start the lane with that prompt, then send the brief by send_message (decision agent-model-cap)."

@@ -131,12 +131,14 @@ that holds `round <N>` or `reviewer` and a capital PASS or PASSED claims a PASS,
 "did not PASS") claims nothing, nor does a PASS whose clause places it in the past ("was before the fix", "went stale"). Clauses split on `,`, `;` and `--`; a
 history word in another clause hides no claim. The line claims it for each PR it names, as
 `#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
-the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
+the review marker (merge/merge.py review_newest: an edited newest record, or an edited comment after it, reads as no record), read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
 PR on its line is refused and asks for the PR. The remedy names the act (`merge <pr> --review-record ...`, then post the
 record) and never the live head. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
 checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
-blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
+blocks: it adds a systemMessage that says UNKNOWN. The comment's last edit time and the cutover (merge/merge.py review_stamp_since, for the PR's base) go to parse_review, so an unstamped
+record from before the cutover reads done, as merge --reviewed reads it; with no cwd, or a cwd with no cutover, the Stamp line is required, and the refusal names it. Cost: 2 gh reads and one git log
+(review_stamp_since, cached per (root, base) in the process: one per distinct base per Stop), plus the guard_merge and merge module imports; no file,
 process kept or timer. A stop_hook_active rewrite is not checked.
 """
 import datetime
@@ -151,6 +153,9 @@ from _transcript import (  # noqa: E402
     ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
+
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with hooks/guard.py
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -313,11 +318,59 @@ def _stops_before_a_commit(args):
     return False
 
 
+GH_API_VALUE_FLAGS = {"-X", "--method", "-f", "-F", "--field", "--raw-field", "-H", "--header",
+                      "--input", "-q", "--jq", "-t", "--template", "--hostname", "--cache", "-p",
+                      "--preview", "-R", "--repo"}
+GH_API_FIELD_FLAGS = {"-f", "-F", "--field", "--raw-field", "--input"}
+# A pull's merge route, and the repo's merges route (a merge commit on a branch).
+GH_API_MERGE_ROUTE_RE = re.compile(r"(^|/)pulls/[^/]+/merge/?$")
+GH_API_MERGES_ROUTE_RE = re.compile(r"(^|/)repos/[^/]+/[^/]+/merges/?$")
+
+
+def _gh_api_lands(args):
+    """True when a `gh api` call (the tokens after `api`) merges. The route is the first word that
+    is no flag and no flag's value. The method is `-X`/`--method` when given, else POST once any
+    field or `--input` is given (gh's own default), else GET. A PUT to a pull's merge route and a POST
+    to the repo's merges route land; GET, a POST to a pull's merge route, `--help` and every other
+    route do not."""
+    method, has_fields, route, i = None, False, None, 0
+    while i < len(args):
+        arg = args[i]
+        i += 1
+        if arg in ("-X", "--method"):
+            method = args[i].upper() if i < len(args) else method
+            i += 1
+        elif arg.startswith("--method=") or arg.startswith("-X"):
+            method = arg.split("=", 1)[1].upper() if "=" in arg else arg[2:].upper()
+        elif arg in ("--help", "-h"):
+            return False   # prints help and makes no request
+        elif arg in GH_API_FIELD_FLAGS:
+            has_fields = True
+            i += 1
+        elif arg in GH_API_VALUE_FLAGS:
+            i += 1
+        elif arg.startswith("--"):
+            has_fields = has_fields or arg.split("=", 1)[0] in GH_API_FIELD_FLAGS
+        elif arg.startswith("-") and len(arg) > 1:
+            has_fields = has_fields or arg[:2] in ("-f", "-F")
+        elif route is None:
+            route = arg.split("?", 1)[0]
+    if route is None:
+        return False
+    method = method or ("POST" if has_fields else "GET")
+    if GH_API_MERGE_ROUTE_RE.search(route):
+        return method == "PUT"
+    return method == "POST" and bool(GH_API_MERGES_ROUTE_RE.search(route))
+
+
 def _segment_lands_a_gh_write(segment):
     """True when the segment's command word is `gh` and the call is `pr merge`, `pr create` or
-    `pr update-branch` without a flag that writes nothing (GH_NO_WRITE_FLAGS, `--help`, `-h`). `guard.gh_call_of` reads the
+    `pr update-branch` without a flag that writes nothing (GH_NO_WRITE_FLAGS, `--help`, `-h`), or
+    a `gh api` merge call (`_gh_api_lands`). `guard.gh_call_of` reads the
     command word past wrappers and a subshell, the same read the merge guard takes."""
     rest = guard.gh_call_of(segment)
+    if rest is not None and rest[:1] == ["api"]:
+        return _gh_api_lands(rest[1:])
     if rest is None or rest[:1] != ["pr"] or rest[1:2] == [] or rest[1] not in GH_LANDING_PR_VERBS:
         return False
     no_write = GH_NO_WRITE_FLAGS.get(rest[1], set()) | {"--help", "-h"}
@@ -709,7 +762,6 @@ LANE_REFUSAL = owner_line(
     "a question was asked in a lane session, whose own chat does not reach the owner, and it was not sent to "
     "its parent")
 NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
-LANE_TAG = "cs-build:lane"
 PARENT_TARGETS = {"@parent", "parent"}
 # A "?" ends a question unless a word character follows it, so a URL query (a?b=1) never counts. Quoted
 # text, backticked text and a blockquoted line are past words, never a question asked now. A straight
@@ -1601,6 +1653,10 @@ REVIEW_NO_RECORD = (
     "Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer read> --kind <kind> --guard "
     "<yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a comment on PR #%d, then report again."
 )
+REVIEW_NO_STAMP = (
+    " The newest review record on that PR has no Stamp line, and with no cutover for the base this check requires one. "
+    "Render the record again with `merge <pr> --review-record`, which prints the Stamp line, and post that."
+)
 
 
 def review_claims(text):
@@ -1636,11 +1692,21 @@ def _gh_json(args, cwd):
     return json.loads(run.stdout)
 
 
-def _newest_record(n, comments, merge_mod):
-    """The parsed newest review record comment of `comments` (oldest first), else None."""
-    bodies = [c.get("body") or "" for c in comments if isinstance(c, dict)]
-    marked = [b for b in bodies if b.splitlines()[:1] == [merge_mod.REVIEW_MARKER]]
-    return merge_mod.parse_review(marked[-1]) if marked else None
+def _newest_marked(comments, merge_mod):
+    """The newest comment of `comments` (oldest first) that merge's review_marked calls a record, else None. merge's review_newest is the one home."""
+    return merge_mod.review_newest(comments)[0]
+
+
+def _newest_record(n, comments, merge_mod, cutover=None):
+    """The parsed newest review record comment of `comments` (oldest first), else None. None as well when merge's review_newest says it
+    cannot be trusted: the newest record, or a comment after it, was edited, so a PASS claim reads as merge --reviewed reads it, bad. With a
+    `cutover` (merge's review_stamp_since), the comment's last edit time (updated_at, else created_at) goes to parse_review, so an unstamped
+    record from before the cutover reads as merge --reviewed reads it. With no cutover, the Stamp line is required."""
+    newest, why = merge_mod.review_newest(comments)
+    if newest is None or why:
+        return None
+    edited = (newest.get("updated_at") or newest.get("created_at")) if cutover else None
+    return merge_mod.parse_review(newest.get("body") or "", edited, cutover)
 
 
 def review_record_problem(hook, text):
@@ -1666,16 +1732,21 @@ def review_record_problem(hook, text):
             if merge_mod is None:
                 raise ImportError("merge/merge.py not found")
             cwd = hook.get("cwd")
-            live = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd)["head"]["sha"]
+            pull = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd)
+            live = pull["head"]["sha"]
             pages = _gh_json(["repos/{owner}/{repo}/issues/%d/comments" % n, "-X", "GET", "-f", "per_page=100",
                               "--paginate", "--slurp"], cwd)
             comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
-            rec = _newest_record(n, comments, merge_mod)
+            cutover = merge_mod.review_stamp_since(cwd, pull["base"]["ref"]) if cwd else None
+            rec = _newest_record(n, comments, merge_mod, cutover)
+            newest = _newest_marked(comments, merge_mod)
+            unstamped = (not cutover and newest is not None
+                         and not any(line.startswith("Stamp: ") for line in (newest.get("body") or "").splitlines()))
         except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block
             notes.append("Review-record guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
             continue
         if not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
-            reasons.append(REVIEW_NO_RECORD % (n, n, n))
+            reasons.append(REVIEW_NO_RECORD % (n, n, n) + (REVIEW_NO_STAMP if unstamped else ""))
     return " ".join(reasons), " ".join(notes)
 
 

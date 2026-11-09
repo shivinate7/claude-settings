@@ -388,23 +388,84 @@ def delete_text(segment):
         lambda m: m.group(0) if m.group(1) in ("'", '"') else "/" + norm(m.group(1)), segment))
 
 
+def _substitution_end(text, index):
+    """Where the command substitution that opens at `text[index]` ends, else -1. `$(` ends at its
+    matching `)` and a backtick at the next one; an unclosed one runs to the end of the text.
+    PowerShell has `$( )` only, as a backtick is its escape."""
+    if text.startswith("$(", index):
+        depth = 0
+        for at in range(index + 1, len(text)):
+            depth += (text[at] == "(") - (text[at] == ")")
+            if depth == 0:
+                return at
+        return len(text)
+    if text[index] == "`" and not is_powershell(text):
+        close = text.find("`", index + 1)
+        return len(text) if close < 0 else close
+    return -1
+
+
+_TEXT_COMMANDS = ("echo", "printf", "write-host", "write-output")
+_LIVE_UNQUOTED = re.compile(r"\$\(|`|[<>]\(")
+
+
+def _quotes_are_text(segment):
+    """True when a segment only prints its quoted words or stores them as a commit message: its
+    command is a printer or `git commit`, with no substitution outside single quotes. Any other
+    command may run a quoted word (`parallel`, `script -c`, `watch`, `runuser -c`)."""
+    if _LIVE_UNQUOTED.search(re.sub(r"'[^']*'", "", segment)):
+        return False
+    words = [word for word in segment_tokens(segment) or () if not re.match(r"[A-Za-z_]\w*=", word)]
+    if not words:
+        return False
+    if words[0].lower() in _TEXT_COMMANDS:
+        return True
+    return words[0] in ("git", "git.exe") and words[_git_subcommand_index(words, 0):][:1] == ["commit"]
+
+
 class UnquotedStart:
     """A compiled pattern whose `search` skips a match that starts inside quotes. It has a
     pattern's own `search`, so a caller loops over it without knowing the difference. An
     apostrophe shaped like a contraction is text, as in split_segments' second reading: a lone
-    `don't` must not turn the rest of the line into one quote."""
+    `don't` must not turn the rest of the line into one quote. `printers_only` skips quotes only in
+    a segment whose quoted words are text (`_quotes_are_text`) and not piped on; elsewhere it reads
+    the raw text."""
 
-    def __init__(self, pattern):
+    def __init__(self, pattern, nested=False, printers_only=False):
         self.pattern = pattern
+        self.nested = nested
+        self.printers_only = printers_only
 
     def search(self, text):
-        inside, quote, index = set(), "", 0
+        if self.printers_only:
+            ends = []
+            for segment, end in zip(split_segments(text, ends), ends):
+                text_only = end != "|" and _quotes_are_text(segment)
+                found = self._search_unquoted(segment) if text_only else self.pattern.search(segment)
+                if found:
+                    return found
+            return None
+        found = self._search_unquoted(text)
+        if found or not self.nested:
+            return found
+        # The script a shell, `eval` or `pwsh -Command` runs is quoted text, so it is read again as a command.
+        for segment in split_segments(text):
+            for script in inner_commands(segment_tokens(segment) or []):
+                found = self.search(script)
+                if found:
+                    return found
+        return None
+
+    def _search_unquoted(self, text):
+        inside, quote, index, live_to = set(), "", 0, -1
         while index < len(text):
+            if quote == '"' and index > live_to:
+                live_to = max(live_to, _substitution_end(text, index))   # `$( )` and backticks run in double quotes
             if not quote and text[index] == "'" and CONTRACTION.match(text, index):
                 width, after = 1, ""
             else:
                 width, after = quote_advance(text, index, quote)
-            if quote:
+            if quote and index >= live_to:
                 inside.update(range(index, index + width))
             quote, index = after, index + width
         return next((m for m in self.pattern.finditer(text) if m.start() not in inside), None)
@@ -416,19 +477,20 @@ RM_RAW = UnquotedStart(re.compile(
 
 
 DESTRUCTIVE_DELETE = (
-    re.compile(
+    UnquotedStart(re.compile(
         r"(?i)\b(?:remove-item|ri|rd|rmdir|del|erase|rm)\b"
+        r"(?![^\n;|&]*\s--cached\b)"   # the index-only form of `git rm`
         r"(?=[^\n;|&]*\s-r(?:ec(?:urse)?)?\b)"
         r"(?=[^\n;|&]*\s-f(?:o(?:rce)?)?\b)"
         r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|\)|$)"
-    ),
+    ), printers_only=True),
     # Recursion alone is enough for the PowerShell names. `rm` is read by tokens, not here. A match
     # that starts inside quotes is text (an echo, a commit message), so it is not read.
     UnquotedStart(re.compile(
         r"(?i)\b(?:remove-item|ri|rd|rmdir|del|erase)\b"
         r"(?=[^\n;|&]*\s-r(?:ec(?:urse)?)?\b)"
         r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|\)|$)"
-    )),
+    ), nested=True),
 )
 # The one set of wide targets, read by the pattern fallbacks and, by tokens, by `rm -rf`: a root, a
 # home, the working directory or a glob of one, with an optional trailing slash and `*`. `.*` and
@@ -484,14 +546,16 @@ def _in_group(args, tick=False):
 def _git_subcommands(words):
     """The indexes of the words that name a git subcommand, such as the `rm` of `git rm -r .`. Such
     a word is no command word. A force flag keeps the word read: `git rm` without one refuses to drop an edited
-    file, so git can restore what it removes, and `git rm -f` discards the edits."""
+    file, so git can restore what it removes, and `git rm -f` discards the edits. `--cached` removes from the
+    index only, so it names the subcommand whatever the other flags say."""
     found = set()
     for at, word in enumerate(words):
         if basename(word) in ("git", "git.exe"):
             sub = _git_subcommand_index(words, at)
             args = words[sub + 1:]
             args = args[:args.index("--")] if "--" in args else args
-            if not any(a == "--force" or (a[:1] == "-" and a[1:2] != "-" and "f" in a) for a in args):
+            if "--cached" in args or not any(
+                    a == "--force" or (a[:1] == "-" and a[1:2] != "-" and "f" in a) for a in args):
                 found.add(sub)
     return found
 
@@ -659,22 +723,36 @@ def parent_delete_hit(segments, number: int, cwd: str):
 # Through that link a hand-run `npm ci`, or a recursive delete of what is inside it, empties the
 # other checkout's install. The rule reads the filesystem: a real folder, or none, is judged as it
 # always was. A bare `rm node_modules` removes only the link, so it stays allowed.
-# ponytail: `-w` and `--workspace` are not read; the install is judged against the working folder
-# alone, and `install-test` and its aliases are not listed.
-NPM_ALIASES = {
-    "ci": "ci", "clean-install": "ci", "install-clean": "ci", "ic": "ci", "cit": "ci",
-    "install": "install", "i": "install", "in": "install", "ins": "install", "isntall": "install",
-    "add": "install", "uninstall": "uninstall", "remove": "uninstall", "rm": "uninstall",
-    "r": "uninstall", "un": "uninstall", "update": "update", "up": "update", "upgrade": "update",
+# `--prefix` is read (npm_prefix_flag): its folder is the one judged. A workspace flag is read for
+# `npm version` only (NPM_WORKSPACE_FLAGS).
+# THE READ-ONLY LIST: every npm subcommand and alias that never rewrites node_modules, by the npm 10.9.9
+# list in lib/utils/cmd-list.js. A subcommand off this list is refused in a linked folder, so a new npm
+# command, a typo and an abbreviation fail closed. The list is a curated copy because the guard cannot
+# read npm's own at hook time.
+NPM_READ_ONLY = {
+    "access", "adduser", "add-user", "login", "logout", "audit", "bugs", "issues", "cache",  # glossary-ok: "bugs" is npm's own subcommand name
+    "completion", "config", "c", "get", "set", "deprecate", "diff", "dist-tag", "dist-tags", "docs",
+    "home", "doctor", "exec", "x", "explain", "why", "find-dupes", "fund", "help", "hlep",
+    "help-search", "hook", "ll", "la", "ls", "list", "org", "ogr", "outdated", "owner", "author",
+    "pack", "ping", "pkg", "prefix", "profile", "publish", "query", "repo", "root", "run-script",
+    "run", "rum", "urn", "sbom", "search", "s", "se", "find", "star", "stars", "unstar", "start",
+    "stop", "restart", "test", "t", "tst", "team", "token", "unpublish", "version", "verison", "view",
+    "v", "info", "show", "whoami",
 }
 # Global options that take the next word as their value, so that word is not the subcommand.
 NPM_VALUE_FLAGS = {
     "--loglevel", "--prefix", "--cache", "--registry", "--userconfig", "--globalconfig",
     "--workspace", "-w", "--tag", "--otp", "--scope", "--before", "--omit", "--include",
-    "--install-strategy", "--logs-dir",
+    "--install-strategy", "--logs-dir", "-C", "-L", "--location", "-c", "--call", "-m", "--message",
+    "--reg",
 }
 # Options after which the command changes nothing in the working folder's install.
 NPM_NO_CHANGE = {"-g", "--global", "--location=global", "--help", "-h", "--dry-run"}
+# Subcommands that run install scripts even with --dry-run, so a dry run is no exemption for them.
+NPM_DRY_RUN_WRITERS = {"rebuild", "rb", "edit"}
+# With one of these, `npm version` reifies the linked root, so it changes the install. Without one it
+# only rewrites package.json.
+NPM_WORKSPACE_FLAGS = {"-w", "-ws"}
 DELETE_WORDS = ("rm", "remove-item", "ri", "del", "erase", "rd", "rmdir")
 
 
@@ -761,7 +839,15 @@ def linked_nm_hit(segment: str, where: str) -> str:
             elif words[at].startswith("-"):
                 at += 1
             else:
-                subcommand = NPM_ALIASES.get(words[at].lower(), "")
+                word = words[at].lower()
+                version_in_workspace = word == "version" and any(
+                    flag in NPM_WORKSPACE_FLAGS or flag.startswith("--workspace") for flag in words)
+                # `audit` rewrites the install when `fix` follows it, after any flag.
+                if word not in NPM_READ_ONLY or (word == "audit" and "fix" in words[at + 1:]) or (
+                        version_in_workspace):
+                    subcommand = word
+                if word in NPM_DRY_RUN_WRITERS:
+                    words = [flag for flag in words if flag != "--dry-run"]
                 break
         if subcommand and not NPM_NO_CHANGE.intersection(words) and is_link(
                 os.path.join(npm_prefix_flag(words, where) or npm_prefix(where), "node_modules")):

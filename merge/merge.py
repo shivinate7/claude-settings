@@ -79,6 +79,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -879,15 +880,29 @@ class Host:
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
-    def review_comments(self, since):
-        """-> {PR number: [(created_at, review record body), oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts only
-        when the review record marker is its whole first line. The number comes from the comment's issue_url. A failed read is a Stop."""
-        found = {}
+    def review_read(self, since):
+        """-> {PR number: ([(review record body, time, edited), oldest first], why)}: one list read of the repo's issue comments updated since `since`. A body
+        counts only when the review record marker is its whole first line. The time is the comment's last edit (updated_at, else created_at), because an edit
+        keeps created_at and the cutover must date the body as it now reads. `edited` is True when updated_at is set and differs from created_at: the body
+        was edited by hand, since the merge tool never edits a comment (decision pr-review-record). `why` is review_newest's read of that pull request's
+        comments, all of them, marked or not: None, or why the newest record cannot be trusted. A pull request with no record has no entry. The number
+        comes from the comment's issue_url. A failed read is a Stop."""
+        grouped = {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
-            body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
-            if m and review_marked(body):
-                found.setdefault(int(m.group(1)), []).append((c.get("created_at"), body))
+            m = re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
+            if m:
+                grouped.setdefault(int(m.group(1)), []).append(c)
+        found = {}
+        for n, comments in grouped.items():
+            records = [(c.get("body") or "", c.get("updated_at") or c.get("created_at"), comment_edited(c))
+                       for c in comments if review_marked(c.get("body") or "")]
+            if records:
+                found[n] = (records, review_newest(comments)[1])
         return found
+
+    def review_comments(self, since):
+        """-> {PR number: [(review record body, time, edited), oldest first]}: the records of review_read, without its `why`."""
+        return {n: records for n, (records, _why) in self.review_read(since).items()}
 
     def open_heads(self):
         """-> {head branch name: (head sha, PR base)} of the open pull requests, every page. A failed read raises Stop: never an empty set,
@@ -2303,7 +2318,7 @@ def after_merge(root, cmds):
     """Run each command. True when every one passed. A failure never undoes the merge."""
     ok = True
     for cmd in cmds:
-        # nowindow: the afterMerge command prints on the caller's terminal; with no window that output goes to a hidden console
+        # nowindow: the afterMerge command prints on the caller's terminal; the wrapper's no-window flag could hide that output
         c = subprocess.run([resolve_program("bash"), "-c", cmd], cwd=root).returncode
         say(f"merge: afterMerge `{cmd}`: " + ("done." if not c else f"FAILED (exit {c}). The merge landed and stays."))
         ok = ok and not c
@@ -2531,13 +2546,14 @@ def lane_head_and_base(root, target, base):
         raise Stop(f"cannot find {target} as a commit or ref in this clone or on origin {LANE_LINT_CITE}")
     return head, base
 
-def ci_job_run(wt, *args):
+def ci_job_run(wt, *args, notes=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead; on a pass, the names of the CI steps ci-job skipped (from its
     `skipped <step>: <why>` lines), so no pass hides a CI step that did not run. log: ci-job's log line, as a list of
-    0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps."""
+    0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps.
+    notes: a list the caller passes to receive, on a pass, each ci-job line that holds the pin note marker (a stale pin); the draft step passes none and ignores them."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
     try:
         c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
@@ -2546,6 +2562,8 @@ def ci_job_run(wt, *args):
     lines = out.splitlines()
     log = [l for l in lines if l.startswith("log=")][-1:]
     if c == 0:
+        if notes is not None:
+            notes.extend(l.rstrip() for l in lines if PIN_NOTE_MARKER in l)
         return "pass", [l.split(None, 1)[1].split(": ", 1)[0] for l in lines if l.startswith("skipped") and len(l.split(None, 1)) > 1], log, False
     if c == 1:
         return "fail", [l.rstrip() for l in lines if l.startswith("FAIL")] or [f"(no FAIL line read; ci-job exit {c})"], log, False
@@ -2568,13 +2586,14 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}")
+        pin_notes = []
+        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
-        say(f"PASS: lint of {short} against {base} passes{named}. The batch runner may take this head, or join it to a batch.")
+        say(f"PASS: lint of {short} against {base} passes{named}. The batch runner may take this head, or join it to a batch.", *pin_notes)
         return 0
     if state == "fail":
         raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
@@ -3229,6 +3248,29 @@ def review_marked(text):
     """True when the first line of `text` is exactly the review-record marker: the one test of whether a body is a record."""
     return [line.rstrip() for line in text.splitlines()[:1]] == [REVIEW_MARKER]
 
+def comment_edited(c):
+    """True when the comment `c` (a GitHub comment dict) was edited: updated_at is set and differs from created_at. A missing or null updated_at is not an edit."""
+    upd = c.get("updated_at")
+    return bool(upd) and upd != c.get("created_at")
+
+def review_newest(comments):
+    """-> (newest, why): the one home of the newest-record read, for `merge --reviewed`, the fix check and the PASS-claim guard (decision pr-review-record).
+    `comments` are one pull request's GitHub comments, oldest first, all of them. `newest` is the last comment whose first line is the record marker, or None.
+    `why` is None when it can be trusted, else the reason it cannot: it was edited, or a comment after it was edited, marked or not. An edit strips a
+    marker as well as it changes a verdict, and the tool cannot tell a stripped record from an edited comment. An edited comment before the newest
+    record does not count. A reaction does not move updated_at, so it is no edit."""
+    comments = [c for c in comments if isinstance(c, dict)]
+    marked = [i for i, c in enumerate(comments) if review_marked(c.get("body") or "")]
+    if not marked:
+        return None, None
+    newest = comments[marked[-1]]
+    if comment_edited(newest):
+        return newest, REVIEW_EDITED_WHY
+    for c in comments[marked[-1] + 1:]:
+        if comment_edited(c):
+            return newest, REVIEW_NEWER_EDITED_WHY.format(who=c.get("html_url") or f"comment {c.get('id')}")
+    return newest, None
+
 
 _stamp_since = {}
 
@@ -3249,7 +3291,7 @@ def parse_review(text, created=None, cutover=None):
     `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
     tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. The `Stamp: <16 hex>` line between Net value and
     the CI line must equal review_stamp of the lines above it, so a body typed or edited by hand is None. A body with no Stamp line still parses when its
-    comment's `created` time is before `cutover` (review_stamp_since), or `cutover` is None; a Stamp line that is there must match. With no `created`,
+    comment's `created` time (its last edit, see Host.review_read) is before `cutover` (review_stamp_since), or `cutover` is None; a Stamp line that is there must match. With no `created`,
     as for a new post, the Stamp line is required. Trailing whitespace on a line and trailing blank lines are allowed. The
     record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
     lines = [line.rstrip() for line in text.splitlines()]  # trailing spaces and CRLF are no part of a line, the marker's included
@@ -3344,6 +3386,9 @@ def review_state(rec, head):
         return "done", "docs-only change, no round owed"
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
+REVIEW_EDITED_WHY = "the newest record is hand-edited (its updated_at differs from its created_at), so it does not count and an older record does not stand in for it."
+REVIEW_NEWER_EDITED_WHY = ("{who} is newer than the newest record and hand-edited (its updated_at differs from its created_at), so it may be a record "
+                           "whose marker was taken out. Post a fresh record through the tool: `merge <pr> --review-record`.")
 REVIEW_BATCH_OPEN = "open batch now: "  # the batch line of a --root block when no ready pull request on the base has CI running
 REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when one has
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
@@ -3356,16 +3401,19 @@ def reviewed_read(h, cutover=None):
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
         return ["no open pull requests."], [], pulls
-    records = h.review_comments(min(d["created_at"] for d in pulls))
+    records = h.review_read(min(d["created_at"] for d in pulls))
     lines, bare, done = [], [], []
     for d in sorted(pulls, key=lambda d: d["number"]):
-        n, sha, bodies = d["number"], d["head"]["sha"], records.get(d["number"])
-        if not bodies:
+        n, sha, found = d["number"], d["head"]["sha"], records.get(d["number"])
+        if not found:
             bare.append(f"#{n}")
             continue
-        created, body = bodies[-1]
-        rec = parse_review(body, created, cutover)
-        state, why = review_state(rec if rec and rec["n"] == n else None, sha)
+        (body, time, _edited), why = found[0][-1], found[1]
+        if why:  # the newest record decides: a hand-edited one, or an edited comment after it, reads bad, and an older record does not count
+            state = "bad"
+        else:
+            rec = parse_review(body, time, cutover)
+            state, why = review_state(rec if rec and rec["n"] == n else None, sha)
         if state == "done":
             done.append((n, d["base"]["ref"]))
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
@@ -3660,8 +3708,11 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
                 cutover = review_stamp_since(root, info["base"])
-                earlier = [parse_review(b, created, cutover) for created, b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
-                last = earlier[-1] if earlier else None
+                earlier, why = h.review_read(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, ([], None))
+                if why:  # the newest record decides: a hand-edited one names no reviewed head, and an edited comment after it may be a record with its marker taken out
+                    print("merge: --fix-check: " + why + " " + REVIEW_CITE, file=sys.stderr)
+                    return 2
+                last = parse_review(earlier[-1][0], earlier[-1][1], cutover) if earlier else None
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
