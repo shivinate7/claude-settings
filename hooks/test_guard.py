@@ -10681,8 +10681,8 @@ def record_push_cost_case():
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal destination of main
     or master (`origin main`, `HEAD:main`) adds no read. The octopus-push check (rule octopus-push) reads
-    the push range with `git rev-list`: one read for a destination with a remote-tracking ref, three for
-    one with none. The conflict-markers push check
+    the push range with one `git rev-list` for each destination other than main or master, with or without
+    a remote-tracking ref. The conflict-markers push check
     (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
     order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
     finds the merge base itself). A push with a tracking ref reads one base. A push with no tracking ref
@@ -10729,7 +10729,7 @@ def record_push_cost_case():
         ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo",
          {"rev-parse": 1, "diff": 1, "rev-list": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
-         {"rev-parse": 3, "symbolic-ref": 2, "diff": 3, "rev-list": 3}),
+         {"rev-parse": 2, "symbolic-ref": 1, "diff": 3, "rev-list": 1}),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, PUSHFEAT)
         if kinds != want:
