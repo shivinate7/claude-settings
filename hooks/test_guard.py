@@ -535,6 +535,8 @@ MSG_NOGIT = os.path.join(NOGIT, "msg_nogit.txt")  # a clean message file outside
 SCRATCH_MSG = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "probe", "commit_msg.txt")  # a clean one, this session's
 SCRATCH_EMPTY = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "probe", "empty_msg.txt")  # an empty one, this session's
 SCRATCH_OTHER_MSG = os.path.join(ROOT, OTHER_SESSION, "scratchpad", "probe", "commit_msg.txt")  # a clean one, another session's
+TILDE_DIR = os.path.join(ROOT, "tilde~dir")   # a folder whose name holds ~: a variable naming it is no literal to the guard
+TILDE_MSG = os.path.join(TILDE_DIR, "commit_msg.txt")  # a clean message file in it, outside every scratchpad
 SCRATCH_LINK_IN = os.path.join(NOGIT, "link_into_scratch.txt")  # a link outside every scratchpad, to SCRATCH_MSG
 SCRATCH_LINK_OUT = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "probe", "link_out.txt")  # a link in the scratchpad, to MSG_NOGIT
 PATHSPEC_LIST = os.path.join(ROOT, "pathspec_list.txt")  # a pathspec file naming f.txt, for --pathspec-from-file
@@ -1353,6 +1355,7 @@ def build_fixtures():
     write(SCRATCH_MSG, "title\n\nthe message another agent wrote\n")
     write(SCRATCH_EMPTY, "")
     write(SCRATCH_OTHER_MSG, "title\n\nthe message of another session\n")
+    write(TILDE_MSG, "title\n\nthe message the agent wrote\n")
     write(PATHSPEC_LIST, "f.txt\n")
     make_fake_gh(GHPEND, "main", checks=[{"name": "checks", "bucket": "pending", "link": ""}])
     make_fake_gh(GHRED, "main", checks=[{"name": "checks", "bucket": "fail", "link": ""}])
@@ -11116,10 +11119,11 @@ SCRATCH_AGENT = "9f3c1a7e5b2d4c8f6"           # an agent's id on its payload
 NO_LINK_HERE = "this host gives no symlink, so the link case does not run here"
 
 
-def scratch_refuse(name, command, cwd=NOGIT, session=FAKE_SESSION, agent_id=SCRATCH_AGENT):
-    """One case: an agent's commit of a scratchpad message file is refused, and the remedy names `-F -`."""
-    sh(name, command, "deny", SCRATCH_RULE, carries=SCRATCH_REMEDY, cwd=cwd, session=session,
-       agent_id=agent_id)
+def scratch_refuse(name, command, cwd=NOGIT, session=FAKE_SESSION, agent_id=SCRATCH_AGENT,
+                   rule=SCRATCH_RULE, carries=SCRATCH_REMEDY):
+    """One case: an agent's commit is refused. By default the refusal is the scratchpad rule, and its remedy
+    names `-F -`. `rule=None` and `carries=()` pin only the refusal, whichever rule gives it."""
+    sh(name, command, "deny", rule, carries=carries, cwd=cwd, session=session, agent_id=agent_id)
 
 
 def scratch_allow(name, command, cwd=NOGIT, session=FAKE_SESSION, agent_id=SCRATCH_AGENT):
@@ -11197,6 +11201,11 @@ if "~" in SCRATCH_DIR:   # no long name on this host: the case would test cite-b
 else:
     scratch_refuse("scratchpad-message: an agent's commit -F through a variable set in the same command is refused",
                  "S=" + SCRATCH_DIR + "; " + VCS + " commit -F $S/commit_msg.txt")
+# A variable whose value holds `~` is no literal to the guard, so the file it names is unread and the call is
+# refused. The file is clean and sits outside every scratchpad. No rule id is pinned: the case fails only when
+# such a call is let through.
+scratch_refuse("scratchpad-message: an agent's commit -F through a variable holding ~ is refused, by any rule",
+             "S=" + slash(TILDE_DIR) + "; " + VCS + " commit -F $S/commit_msg.txt", rule=None, carries=())
 scratch_refuse("scratchpad-message: an agent's commit -F after pushd into its scratchpad is refused",
              "pushd " + SCRATCH_DIR + " && " + VCS + " commit -F commit_msg.txt")
 scratch_refuse("scratchpad-message: an agent's commit -C . -F after cd into its scratchpad is refused",
