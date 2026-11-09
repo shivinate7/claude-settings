@@ -14839,6 +14839,11 @@ SB = dict(B, cwd=SCRIPTREPO)   # a builder, run in SCRIPTREPO
 SA = dict(A, cwd=SCRIPTREPO)   # a test-author, run in SCRIPTREPO
 
 
+# A script over guard_frozen's read limit (_SCRIPT_READ_LIMIT, 256 KB). The string runs past the limit, so the
+# cut falls inside it and the read is no parseable python. Anything written before the cut is still read.
+OVER_LIMIT_PAD = "PAD = '" + "x" * (300 * 1024) + "'\n"
+
+
 def _build_scriptrepo():
     """SCRIPTREPO: the scripts the script-file cases run, committed in one real checkout."""
     make_repo(SCRIPTREPO, {
@@ -14860,6 +14865,23 @@ def _build_scriptrepo():
                         "fs.writeFileSync(path.join(__dirname, '..', 'tests', 'x.js'), 'x');\n",
         "tools/build.py": "import os\nopen(os.path.join(os.path.dirname(__file__), '..', 'dist', 'out.txt'),\n"
                           "     'w').write('x')\n",
+        # Over the read limit. The first 256 KB hold a test-path literal beside a write to dist/.
+        "tools/big_dist_write.py": "MARK = 'tests/test_x.py'\nout = 'dist/o.txt'\nopen(out, 'w').write(MARK)\n"
+                                   + OVER_LIMIT_PAD,
+        # Over the read limit, with the test write first: it lies within the first 256 KB, so it still counts.
+        "tools/big_early_test.py": "open('tests/test_x.py', 'w').write('x')\n" + OVER_LIMIT_PAD,
+        # A temp folder the script made, or os.tmpdir(), reached through a name or a join.
+        "tools/gen_tmp_dir.js": "const fs = require('fs');\nconst os = require('os');\nconst path = require('path');\n"
+                                "const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'x-'));\n"
+                                "fs.writeFileSync(path.join(dir, 'a.test.js'), 'x');\n",
+        "tools/gen_tmp_var.js": "const fs = require('fs');\nconst os = require('os');\nconst path = require('path');\n"
+                                "const tmp = os.tmpdir();\nfs.writeFileSync(path.join(tmp, 'a.test.js'), 'x');\n",
+        "tools/gen_tmp_tests.js": "const fs = require('fs');\nconst os = require('os');\nconst path = require('path');\n"
+                                  "const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'x-'));\n"
+                                  "fs.writeFileSync(path.join(dir, 'tests', 'a.js'), 'x');\n",
+        # A repo-relative write into tests/: no temp folder, so it stays a test write.
+        "tools/gen_rel_tests.js": "const fs = require('fs');\nconst path = require('path');\n"
+                                  "fs.writeFileSync(path.join('tests', 'a.test.js'), 'x');\n",
     })
     run_vcs(SCRIPTREPO, "worktree", "add", "-q", SCRIPTWT, "-b", "scriptlane")
     os.makedirs(SCRIPTFRESH, exist_ok=True)
@@ -14867,7 +14889,10 @@ def _build_scriptrepo():
     if (os.listdir(SCRIPTFRESH) or os.path.exists(os.path.join(SCRIPTREPO, "tools", "missing.py"))
             or not os.path.isfile(os.path.join(SCRIPTREPO, "probe.py"))
             or not os.path.isdir(os.path.join(SCRIPTREPO, "probe_dir.py"))
-            or not os.path.isfile(os.path.join(SCRIPTWT, "tools", "build.py"))):
+            or not os.path.isfile(os.path.join(SCRIPTWT, "tools", "build.py"))
+            # The over-limit cases need a script past the read limit, or they test nothing.
+            or os.path.getsize(os.path.join(SCRIPTREPO, "tools", "big_dist_write.py")) <= 256 * 1024
+            or os.path.getsize(os.path.join(SCRIPTREPO, "tools", "big_early_test.py")) <= 256 * 1024):
         sys.exit("fixture setup failed in _build_scriptrepo: %r lacks the scripts the cases name"
                  % SCRIPTREPO)
 
@@ -14937,6 +14962,26 @@ sh("builder script file: a script run from a worktree, writing dist by __file__ 
    "python3 tools/build.py", "allow", **dict(B, cwd=SCRIPTWT))
 sh("builder script file: a test-author running the same worktree script, writing dist, is allowed",
    "python3 tools/build.py", "allow", **dict(A, cwd=SCRIPTWT))
+
+# RED, a script over the read limit. The cut falls inside OVER_LIMIT_PAD, so the read is no parseable python, and
+# the fallback counts a test-path literal beside a write call. The write goes to dist/, so it is allowed.
+sh("builder script file: a python script over 256 KB writing dist/o.txt, with a test path literal before the cut, is allowed",
+   "python3 tools/big_dist_write.py", "allow", **SB)
+# GREEN pair: the same over-limit script, with its test write inside the first 256 KB, stays refused.
+sh("builder script file: a python script over 256 KB whose test write is within the first 256 KB is refused",
+   "python3 tools/big_early_test.py", "deny", rule=BT, **SB)
+# RED, a node script that writes under a temp folder it made. The join's head is a name bound to fs.mkdtempSync or
+# os.tmpdir(), which the scan does not follow, so the bare test name is judged as a repo path.
+sh("builder script file: a node script writing a.test.js under a folder from mkdtemp(os.tmpdir()) is allowed",
+   "node tools/gen_tmp_dir.js", "allow", **SB)
+sh("builder script file: a node script writing a.test.js under os.tmpdir() held in a variable is allowed",
+   "node tools/gen_tmp_var.js", "allow", **SB)
+sh("builder script file: a node script writing tests/a.js under a folder from mkdtemp(os.tmpdir()) is allowed",
+   "node tools/gen_tmp_tests.js", "allow", **SB)
+# GREEN, the node counterpart: a write into tests/ with no temp folder is refused. The __dirname form of the same
+# write is the tools/gen.js case above.
+sh("builder script file: a node script writing tests/a.test.js by a repo-relative path.join is refused",
+   "node tools/gen_rel_tests.js", "deny", rule=BT, **SB)
 
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
