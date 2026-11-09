@@ -106,6 +106,15 @@ def refusals_path(session_id: object) -> Optional[str]:
     return os.path.join(config_dir(), STATE_DIR_NAME, "refusals", session_id + ".jsonl")
 
 
+def raised_refusals_path(session_id: object) -> Optional[str]:
+    """The file of (tool_name, reason) pairs a session's replies have already raised with the owner, so the same
+    tool refused again for the same reason does not block again, or None for an id that is not a plain name.
+    Written and read by lint/report_guard.py, beside the refusals file."""
+    if not isinstance(session_id, str) or not re.fullmatch(r"[\w.-]+", session_id) or session_id.startswith("."):
+        return None
+    return os.path.join(config_dir(), STATE_DIR_NAME, "refusals-raised", session_id + ".json")
+
+
 def route_flags_path(session_id: object) -> Optional[str]:
     """The file of route-row flags a session's Stop has already shown, so each shows once per session, or None for
     an id that is not a plain name. Written and read by lint/report_guard.py."""
