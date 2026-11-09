@@ -3151,7 +3151,7 @@ ROLE_MODEL_REASON = (
 ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
 ROLE_REVIEWER_FIX_CHECK_REMEDY = (", or, when this brief is a fix check, open its first line with the `%s` marker, "
                                   "or with `Round N of 3 (fix check)` (N = %s)")
-ROLE_REVIEWER_FIRST_ROUND_NOTE = "; round 1 and the test-author run on their role's model"
+ROLE_REVIEWER_FIRST_ROUND_NOTE = "; review round 1 and the test-author run on their role's model"
 # An Explore has a second way past its row, so only its refusal names it, and only for a ranked model: the marker
 # does not lift a model the table does not rank.
 ROLE_EXPLORE_AUDIT_REMEDY = ", or, when this brief is an audit, open its first line with the `%s` marker"
@@ -3397,9 +3397,10 @@ def role_model_one(tool_input):
                 extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(ROLE_REVIEWER_FREE_ROUNDS),
                                                     ", ".join("`Round %s of 3`" % n for n in ROLE_REVIEWER_FREE_ROUNDS))
                 extra += ROLE_REVIEWER_FIX_CHECK_REMEDY % (FIX_CHECK_MARKER, " or ".join(ROLE_REVIEWER_FREE_ROUNDS))
-                extra += ROLE_REVIEWER_FIRST_ROUND_NOTE
             if tool_input.get(BRIEF_UNREAD):
                 extra += ", or " + BRIEF_LITERAL_REMEDY
+            if role == "reviewer":
+                extra += ROLE_REVIEWER_FIRST_ROUND_NOTE
             return ROLE_MODEL_REASON % extra, model, False
         return "", "", False
     if os.environ.get(ROLE_MODEL_ENV, "").strip():
