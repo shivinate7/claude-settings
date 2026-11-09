@@ -12342,6 +12342,7 @@ def _build_records_more():
     run(REC_MOVED_LANES["product"], "add", "src/app.py")
     take("nonbase")
     take("base")
+    take("take")                                             # the page is in the tree, as a take leaves it
     write(os.path.join(REC_MOVED_LANES["base"], "src", "app.py"), "x = 3\n")
     run(REC_MOVED_LANES["base"], "add", "src/app.py")
     need(run(REC_MOVED, "show", "origin/main:docs/records.md") == REC_MOVED_TEXT.strip(),
@@ -12352,6 +12353,9 @@ def _build_records_more():
     need(run(REC_MOVED_LANES["nonbase"], "show", ":docs/records.md") == REC_FEAT.strip()
          and run_vcs(REC_MOVED_LANES["quit"], "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode != 0,
          "the moved nonbase lane does not hold the feature page, or the quit lane still has a merge")
+    need(run(REC_MOVED_LANES["take"], "show", ":docs/records.md") == REC_V1.strip()
+         and run(REC_MOVED_LANES["take"], "show", "HEAD:docs/records.md") == REC_LANE.strip(),
+         "the take lane does not hold MERGE_HEAD's page in its index, over the lane's own HEAD page")
 
 
 lazy_fixture([REC_DANGLE, REC_NEW, REC_ADOPT, REC_PLAIN, *REC_DANGLE_LANES.values(), REC_NEW_LANE,
@@ -12564,9 +12568,10 @@ records_allow("a test-author add -A and commit of the merge's own page, after or
               VCS + " add -A && " + VCS + " commit -m x", _mv["merge"], **RECORDS_AUTHOR)
 records_allow("a test-author commit --no-edit of the merge's own page, after origin/main moved on",
               VCS + " commit --no-edit", _mv["merge"], **RECORDS_AUTHOR)
-records_allow("a test-author Bash call that writes MERGE_HEAD's page, adds it and commits, origin/main moved on",
-              VCS + " show MERGE_HEAD:docs/records.md > docs/records.md && " + VCS + " add docs/records.md && "
-              + VCS + " commit -m x", _mv["take"], **RECORDS_AUTHOR)
+# The page the merge brought is already in the tree and the index. The hook runs before the chain, so the
+# act is the add and commit that follow it.
+records_allow("a test-author add -A and commit of MERGE_HEAD's page already in the tree, origin/main moved on",
+              ADD_A + " && " + COMMIT_X, _mv["take"], **RECORDS_AUTHOR)
 # RED now, and the product path is the test-author's out-of-role path: logged, never refused (decision
 # builders-cannot-edit-tests). The page is the merge's own, so the commit is allowed.
 records_allow("a test-author commit of the merge's own page with a clean product file staged",
