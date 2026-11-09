@@ -11,12 +11,13 @@ import shlex
 import sys
 
 from guard_core import (
-    _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
-    git_calls, inline_script, inner_commands, is_powershell, resolve_command, resolve_default_base, segment_tokens,
-    split_segments, walk_quotes,
+    _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
+    dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    strip_heredoc_bodies,
+    is_powershell, walk_quotes,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -378,9 +379,15 @@ REVIEW_OLD_UNREAD_REASON = (
     "(decision pr-review-record, hooks fail closed on a read that cannot run)"
 )
 REVIEW_UNREAD_REMEDY = "run the edit again when `gh` can read the comment, or post a new comment."
-REVIEW_LITERAL_ID_REMEDY = "write the literal comment id and repo in the route, not a shell expansion such as $ID, then run the edit again."
-REVIEW_LITERAL_PR_REMEDY = "write the PR number literally, not a shell expansion such as $PR, then run the edit again."
-REVIEW_LITERAL_REPO_REMEDY = "write the repo, OWNER/NAME, literally, not a shell expansion such as $REPO, then run the edit again."
+REVIEW_LITERAL_ID_REMEDY = ("write the route with a literal `owner/repo` and a literal comment id, such as repos/owner/repo/issues/comments/<id>, "
+                            "or with the `{owner}/{repo}` placeholder, not a shell variable or `$(...)`; the guard then reads that route. "
+                            "Or post a new comment.")
+REVIEW_LITERAL_PR_REMEDY = ("write the PR number literally and the repo as a literal `-R owner/repo`, "
+                            "such as `gh pr comment <number> -R owner/repo --edit-last`, not a shell expansion such as $PR; "
+                            "the guard then reads that pull request. Or post a new comment.")
+REVIEW_LITERAL_REPO_REMEDY = ("write the repo, OWNER/NAME, literally, as `-R owner/repo` on the call, "
+                              "such as `gh pr comment <number> -R owner/repo --edit-last`, not a shell expansion such as $REPO. "
+                              "Or post a new comment.")
 REVIEW_BODY_FILE_REASON = (
     "Rule (pr-review-record): the new body's file %s could not be read, so the check could not run and the edit is refused. "
     "The body may be a review record. "
@@ -395,7 +402,7 @@ def shell_expanded(text) -> bool:
 
 
 class _LiteralIdNeeded(RuntimeError):
-    """The comment id or pull request number is not a number the guard can read, such as a shell variable. `remedy` tells the caller what to write."""
+    """The route's repo or comment id, or the pull request number, is not a literal the guard can read, such as a shell variable or `$(...)`. `remedy` tells the caller what to write."""
 
     def __init__(self, message, remedy):
         super().__init__(message)
@@ -491,7 +498,7 @@ def _old_body(host, edit):
         if code:
             raise RuntimeError("reading the comment failed")
         return str(json.loads(out).get("body") or "")
-    if shell_expanded(ref):
+    if shell_expanded(ref):   # a variable selector names no pull request, so no retry reads it
         raise _LiteralIdNeeded("the pull request number is a shell expansion the guard cannot read", REVIEW_LITERAL_PR_REMEDY)
     rows = host.pages("issues/%d/comments" % host.pr_number(ref))   # 100 a page, so a long thread stays inside MERGE_READ_TIMEOUT
     return str(rows[-1].get("body") or "") if rows else ""
@@ -503,8 +510,9 @@ def _old_body_hit(edit, repo: str, where: str, stdin_unseen: bool = False):
     prints the not-checked note; a refused edit prints none."""
     module = merge_module()
     try:
-        if edit[0] == "last" and shell_expanded(repo):   # a comment-id edit with a variable repo already carries no id
-            raise _LiteralIdNeeded("the repo is a shell expansion the guard cannot read", REVIEW_LITERAL_REPO_REMEDY)
+        if shell_expanded(repo):   # no retry reads such a repo: it needs a literal route, not a read; each remedy names the form typed
+            raise _LiteralIdNeeded("the repo is a shell expansion the guard cannot read",
+                                   REVIEW_LITERAL_REPO_REMEDY if edit[0] == "last" else REVIEW_LITERAL_ID_REMEDY)
         if module is None:
             raise RuntimeError("the merge tool could not be loaded")
         with module.shared_deadline(MERGE_READ_TIMEOUT):
@@ -1009,7 +1017,9 @@ def conflict_markers_hit(stripped: str, cwd: str):
     whole_tops, add_specs = set(), []   # tops an earlier add stages whole / (where, top, specs) of earlier adds
     readable = True                     # every segment so far is one that cannot change the tree
     blind_commit = blind_triplet = conflict_step = False   # a commit after a blind step / that covers a triplet / a conflict step ran
-    for segment in split_segments(stripped):
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number, segment in enumerate(segments):
         if not segment.strip():
             continue
         call = git_call_of(segment)
@@ -1026,8 +1036,13 @@ def conflict_markers_hit(stripped: str, cwd: str):
             conflict_step = conflict_step or (call is not None and _makes_conflict(call))
             continue
         c_target = _segment_git_c_target(segment_tokens(segment) or [])
-        root = command_root(stripped, cwd)
-        where = _absolute(c_target, root) if c_target is not None else root
+        where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)   # this segment's own folder
+        if c_target is not None:
+            where = _absolute(c_target, where or "")
+            where = where if os.path.isabs(where) else None
+        tree = GIT_WORK_TREE_RE.search(segment)
+        if tree and where:
+            where = _absolute(tree.group(2), where)
         done = _git(where, "rev-parse", "--show-toplevel") if where and os.path.isdir(where) else None
         if done is None or done.returncode != 0 or not done.stdout.strip():
             continue
@@ -1074,7 +1089,7 @@ def conflict_markers_hit(stripped: str, cwd: str):
 
 # ---- merge --role: the tier is read from this session's own get_session record
 ROLE_TIERS = ("batch-runner",)
-ROLE_TAG_PREFIX = "cs-build:"
+ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
     "If this session is the batch runner: run get_session (no argument) alone in its own "
@@ -1199,9 +1214,14 @@ def _push_calls(segment: str, script: str, cwd: str):
     inner = inner_commands(tokens) if tokens else []
     if inner:
         inner_cwd = push_target(segment, script, cwd)[0] or cwd
+        from guard_env import substitution_commands   # imported late: a family reads only the families before it
         for text in inner:
-            for part in split_segments(text):
-                yield from _push_calls(part, text, inner_cwd)
+            # The shell reads the wrapped script as it reads a command: a heredoc body is data, and
+            # each `$( )` or backtick text runs as a command of its own (judge_shell does the same).
+            stripped = strip_heredoc_bodies(text)
+            for each in (stripped, *substitution_commands(text, stripped)):
+                for part in split_segments(each):
+                    yield from _push_calls(part, each, inner_cwd)
 
 
 def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
@@ -1316,7 +1336,7 @@ def archive_hit(tool: str, tool_input, transcript: str):
     slugs, repos = [x for x in slugs if x], [x for x in repos if x]
     if not slugs or not repos or not all(_REPO_NAME.fullmatch(r) for r in repos):
         return "archive of a lane with no step or repo tag", ARCHIVE_TAGS_REASON
-    try:  # cost: one paginated gh REST read per cs-repo tag (one in practice), through the merge tool's page reader
+    try:  # cost: one paged gh REST read per cs-repo tag (one in practice), through the merge tool's page reader
         module = merge_module()
         if module is None:
             raise RuntimeError("the merge tool could not be loaded")

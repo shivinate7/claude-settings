@@ -36,7 +36,7 @@ MODULE = os.path.join(HERE, "check_comment_narration.py")
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 GIT_ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
-STANDARD = os.path.join(HERE, "..", "actions", "code-check", "standard.json")
+STANDARD = os.path.join(HERE, "code_check_standard.json")
 with open(STANDARD, encoding="utf-8") as f:
     TS_PIN = json.load(f)["tools"]["typescript"]
 NEEDS_TSC = unittest.skipUnless(shutil.which("tsc") or os.environ.get("CI"),
@@ -57,7 +57,9 @@ FLAGGED = [
     "Fixed from 2026-10-30 onward", "Changed from 2024-01-01 to the new rule",
     "Fixed in round 2 places where the rows were summed", "Previously, this returned None",
     "Previously used a dict", "Added after code review", "Added after review of the PR feedback",
-    "Changed from returning None to raising",
+    "Changed from returning None to raising", "Changed from the previous default to 5",
+    "changed from the old file layout to the new one", "changed from the old state machine to a table",
+    "changed from the old hash function to sha256", "changed from the old base class to a mixin",
 ]
 
 # Near misses. No pattern may flag any of them.
@@ -75,6 +77,8 @@ CLEAN = [
     "Skip when previously it was seen in this loop",
     "Keep the old behaviour expected by legacy clients", "Keep the old behaviour required by billing",
     "Preserve the old behaviour relied on by v1 callers",
+    "true if the hash changed from the previous snapshot", "true when the file changed from the previous run",
+    "changed from the old snapshot", "changed from the original snapshot",
 ]
 
 # Characters that str.splitlines() treats as a line break but ast and tokenize do not.
@@ -103,7 +107,7 @@ class Case(unittest.TestCase):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_comment_narration.py")
         self.tree = tempfile.mkdtemp(prefix="cnl_", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, self.tree, True)
-        tracked_tree.copy_tracked(self.tree, "lint", "hooks", "actions/code-check")  # the imports and the standard
+        tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # the module imports hooks/ and reads its standard from lint/
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_comment_narration.py"))
         self.git("init", "-q")
         self.git("symbolic-ref", "HEAD", "refs/heads/main")
@@ -773,6 +777,26 @@ class NpxPath(Case):
         self.assertIn("typescript@" + TS_PIN, argv, out)
         self.assertIn("node", argv, out)
         self.assertTrue(any(a.endswith("comment_scan.mjs") for a in argv), out)
+
+
+class LandedTree(Case):
+    """The install lands lint/ and hooks/ under ~/.claude, not actions/. The check reads its standard from lint/."""
+
+    def setUp(self):
+        self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_comment_narration.py")
+        self.tree = tempfile.mkdtemp(prefix="landed_", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.tree, True)
+        tracked_tree.copy_tracked(self.tree, "lint", "hooks")
+        self.git("init", "-q")
+        self.git("symbolic-ref", "HEAD", "refs/heads/main")
+
+    def test_check_finds_code_check_standard_in_its_own_lint_folder(self):
+        self.base({"a.py": "x = 1\n"})
+        self.change({"a.py": "# fixed in round 2\nx = 1\n"})
+        rc, out = self.lint()
+        self.assertNotIn("cannot read", out, "the check cannot find code_check_standard.json beside itself:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "a.py", 1)
 
 
 def tearDownModule():
