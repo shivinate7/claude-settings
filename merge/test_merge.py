@@ -23,6 +23,9 @@ import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
+import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
+sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: no hook module shadows one this suite imports
+import guard as hook_guard  # noqa: E402  is_test_rel, the one home of what a test path is (hooks/guard.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
 
 def printed(out, marker):
@@ -142,13 +145,21 @@ class FakeHost:
         self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
         self.pr_calls = []  # each n the run read through pr(): a refusal before any host read leaves it empty
         self.readies, self.ready_refuse = [], None  # readies: each n a draft confirm asked to mark ready; ready_refuse: the reason the host refuses
+        self.changed, self.files_error = [("README.md", "modified", 0)], None  # changed: the (path, status, additions) triples pr_files reports; files_error: raised by pr_files instead
+        self.changed_files = None  # the changed_files count pr reports; None is the length of changed. The count check is the real Host's, so this fake does not check it
+
+    def pr_files(self, n, changed=None):  # the (path, status, additions) triples of the pull request, as Host.pr_files reports them
+        if self.files_error:
+            raise merge.Stop(self.files_error)
+        return list(self.changed)
 
     def pr(self, n):
         self.pr_calls.append(n)
         head = merge.origin_head(self.root, self.branch)
         base = (self.base_seq.pop(0) if len(self.base_seq) > 1 else self.base_seq[0]) if self.base_seq else self.base
         return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
-                "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": self.draft, "body": self.body}
+                "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": self.draft, "body": self.body,
+                "changed_files": len(self.changed) if self.changed_files is None else self.changed_files}
 
     def required_names(self):
         return ["checks"]
@@ -6656,6 +6667,43 @@ class ConfigFile(Env):
         rc, out = self.run_merge("7")
         self.assertIn("main is not the default branch (trunk)", out)
 
+class ReadyChecksRun(unittest.TestCase):
+    """The draft step's ready checks run through ci-job with --pinned: a child's pin names a claude-settings commit, so the
+    check runs that commit's harness, never the local copy's. The argv keeps its step names and base as before."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.run_dir = _test_temp.run_folder()  # test-temp-standard: the plain repo below is made in this run's folder
+        cls.addClassCleanup(shutil.rmtree, cls.run_dir, True)
+
+    def ci_job_calls(self, checks):
+        """Runs run_ready_checks on a plain repo, with ci-job stubbed to a pass. -> the argv of each ci-job call."""
+        wt = tempfile.mkdtemp(dir=self.run_dir)
+        sh(wt, "git", "init", "-q")
+        sh(wt, "git", "checkout", "-q", "-B", "main")
+        put(os.path.join(wt, "a.txt"), "a\n"); sh(wt, "git", "add", "-A"); sh(wt, "git", "commit", "-qm", "a")
+        calls, real = [], merge.sh
+        def stub(args, *a, **k):
+            if args[1:2] == [merge.CI_JOB]:
+                calls.append(list(args))
+                return 0, ""
+            return real(args, *a, **k)
+        with unittest.mock.patch.object(merge, "sh", stub):
+            merge.run_ready_checks(wt, 7, "main", checks)
+        return calls
+
+    def test_the_ready_checks_run_ci_job_with_pinned(self):
+        calls = self.ci_job_calls(["check invariants"])
+        self.assertEqual(len(calls), 1, calls)  # precondition: one ci-job run for the one ready check
+        self.assertIn("--pinned", calls[0], "the ready checks did not pass --pinned to ci-job: %s" % calls[0])
+
+    def test_the_ready_checks_keep_their_step_names_and_base(self):  # the control: the argv --pinned joins is unchanged
+        calls = self.ci_job_calls(["check invariants", "records page"])
+        self.assertEqual(len(calls), 1, calls)
+        argv = [a for a in calls[0][2:] if a != "--pinned"]
+        self.assertEqual(argv, ["checks", "--step", "check invariants", "--step", "records page", "--base", "origin/main"], calls[0])
+
 class ClaimSkipped(Env):
     """A base with no stamp kinds: the claim and the numbering check are skipped, and stamp.mjs never runs."""
     def setUp(self):
@@ -7207,12 +7255,57 @@ class MemoKeyRead(Env):
 
 class UnknownOverride(Env):
     """Unknown has a way out that does not depend on the check: a reason flag with a reason, logged. Claude may type it; the owner is not named as who types it."""
-    def unreadable(self):
+    FINDING = "stub.md: the finding a merge put back"
+
+    def unreadable(self, problems=None):
+        """check() raises an Unknown. With `problems`, the Unknown also carries them as its findings (.problems), as the octopus read does."""
         sys.path.insert(0, os.path.join(HERE, "..", "lint"))
         import check_silent_undo as undo
         def boom(*a, **k):
-            raise undo.Unknown("git is older than 2.38")
+            e = undo.Unknown("git is older than 2.38")
+            if problems is not None:
+                e.problems, e.notes = list(problems), []
+            raise e
+        self.addCleanup(merge.UNDO_MEMO.clear)  # the memo keeps the Unknown itself
         return unittest.mock.patch.object(undo, "check", boom)
+
+    def refusal_of(self, unknown_ok=""):
+        """undo_check on the test checkout, with an Unknown that carries FINDING. -> the Stop it raised, or None when it returned."""
+        with self.unreadable(problems=[self.FINDING]):
+            try:
+                merge.undo_check(self.co, "origin/main", unknown_ok=unknown_ok)
+            except merge.Stop as e:
+                return e
+        return None
+
+    def test_an_unknown_that_carries_findings_is_refused_as_dropped_and_the_reason_flag_does_not_lift_it(self):
+        e = self.refusal_of(unknown_ok="octopus read it")
+        self.assertIsNotNone(e, "the reason flag lifted an Unknown that carries findings: undo_check returned")
+        self.assertIsInstance(e, merge.Dropped, "an Unknown that carries findings was not refused as a Dropped: %s" % type(e).__name__)
+        self.assertNotIsInstance(e, merge.Unread, "an Unknown that carries findings was refused as Unread, which no refusal is")
+        self.assertIn(self.FINDING, str(e))
+        self.assertIn("git is older than 2.38", str(e), "the refusal does not carry the UNKNOWN's own message")
+
+    def test_the_reason_flag_does_not_lift_an_unknown_that_carries_findings_at_the_merge(self):
+        before = self.refs()
+        with self.unreadable(problems=[self.FINDING]):
+            rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "octopus read it")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(self.FINDING, out)
+        self.assertEqual(self.refs(), before)
+        self.assertFalse(self.lock_ref())
+
+    def test_a_refusal_for_an_unknown_that_carries_findings_names_the_findings_and_the_unknown(self):
+        with self.unreadable(problems=[self.FINDING]):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(self.FINDING, out)
+        self.assertIn("git is older than 2.38", out)
+
+    def test_an_unknown_with_no_findings_is_still_lifted_by_the_reason_flag(self):  # control
+        with self.unreadable(problems=[]):
+            got = merge.undo_check(self.co, "origin/main", unknown_ok="octopus read it")
+        self.assertEqual(got, "octopus read it")
 
     def unreadable_after_the_claim(self):
         """The first silent-undo read passes. The second, which prove() runs after the claim push, cannot read the history."""
@@ -8208,7 +8301,7 @@ class ClockedHost(merge.Host):
     def pr(self, n, *a, **k):
         self.read()
         return {"head": self.head_at(self.clock[0]), "branch": "feat", "base": "main", "state": "OPEN",
-                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": False}
+                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": False, "changed_files": 1}
 
     def batch_running(self, n, base, head=None):  # no gh here, and no other pull request in these cases
         return []
@@ -11894,6 +11987,14 @@ def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:
     """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads and created_at, which the review list reads."""
     return {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": {"ref": "feat%d" % number, "sha": sha}}
 
+def pr_file(name, previous=None, status="modified", additions=0):
+    """One changed file of a pull request, as `pulls/<n>/files` lists it. `previous` is the old name of a rename: GitHub gives it only then.
+    `additions` is the lines the file adds; a file with only removed lines has 0."""
+    d = {"filename": name, "status": status, "additions": additions}
+    if previous is not None:
+        d["previous_filename"] = previous
+    return d
+
 def batch_run(name, status="in_progress", conclusion=None):
     """A check run of a head as `pages("commits/<sha>/check-runs")` lists it. Pending unless its status is completed."""
     return {"name": name, "status": status, "conclusion": conclusion, "details_url": BATCH_LINK, "started_at": None, "completed_at": None}
@@ -11908,14 +12009,20 @@ class PullsHost(merge.Host):
     `compare/<base>...<head>`, is keyed ("main", head sha) in the same map. `compare_error` answers every compare read;
     `base_compare_error` answers only the base branch's read. `diffs` maps (older head, newer head) to compare_of(...), the status and the
     files GitHub gives the older...newer read. The compare is GitHub's three-dot one: its files are those on the second head's side of the
-    merge base, so the reverse read answers "behind" with no file, and a diverged pair answers "diverged" in either order. `repo` is the
-    OWNER/NAME the host names its repo by (Host.repo): the header of a `--reviewed --root` block reads it."""
+    merge base, so the reverse read answers "behind" with no file, and a diverged pair answers "diverged" in either order. `files` are the
+    changed files of the pull requests (`pulls/<n>/files`, one page per 100), and `files_error` fails that read. `changed_files` is the count
+    `pulls/<n>` reports (None: the length of `files`). `repo` is the OWNER/NAME the host names its repo by (Host.repo): the header of a
+    `--reviewed --root` block reads it."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
-                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, repo=None, diffs=None, comment_error=None):
+                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, repo=None, diffs=None, comment_error=None,
+                 files=None, files_error=None, changed_files=None):
         super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore, repo=repo)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
         self.comment_error = comment_error  # the message of a failed review_comment read; every such read fails with it
+        self.files = list(files) if files is not None else [pr_file("README.md")]  # the changed files of every pull request, as `pulls/<n>/files` lists them
+        self.files_error = files_error  # the (code, output) text of a failed files read
+        self.changed_files = changed_files  # the changed_files count of `pulls/<n>`; None is the length of files
         self.workflow_runs = workflow_runs or {}  # sha -> the workflow runs `gh run list --commit <sha>` answers
         self.compares, self.compare_error, self.base_compare_error = compares or {}, compare_error, base_compare_error  # the (code, output) of a failed read
         self.diffs = diffs or {}  # (older head, newer head) -> compare_of(status, *files): the reply of the net diff between them
@@ -11932,14 +12039,16 @@ class PullsHost(merge.Host):
         if self.count_gh and args[0] == "api":
             rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
             self.gh_calls.append(rel)
+            if self.files_error and re.fullmatch(r"pulls/\d+/files", rel):
+                return 1, self.files_error
+            m = re.fullmatch(r"pulls/(\d+)", rel)
+            if m:
+                return self.pull_reply(int(m.group(1)))
             return 0, self.answer(rel, args[1:])
         route = args[1] if args[:1] == ["api"] else ""
         m = re.search(r"/pulls/(\d+)$", route)
         if m:
-            found = [d for d in self.pulls if d["number"] == int(m.group(1))]
-            if not found:
-                return 1, "gh: Not Found (HTTP 404)"
-            return 0, json.dumps({**found[0], "state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean", "body": ""})
+            return self.pull_reply(int(m.group(1)))
         m = re.search(r"/compare/([^/]+)\.\.\.([^/]+)$", route)
         if m:
             self.compare_reads.append(m.groups())
@@ -11977,6 +12086,25 @@ class PullsHost(merge.Host):
                 return {"body": c["body"], "issue_number": number, "created_at": c["created_at"]}
         raise merge.Stop(f"comment {comment_id} is not on the repo")
 
+    def pull_reply(self, n):
+        """-> (code, output) of `pulls/<n>`: the open pull request n, as the REST read gives it."""
+        found = [d for d in self.pulls if d["number"] == n]
+        if not found:
+            return 1, "gh: Not Found (HTTP 404)"
+        count = len(self.files) if self.changed_files is None else self.changed_files
+        return 0, json.dumps({**found[0], "state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean", "body": "",
+                              "changed_files": count})
+
+    def files_reply(self, rel, params, flags):
+        """`pulls/<n>/files`: the page asked for, 100 to a page (REST.listing). Under -i, a Link header with rel="next" while pages follow, as gh
+        prints it. The header's URL is never followed: a reader asks for each page by number."""
+        text = REST.listing(self.files, None, params, flags, None, 100)
+        size = max(1, min(int(params.get("per_page", 30)), 100))
+        page, last = int(params.get("page", 1)), max(1, -(-len(self.files) // size))
+        if "include" not in flags or "paginate" in flags or page >= last:
+            return text
+        link = '<https://api.github.com/repos/{owner}/{repo}/%s?page=%d>; rel="next"' % (rel, page + 1)
+        return "HTTP/1.1 200 OK\nLink: %s\n\n%s" % (link, text)
     def answer(self, rel, argv):
         """The reply of one REST route for the request's own flags, as the fake gh gives it (REST.listing): the page asked for, or with
         --paginate every page in the --slurp shape. The protection answers its --jq value. A list read that asks for a page gets that page."""
@@ -11984,6 +12112,8 @@ class PullsHost(merge.Host):
         m = re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel)
         if rel == "pulls":
             return REST.listing(self.pulls, None, params, flags, None, 100)
+        if re.fullmatch(r"pulls/\d+/files", rel):
+            return self.files_reply(rel, params, flags)
         if rel == "issues/comments":
             return REST.listing(self.comments, None, params, flags, None, 100)
         if rel == f"branches/{self.base}/protection/required_status_checks":
@@ -12012,6 +12142,10 @@ class PullsHost(merge.Host):
             return self.check_rows.get(m.group(1), [])
         if re.fullmatch(r"commits/[^/]+/status", rel):
             return []
+        if re.fullmatch(r"pulls/\d+/files", rel):
+            if self.files_error:
+                raise merge.Stop(self.files_error)
+            return self.files
         raise AssertionError("unexpected read: " + rel)
 
 class BatchRunningReads(unittest.TestCase):
@@ -12882,15 +13016,24 @@ def record_text(rounds=REVIEW_PASS, head=REVIEW_HEAD, kind="normal", guard="no",
     return "\n".join([marker, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
                       *rounds, *fix, f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
 
-def fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model="haiku"):
+def fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model=merge.REVIEW_FIX_GUARD_MODEL):
     """The one literal of the fix check line: the reviewed head the fix diff starts from, the role, the model and the verdict."""
     return f"Fix check: {head}, {role}, {model}, {verdict}"
 
 def review_fn(test, name):
-    """The merge.py function `name`, or a failed case that says it is missing."""
+    """The merge.py name `name` (a function or a constant), or a failed case that says it is missing."""
     fn = getattr(merge, name, None)
     if fn is None:
         test.fail(f"merge.{name} is not defined")
+    return fn
+
+def pr_files_of(test, host):
+    """`host.pr_files(n, changed)`, or a failed case that says merge.Host has none, or that its second parameter is not the count. The fakes
+    have one; the real Host is the one under test."""
+    fn = getattr(host, "pr_files", None)
+    if fn is None:
+        test.fail("merge.Host.pr_files is not defined")
+    test.assertIn("changed", inspect.signature(fn).parameters, "merge.Host.pr_files must take changed, the pull request's changed_files count")
     return fn
 
 def parse_text(test, text):
@@ -12936,9 +13079,9 @@ def no_record_numbers(out):
     """The pull request numbers named on the `no record:` line."""
     return {int(m) for l in out.splitlines() if l.startswith("no record:") for m in re.findall(r"#(\d+)", l)}
 
-REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", "haiku", "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict
-REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", "haiku", "FAIL")
-REVIEW_FIX_WIDE = (REVIEW_OLD_HEAD, "reviewer", "haiku", "WIDE")  # the fix check whose diff is wider than its finding
+REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict; every fix check runs on that model (owner item 444 a)
+REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "FAIL")
+REVIEW_FIX_WIDE = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "WIDE")  # the fix check whose diff is wider than its finding
 REVIEW_WIDE_WHY = "the fix diff is wider than its finding, so the fix needs a new lane at round 1"  # the why of a WIDE fix check
 
 def fix_state(test, fix, **kw):
@@ -13476,7 +13619,8 @@ class ReviewFixRules(unittest.TestCase):
                  (("Round 1: reviewer, sonnet, FAIL",), "no", "not owed", "PASS", "done"))
         for rounds, guard, net, verdict, want in cases:
             with self.subTest(rounds=rounds, guard=guard, net=net, verdict=verdict):
-                text = record_text(rounds=rounds, guard=guard, net=net, fix=(fix_check_line(verdict=verdict),))
+                model = merge.REVIEW_FIX_GUARD_MODEL
+                text = record_text(rounds=rounds, guard=guard, net=net, fix=(fix_check_line(verdict=verdict, model=model),))
                 self.assertEqual(record_state(self, text), want)
 
     def test_a_fix_pass_after_a_failed_first_round_names_the_fail_and_the_fix_check(self):
@@ -13535,10 +13679,10 @@ class ReviewEnv(Env):
         """The review flags, with --head set to the live head of the feature branch, then `extra`."""
         return (*REVIEW_FLAGS, "--head", self.head(), *extra)
 
-    def record_host(self, *comments, head=REVIEW_HEAD, **reads):
-        """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first. `reads` go to
-        PullsHost: `diffs` for the compare replies, `compare_error` for a failed compare read."""
-        return PullsHost([batch_pull(7, head)], {}, comments=comments, **reads)
+    def record_host(self, *comments, head=REVIEW_HEAD, files=None, **reads):
+        """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first, and the files given
+        (default: one non-guard file). `reads` go to PullsHost: `diffs` for the compare replies, `compare_error` for a failed compare read."""
+        return PullsHost([batch_pull(7, head)], {}, comments=comments, files=files, **reads)
 
     def listing(self, pulls, comments=(), check_rows=None, **reads):
         """`merge --reviewed` over the open `pulls` and the repo's `comments`, on a PullsHost: -> (host, rc, out, err). The one home of that read."""
@@ -13629,7 +13773,7 @@ class ReviewArgs(ReviewEnv):
 
     def test_preview_and_confirm_take_no_review_record(self):
         # Q1 a, pinned: the review flags add no refusal to the preview or the confirm, so a pull request with no record runs as before.
-        # This case passes on main. It guards against a refusal added later.
+        # This case guards against a refusal added later.
         rc, out, err = self.run_args("7")
         self.assertEqual(rc, 0, out + err)
         rc, out, err = self.run_args("7", "--confirm")
@@ -13831,7 +13975,7 @@ class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
     error prints no record. Each refusal sits beside the good value, which must exit 0, so a parser that never learned the flag fails here too."""
 
-    def fix_value(self, head=REVIEW_OLD_HEAD, role="reviewer", model="haiku", verdict="PASS"):
+    def fix_value(self, head=REVIEW_OLD_HEAD, role="reviewer", model=merge.REVIEW_FIX_GUARD_MODEL, verdict="PASS"):
         return f"{head}:{role}:{model}:{verdict}"
 
     def earlier_host(self):
@@ -13898,7 +14042,7 @@ class ReviewFixBase(ReviewEnv):
     NON_RECORD_PATHS = ("merge/merge.py", "lint/layout.json", "docs/specs/slug.md")  # code, config and a spec: none is a record or notes file
 
     def review_with_base(self, base, host):
-        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:haiku:PASS", host=host)
+        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
 
     def orders(self):
         """The two orders of a fix base beside the newest record's Head, as (label, record Head, base). The compare reads the files between the two
@@ -13982,7 +14126,7 @@ class ReviewFixBase(ReviewEnv):
         diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry("docs/debts/notes.md"))}
         rc, out, err = self.review_with_base(self.NOTES_HEAD, self.record_host(newest, diffs=diffs))
         self.assertEqual(rc, 0, "a fix check that reads from a notes commit was refused:\n" + out + err)
-        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.NOTES_HEAD, "reviewer", "haiku", "PASS"))
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.NOTES_HEAD, "reviewer", "sonnet", "PASS"))
 
     def test_each_record_or_notes_path_between_the_heads_is_allowed(self):
         for path in self.RECORD_PATHS:
@@ -14121,7 +14265,7 @@ class ReviewChainFixture(ReviewEnv):
         live = live or self.LIVE
         host = self.record_host(*comments, head=live, diffs=diffs or {})
         argv = ["7", "--review-record", "--kind", kind, "--guard", guard, "--head", live, *(a for r in rounds for a in ("--round", r)),
-                "--fix-check", f"{base}:reviewer:haiku:{verdict}", "--net-value", net]
+                "--fix-check", f"{base}:reviewer:sonnet:{verdict}", "--net-value", net]
         rc, out, err = self.run_args(*argv, host=host)
         return rc, out, err, host
 
@@ -14146,7 +14290,7 @@ class ReviewFixPassChain(ReviewChainFixture):
         self.assertEqual(host.compare_reads, [(self.NEWEST, self.LIVE)], "the fix check did not read compare(base, live) exactly once")
         body = posted_body(self, out)
         self.assertIn(fix_check_line(head=self.NEWEST), body.splitlines(), "the record does not name the new base in its fix check line")
-        self.assertEqual(parse_text(self, body)["fix"], (self.NEWEST, "reviewer", "haiku", "PASS"))
+        self.assertEqual(parse_text(self, body)["fix"], (self.NEWEST, "reviewer", "sonnet", "PASS"))
 
     def test_a_newest_fix_check_that_failed_or_was_wide_refuses_every_base(self):
         # the live head is ahead of the newest Head, so the ancestor read alone would accept the base. Only the newest verdict can refuse it
@@ -14190,7 +14334,7 @@ class ReviewFixPassChain(ReviewChainFixture):
         self.assertEqual(rc, 0, "a notes-only step past a newest record whose fix check PASSed, with the live head ahead of it, was refused:\n" + out + err)
         self.assertTrue(self.compared(host, self.NEWEST, self.NOTES), "the base rule did not compare the step with the newest record's Head")
         self.assertIn((self.NOTES, self.LIVE), host.compare_reads, "the ancestor read compare(base, live) was not made")
-        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NOTES, "reviewer", "haiku", "PASS"))
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NOTES, "reviewer", "sonnet", "PASS"))
 
     def test_a_chain_after_a_round_3_record_may_not_change_its_net_value(self):
         # the final round's hold (decision hold-unsafe-after-round-3): a passing fix keeps the net value that round gave. A chained fix check with another
@@ -14225,7 +14369,7 @@ class ReviewFixPassChain(ReviewChainFixture):
         rc, out, err, host = self.run_chain(self.NEWEST, (review_comment(1, 7, record_text(head=self.NEWEST, rounds=REVIEW_PASS)),))
         self.assertEqual(rc, 0, "control: a fix check from the only record's Head was refused:\n" + out + err)
         self.assertEqual(host.compare_reads, [], "control: a record with no fix check line read a compare")
-        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "haiku", "PASS"))
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "sonnet", "PASS"))
 
 class ReviewFixNetFreeze(ReviewChainFixture):
     """A fix check that follows a record whose final round is the last allowed one (decision hold-unsafe-after-round-3): its --net-value, --guard
@@ -14627,7 +14771,7 @@ class ReviewFixRemedies(ReviewChainFixture):
         self.assertEqual(parse(cut + "---\nReviewer prose.\n"), parse(cut), "control: prose below the rule changes the record")
         rc, out, err, _ = self.run_chain(self.NEWEST, (review_comment(1, 7, cut),))
         self.assertEqual(rc, 0, "control: the record cut after its CI line was refused:\n" + out + err)
-        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.NEWEST, "reviewer", "haiku", "PASS"),
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.NEWEST, "reviewer", "sonnet", "PASS"),
                          "control: the fix check was not written on the posted record:\n" + out)
 
     def test_a_fix_base_whose_extras_file_has_no_kinds_names_that_error_and_its_file_as_its_remedy(self):
@@ -14683,7 +14827,7 @@ class ReviewFixRemedies(ReviewChainFixture):
             with self.subTest(label=label):
                 host = self.record_host(*comments, head=self.LIVE)
                 rc, out, err = self.run_args("7", "--review-record", "--head", self.LIVE, "--kind", "normal", "--guard", "no",
-                                             "--round", "1:reviewer:sonnet:PASS", "--fix-check", f"{self.NEWEST}:reviewer:haiku:PASS",
+                                             "--round", "1:reviewer:sonnet:PASS", "--fix-check", f"{self.NEWEST}:reviewer:sonnet:PASS",
                                              "--fix-base-record", url, host=host)
                 self.assert_own_remedy(rc, out, err, cause, remedy)
 
@@ -14695,7 +14839,7 @@ class ReviewFixRemedies(ReviewChainFixture):
         source = review_comment(5, 9, record_text(n=9, head=self.EARLIER, rounds=REVIEW_PASS))
         host = self.record_host(own, source, head=self.LIVE)
         argv = ["7", "--review-record", "--head", self.LIVE, "--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:PASS",
-                "--fix-check", f"{self.NEWEST}:reviewer:haiku:PASS"]
+                "--fix-check", f"{self.NEWEST}:reviewer:sonnet:PASS"]
         rc, out, err = self.run_args(*argv, host=host)
         self.assertEqual(rc, 0, "control: the own record refused its own fix check:\n" + out + err)
         rc, out, err = self.run_args(*argv, "--fix-base-record", "https://github.com/o/r/pull/9#issuecomment-5", host=host)
@@ -14737,7 +14881,7 @@ class ReviewFixBaseRecord(ReviewEnv):
         return review_comment(cid, n, record_text(n=n, head=head, rounds=rounds, guard=guard, net=net))
 
     def fix_of(self, head=REVIEW_OLD_HEAD):
-        return f"{head}:reviewer:haiku:PASS"
+        return f"{head}:reviewer:sonnet:PASS"
 
     def argv(self, fix, url=None, rounds=("1:reviewer:sonnet:PASS",), guard="no", kind="normal", net=None):
         """The review flags of pull request 7 at REVIEW_HEAD, with --fix-check `fix` and, when given, --fix-base-record `url`. `net`, when given, is --net-value."""
@@ -14791,7 +14935,7 @@ class ReviewFixBaseRecord(ReviewEnv):
                 self.assert_refused(rc, out, err)
                 rc, out, err = self.flagged(self.argv(self.fix_of(fix), self.link()), host)
                 self.assertEqual(rc, 0, f"{label} was refused:\n" + out + err)
-                self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (fix, "reviewer", "haiku", "PASS"))
+                self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (fix, "reviewer", "sonnet", "PASS"))
 
     def test_a_pull_request_with_its_own_record_refuses_the_flag(self):
         # two bases never compete: with its own record, the flag is refused, and the own record alone takes the same fix check
@@ -15003,7 +15147,7 @@ class ReviewFixKeepsRounds(ReviewChainFixture):
         comments = self.newest(self.DESIGN_FAIL)
         rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.DESIGN_FAIL))
         self.assertEqual(rc, 0, "a fix check that keeps every round line was refused:\n" + out + err)
-        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "haiku", "PASS"))
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "sonnet", "PASS"))
 
     def test_a_fix_check_that_adds_a_round_line_to_the_copied_lines_is_written(self):
         # extra lines are not refused by this rule: every copied line is present, and a line added after them leaves the copy whole
@@ -15017,7 +15161,7 @@ class ReviewFixKeepsRounds(ReviewChainFixture):
         host = self.record_host(*comments, head=REVIEW_HEAD)
         argv = ["7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no"]
         argv += [a for r in rounds for a in ("--round", r)]
-        argv += ["--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:haiku:PASS", "--fix-base-record", self.SOURCE_URL]
+        argv += ["--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:sonnet:PASS", "--fix-base-record", self.SOURCE_URL]
         rc, out, err = self.run_args(*argv, host=host)
         for old in OLD_PARSER_ERRORS:
             self.assertNotIn(old, err, "merge.py takes no --fix-base-record flag:\n" + err)
@@ -15104,7 +15248,7 @@ class ReviewFixAfterFinalFail(ReviewChainFixture):
                     review_comment(2, 7, record_text(head=self.NEWEST, rounds=self.TWO_FAILS)))
         rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.TWO_FAILS))
         self.assertEqual(rc, 0, "a fix check from B after a FAIL fix check before round 3 was refused:\n" + out + err)
-        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "haiku", "PASS"))
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "sonnet", "PASS"))
 
     def test_a_chain_after_records_that_pass_every_round_with_no_failed_fix_check_is_written(self):
         # control, green on the old code: no record of the pull request holds a failed fix check, so the PASS from B is written
@@ -15112,7 +15256,7 @@ class ReviewFixAfterFinalFail(ReviewChainFixture):
                     review_comment(2, 7, record_text(head=self.NEWEST, rounds=ReviewFixRemedies.ALL_PASS)))
         rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=ReviewFixRemedies.ALL_PASS_ARGS)
         self.assertEqual(rc, 0, "a fix check from B after records that passed every round was refused:\n" + out + err)
-        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "haiku", "PASS"))
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "sonnet", "PASS"))
 
 class ReviewFixChainCap(ReviewChainFixture):
     """A chain holds at most two fix checks (owner item 426 a, decision pr-review-record). A chain is the run of records at the end of the pull request
@@ -15152,7 +15296,7 @@ class ReviewFixChainCap(ReviewChainFixture):
         diffs = {(self.HEAD_B, self.HEAD_C): compare_of("ahead", self.CODE)}
         rc, out, err, _ = self.run_chain(self.HEAD_B, comments, diffs=diffs, rounds=round_args(self.ONE_FAIL), live=self.HEAD_C)
         self.assertEqual(rc, 0, "control: a second fix check on a chain of one was refused:\n" + out + err)
-        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.HEAD_B, "reviewer", "haiku", "PASS"))
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.HEAD_B, "reviewer", "sonnet", "PASS"))
 
     def test_a_third_fix_check_after_round_3_is_refused(self):
         # the same chain after the final round: each record passed every round with Net value zero, and each link keeps it, so only the count refuses the link
@@ -15171,7 +15315,7 @@ class ReviewFixChainCap(ReviewChainFixture):
                     self.chain_link(4, self.HEAD_E, rounds=self.TWO_FAILS))
         rc, out, err, _ = self.run_chain(self.HEAD_E, comments, rounds=round_args(self.TWO_FAILS))
         self.assertEqual(rc, 0, "control: a fix check from a round 2 record after a chain of two was refused:\n" + out + err)
-        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.HEAD_E, "reviewer", "haiku", "PASS"))
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.HEAD_E, "reviewer", "sonnet", "PASS"))
 
     def test_a_plain_copy_of_the_chains_round_lines_does_not_restart_the_count(self):
         # the chain A, B, C holds two fix checks. D repeats the Round lines of C with no Fix check line, so it continues the chain, and a fix check from D is refused
@@ -15192,7 +15336,7 @@ class ReviewFixChainCap(ReviewChainFixture):
         diffs = {(self.HEAD_D, self.LIVE): compare_of("ahead", self.CODE)}
         rc, out, err, _ = self.run_chain(self.HEAD_D, comments, diffs=diffs, rounds=round_args(self.FRESH_FAIL))
         self.assertEqual(rc, 0, "control: a fix check from a fresh chain after two links was refused:\n" + out + err)
-        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.HEAD_D, "reviewer", "haiku", "PASS"))
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.HEAD_D, "reviewer", "sonnet", "PASS"))
 
     def test_plain_records_that_each_change_the_round_lines_start_a_new_count(self):
         # control, green on the old code: D, E and F each change the Round lines of the record before them, so F starts a new count and a fix check from F is written
@@ -15205,7 +15349,7 @@ class ReviewFixChainCap(ReviewChainFixture):
         diffs = {(self.HEAD_F, self.LIVE): compare_of("ahead", self.CODE)}
         rc, out, err, _ = self.run_chain(self.HEAD_F, comments, diffs=diffs, net="zero", rounds=self.ALL_PASS_ARGS)
         self.assertEqual(rc, 0, "control: a fix check from F, the last of three plain records after two links, was refused:\n" + out + err)
-        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.HEAD_F, "reviewer", "haiku", "PASS"))
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.HEAD_F, "reviewer", "sonnet", "PASS"))
 
     def test_the_listing_of_a_third_fix_check_is_not_done(self):
         # the chain A, B, C, D holds three fix checks, so D's is past the cap. The listing reads the pull request at D's head as not done, and its why names the chain
@@ -15283,7 +15427,7 @@ class ReviewFixHiddenByCopy(ReviewChainFixture):
                     review_comment(3, 7, record_text(head=self.NEWEST, rounds=self.ROUND_1_2)))
         rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.ROUND_1_2))
         self.assertEqual(rc, 0, "a fix check after a record that changes the Round lines was refused:\n" + out + err)
-        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "haiku", "PASS"))
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "sonnet", "PASS"))
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
@@ -15405,7 +15549,7 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
 
-    EARLIER_HEAD = "1e" * 20  # the head of the earlier record, the one that holds the failed fix check
+    EARLIER_HEAD ="1e" * 20  # the head of the earlier record, the one that holds the failed fix check
     FIX_BASE_HEAD = "2e" * 20  # the head the fix diff started from, as the earlier record's fix line names it
 
     def floor_listing(self, verdict, earlier_rounds, newest_rounds, **reads):
@@ -15566,6 +15710,407 @@ class ReviewedList(ReviewEnv):
         self.assertTrue(line.startswith(f"#7 feat7 {REVIEW_HEAD[:9]} done: "), out)
         self.assertIn("fix check", self.why_of(line), f"the why does not name the fix check that cleared round 1:\n{out}")
 
+# The guard's changed-path check of `--review-record`. One home for its examples: GUARD_EXAMPLES holds one changed path under each folder entry
+# of merge.GUARD_PATHS and under each file entry of merge.GUARD_FILES. The cases read the entries from merge and check them against these keys,
+# so an entry with no example fails.
+GUARD_EXAMPLES = {"hooks/": "hooks/guard.py", "lint/": "lint/check_x.py", "bin/": "bin/merge", "actions/": "actions/stamp/stamp.mjs",
+                  ".github/": ".github/workflows/checks.yml", "merge/": "merge/merge.py", "githooks/": "githooks/pre-commit", "settings.json": "settings.json"}
+
+class ReviewGuardPaths(unittest.TestCase):
+    """merge.GUARD_PATHS: the rule dirs of lint/stale_cites.py, then merge/ and githooks/, folder prefixes only. merge.GUARD_FILES: settings.json,
+    matched exactly. The rule dirs are read from stale_cites, so the guard follows the module and never a copy of its tuple."""
+
+    def test_the_entries_are_the_rule_dirs_then_merge_and_githooks(self):
+        self.assertEqual(review_fn(self, "GUARD_PATHS"), (*stale_cites.RULE_DIRS, "merge/", "githooks/"))
+
+    def test_the_file_entry_is_settings_json(self):
+        self.assertEqual(getattr(merge, "GUARD_FILES", None), ("settings.json",), "merge.GUARD_FILES must be ('settings.json',), matched exactly")
+
+    def test_the_rule_dirs_are_read_from_the_module(self):
+        # A copy of the tuple keeps the default. Here the module's tuple is swapped before merge loads, so only a read of it shows the swap.
+        code = ("import sys\n"
+                f"sys.path[:0] = [{HERE!r}, {os.path.join(os.path.dirname(HERE), 'lint')!r}]\n"
+                "import stale_cites\n"
+                "stale_cites.RULE_DIRS = ('zzz/',)\n"
+                "import merge\n"
+                "print(repr(getattr(merge, 'GUARD_PATHS', None)))\n")
+        r = subprocess.run([sys.executable, "-c", code], cwd=os.path.dirname(HERE), capture_output=True, text=True, timeout=300)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), repr(("zzz/", "merge/", "githooks/")), "merge.GUARD_PATHS does not read stale_cites.RULE_DIRS")
+
+class ReviewGuardHits(unittest.TestCase):
+    """merge.guard_hits(paths): the paths that start with a GUARD_PATHS entry, or equal a GUARD_FILES entry, sorted. A folder entry holds the
+    paths under it; a file entry holds the one path that is its whole name. A path that holds an entry's name below its own folder is no hit."""
+
+    def test_each_entry_has_an_example_and_each_example_is_a_hit(self):
+        guard_hits = review_fn(self, "guard_hits")
+        entries = (*review_fn(self, "GUARD_PATHS"), *getattr(merge, "GUARD_FILES", ()))
+        self.assertEqual(set(GUARD_EXAMPLES), set(entries), "GUARD_EXAMPLES must name every entry of GUARD_PATHS and GUARD_FILES")
+        for entry, path in GUARD_EXAMPLES.items():
+            with self.subTest(entry=entry):
+                self.assertEqual(guard_hits([path]), [path], f"{path} is not a hit under {entry}")
+
+    def test_a_githooks_file_is_a_hit(self):
+        self.assertEqual(review_fn(self, "guard_hits")(["githooks/pre-commit"]), ["githooks/pre-commit"])
+
+    def test_settings_json_at_the_root_is_a_hit(self):
+        self.assertEqual(review_fn(self, "guard_hits")(["settings.json"]), ["settings.json"])
+
+    def test_a_name_that_only_begins_with_settings_json_is_no_hit(self):
+        # GUARD_FILES matches the whole path, so a file that begins with settings.json is no hit
+        guard_hits = review_fn(self, "guard_hits")
+        for path in ("settings.json.bak", "settings.jsonc"):
+            with self.subTest(path=path):
+                self.assertEqual(guard_hits([path]), [], f"{path} is a hit, but GUARD_FILES matches settings.json exactly")
+
+    def test_a_folder_that_begins_with_a_guard_folder_name_is_no_hit(self):
+        # hooksfoo/ begins with hooks, but the folder entry is hooks/, with its slash
+        self.assertEqual(review_fn(self, "guard_hits")(["hooksfoo/x.py"]), [])
+
+    def test_a_markdown_file_under_hooks_is_a_hit(self):
+        self.assertEqual(review_fn(self, "guard_hits")(["hooks/README.md"]), ["hooks/README.md"])
+
+    def test_a_path_under_no_entry_is_no_hit_and_no_paths_is_empty(self):
+        # docs/hooks/ is not hooks/, merges.md is not merge/, lint.md is not lint/. An empty result is a clean diff.
+        guard_hits = review_fn(self, "guard_hits")
+        self.assertEqual(guard_hits(["README.md", "docs/hooks/notes.md", "merges.md", "lint.md"]), [])
+        self.assertEqual(guard_hits([]), [])
+
+    def test_hits_are_sorted_and_only_the_guard_paths_are_kept(self):
+        self.assertEqual(review_fn(self, "guard_hits")(["lint/b.py", "README.md", "hooks/a.py", "docs/x.md", "merge/m.py"]),
+                         ["hooks/a.py", "lint/b.py", "merge/m.py"])
+
+TEST_PATHS = ("hooks/test_guard.py", "merge/test_merge.py", "lint/test_stale_cites.py", "githooks/test_pre_commit.sh")
+
+class ReviewGuardTestPaths(unittest.TestCase):
+    """A test path is no guard change, and a diff of test paths alone holds no hit. hooks/guard.py is_test_rel is the one home of what a test
+    path is, and guard_hits calls it. A check named like a test, such as hooks/mutate_guard.py, is no test path, so it stays a hit."""
+
+    def test_each_test_path_is_no_hit_and_a_diff_of_them_holds_none(self):
+        guard_hits = review_fn(self, "guard_hits")
+        for path in TEST_PATHS:
+            with self.subTest(path=path):
+                self.assertTrue(hook_guard.is_test_rel(path), f"{path} is not a test path under hooks/guard.py is_test_rel")
+                self.assertEqual(guard_hits([path]), [], f"{path} is a guard hit, but a test path is no guard change")
+        self.assertEqual(guard_hits(list(TEST_PATHS)), [], "a diff of test paths alone holds a guard hit")
+
+    def test_a_check_named_like_a_test_is_still_a_hit(self):
+        # hooks/mutate_guard.py is a check, not a test. Beside a test path, it is the one hit left.
+        self.assertFalse(hook_guard.is_test_rel("hooks/mutate_guard.py"), "hooks/mutate_guard.py is a test path under is_test_rel, but a check is no test")
+        self.assertEqual(review_fn(self, "guard_hits")(["hooks/test_guard.py", "hooks/mutate_guard.py"]), ["hooks/mutate_guard.py"],
+                         "guard_hits counts the test path hooks/test_guard.py, or drops the check hooks/mutate_guard.py")
+
+class ReviewGuardKinds(unittest.TestCase):
+    """merge.kind_misfits(kind, files): the sorted paths that break the kind, over the (path, status, additions) triples of the diff. docs-only:
+    each path not ending in .md. delete-only: each path that adds lines (additions above 0), or is new (status added, renamed or copied). normal: none."""
+
+    def test_normal_owes_no_kind_check(self):
+        self.assertEqual(review_fn(self, "kind_misfits")("normal", [("hooks/a.py", "modified", 4), ("x.py", "removed", 0)]), [])
+
+    def test_docs_only_names_each_path_not_ending_in_md_sorted(self):
+        files = [("lint/x.py", "modified", 2), ("docs/a.md", "modified", 1), ("hooks/y.txt", "modified", 0), ("docs/b.md", "removed", 0)]
+        self.assertEqual(review_fn(self, "kind_misfits")("docs-only", files), ["hooks/y.txt", "lint/x.py"])
+
+    def test_delete_only_names_each_path_that_adds_or_is_new_sorted(self):
+        files = [("hooks/a.py", "removed", 0), ("README.md", "modified", 3), ("docs/moved.md", "renamed", 0), ("docs/old.md", "removed", 0),
+                 ("new.py", "added", 0), ("c.py", "copied", 0), ("m.py", "modified", 0)]
+        self.assertEqual(review_fn(self, "kind_misfits")("delete-only", files), ["README.md", "c.py", "docs/moved.md", "new.py"])
+
+    def test_a_modified_path_with_no_additions_is_a_delete_only_change(self):
+        # a file with only removed lines has status modified and adds nothing: a delete, not a misfit
+        self.assertEqual(review_fn(self, "kind_misfits")("delete-only", [("a.py", "modified", 0), ("b.py", "removed", 0)]), [])
+
+    def test_a_clean_diff_and_an_empty_one_name_nothing(self):
+        kind_misfits = review_fn(self, "kind_misfits")
+        self.assertEqual(kind_misfits("docs-only", [("docs/a.md", "modified", 1), ("docs/b.md", "added", 3)]), [])
+        self.assertEqual(kind_misfits("delete-only", [("docs/a.md", "removed", 0), ("docs/b.md", "removed", 0)]), [])
+        self.assertEqual(kind_misfits("docs-only", []), [])
+        self.assertEqual(kind_misfits("delete-only", []), [])
+
+class ReviewGuardEnv(ReviewEnv):
+    """The guard and kind cases' one home: the record's argv at the feature branch's head (the fake host reports it as live), and the refusal's shape."""
+
+    def review_argv(self, kind="normal", guard="no"):
+        rounds = () if kind == "docs-only" else ("--round", "1:reviewer:sonnet:PASS")  # a docs-only change owes no round
+        return ("7", "--review-record", "--head", self.head(), "--kind", kind, "--guard", guard, *rounds)
+
+    def assert_refused(self, rc, out, err, *paths, holds="Guard or check"):
+        """A refusal: rc 1, nothing printed on stdout, and stderr names each path and holds `holds`."""
+        self.assertEqual(rc, 1, f"a changed path was not refused ({holds}):\n" + out + err)
+        self.assertEqual(out, "", "a refused record was printed")
+        for path in paths:
+            self.assertIn(path, err)
+        self.assertIn(holds, err)
+
+class ReviewGuardRefusal(ReviewGuardEnv):
+    """`--review-record --guard no` refuses a pull request with a changed path under merge.GUARD_PATHS, and a kind refuses a diff that breaks it
+    (merge.kind_misfits). A clean diff prints the record as before, and --guard yes prints it with a guard hit. The fake host reports
+    (path, status, additions) triples, with additions 0 unless a case gives more."""
+
+    def test_guard_no_refuses_a_hit_under_each_entry(self):
+        for entry, path in GUARD_EXAMPLES.items():
+            with self.subTest(entry=entry):
+                self.host.changed = [(path, "modified", 0)]
+                self.assert_refused(*self.run_args(*self.review_argv()), path)
+
+    def test_a_hooks_markdown_file_refuses(self):
+        self.host.changed = [("hooks/README.md", "modified", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv()), "hooks/README.md")
+
+    def test_docs_only_on_a_guard_path_refuses(self):
+        # the guard path is markdown, so the docs-only kind holds and only the guard refuses
+        self.host.changed = [("docs/notes.md", "modified", 0), ("hooks/README.md", "modified", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "hooks/README.md")
+
+    def test_delete_only_on_a_guard_path_refuses(self):
+        self.host.changed = [("bin/merge", "removed", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv("delete-only")), "bin/merge")
+
+    def test_every_hit_path_is_named(self):
+        self.host.changed = [("hooks/a.py", "modified", 0), ("README.md", "modified", 0), ("lint/b.py", "modified", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv()), "hooks/a.py", "lint/b.py")
+
+    def test_guard_no_on_a_test_only_diff_under_hooks_prints_the_record(self):
+        self.host.changed = [("hooks/test_guard.py", "modified", 0)]
+        rc, out, err = self.run_args(*self.review_argv())
+        self.assertEqual(rc, 0, "a test-only diff was refused as a guard change:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
+
+    def test_a_mixed_diff_refuses_on_the_check_and_does_not_name_the_test_file(self):
+        self.host.changed = [("hooks/test_guard.py", "modified", 0), ("hooks/guard.py", "modified", 0)]
+        rc, out, err = self.run_args(*self.review_argv())
+        self.assert_refused(rc, out, err, "hooks/guard.py")
+        self.assertNotIn("hooks/test_guard.py", err, "the refusal names the test file hooks/test_guard.py, which is no guard change")
+
+    def test_guard_no_with_no_hit_prints_the_record_as_before(self):
+        rc, out, err = self.run_args(*self.review_argv())
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
+
+    def test_docs_only_with_no_hit_prints_the_record(self):
+        self.host.changed = [("docs/notes.md", "modified", 0)]
+        rc, out, err = self.run_args(*self.review_argv("docs-only"))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only")
+
+    def test_guard_yes_with_a_hit_still_prints_the_record(self):
+        self.host.changed = [("hooks/guard.py", "modified", 0)]
+        rc, out, err = self.run_args(*self.review_argv(guard="yes"))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "yes")
+
+    def test_guard_yes_with_no_hit_is_allowed(self):
+        rc, out, err = self.run_args(*self.review_argv(guard="yes"))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "yes")
+
+    def test_a_failed_files_read_exits_one_and_prints_no_record(self):
+        for guard in ("no", "yes"):
+            with self.subTest(guard=guard):
+                self.host.files_error = "reading pulls/7/files from GitHub failed: HTTP 500"
+                rc, out, err = self.run_args(*self.review_argv(guard=guard))
+                self.assertEqual(rc, 1, "a failed files read did not stop the record:\n" + out + err)
+                self.assertNotIn(REVIEW_MARKER, out)
+                self.assertIn("pulls/7/files", err)
+
+    def test_docs_only_with_a_py_path_refuses_on_kind(self):
+        self.host.changed = [("docs/tool.py", "modified", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "docs/tool.py", holds="Kind")
+
+    def test_docs_only_refusal_names_each_non_md_path(self):
+        self.host.changed = [("docs/a.md", "modified", 0), ("docs/b.py", "modified", 0), ("docs/c.txt", "modified", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "docs/b.py", "docs/c.txt", holds="Kind")
+
+    def test_delete_only_with_a_modified_path_that_adds_refuses_on_kind(self):
+        # the path is modified with 3 added lines: it adds something, so it is no delete-only change
+        self.host.changed = [("README.md", "modified", 3)]
+        self.assert_refused(*self.run_args(*self.review_argv("delete-only")), "README.md", holds="Kind")
+
+    def test_delete_only_with_a_renamed_path_refuses_on_kind(self):
+        # a rename gives its new path as renamed and its old path as removed; only the new path breaks delete-only
+        self.host.changed = [("docs/moved.md", "renamed", 0), ("docs/old.md", "removed", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv("delete-only")), "docs/moved.md", holds="Kind")
+
+    def test_a_kind_misfit_refuses_whatever_the_guard(self):
+        self.host.changed = [("README.md", "modified", 3)]
+        self.assert_refused(*self.run_args(*self.review_argv("delete-only", guard="yes")), "README.md", holds="Kind")
+
+    def test_a_clean_docs_only_diff_prints_the_record(self):
+        self.host.changed = [("docs/a.md", "modified", 1), ("docs/b.md", "added", 4)]
+        rc, out, err = self.run_args(*self.review_argv("docs-only"))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only")
+
+    def test_a_clean_delete_only_diff_prints_the_record(self):
+        self.host.changed = [("docs/a.md", "removed", 0), ("docs/b.md", "removed", 0)]
+        rc, out, err = self.run_args(*self.review_argv("delete-only"))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "delete-only")
+
+class ReviewGuardFiles(ReviewGuardEnv):
+    """The guard and the kind read the files through the real Host.pr_files, so a rename counts by both its names and every page of the list is
+    read. These cases run merge over PullsHost in count mode: its gh answers the REST routes that the real Host reads."""
+
+    def run_record(self, files, kind="normal", guard="no", files_error=None, changed=None):
+        host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, count_gh=True, files=files, files_error=files_error, changed_files=changed)
+        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", kind, "--guard", guard, "--round", "1:reviewer:sonnet:PASS",
+                             host=host)
+
+    def test_a_rename_out_of_hooks_refuses_by_its_old_name(self):
+        self.assert_refused(*self.run_record([pr_file("docs/moved.md", previous="hooks/moved.md", status="renamed")]), "hooks/moved.md")
+
+    def test_a_move_into_hooks_refuses(self):
+        self.assert_refused(*self.run_record([pr_file("hooks/new.py", previous="docs/old.py", status="renamed")]), "hooks/new.py")
+
+    def test_a_rename_inside_docs_passes(self):
+        rc, out, err = self.run_record([pr_file("docs/new.md", previous="docs/old.md", status="renamed")])
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
+
+    def test_a_removed_hook_refuses_as_delete_only(self):
+        self.assert_refused(*self.run_record([pr_file("hooks/old.py", status="removed")], kind="delete-only"), "hooks/old.py")
+
+    def test_a_delete_only_rename_refuses_on_kind_by_its_new_name(self):
+        # a rename with no added lines still moves a path to a new name: the new name breaks delete-only, the old one does not
+        self.assert_refused(*self.run_record([pr_file("docs/moved.md", previous="docs/old.md", status="renamed", additions=0)], kind="delete-only"),
+                            "docs/moved.md", holds="Kind")
+
+    def test_delete_only_with_a_modified_path_and_no_additions_prints_the_record(self):
+        # a file with only removed lines: status modified, 0 additions. It is a delete-only change, so the record prints
+        rc, out, err = self.run_record([pr_file("a.py", status="modified", additions=0)], kind="delete-only")
+        self.assertEqual(rc, 0, "a modified path with no additions was refused on kind delete-only:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "delete-only")
+
+    def test_delete_only_with_a_modified_path_that_adds_refuses_on_kind(self):
+        self.assert_refused(*self.run_record([pr_file("a.py", status="modified", additions=3)], kind="delete-only"), "a.py", holds="Kind")
+
+    def test_delete_only_with_an_added_path_refuses_on_kind(self):
+        self.assert_refused(*self.run_record([pr_file("new.py", status="added", additions=0)], kind="delete-only"), "new.py", holds="Kind")
+
+    def test_a_removed_path_with_no_additions_prints_as_delete_only(self):
+        rc, out, err = self.run_record([pr_file("old.py", status="removed", additions=0)], kind="delete-only")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "delete-only")
+
+    def test_a_docs_only_rename_of_md_files_prints_the_record(self):
+        rc, out, err = self.run_record([pr_file("docs/new.md", previous="docs/old.md", status="renamed")], kind="docs-only")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only")
+
+    def test_a_pr_with_no_files_prints_the_record(self):
+        rc, out, err = self.run_record([])
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
+
+    def test_a_hit_on_the_last_of_three_pages_refuses(self):
+        # 250 files: GitHub pages them 100 to a page, so the hit sits on the third page
+        files = [pr_file(f"docs/page-{i}.md") for i in range(249)] + [pr_file("hooks/last.py")]
+        self.assert_refused(*self.run_record(files), "hooks/last.py")
+
+    def test_a_failed_files_read_exits_one_and_prints_no_record(self):
+        rc, out, err = self.run_record([], files_error="gh: Resource not accessible by integration (HTTP 403)")
+        self.assertEqual(rc, 1, "a failed files read did not stop the record:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out)
+        self.assertIn("pulls/7/files", err)
+
+    def test_a_files_list_shorter_than_the_changed_count_refuses_the_record(self):
+        # the pull request says two files changed and its list holds one: the record would miss the other, so no record is printed
+        rc, out, err = self.run_record([pr_file("README.md")], changed=2)
+        self.assertEqual(rc, 1, "a short files list did not stop the record:\n" + out + err)
+        self.assertEqual(out, "", "a short files list printed a record")
+        self.assertIn("changed files", err)
+
+    def test_a_files_list_with_the_changed_count_prints_the_record(self):
+        rc, out, err = self.run_record([pr_file("README.md"), pr_file("docs/a.md")], changed=2)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
+
+class ReviewGuardHostFiles(unittest.TestCase):
+    """merge.Host.pr_files(n, changed) and Host.pr(n) over the real Host and a scripted gh. pr_files reads pulls/<n>/files page by page, one call per page of 100, as
+    (path, status, additions) triples: each filename with its status and the lines it adds, and for a rename also its previous_filename as
+    removed with 0 additions. The list must hold `changed` file entries, the pull request's changed_files count, or it is a Stop. GitHub caps
+    the list at 3000 entries. A failed read is a Stop."""
+
+    def host(self, files=None, files_error=None, changed_files=None):
+        return PullsHost([batch_pull(7, REVIEW_HEAD)], {}, count_gh=True, files=files, files_error=files_error, changed_files=changed_files)
+
+    def test_lists_each_filename_with_its_status_and_additions(self):
+        fn = pr_files_of(self, self.host([pr_file("hooks/a.py", additions=3), pr_file("README.md", additions=0)]))
+        self.assertEqual(sorted(fn(7, 2)), [("README.md", "modified", 0), ("hooks/a.py", "modified", 3)])
+
+    def test_an_entry_with_no_additions_key_counts_zero(self):
+        # the API entry may leave additions out: the path then counts as adding nothing
+        fn = pr_files_of(self, self.host([{"filename": "a.py", "status": "modified"}]))
+        self.assertEqual(fn(7, 1), [("a.py", "modified", 0)], "a file entry with no additions key must count 0 additions")
+
+    def test_a_rename_lists_its_new_path_and_its_old_path_as_removed(self):
+        # one rename is one changed file: the count is 1, and the two tuples are not two entries. The old path adds nothing.
+        fn = pr_files_of(self, self.host([pr_file("docs/moved.md", previous="hooks/moved.md", status="renamed", additions=2)]))
+        self.assertEqual(sorted(fn(7, 1)), [("docs/moved.md", "renamed", 2), ("hooks/moved.md", "removed", 0)])
+
+    def test_no_files_is_an_empty_list(self):
+        self.assertEqual(pr_files_of(self, self.host([]))(7, 0), [])
+
+    def test_every_page_is_read(self):
+        # 250 files: GitHub pages them 100 to a page, so the list takes three reads, one per page. A file on the middle page adds 5 lines, and
+        # the rename on the last page adds 2, so additions are read from every page. The rename's old path adds nothing.
+        names = [f"docs/p{i}.md" for i in range(249)]
+        added = {"docs/p150.md": 5}
+        host = self.host([pr_file(n, additions=added.get(n, 0)) for n in names]
+                         + [pr_file("docs/moved.md", previous="hooks/moved.md", status="renamed", additions=2)])
+        want = sorted([(n, "modified", added.get(n, 0)) for n in names] + [("docs/moved.md", "renamed", 2), ("hooks/moved.md", "removed", 0)])
+        self.assertEqual(sorted(pr_files_of(self, host)(7, 250)), want, "every filename and every previous_filename, from every page")
+        self.assertEqual(host.gh_calls, ["pulls/7/files"] * 3, "one read per page of 100: 250 files are three pages")
+
+    def test_a_short_list_is_a_stop_that_names_the_changed_files(self):
+        fn = pr_files_of(self, self.host([pr_file("hooks/a.py")]))
+        with self.assertRaises(merge.Stop) as cm:
+            fn(7, 2)
+        self.assertIn("changed files", str(cm.exception))
+
+    def test_a_rename_is_one_entry_so_a_count_of_two_is_short(self):
+        # the rename gives two tuples but one file entry: a count of two names a file the list does not hold, however many tuples it gives
+        fn = pr_files_of(self, self.host([pr_file("docs/moved.md", previous="hooks/moved.md", status="renamed")]))
+        with self.assertRaises(merge.Stop) as cm:
+            fn(7, 2)
+        self.assertIn("changed files", str(cm.exception))
+
+    def test_a_list_capped_at_githubs_3000_entries_is_a_stop_under_a_larger_count(self):
+        # GitHub stops the list at 3000 entries. A pull request that changed 3001 files cannot be read in full, so the record stops
+        fn = pr_files_of(self, self.host([pr_file(f"docs/f{i}.md") for i in range(3000)]))
+        with self.assertRaises(merge.Stop) as cm:
+            fn(7, 3001)
+        self.assertIn("changed files", str(cm.exception))
+
+    def test_a_full_list_of_3000_passes_at_its_count(self):
+        fn = pr_files_of(self, self.host([pr_file(f"docs/f{i}.md") for i in range(3000)]))
+        self.assertEqual(len(fn(7, 3000)), 3000)
+
+    def test_the_pr_read_carries_its_changed_files_count(self):
+        # the count is the read's own field: 5 here, though the list holds 2 entries, so Host.pr does not count the list
+        info = self.host([pr_file("a.md"), pr_file("b.md")], changed_files=5).pr(7)
+        self.assertEqual(info.get("changed_files"), 5, "merge.Host.pr must return changed_files, the count the pull request read gives")
+
+    def test_a_failed_read_is_a_stop(self):
+        fn = pr_files_of(self, self.host(files_error="gh: Resource not accessible by integration (HTTP 403)"))
+        with self.assertRaises(merge.Stop):
+            fn(7, 1)
+
+class ReviewGuardCost(ReviewEnv):
+    """`--review-record` without --fix-check makes exactly two gh reads, the pull request and then its files list. They are counted at the one seam
+    every call goes through (PullsHost in count mode), as ReviewedList counts its reads."""
+
+    def test_the_record_makes_two_gh_reads(self):
+        # a PR of 100 files is one page, so its whole list is still one read: two reads for any PR of up to 100 files
+        hundred = [pr_file(f"docs/f{i}.md") for i in range(100)]
+        for guard, files in (("no", None), ("yes", None), ("no", hundred)):
+            with self.subTest(guard=guard, files=len(files) if files else 1):
+                host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, count_gh=True, files=files)
+                rc, out, err = self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", guard,
+                                             "--round", "1:reviewer:sonnet:PASS", host=host)
+                self.assertEqual(rc, 0, out + err)  # the record printed, so the reads ran to the end
+                self.assertEqual(parse_text(self, posted_body(self, out))["guard"], guard)
+                self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files"], "the record's gh reads, in order")
 
 # `merge --reviewed --root DIR [--root DIR ...]`: one call reads every repo the batch runner owns. The seam is `hosts`: main takes a mapping
 # from each --root string, exactly as given, to that root's Host. A root's header is the `repo` of its host, and its config is read by
@@ -16149,6 +16694,126 @@ BACKING_TEXT = "a = 1\nb = 2\nc = 3\nd = 4\n"
 CAP_NAME = "PROSE_JUDGE_MAX_CALLS"
 PROSE_CAP = 2
 
+
+class ReviewFixSonnet(ReviewEnv):
+    """Every fix check runs on Sonnet, whatever the change's Guard or check value (owner item 444 a). That widens
+    owner item 351 a, which covered a change with Guard or check yes only. A fix check on another model, such as
+    Haiku, reads open on every record, and `--review-record` refuses to write one (exit 2) with a remedy that names sonnet. A Sonnet fix
+    check, whatever its letter case, reads as it always has. Records are built with record_text() and read with record_verdict(); the write
+    path runs through merge.main, so each case reaches the rule in the real code."""
+
+    OTHER_MODEL = "haiku"  # a fix check model that is not merge.REVIEW_FIX_GUARD_MODEL, so it is refused on every record
+    LOOKALIKE_MODEL = "claude-sonnet-5-5"  # contains the sonnet name, so a substring match passes it and only the exact compare refuses it
+    REFUSED_MODELS = (OTHER_MODEL, LOOKALIKE_MODEL)  # each is refused on every record, guard yes and no alike
+    MODEL_REFUSAL = f"must run on {merge.REVIEW_FIX_GUARD_MODEL}"  # the phrase review_state gives as the why of a model refusal
+
+    def guard_yes_verdict(self, rounds, fix_model, net="not owed"):
+        return record_verdict(self, record_text(rounds=rounds, guard="yes", net=net, fix=(fix_check_line(model=fix_model),)))
+
+    def guard_flags(self, fix_model, guard="yes"):
+        """The review flags for a normal change with `guard`, a failed first review, and a fix check PASS on `fix_model` from the earlier head."""
+        return ("--kind", "normal", "--guard", guard, "--round", "1:reviewer:sonnet:FAIL", "--head", self.head(),
+                "--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:{fix_model}:PASS")
+
+    def earlier_host(self):
+        """The live head, with one earlier record that reviewed the fix base, has no fix line, and failed its first round. The guard flags name
+        that round as FAIL, and the copy rule (every Round line of the earlier record, unchanged) needs the earlier record to hold it too."""
+        return self.record_host(review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))), head=self.head())
+
+    def test_a_fix_pass_on_another_model_on_a_guard_change_reads_open_not_done(self):
+        # The model refusal is asserted in the why, not only the open state: under owner item 402 a, a guard-yes change reads open on its own,
+        # until its third review, so the state alone would stay green with the model rule deleted.
+        for model in self.REFUSED_MODELS:
+            for rounds in (("Round 1: reviewer, sonnet, FAIL",), ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL")):
+                with self.subTest(model=model, rounds=rounds):
+                    state, why = self.guard_yes_verdict(rounds, model)
+                    self.assertEqual(state, "open", f"a {model} fix check PASS on a guard or check change must not read done: {why!r}")
+                    self.assertIn(self.MODEL_REFUSAL, why, f"a {model} fix check PASS on a guard or check change is not refused on its model: {why!r}")
+
+    def test_a_sonnet_fix_pass_on_a_guard_change_is_not_refused_by_the_model_rule(self):
+        # Pins the model part only. Owner item 402 a owes a third review on a guard or check change, so the state is not
+        # asserted here. The haiku verdict is the control: it must carry the model refusal, or the sonnet check proves nothing.
+        for rounds in (("Round 1: reviewer, sonnet, FAIL",), ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL")):
+            with self.subTest(rounds=rounds):
+                _, haiku_why = self.guard_yes_verdict(rounds, self.OTHER_MODEL)
+                self.assertIn(self.MODEL_REFUSAL, haiku_why, "the haiku control lost the model refusal, so this case proves nothing:\n" + haiku_why)
+                _, why = self.guard_yes_verdict(rounds, merge.REVIEW_FIX_GUARD_MODEL)
+                self.assertNotIn(self.MODEL_REFUSAL, why, f"a sonnet fix check on a guard or check change gets the model refusal: {why!r}")
+
+    def test_a_fix_pass_on_another_model_on_a_change_with_no_guard_reads_open_not_done(self):
+        # owner item 444 a: Guard or check no owes the same sonnet fix check as yes, so another model's PASS reads open after each round
+        for model in self.REFUSED_MODELS:
+            for rounds in (("Round 1: reviewer, sonnet, FAIL",), REVIEW_PASS, REVIEW_FAILED_THREE):
+                with self.subTest(model=model, rounds=rounds):
+                    state, why = record_verdict(self, record_text(rounds=rounds, guard="no", fix=(fix_check_line(model=model),)))
+                    self.assertEqual(state, "open", f"a {model} fix check PASS on a change with no guard or check must not read done: {why!r}")
+                    self.assertIn(self.MODEL_REFUSAL, why, f"a {model} fix check PASS on a change with no guard or check is not refused on its model: {why!r}")
+
+    def test_a_sonnet_fix_pass_on_a_change_with_no_guard_still_reads_done(self):
+        # control: the same record on Sonnet reads done, so the open state above comes from the model and not the record
+        state, why = record_verdict(self, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",), guard="no",
+                                                      fix=(fix_check_line(model=merge.REVIEW_FIX_GUARD_MODEL),)))
+        self.assertEqual(state, "done", f"a Sonnet fix check PASS on a change with no guard or check must read done: {why!r}")
+
+    def remedy_names_sonnet(self, model, text):
+        # The refused model's own name holds "sonnet", so it is taken out before the check: only the remedy can satisfy it.
+        return merge.REVIEW_FIX_GUARD_MODEL in text.replace(model, "")
+
+    def test_a_fix_check_on_another_model_on_a_guard_change_is_refused_and_names_sonnet(self):
+        for model in self.REFUSED_MODELS:
+            with self.subTest(model=model):
+                rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(model), host=self.earlier_host())
+                self.assertEqual(rc, 2, f"a {model} fix check on a guard or check change was written, not refused:\n" + out + err)
+                self.assertNotIn("Traceback", err)
+                self.assertNotIn(REVIEW_MARKER, out, f"a refused {model} fix check still printed a record")
+                self.assertTrue(self.remedy_names_sonnet(model, out + err), "the refusal does not name sonnet as the model to use:\n" + out + err)
+
+    def test_a_sonnet_fix_check_on_a_guard_change_prints_the_record(self):
+        # control: the same flags on Sonnet are written, with the fix line the record reads back
+        rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(merge.REVIEW_FIX_GUARD_MODEL), host=self.earlier_host())
+        self.assertEqual(rc, 0, "a Sonnet fix check on a guard or check change was refused:\n" + out + err)
+        self.assertIn(fix_check_line(model=merge.REVIEW_FIX_GUARD_MODEL), posted_body(self, out).splitlines())
+
+    def test_a_fix_check_on_another_model_on_a_change_with_no_guard_is_refused_and_names_sonnet(self):
+        # owner item 444 a: the refusal does not turn on Guard or check, so the same flags with guard no are refused too
+        for model in self.REFUSED_MODELS:
+            with self.subTest(model=model):
+                rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(model, guard="no"), host=self.earlier_host())
+                self.assertEqual(rc, 2, f"a {model} fix check on a change with no guard or check was written, not refused:\n" + out + err)
+                self.assertNotIn(REVIEW_MARKER, out, f"a refused {model} fix check still printed a record")
+                self.assertNotIn("Traceback", err)
+                self.assertTrue(self.remedy_names_sonnet(model, out + err), "the refusal does not name sonnet as the model to use:\n" + out + err)
+
+    def test_a_sonnet_fix_check_on_a_change_with_no_guard_prints_the_record(self):
+        # control: the same flags on Sonnet are written on Guard or check no, with the fix line the record reads back
+        rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(merge.REVIEW_FIX_GUARD_MODEL, guard="no"), host=self.earlier_host())
+        self.assertEqual(rc, 0, "a Sonnet fix check on a change with no guard or check was refused:\n" + out + err)
+        self.assertIn(fix_check_line(model=merge.REVIEW_FIX_GUARD_MODEL), posted_body(self, out).splitlines())
+
+    # The model in the spelling a person may type. Built from the constant, so the cases follow the model name when it changes.
+    MIXED_CASE_MODEL = merge.REVIEW_FIX_GUARD_MODEL.capitalize()
+
+    def test_a_mixed_case_sonnet_fix_pass_on_a_guard_change_reads_like_lowercase(self):
+        # Pins letter case only. The state is not asserted: owner item 402 a owes a third review on a guard or check change.
+        rounds = ("Round 1: reviewer, sonnet, FAIL",)
+        lower = self.guard_yes_verdict(rounds, merge.REVIEW_FIX_GUARD_MODEL)  # control: the lowercase model is not refused
+        self.assertNotIn(self.MODEL_REFUSAL, lower[1], f"the lowercase control is refused on the model, so the case proves nothing: {lower[1]!r}")
+        mixed = self.guard_yes_verdict(rounds, self.MIXED_CASE_MODEL)
+        self.assertEqual(mixed, lower, f"a {self.MIXED_CASE_MODEL} fix check PASS on a guard or check change reads differently from lowercase")
+
+    def test_a_mixed_case_sonnet_fix_check_on_a_guard_change_is_accepted_and_printed(self):
+        rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(self.MIXED_CASE_MODEL), host=self.earlier_host())
+        self.assertEqual(rc, 0, f"--review-record refused a {self.MIXED_CASE_MODEL} fix check on a guard or check change:\n" + out + err)
+        self.assertIn(fix_check_line(model=self.MIXED_CASE_MODEL), posted_body(self, out).splitlines())
+
+    def test_a_mixed_case_sonnet_fix_check_on_a_change_with_no_guard_reads_done_and_is_printed(self):
+        # control: the letter-case match holds on Guard or check no too, as it does on yes
+        state, why = record_verdict(self, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",), guard="no",
+                                                      fix=(fix_check_line(model=self.MIXED_CASE_MODEL),)))
+        self.assertEqual(state, "done", f"a {self.MIXED_CASE_MODEL} fix check PASS on a change with no guard or check must read done: {why!r}")
+        rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(self.MIXED_CASE_MODEL, guard="no"), host=self.earlier_host())
+        self.assertEqual(rc, 0, f"--review-record refused a {self.MIXED_CASE_MODEL} fix check on a change with no guard or check:\n" + out + err)
+        self.assertIn(fix_check_line(model=self.MIXED_CASE_MODEL), posted_body(self, out).splitlines())
 
 class JudgeStub:
     """Stands in for decision_watch.invoke_model. `answer(prompt)` gives (verdict, error), or raises. Each call's prompt is
