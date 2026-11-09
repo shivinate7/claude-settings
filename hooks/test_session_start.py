@@ -108,7 +108,7 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             vcs(self.primary, "worktree", "add", "-q", "--detach", "--no-checkout", path, "HEAD")
 
     def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
-                 remote_session_id=None, path_dir=None):
+                 remote_session_id=None, path_dir=None, trace_file=None):
         """The hook's stdout lines. Its stderr lands in self.last_stderr.
 
         remote: the CLAUDE_CODE_REMOTE value, or None to unset it as a non-cloud runner does.
@@ -117,6 +117,7 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         source: the payload's "source" (startup, resume, ...), or None to send none.
         compact: send the payload with no spaces after its separators, the way the hook's sed must also read it.
         path_dir: a folder put first on PATH, such as a git shim's folder, or None for the runner's own PATH.
+        trace_file: a file git appends its own trace to (GIT_TRACE), or None for no trace.
         """
         where = self.primary if session_cwd is None else session_cwd
         # Forward slashes: the hook reads "cwd" with sed, and a doubled backslash is not a path.
@@ -127,6 +128,8 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.config, CLAUDE_SETTINGS_FETCH_TIMEOUT=fetch_timeout)
         if path_dir is not None:
             env["PATH"] = path_dir + os.pathsep + env.get("PATH", "")
+        if trace_file is not None:
+            env["GIT_TRACE"] = trace_file.replace("\\", "/")
         # The test runner may itself be a cloud session, so each run sets the variable it means.
         env.pop("CLAUDE_CODE_REMOTE", None)
         env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
@@ -737,6 +740,7 @@ GRANT_WORD = re.compile(r"standing grant")
 GRANT_UNKNOWN = re.compile(r"^checkout .+: standing grant check unknown, neither origin/main nor origin/HEAD "
                            r"could be read$")
 GIT_STARTS_LOG = "git-starts.log"
+GIT_TRACE_LOG = "git-trace.log"
 
 
 def grant_text(tag, count):
@@ -816,9 +820,10 @@ class GitFixtureMixin:
         vcs(self.primary, "update-ref", "refs/remotes/origin/trunk", sha)
         vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 
-    def run_checked(self, session_cwd=None, path_dir=None, fetch_timeout="30"):
+    def run_checked(self, session_cwd=None, path_dir=None, fetch_timeout="30", trace_file=None):
         """The hook's lines, after a control: the hook ran and printed its checkout line."""
-        lines = self.run_hook(session_cwd=session_cwd, path_dir=path_dir, fetch_timeout=fetch_timeout)
+        lines = self.run_hook(session_cwd=session_cwd, path_dir=path_dir, fetch_timeout=fetch_timeout,
+                              trace_file=trace_file)
         self.assertTrue(any(line.startswith("checkout ") for line in lines),
                         "the hook printed no checkout line: %r" % lines)
         return lines
@@ -861,6 +866,22 @@ class GitFixtureMixin:
         if os.path.exists(log):
             with open(log, encoding="utf-8") as handle:
                 starts = [entry.strip() for entry in handle if entry.strip()]
+        return lines, starts
+
+    def run_traced(self, session_cwd=None, fetch_timeout="30"):
+        """The hook's lines, and each git start the run made, read from git's own trace (GIT_TRACE). A PATH shim does not
+        run on every platform; git writes its trace itself, the same way everywhere. Each start is git's argv without
+        the leading `git`, so the fetch checks read it as they read a shim's log."""
+        trace = os.path.join(self.root, GIT_TRACE_LOG)
+        if os.path.exists(trace):
+            os.remove(trace)
+        lines = self.run_checked(session_cwd=session_cwd, fetch_timeout=fetch_timeout, trace_file=trace)
+        starts = []
+        if os.path.exists(trace):
+            with open(trace, encoding="utf-8") as handle:
+                for entry in handle:
+                    if "built-in: git " in entry:
+                        starts.append(entry.split("built-in: git ", 1)[1].strip())
         return lines, starts
 
     def assert_grant_check_is_cheap(self):
@@ -1152,8 +1173,14 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.assertNotEqual(self.resolve("origin/main"), fresh, "scope: origin/main is already fresh")
         self.assertEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/main", "CLAUDE.md"),
                          "scope: the lane's CLAUDE.md differs before the refresh")
-        lines, _ = self.run_logged()
+        lines = self.run_checked()
         self.assert_one_differ_line(lines, "CLAUDE.md", "origin/main", fresh)
+
+    def test_a_lane_branch_runs_one_prune_fetch_of_origin(self):
+        self.advance_origin_main()
+        self.checkout_lane()
+        _, starts = self.run_traced()
+        self.assert_one_prune_fetch(starts)
 
     def test_a_detached_head_fetches_origin_before_the_grants_compare(self):
         fresh = self.advance_origin_main()
@@ -1161,12 +1188,18 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.assertNotEqual(self.resolve("origin/main"), fresh, "scope: origin/main is already fresh")
         self.assertEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/main", "CLAUDE.md"),
                          "scope: the detached CLAUDE.md differs before the refresh")
-        lines, _ = self.run_logged()
+        lines = self.run_checked()
         self.assert_one_differ_line(lines, "CLAUDE.md", "origin/main", fresh)
+
+    def test_a_detached_head_runs_one_prune_fetch_of_origin(self):
+        self.advance_origin_main()
+        vcs(self.primary, "checkout", "-q", "--detach")
+        _, starts = self.run_traced()
+        self.assert_one_prune_fetch(starts)
 
     def test_the_refresh_is_one_fetch_of_all_of_origin(self):
         self.checkout_lane()
-        _, starts = self.run_logged()
+        _, starts = self.run_traced()
         self.assert_one_prune_fetch(starts)
 
     def test_the_claude_settings_clone_refreshes_with_one_fetch_of_all_of_origin(self):
@@ -1174,27 +1207,29 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.put(os.path.join(self.config, "CLAUDE.md"), "@%s/CLAUDE.md\n" % self.primary.replace("\\", "/"))
         self.assertEqual(vcs(self.primary, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip(), "main",
                          "scope: the clone is not on main")
-        _, starts = self.run_logged()
+        _, starts = self.run_traced()
         self.assert_one_prune_fetch(starts)
 
     def test_the_default_branch_refreshes_with_one_fetch_of_all_of_origin(self):
         vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
         self.assertEqual(self.resolve("origin/HEAD"), self.resolve("origin/main"),
                          "scope: origin/HEAD does not name origin/main")
-        _, starts = self.run_logged()
+        _, starts = self.run_traced()
         self.assert_one_prune_fetch(starts)
 
     def test_no_origin_remote_starts_no_fetch_and_prints_no_refresh_line(self):
         vcs(self.primary, "remote", "remove", "origin")
         self.assertEqual(vcs(self.primary, "remote").stdout.strip(), "", "scope: a remote is still configured")
-        lines, starts = self.run_logged()
+        lines, starts = self.run_traced()
         self.assertEqual(self.fetch_starts(starts), [], "a fetch ran with no origin: %r" % starts)
         self.assertEqual([line for line in lines if REFRESH_FAILED.match(line)], [],
                          "a refresh line printed with no origin: %r" % lines)
 
     # A refresh that fails: one line says so, and the grant line it leaves is marked unrefreshed.
 
-    def test_a_failed_fetch_prints_one_refresh_line_and_marks_the_grant_line_unrefreshed(self):
+    def stage_a_lane_grant_against_a_missing_origin(self):
+        """A lane whose CLAUDE.md differs from origin/main, with origin set to a path that does not exist. Returns
+        origin/main's tip, which the grant line must not name once the refresh fails."""
         self.checkout_lane()
         self.set_grants(GRANT_FRESH, GRANT_STALE_DOT)
         self.commit("lane grants")
@@ -1202,8 +1237,16 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.assertNotEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/main", "CLAUDE.md"),
                             "scope: the lane's CLAUDE.md does not differ")
         vcs(self.primary, "remote", "set-url", "origin", os.path.join(self.root, "missing.git"))
-        lines, starts = self.run_logged()
+        return stale
+
+    def test_a_failed_fetch_is_one_refresh_attempt(self):
+        self.stage_a_lane_grant_against_a_missing_origin()
+        _, starts = self.run_traced()
         self.assertEqual(len(self.fetch_starts(starts)), 1, "want one refresh attempt, got %r" % starts)
+
+    def test_a_failed_fetch_prints_one_refresh_line_and_marks_the_grant_line_unrefreshed(self):
+        stale = self.stage_a_lane_grant_against_a_missing_origin()
+        lines = self.run_checked()
         refresh = [line for line in lines if REFRESH_FAILED.match(line)]
         self.assertEqual(len(refresh), 1, "want one refresh line, got %r" % lines)
         grant = self.grant_lines_of(lines)
@@ -1217,7 +1260,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.set_grants(GRANT_FRESH, GRANT_STALE_DOT)
         self.commit("lane grants")
         stale = self.resolve("origin/main")
-        lines, _ = self.run_logged()
+        lines = self.run_checked()
         self.assert_one_differ_line(lines, "CLAUDE.md", "origin/main", stale)
 
     # Local main: counted against origin/main, never moved.
@@ -1227,7 +1270,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.checkout_lane()
         main_before = self.resolve("refs/heads/main")
         self.assertEqual(main_before, self.resolve("origin/main"), "scope: local main is not at the stale origin/main")
-        lines, _ = self.run_logged()
+        lines = self.run_checked()
         self.assertEqual(self.resolve("refs/heads/main"), main_before, "the session start moved local main")
         self.assert_local_main_line(lines, "1", None)
 
@@ -1236,7 +1279,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.checkout_lane()
         main_before = self.resolve("refs/heads/main")
         self.assertNotEqual(main_before, self.resolve("origin/main"), "scope: local main equals origin/main")
-        lines, _ = self.run_logged()
+        lines = self.run_checked()
         self.assertEqual(self.resolve("refs/heads/main"), main_before, "the session start moved local main")
         self.assert_local_main_line(lines, "0", "1")
 
@@ -1245,7 +1288,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.advance_origin_main()
         self.checkout_lane()
         main_before = self.resolve("refs/heads/main")
-        lines, _ = self.run_logged()
+        lines = self.run_checked()
         self.assertEqual(self.resolve("refs/heads/main"), main_before, "the session start moved local main")
         self.assert_local_main_line(lines, "1", "1")
 
@@ -1253,7 +1296,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.checkout_lane()
         self.assertEqual(self.resolve("refs/heads/main"), self.resolve("origin/main"),
                          "scope: local main differs from origin/main")
-        lines, _ = self.run_logged()
+        lines = self.run_checked()
         self.assertEqual([line for line in lines if LOCAL_MAIN.match(line)], [],
                          "a local main line printed for equal refs: %r" % lines)
 
@@ -1263,7 +1306,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         vcs(self.primary, "branch", "-q", "-D", "main")
         self.assertIsNone(self.resolve("refs/heads/main"), "scope: local main still exists")
         self.assertIsNotNone(self.resolve("origin/main"), "scope: origin/main is gone")
-        lines, _ = self.run_logged()
+        lines = self.run_checked()
         self.assertEqual([line for line in lines if LOCAL_MAIN.match(line)], [],
                          "a local main line printed with no local main: %r" % lines)
 
@@ -1317,6 +1360,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         return [fields[0] for fields in (line.split() for line in answer.stdout.splitlines())
                 if fields[1:] == ["sleep", "7"]]
 
+    @unittest.skipIf(os.name == "nt", "the reap check reads POSIX ps and the sh git stub, which Windows does not run")
     def test_the_watchdog_sleep_is_gone_when_the_fetch_returns_first(self):
         witness = os.path.join(self.root, "sleep-seen")
         folder = self.make_fetch_stall_shim(witness)
@@ -1345,7 +1389,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.checkout_lane()
         self.assertIsNotNone(self.resolve("origin/feature"), "scope: origin/feature is not set")
         self.assertIsNotNone(self.resolve("refs/heads/feature"), "scope: local feature is not set")
-        self.run_logged()
+        self.run_checked()
         self.assertIsNone(self.resolve("origin/feature"), "the deleted branch's remote ref survived the refresh")
         self.assertIsNotNone(self.resolve("refs/heads/feature"), "the refresh removed the local branch")
 
@@ -1355,7 +1399,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         fresh = self.advance_origin_main()
         self.checkout_lane()
         before = self.snapshot()
-        self.run_logged()
+        self.run_checked()
         after = self.snapshot()
         self.assertEqual(self.resolve("origin/main"), fresh, "scope: the refresh did not run")
         changed = sorted(name.replace(os.sep, "/") for name in set(before) | set(after)
