@@ -49,7 +49,7 @@
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
   merge --batch-build NAME PR [PR ...] [--on BRANCH] [--base BRANCH]
                           the batch NAME: branch batch/NAME (each lane head merged no-ff onto the base, or onto origin/BRANCH, a running
-                          batch) and its one integration pull request, opened as a draft. The lane heads read now are the freeze:
+                          batch) and its one integration PR, opened as a draft. The lane heads read now are the freeze:
                           they go in the pull request body between two marker lines. A second build of NAME is allowed only for that same
                           set and leaves the pull request as it is, draft or ready; a late PR, a moved head or a lane left out is refused,
                           and nothing is pushed or edited. Runs no lane lint and no ready check, waits for no CI, takes no lock.
@@ -139,6 +139,8 @@ RED_CITE = "(decision no-merge-onto-red-main, no batch merges onto a red base)"
 RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
 DROP_CITE = "(decision merge-deletes-batch-lanes, a batch that drops a lane by a revert of its merge does not merge)"
 BATCH_CITE = "(decision no-merge-during-batch-ci, nothing merges while another ready pull request's CI runs, and the required checks are never empty)"
+FREEZE_CITE = BATCH_CITE  # decision batch-freeze-lane-set is not on main yet; swap to its own cite when it lands
+DRAFT_CITE = "(decision draft-until-reviewed, every pull request opens as a draft and only the one integration PR goes ready)"
 STAMP_RUN_CITE = "(decision one-shared-record-stamp, the claim runs before the merge, on the pull request branch, in the merge tool)"
 STAMP_CFG_CITE = "(decision one-shared-record-stamp, each repo keeps its config in its own tree, and the tool never guesses a config field)"
 HTTP_DENIED = re.compile(r"\bHTTP 40[13]\b")  # GitHub answered a read with a refusal: gh prints "(HTTP 403)" or "HTTP 403:". A proven refusal; any other failed read is unknown
@@ -900,7 +902,7 @@ class Host:
         """-> (number, pr() fields) of the open pull request whose head is `branch`, or None. Two of them is a Stop: the batch is not told apart."""
         hits = [row for row in self.open_prs() if row[1]["branch"] == branch]
         if len(hits) > 1:
-            raise Stop(f"{len(hits)} open pull requests have the head {branch}: close all but one")
+            raise Stop(f"{len(hits)} open pull requests have the head {branch}: close all but one {FREEZE_CITE}")
         return hits[0] if hits else None
 
     def create_pr(self, branch, base, title, body, draft=False):
@@ -911,12 +913,12 @@ class Host:
                 raise ValueError(out)
             return json.loads(out)["number"]
         except (ValueError, KeyError, TypeError) as e:
-            raise Stop(f"opening the pull request for {branch} failed: {e}")
+            raise Stop(f"opening the pull request for {branch} failed: {e} {DRAFT_CITE}")
 
     def set_body(self, n, body):
         c, out = self.api(f"pulls/{n}", method="PATCH", body={"body": body})
         if c:
-            raise Stop(f"editing the body of #{n} failed: " + out)
+            raise Stop(f"editing the body of #{n} failed: " + out + " " + FREEZE_CITE)
 
     def cited_run(self, url):
         """-> (conclusion, head sha) of the workflow run at `url`, one read. A failed read is a Stop, never a green run."""
@@ -2032,12 +2034,12 @@ def holds_base(wt, base_ref, sha, before_run=None, raise_unread=False):
         raise Unread(text)
     return text, None
 
-def push_branch(wt, branch, lease=None):
+def push_branch(wt, branch, lease=None, cite=""):
     """A plain push. Never force: a moved branch refuses it, and nothing reaches origin.
-    `lease`, a sha, makes it a force-with-lease push that lands only while origin still holds that sha: a batch rebuild is the one caller."""
+    `lease`, a sha, makes it a force-with-lease push that lands only while origin still holds that sha: a batch rebuild is the one caller. `cite` ends the stop's text: that caller passes its own."""
     c, out = git(wt, "push", "-q", *([f"--force-with-lease=refs/heads/{branch}:{lease}"] if lease else []), "origin", f"HEAD:refs/heads/{branch}")
     if c:
-        raise Stop(f"the push of {branch} was refused. Nothing is on origin from this run. Run again.\n{out}")
+        raise Stop(f"the push of {branch} was refused. Nothing is on origin from this run. Run again.{' ' + cite if cite else ''}\n{out}")
 
 def origin_head(root, branch):
     return git(root, "ls-remote", "origin", f"refs/heads/{branch}")[1].split("\t")[0]
@@ -2535,17 +2537,17 @@ def refuse_bad_pr(info):
     if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
         raise Stop("the pull request is CONFLICTING. Merge the base into the branch and run again. Nothing was claimed. " + BASE_CITE)
 
-def fetch_branch(root, branch):
-    """Fetch origin's `branch` into refs/remotes/origin/. -> its sha. The one home of that fetch."""
+def fetch_branch(root, branch, cite=""):
+    """Fetch origin's `branch` into refs/remotes/origin/. -> its sha. The one home of that fetch. `cite` ends the stop's text: the batch calls pass their own."""
     c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
     if c:
-        raise Stop(f"git fetch origin {branch} failed: {out}")
+        raise Stop(f"git fetch origin {branch} failed: {out}{' ' + cite if cite else ''}")
     return git(root, "rev-parse", f"refs/remotes/origin/{branch}")[1]
 
 def open_worktree(root, info, base):
     """Fetch, check that the head is the one gh named, and make a detached worktree there."""
-    fetch_branch(root, base)
-    got = fetch_branch(root, info["branch"])
+    for ref in (base, info["branch"]):
+        got = fetch_branch(root, ref)  # the last ref read is the branch
     if got != info["head"]:
         raise Stop(f"{info['branch']} moved: gh says {info['head'][:9]}, origin holds {got[:9]}. Run again. Nothing was claimed.")
     return add_worktree(root, info["head"])
@@ -3513,13 +3515,12 @@ def fix_check_arg(text):
     return m.group(1, 2, 3, 4)
 
 # ------------------------------------------------------------------ batch build and drop
-# A batch's lane set lives in its integration pull request body, between two marker lines. parse_freeze reads the block and
+# A batch's lane set lives in its integration PR body, between two marker lines. parse_freeze reads the block and
 # freeze_lines writes it: the one pair, used by build, drop and the rebuild of a batch stacked on a moved head.
 
 BATCH_BEGIN, BATCH_END = "<!-- batch-freeze:begin -->", "<!-- batch-freeze:end -->"
 BATCH_NAME = re.compile(r"[a-z0-9-]{1,32}")
-BATCH_BRANCH = re.compile(r"[A-Za-z0-9._/][A-Za-z0-9._/-]*")  # a branch name that is safe inside a fetch refspec
-FREEZE_CITE = "(decision batch-freeze-lane-set, a batch's lane set is frozen in its pull request body)"
+INTEGRATION_BRANCH = re.compile(r"[A-Za-z0-9._/][A-Za-z0-9._/-]*")  # a branch name that is safe inside a fetch refspec
 FROZEN_ONLY_DROP = "a frozen set never changes except by --batch-drop"
 
 def freeze_markers(lines):
@@ -3599,12 +3600,12 @@ def holds(root, head, ref):
         raise Stop(f"cannot read whether {ref} holds {head[:9]} (a missing object). {FREEZE_CITE}")
     return got
 
-def build_batch_branch(root, name, start, lanes, lease=None, body=None):
+def build_integration_branch(root, name, start, lanes, lease=None, body=None):
     """Merge each lane head of `lanes`, [(PR, head)], no-ff onto `start`, each keeping its own commit, in a temporary worktree, and push
     batch/NAME. -> the new head. With `lease` (the sha origin holds now) the push is a force-with-lease, and a rebuild that changed nothing pushes nothing.
     `body` is (host, PR, old body, new body): the new body is written after the merges and before the push, so a refused write leaves origin as it was,
     and a refused push puts the old body back; the branch and the body then never disagree.
-    The one home of the batch branch: build, drop and the rebuild on a moved head call it."""
+    The one home of the integration branch: build, drop and the rebuild on a moved head call it."""
     branch = f"batch/{name}"
     tmp, wt = add_worktree(root, start)
     try:
@@ -3612,19 +3613,19 @@ def build_batch_branch(root, name, start, lanes, lease=None, body=None):
             c, out = git(wt, *identity(wt), "merge", "-q", "--no-ff", "-m", f"Merge lane #{n} into batch {name}", head)
             if c:
                 git(wt, "merge", "--abort")
-                raise Stop(f"lane #{n} ({head[:9]}) does not merge into {branch}. Nothing was pushed. Fix the lane or leave it out.\n{out}")
+                raise Stop(f"lane #{n} ({head[:9]}) does not merge into {branch}. Nothing was pushed. Fix the lane or leave it out. {FREEZE_CITE}\n{out}")
         new = git(wt, "rev-parse", "HEAD")[1]
         if body:
             body[0].set_body(body[1], body[3])
         if new != lease:
             try:
-                push_branch(wt, branch, lease)
+                push_branch(wt, branch, lease, FREEZE_CITE)
             except Stop as e:
                 if body:
                     try:
                         body[0].set_body(body[1], body[2])
                     except Stop as back:
-                        raise Stop(f"{e}\nThe body of #{body[1]} could not be put back ({back}): it lists the new lane set, and {branch} holds the old one.") from e
+                        raise Stop(f"{e}\nThe body of #{body[1]} could not be put back ({back}): it lists the new lane set, and {branch} holds the old one. {FREEZE_CITE}") from e
                 raise
         return new
     finally:
@@ -3635,7 +3636,7 @@ def batch_start(root, block, base):
     else (a block made before Base was recorded) the tip of `base` now, said in one line, because main may have moved since the build."""
     if block["on"]:
         return block["on"][1], block["base"]
-    tip = fetch_branch(root, base)  # also brings in the history that holds a recorded Base
+    tip = fetch_branch(root, base, FREEZE_CITE)  # also brings in the history that holds a recorded Base
     if block["base"]:
         return block["base"], block["base"]
     say(f"merge: batch {block['name']} records no Base line (built before it was recorded); rebuilt on the current tip of {base}, {tip[:9]}.")
@@ -3679,14 +3680,14 @@ def restack(root, h, moved, new_head, gone=None, seen=frozenset()):
                 continue  # a pull request that only quotes a marker
             if not block or not block["on"] or block["on"][0] != moved or block["on"][1] == new_head or info["branch"] != f"batch/{block['name']}":
                 continue
-            tip = fetch_branch(root, info["branch"])
+            tip = fetch_branch(root, info["branch"], FREEZE_CITE)
             off = {k: v for k, v in block["lanes"].items() if k in gone or any(g != v and holds(root, g, v) for g in gone.values())}
             kept = {k: v for k, v in block["lanes"].items() if k not in off}
             if not kept:
                 raise Stop(f"dropping {lane_list(off)} leaves batch {block['name']} no lane. Close pull request #{n} instead. {FREEZE_CITE}")
             text = freeze_rewrite(info["body"], block, freeze_lines(block["name"], kept, [*block["dropped"], *sorted(off)], (moved, new_head), block["base"]))
             drafted = return_to_draft(h, n, info)
-            new = build_batch_branch(root, block["name"], new_head, sorted(kept.items()), lease=tip, body=(h, n, info["body"], text))
+            new = build_integration_branch(root, block["name"], new_head, sorted(kept.items()), lease=tip, body=(h, n, info["body"], text))
             say(f"merge: batch {block['name']} was on {moved}; rebuilt on its new head {new_head[:9]}"
                 + (f", without {lane_list(off)}, which stacked on a dropped lane." if off else "."))
             needs_ready(block["name"], drafted)
@@ -3724,7 +3725,7 @@ def stacked_without_base(root, h, base, heads, running, own=None, remedy="Add th
     would put that pull request's commits into the batch unfrozen, an old commit of it as much as its head. `heads` is {PR: head} of the request;
     `running` is the head of the integration branch it stacks on, or None; a commit that it or the base tip holds is already in. `own` is the batch's
     own pull request. Each other head is the sha the open list gives. `remedy` is the route the refusal names."""
-    kept = [fetch_branch(root, base), *([running] if running else [])]
+    kept = [fetch_branch(root, base, FREEZE_CITE), *([running] if running else [])]
     frozen = set(heads.values())
     others = [(n, info["head"]) for n, info in h.open_prs() if n not in heads and n != own and info["base"] == base]
     unread = fetch_heads(root, [s for _, s in others])
@@ -3754,9 +3755,9 @@ def sync_batch(root, h, pr, info, block, on, base):
     commit of a pull request outside the set. -> 0, or 1 when a batch stacked on it could not be rebuilt."""
     name, heads = block["name"], block["lanes"]
     branch = f"batch/{name}"
-    tip = fetch_branch(root, branch)
-    now_on = fetch_branch(root, on) if on else None  # a running batch's head moves on a drop, a claim or a heal
-    kept = [fetch_branch(root, base), *([now_on] if on else [])]
+    tip = fetch_branch(root, branch, FREEZE_CITE)
+    now_on = fetch_branch(root, on, FREEZE_CITE) if on else None  # a running batch's head moves on a drop, a claim or a heal
+    kept = [fetch_branch(root, base, FREEZE_CITE), *([now_on] if on else [])]
     stops = [*kept, *([block["on"][1]] if block["on"] else []), *([block["base"]] if block["base"] else [])]
     strays = stray_heads(root, tip, block, stops, kept)
     if not strays and all(holds(root, heads[n], tip) for n in sorted(heads)) and not (on and not holds(root, now_on, tip)):
@@ -3768,7 +3769,7 @@ def sync_batch(root, h, pr, info, block, on, base):
     start = now_on or start
     text = freeze_rewrite(info["body"], block, freeze_lines(name, heads, block["dropped"], (on, now_on) if on else None, recorded))
     drafted = return_to_draft(h, pr, info)
-    new = build_batch_branch(root, name, start, sorted(heads.items()), lease=tip, body=(h, pr, info["body"], text))
+    new = build_integration_branch(root, name, start, sorted(heads.items()), lease=tip, body=(h, pr, info["body"], text))
     say(f"merge: batch {name} rebuilt on {on or base}, lanes {lane_list(heads)}"
         + (f"; it held {len(strays)} lane head(s) its frozen set does not list, which are now off." if strays else "."))
     if not info["draft"]:  # a draft was a draft before the rebuild; a batch that was ready needs the line, whether or not its return to draft held
@@ -3836,7 +3837,7 @@ def blame_lines(name, blamed, base):
         f"  merge --batch-drop {name} {n}")]
 
 def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok=""):
-    """merge --batch-build NAME PR... [--on BRANCH] [--base BRANCH]: the batch branch and its one draft pull request, or the same set again.
+    """merge --batch-build NAME PR... [--on BRANCH] [--base BRANCH]: the integration branch and its one draft pull request, or the same set again.
     With `ready` (--ready): the batch already exists. It is checked as the same set again, with no PR list meaning its frozen set, then the one
     lint of the integration branch head runs and the draft is marked ready; a ready one is left as it is. `on` and `base` default to the block's.
     Returns 0, or 1 when a batch stacked on a rebuilt one could not be rebuilt."""
@@ -3865,21 +3866,21 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok=""):
     if on:
         running = h.batch_pr(on)
         # --ready on a batch whose On batch has merged: the base holds the On sha now, so there is no running batch to read, and nothing to stack on
-        merged_on = bool(ready and running is None and frozen["on"] and frozen["on"][0] == on and holds(root, frozen["on"][1], fetch_branch(root, base)))
+        merged_on = bool(ready and running is None and frozen["on"] and frozen["on"][0] == on and holds(root, frozen["on"][1], fetch_branch(root, base, FREEZE_CITE)))
         if not merged_on and (running is None or parse_freeze(running[1]["body"]) is None):
             raise Stop(f"--on {on}: {on} has no open pull request that holds a frozen block, so it is not a running batch. {FREEZE_CITE}")
     found = found or h.batch_pr(branch)
     if found is None:
-        start = fetch_branch(root, on or base)
+        start = fetch_branch(root, on or base, FREEZE_CITE)
         for n in numbers:
-            if fetch_branch(root, infos[n]["branch"]) != heads[n]:
-                raise Stop(f"{infos[n]['branch']} moved while #{n} was read. Nothing was pushed. Run again.")
+            if fetch_branch(root, infos[n]["branch"], FREEZE_CITE) != heads[n]:
+                raise Stop(f"{infos[n]['branch']} moved while #{n} was read. Nothing was pushed. Run again. {FREEZE_CITE}")
         stacked_without_base(root, h, base, heads, start if on else None)
-        build_batch_branch(root, name, start, sorted(heads.items()))
+        build_integration_branch(root, name, start, sorted(heads.items()))
         try:
             pr = h.create_pr(branch, base, f"Batch {name}", "\n".join(freeze_lines(name, heads, on=(on, start) if on else None, base=None if on else start)) + "\n", draft=True)
         except Stop as e:
-            raise Stop(f"{branch} is on origin, but its pull request was not opened: {e}. Open it by hand with the frozen block, or delete the branch and run again.")
+            raise Stop(f"{branch} is on origin, but its pull request was not opened: {e}. Open it by hand with the frozen block, or delete the branch and run again. {FREEZE_CITE}")
         say(f"merge: batch {name} built: PR #{pr} draft, lanes {lane_list(heads)}")
         return 0
     pr, info = found
@@ -3899,23 +3900,23 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok=""):
         raise Stop(f"batch {name} is frozen on {was_on or 'no running batch'} into {info['base']}; this request says {on or 'no running batch'} into {base}. "
                    f"Nothing was pushed or edited. {FREEZE_CITE}")
     for n in numbers:
-        if fetch_branch(root, infos[n]["branch"]) != heads[n]:
-            raise Stop(f"{infos[n]['branch']} moved while #{n} was read. Nothing was pushed. Run again.")
+        if fetch_branch(root, infos[n]["branch"], FREEZE_CITE) != heads[n]:
+            raise Stop(f"{infos[n]['branch']} moved while #{n} was read. Nothing was pushed. Run again. {FREEZE_CITE}")
     if ready and not info["draft"]:
         say(f"merge: batch {name}: PR #{pr} is already ready.")
         return 0
     if merged_on:  # a plain batch from here: its lanes sit on the base, which holds what the On batch held
         say(f"merge: batch {name} was on {on}, which has merged into {base}; it is checked against {base}.")
-        on, block = None, {**block, "on": None, "base": fetch_branch(root, base)}
+        on, block = None, {**block, "on": None, "base": fetch_branch(root, base, FREEZE_CITE)}
     rc = sync_batch(root, h, pr, info, block, on, base)
     if ready:
         try:
             lane_lint(root, branch, h, base, unknown_ok)  # the one lint of the batch head: a build never lints, a lane's own lint is not repeated
         except LintFail as e:
-            raise Stop("\n".join([str(e), *blame_lines(name, blamed_lanes(root, e, heads, base), base)])) from None
+            raise Stop("\n".join([str(e), *blame_lines(name, blamed_lanes(root, e, heads, base), base), DRAFT_CITE])) from None
         ok, why = h.ready(pr)
         if not ok:
-            raise Stop(f"#{pr} is a draft and was not marked ready. {why}")
+            raise Stop(f"#{pr} is a draft and was not marked ready. {why} {DRAFT_CITE}")
         say(f"merge: batch {name}: PR #{pr} ready, lanes {lane_list(heads)}")
         return rc
     say(f"merge: batch {name} built: PR #{pr} {'draft' if info['draft'] else 'ready'}, lanes {lane_list(heads)}")
@@ -3942,7 +3943,7 @@ def batch_drop(root, h, name, number):
         return rc
     if number not in lanes:
         raise Stop(f"#{number} is not in batch {name}'s frozen lane set, which is {lane_list(lanes)}. {FREEZE_CITE}")
-    tip = fetch_branch(root, branch)  # holds every frozen lane head and the recorded On sha, so no lane branch is read
+    tip = fetch_branch(root, branch, FREEZE_CITE)  # holds every frozen lane head and the recorded On sha, so no lane branch is read
     dependents = []
     for n in sorted(lanes):
         if n != number and lanes[n] != lanes[number] and holds(root, lanes[number], lanes[n]):
@@ -3955,13 +3956,13 @@ def batch_drop(root, h, name, number):
     on = block["on"]
     if on:  # the On batch's head moves on a drop, a claim or a heal, and a restack that failed leaves this batch behind: rebuild on its head now, not the recorded one
         try:
-            start = fetch_branch(root, on[0])
+            start = fetch_branch(root, on[0], FREEZE_CITE)
             on = (on[0], start)
         except Stop as e:
             say(f"merge: {on[0]} could not be read ({e}); batch {name} is rebuilt on the On sha it recorded, {on[1][:9]}.")
     text = freeze_rewrite(info["body"], block, freeze_lines(name, kept, [*block["dropped"], *dropping], on, recorded))
     drafted = return_to_draft(h, pr, info)
-    new = build_batch_branch(root, name, start, sorted(kept.items()), lease=tip, body=(h, pr, info["body"], text))
+    new = build_integration_branch(root, name, start, sorted(kept.items()), lease=tip, body=(h, pr, info["body"], text))
     say(f"merge: #{number} dropped from batch {name}.", *(f"merge: #{n} dropped too: its head contains #{number}'s head." for n in dependents),
         f"merge: batch {name} now holds lanes {lane_list(kept)}.")
     needs_ready(name, drafted)
@@ -4109,7 +4110,7 @@ def main(argv, host=None, lock=None, hosts=None):
         if len(set(map(int, numbers))) != len(numbers):
             p.error(f"{flag}: a PR is named twice")
         for what, value in (("--on", a.on), ("--base", a.base)):
-            if value and not BATCH_BRANCH.fullmatch(value):
+            if value and not INTEGRATION_BRANCH.fullmatch(value):
                 p.error(f"{what} {value!r} is not a branch name")
     elif a.lane_lint:
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record:
@@ -4148,25 +4149,20 @@ def main(argv, host=None, lock=None, hosts=None):
             write_merge_role(a.role)
             say(f"merge: merge role {a.role} recorded for this session.")
             return 0
-        if batch:  # stands alone: no lock, no lint, no wait. The role check comes before any host read
-            if os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():
-                raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
-            c, root = sh(["git", "rev-parse", "--show-toplevel"])
-            if c:
-                raise Stop("not in a git checkout")
-            h = host or Host()
-            if a.batch_drop:
-                return batch_drop(root, h, name, int(numbers[0]))
-            return batch_build(root, h, name, sorted(map(int, numbers)), a.on, a.base, a.ready, a.lint_unknown_ok)
         if a.root:  # every block is built before any is printed
             lines, ok = reviewed_roots(a.root, hosts, a.config)
             say(*lines)
             return 0 if ok else 1
-        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
+        if (a.confirm or batch) and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
             raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
         if c:
             raise Stop("not in a git checkout")
+        if batch:  # stands alone: no lock, no lint, no wait
+            h = host or Host()
+            if a.batch_drop:
+                return batch_drop(root, h, name, int(numbers[0]))
+            return batch_build(root, h, name, sorted(map(int, numbers)), a.on, a.base, a.ready, a.lint_unknown_ok)
         lock = lock or default_lock(root)
         if a.unlock is not None:
             b = a.unlock
