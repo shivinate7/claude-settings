@@ -15037,9 +15037,10 @@ def _build_find_cp():
     # below write into, and assets/ holds files with no test name. The root test_x.py is the source of a copy into
     # a folder that the same command makes. src/test_x.py feeds the compound-command cases. tests/notes.txt is a
     # non-test file under a test folder, copied with --parents. dyn/ is absent on purpose: dyn/[id].test.tsx matches
-    # no file, so bash passes that text on as the source.
+    # no file, so bash passes that text on as the source. tests/test_a.py is the test the made-folder cases copy out
+    # of tests/ into out/, by a glob and by name.
     make_repo(FINDCP, {"src/app.py": "x\n", "src/a.py": "x\n", "src/b.txt": "x\n", "src/test_a.py": "x\n",
-                       "src/test_x.py": "x\n", "test_x.py": "x\n", "tests/notes.txt": "x\n",
+                       "src/test_x.py": "x\n", "test_x.py": "x\n", "tests/notes.txt": "x\n", "tests/test_a.py": "x\n",
                        "pkg/keep.py": "x\n", "hooks/keep.py": "x\n", "hooks/test_x.py": "x\n",
                        "hooks/guard.py": "x\n", "hooks/notes.txt": "x\n", "docs/keep.txt": "x\n",
                        "assets/logo.css": "x\n"})
@@ -15153,6 +15154,16 @@ sh("builder-find: (mkdir -p tests/new) && cd tests/new && cp ../../hooks/guard.p
 # Without the cd, the copy writes newd/test_guard.py and is refused, as the mkdir newd case above shows.
 sh("builder-find: mkdir newd, cd docs, cp ../hooks/test_guard.py newd writes docs/newd, a file name, is allowed",
    "mkdir newd && cd docs && cp ../hooks/test_guard.py newd", "allow", **dict(BR, cwd=FINDCP))
+# out/ is made by the same command, so it is absent from disk while the guard judges the copy. The glob from inside
+# out cannot resolve `..`, so it matches nothing and is judged as its literal text, not as tests/test_a.py. The copy
+# writes out/test_a.py, a test, so it is refused. The no-glob copy writes that same file and is refused too. The
+# control copies src/*.txt, which writes out/b.txt, no test.
+sh("builder-find: mkdir -p out, cd out, cp ../tests/*.py . writes out/test_a.py, a glob from a made folder, is refused",
+   "mkdir -p out && cd out && cp ../tests/*.py .", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: mkdir -p out, cd out, cp ../tests/test_a.py . writes out/test_a.py, no glob, is refused",
+   "mkdir -p out && cd out && cp ../tests/test_a.py .", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: mkdir -p out, cd out, cp ../src/*.txt . writes out/b.txt, no test, is allowed",
+   "mkdir -p out && cd out && cp ../src/*.txt .", "allow", **dict(BR, cwd=FINDCP))
 # An unmatched glob is judged by its literal text, the same as the dyn/[id].test.tsx case above.
 sh("builder-find: cp of unmatched glob assets/test_*.py into docs/, judged by its literal text, is refused",
    "cp assets/test_*.py docs/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
