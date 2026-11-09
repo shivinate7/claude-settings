@@ -290,9 +290,7 @@ The guard enforces this (rule `page-stale`, decision `page-stale-publish`): an `
 repo's waiting page from a file behind main is refused, and its reason repeats steps 1, 2 and 4. An allowed
 publish of main's page stamps main's page version, and the next session start says when the page is behind.
 
-Cost: on demand, inside a wake already running. One `Artifact read`, one python process, at most
-one short read-only git process, with no fetch, and one gh call per open item with `waits`, and with `--answers` one more `ArtifactData list answers` read, and with `--asks` one more `ArtifactData list asks` read, no process added. It writes `<out>` only, and no file without
-`--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
+Cost: on demand, inside a wake already running. It runs one `Artifact read`, one python process, and at most one short read-only git process, with no fetch. It makes one gh call per open item with `waits`. With `--answers` it adds one `ArtifactData list answers` read. With `--asks` it adds one `ArtifactData list asks` read, and no process. It writes `<out>` only, and no file without `--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
 
 ## Keep a copy in the repo
 
