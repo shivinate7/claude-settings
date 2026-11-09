@@ -107,6 +107,7 @@ FAMILIES = {
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
+    "octopus-push": "a git push whose range adds a merge commit of more than two parents is refused, with a two-parent remedy; a push that writes main keeps its push-main ask",
     "cite": "cite by id",
     "frozen": "frozen paths",
     "model-cap": "the agent model cap",
@@ -12351,6 +12352,165 @@ cmk_allow("two commits, the first adding a triplet and the second removing it, t
           VCS + " push", R2_NET)
 
 
+# =========================================================================== 5e. octopus-push
+#
+# `octopus-push`. A `git push` is refused when a commit it would send is a merge with more than two parents
+# (an octopus merge). The range is the one the conflict-markers push check reads: the destination's
+# remote-tracking tip to the pushed ref, else HEAD. An octopus merge already in that tip's history is outside
+# the range and passes. A push that writes main or master is out of scope: it keeps its push-main ask. The
+# remedy names the two-parent form, so the push can be redone as chained two-parent merges.
+#
+# Each push case runs in a checkout whose remote is a bare repository beside it: nothing leaves the machine.
+# The fixtures reuse the conflict-markers push helpers (`_cmk_pushed`, `_cmk_run`, `_cmk_commit`), and their
+# folders carry an `oct-` prefix, so no bare remote name collides with another fixture's.
+FAMILY = "octopus-push"
+OCT_RULE = "octopus-push"
+OCT_TARGET_WORD = "octopus"                       # the forbidden target, as a remedy would name it
+OCT_THREE = os.path.join(ROOT, "oct-three")       # topic: a commit, a merge of x and y (three parents), a commit
+OCT_FOUR = os.path.join(ROOT, "oct-four")         # topic: a commit, a merge of x, y and z (four parents)
+OCT_TWO = os.path.join(ROOT, "oct-two")           # topic: a commit, then a merge of x and a merge of y (two parents each)
+OCT_PLAIN = os.path.join(ROOT, "oct-plain")       # topic: two commits, no merge
+OCT_REMOTE = os.path.join(ROOT, "oct-remote")     # topic: a three-parent merge already pushed, then a clean commit
+OCT_EMPTY = os.path.join(ROOT, "oct-empty")       # topic: a three-parent merge already pushed, nothing unpushed
+OCT_MAIN = os.path.join(ROOT, "oct-main")         # main: a commit, then an unpushed three-parent merge
+
+
+def _oct_branch(where, name, rel, text):
+    """Cut `name` from main and commit one file on it. The caller picks the branch to merge into."""
+    _cmk_run(where, "checkout", "-q", "-b", name, "main")
+    _cmk_commit(where, rel, text, "change on " + name)
+
+
+def _oct_merge(where, into, names):
+    """Merge `names` into branch `into` as one merge commit. --no-ff keeps a fast-forward from hiding it."""
+    _cmk_run(where, "checkout", "-q", into)
+    _cmk_run(where, "merge", "-q", "--no-ff", "--no-edit", *names)
+
+
+def _oct_parents(where, rng):
+    """The parent count of each merge in `rng`, sorted, as git reads them."""
+    out = _cmk_run(where, "rev-list", "--merges", "--parents", rng)
+    return sorted(len(line.split()) - 1 for line in out.splitlines())
+
+
+def _oct_must(where, rng, want, what):
+    """Stop the suite unless the merges in `rng` have the parent counts `want`. Each fixture's scope is read
+    this way before a case judges it, so a fixture that built nothing fails here, not as a wrong case."""
+    got = _oct_parents(where, rng)
+    if got != want:
+        sys.exit("fixture setup failed in the octopus-push fixtures: %s: merges in %r have parents %r, want %r"
+                 % (what, rng, got, want))
+
+
+def _oct_remote(where):
+    """Topic with a three-parent merge pushed to its remote, and no commit after it."""
+    _cmk_pushed(where, {"a.txt": "base\n"})
+    _cmk_commit(where, "t1.txt", "t1\n", "topic one")
+    _oct_branch(where, "x", "x.txt", "x\n")
+    _oct_branch(where, "y", "y.txt", "y\n")
+    _oct_merge(where, "topic", ["x", "y"])
+    _cmk_run(where, "push", "-q", "origin", "topic")
+    _oct_must(where, "origin/topic", [3], "the merge on the remote")
+
+
+def _build_octopus_push():
+    _cmk_pushed(OCT_THREE, {"a.txt": "base\n"})
+    _cmk_commit(OCT_THREE, "t1.txt", "t1\n", "topic one")
+    _oct_branch(OCT_THREE, "x", "x.txt", "x\n")
+    _oct_branch(OCT_THREE, "y", "y.txt", "y\n")
+    _oct_merge(OCT_THREE, "topic", ["x", "y"])
+    _cmk_commit(OCT_THREE, "t2.txt", "t2\n", "topic two, after the merge")
+    _oct_must(OCT_THREE, "origin/topic..HEAD", [3], "the unpushed three-parent merge")
+
+    _cmk_pushed(OCT_FOUR, {"a.txt": "base\n"})
+    _cmk_commit(OCT_FOUR, "t1.txt", "t1\n", "topic one")
+    for name in ("x", "y", "z"):
+        _oct_branch(OCT_FOUR, name, name + ".txt", name + "\n")
+    _oct_merge(OCT_FOUR, "topic", ["x", "y", "z"])
+    _oct_must(OCT_FOUR, "origin/topic..HEAD", [4], "the unpushed four-parent merge")
+
+    _cmk_pushed(OCT_TWO, {"a.txt": "base\n"})
+    _cmk_commit(OCT_TWO, "t1.txt", "t1\n", "topic one")
+    _oct_branch(OCT_TWO, "x", "x.txt", "x\n")
+    _oct_merge(OCT_TWO, "topic", ["x"])
+    _oct_branch(OCT_TWO, "y", "y.txt", "y\n")
+    _oct_merge(OCT_TWO, "topic", ["y"])
+    _oct_must(OCT_TWO, "origin/topic..HEAD", [2, 2], "two unpushed two-parent merges")
+
+    _cmk_pushed(OCT_PLAIN, {"a.txt": "base\n"})
+    _cmk_commit(OCT_PLAIN, "t1.txt", "t1\n", "topic one")
+    _cmk_commit(OCT_PLAIN, "t2.txt", "t2\n", "topic two")
+    _oct_must(OCT_PLAIN, "origin/topic..HEAD", [], "no merge, unpushed")
+
+    _oct_remote(OCT_REMOTE)
+    _cmk_commit(OCT_REMOTE, "b.txt", "clean\n", "clean change, unpushed")
+    _oct_must(OCT_REMOTE, "origin/topic..HEAD", [], "only the clean commit, unpushed")
+
+    _oct_remote(OCT_EMPTY)
+    _oct_must(OCT_EMPTY, "origin/topic..HEAD", [], "nothing unpushed")
+
+    _cmk_pushed(OCT_MAIN, {"a.txt": "base\n"})
+    _oct_branch(OCT_MAIN, "x", "x.txt", "x\n")
+    _oct_branch(OCT_MAIN, "y", "y.txt", "y\n")
+    _cmk_run(OCT_MAIN, "checkout", "-q", "main")
+    _cmk_commit(OCT_MAIN, "m.txt", "m\n", "main one, unpushed")
+    _oct_merge(OCT_MAIN, "main", ["x", "y"])
+    _oct_must(OCT_MAIN, "origin/main..HEAD", [3], "the unpushed three-parent merge on main")
+
+
+lazy_fixture([OCT_THREE, OCT_FOUR, OCT_TWO, OCT_PLAIN, OCT_REMOTE, OCT_EMPTY, OCT_MAIN], _build_octopus_push)
+
+
+def oct_refuse(name, command, cwd):
+    sh("octopus-push: %s is refused" % name, command, "deny", OCT_RULE, cwd=cwd)
+
+
+def oct_allow(name, command, cwd):
+    sh("octopus-push: %s is allowed" % name, command, "allow", cwd=cwd)
+
+
+# A push is refused when a commit it would send is a merge of more than two parents, whatever the refspec.
+oct_refuse("a push of a three-parent merge in the range", VCS + " push", OCT_THREE)
+oct_refuse("a push by an explicit refspec of a three-parent merge in the range",
+           VCS + " push origin HEAD:refs/heads/topic", OCT_THREE)
+oct_refuse("a push of a four-parent merge in the range", VCS + " push", OCT_FOUR)
+
+# Only what the push sends is judged: two-parent merges pass, and so does a range with no merge at all.
+oct_allow("a push of a range holding only two-parent merges", VCS + " push", OCT_TWO)
+oct_allow("a push of a range with no merge", VCS + " push", OCT_PLAIN)
+
+# A merge already in the remote-tracking tip's history is outside the range, so the push passes. The empty
+# range is the state where nothing is unpushed at all.
+oct_allow("a push of a clean commit, with a three-parent merge already on the remote", VCS + " push", OCT_REMOTE)
+oct_allow("a push with nothing unpushed, its three-parent merge already on the remote", VCS + " push", OCT_EMPTY)
+
+# Main is out of scope. The push-main ask is queued, not raised, so a deny from this rule would win over it:
+# this case fails if a builder's rule forgets the main exemption.
+sh("octopus-push: a push of main with a three-parent merge keeps its push-main ask",
+   VCS + " push origin main", "ask", PUSH_MAIN_RULE, cwd=OCT_MAIN)
+
+
+def octopus_remedy_case():
+    """The octopus-push refusal names the two-parent form in its remedy, and never the forbidden target
+    (git-remedy-never-names-target). The rule's name sits in the reason's header, so the target word is read
+    only after the `Remedy:` label, in lower case."""
+    got, reason = decide({
+        "raw": None, "tool": "Bash", "cwd": OCT_THREE, "session": None,
+        "env_path": None, "tool_input": {"command": VCS + " push"},
+    })
+    if got != "deny":
+        return False, "expected deny, got %s" % got
+    remedy = reason.lower().partition("remedy:")[2]
+    if "two-parent" not in remedy:
+        return False, "the remedy does not name the two-parent form: %s" % reason[:90]
+    if OCT_TARGET_WORD in remedy:
+        return False, "the remedy names the forbidden target %r: %s" % (OCT_TARGET_WORD, remedy[:90])
+    leak = names_the_target(reason, OCT_RULE)
+    if leak:
+        return False, "the reason names the forbidden target %r" % leak
+    return True, "refused, and the remedy names the two-parent form and not the octopus merge"
+
+
 # =========================================================================== 6. frozen paths
 FAMILY = "frozen"
 #
@@ -15113,6 +15273,12 @@ for _constant in REMEDY_CONSTANTS:
     _remedy_label = "wait-until remedy: every command form the %s names is allowed" % _constant
     LOG_CHECKS_EXTRA.append((_remedy_label, remedy_check(_constant)))
     LOG_FAMILY[_remedy_label] = "stream"
+# The octopus-push remedy check is defined in its section above. It builds only the fixture it reads, through
+# decide, so it is fixtureless and a family run does not build every fixture. Its family is set by hand.
+OCT_REMEDY_LABEL = "octopus-push: the refusal's remedy names the two-parent form and not the forbidden target"
+LOG_CHECKS_EXTRA.append((OCT_REMEDY_LABEL, octopus_remedy_case))
+LOG_FAMILY[OCT_REMEDY_LABEL] = "octopus-push"
+FIXTURELESS_CHECKS.add(octopus_remedy_case)
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
