@@ -10,7 +10,7 @@ step sha-hex-followups). Process-only.
   modules those load in turn.
 - The guard family is in the closure: `merge.py` loads `hooks/guard_core.py`, and each `hooks/guard_*.py`
   keeps the flags of `hooks/guard.py`.
-- No file in the closure is an exception. Guard-set files that `merge.py` does not load, like `hooks/mutate_shared.py`, get the merge flag from one shared case line in `ci-scope.sh`, which `hooks/test_install_src.sh` checks; each edit runs one extra CI job.
+- No file in the closure is an exception. Guard-set files that `merge.py` does not load, like `hooks/mutate_shared.py`, get the merge flag from the guard set's one shared case line in `ci-scope.sh`. No test pins that flag: it is a cost, not a safety need, and each edit runs one extra CI job.
 - A script that `merge.py` runs as a subprocess, such as `bin/ci-job`, is not a load and is out of the
   closure (coordinator, 2026-11-07 22:12 CST). Its own tests cover it.
 
