@@ -74,6 +74,7 @@ OVERRIDE = os.path.join(HERE, "override.py")
 CALL_JUDGE = os.path.join(HERE, "call_judge.py")
 CALL_JUDGE_SUITE = os.path.join(HERE, "test_call_judge.py")
 SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
+MERGE_TOOL = os.path.join(HERE, "..", "merge", "merge.py")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -86,6 +87,8 @@ TARGETS = {
     "calljudge": (CALL_JUDGE, CALL_JUDGE_SUITE, "CALL_JUDGE_UNDER_TEST", "call_judge"),
     # bin/sim-lease, which the guard loads by path (hooks/guard.py sim_lease_holds). The suite is the guard's.
     "simlease": (SIM_LEASE, SUITE, "GUARD_UNDER_TEST", "sim_lease"),
+    # The merge tool, which the guard loads by path for the fix check rule (guard_merge.merge_module). The suite is the guard's.
+    "mergefix": (MERGE_TOOL, SUITE, "GUARD_UNDER_TEST", "merge_fix"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -1125,16 +1128,80 @@ MUTATIONS = [
      r're.escape(FIX_CHECK_MARKER) + r"\b", "first-line"),',
      r're.escape(FIX_CHECK_MARKER), "first-line"),', "guard",
      'role-model: fix check: reviewer on sonnet with Fix checkpoint on line one is denied'),
+    # The fix check chain (decision hold-unsafe-after-round-3): the guard reads the pull request's review chain and asks the merge tool's own rule.
+    ("role-model: the fix check lift never reads the chain, so a fix check on an ineligible chain walks past",
+     '            return fix_check_chain_hit(tool_input.get("prompt"), pointer)\n        if role == "reviewer" and named < top and any(kind.lower() == "round"',
+     '            return "", "", False\n        if role == "reviewer" and named < top and any(kind.lower() == "round"', "guard",
+     "role-model: fix check chain: a fix check whose newest record has a fix check is refused, with the tool's reason"),
+    ("role-model: a fix check chain read that raises is refused, so the guard fails closed on its own error",
+     '    except (Exception, SystemExit):\n        return "", "", True\n',
+     '    except (Exception, SystemExit):\n        return "the chain could not be read", ROLE_FIX_CHECK_CHAIN_REMEDY, False\n', "guard",
+     "role-model: fix check chain: a chain read that raises fails open, allows the spawn and logs the unread row"),
+    ("role-model: the fix check reads its pull request from a later line, so a PR named in the context is judged",
+     '    pr = ROLE_FIX_CHECK_PR_LINE.match(rest[0]) if rest else None',
+     '    pr = ROLE_FIX_CHECK_PR_LINE.search("\\n".join(rest[1:]))', "guard",
+     "role-model: fix check chain: the PR is read from line two only, a PR named later in the brief is ignored"),
+    ("role-model: a round reviewer brief reads the fix check chain too",
+     '                                                      for kind, n in brief_markers(tool_input.get("prompt"))):\n            return "", "", False',
+     '                                                      for kind, n in brief_markers(tool_input.get("prompt"))):\n            return fix_check_chain_hit(tool_input.get("prompt"), pointer)', "guard",
+     "role-model: fix check chain: a round 2 reviewer brief reads no chain (control)"),
+    ("role-model: the fix check is judged below the round lift again, so a fix check with a Round 2 of 3 line skips its chain",
+     '        if role == "reviewer" and named < top and ("fixcheck", None) in marker_hits(tool_input.get("prompt")):\n'
+     '            return fix_check_chain_hit(tool_input.get("prompt"), pointer)\n'
+     '        if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS\n'
+     '                                                      for kind, n in brief_markers(tool_input.get("prompt"))):\n'
+     '            return "", "", False\n',
+     '        if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS\n'
+     '                                                      for kind, n in brief_markers(tool_input.get("prompt"))):\n'
+     '            return "", "", False\n'
+     '        if role == "reviewer" and named < top and ("fixcheck", None) in marker_hits(tool_input.get("prompt")):\n'
+     '            return fix_check_chain_hit(tool_input.get("prompt"), pointer)\n', "guard",
+     "role-model: fix check chain: a round 2 of 3 line below the PR line does not skip the chain, and a fixed chain is refused"),
+    ("role-model: a fix check with no model is judged after the agent file pin returns, so it is allowed on the pin",
+     '    if (role == "reviewer" and table.get(role) is not None and ("fixcheck", None) in marker_hits(tool_input.get("prompt"))\n',
+     '    if (False and role == "reviewer" and table.get(role) is not None and ("fixcheck", None) in marker_hits(tool_input.get("prompt"))\n', "guard",
+     "role-model: fix check chain: a fix check with no model on a fixed chain is refused, not allowed on the agent file's pin"),
+    ("role-model: a fix check with no model returns on a chain that passes, so with no default and no pin it is allowed",
+     '        if chain[0]:\n            return fix_check_chain_hit(tool_input.get("prompt"), pointer)\n',
+     '        if True:\n            return fix_check_chain_hit(tool_input.get("prompt"), pointer)\n', "guard",
+     "role-model: fix check chain: a fix check with no model, no default and no pin is refused with the no-model reason on an eligible chain"),
+    ("role-model: a default that is not Opus skips the fix check chain, so a fix check with no model is allowed on a fixed chain",
+     '            and (not default_model or role_model_rank(default_model) != len(ROLE_MODEL_RANK) - 1)):',
+     '            and not default_model):', "guard",
+     "role-model: fix check chain: a fix check with no model under a "),
+    # fix_check_read (hooks/guard_merge.py) feeds the verdict the real chain; a read that returns nothing never reaches the Host.
+    ("role-model: the fix check chain read returns no records, so the real chain never reaches the verdict",
+     '        return module.pr_review_chain(pr, module.Host())',
+     '        return [], ""', "guard",
+     "role-model: fix check chain: the real chain read, unpatched, "),
+    ("role-model: the fix check judgment is not memoized, so a refused fix check reads its chain twice",
+     '    if key not in FIX_CHECK_MEMO:\n',
+     '    if True:\n', "guard",
+     "role-model: fix check chain: a refused fix check reads its chain once on the refuse path"),
+    ("role-model: an empty fix diff gets the chain remedy, so it tells the orchestrator to brief the same head again",
+     'remedy = ROLE_FIX_CHECK_EMPTY_REMEDY if why == merge.FIX_CHECK_EMPTY else ROLE_FIX_CHECK_CHAIN_REMEDY',
+     'remedy = ROLE_FIX_CHECK_CHAIN_REMEDY', "guard",
+     "role-model: fix check chain: an empty fix diff's remedy says to push the fix, not to brief the newest head"),
+    # The rule's one home is merge.fix_check_refusal; each mutant breaks one arm and the guard's chain cases read it.
+    ("fix-check-rule: a newest record with a fix check no longer refuses",
+     'if not last or last["head"] != reviewed_head or last["fix"]:', 'if not last or last["head"] != reviewed_head:', "mergefix",
+     "role-model: fix check chain: a fix check whose newest record has a fix check is refused, with the tool's reason"),
+    ("fix-check-rule: a reviewed head that is not the newest record's head no longer refuses",
+     'if not last or last["head"] != reviewed_head or last["fix"]:', 'if not last or last["fix"]:', "mergefix",
+     "role-model: fix check chain: a reviewed head that is not the newest record's head is refused, with the tool's reason"),
+    ("fix-check-rule: a reviewed head equal to the live head no longer refuses",
+     'if reviewed_head == live_head:\n        return FIX_CHECK_EMPTY', 'if False:\n        return FIX_CHECK_EMPTY', "mergefix",
+     "role-model: fix check chain: a reviewed head equal to the live head is refused as an empty fix diff"),
     ("role-model: Opus is no longer left to the ceiling, so a builder on opus is denied here",
      'named == top or row is None:',
      'row is None:', "guard",
      'role-model: builder on opus with no round line is denied under agent-model-cap, not this rule'),
     ("role-model: the default model is ignored, so a builder with no model is denied under a sonnet default",
-     '    if os.environ.get(ROLE_MODEL_ENV, "").strip():',
-     '    if False:', "guard", 'role-model: builder with no model is allowed when the default is sonnet'),
+     '    if default_model:\n        return "", chain[1], chain[2]',
+     '    if False:\n        return "", chain[1], chain[2]', "guard", 'role-model: builder with no model is allowed when the default is sonnet'),
     ("role-model: the agent file pin is ignored, so a reviewer with no model is denied",
-     '    if pinned:\n        return "", "", False',
-     '    if False:\n        return "", "", False', "guard",
+     '    if pinned:\n        return "", chain[1], chain[2]',
+     '    if False:\n        return "", chain[1], chain[2]', "guard",
      'role-model: reviewer with no model is allowed when the default is unset'),
     ("role-model: the no-model deny is dropped, so a builder with no model and no default passes",
      '    return ROLE_NO_MODEL_REASON %',
@@ -3673,7 +3740,7 @@ def run_mutant(sources, work: str, entry):
     if skip:
         return label, None, [], required, skip
     _path, suite, variable, stem = TARGETS[target]
-    if target in ("guard", "simlease"):
+    if target in ("guard", "simlease", "mergefix"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
         # module that holds it. The suite loads the copied guard.py, which finds its siblings. The
         # simulator refusal imports janitor/sweep.py from ../janitor and fails open when it cannot, so
@@ -3688,8 +3755,21 @@ def run_mutant(sources, work: str, entry):
             with open(os.path.join(root, "bin", "sim-lease"), "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(sources[target].replace(old, new, 1))
         else:
-            mutate_shared.apply_mutant(tree, old, new)
+            if target == "guard":
+                mutate_shared.apply_mutant(tree, old, new)
             shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
+        # The guard loads ../merge/merge.py beside its hooks folder for the fix check rule, so the copy takes it too, mutated or not.
+        os.makedirs(os.path.join(root, "merge"), exist_ok=True)
+        if target == "mergefix":
+            with open(os.path.join(root, "merge", "merge.py"), "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(sources[target].replace(old, new, 1))
+        else:
+            shutil.copy(MERGE_TOOL, os.path.join(root, "merge"))
+        # The merge tool reads ../actions/ci-alarm/events.json at import and clear_rule.py beside it. Without them it does not load,
+        # every fix check chain fails open, and each chain case is red on every mutant, whatever was mutated.
+        os.makedirs(os.path.join(root, "actions", "ci-alarm"), exist_ok=True)
+        for name in ("events.json", "clear_rule.py"):
+            shutil.copy(os.path.join(HERE, "..", "actions", "ci-alarm", name), os.path.join(root, "actions", "ci-alarm"))
         copy_path = os.path.join(tree, "guard.py")
         os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
         for name in ("sweep.py", "temp_sweep.py"):
@@ -3729,7 +3809,7 @@ def run_mutant(sources, work: str, entry):
         copy_path = os.path.join(tree, "call_judge.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
-    elif target not in ("guard", "simlease"):
+    elif target not in ("guard", "simlease", "mergefix"):
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
