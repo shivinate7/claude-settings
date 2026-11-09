@@ -18946,6 +18946,47 @@ def pd_budget_case():
 LOG_CHECKS_EXTRA.append(("page-item-design: pictured items in one batch share one deadline", pd_budget_case))
 
 
+def pd_batch_miss_case():
+    """A batch of three pictured items: the first is unknown, the second misses, the third would pass. The deny names
+    the second, the checker is not run on the third (the loop ends at the first miss), and the first's unknown is one
+    noted line. The checker is a stand-in that answers by item, so nothing renders and the case stays fast."""
+    seen = []
+    ids = ["miss-1", "miss-2", "miss-3"]
+
+    def stand_in(page_file, item):
+        seen.append(item["id"])
+        if item["id"] == "miss-1":
+            return 3, "checker cannot run for item one"
+        if item["id"] == "miss-2":
+            return 1, "item two's mockup draws no focus"
+        return 0, ""
+    repo = pd_repo("batch-miss", PD_PAGE)
+    writes = [{"op": "set", "collection": "items", "doc_id": doc, "data": pd_item(id=doc)} for doc in ids]
+    payload = {"tool_name": "ArtifactData", "cwd": repo,
+               "tool_input": {"url": PQ_URL, "action": "batch", "writes": writes}}
+    _calls, out, rows = pd_judged(payload, "batch-miss", seam=stand_in)
+    decision, reason = read_decision(out)
+    noted = pd_noted(rows)
+    problems = []
+    if seen != ids[:2]:
+        problems.append("the checker ran on %s, want %s: one call per item up to the first miss, none for item three"
+                        % (seen, ids[:2]))
+    if decision != "deny":
+        problems.append("want deny, got %s: %s" % (decision, reason[:160]))
+    elif "item two's mockup draws no focus" not in reason:
+        problems.append("the deny does not name item two: %s" % reason[:160])
+    if len(noted) != 1:
+        problems.append("want one noted/page-item-design line for item one's unknown, found %d" % len(noted))
+    elif "checker cannot run for item one" not in "\t".join(noted[0]):
+        problems.append("the noted line does not carry item one's unknown: %r" % noted[0])
+    return (not problems), ("; ".join(problems)
+                            or "the deny names item two, the checker stops there, one noted line for item one")
+
+
+LOG_CHECKS_EXTRA.append(("page-item-design: a batch whose second item misses is denied there, with no run of the third",
+                         pd_batch_miss_case))
+
+
 # --------------------------------------------------------------------------- a design names its file, in a mockup home
 
 # Rule mockup-home (the file of a waiting item's design, judged at write). The one mockup home is the repo's design

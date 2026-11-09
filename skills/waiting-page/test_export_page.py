@@ -37,6 +37,10 @@ Contract the page cases assume (the builder builds to it):
   --check: `export_page.py --check --fetched DIR --page FILE` runs the same item checks
     and writes nothing. A held item prints its `held item <n>: <sentence>` line and exits 4; a clean run prints one line
     `checks pass` and exits 0; a check that cannot run prints `checks unknown: <why>` and exits 3.
+  --all, a waiting-page entry whose own `collections` lacks `items` or `answers`: `<id>: checks unknown: collections lack
+    <name>`, the copy written, exit 2, and no item held for that entry (an unread answers collection holds answered items).
+  The picture checks of one run share one time budget. Items not checked when it runs out print
+    `checks unknown: time budget spent, <k> item(s) not checked`; --check exits 3; export keeps its copy and its exit code.
 """
 import collections
 import contextlib
@@ -463,6 +467,18 @@ def write_bytes(path, data):
 def read_bytes(path):
     with open(path, "rb") as f:
         return f.read()
+
+
+def skill_step(heading, n):
+    """The text of step `n` in the SKILL.md section that starts with the `heading` line, read from SKILL.md and never copied
+    here. The step runs to the next step, or to the next section."""
+    sections = read_text(os.path.join(HERE, "SKILL.md")).split(heading, 1)
+    if len(sections) != 2:
+        raise AssertionError("SKILL.md has no '%s' section" % heading)
+    steps = sections[1].split("\n## ", 1)[0].split("\n%d. " % n, 1)
+    if len(steps) != 2:
+        raise AssertionError("the '%s' section has no step %d" % (heading, n))
+    return steps[1].split("\n%d. " % (n + 1), 1)[0]
 
 
 def page_with(snippet):
@@ -1312,11 +1328,7 @@ class All(Base):
         # writes each doc to <out_dir>/<collection>/<doc_id>.json. The marker is touched where the step names it, and an
         # empty collection gets a folder only where the step says to make one by hand. The text is read from SKILL.md,
         # never copied here, so a change to that step is what this case checks.
-        sections = read_text(os.path.join(HERE, "SKILL.md")).split("## Before you switch Claude accounts", 1)
-        self.assertEqual(len(sections), 2, "SKILL.md has no 'Before you switch Claude accounts' section")
-        steps = sections[1].split("\n## ", 1)[0].split("\n2. ", 1)
-        self.assertEqual(len(steps), 2, "the 'Before you switch Claude accounts' section has no step 2")
-        step2 = steps[1].split("\n3. ", 1)[0]
+        step2 = skill_step("## Before you switch Claude accounts", 2)
         found = re.search(r"`out_dir`\s+(?:set\s+to|=)\s*`([^`]+)`", step2)
         self.assertTrue(found, "step 2 names no out_dir path, so the fetch layout cannot be read from the skill")
         template = found.group(1)
@@ -1934,8 +1946,13 @@ class AnsweredOnPage(PictureChecks):
 
 
 class CheckBudget(Copied):
-    """No overall time budget: every pictured item is checked however slow each run is. The per-run seam is stubbed in
-    process, and the clock is fake: it moves only when a stubbed run ends, so no wall clock is read. Not gated: no node runs."""
+    """One time budget for the whole run: the picture checks of one export, or of one --check, share it. A stubbed run takes
+    SLOW_RUN seconds on the fake clock, longer than any budget a run is given, so the first run spends the budget and the
+    rest are unknown. The per-run seam and the clock are stubbed in process, and the clock is fake: it moves only when a
+    stubbed run ends, so no wall clock is read. Not gated: no node runs."""
+
+    SLOW_RUN = 100000.0  # seconds one stubbed run takes on the fake clock
+    UNKNOWN = "checks unknown: time budget spent, 2 item(s) not checked"  # 3 pictured items, and the first is checked
 
     class Clock:
         def __init__(self):
@@ -1944,35 +1961,111 @@ class CheckBudget(Copied):
         def monotonic(self):
             return self.now
 
-    def slow_runs(self, clock, calls):
+        def perf_counter(self):
+            return self.now
+
+        def time(self):
+            return self.now
+
+    def slow_runs(self, clock, calls, tick=SLOW_RUN, held=()):
+        """A stubbed run that takes `tick` on the fake clock and passes, so an item the budget leaves unchecked is the only
+        unknown a case can see. A tick of 0 is the fast run. An item whose id is in `held` fails with the page's sentence."""
         def run(page_file, item, *args, **kwargs):
             calls.append(item["id"])
-            clock.now += 60.0  # each run takes 60 s on the fake clock, past the 100 s budget after two runs
-            return 1, HELD_SENTENCE
+            clock.now += tick
+            if item["id"] in held:
+                return 1, HELD_SENTENCE
+            return 0, ""
         return run
+
+    def patched(self, clock, calls, tick=SLOW_RUN, held=()):
+        """The per-run seam and the clock, stubbed in both modules that read the budget: `with self.patched(clock, calls):`."""
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.object(page_check, "run_check_designs", self.slow_runs(clock, calls, tick, held)))
+        for module in (page_check, export_page):
+            stack.enter_context(mock.patch.object(module, "time", clock, create=True))
+        return stack
 
     def pictured(self):
         return {"budget-%d" % k: picture_item(300 + k, "budget-%d" % k) for k in range(1, 4)}
 
-    def test_export_checks_every_pictured_item_when_each_run_is_slow(self):
+    def test_export_stops_at_the_budget_when_each_run_is_slow(self):
         clock, calls = self.Clock(), []
-        with mock.patch.object(page_check, "run_check_designs", self.slow_runs(clock, calls)), \
-                mock.patch.object(page_check, "time", clock, create=True):
+        with self.patched(clock, calls):
             held, unknown = export_page.picture_checks(PAGE_FILE, {"items": self.pictured(), "answers": {}})
-        self.assertEqual(len(calls), 3, "the export checked %d of 3 pictured items: an overall budget stopped the rest" % len(calls))
-        self.assertIsNone(unknown, "the export printed an unknown for a budget it should not have: %s" % unknown)
-        self.assertEqual(len(held), 3, "the export held %d of 3 items" % len(held))
+        self.assertEqual(len(calls), 1, "the export ran %d of 3 pictured items past a spent budget: %r" % (len(calls), calls))
+        self.assertEqual(unknown, self.UNKNOWN, "the export did not name the unchecked items. Got %r" % (unknown,))
+        self.assertEqual(held, [], "a passing run held an item: %r" % (held,))
 
-    def test_check_mode_checks_every_pictured_item_when_each_run_is_slow(self):
+    def test_check_mode_stops_at_the_budget_when_each_run_is_slow(self):
         clock, calls = self.Clock(), []
         fetched = self.fetch(items=self.pictured())
         page = write_text(os.path.join(self.tmp.name, "page-budget.html"), page_with_mockups(MOCKS_292))
         printed = io.StringIO()
-        with mock.patch.object(page_check, "run_check_designs", self.slow_runs(clock, calls)), \
-                mock.patch.object(page_check, "time", clock, create=True), contextlib.redirect_stdout(printed):
+        with self.patched(clock, calls), contextlib.redirect_stdout(printed):
             code = export_page.check_only(fetched, page)
-        self.assertEqual(len(calls), 3, "--check checked %d of 3 pictured items: an overall budget stopped the rest" % len(calls))
-        self.assertEqual(code, 4, "--check with three held items must exit 4. Output:\n" + printed.getvalue())
+        lines = [line.strip() for line in printed.getvalue().splitlines()]
+        self.assertEqual(len(calls), 1, "--check ran %d of 3 pictured items past a spent budget: %r" % (len(calls), calls))
+        self.assertIn(self.UNKNOWN, lines, "--check did not name the unchecked items. Output:\n" + printed.getvalue())
+        self.assertNotIn("checks pass", lines, "--check read the unchecked items as a pass. Output:\n" + printed.getvalue())
+        self.assertEqual(code, 3, "--check with the budget spent must exit 3, unknown. Output:\n" + printed.getvalue())
+
+    def test_check_mode_held_item_beside_a_spent_budget_exits_4(self):
+        """The first item is held and spends the budget, so two are unchecked. The held line prints, the unknown line prints,
+        and the exit is 4: a held item outranks the unknown 3."""
+        clock, calls = self.Clock(), []
+        fetched = self.fetch(items=self.pictured())
+        page = write_text(os.path.join(self.tmp.name, "page-budget-held.html"), page_with_mockups(MOCKS_292))
+        printed = io.StringIO()
+        with self.patched(clock, calls, held=("budget-1",)), contextlib.redirect_stdout(printed):
+            code = export_page.check_only(fetched, page)
+        lines = [line.strip() for line in printed.getvalue().splitlines()]
+        self.assertEqual(calls, ["budget-1"], "scope: the held item did not run alone before the budget was spent: %r" % (calls,))
+        self.assertIn("held item 301: " + HELD_SENTENCE, lines,
+                      "--check did not print the held item's line. Output:\n" + printed.getvalue())
+        self.assertIn(self.UNKNOWN, lines, "--check did not print the unchecked items' line. Output:\n" + printed.getvalue())
+        self.assertEqual(code, 4, "--check with a held item and the budget spent must exit 4, not 3. Output:\n" + printed.getvalue())
+
+    def test_export_keeps_its_copy_and_its_exit_when_the_budget_is_spent(self):
+        clock, calls = self.Clock(), []
+        fetched = self.fetch(items=self.pictured(), meta={"page": META})
+        page = write_text(os.path.join(self.tmp.name, "page-budget-export.html"), page_with_mockups(MOCKS_292))
+        out = self.out()
+        printed = io.StringIO()
+        with self.patched(clock, calls), contextlib.redirect_stdout(printed):
+            code = export_page.main(["--fetched", fetched, "--out", out, "--page", page])
+        lines = [line.strip() for line in printed.getvalue().splitlines()]
+        for n in (1, 2, 3):
+            self.assertTrue(os.path.isfile(os.path.join(out, "items", "budget-%d.json" % n)),
+                            "scope: budget-%d is not in the copy, so the export did not write every item. Output:\n%s"
+                            % (n, printed.getvalue()))
+        self.assertIn(self.UNKNOWN, lines, "the export did not name the unchecked items. Output:\n" + printed.getvalue())
+        self.assertEqual(code, 0, "an export with the budget spent and no held item must keep its exit code, 0. Output:\n"
+                         + printed.getvalue())
+
+
+    def test_control_export_checks_every_item_when_each_run_is_fast(self):
+        """Control: fast runs spend no budget, so all three items are checked and none is unknown. It holds without the budget too."""
+        clock, calls = self.Clock(), []
+        with self.patched(clock, calls, tick=0.0):
+            held, unknown = export_page.picture_checks(PAGE_FILE, {"items": self.pictured(), "answers": {}})
+        self.assertEqual(len(calls), 3, "the export ran %d of 3 pictured items when each run is fast: %r" % (len(calls), calls))
+        self.assertIsNone(unknown, "the export named an unknown when no budget was spent: %s" % (unknown,))
+        self.assertEqual(held, [], "a passing run held an item: %r" % (held,))
+
+    def test_control_check_mode_passes_every_item_when_each_run_is_fast(self):
+        """Control: --check with fast runs checks all three and prints `checks pass`, exit 0. It holds without the budget too."""
+        clock, calls = self.Clock(), []
+        fetched = self.fetch(items=self.pictured())
+        page = write_text(os.path.join(self.tmp.name, "page-budget-fast.html"), page_with_mockups(MOCKS_292))
+        printed = io.StringIO()
+        with self.patched(clock, calls, tick=0.0), contextlib.redirect_stdout(printed):
+            code = export_page.check_only(fetched, page)
+        lines = [line.strip() for line in printed.getvalue().splitlines()]
+        self.assertEqual(len(calls), 3, "--check ran %d of 3 pictured items when each run is fast: %r" % (len(calls), calls))
+        self.assertIn("checks pass", lines, "--check printed no `checks pass` when each run is fast. Output:\n"
+                      + printed.getvalue())
+        self.assertEqual(code, 0, "a clean --check must exit 0. Output:\n" + printed.getvalue())
 
 
 class AnswersPassed(Copied):
@@ -2010,6 +2103,108 @@ class AnswersPassed(Copied):
                              "with it: page_check drops {} (`if answers:`), so the page's isAnswered reads no answers: %s"
                              % seen["command"])
         self.assertEqual(json.loads(seen["answers"]), {}, "the --answers file is not the empty map the export gave")
+
+
+class RepublishChecksFirst(Base):
+    """SKILL.md "Update a repo's pages" step 3: `export_page.py --check` runs on the `stale_pages.py --write` output before
+    the republish. The step's text is read from SKILL.md by skill_step, never copied here. Not gated: no node runs."""
+
+    def test_step_3_runs_the_check_on_the_write_output_before_the_republish(self):
+        step = " ".join(skill_step("## Update a repo's pages", 3).split())
+        # The command sits in a code span, with --check and --page <new page> in any order.
+        spans = [m for m in re.finditer(r"`([^`]*export_page\.py[^`]*)`", step)
+                 if "--check" in m.group(1) and "--page <new page>" in m.group(1)]
+        self.assertTrue(spans, "step 3 names no `export_page.py` command with --check and --page <new page> on the "
+                        "`stale_pages.py --write` output, so a bad item reaches the page at republish. Step 3:\n" + step)
+        republish = step.find("Republish")
+        self.assertGreaterEqual(republish, 0, "step 3 has no Republish sentence, so the order cannot be read. Step 3:\n" + step)
+        self.assertLess(spans[0].start(), republish, "step 3 runs the check after the republish. Step 3:\n" + step)
+
+
+class WaitingCollectionsRun(Copied):
+    """--all with one registry entry `entry_id` of `role`, whose own `collections` is `collections` (None: no list, so the
+    waiting page gets the default five). The fetched page holds `items`, `answers` and the page with item 292's mockups.
+    Returns (the run, the worktree)."""
+
+    def run_all(self, collections, items, answers=None, role="waiting-page", entry_id="page01"):
+        root = os.path.join(self.tmp.name, "repo")
+        entry = {"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": role, "account": "work"}
+        if collections is not None:
+            entry["collections"] = list(collections)
+        write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "artifacts": [entry]}))
+        folder = self.fetch(items=items, answers=answers, meta={"page": META})
+        write_bytes(os.path.join(folder, "page.html"), page_with_mockups(MOCKS_292).encode("utf-8"))
+        fetched = os.path.join(self.tmp.name, "fetched-collections")
+        os.makedirs(fetched)
+        os.rename(folder, os.path.join(fetched, entry_id))
+        worktree = self.out("worktree")
+        return self.run_cmd("--all", root, "--fetched", fetched, "--worktree", worktree), worktree
+
+
+class WaitingCollections(WaitingCollectionsRun):
+    """--all, a waiting-page entry whose own `collections` lacks `items` or `answers`: the picture check cannot read what it
+    needs, so the entry prints `<id>: checks unknown: collections lack <name>`, its copy is written and the exit is 2. The
+    unknown lines need no node, so these cases are not gated."""
+
+    def test_a_waiting_entry_without_items_is_named_unknown_and_exits_2(self):
+        r, worktree = self.run_all(("answers", "groups", "asks", "meta"), {ITEM_292["id"]: ITEM_292})
+        self.assertTrue(os.path.isfile(os.path.join(worktree, "waiting", "meta", "page.json")),
+                        "scope: the meta doc is not in the copy. Output:\n" + shown(r))
+        self.assertIn("page01: checks unknown: collections lack items", verdict_lines(r),
+                      "--all printed no `checks unknown: collections lack items` line: the picture check was skipped without a "
+                      "word, and the entry reads as a pass. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 2, "a waiting page whose check cannot run must exit 2. Output:\n" + shown(r))
+
+    def test_a_waiting_entry_without_answers_is_named_unknown_and_exits_2(self):
+        r, worktree = self.run_all(("items", "groups", "asks", "meta"), {ITEM_292["id"]: ITEM_292})
+        self.assertTrue(os.path.isfile(os.path.join(worktree, "waiting", "items", "3d-dummy-phone.json")),
+                        "scope: item 292 is not in the copy. Output:\n" + shown(r))
+        self.assertIn("page01: checks unknown: collections lack answers", verdict_lines(r),
+                      "--all printed no `checks unknown: collections lack answers` line for a waiting page with no answers "
+                      "collection. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 2, "a waiting page whose check cannot run must exit 2. Output:\n" + shown(r))
+
+    def test_control_a_queue_entry_with_items_only_runs_no_check_and_exits_0(self):
+        """Control: the check is the waiting page's. A queue page whose collections list only items, with a plain item, is
+        exported with no check line. It holds without the budget too."""
+        r, worktree = self.run_all(("items",), {"plain": item(1)}, role="queue-page", entry_id="queue02")
+        self.assertTrue(os.path.isfile(os.path.join(worktree, "artifacts", "queue02", "items", "plain.json")),
+                        "scope: the plain item is not in the queue copy. Output:\n" + shown(r))
+        self.assertTrue(any(re.match(r"queue02: changed \d+$", line) for line in verdict_lines(r)),
+                        "scope: the queue entry printed no `changed N` verdict. Output:\n" + shown(r))
+        checks = [line for line in verdict_lines(r) if "checks" in line]
+        self.assertEqual(checks, [], "a queue page with no waiting role was given a check line. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, "a queue page with a plain item must exit 0. Output:\n" + shown(r))
+
+
+class WaitingCollectionsHold(WaitingCollectionsRun, PictureChecks):
+    """A waiting page without its answers collection holds no item the page draws as answered, and the control with the
+    answers read. Gated: the page's own check runs, so a node-less run skips here and CI fails it."""
+
+    def answered(self):
+        """Item 292 and an answers collection that holds a saved answer under its id: the page draws item 292 as answered."""
+        return {ITEM_292["id"]: ITEM_292}, {ITEM_292["id"]: {"pick": "a", "note": "Synthetic answer"}}
+
+    def test_a_waiting_entry_without_answers_holds_no_item_the_page_draws_as_answered(self):
+        items, answers = self.answered()
+        r, worktree = self.run_all(("items", "groups", "asks", "meta"), items, answers)
+        self.assertTrue(os.path.isfile(os.path.join(worktree, "waiting", "items", "3d-dummy-phone.json")),
+                        "scope: item 292 is not in the copy. Output:\n" + shown(r))
+        self.assertNotIn(292, [n for n, _ in held_lines(r)],
+                         "item 292 is held, though the page draws it as answered: the answers collection is not read, so the "
+                         "check holds an answered item. Output:\n" + shown(r))
+
+    def test_control_with_answers_read_the_answered_item_is_not_held_and_the_open_picture_is(self):
+        """Control: with the answers collection in the registry, item 292 is not held and an open picture is, so the check
+        ran. It holds on main as well."""
+        items, answers = self.answered()
+        items["open-picture"] = picture_item(313, "open-picture")
+        r, _worktree = self.run_all(None, items, answers)
+        self.assertIn((313, HELD_SENTENCE), held_lines(r),
+                      "scope: the open picture, item 313, is not held, so the check did not run. Output:\n" + shown(r))
+        self.assertNotIn(292, [n for n, _ in held_lines(r)],
+                         "item 292 is held though its answer is read. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 4, "a held item must exit 4. Output:\n" + shown(r))
 
 
 if __name__ == "__main__":
