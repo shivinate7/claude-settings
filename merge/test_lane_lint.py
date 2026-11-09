@@ -1561,6 +1561,10 @@ class StepCites(CiJobStub, tm.CloudSession):
         rc = subprocess.run(["git", "-C", self.co, "merge-base", "refs/remotes/origin/main", head], capture_output=True).returncode
         self.assertEqual(rc, 1, "precondition: the shallow clone has a merge base for origin/main and the head, so the case probes nothing")
 
+    def clone_has_ref(self, ref):
+        """True when the lane clone holds `ref`, whatever git call put it there."""
+        return subprocess.run(["git", "-C", self.co, "rev-parse", "-q", "--verify", ref], capture_output=True).returncode == 0
+
     def test_a_shallow_lane_with_no_merge_base_refuses_a_missing_step_cite_and_names_it(self):
         self.put_roadmap(["real-step"])
         head = self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "Builds on `step:shallow-ghost`.")})
@@ -1585,6 +1589,7 @@ class StepCites(CiJobStub, tm.CloudSession):
         self.put_roadmap(["real-step"])
         head = self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "No cite here.")})
         self.shallow_lane_with_no_merge_base(head)
+        self.assertFalse(self.clone_has_ref("refs/remotes/origin/roadmap"), "precondition: the shallow clone already holds origin's roadmap branch, so the case probes nothing")
         with self.git_spy() as calls:
             rc, text = self.run_lane("--lane-lint", "7")
         self.assertTrue(calls, "the spy saw no git call, so the case proves nothing")
@@ -1593,11 +1598,23 @@ class StepCites(CiJobStub, tm.CloudSession):
         self.assertEqual(len(pass_lines(text)), 1, "a shallow lane with no cite printed no single PASS line: " + text)
         self.assertEqual(roadmap_fetches(calls), [], "a shallow lane with no cite fetched the roadmap: %s" % roadmap_fetches(calls))
         self.assertEqual(roadmap_reads(calls), [], "a shallow lane with no cite read the roadmap: %s" % roadmap_reads(calls))
+        self.assertFalse(self.clone_has_ref("refs/remotes/origin/roadmap"), "a shallow lane with no cite put origin's roadmap branch in its clone, though no git call named it")
 
-    def test_a_git_diff_that_fails_for_another_reason_still_refuses_as_unknown_and_never_passes(self):  # the pin: not about the merge base
+    def test_a_shallow_lane_with_no_merge_base_reads_only_the_records_the_pull_request_changed(self):
+        self.put_roadmap(["real-step"])
+        self.push_main({"docs/decisions/old-bad.md": decision_text("old-bad", "Old: `step:main-only-ghost`.")})
+        head = self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "New: `step:changed-ghost`.")})
+        self.shallow_lane_with_no_merge_base(head)
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a shallow lane with no merge base passed a missing cite in a changed record: " + text)
+        self.assertIn("changed-ghost", text, "a shallow lane with no merge base does not name the changed record's missing step: " + text)
+        self.assertNotIn("main-only-ghost", text, "a shallow lane with no merge base scanned a record the pull request did not change: " + text)
+
+    def test_a_git_diff_that_fails_for_another_reason_still_refuses_as_unknown_and_never_passes(self):
+        """The pin: only the three-dot diff fails, so a two-dot retry on every diff error would read the records and turn this red."""
         self.put_roadmap(["real-step"])
         self.push_feat({"docs/decisions/cites-one.md": decision_text("cites-one", "See `step:real-step`.")})
-        with self.git_spy(fail=lambda argv: "diff" in argv) as calls:
+        with self.git_spy(fail=lambda argv: "diff" in argv and any("..." in arg for arg in argv)) as calls:
             rc, text = self.run_lane("--lane-lint", "7")
         self.assertTrue([argv for argv in calls if "diff" in argv], "the diff never ran, so the case proves nothing: " + text)
         self.assertNotEqual(rc, 0, "a git diff that failed for another reason read as a pass: " + text)
