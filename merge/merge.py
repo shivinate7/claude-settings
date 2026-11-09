@@ -3289,8 +3289,13 @@ REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never 
 REVIEW_FIX_GUARD_MODEL = "sonnet"  # every fix check runs on this model, whatever Guard or check says (owner item 444 a; decision pr-review-record)
 
 def non_doc_paths(paths):
-    """-> the paths that are not docs. A doc is a .md file that is not a rule file, which decision claude-md-change-is-flagged keeps out of a docs-only change."""
-    return [p for p in paths if not p.lower().endswith(".md") or p.lower() in RULE_FILES or p.lower().startswith(RULE_PREFIX)]
+    """-> the paths that are not docs. A doc is a .md file under docs/, or the root README.md; case is ignored, the path is not stripped, so a
+    leading or trailing space makes it a non-doc. Any other file may steer behaviour, which decision docs-only-prs-skip-review keeps out of a
+    docs-only change, so this is an allow list: a path not named here fails."""
+    def is_doc(p):
+        low = p.lower()
+        return low.endswith(".md") and (low.startswith("docs/") or low == "readme.md")
+    return [p for p in paths if not is_doc(p)]
 
 
 def review_body(n, head, kind, guard, rounds, net, fix=None):
