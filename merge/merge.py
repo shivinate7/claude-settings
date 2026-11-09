@@ -49,14 +49,20 @@
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
   merge --batch-build NAME PR [PR ...] [--on BRANCH] [--base BRANCH]
                           the batch NAME: branch batch/NAME (each lane head merged no-ff onto the base, or onto origin/BRANCH, a running
-                          batch) and its one integration pull request, always ready, never a draft. The lane heads read now are the freeze:
+                          batch) and its one integration pull request, opened as a draft. The lane heads read now are the freeze:
                           they go in the pull request body between two marker lines. A second build of NAME is allowed only for that same
-                          set; a late PR, a moved head or a lane left out is refused, and nothing is pushed or edited. Runs no lane lint and
-                          no ready check, waits for no CI, takes no lock. A cloud run needs the batch-runner role.
+                          set and leaves the pull request as it is, draft or ready; a late PR, a moved head or a lane left out is refused,
+                          and nothing is pushed or edited. Runs no lane lint and no ready check, waits for no CI, takes no lock.
+                          A cloud run needs the batch-runner role.
+  merge --batch-build NAME [PR ...] --ready [--lint-unknown-ok REASON]
+                          lint the head of batch/NAME once (the lint of --lane-lint), then mark its draft pull request ready. A FAIL, or an
+                          unknown with no reason, leaves the draft and exits 1. A PR list, if given, must be the frozen set. A ready pull
+                          request is left as it is. Takes no lock. A cloud run needs the batch-runner role.
   merge --batch-drop NAME PR
                           take PR, and each frozen lane whose head contains PR's head, off batch/NAME: rebuild the branch from the batch's
                           base with the lanes left, force-with-lease, and rewrite the block with a Dropped line per PR. Rebuilds each open
-                          batch that says `On: batch/NAME` on the new head. Runs no lane lint and no ready check, takes no lock.
+                          batch that says `On: batch/NAME` on the new head. A ready pull request goes back to draft before the push, and
+                          needs `--batch-build NAME --ready` again. Runs no lane lint and no ready check, takes no lock.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
@@ -891,9 +897,9 @@ class Host:
             raise Stop(f"{len(hits)} open pull requests have the head {branch}: close all but one")
         return hits[0] if hits else None
 
-    def create_pr(self, branch, base, title, body):
-        """Open a pull request, ready: `draft` is false. -> its number."""
-        c, out = self.api("pulls", method="POST", body={"title": title, "head": branch, "base": base, "body": body, "draft": False})
+    def create_pr(self, branch, base, title, body, draft=False):
+        """Open a pull request, ready unless `draft`. -> its number."""
+        c, out = self.api("pulls", method="POST", body={"title": title, "head": branch, "base": base, "body": body, "draft": draft})
         try:
             if c:
                 raise ValueError(out)
@@ -1455,6 +1461,10 @@ class Host:
         could send is unmeasured (route pr-ready-gh-api-cloud). The caller then says to mark it ready by the session's route."""
         return False, f"this tool sends no GraphQL and no unmeasured REST route. {READY_ROUTES}"
 
+    def to_draft(self, n):
+        """Return a ready pull request to draft. -> (ok, why). Bandaid, as ready(): the return is GraphQL too, so it sends nothing and returns False."""
+        return False, f"this tool sends no GraphQL and no unmeasured REST route. {DRAFT_ROUTES}"
+
     def merge(self, n, method, sha):
         """`PUT pulls/<n>/merge` with `sha`, so GitHub refuses (409) a head that moved. `self.commit_message`, when set, is the merge commit's message. Never --admin, never --delete-branch (cut_branch does that).
         -> (merge commit oid or None, message). The reply is never trusted: after any reply the PR state is read.
@@ -1642,6 +1652,8 @@ CI_JOB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "
 CI_SCOPE = ".github/scripts/ci-scope.sh"  # the repo's one home of which jobs read which paths; a repo without it never takes a small move
 READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on a computer by `gh pr ready`, "
                 "a GraphQL call a cloud session gets 403 on (route pr-ready-mcp-cloud, route pr-ready-gh-cli-cloud, route pr-ready-gh-cli-local)")
+DRAFT_ROUTES = ("Return to draft in cloud by MCP update_pull_request draft=true; on a computer by `gh pr ready --undo` "
+                "(route pr-draft-mcp-cloud, route pr-draft-gh-cli-local)")
 DRAFT_SKIP_CHECK = REQUIRED_CHECK  # the one required check a draft run skips (actions/all-jobs-passed): its skip means the ready run is still to come, not green
 LINT_SECONDS = 1200  # the bound on the lint run of the merge result, and again on the suites it hits; the lock is extended to cover each
 SUITE_LINE = re.compile(r"(python3|node|bash) ([\w./-]+\.(?:py|mjs|sh))(?: [^|&;`<>$(){}]*)?")  # a suite line run as written: no shell syntax
@@ -3626,6 +3638,20 @@ def batch_start(root, block, base):
 def lane_list(numbers):
     return " ".join(f"#{n}" for n in sorted(numbers))
 
+def return_to_draft(h, n, info):
+    """Before a push to the integration branch of pull request `n`: send a ready one back to draft, so the push's CI run is a draft run and `--ready`
+    lints the new head. A refused return never stops the push; it restarts CI whatever the flag says. A draft is left as it is.
+    -> True when the pull request is a draft now; the caller says `needs_ready` after the push."""
+    if info["draft"]:
+        return True
+    ok, why = h.to_draft(n)
+    if not ok:
+        say(f"merge: #{n} could not return to draft: {' '.join(why.split()) or 'no reason given'}; the push restarts CI")
+    return ok
+
+def needs_ready(name):
+    say(f"merge: batch {name} needs `merge --batch-build {name} --ready` again before it goes ready.")
+
 def restack(root, h, moved, new_head, gone=None, seen=frozenset()):
     """Batch branch `moved` has a new head. Rebuild each open batch whose block says `On: moved` on it: the same lanes, the On sha updated, force-with-lease,
     no lint. `gone` is {PR: head} of the lanes a drop took off `moved`: a lane of the rebuilt batch that is one of them, or whose head contains one of their
@@ -3648,9 +3674,12 @@ def restack(root, h, moved, new_head, gone=None, seen=frozenset()):
             if not kept:
                 raise Stop(f"dropping {lane_list(off)} leaves batch {block['name']} no lane. Close pull request #{n} instead. {FREEZE_CITE}")
             text = freeze_rewrite(info["body"], block, freeze_lines(block["name"], kept, [*block["dropped"], *sorted(off)], (moved, new_head), block["base"]))
+            drafted = return_to_draft(h, n, info)
             new = build_batch_branch(root, block["name"], new_head, sorted(kept.items()), lease=tip, body=(h, n, info["body"], text))
             say(f"merge: batch {block['name']} was on {moved}; rebuilt on its new head {new_head[:9]}"
                 + (f", without {lane_list(off)}, which stacked on a dropped lane." if off else "."))
+            if drafted:
+                needs_ready(block["name"])
             if moved not in seen:
                 failed += restack(root, h, info["branch"], new, {**gone, **off}, seen | {moved})
         except Stop as e:
@@ -3731,10 +3760,24 @@ def sync_batch(root, h, pr, info, block, on, base):
         + (f"; it held {len(strays)} lane head(s) its frozen set does not list, which are now off." if strays else "."))
     return 1 if restack(root, h, branch, new, {s: s for s in strays}) else 0
 
-def batch_build(root, h, name, numbers, on, base):
-    """merge --batch-build NAME PR... [--on BRANCH] [--base BRANCH]: the batch branch and its one ready pull request, or the same set again.
+def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok=""):
+    """merge --batch-build NAME PR... [--on BRANCH] [--base BRANCH]: the batch branch and its one draft pull request, or the same set again.
+    With `ready` (--ready): the batch already exists. It is checked as the same set again, with no PR list meaning its frozen set, then the one
+    lint of the integration branch head runs and the draft is marked ready; a ready one is left as it is. `on` and `base` default to the block's.
     Returns 0, or 1 when a batch stacked on a rebuilt one could not be rebuilt."""
     branch = f"batch/{name}"
+    found = None
+    if ready:
+        found = h.batch_pr(branch)
+        if found is None:
+            raise Stop(f"no open pull request has the head {branch}, so batch {name} is not built. {FREEZE_CITE}")
+        frozen = parse_freeze(found[1]["body"])
+        if frozen is None:
+            raise Stop(f"#{found[0]} is the open pull request of {branch} and holds no frozen block, so its lane set is not known. {FREEZE_CITE}")
+        numbers = numbers or sorted(frozen["lanes"])
+        on = on or (frozen["on"][0] if frozen["on"] else None)
+        base = base or found[1]["base"]
+    base = base or "main"
     infos = {}
     for n in numbers:
         infos[n] = h.pr(n)
@@ -3747,7 +3790,7 @@ def batch_build(root, h, name, numbers, on, base):
         running = h.batch_pr(on)
         if running is None or parse_freeze(running[1]["body"]) is None:
             raise Stop(f"--on {on}: {on} has no open pull request that holds a frozen block, so it is not a running batch. {FREEZE_CITE}")
-    found = h.batch_pr(branch)
+    found = found or h.batch_pr(branch)
     if found is None:
         start = fetch_branch(root, on or base)
         for n in numbers:
@@ -3756,10 +3799,10 @@ def batch_build(root, h, name, numbers, on, base):
         stacked_without_base(root, h, base, heads, start if on else None)
         build_batch_branch(root, name, start, sorted(heads.items()))
         try:
-            pr = h.create_pr(branch, base, f"Batch {name}", "\n".join(freeze_lines(name, heads, on=(on, start) if on else None, base=None if on else start)) + "\n")
+            pr = h.create_pr(branch, base, f"Batch {name}", "\n".join(freeze_lines(name, heads, on=(on, start) if on else None, base=None if on else start)) + "\n", draft=True)
         except Stop as e:
             raise Stop(f"{branch} is on origin, but its pull request was not opened: {e}. Open it by hand with the frozen block, or delete the branch and run again.")
-        say(f"merge: batch {name} built: PR #{pr} ready, lanes {lane_list(heads)}")
+        say(f"merge: batch {name} built: PR #{pr} draft, lanes {lane_list(heads)}")
         return 0
     pr, info = found
     block = parse_freeze(info["body"])
@@ -3780,12 +3823,18 @@ def batch_build(root, h, name, numbers, on, base):
     for n in numbers:
         if fetch_branch(root, infos[n]["branch"]) != heads[n]:
             raise Stop(f"{infos[n]['branch']} moved while #{n} was read. Nothing was pushed. Run again.")
+    if ready and not info["draft"]:
+        say(f"merge: batch {name}: PR #{pr} is already ready.")
+        return 0
     rc = sync_batch(root, h, pr, info, block, on, base)
-    if info["draft"]:
+    if ready:
+        lane_lint(root, branch, h, base, unknown_ok)  # the one lint of the batch head: a build never lints, a lane's own lint is not repeated
         ok, why = h.ready(pr)
         if not ok:
             raise Stop(f"#{pr} is a draft and was not marked ready. {why}")
-    say(f"merge: batch {name} built: PR #{pr} ready, lanes {lane_list(heads)}")
+        say(f"merge: batch {name}: PR #{pr} ready, lanes {lane_list(heads)}")
+        return rc
+    say(f"merge: batch {name} built: PR #{pr} {'draft' if info['draft'] else 'ready'}, lanes {lane_list(heads)}")
     return rc
 
 def batch_drop(root, h, name, number):
@@ -3820,9 +3869,12 @@ def batch_drop(root, h, name, number):
         raise Stop(f"dropping {lane_list(dropping)} leaves batch {name} no lane. To end the batch, close pull request #{pr} instead. {FREEZE_CITE}")
     start, recorded = batch_start(root, block, info["base"])
     text = freeze_rewrite(info["body"], block, freeze_lines(name, kept, [*block["dropped"], *dropping], block["on"], recorded))
+    drafted = return_to_draft(h, pr, info)
     new = build_batch_branch(root, name, start, sorted(kept.items()), lease=tip, body=(h, pr, info["body"], text))
     say(f"merge: #{number} dropped from batch {name}.", *(f"merge: #{n} dropped too: its head contains #{number}'s head." for n in dependents),
         f"merge: batch {name} now holds lanes {lane_list(kept)}.")
+    if drafted:
+        needs_ready(name)
     return 1 if restack(root, h, branch, new, {n: lanes[n] for n in dropping}) else 0
 
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
@@ -3906,9 +3958,10 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
-    p.add_argument("--batch-build", nargs="+", metavar=("NAME", "PR"), help="build batch/NAME and its one ready pull request from these lane PRs, or allow the same set again; stands alone; takes no lock")
+    p.add_argument("--batch-build", nargs="+", metavar=("NAME", "PR"), help="build batch/NAME and its one draft pull request from these lane PRs, or allow the same set again; stands alone; takes no lock")
     p.add_argument("--batch-drop", nargs=2, metavar=("NAME", "PR"), help="take PR, and each frozen lane that stacks on it, off batch/NAME; stands alone; takes no lock")
     p.add_argument("--on", metavar="BRANCH", help="with --batch-build: stack the batch on this running batch's head")
+    p.add_argument("--ready", action="store_true", help="with --batch-build: lint the head of batch/NAME once, then mark its draft pull request ready; the PR list may be left out")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
     p.add_argument("--base-red-ok", default="", metavar="REASON", help="go on when the base's latest run is red or unreadable (the batch carries the fix); logged")
@@ -3929,6 +3982,8 @@ def main(argv, host=None, lock=None, hosts=None):
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
     if (a.head or a.kind or a.guard or a.round or a.fix_check or a.net_value != "not owed") and not a.review_record:
         p.error("--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record")
+    if a.ready and not a.batch_build:
+        p.error("--ready goes with --batch-build")
     if a.live is not None and not a.idle_lanes:
         p.error("--live goes with --idle-lanes")
     if a.root and not a.reviewed:
@@ -3942,9 +3997,9 @@ def main(argv, host=None, lock=None, hosts=None):
     if not (a.lane_lint or a.batch_build):
         if a.base:
             p.error("--base goes with --lane-lint or --batch-build")
-    if not a.lane_lint:
+    if not (a.lane_lint or a.ready):
         if a.lint_unknown_ok:
-            p.error("--lint-unknown-ok goes with --lane-lint")
+            p.error("--lint-unknown-ok goes with --lane-lint or --batch-build --ready")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
     if batch and (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record
@@ -3957,7 +4012,7 @@ def main(argv, host=None, lock=None, hosts=None):
         flag = "--batch-build" if a.batch_build else "--batch-drop"
         if not BATCH_NAME.fullmatch(name):
             p.error(f"{flag} NAME {name!r} must be 1 to 32 characters from a-z, 0-9 and -")
-        if not numbers:
+        if not numbers and not a.ready:
             p.error("--batch-build needs at least one pull request number (PR) after NAME")
         if not all(x.isdigit() for x in numbers):
             p.error(f"{flag}: each PR is a pull request number, and these are not: {' '.join(x for x in numbers if not x.isdigit())}")
@@ -4012,7 +4067,7 @@ def main(argv, host=None, lock=None, hosts=None):
             h = host or Host()
             if a.batch_drop:
                 return batch_drop(root, h, name, int(numbers[0]))
-            return batch_build(root, h, name, sorted(map(int, numbers)), a.on, a.base or "main")
+            return batch_build(root, h, name, sorted(map(int, numbers)), a.on, a.base, a.ready, a.lint_unknown_ok)
         if a.root:  # every block is built before any is printed
             lines, ok = reviewed_roots(a.root, hosts, a.config)
             say(*lines)
