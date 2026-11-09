@@ -21439,6 +21439,8 @@ add("brief-claim: an empty brief is allowed", "allow", tool="Agent", prompt="", 
 # on main, where no rule reads a brief. Selector: MUTATE_ONLY=brief-destructive-git: runs these cases and log checks.
 BRIEF_DESTRUCTIVE = "brief-destructive-git"
 # A session id is 8 or more characters, so a short folder name would not read as a scratchpad (in_any_session_scratchpad).
+# The spans below single-quote this path: the brief reader tokenizes a span like bash, which drops the backslashes of an
+# unquoted Windows path, so the path would stop reading as a scratchpad. The forward-slash form needs no quotes.
 SCRATCH_REPO = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "repo")
 from agent_brief import COMMON  # noqa: E402  the standing-rules text the SubagentStart hook gives every agent
 STANDING_LINE_ONE = "\n".join(text for _, text in COMMON[:2])   # the heading, then the first rule line
@@ -21452,7 +21454,7 @@ BRIEF_ALLOW_PARAGRAPHS = (
     "The standing-rules text from hooks/agent_brief.py COMMON line 1 pasted in a brief.\n"
     'Prose with no command span: "the reset with the hard flag lost work".\n'
     "A non-discarding git span: `git reset HEAD file.py`, `git stash list`, `git status`.\n"
-    "A scratch repo: `git -C " + SCRATCH_REPO + " reset --hard` (a path under a session scratchpad, as "
+    "A scratch repo: `git -C '" + SCRATCH_REPO + "' reset --hard` (a path under a session scratchpad, as "
     "`in_any_session_scratchpad` reads it) passes, mirroring the shell guard, which allows the session's own scratchpad."
 )
 add("brief-destructive-git: builder brief that orders `git reset --hard origin/main` is denied", "deny",
@@ -21529,7 +21531,10 @@ add("brief-destructive-git: git stash list is a read and is allowed", "allow",
 add("brief-destructive-git: git status is allowed", "allow",
     tool="Agent", prompt="Run `git status`.", subagent_type="builder", model="sonnet")
 add("brief-destructive-git: a reset --hard in a scratch repo under a session scratchpad is allowed", "allow",
-    tool="Agent", prompt="Try it first: `git -C " + SCRATCH_REPO + " reset --hard`.",
+    tool="Agent", prompt="Try it first: `git -C '" + SCRATCH_REPO + "' reset --hard`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a reset --hard in a scratch repo named with forward slashes is allowed", "allow",
+    tool="Agent", prompt="Try it first: `git -C " + SCRATCH_REPO.replace(os.sep, "/") + " reset --hard`.",
     subagent_type="builder", model="sonnet")
 add("brief-destructive-git: the brief's own allow paragraphs, as a test-author brief, are allowed", "allow",
     tool="Agent", prompt=BRIEF_ALLOW_PARAGRAPHS, subagent_type="test-author")
@@ -21564,7 +21569,7 @@ add("brief-destructive-git: builder brief that orders `git worktree remove x` is
     tool="Agent", prompt="Then run `git worktree remove x`.", subagent_type="builder", model="sonnet")
 add("brief-destructive-git: a brief whose scratch `git -C` segment is joined to a reset outside it is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent",
-    prompt="Compare: `git -C " + SCRATCH_REPO + " status && git reset --hard origin/main`.",
+    prompt="Compare: `git -C '" + SCRATCH_REPO + "' status && git reset --hard origin/main`.",
     subagent_type="builder", model="sonnet")
 add("brief-destructive-git: a reset under an inline ``` span line that is not a fence is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent", prompt="```git status```\nRun `git reset --hard origin/main`.",
