@@ -1074,7 +1074,9 @@ elif args[:1] != ["api"]:
     print(GRAPHQL)  # gh pr ..., gh repo view: GraphQL, which a Claude Code cloud session refuses
     sys.exit(1)
 else:
-    m = re.match(r"^repos/(?:\{owner\}/\{repo\}|[^/{}]+/[^/{}]+)/(.*)$", path)
+    # The repo is a literal owner/repo slug or the placeholder. A shell substitution or variable in its place is no owner: GitHub
+    # answers 404 for such a path, as it does for any name it does not hold.
+    m = re.match(r"^repos/(?:\{owner\}/\{repo\}|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/(.*)$", path)
     rel = m.group(1) if m else ""
     head = state["pr"]["head"]["sha"]
     rows_of = {head: (state["checks"], state["statuses"])}  # the head's own rows; each other open pull request's head has its own
@@ -11716,7 +11718,8 @@ sh("review-record: an edit of the newest comment on a two-page listing is allowe
 old_bash("review-record: an edit whose body file cannot be read is refused over a stamped record, gh api -F body=@ with no such file",
          "%s -F body=@no-such-body.md" % API_EDIT_CMD, "deny", rule=REVIEW_RULE, carries=("could not run",))
 
-# A variable comment id: refused as a read that could not run, and the remedy writes the literal comment id.
+# A variable comment id: refused as a read that could not run, and the remedy writes the literal comment id. Decision pr-review-record,
+# the fail-closed ruling.
 for _label, _command in (("$ID", "gh api -X PATCH repos/y/x/issues/comments/$ID -f 'body=x'"),
                          ("${ID}", "gh api -X PATCH repos/y/x/issues/comments/${ID} -f 'body=x'")):
     bash_post("review-record: an edit through a variable id is refused as a read that could not run, and its remedy names the literal id, %s" % _label,
@@ -11734,34 +11737,83 @@ for _label, _command in (
     bash_post("review-record: a hand-typed record under a variable id or number is refused, %s" % _label, _command, "deny",
               rule=REVIEW_RULE)
 
-# THE EDIT ROUTE IN OTHER FORMS. A marked edit is refused whatever form its comment route takes: a full URL, a query string after the
-# comment id, or a command substitution in the id or in the route. The guard judges the route it reads, so a route its pattern does not
-# match is an edit it never judges. Each form takes the edit refusal.
-# An unmarked edit on a route the guard reads makes its one read of the old body, and is allowed. A command substitution in the id
-# names no comment the guard can read, so the old body cannot be read: an unmarked edit on it is refused as a read that could not run.
-# The unquoted forms have a space inside their substitution. The guard splits the command into words before it reads a route, so the
-# space splits the route into several words. Each form must take the edit refusal, the same as the quoted forms above.
+# THE EDIT ROUTE IN OTHER FORMS. A marked edit is refused whatever form its comment route takes: a full URL, or a query string after the
+# comment id. The guard judges the route it reads, so a route its pattern does not match is an edit it never judges. Each form takes the
+# edit refusal. An unmarked edit on such a route makes its one read of the old body, and is allowed.
 EDIT_ROUTE_FORMS = (
     ("a full URL", "\"https://api.github.com/repos/y/x/issues/comments/%d\"" % REVIEW_COMMENT_ID),
     ("a query string after the id", "\"repos/y/x/issues/comments/%d?x=1\"" % REVIEW_COMMENT_ID),
+)
+# A VARIABLE OR A SUBSTITUTION IN THE REPO OR THE ID. The guard reads the route as written, so the repo is the literal text, and GitHub
+# holds no such repo. An id held in a substitution names no comment the guard can read. Either way the old body cannot be read, and a
+# retry reads it no better. A marked edit is refused before any read. An unmarked edit is refused as a read that could not run.
+# Decision pr-review-record, the fail-closed ruling. The unquoted forms have a space inside their substitution.
+# The guard splits the command into words before it reads a route, so the space splits the route into several words.
+UNREADABLE_ROUTE_FORMS = (
     ("a command substitution in the route", "\"repos/$(echo y/x)/issues/comments/%d\"" % REVIEW_COMMENT_ID),
     ("an unquoted command substitution with a space in the repo", "repos/$(echo y/x)/issues/comments/%d" % REVIEW_COMMENT_ID),
-)
-UNREADABLE_ID_FORMS = (
+    ("a shell variable in the repo", "repos/$REPO/issues/comments/%d" % REVIEW_COMMENT_ID),
     ("a command substitution in the id", "\"repos/y/x/issues/comments/$(echo %d)\"" % REVIEW_COMMENT_ID),
     ("an unquoted command substitution with a space in the id", "repos/y/x/issues/comments/$(cat idfile)"),
     ("an unquoted gh call in the id", "repos/y/x/issues/comments/$(gh api repos/y/x/issues/%d/comments --jq .[0].id)" % REVIEW_PR),
 )
-for _what, _route in EDIT_ROUTE_FORMS + UNREADABLE_ID_FORMS:
+for _what, _route in EDIT_ROUTE_FORMS + UNREADABLE_ROUTE_FORMS:
     bash_post("review-record: a marked edit is refused, %s, gh api -X PATCH" % _what,
               "gh api -X PATCH %s -f 'body=%s'" % (_route, review_record()), "deny", rule=REVIEW_RULE, carries=(EDIT_REFUSAL,))
 for _what, _route in EDIT_ROUTE_FORMS:
     bash_post("review-record: an edit with no marker is allowed, %s, gh api -X PATCH" % _what,
               "gh api -X PATCH %s -f 'body=%s'" % (_route, UNMARKED_BODY), "allow")
-for _what, _route in UNREADABLE_ID_FORMS:
+for _what, _route in UNREADABLE_ROUTE_FORMS:
     bash_post("review-record: an edit with no marker is refused as a read that could not run, %s, gh api -X PATCH" % _what,
               "gh api -X PATCH %s -f 'body=%s'" % (_route, UNMARKED_BODY), "deny", rule=REVIEW_RULE,
               carries=("the read of the comment's current body could not run",))
+
+
+def remedy_of(reason):
+    """The remedy of a refusal: the text from `Remedy:` to the decision's cite. '' when the reason names none."""
+    found = re.search(r"Remedy: (.*?)\s*\(decision", reason, re.S)
+    return found.group(1) if found else ""
+
+
+def unread_remedy_check():
+    """-> (ok, note). The remedy of an unmarked edit on a route that holds a variable or a substitution names the literal route, and
+    never says to run the edit again: no retry reads such a route. The first form whose remedy fails names the cause."""
+    def check():
+        for what, route in UNREADABLE_ROUTE_FORMS:
+            command = "gh api -X PATCH %s -f 'body=%s'" % (route, UNMARKED_BODY)
+            decision, reason = decide(review_case("Bash", {"command": command}, GHRECORD + os.pathsep + PY_PATH))
+            if decision != "deny" or REVIEW_RULE not in reason or "could not run" not in reason:
+                return False, "%s: want a refusal under %s as a read that could not run, got %s: %s" % (
+                    what, REVIEW_RULE, decision, reason[:90])
+            remedy = remedy_of(reason)
+            if not remedy:
+                return False, "%s: the refusal names no remedy: %s" % (what, reason[:90])
+            if re.search(r"\bagain\b", remedy):
+                return False, "%s: the remedy says to run the edit again: %s" % (what, remedy[:110])
+            repo_part, id_part = route.split("/issues/", 1)[0], route.split("/issues/comments/", 1)[-1]
+            if "$" in repo_part and not ("{owner}/{repo}" in remedy or ("owner/repo" in remedy and re.search(r"\bid\b", remedy))):
+                return False, "%s: the remedy names neither {owner}/{repo} nor a literal owner/repo and id: %s" % (what, remedy[:110])
+            if "$" in id_part and not (re.search(r"\bliteral\b", remedy) and re.search(r"\bid\b", remedy)):
+                return False, "%s: the remedy does not name a literal id: %s" % (what, remedy[:110])
+        return True, "every remedy for a variable or substitution route names a literal route and does not retry"
+    return check
+
+
+def review_retry_remedy_kept():
+    """-> (ok, note). A read that fails on a literal route is a transient failure, so its remedy still says to run the edit again."""
+    command = "gh api -X PATCH repos/y/x/issues/comments/%d -f 'body=%s'" % (REVIEW_COMMENT_ID, UNMARKED_BODY)
+    decision, reason = decide(review_case("Bash", {"command": command}, GHRECORDBROKEN + os.pathsep + PY_PATH))
+    if decision != "deny":
+        return False, "want deny, got %s: %s" % (decision, reason[:90])
+    if not re.search(r"\bagain\b", remedy_of(reason)):
+        return False, "a read that fails on a literal route names no retry: %s" % reason[:90]
+    return True, "a read that fails on a literal route still says to run the edit again"
+
+
+REVIEW_LOG_CHECKS.append(("review-record:the remedy of an edit whose repo or id is a variable or a substitution names a literal route, and does not say to run it again, gh api -X PATCH",
+                         unread_remedy_check()))
+REVIEW_LOG_CHECKS.append(("review-record:a read that fails on a literal route still says to run the edit again, gh api -X PATCH",
+                         review_retry_remedy_kept))
 
 # `-e` is gh's --editor, not --edit-last. A post with -e is a post: judged on its pull request, with one head read, and allowed.
 REVIEW_LOG_CHECKS.append(("review-record:a fresh post with -e (--editor) is judged as a post, gh pr comment -e --body",
@@ -11774,7 +11826,7 @@ REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused with no gh r
                          review_reads(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT), "deny", 0)))
 REVIEW_LOG_CHECKS.append(("review-record:a marked update with a wrong head tail is refused with no gh read, MCP update_issue_comment",
                          review_reads(MCP_UPDATE, mcp_input(review_record(head=REVIEW_TAIL), comment_id=REVIEW_COMMENT), "deny", 0)))
-# An edit whose new body holds no marker reads the old body once.
+# An edit whose new body holds no marker reads the old body once. Decision pr-review-record, the edit-read cost.
 REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker makes one gh read of the old body, MCP update_issue_comment",
                          review_reads(MCP_UPDATE, mcp_input("Round 1 ran. No review record yet.", comment_id=REVIEW_COMMENT), "allow", 1)))
 REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line makes one gh read of the old body, MCP update_issue_comment",
