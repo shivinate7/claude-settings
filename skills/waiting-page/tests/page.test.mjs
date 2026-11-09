@@ -3111,6 +3111,36 @@ for (const kind of SIDE_KINDS) for (const scheme of SCHEMES) {
   });
 }
 
+// ---------------------------------------------------------------- the 641 px list: each folded row's title is at least 8em
+// The list is the .asklist, a container of its own. Its width follows the window, so the window is set by measuring the list until the list
+// reads 641 px. Each row is read with the rows' own press geometry, the same as the 8em cases above.
+const LIST_PX = 641;
+async function listPage(t, kind, scheme) {
+  let vw = LIST_PX;
+  const page = await foldedRowPage(t, kind, vw, scheme); if (!page) return null;
+  for (let i = 0; i < 4; i++) {
+    const w = await page.evaluate(() => document.querySelector(".asklist").getBoundingClientRect().width);
+    if (Math.abs(w - LIST_PX) <= 0.5) break;
+    vw = Math.round(vw + LIST_PX - w);
+    await page.setViewportSize({ width: vw, height: 800 });
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  }
+  return page;
+}
+for (const kind of Object.keys(FOLD_ROWS)) for (const scheme of SCHEMES) {
+  test(`folded rows, ${scheme}: at a ${LIST_PX} px list, the ${kind} row's title is at least 8em wide`, async (t) => {
+    const page = await listPage(t, kind, scheme); if (!page) return;
+    const id = FOLD_ROWS[kind].ask.id;
+    const list = await page.evaluate(() => { const l = document.querySelector(".asklist"); return { w: l.getBoundingClientRect().width, em: parseFloat(getComputedStyle(l).fontSize) }; });
+    assert.ok(Math.abs(list.w - LIST_PX) <= 0.5, `the list is ${list.w.toFixed(1)} px wide, not ${LIST_PX} px`);
+    assert.ok(list.w > 40 * list.em, `the list is ${list.w.toFixed(1)} px wide, not wider than 40em (${Math.round(40 * list.em)} px) of its own font size`);
+    foldedScope(await foldedDate(page, id), kind, LIST_PX);
+    const g = await pressGeo(page, id);
+    const col = g.title.r - g.title.l, need = 8 * g.rootSize;
+    assert.ok(col >= need, `the ${kind} row's title is ${Math.round(col)} px at a ${LIST_PX} px list, not at least ${need} px (8em)`);
+  });
+}
+
 // The reply box's Close and Send reply, as boxes from the form's top-left corner. Both are reached through the thread's Reply press.
 // Each press also holds its text runs, one box per line piece, and the answered row (card) holds the form: all in the form's frame.
 const replyGeo = (page, root) => page.evaluate((k) => {
@@ -3495,6 +3525,31 @@ for (const width of [390, 1280]) for (const scheme of SCHEMES) {
   });
 }
 
+// ---------------------------------------------------------------- the Designs head's position: never larger than the title
+// The position "1/2" is set in the title's own cap, so at no width from 180 to 390 is its text larger than the title's. Each sweep opens the
+// sheet at 390 wide, then runs the window through 180 to 390 wide. The head is read by its two elements' computed sizes.
+const headSizes = (page) => page.evaluate(() => {
+  const pos = document.getElementById("dPos"), title = document.getElementById("dTitle");
+  return { open: !document.getElementById("dsheet").hidden, shown: pos.checkVisibility() && title.checkVisibility(), pos: parseFloat(getComputedStyle(pos).fontSize), title: parseFloat(getComputedStyle(title).fontSize), text: pos.textContent.trim() };
+});
+for (const pct of [100, 150, 200, 300]) for (const scheme of SCHEMES) {
+  const note = pct === 300 ? "" : " (control)";
+  test(`Designs sheet, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, the position is no larger than the title${note}`, async (t) => {
+    const page = await tabSetPage(t, { width: 390, pct, designs: true, scheme, sel: "Questions" }); if (!page) return;
+    await openDesigns(page);
+    const s = await headSizes(page);
+    assert.ok(s.open && s.shown, `the Designs head is not shown at 390 wide with the root font size at ${pct}%`);
+    assert.ok(/\d/.test(s.text), `the position reads ${JSON.stringify(s.text)} at 390 wide, not a count`);
+    const widths = widthsFrom(180, 390, 5);
+    const faults = await sweepWidths(page, widths, 900, async (p) => {
+      const h = await headSizes(p);
+      if (!h.open || !h.shown) return "the Designs head is not shown";
+      return h.pos <= h.title + 0.5 ? null : `the position "${h.text}" is ${h.pos.toFixed(1)} px, the title ${h.title.toFixed(1)} px`;
+    });
+    assert.equal(faults.length, 0, `${faults.length} of ${widths.length} widths set the position above the title, the first: ${faults[0]}`);
+  });
+}
+
 // ---------------------------------------------------------------- an answered row at large text: its presses sit in the row, and the page does not scroll sideways
 // The row with Dismiss, unfolded (not seen before its answer, so the answer is new and the row stays open, with Reply and Dismiss at its
 // end) or folded (seen on an earlier visit, so Dismiss is the row's side press). Each case reads its scope first (the fold, the root font
@@ -3863,7 +3918,7 @@ for (const [width, pct] of RESTORED_LINE) for (const scheme of SCHEMES) {
   const where = sizeWhere(width, pct);
   test(`ask list, ${scheme}: ${where}: after a Restore in the dismissed list, the Restored. line stays inside the window with no sideways scroll`, async (t) => {
     const page = await restoredPage(t, { width, pct, scheme }); if (!page) return;
-    const g = await page.evaluate(() => { const b = document.querySelector("#row-ask-fold-res p.sline.dline > span > b"), r = b.getBoundingClientRect(); return { text: b.textContent, left: r.left, right: r.right, iw: window.innerWidth }; });
+    const g = await page.evaluate(() => { const b = document.querySelector("#row-ask-fold-res p.sline.dline > span > b"), r = b.getBoundingClientRect(); return { text: b.textContent.replace(/­/g, ""), left: r.left, right: r.right, iw: window.innerWidth }; });
     assert.equal(g.text, "Restored.", `the line's bold word reads ${JSON.stringify(g.text)}, not "Restored.", ${where}`);
     assert.ok(g.left >= -0.5 && g.right <= g.iw + 0.5, `the Restored. line runs from ${Math.round(g.left)} to ${Math.round(g.right)} px in a ${g.iw} px window, ${where}`);
     const fault = await sidewaysFault(page);
@@ -3885,7 +3940,8 @@ const restoredGeo = (page) => page.evaluate(() => {
     for (let i = 0; i < n.data.length; i++) {
       const rg = document.createRange();
       rg.setStart(n, i); rg.setEnd(n, i + 1);
-      const r = [...rg.getClientRects()].find((x) => x.width > 0.5);
+      // A soft hyphen drawn at a break adds a box on the line above to the next character, so the lowest box is the glyph's own.
+      const r = [...rg.getClientRects()].filter((x) => x.width > 0.5).reduce((a, b) => (!a || b.top > a.top ? b : a), null);
       if (!r) continue;
       const mid = (r.top + r.bottom) / 2;
       const cur = lines[lines.length - 1];
@@ -3895,18 +3951,26 @@ const restoredGeo = (page) => page.evaluate(() => {
       chars.push({ inB: b.contains(n), line: lines.length - 1 });
     }
   }
-  const words = sp.textContent.trim().split(/\s+/);
+  const words = sp.textContent.replace(/­/g, "").trim().split(/\s+/);
   const bLines = new Set(chars.filter((c) => c.inB).map((c) => c.line)).size;
   const saved = [b.style.whiteSpace, b.style.overflowWrap];
   b.style.whiteSpace = "nowrap"; b.style.overflowWrap = "normal";
   const natural = b.getBoundingClientRect().width;
   [b.style.whiteSpace, b.style.overflowWrap] = saved;
-  return { lines: lines.map((L) => ({ text: L.text, t: L.t, b: L.b })), words, bText: b.textContent, bLines, natural, column: sp.getBoundingClientRect().width, glyphTop: glyph.getBoundingClientRect().top };
+  return { lines: lines.map((L) => ({ text: L.text, t: L.t, b: L.b })), words, bText: b.textContent, soft: b.textContent.includes("­"), bLines, natural, column: sp.getBoundingClientRect().width, glyphTop: glyph.getBoundingClientRect().top };
 });
-// A line holds a fragment when one of its tokens is not a whole word of the message: "." or "d." is one, "Restored." is not.
+// A line holds a fragment when one of its tokens is not a whole word of the message: "." or "d." is one, "Restored." is not. The one break
+// a word may take is after "Re" at a soft hyphen in the text, with "stored." on the next line.
 const restoredFragment = async (page) => {
   const g = await restoredGeo(page);
-  const bad = g.lines.flatMap((L, i) => L.text.trim().split(/\s+/).filter((tok) => tok && !g.words.includes(tok)).map((tok) => `${JSON.stringify(tok)} on line ${i + 1}`));
+  const texts = g.lines.map((L) => L.text.replace(/­/g, "").trim());
+  // The soft-hyphen break: "Re" ends a line and "stored." opens the next, where more of the message may follow on that line.
+  const split = g.soft && texts[0] === "Re" && /^stored\.(\s|$)/.test(texts[1] || "");
+  const bad = texts.flatMap((t0, i) => {
+    if (split && i === 0) return [];
+    const t = split && i === 1 ? t0.replace(/^stored\.\s*/, "") : t0;
+    return t.split(/\s+/).filter((tok) => tok && !g.words.includes(tok)).map((tok) => `${JSON.stringify(tok)} on line ${i + 1}`);
+  });
   return bad.length ? `a line holds a fragment of a word: ${bad.join(" and ")}` : null;
 };
 // Where Restored. fits its column it is one line. Where it does not fit, it is not read here: the caller counts the widths that fit.
@@ -3955,6 +4019,75 @@ for (const pct of [100, 200, 300]) for (const scheme of SCHEMES) {
     });
     assert.ok(wrapped > 0, "the Restored. line never wraps from 180 to 390 wide, so the glyph is not read");
     assert.equal(faults.length, 0, `the glyph is off its first line box at ${faults.length} of ${wrapped} wrapped widths, the first: ${faults[0]}`);
+  });
+}
+
+// ---------------------------------------------------------------- the refusal line and the Restored. size: the text keeps the reader's size
+// A refused write says why in a line of the list: "Not dismissed (...)" under the answered row, "Not restored (...)" in the dismissed list.
+// Each sweep reads the line's text size at the window, then at each width from 180 to 390 wide, against the same line at 1024 wide. The
+// reference must be the paragraph's own size, so the line is not capped there: a shrink at a width is then the cap's, and nothing else.
+const REFUSED_WORDS = { dismiss: "Not dismissed (permission-denied)", restore: "Not restored (permission-denied)" };
+// The ask each refusal is made on. DIS_HIDDEN is declared further down the file, so this is read when a case runs.
+const refusedAsk = (kind) => (kind === "dismiss" ? ASK_ANSWERED : DIS_HIDDEN);
+// The list at 1024 px with the write refused, so its line is drawn, at the text size. Null without a browser.
+async function refusedLinePage(t, { kind, pct = 100, scheme = "light" }) {
+  const ask = refusedAsk(kind);
+  const page = await open(t, { dbExtra: { asks: { [ask.id]: ask } }, storage: RPL_NEW, failUpdate: true, viewport: { width: 1024, height: 800 }, scheme }); if (!page) return null;
+  if (pct !== 100) await zoomedTo(page, pct);
+  if (kind === "dismiss") {
+    await mustHave(page, `#dis-${ask.id}`, "Dismiss on the answered ask");
+    await page.click(`#dis-${ask.id}`);
+  } else {
+    await mustHave(page, "#askDismissed", "Show dismissed asks unfold");
+    await page.click("#askDismissed");
+    await mustHave(page, `ol#askDList #res-${ask.id}`, "Restore in the dismissed list");
+    await page.click(`ol#askDList #res-${ask.id}`);
+  }
+  const drawn = await page.waitForFunction((w) => [...document.querySelectorAll("p.sline.dline")].some((p) => p.textContent.includes(w)), REFUSED_WORDS[kind], { timeout: 3000 }).then(() => true, () => false);
+  assert.ok(drawn, `the refused write does not draw "${REFUSED_WORDS[kind]}"`);
+  return page;
+}
+// The refusal line's text: its size, its paragraph's size, and its text. Null when no line holds the words.
+const refusedSpan = (page, words) => page.evaluate((w) => {
+  const p = [...document.querySelectorAll("p.sline.dline")].find((x) => x.textContent.includes(w));
+  if (!p) return null;
+  const span = p.querySelector(":scope > span:not(.g)");
+  return { size: parseFloat(getComputedStyle(span).fontSize), para: parseFloat(getComputedStyle(p).fontSize), text: span.textContent.replace(/\s+/g, " ").trim() };
+}, words);
+for (const kind of ["dismiss", "restore"]) for (const pct of [100, 150, 200, 300]) for (const scheme of SCHEMES) {
+  const note = pct === 100 ? " (control)" : "";
+  test(`ask list, ${scheme}: with the root font size at ${pct}%, from 180 to 390 wide, the "${REFUSED_WORDS[kind]}" line keeps its size${note}`, async (t) => {
+    const page = await refusedLinePage(t, { kind, pct, scheme }); if (!page) return;
+    const words = REFUSED_WORDS[kind];
+    const ref = await refusedSpan(page, words);
+    assert.ok(ref && ref.text.includes(words), `the refusal line is not drawn at 1024 wide with the root font size at ${pct}%`);
+    assert.equal(ref.size, ref.para, `the line's text is ${ref.size.toFixed(1)} px at 1024 wide, not its paragraph's ${ref.para.toFixed(1)} px, with the root font size at ${pct}%`);
+    const widths = widthsFrom(180, 390, 5);
+    const faults = await sweepWidths(page, widths, 800, async (p) => {
+      const s = await refusedSpan(p, words);
+      if (!s || !s.text.includes(words)) return "the refusal line is not drawn";
+      return s.size >= ref.size - 0.5 ? null : `the line's text is ${s.size.toFixed(1)} px, not ${ref.size.toFixed(1)} px`;
+    });
+    assert.equal(faults.length, 0, `${faults.length} of ${widths.length} widths shrink the "${words}" line, the first: ${faults[0]}`);
+  });
+}
+
+// The Restored. line's text at 180 wide, doubled and tripled, is at least 22 px: the word is read at a size a reader can read.
+for (const pct of [200, 300]) for (const scheme of SCHEMES) {
+  test(`ask list, ${scheme}: ${sizeWhere(180, pct)}: the Restored. line's text is at least 22 px`, async (t) => {
+    const page = await restoredPage(t, { width: 180, pct, scheme }); if (!page) return;
+    const s = await page.evaluate(() => { const sp = document.querySelector("#row-ask-fold-res p.sline.dline > span:not(.g)"); return { size: parseFloat(getComputedStyle(sp).fontSize), text: sp.textContent.replace(/­/g, "").replace(/\s+/g, " ").trim() }; });
+    assert.ok(s.text.startsWith("Restored."), `the line reads ${JSON.stringify(s.text)}, not "Restored."`);
+    assert.ok(s.size >= 22, `the Restored. line's text is ${s.size.toFixed(1)} px, not at least 22 px, ${sizeWhere(180, pct)}`);
+  });
+}
+// The same two sizes, no fragment: no line breaks a word, except "Re" at a soft hyphen with "stored." after it. No word breaks at these sizes
+// on the current page, so this is a control for the size claim above.
+for (const pct of [200, 300]) for (const scheme of SCHEMES) {
+  test(`ask list, ${scheme}: ${sizeWhere(180, pct)}: no line of the Restored. message holds a fragment of a word, the soft-hyphen break aside (control)`, async (t) => {
+    const page = await restoredPage(t, { width: 180, pct, scheme }); if (!page) return;
+    const fault = await restoredFragment(page);
+    assert.ok(!fault, fault && `${fault}, ${sizeWhere(180, pct)}`);
   });
 }
 
@@ -4734,7 +4867,7 @@ test("dismiss: Restore writes dismissed null with update, the line says the thre
   // The line stays where it is and says when the thread returns. Dismiss takes Restore's place.
   await mustHave(page, `li#row-${root} #dis-${root}`, "Dismiss in place of Restore on the line");
   assert.equal(await page.locator(`li#row-${root} #res-${root}`).count(), 0, "Restore is still on the line");
-  const said = ((await page.locator(`li#row-${root}`).textContent()) || "").replace(/\s+/g, " ").trim();
+  const said = ((await page.locator(`li#row-${root}`).textContent()) || "").replace(/­/g, "").replace(/\s+/g, " ").trim();
   assert.ok(said.includes("Restored. It joins the list at the next load."), "the line reads " + JSON.stringify(said));
   // The next load draws the thread again, and the stored record has dismissed null.
   await page.reload();
@@ -4753,7 +4886,7 @@ test("dismiss: a thread dismissed at load and restored this visit shows in the m
   const before = (await dismissWrites(page)).length;
   await page.click(`ol#askDList #res-${DIS_HIDDEN.id}`);
   await waitUpdates(page, before + 1);
-  const said = await page.waitForFunction(() => document.body.textContent.includes("Restored. It joins the list at the next load."), null, { timeout: 3000 }).then(() => true, () => false);
+  const said = await page.waitForFunction(() => document.body.textContent.replace(/­/g, "").includes("Restored. It joins the list at the next load."), null, { timeout: 3000 }).then(() => true, () => false);
   assert.equal(said, true, "the restore does not say Restored. It joins the list at the next load.");
   // A reply comes in after the restore, as a session's write after the page loaded, and waits for its answer.
   await page.evaluate((r) => window.__putDoc("asks", r.id, r), DIS_HIDDEN_REPLY);
