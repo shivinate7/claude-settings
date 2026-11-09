@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL2Xmid8Pt8sh5sDtSw",
   "why": "A runner that runs each batch check by hand, with flags copied by hand, can miss one or run it differently from CI.",
-  "note": "Topic merge-tool. The checks: narration, silent-undo --strict, red-run, ste-changed. Extends merge --lane-lint where it can. From runner 8's report, via the coordinator 19:49 CST Nov 7. Related: done step batch-local-checks-match-ci (e54d2a003, lane-lint on the batch head before ready); this step widens that home to the four checks it does not yet run.",
-  "updatedAt": "2026-11-07T19:49:00-06:00"
+  "note": "Topic merge-tool. The checks: narration, silent-undo --strict, red-run, ste-changed. Extends merge --lane-lint where it can. From runner 8's report, via the coordinator 19:49 CST Nov 7. Related: done step batch-local-checks-match-ci (e54d2a003, lane-lint on the batch head before ready); this step widens that home to the four checks it does not yet run. Coordinator (13:20 CST Nov 9), from batch 69's red run: before a batch PR goes ready, the batch runner runs every test file that any lane in the batch touched, on the merged tree. Batch 69 went ready with local checks passing, and CI then failed merge/test_lane_lint.py, because #2414 and #2406 broke each other with no text conflict. One red batch costs a full rebuild and a new CI run. Owner goal: fix slow merges (Nov 8 20:24 CST).",
+  "updatedAt": "2026-11-09T13:20:00-06:00"
 }
