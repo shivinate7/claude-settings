@@ -15268,7 +15268,7 @@ class BatchFreeze(CloudSession):
 
     # Build: the branch, the pull request, the lock and the lint.
 
-    def test_build_merges_each_lane_no_ff_and_pushes_the_batch_branch(self):
+    def test_build_merges_each_lane_no_ff_and_pushes_the_integration_branch(self):
         for n in (101, 102, 103):
             self.lane(n)
         rc, out = self.run_batch("--batch-build", "nightly", "103", "101", "102")
@@ -15715,7 +15715,7 @@ class BatchFreeze(CloudSession):
     def test_drop_leaves_another_batchs_branch_and_pr_alone(self):
         for n in (101, 102, 103, 104):
             self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103])
+        self.frozen_batch("nightly", [101, 102, 103])
         other_pr = self.frozen_batch("other", [104])
         other_head, other_body = self.head("batch/other"), self.body(other_pr)
         self.record_pushes()
@@ -16060,8 +16060,8 @@ class BatchFreeze(CloudSession):
             self.assertTrue(self.ancestor(self.heads[n], nightly_new), "the rebuild dropped lane #%d's head from batch/nightly: %s" % (n, out))
         self.assertEqual(rc, 0, "the rebuild exited %s: %s" % (rc, out))
 
-    # Review round 1: a stacked lane needs its base lane, a lane's pull request targets the batch's base, a failed body write, a
-    # dependent on a later batch's On chain, a shallow clone, an unrelated body quoting a marker, and the base recorded at build.
+    # A stacked lane needs its base lane, and a lane's pull request targets the batch's base. The cases below cover a failed
+    # body write, a dependent on a later batch's On chain, a shallow clone, an unrelated body quoting a marker, and the base recorded at build.
 
     def fail_the_next_body_write(self):
         """The host refuses the next body write, by raising Stop; each write after it is kept as usual."""
