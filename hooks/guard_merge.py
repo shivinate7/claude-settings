@@ -230,10 +230,9 @@ def merge_check_reason(verdict: str, detail: str) -> str:
 
 
 PUSH_BATCH_REASON = (
-    "Rule (Git, push-batch-held): this push moves a lane branch that the ready integration PR holds: %s holds this "
-    "branch's remote tip in its head. The batch is built from that head, so a moved head breaks its confirm "
-    "(decision batch-freeze-lane-set). Remedy: wait for the batch to merge, or drop the lane from the batch. "
-    "New work goes in a new lane."
+    "Rule (Git, push-batch-held): the ready PR %s holds this lane branch's remote tip. The batch builds from that "
+    "head, so a moved head breaks its confirm (decision batch-freeze-lane-set). Wait for the batch to merge, or ask "
+    "the batch runner to drop the lane. New work goes in a new lane."
 )
 
 
