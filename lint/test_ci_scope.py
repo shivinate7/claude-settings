@@ -281,6 +281,14 @@ class Scope(unittest.TestCase):
         self.assertEqual(reader, self.true_set(run(["lint/_transcript.py"])))
         self.assertTrue({"checks_windows_rest", "checks_macos", "code", "guard"} <= reader, reader)
 
+    # lint/_clause.py: report_guard.py imports it, and test_clause.py is its suite. It sits in the hooks/* arm of ci-scope.sh,
+    # so an edit turns on that arm's jobs and no merge job (only the transcript reader and guard_log_report.py reach that one).
+    # An edit, not a new file: a new file under lint/ also turns on the landed-dir jobs, which is another arm's rule.
+    def test_clause_parser_change_selects_the_jobs_the_arm_names(self):
+        self.assertEqual(self.true_set(run(["lint/_clause.py"], existing=["lint/_clause.py"])),
+                         {"checks_windows_rest", "checks_macos", "code", "guard"},
+                         "lint/_clause.py must select the hooks/* arm's jobs and no merge job")
+
     # Guard family: hooks/guard_<anything>.py is split out of hooks/guard.py. Each sibling must set
     # exactly the flags guard.py sets, as a new file and as an edit. Today the generic hooks/* rule
     # gives a new sibling no sweep flag, and an edited one no Windows or shell job.
