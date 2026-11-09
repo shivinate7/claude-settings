@@ -590,6 +590,271 @@ class CodeNameTests(Fixture):
         self.green("hooks/x.py", 'D = "subagents"\n')
 
 
+class UncommittedTests(Fixture):
+    """The check judges the tree as it will be pushed: committed changes, staged and unstaged edits, and each
+    untracked file in a folder that already holds tracked files. A root file, a file in a new top-level folder
+    and an ignored file are not part of the change. Each case checks the file's git state before the check runs,
+    so a green case cannot pass because its file was never written."""
+
+    IGNORE = "__pycache__/\n"  # the check imports its modules, so each run writes bytecode into lint/ and hooks/
+
+    def setUp(self):
+        super().setUp()
+        self.put("GLOSSARY.md", HEAD + ROWS + CodeNameTests.EXTRA)
+        self.put(".gitignore", self.IGNORE)
+        self.put("docs/debts/README.md", "# Debts\n")
+
+    def porcelain(self):
+        """The git status entries, `XY path`, untracked files listed one by one. NUL-separated: no quoting."""
+        r = subprocess.run(["git", "status", "--porcelain", "-z", "--untracked-files=all"], cwd=self.tree,
+                           capture_output=True, encoding="utf-8", check=True)
+        return [e for e in r.stdout.split("\0") if e]
+
+    def assertState(self, entry):
+        """Assert the fixture is in the state a case names: git status holds `entry`."""
+        self.assertIn(entry, self.porcelain(), "fixture state: git status has no '%s'" % entry)
+
+    def test_untracked_record_with_avoided_word_fails(self):
+        self.base_repo()
+        self.put("docs/debts/new-debt.md", "Fix in `block-the-act-early`.\n")
+        self.assertState("?? docs/debts/new-debt.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "an untracked record's avoided word passed\n" + out)
+        self.assertIn("docs/debts/new-debt.md:1", out, "the untracked record's line was not read\n" + out)
+
+    def test_untracked_file_with_a_space_in_its_name_is_read(self):
+        self.base_repo()
+        self.put("docs/debts/new debt.md", "Fix in `block-the-act-early`.\n")
+        self.assertState("?? docs/debts/new debt.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "an untracked file with a space in its name passed\n" + out)
+        self.assertIn("docs/debts/new debt.md:1", out, "the spaced file's line was not read\n" + out)
+
+    def test_unstaged_edit_with_avoided_word_fails(self):
+        self.put("hooks/x.py", "x = 1\n")
+        self.base_repo()
+        self.put("hooks/x.py", "x = 1\nbundle = 2\n")
+        self.assertState(" M hooks/x.py")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "an unstaged edit's added line passed\n" + out)
+        self.assertIn("hooks/x.py:2", out, "the unstaged edit's line was not read\n" + out)
+
+    def test_staged_add_with_avoided_word_fails(self):
+        self.base_repo()
+        self.put("hooks/y.py", "bundle = 1\n")
+        self.git("add", "hooks/y.py")
+        self.assertState("A  hooks/y.py")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "a staged add's line passed\n" + out)
+        self.assertIn("hooks/y.py:1", out, "the staged add's line was not read\n" + out)
+
+    def test_untracked_scratch_file_at_the_root_passes(self):
+        self.base_repo()
+        self.put("scratch-notes.md", "Try `block-the-act-early` here.\n")
+        self.assertState("?? scratch-notes.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "a root scratch file counted as the change\n" + out)
+
+    def test_untracked_file_that_gitignore_names_passes(self):
+        self.put(".gitignore", self.IGNORE + "*.draft.md\n")
+        self.base_repo()
+        self.put("docs/new-debt.draft.md", "Fix in `block-the-act-early`.\n")
+        r = subprocess.run(["git", "check-ignore", "-q", "docs/new-debt.draft.md"], cwd=self.tree)
+        self.assertEqual(r.returncode, 0, "fixture state: the file is not ignored")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "an ignored file counted as the change\n" + out)
+
+    def test_untracked_file_in_a_new_top_level_folder_passes(self):
+        self.base_repo()
+        self.put("newtop/notes.md", "Try `block-the-act-early` here.\n")
+        self.assertState("?? newtop/notes.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "a file in a new top-level folder counted as the change\n" + out)
+
+    def test_avoided_word_on_a_line_the_base_already_has_passes(self):
+        self.put("hooks/x.py", "def bundle_old():\n    pass\n")
+        self.base_repo()
+        self.put("hooks/x.py", "def bundle_old():\n    pass\n\n\ndef fine():\n    pass\n")
+        self.assertState(" M hooks/x.py")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "an unchanged line of an uncommitted file was read\n" + out)
+
+    def test_clean_work_tree_after_the_base_passes(self):
+        self.base_repo()
+        self.assertEqual(self.porcelain(), [], "fixture state: the work tree is not clean")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("UNKNOWN", out)
+
+    def test_committed_avoided_word_still_fails_beside_a_clean_untracked_file(self):
+        self.base_repo()
+        self.put("docs/debts/new-debt.md", "Fix in `block-the-act-early`.\n")
+        self.commit()
+        self.put("docs/debts/clean.md", "Fine.\n")
+        self.assertState("?? docs/debts/clean.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "a committed avoided word passed\n" + out)
+        self.assertIn("docs/debts/new-debt.md:1", out, "the committed line was not read\n" + out)
+
+    def test_uncommitted_delete_and_rename_do_not_crash(self):
+        self.put("hooks/gone.py", "x = 1\n")
+        self.put("docs/old.md", "same text\n" * 20)
+        self.base_repo()
+        os.remove(os.path.join(self.tree, "hooks", "gone.py"))
+        os.rename(os.path.join(self.tree, "docs", "old.md"), os.path.join(self.tree, "docs", "renamed.md"))
+        self.assertState(" D hooks/gone.py")
+        self.assertState("?? docs/renamed.md")
+        code, out = self.run_check(ci=True)
+        self.assertEqual(code, 0, "an uncommitted delete or rename failed the check\n" + out)
+        self.assertNotIn("Traceback", out)
+        self.assertNotIn("UNKNOWN", out)
+
+    def test_tracked_symlink_replaced_by_a_file_with_an_avoided_slug_fails(self):
+        try:
+            os.symlink("handoff.md", os.path.join(self.tree, "docs", "link.md"))
+        except (OSError, NotImplementedError):
+            self.skipTest("the file system refuses symlinks")
+        self.base_repo()
+        os.remove(os.path.join(self.tree, "docs", "link.md"))
+        self.put("docs/link.md", "Fix in `block-the-act-early`.\n")
+        self.assertState(" T docs/link.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "a symlink replaced by a file with an avoided slug passed\n" + out)
+        self.assertIn("docs/link.md:1", out, "the replaced file's line was not read\n" + out)
+
+    def test_untracked_utf16_file_is_unknown_and_red_in_ci(self):
+        self.base_repo()
+        with open(os.path.join(self.tree, "hooks", "wide.py"), "wb") as f:
+            f.write("bundle = 1\n".encode("utf-16"))  # a byte-order mark, then UTF-16: no UTF-8 reading decodes it
+        self.assertState("?? hooks/wide.py")
+        code, out = self.run_check()
+        self.assertIn("UNKNOWN", out, "an untracked file that will not decode passed silently\n" + out)
+        code, out = self.run_check(ci=True)
+        self.assertEqual(code, 1, "an untracked file that will not decode is not red in CI\n" + out)
+
+    def test_untracked_cp1252_file_is_unknown_and_red_in_ci(self):
+        self.base_repo()
+        with open(os.path.join(self.tree, "docs", "debts", "latin.md"), "wb") as f:
+            f.write(b"Caf\xe9 notes.\n")  # a cp1252 byte, not valid UTF-8
+        self.assertState("?? docs/debts/latin.md")
+        code, out = self.run_check()
+        self.assertIn("UNKNOWN", out, "an untracked cp1252 file passed silently\n" + out)
+        code, out = self.run_check(ci=True)
+        self.assertEqual(code, 1, "an untracked cp1252 file is not red in CI\n" + out)
+
+    def test_staged_file_does_not_make_an_untracked_neighbour_count(self):
+        """newtop is new on base: only the index holds it, so its folder is not one that holds tracked files."""
+        self.base_repo()
+        self.put("newtop/a.md", "Fine.\n")
+        self.git("add", "newtop/a.md")
+        self.put("newtop/b.md", "Fix in `block-the-act-early`.\n")
+        self.assertState("A  newtop/a.md")
+        self.assertState("?? newtop/b.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "an untracked file in a folder that only the index holds was read\n" + out)
+
+    def test_untracked_file_that_base_already_has_is_skipped(self):
+        """docs/old.md is untracked now but kept, and its avoided slug is already on base: nothing is new."""
+        self.put("docs/old.md", "Fix in `block-the-act-early`.\n")
+        self.base_repo()
+        self.git("rm", "-q", "--cached", "docs/old.md")
+        self.assertState("D  docs/old.md")
+        self.assertState("?? docs/old.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "an untracked file that base already has was read\n" + out)
+
+    def git_starts(self):
+        """The git processes the check starts with no arguments, counted from git's own trace.
+
+        The trace file sits in .git, which git never lists as an untracked file."""
+        trace = os.path.join(self.tree, ".git", "gls-trace.log")
+        env = {k: v for k, v in os.environ.items() if k != "CI"}
+        env["GIT_TRACE"] = trace
+        subprocess.run([sys.executable, os.path.join(self.tree, "lint", "check_glossary.py")],
+                       cwd=self.tree, capture_output=True, encoding="utf-8", env=env)
+        self.assertTrue(os.path.isfile(trace), "fixture state: git wrote no trace")
+        with open(trace, encoding="utf-8", errors="replace") as f:
+            starts = sum(1 for line in f if "built-in: git " in line)
+        self.assertGreater(starts, 0, "fixture state: the trace holds no git process")
+        return starts
+
+    def test_no_argument_run_starts_at_most_four_git_processes(self):
+        self.put("hooks/x.py", "x = 1\n")
+        self.base_repo()
+        self.put("hooks/x.py", "x = 1\nfine = 2\n")
+        self.put("docs/debts/clean.md", "Fine.\n")
+        self.assertState(" M hooks/x.py")
+        self.assertState("?? docs/debts/clean.md")
+        starts = self.git_starts()
+        self.assertLessEqual(starts, 4, "the check started %d git processes with no arguments; the budget is 4" % starts)
+
+    def test_clean_symlink_to_file_type_change_is_read_without_unknown_in_ci(self):
+        try:
+            os.symlink("handoff.md", os.path.join(self.tree, "docs", "link.md"))
+        except (OSError, NotImplementedError):
+            self.skipTest("the file system refuses symlinks")
+        self.base_repo()
+        os.remove(os.path.join(self.tree, "docs", "link.md"))
+        self.put("docs/link.md", "Fine.\n")
+        self.assertState(" T docs/link.md")
+        code, out = self.run_check(ci=True)
+        self.assertNotIn("UNKNOWN", out, "a clean symlink-to-file type change printed UNKNOWN\n" + out)
+        self.assertEqual(code, 0, "a clean symlink-to-file type change failed in CI\n" + out)
+
+    def test_clean_file_to_symlink_type_change_is_read_without_unknown_in_ci(self):
+        self.put("docs/plain.md", "Fine.\n")
+        self.base_repo()
+        os.remove(os.path.join(self.tree, "docs", "plain.md"))
+        try:
+            os.symlink("handoff.md", os.path.join(self.tree, "docs", "plain.md"))
+        except (OSError, NotImplementedError):
+            self.skipTest("the file system refuses symlinks")
+        self.assertState(" T docs/plain.md")
+        code, out = self.run_check(ci=True)
+        self.assertNotIn("UNKNOWN", out, "a clean file-to-symlink type change printed UNKNOWN\n" + out)
+        self.assertEqual(code, 0, "a clean file-to-symlink type change failed in CI\n" + out)
+
+    def test_committed_bad_word_then_fixed_in_the_work_tree_fails(self):
+        self.base_repo()
+        self.put("docs/debts/x.md", "Fix in `block-the-act-early`.\n")
+        self.commit()
+        self.put("docs/debts/x.md", "Fine.\n")
+        self.assertState(" M docs/debts/x.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "a committed avoided slug passed once fixed in the work tree\n" + out)
+        self.assertIn("docs/debts/x.md:1", out, "the committed version's line was not read\n" + out)
+
+    def test_committed_bad_word_then_deleted_from_the_work_tree_fails(self):
+        self.base_repo()
+        self.put("docs/debts/x.md", "Fix in `block-the-act-early`.\n")
+        self.commit()
+        os.remove(os.path.join(self.tree, "docs", "debts", "x.md"))
+        self.assertState(" D docs/debts/x.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "a committed avoided slug passed once its file was deleted\n" + out)
+        self.assertIn("docs/debts/x.md:1", out, "the committed version's line was not read\n" + out)
+
+    def test_untracked_file_with_a_nul_and_invalid_utf8_is_skipped_quietly(self):
+        """binary(): a NUL in the first 8 KB and no byte-order mark makes the file binary, so it is skipped."""
+        self.base_repo()
+        with open(os.path.join(self.tree, "docs", "debts", "blob.md"), "wb") as f:
+            f.write(b"\x00\xff\x80 binary head\n" + "Fix in `block-the-act-early`.\n".encode("utf-8"))
+        self.assertState("?? docs/debts/blob.md")
+        code, out = self.run_check(ci=True)
+        self.assertEqual(code, 0, "a binary untracked file failed the check\n" + out)
+        self.assertNotIn("UNKNOWN", out, "a binary untracked file printed UNKNOWN\n" + out)
+
+    def test_untracked_utf8_file_with_a_nul_is_still_read(self):
+        """binary(): a file that decodes as UTF-8 is read even with a NUL in it."""
+        self.base_repo()
+        with open(os.path.join(self.tree, "docs", "debts", "nul.md"), "wb") as f:
+            f.write(b"Fix in `block-the-act-early`.\n\x00\n")
+        self.assertState("?? docs/debts/nul.md")
+        code, out = self.run_check()
+        self.assertEqual(code, 1, "a UTF-8 untracked file with a NUL passed unread\n" + out)
+        self.assertIn("docs/debts/nul.md:1", out, "the NUL file's line was not read\n" + out)
+
+
 def load_check():
     """The check module, loaded from MODULE, so a case reads the real table through the check's own rows()."""
     spec = importlib.util.spec_from_file_location("check_glossary_under_test", MODULE)
