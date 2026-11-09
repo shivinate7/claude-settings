@@ -175,6 +175,9 @@ class FakeHost:
     def merge(self, n, method, sha):
         if self.refuse:
             return None, self.refuse
+        live = merge.origin_head(self.root, self.branch)
+        if sha != live:  # GitHub's PUT names the head it merges: a head that moved is a 409, and nothing merges
+            return None, f"409: #{n} is at {live[:9]}, not the {sha[:9]} the merge names"
         self.merged = True
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
@@ -327,6 +330,30 @@ class Env(unittest.TestCase):
         put(os.path.join(o, "elsewhere.txt"), "main moved\n")
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
 
+    def leave_no_pending_record(self):
+        """feat's one pending record is removed and pushed, so a run on feat claims nothing."""
+        sh(self.other, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(self.other, "git", "rm", "-q", "docs/decisions/second.md")
+        sh(self.other, "git", "commit", "-qm", "no pending record left"); sh(self.other, "git", "push", "-q", "origin", "feat")
+
+    def run_args(self, *argv, host=None, hosts=None):
+        """-> (rc, stdout, stderr) of merge with argv. A usage error's SystemExit is read as its code."""
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            rc = self.run_merge(*argv, host=host, hosts=hosts, stdout=out, stderr=err)[0]
+        except SystemExit as e:
+            rc = e.code
+        return rc, out.getvalue(), err.getvalue()
+
+    def assert_usage_error(self, *argv):
+        """A usage error: rc 2, from a parser that knows every flag in argv. stderr holds no OLD_PARSER_ERRORS text and no traceback."""
+        rc, out, err = self.run_args(*argv)
+        self.assertEqual(rc, 2, out + err)
+        for old in OLD_PARSER_ERRORS:  # a parser that has never heard of the flag says one of these
+            self.assertNotIn(old, err)
+        self.assertNotIn("Traceback", err)
+        return out, err
+
     def hook(self, fn_script):
         p = os.path.join(self.t, "hook.sh")
         put(p, fn_script)
@@ -399,9 +426,7 @@ class Flow(Env):
         self.assertEqual(self.claims(), 0)
 
     def test_nothing_to_claim_waits_once(self):
-        sh(self.other, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-        sh(self.other, "git", "rm", "-q", "docs/decisions/second.md")
-        sh(self.other, "git", "commit", "-qm", "no pending record left"); sh(self.other, "git", "push", "-q", "origin", "feat")
+        self.leave_no_pending_record()
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("nothing to claim", out)
@@ -565,6 +590,200 @@ class Flow(Env):
         filled = [l for l in out.splitlines() if ".github/stamp.json" in l and "method" in l]
         self.assertEqual(len(filled), 1, out)  # one line names the filled field
 
+
+def without_usage(text):
+    """The text with argparse's usage block left out. The block lists every flag by design, so it is no remedy."""
+    kept, in_usage = [], False
+    for line in text.splitlines():
+        if line.startswith("usage:"):
+            in_usage = True
+        elif in_usage and line.startswith(" "):
+            continue
+        else:
+            in_usage = False
+            kept.append(line)
+    return "\n".join(kept)
+
+class ConfirmHead(Env):
+    """`merge <pr> --confirm --head <sha>`: a relayed yes binds to the pull request's head at relay time (decision auto-mode-owner-acts,
+    section Relayed Merge Yes). The head the relay named must be the live head. A moved head is refused before anything is claimed,
+    locked or merged. Without --head, confirm is as Flow tests it."""
+
+    def test_the_live_head_the_relay_named_merges(self):
+        rc, out, err = self.run_args("7", "--confirm", "--head", self.head())
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_the_merge_call_carries_the_relayed_head(self):
+        self.leave_no_pending_record()  # no claim in this run, so the sha the merge call gets is the head the relay named
+        head, sent = self.head(), []
+        real = self.host.merge
+        self.host.merge = lambda n, m, sha: (sent.append(sha), real(n, m, sha))[1]
+        rc, out, err = self.run_args("7", "--confirm", "--head", head)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(sent, [head], "the merge call did not carry the relayed head as its sha")
+
+    def test_a_claim_push_merges_the_claim_commit_on_the_relayed_head(self):
+        relayed = self.head()  # the pending record makes this run push a claim, so the head moves to the claim commit
+        sent = []
+        real = self.host.merge
+        self.host.merge = lambda n, m, sha: (sent.append(sha), real(n, m, sha))[1]
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(sent), 1, out + err)
+        claim = sent[0]
+        self.assertNotEqual(claim, relayed, "the merge call got the relayed head, not the claim commit pushed on top of it")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"{claim}^"), relayed,
+                         "the merge call's sha is not the claim commit on the relayed head")
+
+    def test_a_moved_head_is_refused_and_says_so(self):
+        relayed = self.head()
+        self.competitor_push()  # the head moves after the relay
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertIn("moved", out + err, "the refusal does not say the head moved")
+        self.assertIn("new yes", out + err, "the refusal does not say a new yes is needed")
+
+    def test_a_moved_head_names_no_retry_target(self):
+        relayed = self.head()
+        live = self.competitor_push()
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertNotEqual(rc, 0, out + err)  # a run that merged would print nothing to check
+        self.assertIn("moved", out + err, "no moved-head refusal to check")
+        text = without_usage(out + err)
+        self.assertNotIn(relayed, text, "the refusal names the relayed head in full")
+        self.assertNotIn(live, text, "the refusal names the live head in full")
+        self.assertNotIn("--confirm", text, "the refusal names the refused command's flag --confirm")
+        self.assertNotIn("--head", text, "the refusal names the refused command's flag --head")
+        self.assertNotRegex(text, r"\bmerge\s+[<\d]", "the refusal names the refused command, merge <pr>")
+
+    def test_a_moved_head_leaves_nothing_behind(self):
+        relayed = self.head()
+        self.competitor_push()
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertEqual(self.claims(), 0, "a claim was pushed for a refused head")
+        self.assertFalse(self.lock_ref(), "the lock was left behind")
+        self.assertEqual(self.worktrees(), 1, "a worktree was left behind")
+
+    def test_the_main_compare_refuses_a_moved_head_before_the_lock(self):
+        relayed = self.head()
+        self.competitor_push()  # the head moved before main's read, so main's compare refuses it first
+        taken = []
+        acquire = self.lock.acquire
+        self.lock.acquire = lambda b, ttl: (taken.append(b), acquire(b, ttl))[1]
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertIn("moved", out + err, "the refusal does not say the head moved")
+        self.assertEqual(taken, [], "the moved head was refused only after the lock was taken")
+        self.assertEqual(self.claims(), 0, "a claim was pushed for a moved head")
+
+    def test_the_lock_compare_refuses_a_head_that_moves_after_main_reads_it(self):
+        relayed = self.head()
+        read, moved = self.host.pr, []
+        def pr_then_move(n):
+            info = read(n)  # main's read: still the relayed head
+            if not moved:
+                moved.append(self.competitor_push())  # the head moves after that read and before confirm re-reads under the lock
+            return info
+        self.host.pr = pr_then_move
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertTrue(moved, "the head was never moved between the two reads")
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertIn("moved", out + err, "the refusal does not say the head moved")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertEqual(self.claims(), 0, "a claim was pushed for a moved head")
+
+    def network_drops_the_wait_after_the_claim(self):
+        """The second check wait, the one after the claim push, raises a network error: the claim stays on the branch, unproven (NetStop)."""
+        wait, calls = self.host.wait_checks, []
+        def dropped(n, sha, d, prior=None):
+            calls.append(sha)
+            if len(calls) == 2:
+                raise merge.NetStop("the network dropped the wait after the claim push")
+            return wait(n, sha, d, prior)
+        self.host.wait_checks = dropped
+
+    def test_a_rerun_on_the_tools_own_claim_commit_proceeds(self):
+        relayed = self.head()
+        self.network_drops_the_wait_after_the_claim()
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the claim is pushed, its result is unknown, so it stays
+        self.assertNotEqual(rc, 0, out + err)
+        claim = self.head()
+        self.assertNotEqual(claim, relayed, "the first run pushed no claim")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"{claim}^"), relayed, "the claim is not directly on the relayed head")
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the live head is the tool's own claim commit on the relayed head
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_a_rerun_on_the_tools_revert_of_its_claim_proceeds(self):
+        relayed = self.head()
+        self.host.seq = [(True, ""), (False, "a check is red after the claim push")]  # the claim wait is red, so the tool reverts its own claim
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertNotEqual(self.head(), relayed, "the revert did not land on the branch")
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the live head is the tool's revert of its claim
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_a_head_that_moves_between_the_compare_and_the_put_merges_nothing(self):
+        relayed = self.head()
+        self.host.on_wait = self.competitor_push  # the rival lands in the wait after the claim push: after every compare, before the PUT
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT merged a head that moved after the compare")
+        self.assertEqual(self.claims(), 0, "a claim reached main")
+
+    def test_a_rival_commit_under_a_tool_claim_refuses_a_rerun_on_the_relayed_head(self):
+        relayed = self.head()
+        rival = self.competitor_push()  # a rival commit on the relayed head
+        self.network_drops_the_wait_after_the_claim()
+        rc, out, err = self.run_args("7", "--confirm", "--head", rival)  # the tool claims on the rival commit; the claim stays
+        self.assertNotEqual(rc, 0, out + err)
+        claim = self.head()
+        self.assertNotEqual(claim, rival, "the first run pushed no claim")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"{claim}^"), rival, "the claim is not directly on the rival commit")
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the live head is the tool's claim on top of a rival commit
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertIn("moved", out + err, "the rerun was not refused as a moved head")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertEqual(self.claims(), 0, "a claim reached main")
+
+    def test_a_rival_commit_on_top_of_a_tool_claim_refuses_a_rerun_on_the_relayed_head(self):
+        relayed = self.head()
+        self.network_drops_the_wait_after_the_claim()
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the tool claims on the relayed head; the claim stays
+        self.assertNotEqual(rc, 0, out + err)
+        claim = self.head()
+        self.assertNotEqual(claim, relayed, "the first run pushed no claim")
+        self.competitor_push()  # a rival commit lands on top of the tool's claim
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the live head is a rival commit above the claim
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertIn("moved", out + err, "the rerun was not refused as a moved head")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertEqual(self.claims(), 0, "a claim reached main")
+
+    def test_a_live_head_behind_the_relayed_head_is_refused(self):
+        base = self.head()
+        relayed = self.competitor_push()  # the relayed head is one commit past base
+        sh(self.co, "git", "fetch", "-q", "origin")  # the relayed commit is local, so the walk's log runs and finds nothing above it
+        sh(self.other, "git", "push", "-q", "origin", ":feat")  # the branch is cut again at the earlier commit: the live head is behind
+        sh(self.other, "git", "push", "-q", "origin", f"{base}:refs/heads/feat")
+        self.assertEqual(self.head(), base, "the branch was not cut back to the earlier commit")
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertIn("moved", out + err, "the rerun was not refused as a moved head")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertEqual(self.claims(), 0, "a claim reached main")
+
+    def test_a_head_that_is_not_40_hex_is_refused_as_bad_input(self):
+        out, err = self.assert_usage_error("7", "--confirm", "--head", self.head()[:7])
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertEqual(self.claims(), 0, "a claim was pushed for a bad head")
+        self.assertFalse(self.lock_ref(), "the lock was left behind")
 
 class ShallowMain(unittest.TestCase):
     """ff_main in a shallow clone of origin. The commit it moves to is on origin/main, but the clone cuts the history
@@ -1300,6 +1519,22 @@ class SmallBaseMove(Env):
         refusal, _ = merge.holds_base(repo, "main", n_head)
         self.assertIsNotNone(refusal)
         self.assertIn("does not hold main", refusal)
+
+    def test_a_batch_rename_of_a_path_main_changed_is_a_shared_path(self):
+        # --no-renames in small_base_move: the batch's rename names its old path too, so main's change to base.txt is shared.
+        # With rename detection the batch names moved.txt only, the shared check passes, and the green run stands.
+        repo, _ = self.batch_repo()
+        sh(repo, "git", "mv", "base.txt", "moved.txt"); sh(repo, "git", "commit", "-qm", "N renames base")
+        n_head = sh(repo, "git", "rev-parse", "HEAD")
+        base = sh(repo, "git", "merge-base", "main", n_head)
+        sh(repo, "git", "checkout", "-q", "main"); put(os.path.join(repo, "base.txt"), "main changed\n")
+        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "main changes base")
+        scope = sh(repo, "git", "diff", "--name-status", "-M", base, n_head)
+        self.assertIn("R100\tbase.txt\tmoved.txt", scope, "the batch is not an exact rename, so the case proves nothing:\n" + scope)
+        with tempfiles_in_run_folder():
+            ok, why = merge.small_base_move(repo, "main", n_head)
+        self.assertFalse(ok, "the batch's rename hid main's change to base.txt, so the green run stands: " + why)
+        self.assertIn("main and the batch both change base.txt", why, "the batch's rename hid main's change to base.txt from the shared-path check")
 
     def scoped(self, workflow=CHECKS_YML, scope=True, extra=None):
         """Main and feat both gain the CI files; feat then holds main's tip. extra: more files, {path: text}, in the same commit."""
@@ -6586,6 +6821,43 @@ class ConfigFile(Env):
         rc, out = self.run_merge("7")
         self.assertIn("main is not the default branch (trunk)", out)
 
+class ReadyChecksRun(unittest.TestCase):
+    """The draft step's ready checks run through ci-job with --pinned: a child's pin names a claude-settings commit, so the
+    check runs that commit's harness, never the local copy's. The argv keeps its step names and base as before."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.run_dir = _test_temp.run_folder()  # test-temp-standard: the plain repo below is made in this run's folder
+        cls.addClassCleanup(shutil.rmtree, cls.run_dir, True)
+
+    def ci_job_calls(self, checks):
+        """Runs run_ready_checks on a plain repo, with ci-job stubbed to a pass. -> the argv of each ci-job call."""
+        wt = tempfile.mkdtemp(dir=self.run_dir)
+        sh(wt, "git", "init", "-q")
+        sh(wt, "git", "checkout", "-q", "-B", "main")
+        put(os.path.join(wt, "a.txt"), "a\n"); sh(wt, "git", "add", "-A"); sh(wt, "git", "commit", "-qm", "a")
+        calls, real = [], merge.sh
+        def stub(args, *a, **k):
+            if args[1:2] == [merge.CI_JOB]:
+                calls.append(list(args))
+                return 0, ""
+            return real(args, *a, **k)
+        with unittest.mock.patch.object(merge, "sh", stub):
+            merge.run_ready_checks(wt, 7, "main", checks, pr_body="")
+        return calls
+
+    def test_the_ready_checks_run_ci_job_with_pinned(self):
+        calls = self.ci_job_calls(["check invariants"])
+        self.assertEqual(len(calls), 1, calls)  # precondition: one ci-job run for the one ready check
+        self.assertIn("--pinned", calls[0], "the ready checks did not pass --pinned to ci-job: %s" % calls[0])
+
+    def test_the_ready_checks_keep_their_step_names_and_base(self):  # the control: the argv --pinned joins is unchanged
+        calls = self.ci_job_calls(["check invariants", "records page"])
+        self.assertEqual(len(calls), 1, calls)
+        argv = [a for a in calls[0][2:] if a != "--pinned"]
+        self.assertEqual(argv, ["checks", "--step", "check invariants", "--step", "records page", "--base", "origin/main"], calls[0])
+
 class ClaimSkipped(Env):
     """A base with no stamp kinds: the claim and the numbering check are skipped, and stamp.mjs never runs."""
     def setUp(self):
@@ -7137,12 +7409,57 @@ class MemoKeyRead(Env):
 
 class UnknownOverride(Env):
     """Unknown has a way out that does not depend on the check: a reason flag with a reason, logged. Claude may type it; the owner is not named as who types it."""
-    def unreadable(self):
+    FINDING = "stub.md: the finding a merge put back"
+
+    def unreadable(self, problems=None):
+        """check() raises an Unknown. With `problems`, the Unknown also carries them as its findings (.problems), as the octopus read does."""
         sys.path.insert(0, os.path.join(HERE, "..", "lint"))
         import check_silent_undo as undo
         def boom(*a, **k):
-            raise undo.Unknown("git is older than 2.38")
+            e = undo.Unknown("git is older than 2.38")
+            if problems is not None:
+                e.problems, e.notes = list(problems), []
+            raise e
+        self.addCleanup(merge.UNDO_MEMO.clear)  # the memo keeps the Unknown itself
         return unittest.mock.patch.object(undo, "check", boom)
+
+    def refusal_of(self, unknown_ok=""):
+        """undo_check on the test checkout, with an Unknown that carries FINDING. -> the Stop it raised, or None when it returned."""
+        with self.unreadable(problems=[self.FINDING]):
+            try:
+                merge.undo_check(self.co, "origin/main", unknown_ok=unknown_ok)
+            except merge.Stop as e:
+                return e
+        return None
+
+    def test_an_unknown_that_carries_findings_is_refused_as_dropped_and_the_reason_flag_does_not_lift_it(self):
+        e = self.refusal_of(unknown_ok="octopus read it")
+        self.assertIsNotNone(e, "the reason flag lifted an Unknown that carries findings: undo_check returned")
+        self.assertIsInstance(e, merge.Dropped, "an Unknown that carries findings was not refused as a Dropped: %s" % type(e).__name__)
+        self.assertNotIsInstance(e, merge.Unread, "an Unknown that carries findings was refused as Unread, which no refusal is")
+        self.assertIn(self.FINDING, str(e))
+        self.assertIn("git is older than 2.38", str(e), "the refusal does not carry the UNKNOWN's own message")
+
+    def test_the_reason_flag_does_not_lift_an_unknown_that_carries_findings_at_the_merge(self):
+        before = self.refs()
+        with self.unreadable(problems=[self.FINDING]):
+            rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "octopus read it")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(self.FINDING, out)
+        self.assertEqual(self.refs(), before)
+        self.assertFalse(self.lock_ref())
+
+    def test_a_refusal_for_an_unknown_that_carries_findings_names_the_findings_and_the_unknown(self):
+        with self.unreadable(problems=[self.FINDING]):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(self.FINDING, out)
+        self.assertIn("git is older than 2.38", out)
+
+    def test_an_unknown_with_no_findings_is_still_lifted_by_the_reason_flag(self):  # control
+        with self.unreadable(problems=[]):
+            got = merge.undo_check(self.co, "origin/main", unknown_ok="octopus read it")
+        self.assertEqual(got, "octopus read it")
 
     def unreadable_after_the_claim(self):
         """The first silent-undo read passes. The second, which prove() runs after the claim push, cannot read the history."""
@@ -12979,6 +13296,19 @@ class ReviewRecordForm(unittest.TestCase):
         with self.subTest(field="a malformed field above the CI line"):  # the footer does not rescue a malformed record part
             self.assertIsNone(review_fn(self, "parse_review")(record_text(kind="bogus").rstrip("\n") + REVIEW_FOOTER))
 
+    def test_a_note_line_after_a_blank_line_below_the_ci_line_is_not_a_record(self):
+        # Pins the incident's own text: a note line after the CI line, with a blank line before it. The field case above has no blank
+        # line, so this one is not redundant. The same record with no note parses, keeps its fix check, and is done at its head.
+        head, fix_head = "d35865d42dae16eef06d9cc516c56f904c287fe1", "5acce9e26c7520dc8808304f87dfeb6805192300"
+        body = record_text(n=2189, head=head, guard="yes", net="positive", fix=(fix_check_line(head=fix_head, model="sonnet"),),
+                           rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, sonnet, PASS"))
+        note = 'Note, Fix: none, Until: 2026-11-21: the remedy says "copy your edited files aside"; on real git a copy leaves the file in place.'
+        with_note = body.rstrip("\n") + "\n\n" + note + REVIEW_FOOTER
+        no_note = body.rstrip("\n") + REVIEW_FOOTER
+        self.assertIsNone(review_fn(self, "parse_review")(with_note), "parse_review read a note line below the CI line as part of the record")
+        self.assertEqual(record_state(self, no_note, head=head), "done", "the record without the note is not done at its head")
+        self.assertEqual(parse_text(self, no_note).get("fix"), (fix_head, "reviewer", "sonnet", "PASS"), "the fix check did not parse")
+
 class ReviewRecordRules(unittest.TestCase):
     """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS
     and the last design-reviewer line is PASS or absent, or the third round is done and Guard or check is no, or the third round is done
@@ -13248,33 +13578,15 @@ class ReviewFixRules(unittest.TestCase):
         self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
 
 class ReviewEnv(Env):
-    """The review-record cases' one home for running merge: a run that returns (rc, stdout, stderr) and reads a usage error's SystemExit as
-    its code, and the check that a usage error came from a parser that knows the flag. No test lives here."""
+    """The review-record cases' flags and records. The run helpers (run_args, assert_usage_error) are Env's. No test lives here."""
 
     def flags(self, *extra):
         """The review flags, with --head set to the live head of the feature branch, then `extra`."""
         return (*REVIEW_FLAGS, "--head", self.head(), *extra)
 
-    def run_args(self, *argv, host=None, hosts=None):
-        out, err = io.StringIO(), io.StringIO()
-        try:
-            rc = self.run_merge(*argv, host=host, hosts=hosts, stdout=out, stderr=err)[0]
-        except SystemExit as e:
-            rc = e.code
-        return rc, out.getvalue(), err.getvalue()
-
     def record_host(self, *comments, head=REVIEW_HEAD):
         """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first."""
         return PullsHost([batch_pull(7, head)], {}, comments=comments)
-
-    def assert_usage_error(self, *argv):
-        """A usage error: rc 2, from a parser that knows every flag in argv. stderr holds no OLD_PARSER_ERRORS text and no traceback."""
-        rc, out, err = self.run_args(*argv)
-        self.assertEqual(rc, 2, out + err)
-        for old in OLD_PARSER_ERRORS:  # a parser that has never heard of the flag says one of these
-            self.assertNotIn(old, err)
-        self.assertNotIn("Traceback", err)
-        return out, err
 
 class ReviewArgs(ReviewEnv):
     """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
@@ -14300,11 +14612,12 @@ def setUpModule():
 
 
 class ProseJudge(Env):
-    def setup_range(self, main_files, feat_files, links=None, later=None):
+    def setup_range(self, main_files, feat_files, links=None, later=None, renames=None):
         """main gains `main_files` ({path: text}), so their lines are in no added line. Then feat removes the pending record
         (second.md, governed prose with no cite) and changes `feat_files`, and makes each `links` ({path: target}) a symlink to
         target. Feat then takes main's base, and `later` ({path: text}) is one more feat commit after that: the lines it adds to
-        a prose file are selected through the diff base, and a cited line through the backing file it cites."""
+        a prose file are selected through the diff base, and a cited line through the backing file it cites. `renames` ({old: new})
+        is one more feat commit after the base too: a git mv of each old path to its new one."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
@@ -14321,12 +14634,14 @@ class ProseJudge(Env):
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: drop the pending record, change the backing")
         sh(o, "git", "push", "-q", "origin", "feat")
         head_takes_base(self)
-        if later:  # after the base is taken: a prose file that main and feat both add would conflict in head_takes_base's merge
+        if later or renames:  # after the base is taken: a prose file that main and feat both add would conflict in head_takes_base's merge
             sh(o, "git", "fetch", "-q", "origin")
             sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-            for path, text in later.items():
+            for old, new in (renames or {}).items():
+                sh(o, "git", "mv", old, new)  # the new path keeps the old text, so git reads a pure rename
+            for path, text in (later or {}).items():
                 put(os.path.join(o, path), text)
-            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: add lines to the prose")
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: move the prose file" if renames and not later else "feat: add lines to the prose")
             sh(o, "git", "push", "-q", "origin", "feat")
 
     def run_capped(self, cap=PROSE_CAP):
@@ -14597,6 +14912,18 @@ class ProseJudge(Env):
             with self.assertRaises(ModelStarted):
                 decision_watch._nowindow.run(["claude", "-p"])
         self.assertEqual(started, [], "the refused claude start still reached the runner")
+
+    def test_a_renamed_prose_file_has_its_lines_judged_as_added(self):
+        # --no-renames in prose_judge_lines: the moved file's lines read as added, so each is judged. Under rename detection a pure
+        # rename adds no line, and its lines go unjudged. Scope first: the range is one pure rename of the prose file.
+        moved = "docs/notes/moved.md"
+        self.setup_range({PROSE: "# Cloud notes\n\nThe cloud runner is idle on weekends.\n"}, {}, renames={PROSE: moved})
+        base = sh(self.other, "git", "merge-base", "origin/main", "origin/feat")
+        scope = sh(self.other, "git", "diff", "--name-status", "-M", base, "origin/feat")
+        self.assertIn("R100\t%s\t%s" % (PROSE, moved), scope, "the range is not a pure rename of %s, so the case proves nothing:\n%s" % (PROSE, scope))
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the moved %s adds its line, so the line is judged\n%s" % (len(stub.prompts), moved, out))
+        self.assertIn("idle on weekends", stub.prompts[0], "the call does not carry the moved file's line")
 
     def test_no_backed_line_and_no_added_prose_makes_no_model_call(self):
         # The range changes code only, and the prose on main cites a file the range does not change.
