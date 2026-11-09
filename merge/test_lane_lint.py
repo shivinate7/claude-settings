@@ -347,6 +347,82 @@ class LaneLint(CiJobStub, tm.CloudSession):
         rc, out = self.lint_run("--lane-lint", "7", base="release")
         self.assertEqual(rc, 0, out)
 
+    def stacked_pr_on_release(self):
+        """PR 7 is feat, based on release, not main. release moves one commit on after feat forked from it. -> (feat sha, release sha)."""
+        self.push_release_branch()
+        self.host.base = "release"
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "release", "origin/release")
+        tm.put(os.path.join(o, "release-moved.txt"), "release moved after feat forked\n")
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", "release moves on")
+        tm.sh(o, "git", "push", "-q", "origin", "release")
+        return self.head("feat"), tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def contains(self, head, base):
+        """True when `base` is an ancestor of `head`. Read in the second clone, which made both commits, so the lane checkout
+        is not fetched here: the lint must fetch its own base."""
+        return subprocess.run(["git", "-C", self.other, "merge-base", "--is-ancestor", base, head], capture_output=True).returncode == 0
+
+    def test_a_stacked_pr_whose_head_lacks_its_bases_head_fails_and_names_the_base_its_missing_sha_and_the_merge_commit_remedy(self):
+        """The incident: a stacked pull request that lacked its base's head conflicted at merge. The lint passes here, so the
+        refusal comes from the stack check alone."""
+        feat, release = self.stacked_pr_on_release()
+        self.assertFalse(self.contains(feat, release), "precondition: the head already holds the base's head, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        before = self.refs()
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a stacked PR whose head lacks its base's head did not refuse: " + out)
+        self.assertEqual(pass_lines(out), [], "a stacked PR whose head lacks its base's head printed a PASS line: " + out)
+        self.assertIn("release", out, "the refusal does not name the base branch: " + out)
+        self.assertIn(release[:7], out, "the refusal does not name the base's missing sha: " + out)
+        self.assertRegex(out, r"(?i)merge commit", "the refusal lacks the merge-commit remedy: " + out)
+        self.assertEqual(self.refs(), before, "a refused lane pushed a ref")
+        self.assertEqual(self.worktrees(), 1, "a refused lane left a worktree behind")
+
+    def test_a_stacked_pr_whose_head_merged_its_base_in_passes_with_the_one_pass_line(self):
+        _, release = self.stacked_pr_on_release()
+        o = self.other
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        tm.sh(o, "git", "merge", "-q", "--no-ff", "-m", "merge release into feat", "origin/release")
+        tm.sh(o, "git", "push", "-q", "origin", "feat")
+        head = self.head("feat")
+        self.assertTrue(self.contains(head, release), "precondition: the merge did not bring the base's head into the head")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7", base="release", head=head)
+        self.assertEqual(rc, 0, out)
+        lines = pass_lines(out)
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn(head[:7], lines[0], out)
+
+    def test_a_pr_on_main_whose_head_lacks_mains_head_gets_no_stack_row_and_still_passes(self):
+        """Main moving is not this check's job: a PR based on main gets no stack row."""
+        self.main_moves()
+        new_main = tm.sh(self.other, "git", "rev-parse", "HEAD")
+        self.assertFalse(self.contains(self.head("feat"), new_main), "precondition: the head already holds main's head, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertNotIn(new_main[:7], out, "a PR on main got a stack row that names main's head: " + out)
+
+    def test_the_stack_refusal_is_a_fail_that_no_unknown_ok_reason_lifts(self):
+        feat, release = self.stacked_pr_on_release()
+        self.assertFalse(self.contains(feat, release), "precondition: the head already holds the base's head, so the case probes nothing")
+        self.use_ci_job(UNKNOWN, 2)
+        before = self.refs()
+        rc, out = self.run_lane("--lane-lint", "7", "--lint-unknown-ok", "shellcheck is not on this box")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted the stacked PR's refusal: " + out)
+        self.assertEqual(pass_lines(out), [], "the stacked PR's refusal printed a PASS line: " + out)
+        self.assertRegex(out, r"FAIL", "the stacked PR's refusal does not read as a FAIL: " + out)
+        self.assertIn(release[:7], out, "the stacked PR's refusal does not name the base's missing sha: " + out)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the stacked PR passed without a reason: " + out)
+        self.assertRegex(out, r"FAIL", "the stacked PR's refusal without a reason does not read as a FAIL: " + out)
+        self.assertIn(release[:7], out, "the stacked PR's refusal without a reason does not name the base's missing sha: " + out)
+        self.assertEqual(self.refs(), before, "a refused lane pushed a ref")
+
     def test_an_exception_in_the_lint_run_still_removes_the_worktree(self):
         self.use_ci_job(PASSING, 0)
         real_sh, seen = merge.sh, []
