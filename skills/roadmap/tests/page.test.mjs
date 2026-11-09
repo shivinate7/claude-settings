@@ -344,6 +344,18 @@ test("the row tint: a paused row's title has the in-progress title's font weight
   const paused = await computedOf(page.locator("#s-a3 .ttl"), "fontWeight"), active = await computedOf(page.locator("#s-a .ttl"), "fontWeight");
   assert.equal(paused, active, `the paused step's title is weight ${paused}, not the in-progress title's ${active}`);
 });
+// The paused title's match with the in-progress title means something only if that title is bolder than a plain one. With both titles
+// plain, the paused match above passes, so this case fails: it is the anchor for that match.
+test("the row tint: the in-progress title is bolder than a to-do title", async (t) => {
+  const steps = { a: stepOf("Step a", "doing", 2), t9: stepOf("Step t9", "todo", 9) };
+  // Step a has an open pull request on its branch a, which makes it a live lane.
+  const live = { readAt: new Date().toISOString(), threads: [], pulls: [{ number: 7, title: "Step a", branch: "a" }], branches: [], sessions: [] };
+  const page = await open(t, builtPage({ steps, live })); if (!page) return;
+  assert.match(await statusLabel(page, "a"), /In progress/, "step a does not read In progress: there is no in-progress title to compare with");
+  assert.match(await statusLabel(page, "t9"), /To do/, "step t9 does not read To do: there is no to-do title to compare with");
+  const active = await computedOf(page.locator("#s-a .ttl"), "fontWeight"), todo = await computedOf(page.locator("#s-t9 .ttl"), "fontWeight");
+  assert.ok(Number(active) > Number(todo), `the in-progress title is weight ${active}, not bolder than the to-do title's ${todo}`);
+});
 // The Stalled pill sits on its row's --bad-soft tint. Its own fill is --bad-soft too, so it vanishes unless the rule that sets it to --surface applies.
 // The pill's fill is read on .tag.stl and the row's on .rw. Each expected value is a probe of the page's own token, taken on the element it is compared with.
 test("the Stalled pill on a stalled row has its own fill, --surface, not the row's --bad-soft tint, in light and dark", async (t) => {
@@ -436,6 +448,13 @@ test("control: the rail's cleanup bar draws a blocked step as blocked", async (t
   assert.equal(await page.locator(`${BARS[1][1]} > i.blk`).count(), 1, "the rail's cleanup bar does not draw the blocked step as blocked");
 });
 
+// The rail's label names the in-progress step too, as its bar draws it: barFixture has a2 in progress (the phase head's label already does).
+test("the rail's cleanup button names its in-progress steps in its label, as its bar draws them", async (t) => {
+  const page = await open(t, builtPage({ steps: barFixture(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
+  assert.equal(await barActCells(page, '#rail button[data-phase="cleanup"]'), 1, "the rail's cleanup bar does not draw the in-progress step (i.act)");
+  const label = (await page.locator('#rail button[data-phase="cleanup"]').getAttribute("aria-label")) || "";
+  assert.match(label, /\b1 in progress\b/, `the rail's cleanup label does not name the in-progress step: "${label}"`);
+});
 // The words: the rail's label, the bars' labels and the Now card's count line name the stalled and paused steps.
 test("the rail's cleanup button names its stalled and paused steps in its label", async (t) => {
   const page = await open(t, builtPage({ steps: barFixture(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
