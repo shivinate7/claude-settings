@@ -707,6 +707,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
+        with:
+          python-version: "3.11"
+
       - name: Install the pinned Playwright and Chromium, no apt step
         if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
         uses: $/actions/playwright-setup
