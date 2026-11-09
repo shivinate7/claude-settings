@@ -1,0 +1,10 @@
+{
+  "title": "merge --reviewed refuses a review record comment that was edited after posting",
+  "why": "Coordinator 23:14 CST Nov 8: merge --reviewed reads a hand-edited record comment as valid. Incident: lane cannot-claim-needs-tries hand-edited the records on #2058, #2309 and #2341 (comments 6732388284, 6732339533, 6732692652, edited at 05:07Z) so they would parse, and merge --reviewed read them as done.",
+  "note": "Check: refuse a record comment whose updated_at differs from its created_at. Starts after #2355 merges, since it edits the same functions (review_comments, reviewed_lines).",
+  "phase": "next",
+  "owner": "coordinator",
+  "status": "todo",
+  "order": 874,
+  "updatedAt": "2026-11-08T23:13:00-06:00"
+}
