@@ -2646,6 +2646,12 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
+    # The second pass of gh_call_of's loop reads a repo flag right after the group word (`gh pr -R o/r comment`).
+    # Only that pass goes: the first pass, before the group word, still reads its flags.
+    ("gh-group-flag: a repo flag after the group word goes unread",
+     '    for _ in (0, 1):',
+     '    for _ in (0,):',
+     "guard", "after the group word"),
     # Rule brief-destructive-git: the check reads no brief, so an ordered discard passes.
     ("brief-destructive-git: the check finds no ordered discard, so a brief that orders a reset passes",
      "                if match and match[1] not in BRIEF_DESTRUCTIVE_SKIP",
