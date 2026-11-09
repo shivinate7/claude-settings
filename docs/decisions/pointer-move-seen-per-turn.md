@@ -16,13 +16,15 @@ Option a, a guard that refuses `update-ref` and `reset` on the pointer checkout,
 
 ## Incident
 
-Lane notes-fix-large-1 ran 1.5 days on a pointer checkout detached at an old merge (2026-11-07 20:03 UTC to 2026-11-09 11:40 CST). The session start hook reports only at session start. The mover was never found.
+Lane notes-fix-large-1 ran on a pointer checkout detached at an old merge (2026-11-07 20:03 UTC to 2026-11-09 11:40 CST). `session_start.sh` (the session start hook) reports only at session start. The mover was never found.
 
 ## Harm stopped
 
-Every hook, lint and agent ran old code, unseen.
+Every hook, lint and agent runs old code, unseen.
 
 ## Cost
+
+Per rule `outcomes-mechanize-rules`:
 
 - At most 4 `git rev-parse` calls per Stop. One call when the pointer is on main.
 - No file written. No new process or timer. The read runs inside the Stop hook already running.
@@ -34,7 +36,7 @@ Every hook, lint and agent ran old code, unseen.
 
 It tests that with `merge-base --is-ancestor`, against a fetch that keeps history from a day before main's tip (`--shallow-since`).
 
-An undecided result, any exit other than 0 or 1, warns unknown and keeps the clone.
+An undecided result from that check, any exit other than 0 or 1, warns unknown and keeps the clone. So does a failed fetch while main differs from the recorded sha.
 
 Kind: process
 Home: rule:outcomes-mechanize-rules
