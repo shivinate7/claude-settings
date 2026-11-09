@@ -5535,7 +5535,7 @@ sh("git-after-cd: an if ! check whose then body echoes an apostrophe in quotes, 
 # the `set -o pipefail` pipe pass in this family.
 sh("git-after-cd: a check piped to tee, then || exit 1 and ; a git push -u, is refused",
    "make check | tee l || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
-   carries=("&&",))
+   carries=("&&", "pipefail"))
 sh("git-after-cd: a check piped to tee, then || a braced exit 1 and ; a git push -u, is refused",
    "make check | tee l || { exit 1; }; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&",))
@@ -5579,7 +5579,13 @@ sh("git-after-cd: a braced git commit piped to tee, then && a git push -u, passe
 # AN IF TEST THAT PIPES A CHECK TO TAIL. The test reads tail's status, not make's, so the then branch runs on a failed
 # make, and the push there runs on that failure. Bash runs the push here, so it is refused.
 sh("git-after-cd: an if test of a check piped to tail, then a git push -u in the then branch, is refused",
-   "if make check | tail -3; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT)
+   "if make check | tail -3; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("pipefail",))
+# AN IF TEST WHOSE PIPE IS IN ITS SECOND COMMAND. The test is `a && make check | tail -3`, and the pipe that hides make's
+# status follows `a`, so the then branch runs on a failed make. Bash runs the push here, so it is refused.
+sh("git-after-cd: an if test of a check after && and piped to tail, then a git push -u in the then branch, is refused",
+   "if a && make check | tail -3; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("pipefail",))
 # A PRINTF PIPED TO A GIT COMMIT, THEN && A PUSH. printf runs no check, and the push waits on the commit's status, so
 # the push runs only after a commit that succeeded. No check runs before it, so it passes.
 sh("git-after-cd: a printf piped to a git commit -F, then && a git push -u, passes",
