@@ -42,9 +42,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (builders-cannot-edit-tests)
   plumbing-commit-diff deny. A `git commit-tree` call of a builder, test-author, record-writer or
                        designer whose tree holds a path the role may not change, judged against
-                       the first parent (git's own merge of two parents; no tree for no parent).
-                       The reason names no path. No override lifts it. A tree git cannot read is
-                       logged as role-diff-unread and allowed.
+                       its parent (git's own merge of two parents; no tree for no parent), also
+                       inside `$( )` or backticks. The reason names no path. No override lifts
+                       it. A tree git cannot read, a parent it cannot resolve, two parents it
+                       cannot merge and three or more parents log role-diff-unread and are allowed.
                        (builders-cannot-edit-tests)
   author-diff, writer-diff, designer-diff, role-diff-*
                        noted. A test-author or record-writer commit or push.
@@ -2429,12 +2430,29 @@ PLUMBING_REASON = (
 )
 # `git commit-tree` options that take a value in the next word.
 COMMIT_TREE_VALUE_OPTS = ("-p", "-m", "-F")
+# A parent word that asks git for a name: `$(git rev-parse X)` or the backtick form. It is read as X.
+PARENT_REV_PARSE = re.compile(r"^(?:\$\(|`)\s*git\s+rev-parse\s+([^\s-][^\s)`]*)\s*(?:\)|`)$")
+
+
+def whole_words(args):
+    """`args` with each unquoted `$( )` or backtick group joined into one word, so that a word the shell
+    expands counts once, as the shell passes it."""
+    words, held = [], ""
+    for word in args:
+        held = held + " " + word if held else word
+        if held.count("(") > held.count(")") or held.count("`") % 2:
+            continue
+        words.append(held)
+        held = ""
+    return words + ([held] if held else [])
 
 
 def commit_tree_args(args):
     """`(tree, parents)` read from the words after `commit-tree`, or None when they do not name exactly
-    one tree."""
+    one tree. A parent spelled `$(git rev-parse X)` is X; another word the shell expands stays as
+    spelled, and git cannot read it, so the call is unread."""
     tree, parents, index = "", [], 0
+    args = whole_words(args)
     while index < len(args):
         word = args[index]
         if word in COMMIT_TREE_VALUE_OPTS:
@@ -2443,6 +2461,9 @@ def commit_tree_args(args):
             if word == "-p":
                 parents.append(args[index + 1])
             index += 2
+        elif word.startswith("-p") and not word.startswith("--"):
+            parents.append(word[2:])
+            index += 1
         elif word.startswith("-"):
             index += 1
         elif tree:
@@ -2450,16 +2471,18 @@ def commit_tree_args(args):
         else:
             tree = word
             index += 1
+    parents = [(PARENT_REV_PARSE.match(p) or [None, p])[1] for p in parents]
     return (tree, parents) if tree else None
 
 
 def plumbing_diff(root: str, top: str, role: str, args):
     """The paths of a `commit-tree` call that the role may not change, judged on the tree it would
     commit; None when git could not answer (unknown, never clear). The tree is compared with its
-    first parent, with git's own merge of the first two parents when there are two or more, and with
-    no tree at all (every path counts as added) when there is no parent."""
+    parent, with git's own merge of the two parents when there are two, and with no tree at all
+    (every path counts as added) when there is no parent. Three or more parents, and two that git
+    cannot merge, are unknown: git makes no merge to compare with."""
     read = commit_tree_args(args)
-    if read is None:
+    if read is None or len(read[1]) > 2:
         return None
     named, parent_names = read
     ids = []
@@ -2470,12 +2493,13 @@ def plumbing_diff(root: str, top: str, role: str, args):
         ids.append(answer.stdout.strip())
     tree, parents = ids[0], ids[1:]
     if not parents:
-        old, paths = "", git_names(root, "ls-tree", "-r", "--name-only", "-z", tree)
+        old, paths = "", git_names(root, "ls-tree", "-r", "--full-tree", "--name-only", "-z", tree)
     else:
         old = parents[0]
         if len(parents) > 1:
-            # the merge of the first two parents; a merge git cannot make falls back to the first parent
-            old = merge_tree(root, parents[0], parents[1]) or old
+            old = merge_tree(root, parents[0], parents[1])
+            if old is None:
+                return None
         paths = changed_paths(root, old, tree, top)
     if paths is None:
         return None
@@ -3861,13 +3885,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     cmd = norm(stripped)
 
     # 0b. A builder, test-author or record-writer's `git commit` or `git push` is judged on the diff it would send.
+    # A `git commit-tree` inside `$( )` or backticks is judged too (rule 1 reads those texts the same way).
     if role:
-        for segment in split_segments(stripped):
-            for subcommand, args in git_calls(segment):
-                if subcommand in ("commit", "push"):
-                    diff_refusal(tool, role, command_root(stripped, cwd))
-                elif subcommand == "commit-tree":
-                    plumbing_refusal(tool, role, args, command_root(stripped, cwd))
+        texts = [stripped, *substitution_commands(raw, stripped)]
+        for position, text in enumerate(texts):
+            for segment in split_segments(text):
+                for subcommand, args in git_calls(segment):
+                    if subcommand in ("commit", "push") and not position:
+                        diff_refusal(tool, role, command_root(stripped, cwd))
+                    elif subcommand == "commit-tree":
+                        plumbing_refusal(tool, role, args, command_root(stripped, cwd))
 
     # 0c. A command that sets a git location variable (q_max incident, 2026-10-14). Placed before
     # rule 1 on purpose: the deny wins where the shared-tree guard would only ask (arbiter ruling).
