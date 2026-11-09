@@ -5364,6 +5364,13 @@ sh("git-after-cd: a check, then ; a make a || make b || exit 1 chain, then a git
 sh("git-after-cd: a check, then ; a make a piped to tee, protected by || exit 1, then a git push -u, is refused",
    "pytest -q; make a | tee l || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd",
    cwd=NOGIT, carries=("&&",))
+# An echo head is inert, so it hides no check, yet the walk back from `|| exit` must still cross its pipe to reach
+# the `;` check behind it. The echo pipe alone passes.
+sh("git-after-cd: a check, then ; an echo piped to tee, protected by || exit 1, then a git push -u, is refused",
+   "pytest -q; echo x | tee l || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: an echo piped to tee, protected by || exit 1, then ; a git push -u, passes",
+   "echo x | tee l || exit 1; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: a make a || make b || exit 1 chain, then ; a git push -u, passes",
    "make a || make b || exit 1; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 # A SUBSTITUTION'S BACKTICK OR PROCESS FORM RUNS ITS CHECK INSIDE THE SHELL. A check in backticks or in a `<( )`
