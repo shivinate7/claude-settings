@@ -102,6 +102,12 @@ class Stop(Exception):
 class Liftable(Stop):
     """A refusal that a reason flag lifts. Its message names the flag, so main() does not add the no-override line."""
 
+class LintFail(Stop):
+    """The lint of a head FAILed. `lines` are ci-job's FAIL lines, `log` its `log=` line as a list of 0 or 1: the step output that names the paths is in that log."""
+    def __init__(self, message, lines, log):
+        super().__init__(message)
+        self.lines, self.log = lines, log
+
 class NetStop(Stop):
     """A `gh` call kept failing with a network error. Not a refusal: the caller must not revert a claim for it."""
 
@@ -2639,7 +2645,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         say(f"PASS: lint of {short} against {base} passes{named}. The batch runner may take this head, or join it to a batch.", *pin_notes)
         return 0
     if state == "fail":
-        raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
+        raise LintFail("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]), lines, log)
     if liftable and unknown_ok.strip():
         say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log)
         return 0
@@ -3755,10 +3761,68 @@ def sync_batch(root, h, pr, info, block, on, base):
     start, recorded = batch_start(root, block, base)
     start = now_on or start
     text = freeze_rewrite(info["body"], block, freeze_lines(name, heads, block["dropped"], (on, now_on) if on else None, recorded))
+    drafted = return_to_draft(h, pr, info)
     new = build_batch_branch(root, name, start, sorted(heads.items()), lease=tip, body=(h, pr, info["body"], text))
     say(f"merge: batch {name} rebuilt on {on or base}, lanes {lane_list(heads)}"
         + (f"; it held {len(strays)} lane head(s) its frozen set does not list, which are now off." if strays else "."))
+    if drafted and not info["draft"]:  # a draft was a draft before the rebuild; only a batch this rebuild sent back needs the line
+        needs_ready(name)
     return 1 if restack(root, h, branch, new, {s: s for s in strays}) else 0
+
+VERDICT_HEADER = re.compile(r"^=== verdict run \d{4}-\d\d-\d\d \d\d:\d\d:\d\d: (.*)$")
+FAIL_COMMAND = re.compile(r"FAIL (\S.*?) rc=-?\d+ \(")
+
+def failed_step_text(fail):
+    """-> the text bin/verdict kept for each step that FAILed in a lane lint, or None when it cannot be read. ci-job keeps one log for all its steps, each
+    section headed by `=== verdict run <time>: <command>`, and the FAIL line carries the same command. The passing steps' sections are left out, so a
+    path a passing step printed blames no lane."""
+    commands = {m[-1] for m in (FAIL_COMMAND.findall(l) for l in fail.lines) if m}
+    if not commands or not fail.log or not fail.log[0].startswith("log="):
+        return None
+    try:
+        with open(fail.log[0][4:], encoding="utf-8", errors="replace") as f:
+            text = f.read().splitlines()
+    except OSError:
+        return None
+    kept, current = [], False
+    for line in text:
+        header = VERDICT_HEADER.match(line)
+        if header:
+            current = header[1] in commands
+        elif current:
+            kept.append(line)
+    return "\n".join(kept) if kept else None
+
+def blamed_lanes(root, fail, lanes, base):
+    """-> {PR: [path]} of each frozen lane whose diff against `base` touches a path the FAILed lane-lint step names, or None when that cannot be read.
+    A lane is matched by its paths, not by a path grammar: a path counts when it is a whole token of the step's output, bare, after `./`, or after an absolute prefix."""
+    text = failed_step_text(fail)
+    if text is None:
+        return None
+    seen = set()
+    for token in re.findall(r"[\w@+~./-]+", text):
+        token = token[2:] if token.startswith("./") else token
+        seen.add(token)
+        if token.startswith("/"):
+            seen.update(token[i + 1:] for i, c in enumerate(token) if c == "/")
+    blamed = {}
+    for n, head in sorted(lanes.items()):
+        c, out = git(root, "diff", "-z", "--name-only", "--no-renames", f"origin/{base}...{head}")
+        if c:
+            return None
+        hit = [p for p in out.split("\0") if p and p in seen]
+        if hit:
+            blamed[n] = hit
+    return blamed
+
+def blame_lines(name, blamed, base):
+    """The lines a FAILing lint of batch/NAME's head adds: each blamed lane with its drop command. With no lane to name, one line says the blame is unknown and no
+    drop command is printed: a lane is never named by a guess."""
+    if not blamed:
+        return [f"merge: the blame is unknown: no path in the failing check's output is one that a frozen lane's diff against {base} touches, or that output could not be read, so no lane is named and no drop command is printed."]
+    return [line for n in sorted(blamed) for line in (
+        f"merge: #{n}'s diff against {base} touches {', '.join(blamed[n][:3])}{' and more' if len(blamed[n]) > 3 else ''}, which the failing check names. To take it off the batch, run:",
+        f"  merge --batch-drop {name} {n}")]
 
 def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok=""):
     """merge --batch-build NAME PR... [--on BRANCH] [--base BRANCH]: the batch branch and its one draft pull request, or the same set again.
@@ -3828,7 +3892,10 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok=""):
         return 0
     rc = sync_batch(root, h, pr, info, block, on, base)
     if ready:
-        lane_lint(root, branch, h, base, unknown_ok)  # the one lint of the batch head: a build never lints, a lane's own lint is not repeated
+        try:
+            lane_lint(root, branch, h, base, unknown_ok)  # the one lint of the batch head: a build never lints, a lane's own lint is not repeated
+        except LintFail as e:
+            raise Stop("\n".join([str(e), *blame_lines(name, blamed_lanes(root, e, heads, base), base)])) from None
         ok, why = h.ready(pr)
         if not ok:
             raise Stop(f"#{pr} is a draft and was not marked ready. {why}")
