@@ -923,7 +923,7 @@ def _push_calls(segment: str, script: str, cwd: str):
     segment hands on (`bash -c`, `sh -lc`, `eval`, `ssh`): the one reader of those wrappers is inner_commands.
     `script` is the text the segment came from, which push_target reads for a leading `cd`. A script
     runs in the folder its segment's own `cd` or `git -C` names."""
-    for subcommand, args in push_calls(segment):
+    for subcommand, args in push_calls(segment, script):
         if subcommand == "push":
             where, overrides = push_target(segment, script, cwd)
             yield _command_words(args), where, overrides
