@@ -1268,8 +1268,8 @@ def probes(calls):
 
 
 class CallBound(unittest.TestCase):
-    """branch_only ran one `git log -G` per lost line, up to OWN_LOOKUPS per file. A merge that drops
-    20 lines of one file must cost a fixed number of git calls, not one per line."""
+    """The check reads every lost line of a file in one `git log -p`, never one `git log -G` per line. A merge
+    that drops 20 lines of one file must cost a fixed number of git calls, not one per line."""
 
     def lost(self, lines, own=False):
         r, m = drop_merge(lines, own)
@@ -1308,12 +1308,12 @@ class Scanner(unittest.TestCase):
         self.assertEqual(r.verdict(), [])
 
 
-# ----------------------------------------------------- the own-line lookup cap
+# ------------------------------------------------ own lines past position 25
 
 
-OWN30 = ["own line %02d" % i for i in range(1, 31)]  # more than OWN_LOOKUPS, so the cap binds
+OWN30 = ["own line %02d" % i for i in range(1, 31)]  # more than 25: a per-file cap of 25 would leave own lines unread
 MAIN30 = ["main line %02d" % i for i in range(1, 31)]
-TAIL = ["main tail %d" % i for i in range(1, 4)]  # lost after the 30 own lines, so past the cap
+TAIL = ["main tail %d" % i for i in range(1, 4)]  # lost after the 30 own lines, so past position 25 of the lost list
 
 
 def dropped_from_parent(r, m, n, lines):
@@ -1348,35 +1348,35 @@ def mixed_merge():
 
 
 class OwnLineCap(unittest.TestCase):
-    """branch_only_lines reads at most OWN_LOOKUPS lost lines of one file as the branch's own. A line past that
-    cap counts as lost, so a merge that drops more own lines than the cap reads as undone main work."""
+    """branch_only_lines reads every lost line of one file as the branch's own or not, never a capped prefix.
+    A merge that drops more than 25 own lines of one file must not read as undone main work."""
 
     def test_a_merge_that_drops_thirty_own_lines_of_one_file_reads_clean(self):
         r, m = drop_merge(OWN30, own=True)
         self.assertTrue(dropped_from_parent(r, m, 1, OWN30), "premise: the merge drops the 30 own lines from its first parent")
-        self.assertEqual(C.lost_lines(r.dir, m, ("origin/main",)), [], "own lines past the lookup cap read as lost")
-        self.assertEqual(r.verdict(), [], "own lines past the lookup cap read as lost")
+        self.assertEqual(C.lost_lines(r.dir, m, ("origin/main",)), [], "own lines past position 25 read as lost")
+        self.assertEqual(r.verdict(), [], "own lines past position 25 read as lost")
 
     def test_thirty_main_carried_lines_a_merge_drops_are_all_flagged(self):
         r, m = drop_merge(MAIN30, own=False)
         self.assertTrue(dropped_from_parent(r, m, 2, MAIN30), "premise: the merge drops the 30 main lines from its second parent")
         flagged = [l for _, _, lines in C.lost_lines(r.dir, m, ("origin/main",)) for l in lines]
-        self.assertEqual(sorted(flagged), sorted(MAIN30), "main-carried lines past the lookup cap are not all flagged")
+        self.assertEqual(sorted(flagged), sorted(MAIN30), "main-carried lines past position 25 are not all flagged")
         text = "\n".join(r.verdict())
         for line in MAIN30:
             self.assertIn(line, text, "main-carried line missing from the verdict")
 
     def test_own_lines_past_the_cap_are_not_flagged_beside_main_lines_past_it(self):
         r, m = mixed_merge()
-        self.assertGreater(len(OWN30), C.OWN_LOOKUPS, "premise: the 30 own lines fill past the lookup cap")
+        self.assertGreater(len(OWN30), 25, "premise: the 30 own lines are more than the old 25-line cap")
         before = r.sh("show", "%s^1:app.txt" % m).split("\n")
         self.assertEqual([l for l in before if l in OWN30 or l in TAIL], OWN30 + TAIL, "premise: the first parent lists the own lines, then the 3 main lines")
         self.assertTrue(dropped_from_parent(r, m, 1, OWN30 + TAIL), "premise: the merge drops all 33 lines from its first parent")
         flagged = [l for _, _, lines in C.lost_lines(r.dir, m, ("origin/main",)) for l in lines]
-        self.assertEqual([l for l in flagged if l in OWN30], [], "own lines past the lookup cap reported as lost, beside the main lines")
-        self.assertEqual(sorted(flagged), sorted(TAIL), "the flagged lines are not exactly the 3 main lines past the cap")
+        self.assertEqual([l for l in flagged if l in OWN30], [], "own lines past position 25 reported as lost, beside the main lines")
+        self.assertEqual(sorted(flagged), sorted(TAIL), "the flagged lines are not exactly the 3 main lines past position 25")
         text = "\n".join(r.verdict())
-        self.assertEqual([l for l in OWN30 if l in text], [], "the verdict names own lines past the lookup cap")
+        self.assertEqual([l for l in OWN30 if l in text], [], "the verdict names own lines past position 25")
 
     def test_thirty_own_lines_cost_the_same_git_calls_as_five(self):
         r30, m30 = drop_merge(OWN30, own=True)
