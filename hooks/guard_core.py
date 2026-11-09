@@ -670,6 +670,45 @@ def _interpreter_header(words: str):
     return re.compile(r"(?<!\w)(?:" + words + r")(?:\.exe|\.cmd)?(?![\w.-])[^\n]*<<").search
 
 
+# A launcher runs the interpreter it is given as a later word (`uv run python -`, `docker exec -i c python3 -`).
+_LAUNCHERS = frozenset(
+    "uv uvx poetry pipenv pdm rye hatch conda mamba pyenv pipx npx pnpm yarn bunx volta fnm ssh docker podman kubectl".split())
+_REDIRECT_END = re.compile(r"[<>]\|?$")
+
+
+def _interpreter_command(words: str):
+    """Like `_interpreter_header`, but the interpreter must be the COMMAND of the heredoc's segment (after
+    assignments and wrappers such as `timeout 5` or `env X=1`), or follow a launcher's word. The word as a
+    redirect target (`cat > node <<EOF`), a path part (`cat > node/go <<EOF`, `cd ~/node && cat > go <<EOF`)
+    or an argument of another command is the name of a file, and the body is not that interpreter's.
+    A segment the tokenizer cannot read is no match, so the caller keeps the body whole."""
+    word = re.compile(r"(?:" + words + r")(?:\.exe|\.cmd)?").fullmatch
+
+    def command_is_interpreter(header: str) -> bool:
+        for segment in split_segments(header):
+            if "<<" not in segment:
+                continue
+            read = _segment_tokens(segment)
+            if read is None:
+                continue
+            tokens = []
+            for token in read[0]:
+                if "<<" in token:
+                    break
+                tokens.append(token)
+            index = _walk_wrappers(tuple(tokens))[0]
+            if index is None:
+                continue
+            if word(basename(tokens[index])):
+                return True
+            if basename(tokens[index]) in _LAUNCHERS and any(
+                    word(basename(token)) and not _REDIRECT_END.search(tokens[at])
+                    for at, token in enumerate(tokens[index + 1:], index) if token):
+                return True
+        return False
+    return command_is_interpreter
+
+
 _SHELLS = "bash|sh|zsh|dash|ksh|pwsh|powershell"
 # A header whose heredoc pipes into a shell (`cat <<EOF | sh`, `... | ssh host bash -s`) or into xargs or source
 # (`cat <<EOF | xargs sh -c`, `| source /dev/stdin`): the shell runs the body.

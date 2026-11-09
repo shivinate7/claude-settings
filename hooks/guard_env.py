@@ -9,7 +9,7 @@ import re
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
     NODE_WORDS, POWERSHELL_CALL, PYTHON_WORDS, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE,
-    _interpreter_header, _split_heredocs, _without_message_values, is_powershell, norm, split_segments,
+    _interpreter_command, _split_heredocs, _without_message_values, is_powershell, norm, split_segments,
 )
 
 
@@ -431,8 +431,8 @@ def _plain_escaped_quotes(cmd: str) -> str:
             lambda m: m.group(0) if m.group(0) == "\\\\" else "_", body))
 
 
-_PYTHON_HEADER = _interpreter_header(PYTHON_WORDS)
-_NODE_HEADER = _interpreter_header(NODE_WORDS)
+_PYTHON_HEADER = _interpreter_command(PYTHON_WORDS)
+_NODE_HEADER = _interpreter_command(NODE_WORDS)
 # A `//` line of a template literal ends at its line end, or sooner at the backtick or `${` that goes back to code.
 _TEMPLATE_PROSE_END = re.compile(r"\n|`|\$\{|\Z")
 
@@ -446,6 +446,40 @@ def _is_prose_string(body: str, start: int, end: int) -> bool:
     line_end = body.find("\n", end)
     line_end = len(body) if line_end < 0 else line_end
     return not body[line_start:start].strip() and not body[end:line_end].strip()
+
+
+def _template_end(body: str, start: int) -> int:
+    """The index of the backtick that closes the template literal opened at body[start], or len(body)."""
+    j, n = start + 1, len(body)
+    while j < n and body[j] != "`":
+        if body.startswith("${", j):
+            j = _expression_end(body, j + 2)
+        else:
+            j += 2 if body[j] == "\\" else 1
+    return j
+
+
+def _expression_end(body: str, start: int) -> int:
+    """The index just past the `}` that closes the `${` expression whose text starts at `start`, or len(body).
+    A brace nests, a quote opens a string up to its mate on the line, and a backtick opens a nested template."""
+    j, n, depth = start, len(body), 1
+    while j < n:
+        char = body[j]
+        if char == "`":
+            j = _template_end(body, j) + 1
+            continue
+        if char in "'\"":
+            j += 1
+            while j < n and body[j] not in (char, "\n"):
+                j += 2 if body[j] == "\\" else 1
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if not depth:
+                return j + 1
+        j += 1
+    return n
 
 
 def _blank_code_prose(body: str, python: bool) -> str:
@@ -494,6 +528,9 @@ def _blank_code_prose(body: str, python: bool) -> str:
                     k = _TEMPLATE_PROSE_END.search(body, j).start()
                     out.append(body[i:j])
                     i, j = k, k
+                    continue
+                if char == "`" and body.startswith("${", j):
+                    j = _expression_end(body, j + 2)
                     continue
                 j += 2 if body[j] == "\\" else 1
             out.append(body[i:j + 1])
