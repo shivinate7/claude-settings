@@ -228,19 +228,44 @@ def push_refspecs(args):
 
 def push_moves(args, cwd: str, overrides=None):
     """[(remote, destination branch, source rev)] for each branch a non-forced `git push` writes, off the literal
-    default names (main, master). A forced, leased, `+`, mirror, `--all`, deleting or tags-only push gives []. The
-    remote is the named one, else `origin`. A bare push has the source `HEAD`; a colon-less refspec is its own
-    source. It starts no process beyond those `push_destinations` already shares."""
+    default names (main, master). A forced, leased, `+`, mirror, `--delete` or tags-only push gives []. A `:ref`
+    refspec is a deletion, not a move: it is skipped, and its sibling refspecs still count. `--all` and
+    `--branches` name each local branch whose remote-tracking ref holds another commit. The remote is the named
+    one, else `origin`. A bare push has the source `HEAD`; a colon-less refspec is its own source. Reads: those
+    `push_destinations` already shares, and one `git for-each-ref` for `--all`."""
     force, mirror, every, _includes, _unpinned, leased, delete, _upstream, remote, plain = _push_parse(args)
-    if force or leased or mirror or every or _colon_delete(delete, plain) or any(s.startswith("+") for s in plain):
+    if force or leased or mirror or delete or any(s.startswith("+") for s in plain):
         return []
-    if not plain and _push_tags_only(args):
+    if not plain and not every and _push_tags_only(args):
         return []
+    remote = remote or "origin"
+    if every:
+        return _all_moves(remote, cwd)
     moves = []
     for spec, dest in zip(plain or [""], push_destinations(args, cwd, overrides)):
+        if spec.startswith(":"):
+            continue
         if dest and "*" not in dest and dest not in DEFAULT_BRANCH_FALLBACK:
-            moves.append((remote or "origin", dest, spec.partition(":")[0] or "HEAD"))
+            moves.append((remote, dest, spec.partition(":")[0] or "HEAD"))
     return moves
+
+
+def _all_moves(remote: str, cwd: str):
+    """The `push_moves` rows of `git push --all`: each local branch, off the default names, whose remote-tracking
+    ref exists and holds another commit. One `git for-each-ref`."""
+    prefix = "refs/remotes/%s/" % remote
+    answer = guard_core._git(cwd, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/", prefix) if cwd else None
+    if answer is None or answer.returncode != 0:
+        return []
+    local, tracked = {}, {}
+    for line in answer.stdout.splitlines():
+        ref, _, sha = line.partition(" ")
+        if ref.startswith("refs/heads/"):
+            local[ref[len("refs/heads/"):]] = sha
+        elif ref.startswith(prefix):
+            tracked[ref[len(prefix):]] = sha
+    return [(remote, name, "refs/heads/" + name) for name, sha in local.items()
+            if name not in DEFAULT_BRANCH_FALLBACK and tracked.get(name, sha) != sha]
 
 
 def push_verdict(args, cwd: str, overrides=None) -> str:
