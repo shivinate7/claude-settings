@@ -1219,7 +1219,7 @@ class RealListTests(unittest.TestCase):
 
 
 class ReplayChangedOnlyTests(unittest.TestCase):
-    """The old replay, unchanged: a changed suite only. These pass on main and pin the opt-in boundary."""
+    """The replay runs a changed suite only. These cases pin that opt-in boundary."""
 
     def test_a_product_only_pull_request_never_runs_the_unchanged_suite_on_its_mutants(self):
         repo, sha = replayed({"calc.py": CALC_MUL_PRODUCT})
