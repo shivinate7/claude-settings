@@ -430,8 +430,6 @@ jobs:
       - name: Waiting page splice fixture suite
         run: python3 skills/waiting-page/test_splice.py
 
-      - name: Waiting page export fixture suite
-        run: python3 skills/waiting-page/test_export_page.py
       - name: Waiting page grant check suite
         run: python3 skills/waiting-page/test_page_grant.py
       - name: Waiting page park relay prose suite
@@ -709,8 +707,8 @@ jobs:
   checks-shoot:
     runs-on: ubuntu-latest
     needs: scope
-    # Cap 10 min, 10x the slowest of 30 runs, 1.0 min (decision ci-job-caps). The browser install is
-    # the only network step, and it no longer waits on apt.
+    # Cap 10 min (provisional, until 5 green runs; decision ci-job-caps). The export fixture suite is the longest
+    # step, 57 s locally. The browser install is the only network step, and it does not wait on apt.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -729,8 +727,8 @@ jobs:
         shell: bash
         run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs
 
-      # The waiting page template (skill waiting-page) in the same browser. Its paths fall to the
-      # all-on arm of ci-scope.sh, so a change there runs this job. A red shoot suite above
+      # The waiting page template (skill waiting-page) in the same browser. ci-scope.sh sets `shoot`
+      # for its paths and for the files its suites import, so a change there runs this job. A red shoot suite above
       # skips this step; it runs again once that suite is green. The merged-page cases run the
       # roadmap build and the splice (tests/merged_page.py), so the runner needs python3 and git.
       # ubuntu-latest has both; the first line fails the step at once if one goes missing.
@@ -740,6 +738,13 @@ jobs:
         run: |
           python3 --version && git --version
           NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs
+
+      # The export suite's picture cases run check_designs.mjs in Playwright. A case that cannot run fails, so
+      # this suite cannot sit in `checks`, which installs no browser. loadPlaywright reads NODE_PATH.
+      - name: Waiting page export fixture suite
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
+        shell: bash
+        run: NODE_PATH="$PWD/.github/shoot/node_modules" python3 skills/waiting-page/test_export_page.py
 
       - name: roadmap page suite
         if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
