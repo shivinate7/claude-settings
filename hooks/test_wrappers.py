@@ -51,11 +51,13 @@ import subprocess
 import sys
 import tempfile
 
-from mutate_shared import guard_beside, guard_tree  # run as a script, so hooks/ is on sys.path
+from mutate_shared import guard_tree  # run as a script, so hooks/ is on sys.path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  git's tracked files under a folder, suites left out (testing/tracked_tree.py)
 SETTINGS = os.environ.get("WRAPPERS_SETTINGS_UNDER_TEST") or os.path.join(HERE, "..", "settings.json")
 HELPER = os.environ.get("REFRESH_HELPER_UNDER_TEST") or os.path.join(HERE, "..", "merge", "install_from_main.sh")
 SH = shutil.which("sh")
@@ -361,7 +363,8 @@ def clean_env(**extra):
 
 def split_tree(mutant):
     """A scratch checkout for the split cases, laid out the way mutate_guard lays out a guard mutant:
-    hooks/ holds guard.py and its guard_* siblings, and merge/, lint/ and actions/ci-alarm/ sit beside it.
+    hooks/ holds guard.py and its guard_* siblings, and merge/, lint/ and actions/ci-alarm/ sit beside it,
+    each copied as git tracks it.
     guard_merge loads merge/merge.py from one folder above the copy's hooks/. merge.py imports
     lint/hook_catalog.py at import and reads events.json, so a copy without them reads the merge tool as
     unloadable. The split check's materialize_all builds every lazy fixture, so the review-record one raises
@@ -372,7 +375,7 @@ def split_tree(mutant):
     root = tempfile.mkdtemp(prefix="guard-split-")
     hooks = os.path.join(root, "hooks")
     guard_tree(hooks)
-    guard_beside(root)
+    tracked_tree.copy_tracked(root, "merge", "lint", "actions/ci-alarm", root=os.path.dirname(HERE))
     if mutant:
         with open(os.path.join(hooks, "guard_core.py"), "a", encoding="utf-8") as handle:
             handle.write(SPLIT_MUTANT)
