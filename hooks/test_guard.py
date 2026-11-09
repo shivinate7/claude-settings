@@ -105,6 +105,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
+    "sendmessage-session-id": "SendMessage whose to starts session_: refused, since a session_ id is not an agent name and delivery to one is unmeasured; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -552,6 +553,8 @@ ARCHNEAR_C10 = os.path.join(ROOT, "archnear-c10")      # an open head `c10`: con
 ARCHNEAR_C10X = os.path.join(ROOT, "archnear-c10x")    # an open head `claude/c10-x1`: contains `c1`, is not it
 ARCHNEAR_CI = os.path.join(ROOT, "archnear-ci")        # an open head `claude/fix-ci-retry-x1`: contains `ci`, is not it
 ARCHOPEN_LANE = os.path.join(ROOT, "archopen-lane")    # the slug's pull request is open on the `lane/<slug>` head form
+ARCH_AGENT_SLUG = "lane-agent-own-step"                # the step an agent's own record names, a second step in the same repo
+ARCHOPEN_AGENT = os.path.join(ROOT, "archopen-agent-step")  # the agent record's step's pull request is open; the main step's is not
 # The containment read of an open lane pull request's head against main, by its status. Each fake holds one open
 # pull request on the slug, its head the slug's head sha; the read's answer is what the name says.
 ARCHDRAFT_BEHIND = os.path.join(ROOT, "archdraft-behind")      # an open draft, head behind main: its commits landed
@@ -1399,6 +1402,8 @@ def build_fixtures():
     make_fake_gh(ARCHMERGED, "main", need=["o/r"], others=[dict(slug_head, state="closed", merged=True)])
     # The same lane's pull request on the `lane/<slug>` head form (decision session-tiers names both forms).
     make_fake_gh(ARCHOPEN_LANE, "main", need=["o/r"], others=[dict(slug_head, ref="lane/" + ARCHIVE_SLUG)])
+    # The agent record's step has the open pull request, and the main record's step has none (see the agent cases).
+    make_fake_gh(ARCHOPEN_AGENT, "main", need=["o/r"], others=[dict(slug_head, ref=ARCH_AGENT_SLUG)])
     # Page two of the open list (two rows a page): the slug's pull request is the third row, so only a read of
     # every page sees it. The two rows before it name other lanes.
     make_fake_gh(ARCHPAGE, "main", need=["o/r"], page_cap=2, others=[
@@ -9498,6 +9503,129 @@ sh("env: heredoc-r3: an unquoted body that runs ls in backticks and names a forc
    "cat > /tmp/n.md <<EOF\nrun `ls` then git push --force later\nEOF", "allow", cwd=NOGIT)
 
 
+# ---- flag-false-alarm: env-file forms that read no file's contents, and the controls. Decision env-file-stays-unread.
+# Each allow row reads no file's contents. The word after a boolean flag is a pattern, a glob that
+# excludes the name reads nothing, a jq or yq word is a key, a folder named with the prefix is only
+# made by mkdir, and a file type after rg -T names no file. Main refuses each allow row except the
+# rg -T one, which main allows.
+# Each refuse row is refused by this guard: the name is a path, a glob that includes it, a loader or
+# in-place write of it, a folder that a commit or a printer reads, or a folder entered by cd or pushd
+# (the next word reads from it). jq, gojq and yq read -C as a
+# colour switch, so the word after it is the program or a file, never a value. ag's --file-search-regex
+# picks the files it reads by name only with a hidden flag, and its -p names a file of ignore patterns it reads.
+FLAG_FALSE_ALARM_ALLOW = (
+    "ag -f " + ENV + " src",
+    "ack -f " + ENV,
+    "grep -r --exclude=" + ENV + " foo .",
+    "grep -r --exclude " + ENV + " foo .",
+    "rg -t py " + ENV,
+    "mkdir " + ENV + "s",
+    "jq " + ENV + "ironment f.json",
+    "jq " + ENV + "From f.json",
+    "jq " + ENV + " f.json",
+    "yq " + ENV + "s f.yaml",
+    "yq e " + ENV + "s f.yaml",
+    "jq -C " + ENV + "s f.json",
+    "jq -L dir " + ENV + " f.yaml",
+    "rg -T " + ENV + " K",
+)
+FLAG_FALSE_ALARM_REFUSE = (
+    "cat " + ENV,
+    "jq . " + ENV,
+    "grep x " + ENV,
+    "grep --include=" + ENV + " -r K .",
+    "rg -g " + ENV + " K",
+    "jq --from-file " + ENV,
+    "jq -f " + ENV,
+    "jq --rawfile x " + ENV + " -n .",
+    "ag -f K " + ENV,
+    "ag -t K " + ENV,
+    "rg -tpy K " + ENV,
+    # rg with a hidden flag searches dotfiles, and -T py excludes only python files, so `.env` is searched.
+    "rg --hidden -T py " + ENV,
+    "rg -uu -T py " + ENV,
+    "rg -. -T py " + ENV,
+    "yq -i .x=1 " + ENV,
+    "yq " + ENV,
+    "yq e " + ENV,
+    "yq -i " + ENV,
+    "yq e -i " + ENV,
+    "yq -i e " + ENV,
+    "jq -L " + ENV + " .",
+    VCS + " add " + ENV + "s",
+    "cat " + ENV + "s",
+    "jq -C . " + ENV + " f.json",
+    "gojq -C . " + ENV + " f.json",
+    "yq -C . " + ENV + " f.yaml",
+    "jq -rC .k " + ENV + " f.json",
+    "jq -C -f " + ENV + " .",
+    "gojq . " + ENV,
+    "yq eval .x " + ENV,
+    "grep --exclude-from " + ENV + " foo .",
+    "ag -fp " + ENV + " K",
+    # -p is --path-to-ignore: ag reads the named file as an ignore file, so `.env` is read.
+    "ag -p " + ENV + " K",
+    "cd " + ENV + "s",
+    "pushd " + ENV + "s",
+    "cd " + ENV + ".d",
+)
+for _cmd in FLAG_FALSE_ALARM_ALLOW:
+    sh("env: flag-false-alarm: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
+for _cmd in FLAG_FALSE_ALARM_REFUSE:
+    sh("env: flag-false-alarm: still refused, " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+
+# ---- a folder move into an env-prefixed name. Decision env-file-stays-unread.
+# A lone cd or pushd into one is refused (FLAG_FALSE_ALARM_REFUSE). The Bash tool keeps its folder, so the
+# move would open the next call's reads. The chained forms are pinned here too. Set-Location is the PowerShell cd.
+sh("env: folder move: cd into .envs, then cat a file in it", "cd " + ENV + "s && cat config.json",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: pushd into .envs, then cat a file in it", "pushd " + ENV + "s && cat config.json",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: cd into .env.d, then cat a file in it", "cd " + ENV + ".d && cat x",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: PowerShell Set-Location into .envs, then Get-Content a file in it",
+   "Set-Location " + ENV + "s; Get-Content config.json", "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: folder move: cd into .envs, then ls in it", "cd " + ENV + "s && ls", "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: cd into .envs, then cd back out", "cd " + ENV + "s && cd ..", "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: PowerShell Set-Location into .envs, alone", "Set-Location " + ENV + "s",
+   "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+# A hidden search reads a dotfile whose name matches its -G regex. `-G e` matches `.env`, and the search
+# reads that file while `.env` is the pattern.
+# The guard tries the regex on a few sample env file names. A suffix outside that sample (.production,
+# .development, .test, .staging) is an env file too. Inside double quotes the shell turns `\\.` into `\.`,
+# the regex ag reads. A regex that will not compile is refused: the guard cannot tell what it matches.
+for _cmd in (
+    "ag --hidden -G e " + ENV,
+    "ag -u -G e " + ENV,
+    "ag --hidden --file-search-regex e " + ENV,
+    "ag --unrestricted -G e " + ENV,
+    "ag --hidden --file-search-regex=e " + ENV,
+    "ag --hidden -Ge " + ENV,
+    r"ag --hidden -G '\.env\.production' K",
+    "ag --hidden -G prod K",
+    r"ag --hidden -G '\.development' K",
+    r"ag --hidden -G '\.test' K",
+    r"ag --hidden -G '\.staging' K",
+    r'ag --hidden -G "\\.(env|rc)$" K',
+    r'ag --hidden -G "\\.e" K',
+    "ag --hidden -G 'rc$' K",
+    "ag --hidden -G local K",
+    r"ag --hidden -G '^\./\.env' K",
+    "ag --hidden -G '(' K",
+):
+    sh("env: ag hidden: refused, " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+# The controls. A hidden search whose -G regex names no env file reads none, so it stays allowed. The last
+# row is allowed here and refused by main: main reads the `e` after -G as the pattern and judges `.env` as
+# a file. ag reads `.env` as the pattern, and without a hidden flag it skips dotfiles, so no env file is read.
+for _cmd in ("ag --hidden -G '\\.py$' KEY", "ag -G e " + ENV):
+    sh("env: ag hidden: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
+# With no hidden flag, ag does not search dotfiles, so a -G or --file-search-regex that names `.env` reads
+# no env file. -f is --follow, not a hidden flag. Decision env-file-stays-unread judges the file regex
+# only with a hidden flag.
+for _cmd in ("ag -G " + ENV + " K", "ag --file-search-regex " + ENV + " K", "ag -fG " + ENV + " K"):
+    sh("env: ag no hidden: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+
 def incident_write_strip_case():
     """strip_heredoc_bodies keeps no body line of the incident cat write.
 
@@ -10290,6 +10418,8 @@ STEP_COLORS_TAGS = ["cs-build:lane", "cs-step:colors-a", "cs-topic:colors", "cs-
 
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
 ARCH_LANE_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
+# An agent's own record that is a lane on a second step, in the same repo as ARCH_LANE_TAGS.
+ARCH_AGENT_LANE_TAGS = ["cs-build:lane", "cs-step:" + ARCH_AGENT_SLUG, "cs-repo:o/r"]
 # Lanes whose step ids are a substring of a near-miss open head (see ARCHNEAR_C10): their own pull requests are absent.
 ARCH_LANE_C1_TAGS = ["cs-build:lane", "cs-step:c1", "cs-repo:o/r"]
 ARCH_LANE_CI_TAGS = ["cs-build:lane", "cs-step:ci", "cs-repo:o/r"]
@@ -10844,19 +10974,20 @@ def fake_gh_path(folder):
     return folder + os.pathsep + PY_PATH
 
 
-def archive_refuse(name, transcript, env_path, carries=(), lacks=()):
+def archive_refuse(name, transcript, env_path, carries=(), lacks=(), agent_id=None):
     """An archive_session of the target the guard refuses. The reason names its rule, never the tool. `lacks`
-    adds fragments the reason must not hold, so a case can tell one refusal reason from another."""
+    adds fragments the reason must not hold, so a case can tell one refusal reason from another. `agent_id`, when
+    given, makes the call an agent's, as the harness sends it."""
     more = (lacks,) if isinstance(lacks, str) else tuple(lacks)
     add("lane-closes-after-records: " + name, "deny", rule=ARCHIVE_RULE, tool=ARCHIVE_TOOL, cwd=NOGIT,
         lacks=ARCHIVE_NAMED + more, carries=carries, transcript=transcript, env=ROLE_ENV, env_path=env_path,
-        session_id=ROLE_OTHER)
+        session_id=ROLE_OTHER, agent_id=agent_id)
 
 
-def archive_allow(name, transcript, env_path):
-    """An archive_session of the target the guard lets through silently."""
+def archive_allow(name, transcript, env_path, agent_id=None):
+    """An archive_session of the target the guard lets through silently. `agent_id` as in archive_refuse."""
     add("lane-closes-after-records: " + name, "allow", tool=ARCHIVE_TOOL, cwd=NOGIT, silent=True,
-        transcript=transcript, env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER)
+        transcript=transcript, env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER, agent_id=agent_id)
 
 
 # A lane whose open pull request has a head exactly equal to its step slug is its own pull request: refused.
@@ -10959,6 +11090,116 @@ archive_refuse("a get_session result whose content is a dict before the lane's r
                role_path("body-dict-then-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
 archive_refuse("a get_session result whose content is an int before the lane's record: the lane's open pull request refuses",
                role_path("body-int-then-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
+
+
+# The agent's own record. An agent (a call with an `agent_id`) made its get_session call in its own transcript, which
+# sits beside the main transcript at `<transcript_path minus .jsonl>/subagents/agent-<agent_id>.jsonl`. The guard reads
+# that file for the agent's call. A lane is refused when either record says lane. An orchestrator call (no agent_id)
+# reads the main record alone. A malformed agent_id reads no file at all.
+AGENT_OWN_ID = "ab12cd34ef56a7890"  # an agent id as the harness sends it: 17 hex characters
+AGENT_QUIET = [role_use("m0", "Bash"), role_result("m0", "ok")]  # a transcript with no get_session call
+# name -> (the main transcript's lines, [(agent_id, the agent file's lines), ...]). An agent id that the guard
+# must refuse still gets its file written at the raw path it names, so a reader that skipped the check would read it.
+AGENT_FIXTURES = {
+    "agent-own-triage": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_call("g1", ARCH_TRIAGE_TAGS))]),
+    "agent-own-lane": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_call("g1", ARCH_LANE_TAGS))]),
+    "agent-no-record": (AGENT_QUIET, [(AGENT_OWN_ID, AGENT_QUIET)]),
+    "agent-quiet-main-triage": (role_target_call("g1", ARCH_TRIAGE_TAGS), [(AGENT_OWN_ID, AGENT_QUIET)]),
+    "orchestrator-agent-file": (role_target_call("g1", ARCH_TRIAGE_TAGS),
+                                [(AGENT_OWN_ID, role_target_call("g1", ARCH_LANE_TAGS))]),
+    "main-triage-agent-lane": (role_target_call("g1", ARCH_TRIAGE_TAGS),
+                               [(AGENT_OWN_ID, role_target_call("g1", ARCH_LANE_TAGS))]),
+    "main-lane-agent-triage": (role_target_call("g1", ARCH_LANE_TAGS),
+                               [(AGENT_OWN_ID, role_target_call("g1", ARCH_TRIAGE_TAGS))]),
+    "agent-malformed-id": (AGENT_QUIET, [("x.y", role_target_call("g1", ARCH_TRIAGE_TAGS))]),
+    "agent-own-triage-slug": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_call("g1", ARCH_TRIAGE_SLUG_TAGS))]),
+    "agent-file-absent": (role_target_call("g1", ARCH_TRIAGE_TAGS), []),
+    "agent-dir-at-file": (role_target_call("g1", ARCH_TRIAGE_TAGS), [(AGENT_OWN_ID, None)]),
+    "main-lane-agent-second-step": (role_target_call("g1", ARCH_LANE_TAGS),
+                                    [(AGENT_OWN_ID, role_target_call("g1", ARCH_AGENT_LANE_TAGS))]),
+}
+
+
+def agent_transcript(name, agent_id):
+    """The agent's own transcript for the main transcript role_path(name): `<main minus .jsonl>/subagents/agent-<id>.jsonl`."""
+    return os.path.join(role_path(name)[:-len(".jsonl")], "subagents", "agent-" + agent_id + ".jsonl")
+
+
+def write_agent_transcripts():
+    """Write each main transcript, and each agent file beside it, as the harness lays them out."""
+    os.makedirs(ROLE_DIR, exist_ok=True)  # this builder may run before write_role_transcripts makes the folder
+    for name, (main, agents) in AGENT_FIXTURES.items():
+        with open(role_path(name), "w", encoding="utf-8") as handle:
+            handle.write("\n".join(main) + "\n")
+        for agent_id, lines in agents:
+            path = agent_transcript(name, agent_id)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if lines is None:  # a folder where the agent's file would be: reading it fails, and not as a missing file
+                os.makedirs(path, exist_ok=True)
+                continue
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(lines) + "\n")
+        if not agents:  # the scope of the no-file case: nothing at its agent path, so the read finds no file
+            assert not os.path.exists(agent_transcript(name, AGENT_OWN_ID)), name
+
+
+lazy_fixture([role_path(name) for name in AGENT_FIXTURES], write_agent_transcripts)
+# An agent whose own record names a non-lane target: allowed, silently, though a slug pull request is open.
+archive_allow("an agent whose own record is a non-lane target is allowed: the record is read from the agent's transcript",
+              role_path("agent-own-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# An agent whose own record is a lane with an open records pull request: refused, for that pull request. The reason pin
+# proves the agent's record was read: a guard that missed it would refuse for having no record.
+archive_refuse("an agent whose own record is a lane with an open records pull request is refused, for the open pull request",
+               role_path("agent-own-lane"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# No record in either transcript: refused for no record, and the open list is not read.
+archive_refuse("an agent with no record in its own transcript or the main one is refused, for no record",
+               role_path("agent-no-record"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
+# An orchestrator call (no agent_id) reads the main transcript only: its lane record refuses for the open pull request.
+archive_refuse("an orchestrator call with a lane record in the main transcript is refused, for the open pull request",
+               role_path("archive-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# An agent whose main record is non-lane, and whose own file reads clean but holds no record of the target: the main record
+# decides, so it is allowed. A fix that refused on a clean agent read with no record would turn this allow into a false alarm.
+archive_allow("an agent whose main record is non-lane is allowed though its own file holds no record of the target",
+              role_path("agent-quiet-main-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# The same agent file, on an orchestrator call with no agent_id: the file is not its record, so the main record decides.
+archive_allow("an orchestrator call with a non-lane main record is allowed though an agent file beside it holds a lane",
+              role_path("orchestrator-agent-file"), fake_gh_path(ARCHOPEN))
+# Precedence: a lane in either record refuses. The agent's own record is a lane, the main record is not.
+archive_refuse("a lane in the agent's own record is refused though the main record says non-lane",
+               role_path("main-triage-agent-lane"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# Precedence the other way: the main record is a lane, the agent's own record is not. It still refuses.
+archive_refuse("a lane in the main record is refused though the agent's own record says non-lane",
+               role_path("main-lane-agent-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# A malformed agent_id: the file its raw text names holds a non-lane record. It is not read, so the call is refused for no
+# record. A reader that skipped the AGENT_ID check would read that record and allow the archive. The id `x.y` has a dot,
+# which AGENT_ID refuses, and its file name is legal on Windows, unlike an id with a path separator.
+archive_refuse("a malformed agent_id reads no agent file: a non-lane record at its raw path is not read, and the call is refused for no record",
+               role_path("agent-malformed-id"), fake_gh_path(ARCHOPEN), agent_id="x.y",
+               carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
+# No file at the agent's path, and a non-lane main record: no agent record is read, so the main record decides and the
+# archive is allowed. A reader that refused on a missing agent file would refuse every agent that has no file of its own.
+archive_allow("an agent with no file at its agent path is allowed: the main record is non-lane and decides",
+              role_path("agent-file-absent"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# A folder at the agent's file path, and a non-lane main record: the read fails with an error other than a missing file, so
+# the archive is refused for no record. A reader that caught every read error as a missing file would allow it.
+archive_refuse("an agent whose file path is a folder is refused, for no record: a read error is not a missing agent file",
+               role_path("agent-dir-at-file"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
+# Both records are lanes on different steps of the same repo. The open pull request is on the agent record's step only, so
+# the archive is refused for it only when the agent record's step is read too. A reader that kept only the main record's
+# step would allow it.
+archive_refuse("a lane in both records, with the open pull request on the agent record's step only, is refused for that pull request",
+               role_path("main-lane-agent-second-step"), fake_gh_path(ARCHOPEN_AGENT), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN)
+# The mirror: the open pull request is on the main record's step only. A reader that kept only the agent record's step
+# would allow it. Together with the case above, each record's step alone fails, whichever record comes first.
+archive_refuse("a lane in both records, with the open pull request on the main record's step only, is refused for that pull request",
+               role_path("main-lane-agent-second-step"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN)
 
 
 # =========================================================================== 5h. one lane, one topic
@@ -11071,6 +11312,58 @@ step_refuse("a heading marker, # Lane brief: x. Topic: icons., to a lane on topi
             role_path("step-colors-lane"), "# Lane brief: x. Topic: icons.")
 step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topic colors is refused",
             role_path("step-colors-lane"), "lane brief: x. topic: icons.")
+
+
+# =========================================================================== 5i. SendMessage to a cloud session
+FAMILY = "sendmessage-session-id"
+#
+# Rule sendmessage-session-id. SendMessage addresses an agent by name. A `session_` id is no agent name, and auto mode
+# refused a SendMessage that named one. So a SendMessage whose `to` starts `session_` is refused: its hand-off could go
+# missing, and whether SendMessage delivers to such an id is unmeasured. The refusal names the right tool,
+# mcp__claude-code-remote__send_message, and its session_id argument. Only SendMessage with such a `to` is refused.
+# An agent name, @parent, an empty, missing or non-string `to`, and the right tool itself all pass.
+# The allows are as load-bearing as the refusals: a false alarm here stops a hand-off to a reviewer or the parent.
+SENDMESSAGE_RULE = "sendmessage-session-id"
+SENDMESSAGE_TOOL = "SendMessage"
+SENDMESSAGE_STEER = (SEND_MESSAGE, "session_id")  # the remedy names the right tool and the argument that takes the id
+SENDMESSAGE_BODY = "Review the diff and report back."
+
+
+def sendmessage_refuse(name, to):
+    """A SendMessage the guard refuses. The reason names its rule, and the right tool with its session_id argument."""
+    add("sendmessage-session-id: " + name, "deny", rule=SENDMESSAGE_RULE, tool=SENDMESSAGE_TOOL, cwd=NOGIT,
+        carries=SENDMESSAGE_STEER, to=to, message=SENDMESSAGE_BODY)
+
+
+def sendmessage_allow(name, **tool_input):
+    """A SendMessage the guard lets through silently. This rule refuses none of them."""
+    add("sendmessage-session-id: " + name, "allow", tool=SENDMESSAGE_TOOL, cwd=NOGIT, silent=True, **tool_input)
+
+
+# Refused: a session_ id in `to`, short and full length.
+sendmessage_refuse("to a session_ id is refused", "session_abc123")
+sendmessage_refuse("to a full-length cloud session id is refused", "session_01AbCdEfGhIjKlMnOpQrStUv")
+# Allowed: an agent name and the parent, which SendMessage reaches as before.
+sendmessage_allow("to an agent name, reviewer-1, is allowed", to="reviewer-1", message=SENDMESSAGE_BODY)
+sendmessage_allow("to @parent is allowed", to="@parent", message=SENDMESSAGE_BODY)
+# Allowed: a `to` with no session_ at its start. The empty string is the empty state, and a name with session_
+# mid-name is a near miss that pins the match to the start of the value.
+sendmessage_allow("to an empty string is allowed", to="", message=SENDMESSAGE_BODY)
+sendmessage_allow("to a name with session_ mid-name is allowed", to="my-session_1", message=SENDMESSAGE_BODY)
+# Allowed: a near miss to the prefix. Each pins the match to the exact `session_` at the start: a looser prefix such as
+# startswith("session") refuses session-abc, a case-insensitive match refuses Session_abc, and a match that drops a
+# leading @ refuses @session_abc.
+sendmessage_allow("to session-abc, a dash not an underscore, is allowed", to="session-abc", message=SENDMESSAGE_BODY)
+sendmessage_allow("to Session_abc, a capital S, is allowed", to="Session_abc", message=SENDMESSAGE_BODY)
+sendmessage_allow("to @session_abc, an @ before the id, is allowed", to="@session_abc", message=SENDMESSAGE_BODY)
+# Allowed: a missing `to`, and a `to` that is not a string.
+sendmessage_allow("a call with no to is allowed", message=SENDMESSAGE_BODY)
+sendmessage_allow("to a number is allowed", to=3, message=SENDMESSAGE_BODY)
+sendmessage_allow("to null is allowed", to=None, message=SENDMESSAGE_BODY)
+sendmessage_allow("to a list that holds a session_ id is allowed", to=["session_abc123"], message=SENDMESSAGE_BODY)
+# The right tool is not refused by this rule, even with a session_ id. A cloud session's id goes in session_id.
+add("sendmessage-session-id: the right tool, send_message, to a session_ id is allowed", "allow", tool=SEND_MESSAGE,
+    cwd=NOGIT, silent=True, session_id=ROLE_OTHER, message=SENDMESSAGE_BODY)
 
 
 # =========================================================================== 5d. cite by id
@@ -12414,6 +12707,20 @@ sh("frozen: cp FROM a frozen hook to scratch is a read", "cp " + CFG_HOOK + " /t
    "allow", cwd=NOGIT)
 sh("frozen: cp FROM the frozen settings to scratch is a read",
    "cp " + CFG_SETTINGS + " /tmp/settings.copy", "allow", cwd=NOGIT)
+# A loop keyword or a wrapper in front of `cp` changes nothing: the copy still reads its source and
+# still writes its destination. Each deny is the matching allow with the frozen path moved to DEST.
+sh("frozen: cp FROM a frozen hook to scratch after a loop keyword is a read",
+   "for f in a; do cp " + CFG_HOOK + " ./x; done", "allow", cwd=NOGIT)
+sh("frozen: sudo cp FROM a frozen hook to scratch is a read",
+   "sudo cp " + CFG_HOOK + " ./x", "allow", cwd=NOGIT)
+sh("frozen: env cp FROM a frozen hook to scratch is a read",
+   "env cp " + CFG_HOOK + " ./x", "allow", cwd=NOGIT)
+sh("frozen: cp TO a frozen hook after a loop keyword still denies",
+   "for f in a; do cp x " + CFG_HOOK + "; done", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sudo cp TO a frozen hook still denies", "sudo cp x " + CFG_HOOK, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: env cp TO a frozen hook still denies", "env cp x " + CFG_HOOK, "deny",
+   "frozen-path", cwd=NOGIT)
 sh("frozen: cp TO a frozen hook still denies", "cp /tmp/x.py " + CFG_HOOK, "deny", "frozen-path",
    cwd=NOGIT)
 sh("frozen: cp from a frozen path TO a frozen path still denies",
@@ -15277,14 +15584,14 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a settings.json matcher rou
 ARCHIVE_CALLS = "calls.log"  # the counted fake's log, beside its state: one line per gh call
 
 
-def archive_judged(transcript, folder):
+def archive_judged(transcript, folder, agent_id=None):
     """The guard's verdict on one archive_session of ROLE_OTHER, from the batch runner, with the fake pull request
     tool at `folder` on PATH. The payload's cwd and the guard's process both run in NOGIT, so a write into the working
     folder shows in the snapshot. MERGECFG is the config folder: its rules file points at the repo, so a guard copy
-    finds the merge tool there."""
+    finds the merge tool there. `agent_id`, when given, makes the call an agent's."""
     return decide({
         "raw": None, "tool": ARCHIVE_TOOL, "cwd": NOGIT, "process_cwd": NOGIT, "session": None,
-        "env_path": fake_gh_path(folder), "config": MERGECFG, "agent_id": None, "agent_type": None,
+        "env_path": fake_gh_path(folder), "config": MERGECFG, "agent_id": agent_id, "agent_type": None,
         "temp": None, "load": None, "env": dict(ROLE_ENV), "tool_input": {"session_id": ROLE_OTHER},
         "transcript": transcript,
     })
@@ -15371,6 +15678,24 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a non-lane archive makes no
                          archive_non_lane_no_read_case))
 LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no file in the session's folders",
                          archive_writes_nothing_case))
+
+
+def archive_agent_non_lane_no_read_case():
+    """An agent's archive of a target that is no lane is allowed and makes no gh call, though its own record carries a
+    step slug that an open-list read would find."""
+    folder = archive_counted_gh()
+    gh_calls_taken(folder)
+    decision, reason = archive_judged(role_path("agent-own-triage-slug"), folder, agent_id=AGENT_OWN_ID)
+    calls = gh_calls_taken(folder)
+    if decision != "allow" or reason:
+        return False, "an agent's non-lane target: %s (%r)" % (decision, reason)
+    if calls:
+        return False, "an agent's non-lane target made %d gh call(s): %r" % (len(calls), calls)
+    return True, "allowed, and no gh call"
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an agent's non-lane archive makes no gh call",
+                         archive_agent_non_lane_no_read_case))
 
 
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
@@ -16015,10 +16340,10 @@ def _f1b_push_reset(w):
     _must(w, *IDENT, "commit", "-q", "-m", "product work")
 
 
-def _f2_conflict_merge(w):
+def _f2_conflict_open(w):
     """Cut at main. Reset to a lane tip that adds test cases to the test file. Main then adds a different
-    line at the same place in that file. The builder merges main, the test file conflicts, and the builder
-    takes its own side and commits the merge by hand (reflog `commit (merge)`)."""
+    line at the same place in that file. The builder merges main, and the test file conflicts. The merge is
+    left in progress: MERGE_HEAD is set, the test file is unmerged, and nothing is committed."""
     main = w + "-main"
     _test_author_lane(w)
     _must(w, "reset", "-q", "--hard", "lane")
@@ -16028,6 +16353,12 @@ def _f2_conflict_merge(w):
     merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
     if merged.returncode == 0:
         sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+
+
+def _f2_conflict_merge(w):
+    """The open merge of _f2_conflict_open. The builder takes its own side of the test file and commits the
+    merge by hand (reflog `commit (merge)`)."""
+    _f2_conflict_open(w)
     write(os.path.join(w, TEST_A), LANE_TEXT)
     _must(w, "add", "-A")
     _must(w, *IDENT, "commit", "-q", "--no-edit")
@@ -16082,15 +16413,17 @@ def _push_main(w):
     _must(w + "-main", "push", "-q", "origin", "main")
 
 
-def _c1_mid_merge(w):
+def _c1_mid_merge(w, extra_tests=()):
     """Cut at main. The builder commits product work. Main then changes a test file and the product file the
-    builder changed. The builder merges main: the product file conflicts and the test file merges clean. The
-    builder resolves the product file and stops before the commit."""
+    builder changed, and adds each of `extra_tests`. The builder merges main: the product file conflicts and the
+    test files merge clean. The builder resolves the product file and stops before the commit."""
     main = w + "-main"
     _origin(w)
     _push_main(w)
     _product_commit(w)
     write(os.path.join(main, TEST_A), MAIN_FIRST + BASE_FILES[TEST_A])
+    for rel in extra_tests:
+        write(os.path.join(main, rel), "def test_clean():\n    assert 2\n")
     write(os.path.join(main, "src/app.py"), "x = 10\n")
     _must(main, "add", "-A")
     _must(main, *IDENT, "commit", "-q", "-m", "main changes a test file and the product file")
@@ -16105,6 +16438,294 @@ def _c1_mid_merge(w):
 def _c1_committed(w):
     _c1_mid_merge(w)
     _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+# Twenty test files that main adds and the builder never touches: each merges clean into the builder's tree.
+MANY_CLEAN_TESTS = ["tests/test_clean_%02d.py" % n for n in range(1, 21)]
+
+
+def _c1_many_clean(w):
+    """The _c1_mid_merge shape, with twenty more test files that main adds and that merge clean beside TEST_A."""
+    _c1_mid_merge(w, MANY_CLEAN_TESTS)
+
+
+def _open_test_conflict_left(w):
+    """The open merge of _f2_conflict_open, with the builder's product edit staged. The conflicted test file stays
+    as git's merge wrote it, with its conflict markers: a test file that still holds markers is a builder's test
+    change, so the builder's commit is refused until the test-author resolves it."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    write(os.path.join(w, "src/app.py"), "x = 7\n")
+    _must(w, "add", "src/app.py")
+
+
+def _open_test_conflict_edited(w):
+    """The open merge of _f2_conflict_open, where the builder rewrites the conflicted test file to its own side.
+    The bytes are no text git's merge wrote, so this is the builder's own change."""
+    _open_test_conflict_left(w)
+    write(os.path.join(w, TEST_A), LANE_TEXT)
+
+
+def _open_test_conflict_mode(w):
+    """The open merge of _f2_conflict_open, where the builder sets the exec bit on the conflicted test file and keeps
+    git's bytes. The file stays unmerged in the index, so the mode change is the builder's only change to it."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    os.chmod(os.path.join(w, TEST_A), 0o755)
+    if not os.stat(os.path.join(w, TEST_A)).st_mode & 0o111:
+        sys.exit("fixture setup failed: chmod +x did not land on %r" % TEST_A)
+
+
+MAIN_CASE = "def test_main_case():\n    assert 3\n"
+BUILDER_CASE = "def test_builder_case():\n    assert 4\n"
+
+
+def _main_test_merge_open(w, builder_text=None):
+    """Cut at main. The builder commits product work. Main appends MAIN_CASE to TEST_A, which the builder never
+    touches, so git's merge takes it clean. The merge is left open. `builder_text`, when given, then replaces
+    TEST_A in the worktree."""
+    main = w + "-main"
+    _product_commit(w)
+    write(os.path.join(main, TEST_A), BASE_FILES[TEST_A] + MAIN_CASE)
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main adds a case")
+    _must(w, *IDENT, "merge", "-q", "--no-commit", "--no-ff", "main")
+    _require_says(w, ["show", ":" + TEST_A], MAIN_CASE)
+    if builder_text is not None:
+        write(os.path.join(w, TEST_A), builder_text)
+
+
+def _main_test_merge_committed(w):
+    """The _main_test_merge_open merge, committed as the merge commit. Then the builder appends BUILDER_CASE to
+    TEST_A, the test file git's merge took clean."""
+    _main_test_merge_open(w)
+    _commit_merge(w)
+    _require_says(w, ["show", "HEAD:" + TEST_A], MAIN_CASE)
+    write(os.path.join(w, TEST_A), BASE_FILES[TEST_A] + MAIN_CASE + BUILDER_CASE)
+
+
+def _main_test_merge_clean_committed(w):
+    """The _main_test_merge_open merge, committed as the builder's merge commit with no builder edit to a test file.
+    The commit is git's merge of its two parents, so it holds main's clean test change and nothing the builder wrote."""
+    _main_test_merge_open(w)
+    _commit_merge(w)
+    _require_says(w, ["show", "HEAD:" + TEST_A], MAIN_CASE)
+    if len(run_vcs(w, "rev-list", "--parents", "-n", "1", "HEAD").stdout.split()) != 3:
+        sys.exit("fixture setup failed: HEAD in %r is not a merge commit" % w)
+
+
+def _f2_conflict_staged(w):
+    """The open merge of _f2_conflict_open, with git's markers staged by `git add`: the index holds them as the bytes
+    of the test file, and the merge is still open."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    _must(w, "add", "-A")
+
+
+def _resolve_test_conflict_open(w, text):
+    """The open merge of _f2_conflict_open, where the builder rewrites the conflicted test file to `text`, with no
+    marker left in it."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    write(os.path.join(w, TEST_A), text)
+
+
+def _strip_test_conflict_markers(w):
+    """The open merge of _f2_conflict_open, where the builder deletes git's three marker lines and keeps both sides."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    path = os.path.join(w, TEST_A)
+    with open(path, encoding="utf-8") as handle:
+        kept = [line for line in handle if not line.startswith(("<<<<<<< ", "=======", ">>>>>>> "))]
+    text = "".join(kept)
+    if "<<<<<<<" in text or "def test_lane_1" not in text or "# main's newer case" not in text:
+        sys.exit("fixture setup failed: the markers did not strip to both sides in %r" % w)
+    write(path, text)
+
+
+# A top-level test file that an add/add merge conflicts. The base holds no such file, so the lane and main each add it;
+# _f2_conflict_open changes tests/test_a.py, which the base holds. The builder's untracked file of the same name sits
+# under src/, so the guard must tell the two apart by their folders.
+TOP_TEST = "test_x.py"
+
+
+def _top_test_conflict_open(w):
+    """The open merge of an add/add conflict on TOP_TEST: the lane adds the file with one case, main adds it with
+    another, and the builder merges main. The conflicted file stays as git's merge wrote it, unmerged, and nothing is
+    committed. The builder then adds an untracked test file of the same name under src/."""
+    main = w + "-main"
+    _test_author_lane(w, TOP_TEST, "def test_x():\n    assert 1\n")
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(main, TOP_TEST), "def test_x():\n    assert 2\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main adds the same test file")
+    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+    _require_conflict(w, TOP_TEST)
+    write(os.path.join(w, "src", TOP_TEST), "def test_x_builder():\n    assert 3\n")
+
+
+# An empty test file is still a test file: the rows below refuse one added or deleted in a merge. They also refuse a
+# test file whose only change is one invalid UTF-8 byte. Both bytes decode to the same character, so only a comparison
+# of the bytes tells the two versions apart.
+EMPTY_TEST = "tests/test_empty.py"
+TEST_BYTES = "tests/test_bytes.py"
+COST_PATHS = ["src/app.py", "tests/test_cost_one.py", "tests/test_cost_two.py"]
+
+
+def _put_bytes(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(data)
+
+
+def _rewrite_bytes(path, change):
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    _put_bytes(path, change(raw))
+
+
+def _clean_merge_open(w, main_adds=None):
+    """Cut at main. The builder commits product work. Main adds each file in `main_adds` (path: bytes) and changes a
+    product file. The builder merges main with no commit: the merge is clean and stays in progress, so git's own
+    merge is the base the builder's change is judged against."""
+    main = w + "-main"
+    _product_commit(w)
+    for rel, data in (main_adds or {}).items():
+        _put_bytes(os.path.join(main, rel), data)
+    write(os.path.join(main, "src/other.py"), "z = 1\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main adds files")
+    _must(w, *IDENT, "merge", "-q", "--no-commit", "--no-ff", "main")
+
+
+def _empty_add_open(w):
+    """A clean merge left open, where the builder adds an empty test file that git's merge does not have."""
+    _clean_merge_open(w)
+    write(os.path.join(w, EMPTY_TEST), "")
+
+
+def _empty_delete_open(w):
+    """A clean merge left open, where git's merge holds an empty test file and the builder deletes it."""
+    _clean_merge_open(w, {EMPTY_TEST: b""})
+    os.remove(os.path.join(w, EMPTY_TEST))
+
+
+def _commit_merge(w):
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+def _empty_add_committed(w):
+    """The _empty_add_open change, committed as the builder's merge commit (reflog `commit (merge)`)."""
+    _empty_add_open(w)
+    _commit_merge(w)
+
+
+def _empty_delete_committed(w):
+    """The _empty_delete_open change, committed as the builder's merge commit."""
+    _empty_delete_open(w)
+    _commit_merge(w)
+
+
+def _conflict_crlf(w):
+    """The open conflict of _f2_conflict_open, where the builder rewrites the conflicted test file with each LF as
+    CRLF. Only the line endings change."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    _rewrite_bytes(os.path.join(w, TEST_A), lambda raw: raw.replace(b"\n", b"\r\n"))
+
+
+def _conflict_cr(w):
+    """As _conflict_crlf, with each LF as a lone CR."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    _rewrite_bytes(os.path.join(w, TEST_A), lambda raw: raw.replace(b"\n", b"\r"))
+
+
+def _invalid_byte_open(w):
+    """A clean merge left open, where git's merge holds a test file with one stray byte, 0x80, and the builder
+    rewrites that byte to 0x81. Both are invalid UTF-8, so both decode to the same replacement character."""
+    _clean_merge_open(w, {TEST_BYTES: b"# \x80\n"})
+    _put_bytes(os.path.join(w, TEST_BYTES), b"# \x81\n")
+
+
+# A gitlink (a submodule entry) and a mode-only change under a test path are refused. A gitlink has no
+# bytes in this repository, and a mode-only change keeps the same bytes, so only the mode can refuse either. The rows
+# check a gitlink to a commit the clone lacks, a gitlink to a commit the clone holds, and a mode-only change. The
+# fixtures read each change back with git first: a change that did not land would give an allow for the wrong reason.
+GITLINK = "tests/sub_lib"
+GITLINK_MISSING = "0123456789abcdef0123456789abcdef01234567"   # a commit this clone does not hold
+
+
+def _head_sha(w):
+    return run_vcs(w, "rev-parse", "HEAD").stdout.strip()
+
+
+def _require_says(where, args, want):
+    """Stop the suite unless git's answer for `args` in `where` holds `want`."""
+    done = run_vcs(where, *args)
+    if done.returncode != 0 or want not in done.stdout:
+        sys.exit("fixture setup failed: git %s in %r does not show %r: %s"
+                 % (" ".join(args), where, want, (done.stdout + done.stderr).strip()))
+
+
+def _gitlink_stage(w, sha=GITLINK_MISSING):
+    """A gitlink under tests/ at `sha`, staged, with the empty folder a checkout would make."""
+    os.makedirs(os.path.join(w, GITLINK), exist_ok=True)
+    _must(w, "update-index", "--add", "--cacheinfo", "160000," + sha + "," + GITLINK)
+    _require_says(w, ["ls-files", "-s", "--", GITLINK], "160000 " + sha)
+
+
+def _gitlink_open(w):
+    """A clean merge left open, where the builder stages a gitlink under tests/ that git's merge does not have."""
+    _clean_merge_open(w)
+    _gitlink_stage(w)
+
+
+def _gitlink_committed(w, sha=GITLINK_MISSING):
+    """The _gitlink_open change at `sha`, committed as the builder's merge commit."""
+    _clean_merge_open(w)
+    _gitlink_stage(w, sha)
+    _commit_merge(w)
+    _require_says(w, ["ls-tree", "HEAD", "--", GITLINK], "160000 commit " + sha)
+
+
+def _gitlink_committed_held(w):
+    """The _gitlink_committed change, to the commit this clone holds (the work branch's HEAD), as a control."""
+    _gitlink_committed(w, _head_sha(w))
+
+
+def _mode_exec(rel):
+    """chmod +x on a test file in the worktree: the bytes stay, and only the mode changes."""
+    def go(w):
+        os.chmod(os.path.join(w, rel), 0o755)
+        _require_says(w, ["diff", "--raw", "--", rel], "100644 100755")
+    return go
+
+
+def _mode_exec_committed(w):
+    """A clean merge, where the builder sets the exec bit on a test file and commits it as the merge commit."""
+    _clean_merge_open(w)
+    _must(w, "update-index", "--chmod=+x", TEST_A)
+    os.chmod(os.path.join(w, TEST_A), 0o755)
+    _commit_merge(w)
+    _require_says(w, ["ls-tree", "HEAD", "--", TEST_A], "100755 ")
+    _require_says(w, ["ls-tree", "HEAD^1", "--", TEST_A], "100644 ")
+
+
+def _mode_exec_open(w):
+    """A clean merge left open, where the builder sets the exec bit on a test file in the worktree."""
+    _clean_merge_open(w)
+    _mode_exec(TEST_A)(w)
+
+
+def _cost_files(w):
+    """The builder's change for the cost checks: a product edit and two new test files."""
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+    write(os.path.join(w, "tests/test_cost_one.py"), "def test_one():\n    assert 1\n")
+    write(os.path.join(w, "tests/test_cost_two.py"), "def test_two():\n    assert 2\n")
 
 
 def _g_lane_and_product(w):
@@ -16502,6 +17123,408 @@ diff_repo("bd-i1-rebase-ours", _i1_rebase_ours)
 LOG_CHECKS_EXTRA.append(("builder-refuse: a rebase conflict in a test file resolved to the upstream side is logged only",
                          logged_builder_case("bd-i1-rebase-ours")))
 
+# A builder never writes test content. A test file that still holds git's conflict markers is a builder's test change,
+# so the builder's commit is refused while the file is unresolved. The rows check that refusal. The test-author resolves
+# that file. The same merge is denied once the builder rewrites the conflicted file to its own side. Both share one setup.
+_bd_m_left = diff_repo("bd-m-test-left", _open_test_conflict_left)
+sh("builder-refuse: a builder's merge in progress, with a product edit staged and a conflicted test file left as git "
+   "wrote it, is denied at commit by builder-diff", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_left, agent_id="bld1",
+   agent_type="builder")
+_bd_m_edited = diff_repo("bd-m-test-edited", _open_test_conflict_edited)
+sh("builder-refuse: a builder's merge in progress that rewrites a conflicted test file to its own side is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_edited, agent_id="bld1", agent_type="builder")
+
+# The same two merges, run from a subfolder. The guard reads each file from the top of the checkout, whatever folder
+# the command runs in: a conflicted test file left as git wrote it is denied, as is one rewritten to the builder's side.
+sh("builder-refuse: a builder's merge in progress, with a conflicted test file left as git wrote it, is denied at "
+   "commit by builder-diff from a subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_m_left, "src"),
+   agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's merge in progress that rewrites a conflicted test file is denied at commit from a "
+   "subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_m_edited, "src"), agent_id="bld1",
+   agent_type="builder")
+
+# A builder's own edit to a test file that a clean merge of main took in is refused, in an open merge and in a merge
+# commit. Main's own change, merged clean and left alone, is allowed: the control row below pins that.
+_bd_m_main_open = diff_repo("bd-m-main-test-open", lambda w: _main_test_merge_open(w, BASE_FILES[TEST_A] + MAIN_CASE
+                                                                                  + BUILDER_CASE))
+sh("builder-refuse: a builder's own case in a test file that main changed and git's open merge took clean is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_main_open, agent_id="bld1", agent_type="builder")
+_bd_m_main_commit = diff_repo("bd-m-main-test-commit", _main_test_merge_committed)
+sh("builder-refuse: a builder's own case in a test file that main changed and a merge commit took clean is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_main_commit, agent_id="bld1", agent_type="builder")
+_bd_m_main_clean = diff_repo("bd-m-main-test-clean", lambda w: _main_test_merge_open(w))
+sh("builder-refuse: a merge in progress where main changed a test file that merged clean, with no builder edit, is "
+   "allowed at commit", COMMIT, "allow", cwd=_bd_m_main_clean, agent_id="bld1", agent_type="builder")
+# The same clean change, committed as the builder's merge commit with no builder edit: git's merge of the two parents
+# is the commit's tree, so main's test change is allowed at commit and push, and at the stop.
+_bd_m_main_merge_clean = diff_repo("bd-m-main-test-merge-clean", _main_test_merge_clean_committed)
+sh("builder-refuse: a builder's merge commit that carries main's clean test change, with no builder edit, is allowed "
+   "at commit", COMMIT, "allow", cwd=_bd_m_main_merge_clean, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's merge commit that carries main's clean test change, with no builder edit, is allowed "
+   "at push", PUSH, "allow", cwd=_bd_m_main_merge_clean, agent_id="bld1", agent_type="builder")
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's merge commit that carries main's clean test change, with no "
+                         "builder edit, is allowed at commit, push and stop, and logs no builder-diff line",
+                         clean_builder_case("bd-m-main-test-merge-clean")))
+
+# git's three conflict markers left in a conflicted test file of an open merge are denied by builder-diff, since a test
+# file that still holds markers is the builder's change. An unmerged file that is not staged is refused by builder-diff
+# too, pinned by the bd-m-test-left row above, so these rows stage the markers first.
+_bd_m_markers_chain = diff_repo("bd-m-markers-chain", _f2_conflict_open)
+sh("builder-refuse: a builder's open merge that leaves git's markers in a conflicted test file, staged and committed in "
+   "one call, is denied by builder-diff", VCS + " add -A && " + COMMIT, "deny", rule=BDIFF,
+   cwd=_bd_m_markers_chain, agent_id="bld1", agent_type="builder")
+_bd_m_markers_staged = diff_repo("bd-m-markers-staged", _f2_conflict_staged)
+sh("builder-refuse: a builder's open merge that stages git's markers in a conflicted test file, then commits, is denied "
+   "by builder-diff", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_markers_staged, agent_id="bld1",
+   agent_type="builder")
+# The same staged markers behind a leading `echo ok;`: builder-diff refuses the test file at commit by itself.
+sh("builder-refuse: a builder's open merge, with a test file still holding git's markers, staged and committed after "
+   "`echo ok;`, is denied at commit by builder-diff", "echo ok; " + VCS + " add -A && " + COMMIT, "deny", rule=BDIFF,
+   cwd=_bd_m_markers_chain, agent_id="bld1", agent_type="builder")
+
+# A builder's resolution of a conflicted test file to main's side, or to a blend of both sides, is refused by
+# builder-diff, as its resolution to its own side is (_open_test_conflict_edited).
+_bd_m_keep_main = diff_repo("bd-m-keep-main", lambda w: _resolve_test_conflict_open(
+    w, BASE_FILES[TEST_A] + "# main's newer case\n"))
+sh("builder-refuse: a builder's merge in progress that resolves a conflicted test file to main's side is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_keep_main, agent_id="bld1", agent_type="builder")
+_bd_m_blend = diff_repo("bd-m-blend", _strip_test_conflict_markers)
+sh("builder-refuse: a builder's merge in progress that strips git's markers from a conflicted test file and keeps both "
+   "sides is denied at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_blend, agent_id="bld1", agent_type="builder")
+
+# A builder's edit to sub/tests/test_b.py is refused when it runs from sub/ with `diff.relative` set, as it is under the
+# default config. With diff.relative, git prints the path relative to sub/ (tests/test_b.py), so the rows check that the
+# refusal holds when git names the file that way. The default-config row is the control. The sibling pin for
+# `git diff --check` under diff.relative is CMK_REL (conflict-markers).
+SUB_TEST = "sub/tests/test_b.py"
+SUB_FILES = {**BASE_FILES, "tests/test_b.py": "def test_top():\n    assert 1\n",
+             SUB_TEST: "def test_sub():\n    assert 1\n"}
+SUB_EDIT = "def test_sub():\n    assert 2\n"
+
+
+def _folder_names(where, folder, *revs, flags=()):
+    """The names `git diff --name-only` prints from `folder`, with `flags` added. A fixture checks them before a case
+    relies on them."""
+    done = run_vcs(os.path.join(where, folder), "diff", *flags, "--name-only", *revs)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed: git diff in %s/ of %r: %s" % (folder, where, done.stderr.strip()))
+    return done.stdout.split()
+
+
+def _sub_open_edit(w, relative):
+    """The open merge of a clean merge, with the builder's edit to SUB_TEST. `relative` sets diff.relative."""
+    _clean_merge_open(w)
+    write(os.path.join(w, SUB_TEST), SUB_EDIT)
+    if relative:
+        _must(w, "config", "diff.relative", "true")
+        if _folder_names(w, "sub", "HEAD") != ["tests/test_b.py"]:
+            sys.exit("fixture setup failed: diff.relative did not name %r relative to sub/ in %r" % (SUB_TEST, w))
+    elif SUB_TEST not in _folder_names(w, "sub", "HEAD"):
+        sys.exit("fixture setup failed: the default config did not name %r from sub/ in %r" % (SUB_TEST, w))
+
+
+def _sub_commit_edit(w):
+    """The open merge of _sub_open_edit, committed as the builder's merge commit, with diff.relative set."""
+    _clean_merge_open(w)
+    write(os.path.join(w, SUB_TEST), SUB_EDIT)
+    _commit_merge(w)
+    _must(w, "config", "diff.relative", "true")
+    if _folder_names(w, "sub", "HEAD^1", "HEAD") != ["tests/test_b.py"]:
+        sys.exit("fixture setup failed: diff.relative did not name the merge commit's %r relative to sub/ in %r"
+                 % (SUB_TEST, w))
+
+
+_bd_sub_open_rel = diff_repo("bd-sub-open-rel", lambda w: _sub_open_edit(w, True), files=SUB_FILES)
+sh("builder-refuse: a builder's edit to sub/tests/test_b.py in an open merge, from sub/ with diff.relative set, is "
+   "denied at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_sub_open_rel, "sub"), agent_id="bld1",
+   agent_type="builder")
+_bd_sub_commit_rel = diff_repo("bd-sub-commit-rel", _sub_commit_edit, files=SUB_FILES)
+sh("builder-refuse: a builder's merge commit that edits sub/tests/test_b.py, from sub/ with diff.relative set, is "
+   "denied at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_sub_commit_rel, "sub"), agent_id="bld1",
+   agent_type="builder")
+_bd_sub_open_default = diff_repo("bd-sub-open-default", lambda w: _sub_open_edit(w, False), files=SUB_FILES)
+sh("builder-refuse: the same open-merge edit to sub/tests/test_b.py under the default config, from sub/, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_sub_open_default, "sub"), agent_id="bld1",
+   agent_type="builder")
+
+# With `diff.relative` set, `git diff` names only the paths under the folder it runs in, so from docs/ a builder's edit
+# to the top-level tests/test_a.py is named by no plain diff. Only `--no-relative` on each name-producing diff keeps the
+# refusal. Each red row runs from docs/ and reads the edit down one call path: the working tree against HEAD, against
+# git's open merge, a committed change at push, and a merge commit at commit. Each fixture checks that premise first.
+# Each control builds the same change under the default config, where the refusal holds with or without the flag.
+DOCS_FILES = {**BASE_FILES, "docs/notes.md": "notes\n"}
+
+
+def _docs_edit(w):
+    write(os.path.join(w, TEST_A), "def test_a():\n    assert 2\n")
+
+
+def _docs_relative(w, relative, *revs):
+    """With `relative`, set diff.relative and check that the plain diff from docs/ names no path while --no-relative
+    names the test file. Without it, check that the default diff from docs/ names the test file."""
+    if not relative:
+        if TEST_A not in _folder_names(w, "docs", *revs):
+            sys.exit("fixture setup failed: the default config did not name %r from docs/ in %r" % (TEST_A, w))
+        return
+    _must(w, "config", "diff.relative", "true")
+    if _folder_names(w, "docs", *revs):
+        sys.exit("fixture setup failed: diff.relative still named a path from docs/ in %r" % w)
+    if TEST_A not in _folder_names(w, "docs", *revs, flags=("--no-relative",)):
+        sys.exit("fixture setup failed: --no-relative did not name %r from docs/ in %r" % (TEST_A, w))
+
+
+def _docs_plain(w, relative):
+    """A builder's uncommitted edit to the top-level test file."""
+    _docs_edit(w)
+    _docs_relative(w, relative, "HEAD")
+
+
+def _docs_open(w, relative):
+    """A builder's edit to the top-level test file, made while git's clean merge of main is still open."""
+    _clean_merge_open(w)
+    _docs_edit(w)
+    _docs_relative(w, relative, "HEAD")
+
+
+def _docs_committed(w, relative):
+    """A builder's plain commit of the top-level test file, read again at push."""
+    _docs_edit(w)
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "builder edit")
+    _docs_relative(w, relative, "HEAD^", "HEAD")
+
+
+def _docs_merge_committed(w, relative):
+    """A builder's merge commit that edits the top-level test file, read again at commit."""
+    _clean_merge_open(w)
+    _docs_edit(w)
+    _commit_merge(w)
+    _docs_relative(w, relative, "HEAD^1", "HEAD")
+
+
+_bd_docs_plain = diff_repo("bd-docs-plain-rel", lambda w: _docs_plain(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's edit to tests/test_a.py, from docs/ with diff.relative set, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_plain, "docs"), agent_id="bld1", agent_type="builder")
+_bd_docs_plain_ctl = diff_repo("bd-docs-plain-ctl", lambda w: _docs_plain(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same edit to tests/test_a.py, from docs/ under the default config, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_plain_ctl, "docs"), agent_id="bld1", agent_type="builder")
+
+_bd_docs_open = diff_repo("bd-docs-open-rel", lambda w: _docs_open(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's edit to tests/test_a.py in an open merge, from docs/ with diff.relative set, is "
+   "denied at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_open, "docs"), agent_id="bld1",
+   agent_type="builder")
+_bd_docs_open_ctl = diff_repo("bd-docs-open-ctl", lambda w: _docs_open(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same open-merge edit to tests/test_a.py, from docs/ under the default config, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_open_ctl, "docs"), agent_id="bld1",
+   agent_type="builder")
+
+_bd_docs_committed = diff_repo("bd-docs-committed-rel", lambda w: _docs_committed(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's committed edit to tests/test_a.py, from docs/ with diff.relative set, is denied at "
+   "push", PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_committed, "docs"), agent_id="bld1",
+   agent_type="builder")
+_bd_docs_committed_ctl = diff_repo("bd-docs-committed-ctl", lambda w: _docs_committed(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same committed edit to tests/test_a.py, from docs/ under the default config, is denied at "
+   "push", PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_committed_ctl, "docs"), agent_id="bld1",
+   agent_type="builder")
+
+_bd_docs_merge = diff_repo("bd-docs-merge-rel", lambda w: _docs_merge_committed(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's merge commit that edits tests/test_a.py, from docs/ with diff.relative set, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_merge, "docs"), agent_id="bld1",
+   agent_type="builder")
+_bd_docs_merge_ctl = diff_repo("bd-docs-merge-ctl", lambda w: _docs_merge_committed(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same merge commit that edits tests/test_a.py, from docs/ under the default config, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_merge_ctl, "docs"), agent_id="bld1",
+   agent_type="builder")
+
+# An untracked file is listed from the checkout's top, whatever folder the command runs in. The builder's test file
+# under src/ is judged as src/test_x.py. The conflicted top-level file of that name holds git's markers, so builder-diff
+# refuses it either way: this row does not tell the two readings apart.
+_bd_m_top = diff_repo("bd-m-top-test", _top_test_conflict_open)
+sh("builder-refuse: a builder's merge in progress, with a conflicted top-level test file left as git wrote it and an "
+   "untracked test file of the same name under src/, is denied at commit from a subfolder", COMMIT, "deny", rule=BDIFF,
+   cwd=os.path.join(_bd_m_top, "src"), agent_id="bld1", agent_type="builder")
+
+# A merge in progress where the merged branch added twenty test files that merged clean is git's, and allowed.
+_bd_m_many = diff_repo("bd-m-many-clean", _c1_many_clean)
+sh("builder-refuse: a builder's merge in progress, with twenty test files that merged clean and a product file "
+   "resolved, is allowed at commit", COMMIT, "allow", cwd=_bd_m_many, agent_id="bld1", agent_type="builder")
+
+# An empty test file that a builder adds or deletes is a builder's change in a merge as in a plain change. The two
+# plain cases are the controls: the same change, outside a merge, is refused.
+_bd_empty_plain_add = diff_repo("bd-empty-plain-add", _put(EMPTY_TEST, ""))
+sh("builder-refuse: a new empty test file in a builder's plain change is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_empty_plain_add, agent_id="bld1", agent_type="builder")
+_bd_empty_plain_del = diff_repo("bd-empty-plain-del", _rm(EMPTY_TEST), files={**BASE_FILES, EMPTY_TEST: ""})
+sh("builder-refuse: a deleted empty test file in a builder's plain change is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_empty_plain_del, agent_id="bld1", agent_type="builder")
+
+_bd_m_empty_add = diff_repo("bd-m-empty-add", _empty_add_open)
+sh("builder-refuse: a builder's merge in progress that adds an empty test file git's merge lacks is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_add, agent_id="bld1", agent_type="builder")
+_bd_m_empty_del = diff_repo("bd-m-empty-del", _empty_delete_open)
+sh("builder-refuse: a builder's merge in progress that deletes an empty test file git's merge has is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_del, agent_id="bld1", agent_type="builder")
+_bd_m_empty_add_c = diff_repo("bd-m-empty-add-commit", _empty_add_committed)
+sh("builder-refuse: a builder's merge commit that adds an empty test file git's merge lacks is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_add_c, agent_id="bld1", agent_type="builder")
+_bd_m_empty_del_c = diff_repo("bd-m-empty-del-commit", _empty_delete_committed)
+sh("builder-refuse: a builder's merge commit that deletes an empty test file git's merge has is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_del_c, agent_id="bld1", agent_type="builder")
+
+# A conflicted test file whose bytes change only in line endings, LF to CRLF or a lone CR, is the builder's change. A
+# line-ending change alters the bytes of the file, so the two rows check that each is refused.
+_bd_m_crlf = diff_repo("bd-m-crlf", _conflict_crlf)
+sh("builder-refuse: a builder's merge in progress that changes only the line endings of a conflicted test file "
+   "(LF to CRLF) is denied at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_crlf, agent_id="bld1",
+   agent_type="builder")
+_bd_m_cr = diff_repo("bd-m-cr", _conflict_cr)
+sh("builder-refuse: a builder's merge in progress that changes only the line endings of a conflicted test file "
+   "(a lone CR) is denied at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_cr, agent_id="bld1",
+   agent_type="builder")
+
+# A test file that differs only in one invalid UTF-8 byte is the builder's change: both bytes decode alike.
+_bd_m_byte = diff_repo("bd-m-invalid-byte", _invalid_byte_open)
+sh("builder-refuse: a builder's merge in progress that changes only an invalid UTF-8 byte of a test file is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_byte, agent_id="bld1", agent_type="builder")
+
+# A gitlink under tests/, and a mode-only change to a test file, are the builder's changes in a merge, refused as on
+# main. The plain changes are the controls: the same change outside a merge is refused.
+_bd_m_gitlink = diff_repo("bd-m-gitlink", _gitlink_open)
+sh("builder-refuse: a builder's merge in progress that adds a gitlink under tests/ is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_gitlink, agent_id="bld1", agent_type="builder")
+_bd_m_gitlink_c = diff_repo("bd-m-gitlink-commit", _gitlink_committed)
+sh("builder-refuse: a builder's merge commit that adds a gitlink under tests/ to a commit the clone lacks is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_gitlink_c, agent_id="bld1", agent_type="builder")
+_bd_m_gitlink_h = diff_repo("bd-m-gitlink-held", _gitlink_committed_held)
+sh("builder-refuse: a builder's merge commit that adds a gitlink under tests/ to a commit the clone holds is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_gitlink_h, agent_id="bld1", agent_type="builder")
+_bd_gitlink_plain = diff_repo("bd-gitlink-plain", _gitlink_stage)
+sh("builder-refuse: a builder's plain change that adds a gitlink under tests/ is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_gitlink_plain, agent_id="bld1", agent_type="builder")
+
+# A mode-only change is no byte change, so the exec bit needs a POSIX checkout. The committed one sets the bit in the
+# index too, so it reads the same on every platform.
+_MODE_OPEN_CASE = ("builder-refuse: a builder's merge in progress that changes only the mode of a test file (chmod +x) "
+                   "is denied at commit")
+_MODE_PLAIN_CASE = ("builder-refuse: a builder's plain change that changes only the mode of a test file (chmod +x) "
+                    "is denied at commit")
+# The conflicted test file of an open merge, unmerged in the index, whose only change is the exec bit: the mode change
+# is the builder's change, whatever git's raw entry for an unmerged path holds.
+_MODE_CONFLICT_CASE = ("builder-refuse: a builder's merge in progress that only sets the exec bit on a conflicted test "
+                       "file, keeping git's bytes, is denied at commit")
+if os.name != "nt":
+    _bd_m_mode = diff_repo("bd-m-mode", _mode_exec_open)
+    sh(_MODE_OPEN_CASE, COMMIT, "deny", rule=BDIFF, cwd=_bd_m_mode, agent_id="bld1", agent_type="builder")
+    _bd_mode_plain = diff_repo("bd-mode-plain", _mode_exec(TEST_A))
+    sh(_MODE_PLAIN_CASE, COMMIT, "deny", rule=BDIFF, cwd=_bd_mode_plain, agent_id="bld1", agent_type="builder")
+    _bd_m_conf_mode = diff_repo("bd-m-conflict-mode", _open_test_conflict_mode)
+    sh(_MODE_CONFLICT_CASE, COMMIT, "deny", rule=BDIFF, cwd=_bd_m_conf_mode, agent_id="bld1", agent_type="builder")
+else:
+    skip_case(_MODE_OPEN_CASE, NO_EXEC_BIT)
+    skip_case(_MODE_PLAIN_CASE, NO_EXEC_BIT)
+    skip_case(_MODE_CONFLICT_CASE, NO_EXEC_BIT)
+_bd_m_mode_c = diff_repo("bd-m-mode-commit", _mode_exec_committed)
+sh("builder-refuse: a builder's merge commit that changes only the mode of a test file is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_mode_c, agent_id="bld1", agent_type="builder")
+
+
+def _reaches_merge_check_case(where, rel, committed):
+    """A builder's change to `rel` in a merge reaches the merge check: own_changes answers, and git's diff of the
+    merge's old side lists `rel` before the merge check judges it. So a deny above comes from the merge check, and an
+    allow from an unread change fails here instead."""
+    materialize(where)
+    guard = _load_guard_module()
+    if guard.own_changes(where) is None:
+        return False, "own_changes returned None, so git could not answer for %s" % rel
+    if committed:
+        old = guard.merge_tree(where, run_vcs(where, "rev-parse", "HEAD^1").stdout.strip(),
+                               run_vcs(where, "rev-parse", "HEAD^2").stdout.strip())
+        paths = guard.changed_paths(where, old, "HEAD") if old else None
+    else:
+        old = guard.merge_tree(where, "HEAD", run_vcs(where, "rev-parse", "MERGE_HEAD").stdout.strip())
+        paths = guard.changed_paths(where, old) if old else None
+    if paths is None:
+        return False, "git could not list the change against the merge's old side"
+    if rel not in paths:
+        return False, "git's diff against the merge's old side does not list %s" % rel
+    return True, "git lists %s against the merge's old side, and own_changes answers" % rel
+
+
+# Each red above must reach the merge check and fail there, not on an unread change.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's gitlink in a merge in progress reaches the merge check",
+                         lambda: _reaches_merge_check_case(_bd_m_gitlink, GITLINK, False)))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's gitlink in a merge commit reaches the merge check",
+                         lambda: _reaches_merge_check_case(_bd_m_gitlink_c, GITLINK, True)))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's mode-only change in a merge commit reaches the merge check",
+                         lambda: _reaches_merge_check_case(_bd_m_mode_c, TEST_A, True)))
+if os.name != "nt":
+    LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's mode-only change in a merge in progress "
+                             "reaches the merge check", lambda: _reaches_merge_check_case(_bd_m_mode, TEST_A, False)))
+    LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's exec-bit change on a conflicted test file in a merge in "
+                             "progress reaches the merge check",
+                             lambda: _reaches_merge_check_case(_bd_m_conf_mode, TEST_A, False)))
+
+
+# The git reader a guard call goes through: `_git`, which guard_core imports from git_reads. The guard calls it as
+# guard_core._git, so a patch on the core module counts each call the guard makes.
+COUNTED_READERS = ("_git",)
+
+
+def _counted_own_changes(where):
+    """own_changes(where) with every git call the guard makes counted: the changes, and the argument tuples of the
+    calls in order. The count is taken at the readers the guard calls, so it is the guard's own. A reader that another
+    counted reader calls is not counted again: a chain of readers is one call."""
+    guard = _load_guard_module()
+    core = sys.modules["guard_core"]
+    calls = []
+    depth = [0]
+    real = {name: getattr(core, name) for name in COUNTED_READERS if hasattr(core, name)}
+
+    def counted(real_call):
+        def call(root, *args):
+            if not depth[0]:
+                calls.append(args)
+            depth[0] += 1
+            try:
+                return real_call(root, *args)
+            finally:
+                depth[0] -= 1
+        return call
+
+    for name, real_call in real.items():
+        setattr(core, name, counted(real_call))
+    try:
+        changes = guard.own_changes(where)
+    finally:
+        for name, real_call in real.items():
+            setattr(core, name, real_call)
+    return changes, calls
+
+
+def _calls_naming(calls, rels):
+    """{rel: how many git calls name rel} for each path in `rels`."""
+    return {rel: sum(1 for args in calls if any(rel in part for part in args)) for rel in rels}
+
+
+def plain_commit_reads_case():
+    """A builder's plain commit: own_changes makes no git call that names one of its changed paths."""
+    where = diff_repo("bd-cost-plain", _cost_files, commit=True)
+    materialize(where)
+    changes, calls = _counted_own_changes(where)
+    if changes is None:
+        return False, "own_changes returned None for the plain commit"
+    found = {path for _old, _new, paths, _kind in changes for path in paths}
+    if found != set(COST_PATHS):
+        return False, "own_changes found paths %r, want %r" % (sorted(found), COST_PATHS)
+    named = {rel: n for rel, n in _calls_naming(calls, COST_PATHS).items() if n}
+    if named:
+        return False, "the plain commit's git calls name paths %r, want none" % (named,)
+    return True, "the plain commit's three paths are read through no git call"
+
+
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's plain commit makes no git call that names a changed path",
+                         plain_commit_reads_case))
+
 # Undo route: a new test file is refused, and the reason says to delete it and names no test path.
 _bd_u2 = diff_repo("bd-u2-new-file", _u2_new_test)
 sh("builder-refuse: a new test file is denied at commit, and the reason says to delete it and names no path",
@@ -16510,6 +17533,10 @@ sh("builder-refuse: a new test file is denied at commit, and the reason says to 
 sh("builder-refuse: a new test file is denied at push, and the reason says to delete it and names no path",
    PUSH, "deny", rule=BDIFF, cwd=_bd_u2, agent_id="bld1", agent_type="builder",
    lacks=("tests/", "test_new"), carries=("delete",))
+# Untracked files are listed from the checkout's top, so the same new test file, under tests/, is refused from a
+# subfolder too.
+sh("builder-refuse: a builder's plain change with an untracked test file in another folder is denied at commit from "
+   "a subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_u2, "src"), agent_id="bld1", agent_type="builder")
 
 
 def stop_pair_case():
@@ -16545,6 +17572,28 @@ def stop_pair_case():
 
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's first stop with a test change is blocked, and its "
                          "second stop is allowed and logs role-diff-unresolved", stop_pair_case))
+
+
+# A test-config file is read from the run folder, so a commit run from src/ reads src/src/pytest.ini,
+# finds no text, and allows a testpaths line that disables tests. The rows from the top are the control:
+# the same file read from the top is refused.
+_bd_src_ini = diff_repo("bd-src-ini-untracked", _put("src/pytest.ini", "[pytest]\ntestpaths = nowhere\n"))
+sh("builder-refuse: a builder's commit from src/ with an untracked src/pytest.ini that sets testpaths is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's push from src/ with an untracked src/pytest.ini that sets testpaths is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: the same untracked src/pytest.ini, committed from the top, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_src_ini, agent_id="bld1", agent_type="builder")
+
+# The same join for a tracked src/pytest.ini: the base holds it, and the builder adds a testpaths line from src/.
+_bd_src_ini_t = diff_repo("bd-src-ini-tracked", _put("src/pytest.ini", "[pytest]\naddopts = -q\ntestpaths = nowhere\n"),
+                          files={**BASE_FILES, "src/pytest.ini": "[pytest]\naddopts = -q\n"})
+sh("builder-refuse: a builder's commit from src/ that adds testpaths to a tracked src/pytest.ini is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini_t, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's push from src/ that adds testpaths to a tracked src/pytest.ini is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini_t, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: the same tracked src/pytest.ini edit, committed from the top, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_src_ini_t, agent_id="bld1", agent_type="builder")
 
 
 # =========================================================================== failing open
@@ -20382,6 +21431,268 @@ add("brief-claim: an empty brief is allowed", "allow", tool="Agent", prompt="", 
     model="sonnet")
 
 
+# ---- A spawn's brief that orders a discard of the working tree (rule brief-destructive-git, rule
+# shared-trees-no-destructive-git). An Agent, Task or Workflow brief is denied when a command span in it is one that
+# shared_tree_match reads as a discard: a backtick span, a fenced line, or a line led by "$ ". A negation before the
+# span on its line (never, do not, don't, no), a "Must deny:" or "Add a case:" line, prose with no span, a git span that
+# discards nothing, and a repo under a session scratchpad are false alarms the rule must leave alone. Each deny is red
+# on main, where no rule reads a brief. Selector: MUTATE_ONLY=brief-destructive-git: runs these cases and log checks.
+BRIEF_DESTRUCTIVE = "brief-destructive-git"
+# A session id is 8 or more characters, so a short folder name would not read as a scratchpad (in_any_session_scratchpad).
+SCRATCH_REPO = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "repo")
+from agent_brief import COMMON  # noqa: E402  the standing-rules text the SubagentStart hook gives every agent
+STANDING_LINE_ONE = "\n".join(text for _, text in COMMON[:2])   # the heading, then the first rule line
+STANDING_ALL = "\n".join(text for _, text in COMMON)
+# Paragraphs 7 to 12 of the brief that set these cases, as a brief would carry them. Paragraph 12's scratch path is the
+# session-shaped one above, so the text reads the same way the rule reads it.
+BRIEF_ALLOW_PARAGRAPHS = (
+    'A prohibition: "Never run `git reset --hard`." and "Do not run `git stash`." '
+    "(a negation word before the span on its line: never, do not, don't, no).\n"
+    "Case data: a line that starts with `Must deny:` or `Add a case:` holding `git reset --hard`.\n"
+    "The standing-rules text from hooks/agent_brief.py COMMON line 1 pasted in a brief.\n"
+    'Prose with no command span: "the reset with the hard flag lost work".\n'
+    "A non-discarding git span: `git reset HEAD file.py`, `git stash list`, `git status`.\n"
+    "A scratch repo: `git -C " + SCRATCH_REPO + " reset --hard` (a path under a session scratchpad, as "
+    "`in_any_session_scratchpad` reads it) passes, mirroring the shell guard, which allows the session's own scratchpad."
+)
+add("brief-destructive-git: builder brief that orders `git reset --hard origin/main` is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Then run `git reset --hard origin/main` and re-apply your change.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that orders the reset in a fenced block is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Undo the bad commit first.\n```\ngit reset --hard HEAD~1\n```\nThen re-apply your change.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief with a `$ ` line that runs a bare git stash is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Set the work aside first.\n$ git stash\nThen redo the edit.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief with a `$ ` line that runs git clean -fd is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Clear the untracked files.\n$ git clean -fd\nThen redo the edit.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that orders `git checkout -- .` in a backtick span is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Drop your edits: `git checkout -- .`, then redo the change.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: Workflow agent prompt that holds `git reset --hard` is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Workflow",
+    script=_step_flow("'Run `git reset --hard` and redo the edit.'", "agentType: 'builder', model: 'sonnet'"))
+add("brief-destructive-git: Task spawn whose brief orders `git reset --hard origin/main` is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Task", prompt="Then run `git reset --hard origin/main` and re-apply your change.",
+    subagent_type="builder", model="sonnet")
+# The scanner reads a brief and a Workflow script as text, so each case below holds a comment opener in a string, a
+# lone quote, or a multi-line template literal in front of the ordered reset.
+add("brief-destructive-git: builder brief with a lone apostrophe before the ordered reset is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="It's late. Then run `git reset --hard origin/main` and re-apply your change.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief with a hash opener inside the reset span is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Then run `git reset --hard HEAD~1 # undo the change` and re-apply it.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: Workflow reset after a // inside a string on the same line is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Workflow",
+    script="const home = 'https://compass.example'; "
+           + _step_flow("'Run `git reset --hard origin/main`.'", "agentType: 'builder', model: 'sonnet'"))
+add("brief-destructive-git: Workflow reset after a /* inside a string on the same line is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Workflow",
+    script="const tag = '/* keep */'; "
+           + _step_flow("'Run `git reset --hard origin/main`.'", "agentType: 'builder', model: 'sonnet'"))
+add("brief-destructive-git: Workflow reset in a multi-line template literal prompt is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Workflow",
+    script="const r = await agent(`Keep the scan.\nRun \\`git reset --hard origin/main\\` and redo the edit.`, "
+           "{agentType: 'builder', model: 'sonnet'}); return r")
+add("brief-destructive-git: builder brief with the reset on line 30 of a long brief is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt=LONG_BRIEF + "\nThen run `git reset --hard origin/main` and re-apply your change.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that prohibits `git reset --hard` is allowed", "allow",
+    tool="Agent", prompt="Never run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that prohibits `git stash` is allowed", "allow",
+    tool="Agent", prompt="Do not run `git stash`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that prohibits `git clean -fd` with don't is allowed", "allow",
+    tool="Agent", prompt="Don't run `git clean -fd`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that prohibits `git checkout -- .` with no is allowed", "allow",
+    tool="Agent", prompt="No `git checkout -- .` in this lane.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a Must deny line holding `git reset --hard` is allowed", "allow",
+    tool="Agent", prompt="Must deny: `git reset --hard origin/main` is refused.",
+    subagent_type="test-author")
+add("brief-destructive-git: an Add a case line holding `git stash` is allowed", "allow",
+    tool="Agent", prompt="Add a case: `git stash` on a dirty tree is denied.", subagent_type="test-author")
+add("brief-destructive-git: the standing-rules heading and first rule from agent_brief COMMON are allowed", "allow",
+    tool="Agent", prompt=STANDING_LINE_ONE, subagent_type="builder", model="sonnet")
+add("brief-destructive-git: the whole standing-rules text from agent_brief COMMON is allowed", "allow",
+    tool="Agent", prompt=STANDING_ALL, subagent_type="builder", model="sonnet")
+add("brief-destructive-git: prose with the reset and the hard flag and no span is allowed", "allow",
+    tool="Agent", prompt="Earlier, the reset with the hard flag lost work.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a reset that only unstages a path is allowed", "allow",
+    tool="Agent", prompt="Run `git reset HEAD file.py` to unstage it.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: git stash list is a read and is allowed", "allow",
+    tool="Agent", prompt="Run `git stash list` to see the stack.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: git status is allowed", "allow",
+    tool="Agent", prompt="Run `git status`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a reset --hard in a scratch repo under a session scratchpad is allowed", "allow",
+    tool="Agent", prompt="Try it first: `git -C " + SCRATCH_REPO + " reset --hard`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: the brief's own allow paragraphs, as a test-author brief, are allowed", "allow",
+    tool="Agent", prompt=BRIEF_ALLOW_PARAGRAPHS, subagent_type="test-author")
+add("brief-destructive-git: an empty brief is allowed", "allow",
+    tool="Agent", prompt="", subagent_type="builder", model="sonnet")
+# Brief-scan cases for these causes: a negation word the scan does not read, a Never heading over bullets, a read-only
+# role, a branch or worktree act, a scratch segment joined to a reset, and an inline triple-backtick span.
+add("brief-destructive-git: builder brief that says `git reset --hard` must not run is allowed", "allow",
+    tool="Agent", prompt="You must not run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that says `git reset --hard` should not run is allowed", "allow",
+    tool="Agent", prompt="You should not run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that says to avoid `git reset --hard` is allowed", "allow",
+    tool="Agent", prompt="Avoid `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that says you cannot run `git reset --hard` is allowed", "allow",
+    tool="Agent", prompt="You cannot run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that says to work without `git reset --hard` is allowed", "allow",
+    tool="Agent", prompt="Work without `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: bullets under a `Never run:` heading that name `git reset --hard` and `git stash` are allowed",
+    "allow", tool="Agent", prompt="Never run:\n- `git reset --hard`\n- `git stash`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: reviewer brief that says `git reset --hard origin/main` is refused is allowed", "allow",
+    tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.", subagent_type="reviewer", model="sonnet")
+add("brief-destructive-git: Explore brief that says `git reset --hard origin/main` is refused is allowed", "allow",
+    tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.", subagent_type="Explore")
+add("brief-destructive-git: Plan brief that says `git reset --hard origin/main` is refused is allowed", "allow",
+    tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.", subagent_type="Plan")
+add("brief-destructive-git: builder brief that orders `git branch -D old-lane` is allowed", "allow",
+    tool="Agent", prompt="Delete it locally: `git branch -D old-lane`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that orders `git worktree prune` is allowed", "allow",
+    tool="Agent", prompt="Then run `git worktree prune`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that orders `git worktree remove x` is allowed", "allow",
+    tool="Agent", prompt="Then run `git worktree remove x`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a brief whose scratch `git -C` segment is joined to a reset outside it is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Compare: `git -C " + SCRATCH_REPO + " status && git reset --hard origin/main`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a reset under an inline ``` span line that is not a fence is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="```git status```\nRun `git reset --hard origin/main`.",
+    subagent_type="builder", model="sonnet")
+# Brief-scan cases for these causes: a heading negator read across the whole heading, a negator that is not the word
+# before its span ("without", "avoid"), emphasis marks inside a negator, a bold heading, a blank line before the list, a
+# fence or a nested bullet under a negating heading, an inline triple-backtick span with text after it, and a read-only
+# role with a plugin prefix. Each deny is red on a brief that the scan lets through; each allow is red on a refusal the
+# scan makes, and its reason names this rule.
+add("brief-destructive-git: heading Do not skip any step: does not cover a numbered list that orders a reset is denied",
+    "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Do not skip any step:\n1. `git fetch`\n2. `git reset --hard origin/main`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: heading Without losing the log, run: does not cover a bullet that orders a discard is denied",
+    "deny", BRIEF_DESTRUCTIVE, tool="Agent", prompt="Without losing the log, run:\n- `git checkout -- .`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: without that is not the word before the span does not cancel a reset is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Reset without asking: `git reset --hard origin/main`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: avoid that is not the word before the span does not cancel a clean is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="To avoid conflicts run `git clean -fd`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: an inline triple-backtick span with text after it opens no fence, so the reset after it "
+    "is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="```git status``` first\nThen:\n```\ngit reset --hard origin/main\n```",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: emphasis marks inside the negator, Do **not** run, are allowed", "allow",
+    tool="Agent", prompt="Do **not** run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a bold Never run: heading over discard bullets is allowed", "allow",
+    tool="Agent", prompt="**Never run:**\n- `git reset --hard`\n- `git stash`", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a blank line between Never run: and its discard bullets is allowed", "allow",
+    tool="Agent", prompt="Never run:\n\n- `git reset --hard`\n- `git stash`", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a fenced discard under a Never run: heading is allowed", "allow",
+    tool="Agent", prompt="Never run:\n```\ngit reset --hard\n```", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a nested discard bullet under a - Never run: bullet heading is allowed", "allow",
+    tool="Agent", prompt="- Never run:\n  - `git stash`", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a plugin-prefixed reviewer role my-plugin:reviewer that says a reset is refused is allowed",
+    "allow", tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.",
+    subagent_type="my-plugin:reviewer", model="sonnet")
+# Failure classes: a false allow on a Workflow spawn that names no model, or names one through a variable (spawn_inputs
+# skips both, so no brief is read), and a false deny on prohibitions joined by commas (the comma ends the clause the
+# negator sits in, so the second span reads as an order).
+add("brief-destructive-git: Workflow builder agent with no model key that orders `git reset --hard origin/main` "
+    "is denied", "deny", BRIEF_DESTRUCTIVE, tool="Workflow",
+    script=_step_flow("'Run `git reset --hard origin/main`'", "agentType: 'builder'"))
+add("brief-destructive-git: Workflow builder agent whose model is held in a variable and that orders "
+    "`git reset --hard origin/main` is denied", "deny", BRIEF_DESTRUCTIVE, tool="Workflow",
+    script="const m = 'sonnet'; "
+           + _step_flow("'Run `git reset --hard origin/main`'", "agentType: 'builder', model: m"))
+add("brief-destructive-git: builder brief whose comma list of prohibitions names `git stash`, `git reset --hard` and "
+    "`git clean -fd` is allowed", "allow", tool="Agent",
+    prompt="Never run `git stash`, `git reset --hard`, or `git clean -fd`.", subagent_type="builder", model="sonnet")
+# A prose word that ends in x, then a comma, then a reset order. The comma-list join reads that x as a span placeholder
+# and drops the clause, so the negator before the comma covers the order. Each is an order, so each is denied.
+add("brief-destructive-git: builder brief, tests fail and you can't fix, then a reset order is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="If the tests fail and you can't fix, `git reset --hard` and restart.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief, no need to fix, then a reset order is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="No need to fix, `git reset --hard` instead.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief, never leave the box, then a reset order is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Never leave the box, `git reset --hard` first.", subagent_type="builder", model="sonnet")
+# The x cases above fail on the no-case half only: the join reads a lower-case x. An upper-case X at the end of a
+# word is read the same way, so this case pins the word-start half that a case-only fix would leave open.
+add("brief-destructive-git: builder brief, a word ending in capital X (INBOX,) then a reset order is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Never edit the INBOX, `git reset --hard` first.", subagent_type="builder", model="sonnet")
+# Control, green on the old code: a comma before an order is a clause break too, so the order is still denied. A
+# builder that drops the comma from the clause split would let this through.
+add("brief-destructive-git: control, a comma before the order keeps it an order and is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Don't skip tests, run `git reset --hard`.",
+    subagent_type="builder", model="sonnet")
+# Controls: a clause break before an order keeps it an order, a negation covers a span after an earlier span, and a
+# builder's refusal text still orders a reset.
+add("brief-destructive-git: control, a semicolon before the order keeps it an order and is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Don't skip tests; run `git reset --hard`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, a never over an earlier span still covers the reset after it is allowed", "allow",
+    tool="Agent", prompt="Never run `a` or `git reset --hard`", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, builder brief that says `git reset --hard origin/main` is refused is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.",
+    subagent_type="builder", model="sonnet")
+
+
+# The owner's override lifts this refusal the way it lifts an Opus spawn's (decision owner-override): a one-act override
+# lets the first brief through, a timed one lets every brief through until it ends. Each story is refused with no override.
+BRIEF_DESTRUCTIVE_SPAWN = {"prompt": "Then run `git reset --hard origin/main` and re-apply your change.",
+                           "model": "sonnet", "subagent_type": "builder"}
+
+
+def brief_destructive_override_check(timed):
+    kind = "timed" if timed else "once"
+
+    def check():
+        config, session = ov_config("brief-destructive-" + kind), "ov-brief-destructive-" + kind
+
+        def call(seconds):
+            return lambda: ov_call("Agent", dict(BRIEF_DESTRUCTIVE_SPAWN), NOGIT, config, session, seconds)
+
+        ok, why = ov_story([("with no override", call(0), "deny", BRIEF_DESTRUCTIVE)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, "override 15m" if timed else "override")
+        if timed:
+            steps = [("first brief", call(60), "allow", BRIEF_DESTRUCTIVE),
+                     ("brief just before the end", call(OV_TIMED_SECONDS - 1), "allow", BRIEF_DESTRUCTIVE),
+                     ("brief at the end instant", call(OV_TIMED_SECONDS), "deny", BRIEF_DESTRUCTIVE)]
+        else:
+            steps = [("first brief", call(60), "allow", BRIEF_DESTRUCTIVE),
+                     ("second brief, override spent", call(120), "deny", BRIEF_DESTRUCTIVE)]
+        ok, why = ov_story(steps, note)
+        if not ok:
+            return False, why
+        return True, "a brief's discard order was refused with no override, then went through %s" % (
+            "until the end" if timed else "once")
+    return check
+
+
+for _is_timed in (False, True):
+    _override_check = brief_destructive_override_check(_is_timed)
+    LOG_CHECKS_EXTRA.append((
+        "brief-destructive-git: an owner override lifts a brief's discard order %s"
+        % ("until it ends" if _is_timed else "for one brief"), _override_check))
+    FIXTURELESS_CHECKS.add(_override_check)  # it builds its own config folders and reads no lazy fixture
+
+
 # ---- Brief-claim edges (rule brief-claim-has-probe). A claim can hide behind a backticked subject, a fence, a passive
 # form, another verb, a probe for a longer input, a plain-quoted input, a path locator, or a quoted red-case text. It
 # can also sit apart from its inputs (both, them, or a list above it), be negated, use "lets ... through", or sit
@@ -21982,6 +23293,70 @@ def worktree_home_cross_checkout_case():
     return True, "sibling, nested, primary, shell and outside-clone writes judged; reads pass"
 
 
+def worktree_home_cross_checkout_copy_case():
+    """Rule 0, `other-checkout`, the false alarms on a copy, beside
+    `worktree_home_cross_checkout_case`. A copy reads its SOURCE, so a source in another checkout
+    is a read; only the target is a write. An interpreter runs its body as code: a write it makes through
+    os.system, subprocess, a copy call, or open() is judged. A substitution in an unquoted heredoc and
+    a bash body are judged too. Why:
+    docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
+    """
+    primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcocp")
+    write(os.path.join(lane_b, "bin", "ci-job"), "#!/bin/sh\n")
+    write(os.path.join(lane_b, "x"), "x\n")
+    write(os.path.join(lane_b, "y"), "y\n")
+    other = slash(lane_b)
+    problems = []
+
+    def check(label, expect, tool, cwd, **tool_input):
+        got, reason = _decide_full(tool, cwd, **tool_input)
+        if got != expect:
+            problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+        elif expect == "deny" and ("other-checkout" not in reason or primary in reason):
+            problems.append("%s: the refusal must name other-checkout and no path: %s" % (
+                label, reason[:160]))
+
+    # A copy reads its source: the source may sit in another checkout. Only the target is judged.
+    check("for-loop copy of another checkout's file into its own", "allow", "Bash", lane_a,
+          command='B=%s; for f in bin/ci-job; do cp "$B/$f" "$f"; done' % other)
+    check("copy from another checkout, inside a loop body", "allow", "Bash", lane_a,
+          command='for f in a; do cp "%s/bin/ci-job" bin/ci-job; done' % other)
+    check("copy from another checkout into an unresolved quoted target", "allow", "Bash", lane_a,
+          command='cp "%s/x" "$f"' % other)
+    # Controls: each write into another checkout stays refused.
+    check("control: copy into another checkout's file, quoted target", "deny", "Bash", lane_a,
+          command='B=%s; cp bin/x "$B/bin/ci-job"' % other)
+    check("control: copy into another checkout inside a loop", "deny", "Bash", lane_a,
+          command='B=%s; for f in a; do cp a "$B/$f"; done' % other)
+    check("control: move out of another checkout", "deny", "Bash", lane_a,
+          command="mv %s/x ./x" % other)
+    check("control: move out of another checkout inside a loop", "deny", "Bash", lane_a,
+          command='B=%s; for f in a; do mv "$B/$f" "$f"; done' % other)
+    check("control: unquoted heredoc whose substitution copies into another checkout", "deny",
+          "Bash", lane_a, command='python3 - <<EOF\nx="$(cp a %s/y)"\nEOF' % other)
+    check("control: quoted heredoc whose interpreter copies into another checkout", "deny",
+          "Bash", lane_a,
+          command="python3 - <<'PY'\nimport shutil; shutil.copy('a', '%s/x')\nPY" % other)
+    check("control: bash heredoc body that copies into another checkout", "deny", "Bash", lane_a,
+          command="bash <<'EOF'\ncp a %s/x\nEOF" % other)
+    # A quoted heredoc whose interpreter writes a file in another checkout.
+    check("quoted heredoc whose interpreter opens a file in another checkout", "deny", "Bash",
+          lane_a, command="python3 - <<'PY'\nopen('%s/x','w').write('1')\nPY" % other)
+    # Interpreter bodies that run a write through another call: the body stays in the shell scan.
+    check("python os.system runs a copy into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os; os.system('cp a %s/x')\nPY" % other)
+    check("python os.system runs an echo redirect into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os; os.system('echo 1 > %s/x')\nPY" % other)
+    check("python subprocess.run lists a copy into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport subprocess; subprocess.run(['cp','a','%s/x'])\nPY" % other)
+    check("python from-import copy into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nfrom shutil import copy; copy('a','%s/x')\nPY" % other)
+
+    if problems:
+        return False, "; ".join(problems)
+    return True, "copy sources in another checkout pass; writes refused"
+
+
 def _stand_in_git(tag):
     """A stand-in `git` first on PATH. It appends each call's arguments to its log, then runs the real git.
     Returns (log, PATH) for a case to pass the guard, or (None, None) when no git is on PATH."""
@@ -22142,7 +23517,8 @@ def worktree_home_cross_checkout_cost_case():
     checkout; none for a Read, a Grep, a shell call that writes no file (a `2>&1` or `/dev/null`
     redirect included), a git verb that stays in its own checkout (`commit`, `checkout -b`, `stash list`),
     a `cd` within its own checkout, or a write from a cwd with no `.git` at or above it. A `git -C` into a
-    separate clone spends its one list. A stand-in git on PATH logs each spawn."""
+    separate clone spends its one list. A python heredoc that prints spends none; one that opens a
+    file in another checkout spends one. A stand-in git on PATH logs each spawn."""
     if os.name == "nt":
         return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
     primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcocost")
@@ -22187,6 +23563,10 @@ def worktree_home_cross_checkout_cost_case():
          {"command": VCS + " status"}, 0, 0, {"CLAUDE_PROJECT_DIR": primary}),
         ("shell git -C a separate clone commit", "Bash", lane_a,
          {"command": VCS + " -C " + slash(XCL_SEP) + " commit -m x"}, None, 1, {"CLAUDE_PROJECT_DIR": primary}),
+        ("shell python heredoc that prints, from its own checkout", "Bash", lane_a,
+         {"command": "python3 - <<'PY'\nprint(1)\nPY"}, None, 0),
+        ("shell python heredoc that opens a file in another checkout", "Bash", lane_a,
+         {"command": "python3 - <<'PY'\nopen('" + slash(lane_b) + "/x','w')\nPY"}, None, 1),
     ):
         if os.path.exists(log):
             os.remove(log)
@@ -23467,6 +24847,9 @@ LOG_CHECKS = (
      "unreadable", worktree_home_case),
     ("worktree-home: any session's write into another checkout of its clone is refused; outside "
      "the clone and its own checkout pass", worktree_home_cross_checkout_case),
+    ("worktree-home: a copy whose source is in another checkout is allowed; a write into another "
+     "checkout, from a copy or an interpreter body, is refused",
+     worktree_home_cross_checkout_copy_case),
     ("worktree-home: a write into a worktree in the session's own scratchpad is allowed; another "
      "session's, an agent's, a sessionless, a symlinked and a climbing write are refused",
      worktree_home_scratchpad_case),
@@ -28626,10 +30009,29 @@ ROLE_TABLE_RULES = ROLE_TABLE_HEAD + (
 ROLE_RULES_WANT = {"Explore": "haiku", "claude-code-guide": "haiku", "test-author": "haiku",
                    "reviewer": "haiku", "builder": "sonnet", "planner": "sonnet",
                    "general-purpose": "sonnet", "claude": "sonnet"}
+# The refuter role is read-only and runs Opus by its own standing grant (decision plan-refuter). Its name is
+# guard_core's REFUTER_ROLE, the one home of the name, read here and never typed. A guard_core with no such name
+# reads as REFUTER_MISSING: a spawn of that name is then refused as a role with no grant, and refuter_name_check
+# fails on the missing name itself (the same reading as the PowerShellScript cases).
+REFUTER_MISSING = "<no REFUTER_ROLE in guard_core>"
+_load_guard_module()  # sets sys.modules["guard_core"] for the read below
+REFUTER = getattr(sys.modules["guard_core"], "REFUTER_ROLE", REFUTER_MISSING)
+
+
+def refuter_name_check():
+    """guard_core names the refuter role in REFUTER_ROLE, a non-empty string. Every refuter case reads that name
+    from guard_core, so a guard_core without it fails this check and says so."""
+    if REFUTER == REFUTER_MISSING:
+        return False, "guard_core has no REFUTER_ROLE, the one home of the refuter role's name"
+    if not isinstance(REFUTER, str) or not REFUTER.strip():
+        return False, "guard_core.REFUTER_ROLE is %r, want a non-empty name" % (REFUTER,)
+    return True, "guard_core.REFUTER_ROLE names the refuter role"
+
+
 # The owner's real decision file: each role, with the first word of its Model cell.
 ROLE_REAL_WANT = {"Explore": "haiku", "claude-code-guide": "haiku", "test-author": "haiku",
                   "reviewer": "haiku", "record-writer": "haiku", "builder": "sonnet", "Plan": "opus",
-                  "designer": "opus", "design-reviewer": "opus", "general-purpose": "sonnet",
+                  "designer": "opus", "design-reviewer": "opus", REFUTER: "opus", "general-purpose": "sonnet",
                   "claude": "sonnet"}
 # Bytes that are not text, so no reader can take the decision file as a table.
 ROLE_TABLE_UNREADABLE = b"# Agent model cap\n\xff\xfe\x80 not text\n"
@@ -28813,12 +30215,23 @@ role_opus_refuse("role-model: a role with no row on opus is denied under agent-m
                "scout", "opus", "Look around.")
 role_opus_refuse("role-model: reviewer on opus with Round 3 of 3 is denied under agent-model-cap (item 127)",
                "reviewer", "opus", "Round 3 of 3. Re-check the diff.")
-# Standing grants stay allowed on Opus (rule 9d): Plan, the design reviewer, and a builder's third round.
+# Standing grants stay allowed on Opus (rule 9d): Plan, the design reviewer, the refuter, and a builder's third round.
 role_model_allow("role-model: Plan on opus is allowed (standing grant)", "Plan", "opus", "Plan the change.")
 role_model_allow("role-model: design-reviewer on opus is allowed (standing grant)", "design-reviewer", "opus",
                  "Review the mockup.")
 role_model_allow("role-model: builder on opus with Round 3 of 3 is allowed (standing grant)", "builder", "opus",
                  "Round 3 of 3. Finish the fix.")
+# The refuter's grant (page item 279, pick d): an Agent or Task spawn on Opus is allowed. Failure class: a false deny,
+# the spawn refused above its row, and a false allow, a reviewer or a near-miss name given the grant (the controls below).
+for _tool, _model in (("Agent", "opus"), ("Task", "claude-opus-5-5")):
+    role_model_allow("role-model: %s refuter on %s is allowed (standing grant)" % (_tool, _model), REFUTER, _model,
+                     "Refute the plan.", tool=_tool)
+# Controls, green on the old code too: a reviewer on Opus stays refused, and a near-miss of the role name earns no grant.
+role_opus_refuse("role-model: reviewer on opus with no round line is still denied (the refuter grant is not a reviewer's)",
+                 "reviewer", "opus", "Check the diff for typos.")
+for _near in (REFUTER + "s", REFUTER.title()):
+    role_opus_refuse("role-model: a near-miss of the refuter role, %s, on opus is denied (no standing grant)" % _near,
+                     _near, "opus", "Refute the plan.")
 
 # ---- H: a Workflow agent() call faces the role row and the Opus ceiling, as an Agent spawn does (decision agent-model-cap).
 # The guard reads each agent() call in the script and judges its agentType and model as an Agent spawn is judged: the
@@ -29293,6 +30706,8 @@ for _label, _check in (
     ("role-list: test-author moved from a haiku row to sonnet drifts HAIKU_ROLES", role_list_haiku_check),
     ("role-list: a new opus row role drifts OPUS_STANDING_ROLES", role_list_opus_check),
     ("role-list: builder moved to an opus row drifts the override's OPUS_ROLES", role_list_builder_check),
+    ("refuter: guard_core names the refuter role in REFUTER_ROLE, the one home the cases read",
+     refuter_name_check),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)
