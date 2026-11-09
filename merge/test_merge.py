@@ -2,9 +2,9 @@
 """Fixture suite for merge/merge.py, the git and GitHub halves.
 
 Run: python3 merge/test_merge.py
-MERGE_TESTS=windows-slice runs only the marked tests. MERGE_SHARD=<i>/<n> then runs every n-th test,
-starting at the i-th (1-based): the n shards are disjoint and together hold every test, so CI can split
-the suite across jobs and drop none.
+MERGE_TESTS=windows-slice runs only the marked tests. MERGE_SHARD=<i>/<n> (or <i>-<n>, for a worktree
+harness that refuses the slash form) then runs every n-th test, starting at the i-th (1-based): the n shards
+are disjoint and together hold every test, so CI can split the suite across jobs and drop none.
 No network, no real repo. Every run uses a local bare origin in a temp dir, the real
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
@@ -73,12 +73,13 @@ def select_tests(suite, mode):
     return unittest.TestSuite(keep)
 
 def select_shard(suite, value):
-    """"" keeps every test. "<i>/<n>" (1 <= i <= n) keeps every n-th test from index i-1. Anything else stops the run."""
+    """"" keeps every test. "<i>/<n>" or "<i>-<n>" (1 <= i <= n) keeps every n-th test from index i-1. Anything else stops the run."""
     if value == "":
         return suite
-    m = re.fullmatch(r"([1-9][0-9]*)/([1-9][0-9]*)", value)
+    # Own regex, not hooks/test_guard.py parse_shard: the two are standalone scripts, and importing the guard suite is not clean.
+    m = re.fullmatch(r"([1-9][0-9]*)[/-]([1-9][0-9]*)", value)
     if not m or int(m.group(1)) > int(m.group(2)):
-        raise SystemExit(f"MERGE_SHARD={value!r}: want <i>/<n> with 1 <= i <= n. Nothing ran.")
+        raise SystemExit(f"MERGE_SHARD={value!r}: want <i>/<n> or <i>-<n> with 1 <= i <= n. Nothing ran.")
     i, n = int(m.group(1)), int(m.group(2))
     keep = list(iter_tests(suite))[i - 1::n]
     if not keep:
@@ -8229,7 +8230,7 @@ class SliceSelector(unittest.TestCase):
         self.assertNotIn("Ran ", r.stdout + r.stderr)
 
 class ShardSelector(unittest.TestCase):
-    """MERGE_SHARD=<i>/<n> splits a selection into n disjoint shards that together hold every test."""
+    """MERGE_SHARD=<i>/<n> or <i>-<n> splits a selection into n disjoint shards that together hold every test."""
     def all_tests(self):
         return unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
 
