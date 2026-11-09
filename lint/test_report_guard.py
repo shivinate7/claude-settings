@@ -108,13 +108,17 @@ def peer_msg(body, stamp=None, from_session="local_fixture"):
     return rec
 
 
-def tool_use_msg(name, input_=None):
+def tool_use_msg(name, input_=None, id_=None):
     block = {"type": "tool_use", "name": name, "input": input_ or {}}
+    if id_ is not None:  # a result pairs to its call by this id
+        block["id"] = id_
     return {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [block]}}
 
 
-def tool_result_msg(tool_use_id="tu_1"):
-    block = {"type": "tool_result", "tool_use_id": tool_use_id, "content": "ok"}
+def tool_result_msg(tool_use_id="tu_1", content="ok", is_error=False):
+    block = {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
+    if is_error:
+        block["is_error"] = True
     return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": [block]}}
 
 
