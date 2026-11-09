@@ -289,7 +289,9 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
 # the text into words and quoted spans, keeps a table of simple assignments, and reads each `$D` or
 # `${D}` as the value current at that point. The table holds `D=v` at a command's start (a value is
 # the whole shell word, so `WT="$BASE"/../lane` is one path), the arguments of `export`, `declare`,
-# `typeset`, `local` and `readonly` (`export A=1 D=v`), and a PowerShell `$D = v`. The last assignment
+# `typeset`, `local` and `readonly` (`export A=1 D=v`), and a PowerShell assignment: `$D = v` or `$D =v`
+# anywhere, and `$D=v`, `$D='v'` or `$D= v` at a statement's start only, so a bash `echo $D=x` sets
+# nothing. A backslash-newline joins two lines, so it reads as a blank. The last assignment
 # wins, `unset D` clears it, a use before the assignment stays as written, and single quotes do not
 # expand. An unassigned variable stays unresolved and allowed. `$HOME` reads as `~`:
 # `os.path.expandvars` leaves it literal when HOME is unset (the Windows default), so a literal
@@ -298,12 +300,16 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
 # is text, and a lone apostrophe in double quotes opens no span, because quotes are read in pairs
 # from the left. An unmated quote is one ordinary character, so the text after it is still read as
 # code, the fail-closed side: a variable read as code resolves, one read as text stays as written.
-# The body of a heredoc with a quoted delimiter is text to the shell, so its quotes are read in the
-# body alone and never pair with a quote after it. The body of `$(...)` or backticks is a command
-# even inside double quotes, and so is the argument of `eval "..."`. A prefix assignment
-# (`S=x cmd "$S"`) sets the variable for that one command: the command's own words and all later
-# text see the value from before it. A subshell `( ... )`, `$( ... )` or backtick pair gives its
-# assignments back where it ends.
+# Every heredoc body is read alone, whatever its delimiter, so its quotes never pair with a quote
+# after it and its assignments end with it. A header with no closer (its body was dropped before this
+# read, or it runs to the end) is read on as code at the same level, so blocks in a row nest nothing;
+# past `_NEST_LIMIT` a nested body is read inline as code too. The body of `$(...)` or backticks is a
+# command even inside double quotes, and so is the argument of `eval "..."`. A prefix assignment
+# (`S=x cmd "$S"`) sets the variable for that one command and the environment of the child it starts:
+# the command's own words and all later text see the value from before it, and its heredoc body sees
+# the new one. `env S=x cmd` gives the child the same. A verbatim body (`<<'EOF'`) is the child's text,
+# so it sees each new value; the parent expands any other body, so it sees only names the table lacks.
+# A subshell `( ... )`, `$( ... )` or backtick pair gives its assignments back where it ends.
 # A redirect (`>/dev/null`, `2>f`, `<<'EOF'`) and the name after `function` leave the command's start
 # as it was, so `D=x >/dev/null` still sets D. An unquoted `$D` whose value holds two words is an
 # ambiguous redirect target that writes nothing, so it stays as written there (unless IFS is set).
@@ -311,6 +317,7 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
 # an interpreter (`python -c`) is not resolved, nor is a variable set in a different tool call. An
 # assignment in a pipeline stage or a background job (`D=x | cat`, `D=x &`) is kept here, though the
 # shell runs it in a subshell and keeps nothing, so a later `$D` can read a value the shell does not.
+# An escaped `\$D` in an unquoted heredoc body reads the parent's value, not the child's.
 # Fixing these needs a shell parser, not this one pass.
 _WORD_STOP = frozenset(" \t\r\n;&|()`")
 _ASSIGN_WORD = re.compile(r"([A-Za-z_]\w*)(\+?)=")
@@ -329,7 +336,9 @@ _TWO_WORDS = re.compile(r"[^ \t\n][ \t\n]+[^ \t\n]")
 _COMMAND_STARTERS = frozenset((
     "{", "!", "if", "then", "elif", "else", "do", "while", "until", "time", "eval", "function"))
 _DECLARERS = frozenset(("export", "declare", "typeset", "local", "readonly"))
-_NEST_LIMIT = 20   # quotes nested in `$(...)` nested in quotes; deeper reads as plain text
+# Quotes nested in `$(...)` nested in quotes, or heredoc in heredoc; a deeper quoted body reads as plain
+# text, a deeper heredoc body as code at the cap's level. It bounds the reader's recursion.
+_NEST_LIMIT = 20
 
 
 def _subst_end(text: str, j: int, depth: int) -> int:
