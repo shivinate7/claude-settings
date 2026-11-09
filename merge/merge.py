@@ -2617,10 +2617,15 @@ def step_cite_check(root, head, base, body=""):
         c, text = git(root, "show", f"{head}:{path}")
         if c:
             raise Stop(f"git show {head[:9]}:{path} failed, so the step cite read is unknown, not a pass: {text} {LANE_LINT_CITE}")
+        if check_step_cites.open_fence(text):  # the rows after an unclosed fence read as fenced, so a cite there would pass unseen
+            raise Stop(f"{path} holds a fence that never closes, so the step cite read is unknown, not a pass. Close the fence. {LANE_LINT_CITE}")
         texts.append(text)
     if not any(check_step_cites.cites(t) for t in texts):
         return
-    branch = layout.DEFAULT_RECORD_BRANCH
+    try:
+        branch = layout.record_branch(root)
+    except layout.LayoutError as e:
+        raise Stop(f"the record branch cannot be read, so the step cite read is unknown, not a pass: {e} {LANE_LINT_CITE}")
     c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
     if c:
         raise Stop(f"git fetch origin {branch} failed, so the step cite read is unknown, not a pass: {out} {LANE_LINT_CITE}")

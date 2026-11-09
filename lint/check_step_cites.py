@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The pure scan of `step:<slug>` cites, for merge --lane-lint (merge/merge.py, lane_lint). Standard library only.
 
-cites(text) -> the sorted unique slugs one text cites. missing(texts, known) -> the sorted slugs the texts cite that `known` lacks, each once.
+cites(text) -> the sorted unique slugs one text cites. open_fence(text) -> True when a fence is never closed. missing(texts, known) -> the sorted slugs the texts cite that `known` lacks, each once.
 A cite is MISTAKE_STEP_RE's match (lint/report_guard.py, the one home of the cite form), in inline code or bare prose. A row inside a fenced
 block is no cite (stale_cites.fenced_lines, the one home of the fence rule). A placeholder such as `step:<slug>` and prose such as
 "next step: foo" match nothing. Cost: one pass over the texts; no git, no file, no process.
@@ -23,6 +23,12 @@ def cites(text):
         if number not in fenced:
             found.update(m.group(0)[len("step:"):] for m in MISTAKE_STEP_RE.finditer(row))
     return sorted(found)
+
+
+def open_fence(text):
+    """True when a fence opens in `text` and never closes: the rows after it read as fenced, so a cite there is not seen."""
+    rows = text.replace("\r\n", "\n").split("\n")
+    return len(rows) + 1 in fenced_lines(rows + ["x"])  # a plain row appended after the last row is fenced only while a fence is still open
 
 
 def missing(texts, known):
