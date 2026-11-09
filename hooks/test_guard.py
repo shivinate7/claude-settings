@@ -9251,6 +9251,8 @@ ENVWALK_LOCAL_SUB = os.path.join(ROOT, "envwalk-localsub")    # a folder with a 
 ENVWALK_SECRETS = os.path.join(ROOT, "envwalk-secrets")       # a git repo whose .gitignore lists secrets/, with a file in it
 ENVWALK_PARENT = os.path.join(ROOT, "envwalk-parent")         # an env file in this folder, and a child folder to run in
 ENVWALK_PARENT_CHILD = os.path.join(ENVWALK_PARENT, "child")  # the child folder: a README, and no env file
+ENVWALK_SUB_IGNORED = os.path.join(ROOT, "envwalk-subignored")  # a git repo whose .gitignore lists sub/.env, which sits in sub
+ENVWALK_MD_SUFFIX = os.path.join(ROOT, "envwalk-md-suffix")     # a folder whose sub holds an env file that ends .md
 
 
 def build_envwalk_folders():
@@ -9324,16 +9326,25 @@ lazy_fixture((ENVWALK_MODULES_ENV,), build_envwalk_modules_env)
 
 
 def build_envwalk_types():
-    # Each folder holds a sub folder and a README. The md and java folders each hold one env-named file, which
-    # the guard's type table misses. The clean folder holds an ordinary file under sub.
+    # Each folder holds a sub folder and a README. The md and java folders each hold one env-named file, which the
+    # type's globs name. The clean folder holds an ordinary file under sub. The md suffix folder holds an env file
+    # whose name ends .md, which a glob with an escaped dot names.
     for folder, leaf, text in ((ENVWALK_SUB_CLEAN, "notes.txt", "notes\n"),
                                (ENVWALK_TYPE_MD, ENV + ".mdx", "FIXTURE=1\n"),
-                               (ENVWALK_TYPE_JAVA, ENV + ".properties", "FIXTURE=1\n")):
+                               (ENVWALK_TYPE_JAVA, ENV + ".properties", "FIXTURE=1\n"),
+                               (ENVWALK_MD_SUFFIX, ENV + ".md", "FIXTURE=1\n")):
         write(os.path.join(folder, "sub", leaf), text)
         write(os.path.join(folder, "README.md"), "sub\n")
 
 
-lazy_fixture((ENVWALK_SUB_CLEAN, ENVWALK_TYPE_MD, ENVWALK_TYPE_JAVA), build_envwalk_types)
+def build_envwalk_sub_ignored():
+    # A git repo whose .gitignore lists sub/.env, so rg skips that file under sub and reads no env file there.
+    make_repo(ENVWALK_SUB_IGNORED, {".gitignore": "sub/" + ENV + "\n", os.path.join("sub", ENV): "FIXTURE=1\n",
+                                    "README.md": "ignored\n"})
+
+
+lazy_fixture((ENVWALK_SUB_CLEAN, ENVWALK_TYPE_MD, ENVWALK_TYPE_JAVA, ENVWALK_MD_SUFFIX), build_envwalk_types)
+lazy_fixture((ENVWALK_SUB_IGNORED,), build_envwalk_sub_ignored)
 
 # A glob that picks an env file by its suffix. Each folder holds one env file with a suffix, and a README. No sample
 # env name ends in .yaml or .json, so the sample names alone pick neither file.
@@ -9564,12 +9575,12 @@ sh("env: walk safety hole, glob sub/**/* names sub/.env with no folder between, 
 sh("env: walk control, glob sub/**/* over a folder with no env file under sub, allowed: " + _ZERO_FOLDERS_GLOB,
    _ZERO_FOLDERS_GLOB, "allow", cwd=ENVWALK_SUB_CLEAN)
 
-# rg's md type names *.mdx, and its java type names *.properties. The guard's type table lists neither, so a search
-# with one of those types is judged to read no env file and is allowed. Each tree is refused with no type, which
-# shows that it holds the env file its type should name.
+# rg's md type names *.mdx, and its java type names *.properties. The guard's type table lists both, so a search with
+# one of those types is refused over the tree that holds the env file the type names. The same search over a folder
+# with no env file is allowed, which shows the refusal comes from that file.
 for _cmd, _cwd, _tree in (("rg --hidden -t md foo", ENVWALK_TYPE_MD, "md"),
                           ("rg --hidden -t java foo", ENVWALK_TYPE_JAVA, "java")):
-    sh("env: walk safety hole, type glob misses the env file name, refused: " + _cmd, _cmd, "deny", "env-file",
+    sh("env: walk safety hole, type glob names the env file, refused: " + _cmd, _cmd, "deny", "env-file",
        cwd=_cwd)
     sh("env: walk control, type glob, folder has no env file, allowed: " + _cmd, _cmd, "allow",
        cwd=ENVWALK_SUB_CLEAN)
@@ -10287,6 +10298,23 @@ _MAXDEPTH_ONE_RG_TYPE_HIDDEN = "find . -maxdepth 1 | xargs rg --hidden K"
 sh("env: walk control, find -maxdepth 1 names sub, rg --hidden reads the env file below it, refused: "
    + _MAXDEPTH_ONE_RG_TYPE_HIDDEN, _MAXDEPTH_ONE_RG_TYPE_HIDDEN, "deny", "env-file", cwd=ENVWALK_TYPE_MD)
 
+# rg's -t type picks the files it reads in a folder that find prints. The py type names only *.py and *.pyi, so the env
+# file that ENVWALK_NESTED holds under sub is not read, and the form is allowed. The control holds the env file at the
+# top, which find names, and rg reads a file it is named whatever its type.
+_MAXDEPTH_ONE_RG_PY = "find . -maxdepth 1 | xargs rg -t py K"
+sh("env: walk false alarm, find -maxdepth 1 names sub, rg -t py picks no env file below it, allowed: "
+   + _MAXDEPTH_ONE_RG_PY, _MAXDEPTH_ONE_RG_PY, "allow", cwd=ENVWALK_NESTED)
+sh("env: walk control, find -maxdepth 1 names the env file at the top, rg -t py reads it, refused: "
+   + _MAXDEPTH_ONE_RG_PY, _MAXDEPTH_ONE_RG_PY, "deny", "env-file", cwd=ENVWALK_HELD)
+
+# A .gitignore line that lists sub/.env stops rg reading that file under sub, and a folder that find prints is read under
+# the same rule. The direct form, rg --hidden K sub, reads no env file there, and the find form must match it.
+_FIND_SUB_RG_HIDDEN = "find . -name 'sub' | xargs rg --hidden K"
+sh("env: rg hidden, find names sub, env file in sub listed in .gitignore, allowed: " + _FIND_SUB_RG_HIDDEN,
+   _FIND_SUB_RG_HIDDEN, "allow", cwd=ENVWALK_SUB_IGNORED)
+sh("env: rg hidden, the direct form names sub, env file in sub listed in .gitignore, allowed: rg --hidden K sub",
+   "rg --hidden K sub", "allow", cwd=ENVWALK_SUB_IGNORED)
+
 # A search's own narrowing (grep --include, rg -g) judges each file of a folder that find prints, as it does for a folder
 # the search names. sub/ holds one env file with no suffix, which *.md does not pick, so the narrowed search reads no env
 # file and is allowed, as the direct forms are. Without the narrowing, the find forms read sub and are refused.
@@ -10298,9 +10326,18 @@ for _cmd in (_FIND_INCLUDE_MD, _FIND_GLOB_MD):
 for _cmd in ("grep -r --include='*.md' K sub", "rg -g '*.md' K sub"):
     sh("env: walk control, the search names sub with its *.md narrowing, allowed: " + _cmd, _cmd, "allow",
        cwd=ENVWALK_NESTED)
+
 for _cmd in ("find . -name 'sub' | xargs grep -r K", "find . -name 'sub' | xargs rg --hidden K"):
     sh("env: walk control, find prints sub with no narrowing, reads the env file in it, refused: " + _cmd, _cmd,
        "deny", "env-file", cwd=ENVWALK_NESTED)
+
+# rg and grep read `\.` in a glob as a literal dot, so `*\.md` picks sub/.env.md. The guard's glob match reads the
+# backslash as a letter, picks no file, and allows the find form. The control writes the glob as `*.md`, which picks it.
+_FIND_ESCAPED_DOT_MD = r"find . -name 'sub' | xargs grep -r --include='*\.md' K"
+sh("env: walk safety hole, find names sub, grep's escaped-dot include reads the env file that ends .md, refused: "
+   + _FIND_ESCAPED_DOT_MD, _FIND_ESCAPED_DOT_MD, "deny", "env-file", cwd=ENVWALK_MD_SUFFIX)
+sh("env: walk control, find names sub, grep's *.md include reads the env file that ends .md, refused: " + _FIND_INCLUDE_MD,
+   _FIND_INCLUDE_MD, "deny", "env-file", cwd=ENVWALK_MD_SUFFIX)
 
 # A -print prints each name before a later test runs, so a name test after -print does not bound the names printed.
 _PRINT_THEN_NAME = "find . -print -name '*.js' | xargs grep K"
