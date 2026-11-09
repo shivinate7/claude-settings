@@ -6,6 +6,6 @@
   "owner": "lane verdict-format-line",
   "lane": "session_013NEJL1BCgLVUACYU5ujv9A",
   "why": "A brief that relays a report, such as `Done: FAIL, round 1 of 3` or `Prior review: verdict: FAIL`, passes the blind-brief guard and anchors the reviewer (lane verdict-format-line, 07:20 CST Nov 8).",
-  "note": "Done check: refuse cases for those lines are red first, then green, in the reviewer-brief-blind family of hooks/test_guard.py; note verdict-label-prefix-passes is deleted. Follow-up PR after #1968, in lane verdict-format-line (coordinator, 07:20 CST Nov 8; items 386 and 410 a).",
-  "updatedAt": "2026-11-08T07:20:00-06:00"
+  "note": "Done check: refuse cases for those lines are red first, then green, in the reviewer-brief-blind family of hooks/test_guard.py; note verdict-label-prefix-passes is deleted. Follow-up PR after #1968, in lane verdict-format-line (coordinator, 07:20 CST Nov 8; items 386 and 410 a). Sightings (lane verdict-format-line session_013NEJL1BCgLVUACYU5ujv9A, round-3 reviews of the blind-brief stack, 04:44 CST Nov 9; notes level, not added to the open PRs): (1) a dash after a verdict label or bolded round label still passes reviewer-brief-blind (`Prior verdict — FAIL (3 findings)`, `Verdict - FAIL`, `Round 1 verdict — FAIL`), #1968 record 6738009192; (2) false alarms on round-dash prose (`Round 3 - PASS or FAIL only.`, `Round 2 - PASS the lint first.`, `The round result - FAIL or PASS - is yours to give.`), same source; (3) format-instruction lines after a label are refused (`Report: verdict: PASS or FAIL, then the findings.`, `Output: Verdict: PASS/FAIL, then findings.`), #2043 record 6738045819.",
+  "updatedAt": "2026-11-09T04:45:00-06:00"
 }
