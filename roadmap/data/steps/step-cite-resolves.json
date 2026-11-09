@@ -1,11 +1,11 @@
 {
   "title": "A `step:<slug>` cite in a record or PR body resolves to a step on the roadmap branch",
   "why": "A record can cite a step that was never filed, so the cite points at nothing and the gap has no tracked home.",
-  "note": "Filed by triage, 03:58 CST Nov 9. Incident: docs/decisions/act-in-place.md:14 on #2024 and #2293 named `step:qform-wrapper-flags`, and #2311 carried it, but no step record existed until triage filed it at 03:57 CST (lane notes-fix-page asked). Candidate home: the lane lint, which reads each `step:<slug>` in the changed records and the PR body and refuses one with no roadmap/data/steps/<slug>.json on origin/roadmap. Lane session_013NEJL3EVBLm5RkyvoamcXP (coordinator 03:57 CST Nov 9).",
+  "note": "Filed by triage, 03:58 CST Nov 9. Incident: docs/decisions/act-in-place.md:14 on #2024 and #2293 named `step:qform-wrapper-flags`, and #2311 carried it, but no step record existed until triage filed it at 03:57 CST (lane notes-fix-page asked). Candidate home: the lane lint, which reads each `step:<slug>` in the changed records and the PR body and refuses one with no roadmap/data/steps/<slug>.json on origin/roadmap. Lane session_013NEJL3EVBLm5RkyvoamcXP (coordinator 03:57 CST Nov 9). Notes (coordinator, 05:12 CST Nov 9, on #2414): (a) its unknown refusals are a plain Stop, so --lint-unknown-ok does not lift them, though the usage text says it does; (b) `step:3` and `next-step:foo` read as cites (shared regex MISTAKE_STEP_RE); (c) the whole changed file is scanned, not only added lines, so an old dead cite in a touched file refuses an unrelated edit; (d) an unclosed fence in the PR body still hides a cite; (e) slugs with underscores or uppercase are not read. The lane fixes (a) and (c) in a follow-up PR after #2414 merges.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJL3EVBLm5RkyvoamcXP",
   "status": "doing",
   "order": 891,
-  "updatedAt": "2026-11-09T03:58:00-06:00"
+  "updatedAt": "2026-11-09T05:13:00-06:00"
 }
