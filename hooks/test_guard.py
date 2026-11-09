@@ -12225,11 +12225,13 @@ REC_ADOPT_LANE = os.path.join(RECMORE, "adopt-lane")
 # The base page is hand-written: it does not open with the generated header, so the rule is no hit.
 REC_PLAIN = os.path.join(RECMORE, "plain")
 REC_PLAIN_LANES = {name: os.path.join(RECMORE, "plain-" + name) for name in ("staged", "product")}
-# A lane merged origin/main (or the feature branch), and origin/main then moved on: the page the merge
-# brought, MERGE_HEAD's, is no longer the base's. Each lane holds one state, see the moved section below.
+# origin/main holds a page newer than the page a lane's merge brought. Each lane holds one state.
 REC_MOVED = os.path.join(RECMORE, "moved")
 REC_MOVED_LANES = {name: os.path.join(RECMORE, "moved-" + name) for name in (
     "merge", "rebuilt", "quit", "product", "nonbase", "take", "base")}
+# A branch merged into origin/main: its tip is in origin/main's history, off the first-parent line.
+REC_ANC = os.path.join(RECMORE, "ancestor")
+REC_ANC_LANE = os.path.join(RECMORE, "ancestor-lane")
 
 
 def _build_records_more():
@@ -12357,9 +12359,46 @@ def _build_records_more():
          and run(REC_MOVED_LANES["take"], "show", "HEAD:docs/records.md") == REC_LANE.strip(),
          "the take lane does not hold MERGE_HEAD's page in its index, over the lane's own HEAD page")
 
+    # The branch 'feat-merged' carries its own page. origin/main takes it in a merge that keeps origin's page,
+    # so the branch's tip is in origin/main's history, and not on its first-parent line. The lane is cut
+    # from main before that merge, holds its own page, and merges the branch.
+    make_repo(REC_ANC, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    run(REC_ANC, "checkout", "-q", "-b", "feat-merged")
+    write(page(REC_ANC), REC_FEAT)
+    run(REC_ANC, "add", "-A")
+    run(REC_ANC, "commit", "-q", "-m", "merged branch page")
+    run(REC_ANC, "checkout", "-q", "main")
+    advance(REC_ANC, {"docs/records.md": REC_V1}, "refs/remotes/origin/main")          # origin/main: v1
+    run(REC_ANC, "checkout", "-q", "-b", "onmain", "refs/remotes/origin/main")
+    run_vcs(REC_ANC, *IDENT, "merge", "--no-ff", "--no-edit", "feat-merged")            # conflicts on the page
+    _require_conflict(REC_ANC, "docs/records.md")
+    run(REC_ANC, "checkout", "--ours", "docs/records.md")                               # origin's page stays
+    run(REC_ANC, "add", "docs/records.md")
+    run(REC_ANC, "commit", "-q", "--no-edit")
+    run(REC_ANC, "update-ref", "refs/remotes/origin/main", "onmain")
+    run(REC_ANC, "update-ref", "refs/remotes/origin/feat-merged", "feat-merged")
+    run(REC_ANC, "checkout", "-q", "main")
+    run(REC_ANC, "branch", "-q", "-D", "onmain")
+    run(REC_ANC, "worktree", "add", "-q", "-b", "lane-ancestor", REC_ANC_LANE, "main")  # cut before the merge
+    write(page(REC_ANC_LANE), REC_LANE)
+    run(REC_ANC_LANE, "add", "docs/records.md")
+    run(REC_ANC_LANE, "commit", "-q", "-m", "lane page")
+    run_vcs(REC_ANC_LANE, *IDENT, "merge", "--no-commit", "--no-ff", "origin/feat-merged")
+    _require_conflict(REC_ANC_LANE, "docs/records.md")
+    write(page(REC_ANC_LANE), run_vcs(REC_ANC_LANE, "show", "MERGE_HEAD:docs/records.md").stdout)
+    run(REC_ANC_LANE, "add", "docs/records.md")
+    feat = run(REC_ANC, "rev-parse", "refs/heads/feat-merged")
+    first_parent = run(REC_ANC, "rev-list", "--first-parent", "refs/remotes/origin/main").split()
+    need(run_vcs(REC_ANC, "merge-base", "--is-ancestor", feat, "refs/remotes/origin/main").returncode == 0
+         and feat not in first_parent
+         and run(REC_ANC_LANE, "show", ":docs/records.md") == REC_FEAT.strip(),
+         "the ancestor fixture: feat-merged is not in origin/main's history off its first-parent line, "
+         "or the lane does not hold the branch's page")
+
 
 lazy_fixture([REC_DANGLE, REC_NEW, REC_ADOPT, REC_PLAIN, *REC_DANGLE_LANES.values(), REC_NEW_LANE,
-              REC_ADOPT_LANE, *REC_PLAIN_LANES.values(), REC_MOVED, *REC_MOVED_LANES.values()], _build_records_more)
+              REC_ADOPT_LANE, *REC_PLAIN_LANES.values(), REC_MOVED, *REC_MOVED_LANES.values(),
+              REC_ANC, REC_ANC_LANE], _build_records_more)
 
 
 def records_deny(name, command, lane, **kw):
@@ -12540,22 +12579,20 @@ records_allow("a commit of a staged page edit where the base page is hand-writte
 records_allow("a chain that runs the generator, then add -A and commit, where the base page is hand-written",
               GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_PLAIN_LANES["product"])
 
-# ---- a merge that brings MERGE_HEAD's page, after origin/main moved on (decision records-index-at-merge)
+# ---- a merge commit's own page (decision records-index-at-merge: the page is rebuilt only at merge)
 #
-# A lane merged origin/main. The page conflicted, and the lane took the page the merge brought into its
-# index. origin/main then moved to a newer page. The page is then none of HEAD's, the base tip's and
-# origin/<base>'s, so the guard refuses the merge's own commit. It is the merge's own result, and it is
-# allowed. The guard reads HEAD, the base and origin/<base>; a fix reads MERGE_HEAD too. Each lane holds
-# one state: the RED cases are refused today and must pass; the GREEN pins must stay as they are.
+# A merge of origin/main brings the page of the base tip it merged, MERGE_HEAD's page. When origin/main
+# holds a newer page, that page is neither HEAD's, the base tip's nor origin/<base>'s, and the merge commit
+# holds it. The rule allows exactly that page, and only when MERGE_HEAD is a base tip on origin/<base>'s
+# first-parent line. Any other page is refused.
 #
-# THE SCOPE. Nothing wider than exact blob equality with MERGE_HEAD's page. A rebuilt page, a page of a
-# merge of a branch that is not the base, and a page taken once the merge state is gone stay refused.
+# The scope is exact blob equality with MERGE_HEAD's page: a rebuilt page, the page of a branch merged off
+# the first-parent line, and a page taken once the merge state is gone are refused.
 RECORDS_AUTHOR = {"agent_id": "rec-auth1", "agent_type": "test-author"}
 _mv = REC_MOVED_LANES
 _mv_page = _rec_page(_mv["merge"])
 
-# RED now: the merge's own page, committed by a test-author, by a plain session, and by the commit forms a
-# test-author uses after a merge.
+# Allowed: the merge's own page, committed by a test-author or a plain session, in each form a merge is finished with.
 records_allow("a test-author commit of the merge's own page, after origin/main moved on", VCS + " commit -m x",
               _mv["merge"], **RECORDS_AUTHOR)
 records_allow("a test-author commit of the merge's own page, after origin/main moved on, under PowerShell",
@@ -12568,33 +12605,37 @@ records_allow("a test-author add -A and commit of the merge's own page, after or
               VCS + " add -A && " + VCS + " commit -m x", _mv["merge"], **RECORDS_AUTHOR)
 records_allow("a test-author commit --no-edit of the merge's own page, after origin/main moved on",
               VCS + " commit --no-edit", _mv["merge"], **RECORDS_AUTHOR)
-# The page the merge brought is already in the tree and the index. The hook runs before the chain, so the
-# act is the add and commit that follow it.
+# Allowed: the page is in the tree before the chain runs, so the hook judges the page there. The chain's add
+# and commit are the acts that follow.
 records_allow("a test-author add -A and commit of MERGE_HEAD's page already in the tree, origin/main moved on",
               ADD_A + " && " + COMMIT_X, _mv["take"], **RECORDS_AUTHOR)
-# RED now, and the product path is the test-author's out-of-role path: logged, never refused (decision
-# builders-cannot-edit-tests). The page is the merge's own, so the commit is allowed.
+# Allowed: a product file staged with the merge's page. The product path is out of a test-author's role, so
+# it is logged and never refused (decision builders-cannot-edit-tests).
 records_allow("a test-author commit of the merge's own page with a clean product file staged",
               VCS + " commit -m x", _mv["product"], **RECORDS_AUTHOR)
 
-# GREEN pins: a page rebuilt after the merge, a merge of a branch that is not the base, and a page taken
-# after the merge state is gone are refused, for a test-author as for a plain session.
+# Refused: a page rebuilt by hand after the merge, a merge of a branch that is not the base, and a page staged
+# after merge --quit, when no merge is in progress.
 records_deny("a test-author commit of a page rebuilt after the merge, origin/main moved on", VCS + " commit -m x",
              _mv["rebuilt"], **RECORDS_AUTHOR)
 records_deny("a test-author commit of a non-base merge's page, the feature branch's, origin/main moved on",
              VCS + " commit -m x", _mv["nonbase"], **RECORDS_AUTHOR)
 records_deny("a test-author commit of the merge's page after merge --quit, no merge in progress",
              VCS + " commit -m x", _mv["quit"], **RECORDS_AUTHOR)
-# GREEN pin: the base's own page (origin/main, the merge's page too) with a clean product file staged. The
-# test-author scope adds no refusal for the product path in a merge.
+# Allowed: the base's own page in a merge, with a product file staged. The test-author scope adds no refusal
+# for a product path in a merge.
 records_allow("a test-author merge commit of origin/main's page with a clean product file staged",
               VCS + " commit -m x", _mv["base"], **RECORDS_AUTHOR)
-# GREEN pin: the test-author's Edit of the page stays refused, under the test-author scope.
+# Refused: a test-author's Edit of the page, under the test-author scope.
 add("records-page: a test-author Edit of the merge's page is refused", "deny", rule="test-author-scope", tool="Edit",
     file_path=_mv_page, cwd=_mv["merge"], **RECORDS_AUTHOR)
-# GREEN pin: writing MERGE_HEAD's page into the tree, with no commit, is allowed.
+# Allowed: writing MERGE_HEAD's page into the tree, with no commit.
 records_allow("a test-author writes MERGE_HEAD's page into the tree, with no commit, origin/main moved on",
               VCS + " show MERGE_HEAD:docs/records.md > docs/records.md", _mv["take"], **RECORDS_AUTHOR)
+# Refused: the page of a branch whose tip is in origin/main's history, off its first-parent line. The merge of
+# that tip is not a merge of a base tip, so the page it brings is not the base's own page.
+records_deny("a test-author commit of a page from a branch merged into origin/main off its first-parent line",
+             VCS + " commit -m x", REC_ANC_LANE, **RECORDS_AUTHOR)
 
 # =========================================================================== 5d. conflict markers
 #
