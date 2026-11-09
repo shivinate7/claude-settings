@@ -10368,6 +10368,22 @@ _FIND_RG_PY = "find . -type f | xargs rg -g '*.py' K"
 sh("env: walk control, find names sub/.env, rg reads a file it is named under its *.py glob, refused: " + _FIND_RG_PY,
    _FIND_RG_PY, "deny", "env-file", cwd=ENVWALK_NESTED)
 
+# grep matches an --include or --exclude glob with a slash against the whole path find prints, and against each tail
+# after a `/`. So `sub/*` picks ./sub/.env through its tail, and `./sub/*` picks it on the whole path. A name-only match
+# reads `.env` alone, which neither glob matches: the include forms would allow and the exclude forms would refuse.
+_FIND_GREP_INCLUDE_SUB = "find . -type f | xargs grep --include='sub/*' K"
+_FIND_GREP_EXCLUDE_SUB = "find . -type f | xargs grep --exclude='sub/*' K"
+_FIND_GREP_INCLUDE_DOT_SUB = "find . -type f | xargs grep --include='./sub/*' K"
+_FIND_GREP_EXCLUDE_DOT_SUB = "find . -type f | xargs grep --exclude='./sub/*' K"
+sh("env: walk pin, find names sub/.env, grep's sub/* include picks it by a tail after /, refused: "
+   + _FIND_GREP_INCLUDE_SUB, _FIND_GREP_INCLUDE_SUB, "deny", "env-file", cwd=ENVWALK_NESTED)
+sh("env: walk pin, find names sub/.env, grep's sub/* exclude skips it, allowed: " + _FIND_GREP_EXCLUDE_SUB,
+   _FIND_GREP_EXCLUDE_SUB, "allow", cwd=ENVWALK_NESTED)
+sh("env: walk pin, find names ./sub/.env, grep's ./sub/* include picks it on the whole path, refused: "
+   + _FIND_GREP_INCLUDE_DOT_SUB, _FIND_GREP_INCLUDE_DOT_SUB, "deny", "env-file", cwd=ENVWALK_NESTED)
+sh("env: walk pin, find names ./sub/.env, grep's ./sub/* exclude skips it, allowed: "
+   + _FIND_GREP_EXCLUDE_DOT_SUB, _FIND_GREP_EXCLUDE_DOT_SUB, "allow", cwd=ENVWALK_NESTED)
+
 # A -print prints each name before a later test runs, so a name test after -print does not bound the names printed.
 _PRINT_THEN_NAME = "find . -print -name '*.js' | xargs grep K"
 sh("env: walk pin, find -print before -name '*.js' prints every name, refused: " + _PRINT_THEN_NAME, _PRINT_THEN_NAME,
