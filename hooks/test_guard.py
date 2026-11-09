@@ -10437,6 +10437,78 @@ sh("env: walk control, seven conditional cds, first runs and six skipped, folder
    + _SEVEN_CDS_FIRST_RUNS, _SEVEN_CDS_FIRST_RUNS, "allow", cwd=ENVWALK_CLEAN)
 
 
+# ---- env walk: the forms the walk reads as no env name. Each deny row searches a folder that holds an env
+# file through a form the guard misreads. Each claim was probed with grep 3.11 and rg 14.1 on dummy names
+# before its row was written. The false alarm names an env file that its include leaves out, and its control
+# reads that file.
+
+# A bracket class in an include. grep uses glibc fnmatch, which negates `[^a]` and reads `[[:alpha:]]` as
+# a class. The guard uses Python's fnmatch, which reads `[^a]` as the set `^` and `a`, and `[[:alpha:]]` as a
+# nested set, so it judges neither glob to pick the env file. Through find, grep matches a glob against each
+# tail of a named path after a `/`, and the tail `sub/.env` starts with a letter, so the alpha class picks it.
+_BRACKET_NEGATED = "find . -type f | xargs grep --include='[^a]*' K"
+_BRACKET_NEGATED_R = "grep -r --include='[^a]*' K sub"
+_BRACKET_ALPHA = "find . -type f | xargs grep --include='[[:alpha:]]*' K"
+for _cmd in (_BRACKET_NEGATED, _BRACKET_NEGATED_R, _BRACKET_ALPHA):
+    sh("env: walk safety hole, a bracket class in grep's include picks the env file in sub, refused: " + _cmd, _cmd,
+       "deny", "env-file", cwd=ENVWALK_NESTED)
+
+# An unquoted `\*` reaches grep as `*`, because bash removes the backslash. The guard reads the backslash as
+# an escape, so it takes `\*` for the one-letter class `[*]`, which picks no name, and it reads no env file.
+# The quoted form is a literal in grep and in the guard, and its allow row is above.
+_UNQUOTED_STAR_MD = r"grep -r --include=\*.md K sub"
+sh("env: walk safety hole, an unquoted star reaches grep as a star, picks the env file in sub that ends .md, refused: "
+   + _UNQUOTED_STAR_MD, _UNQUOTED_STAR_MD, "deny", "env-file", cwd=ENVWALK_MD_SUFFIX)
+
+# bash expands a brace list in a find's words, so `sub/{.env,zz}` becomes `sub/.env sub/zz`, and find lists
+# the env file. The guard reads the word as one path with a brace in it, which names no env file.
+_FIND_BRACE = "find sub/{" + ENV + ",zz} -type f | xargs grep K"
+sh("env: walk safety hole, a brace list fed to find names the env file in sub, refused: " + _FIND_BRACE, _FIND_BRACE,
+   "deny", "env-file", cwd=ENVWALK_NESTED)
+
+# grep skips a named file that its --include leaves out, so `ls -a` names the env file and grep reads
+# nothing from it. The names `.` and `..` are folders, which grep reports and does not read. The control
+# has no include, so grep reads the file.
+_LS_INCLUDE_PY = "ls -a | xargs grep --include='*.py' K"
+_LS_NO_INCLUDE = "ls -a | xargs grep K"
+sh("env: walk false alarm, ls -a names the env file, grep's *.py include skips it, allowed: " + _LS_INCLUDE_PY,
+   _LS_INCLUDE_PY, "allow", cwd=ENVWALK_HELD)
+sh("env: walk control, ls -a names the env file, grep with no include reads it, refused: " + _LS_NO_INCLUDE,
+   _LS_NO_INCLUDE, "deny", "env-file", cwd=ENVWALK_HELD)
+
+# Past the walk cap, a glob is judged by `_glob_could_name_env`, which reads `\.` as a backslash and a dot.
+# So `*\.local` picks no sample name, and the cap clears the refusal. grep and rg read `\.` as a literal dot,
+# so both read the nested `sub/.env.local`. The control is the same tree under the cap, where the walk reaches
+# that file and refuses.
+ENVCAP_ESCAPED_LOCAL = (r"grep -r --include='*\.local' K .", r"rg -g '*\.local' K")
+
+
+def env_cap_escaped_dot_case():
+    """Past the cap, a grep include or an rg -g glob with an escaped dot is refused as too large to check, since
+    it can name the nested env file. Under the cap the same tree is refused for that file. The control runs first,
+    so the cap is the only difference the red assert can show."""
+    small = envcap_folder("envcap-escaped-small", 0, {"sub/" + ENV + ".local": "FIXTURE=1\n", "README.md": "x\n"})
+    if len(os.listdir(small)) > ENVCAP_LOW:
+        return False, "the control fixture is past the lowered cap"
+    for command in ENVCAP_ESCAPED_LOCAL:
+        got = envcap_reason(command, small)
+        if not got or "too large" in got:
+            return False, ("%s under the cap, over the same nested env file, was not refused for that file: %s"
+                           % (command, got[:90] or "it was allowed"))
+    big = envcap_folder("envcap-escaped-big", ENVCAP_LOW + 1, {"sub/" + ENV + ".local": "FIXTURE=1\n"})
+    if len(os.listdir(big)) <= ENVCAP_LOW:
+        return False, "the fixture folder is not past the lowered cap"
+    missed = [command for command in ENVCAP_ESCAPED_LOCAL if "too large to check" not in envcap_reason(command, big)]
+    if missed:
+        return False, ("past the cap, a nested env file that its escaped dot picks was not refused as too large to "
+                       "check, for: %s" % "; ".join(missed))
+    return True, ("past the cap an escaped-dot glob is refused as too large to check; under the cap it is refused "
+                  "for the file")
+
+
+FIXTURELESS_CHECKS.add(env_cap_escaped_dot_case)  # it builds its folders under ROOT, as the cap checks above do
+
+
 # =========================================================================== git env set
 # A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
 # Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set $env:GIT_DIR and $env:GIT_WORK_TREE,
@@ -24021,6 +24093,8 @@ LOG_CHECKS = (
      env_cap_gitignored_bulk_case),
     ("env: walk cap, a positive glob that names an env file is refused too large to check",
      env_cap_positive_glob_case),
+    ("env: walk cap, an escaped-dot glob that picks a nested env file is refused too large to check",
+     env_cap_escaped_dot_case),
     ("liveness: process_start_ms splits alive/dead/unreadable apart", process_start_ms_case),
     ("liveness: process_start_ms reads a repeated-hour start (01:30 CDT) as its instant, in Chicago",
      process_start_ms_repeated_hour_cdt_case),
@@ -31140,6 +31214,7 @@ LOG_RULE_FAMILY = (
     ("env: walk cap, a positive glob that names an env file is refused too large", "env"),
     ("env: walk cap, an include glob picks an env file ending .yaml, refused past the cap", "env"),
     ("env: walk cap, find prints a folder that holds an env file, grep -r refused past the cap", "env"),
+    ("env: walk cap, an escaped-dot glob that picks a nested env file is refused too large", "env"),
     ("env: walk, _substitutions gives one place per text for nested, backtick and mixed input", "env"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
