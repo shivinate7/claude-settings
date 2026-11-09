@@ -59,11 +59,14 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
                        git's `-q`. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
-  hook-bypass          deny. A git commit, merge or push that skips the git hooks: `-c core.hooksPath`
-                       (key in any case), `--no-verify`, `-n` on commit alone (push -n and merge -n
-                       pass), or core.hooksPath set through GIT_CONFIG_COUNT or GIT_CONFIG_PARAMETERS.
-                       Read from the parsed words of a git command, so quoted text and a heredoc body
-                       pass. The reason says to run the act with the hooks on.
+  hook-bypass          deny. A git commit, merge or push that skips or redirects the git hooks:
+                       `-c core.hooksPath` (key in any case), `--no-verify`, `-n` on commit alone (push
+                       -n and merge -n pass), core.hooksPath set through GIT_CONFIG_KEY_<n> or
+                       GIT_CONFIG_PARAMETERS, or a `git config` write of the key with a commit, merge
+                       or push later in the command. Also inside `bash -c`, `sh -c`, `eval`, `env -S`
+                       and runners. Read from the parsed words of a git command, so quoted text and a
+                       heredoc body pass. The reason says to run the act with the repo's own hooks on.
+                       (commit-hook-bypass-refused)
   hand-made-worktree   deny. A real worktree add whose new tree lands outside
                        `<primary>/.claude/worktrees/`. A repo under the temp folder passes.
                        (lanes-start-in-tool-worktrees)
@@ -3891,12 +3894,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 1c1. A git commit, merge or push that skips the git hooks. Placed after silent-write, so a
     # silenced commit is caught on that defect first. `texts` reads a command substitution as its own command.
-    for segment in (part for text in texts for part in split_segments(text)):
-        if segment.strip():
-            hit = hook_bypass_hit(segment)
-            if hit:
-                matched, verb, how = hit
-                refuse(tool, "deny", "hook-bypass", HOOK_BYPASS_REASON.format(verb=verb, how=how), matched)
+    hit = hook_bypass_hit(texts)
+    if hit:
+        matched, verb, what = hit
+        refuse(tool, "deny", "hook-bypass", HOOK_BYPASS_REASON.format(verb=verb, what=what), matched)
 
     # 1c2. A worktree made by hand, outside the tool's own folder.
     for number, segment in enumerate(segments):

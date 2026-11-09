@@ -1168,28 +1168,34 @@ def brief_hit(tool: str, tool_input, transcript: str):
 
 # ------------------------------------------------------------------ hook-bypass
 #
-# A git commit, merge or push that skips the git hooks. Read off the parsed tokens of a segment whose
-# COMMAND WORD is git, so a quoted mention, a commit message value and a heredoc body are never read.
-# Five spellings: `-c core.hooksPath=...` before the verb, `--no-verify` on commit, merge or push,
-# `-n` on commit alone (on push it is --dry-run, on merge --no-stat), and the key set in the
-# environment through GIT_CONFIG_COUNT/KEY_n/VALUE_n or GIT_CONFIG_PARAMETERS. The key is read without
-# case, as git reads it. hooks/mutate_shared.py sets the key inside Python, which no segment shows.
+# A git commit, merge or push that points git's hooks elsewhere or skips them. Read off the parsed tokens
+# of a segment whose COMMAND WORD is git, so a quoted mention, a commit message value and a heredoc body
+# are never read. The forms: `-c core.hooksPath=...` before the verb, `--no-verify` on commit, merge or
+# push, `-n` on commit alone (on push it is --dry-run, on merge --no-stat), the key set in the environment
+# through GIT_CONFIG_KEY_<n> or GIT_CONFIG_PARAMETERS, and a `git config` write of the key followed by a
+# commit, merge or push anywhere later in the command. A shell, `eval`, `env -S` or runner text is read by
+# the same walk (inner_commands); words an `echo` pipes to `xargs git` count as the call's last words. The
+# key is read without case, as git reads it. Known limits: `--config-env`, and an environment set in one
+# segment and used in another. hooks/mutate_shared.py sets the key inside Python, which no segment shows.
 HOOK_BYPASS_REASON = (
-    "Rule (Git): this {verb} skips the git hooks ({how}). The hooks are the checks that run before a "
-    "commit, merge or push lands, and a skipped hook lets a defect through unseen. "
-    "Remedy: run the {verb} with the hooks on. If a hook fails wrongly, fix the hook, or report "
-    "the hook to the owner. "
-    "(decision mistake-means-missing-guard, a mistake that skips a check gets a guard)"
+    "Rule (Git): {what}. Git hooks are the checks that run before a commit, merge or push lands, and a "
+    "call that points them elsewhere lets a defect through unseen. "
+    "Remedy: run the {verb} with the repo's own hooks on. If a hook fails wrongly, fix the hook, or "
+    "report the hook to the owner. "
+    "(decision commit-hook-bypass-refused, a hook skip or redirect is refused)"
 )
 _HOOKS_KEY = "core.hookspath"
 _HOOK_VERBS = ("commit", "merge", "push")
-_HOOK_VALUE_LETTERS = {"commit": "mFCct", "merge": "mFsX", "push": "o"}   # short flags that take a value
+_HOOK_VALUE_LETTERS = {"commit": _COMMIT_VALUE_LETTERS, "merge": "mFsX", "push": "o"}   # short flags that take a value
 _HOOK_VALUE_FLAGS = {
     "commit": _COMMIT_VALUE_FLAGS,
     "merge": {"--strategy", "--strategy-option", "--message", "--file", "--into-name"},
     "push": {"--repo", "--receive-pack", "--exec", "--push-option"},
 }
 _HOOKS_PARAMETER = re.compile(r"(?:^|['\s])core\.hookspath(?:['=\s]|$)", re.IGNORECASE)
+_CONFIG_READ_FLAGS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--unset", "--unset-all", "--list", "-l",
+                      "--edit", "-e", "--remove-section", "--rename-section"}
+_CONFIG_VALUE_FLAGS = {"-f", "--file", "--blob", "--type", "--default", "-t"}
 
 
 def _env_hooks_path(assignments) -> bool:
@@ -1231,29 +1237,104 @@ def _verb_bypass_flag(verb: str, args) -> str:
     return ""
 
 
-def hook_bypass_hit(segment: str):
-    """Return (matched text, verb, how) for a git commit, merge or push in `segment` that skips the git
-    hooks, else None. A segment shlex cannot parse judges nothing (the fail-open stance)."""
+def _config_writes_hooks_path(args) -> bool:
+    """True when the arguments of `git config` set core.hooksPath: the key is the first word that is no flag
+    and no flag's value, and a value word follows it. A read, `--get`, `--unset` and a list write nothing."""
+    words, skip = [], False
+    for arg in args:
+        if skip:
+            skip = False
+        elif arg in _CONFIG_READ_FLAGS:
+            return False
+        elif arg in _CONFIG_VALUE_FLAGS:
+            skip = True
+        elif not arg.startswith("-"):
+            words.append(arg)
+    if words[:1] == ["set"]:   # `git config set <key> <value>`
+        words = words[1:]
+    return len(words) >= 2 and words[0].lower() == _HOOKS_KEY
+
+
+def _fed_words(tokens, index: int, fed: str):
+    """The words an `echo` or `printf` in the pipe's previous segment hands `xargs`, when the git word at
+    `index` runs under xargs: xargs puts them after the call's own words. Else []."""
+    if not fed or not any(basename(word) == "xargs" for word in tokens[:index]):
+        return []
+    feeder = segment_tokens(fed)
+    at = resolve_command(feeder) if feeder else None
+    if at is None or basename(feeder[at]) not in ("echo", "printf"):
+        return []
+    return [word for word in feeder[at + 1:] if word not in ("-n", "-e", "-E")]
+
+
+def _segment_events(segment: str, fed: str = ""):
+    """The hook-relevant act of one segment whose command word is git, as a tuple: ("bypass", matched, verb,
+    what), ("config", matched) for a core.hooksPath write, ("run", verb) for a commit, merge or push that
+    skips nothing, else (). A segment shlex cannot parse judges nothing (the fail-open stance)."""
     tokens = segment_tokens(segment)
     if not tokens:
-        return None
+        return ()
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
-        return None
+        return ()
     cursor = _git_subcommand_index(tokens, index)
-    if cursor >= len(tokens) or tokens[cursor] not in _HOOK_VERBS:
-        return None
+    if cursor >= len(tokens):
+        return ()
     verb = tokens[cursor]
+    if verb == "config":
+        if _config_writes_hooks_path(tokens[cursor + 1:]):
+            return ("config", " ".join(tokens[index:cursor + 1]) + " " + _HOOKS_KEY)
+        return ()
+    if verb not in _HOOK_VERBS:
+        return ()
     matched = " ".join(tokens[index:cursor + 1])
     options = tokens[index + 1:cursor]
     for at, word in enumerate(options):
         if word == "-c" and at + 1 < len(options) and options[at + 1].partition("=")[0].lower() == _HOOKS_KEY:
-            return matched, verb, "core.hooksPath set on the command"
+            return ("bypass", matched, verb, "this " + verb + " points git's hooks at another folder (core.hooksPath on the command)")
     if _env_hooks_path(tokens[:index]):
-        return matched, verb, "core.hooksPath set in the environment"
-    flag = _verb_bypass_flag(verb, tokens[cursor + 1:])
+        return ("bypass", matched, verb, "this " + verb + " points git's hooks at another folder (core.hooksPath in the environment)")
+    flag = _verb_bypass_flag(verb, tokens[cursor + 1:] + _fed_words(tokens, index, fed))
     if flag:
-        return matched + " " + flag, verb, flag + " given"
+        return ("bypass", matched + " " + flag, verb, "this " + verb + " skips the git hooks (" + flag + ")")
+    return ("run", verb)
+
+
+def _hook_events(text: str):
+    """The events of a command text in order: each segment's own, then the texts it hands on (`bash -c`, `sh -lc`,
+    `eval`, `env -S`, runners: inner_commands is the one reader), each judged as a command with its heredoc
+    bodies dropped and its `$( )` texts as commands of their own."""
+    ends = []
+    segments = split_segments(text, ends)
+    for number, segment in enumerate(segments):
+        if not segment.strip():
+            continue
+        fed = segments[number - 1] if number and number - 1 < len(ends) and ends[number - 1] == "|" else ""
+        event = _segment_events(segment, fed)
+        if event:
+            yield event
+        tokens = segment_tokens(segment)
+        if tokens:
+            from guard_env import substitution_commands   # imported late: a family reads only the families before it
+            for inner in inner_commands(tokens):
+                stripped = strip_heredoc_bodies(inner)
+                for each in (stripped, *substitution_commands(inner, stripped)):
+                    yield from _hook_events(each)
+
+
+def hook_bypass_hit(texts):
+    """Return (matched text, verb, what) for the first call in `texts` (the command and its `$( )` texts) that
+    skips or redirects the git hooks, else None. A `git config` write of core.hooksPath counts when a commit,
+    merge or push runs after it, anywhere later; a write with nothing after it sets a value and skips no hook."""
+    for text in texts:
+        written = ""
+        for event in _hook_events(text):
+            if event[0] == "bypass":
+                return event[1], event[2], event[3]
+            if event[0] == "config":
+                written = event[1]
+            elif written:
+                return written, event[1], "this " + event[1] + " runs after core.hooksPath is written, so git's hooks point at another folder"
     return None
 
 
