@@ -1098,23 +1098,28 @@ def _stranded_branch(module, ccr, tag_repos) -> bool:
     return False
 
 
+def _archive_transcripts(transcript: str, agent_id):
+    """The transcripts that hold the record of an archive's target: the main transcript and, for an agent's call
+    (agent_id already checked by the caller), the agent's own. The one home of that choice, for the tags and the
+    branch read alike."""
+    return [transcript] + ([own_session.agent_transcript_path(transcript, agent_id)] if agent_id else [])
+
+
 def _archive_tags(transcript: str, target, agent_id):
-    """The tags that decide an archive of `target`, or None when no transcript holds a record of it. The main
-    transcript and, for an agent's call (agent_id already checked by the caller), the agent's own transcript are
-    both read. A record with the lane tag decides: its tags, or the two records' tags joined when both are lanes.
+    """The tags that decide an archive of `target`, or None when no transcript holds a record of it. Each
+    transcript of _archive_transcripts is read. A record with the lane tag decides: its tags, or the two records' tags joined when both are lanes.
     Else a record without one decides. An agent file that does not exist holds no record; any other read error
     raises. cost: one more transcript read per agent archive call, no file written, no gh call."""
     records = []
-    main = _own_get_session_tags(transcript, target)
-    if main is not None:
-        records.append(main)
-    if agent_id:
+    for index, path in enumerate(_archive_transcripts(transcript, agent_id)):
         try:
-            own = _own_get_session_tags(own_session.agent_transcript_path(transcript, agent_id), target)
+            found = _own_get_session_tags(path, target)
         except FileNotFoundError:
-            own = None
-        if own is not None:
-            records.append(own)
+            if index == 0:
+                raise
+            found = None
+        if found is not None:
+            records.append(found)
     lanes = [tags for tags in records if ARCHIVE_LANE_TAG in tags]
     if lanes:
         return [tag for tags in lanes for tag in tags]
@@ -1128,8 +1133,9 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
     record is a lane. A lane is refused while any open pull request of its cs-repo has a head ref in
     lane_head_refs of its cs-step slug, except an open draft whose head commit is already in its base (compare:
     behind or identical). A lane is also refused while a branch of its record (external_metadata.current_branches)
-    is ahead of its repo's default branch with no pull request in any state (_stranded_branch); that record is
-    read from the caller's transcript only, not the agent's. Fails closed: any error in the reads is a refusal,
+    is ahead of its repo's default branch with no pull request in any state (_stranded_branch); the newest record
+    of the target in each transcript of _archive_transcripts that holds the lane tag is read, so for an agent's
+    call the agent's own record counts too (a missing agent file holds none). Fails closed: any error in the reads is a refusal,
     because the guard-wide crash path fails open. A failed open-list read and a failed branch read each refuse
     with their own reason."""
     if tool != ARCHIVE_TOOL:
@@ -1149,7 +1155,7 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
     if not slugs or not repos or not all(_REPO_NAME.fullmatch(r) for r in repos):
         return "archive of a lane with no step or repo tag", ARCHIVE_TAGS_REASON
     try:  # cost: one paged gh REST read per cs-repo tag (one in practice), through the merge tool's page reader;
-        # then one transcript read for each lane that clears the open list, and, for a record that names branches:
+        # then one transcript read for each lane that clears the open list (two for an agent's call), and, for a record that names branches:
         # one repo read per repo, one compare read per repo x branch, and one pulls read per branch that is ahead,
         # all under one shared MERGE_READ_TIMEOUT
         module = merge_module()
@@ -1165,12 +1171,14 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
                     continue
                 if slug:
                     return "archive of lane " + slug + " with open pull request " + str(row.get("number", "?")), ARCHIVE_OPEN_REASON
-        ccr = own_session.own_session_ccr(transcript, target)
+        ccrs = [own_session.own_session_ccr(path, target) for path in _archive_transcripts(transcript, agent_id)]
     except (Exception, SystemExit):
         return "archive with an unreadable pull request list", ARCHIVE_READ_REASON
     try:
         with module.shared_deadline(MERGE_READ_TIMEOUT):
-            stranded = isinstance(ccr, dict) and _stranded_branch(module, ccr, repos)
+            stranded = any(
+                isinstance(ccr, dict) and isinstance(ccr.get("tags"), list) and ARCHIVE_LANE_TAG in ccr["tags"]
+                and _stranded_branch(module, ccr, repos) for ccr in ccrs)
     except (Exception, SystemExit):
         return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON
     if stranded:
