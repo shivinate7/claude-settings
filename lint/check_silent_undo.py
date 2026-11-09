@@ -19,9 +19,9 @@ Four reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               whitespace-only change, a reorder or a pure delete) is a finding when the removed line is absent from
               every base and one parent holds it and the other does not. A line the lane touched, or only the lane
               added, is quiet. A pure delete is the lost-line read. A Drops-lines trailer does not excuse a hand
-              edit: restore main's lines verbatim in the merge, or change them in a later lane commit (its trailer lifts the
-              reversal read). A hand finding survives a later UNKNOWN, in .problems. Only a generated
-              page (below) does. Cost, per merge commit: that one git call. Only a merge with such a hunk adds a
+              edit. Only a generated page (below) excuses one. The way out: restore main's lines verbatim in the
+              merge, or change them in a later lane commit (its trailer lifts the reversal read). An open hand
+              finding survives a later UNKNOWN, in .problems. Cost, per merge commit: that one git call. Only a merge with such a hunk adds a
               rev-list, a merge-base, a diff-tree per base and parent (renames), one `git log` per parent and
               file (branch_only_lines), and one `git cat-file --batch` process (class Blobs), closed at the end.
               No process stays running and no file is written. Debt merge-commit-skips-review is the incident

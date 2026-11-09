@@ -43,8 +43,8 @@
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
 nothing. A commit's trailer counts only when that commit changes at least one file (a merge: against any
-parent), so a trailer on an empty commit excuses nothing. The path it excuses is its own, and the commit need not
-change that path. A PR-body line has no commit, so this rule does not apply to it. Cost: one
+parent). Per the coordinator (Nov 9 2026 16:48 and 17:04 CST), an empty commit's trailer excuses nothing, and a
+trailer excuses its own path, which its commit need not change. A PR-body line has no commit, so this rule does not apply to it. Cost: one
 `git log -m --name-only` pass over the range, with no process kept and no file written. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
 reason. No switch turns the check off.
 
