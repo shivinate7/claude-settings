@@ -30497,14 +30497,22 @@ lb_add("a lane session's transcript is not opened at a normal reading, and the r
 
 def shard_split_check():
     """GUARD_SHARD: the n shards of a list are disjoint, hold every item, and differ in size by one at most;
-    a malformed value stops the run."""
+    "<i>-<n>" reads as "<i>/<n>", and a malformed value stops the run."""
     for size in (0, 1, 7, 3900):
         items = list(range(size))
         for n in range(1, 6):
             shards = [shard_of(items, (i, n)) for i in range(1, n + 1)]
             if sorted(sum(shards, [])) != items or max(map(len, shards)) - min(map(len, shards)) > 1:
                 return False, "%d items in %d shards split as %s" % (size, n, [len(x) for x in shards])
-    for bad in ("0/2", "3/2", "1", "1/0", "a/b", "1/2/3", " 1/2"):
+    for good, want in (("1/3", (1, 3)), ("1-3", (1, 3)), ("2-3", (2, 3))):
+        try:
+            got = parse_shard(good)
+        except SystemExit:
+            return False, "GUARD_SHARD=%r was refused, want %r" % (good, want)
+        if got != want:
+            return False, "GUARD_SHARD=%r read as %r, want %r" % (good, got, want)
+    for bad in ("0/2", "3/2", "1", "1/0", "a/b", "1/2/3", " 1/2", "01/2",
+                "0-2", "3-2", "1-0", "a-b", "1-2-3", " 1-2", "1-2 ", "1-", "-2", "1/2-3", "1-2/3", "01-2"):
         try:
             parse_shard(bad)
         except SystemExit:
@@ -30512,7 +30520,7 @@ def shard_split_check():
         return False, "GUARD_SHARD=%r was accepted" % bad
     if parse_shard("") != (1, 1) or parse_shard("2/3") != (2, 3):
         return False, "parse_shard misread an empty or a well-formed value"
-    return True, "shards of 0 to 3900 items in 1 to 5 shards are disjoint and whole; bad values stop"
+    return True, "shards of 0 to 3900 items in 1 to 5 shards are disjoint and whole; i-n reads as i/n; bad values stop"
 
 
 LOG_CHECKS_EXTRA.append(("GUARD_SHARD: the shards are disjoint and hold every case", shard_split_check))
