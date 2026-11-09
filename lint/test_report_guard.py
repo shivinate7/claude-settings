@@ -26,6 +26,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPORT_GUARD = os.path.join(HERE, "report_guard.py")
 HOOKS = os.path.join(HERE, "..", "hooks")
+GUARD_PY = os.path.join(HOOKS, "guard.py")
 
 sys.path.insert(0, HERE)
 sys.path.insert(0, HOOKS)  # guard_core, loaded by path below, imports its sibling modules
@@ -4548,7 +4549,8 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         # Catches: the check blocks a rewrite, which this guard leaves quiet today.
         self.assert_allowed("Answered: no permission rule can lift it.", stop_hook_active=True)
 
-    # Cost: regex only, no file read beyond the transcript. The probe is builtins.open, the pattern
+    # Cost: regex only, plus one read of hooks/guard.py. report_guard reads its stamp id there once per run, at
+    # load (hooks_dirs), so no other file opens. The probe is builtins.open, the pattern
     # test_repo_colour.py uses. The guard runs in this process, so the watch can see its opens.
 
     def guard_opens(self, reply):
@@ -4568,19 +4570,19 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
             runpy.run_path(REPORT_GUARD, run_name="__main__")
         return out.getvalue().strip(), opened, hook["transcript_path"]
 
-    def test_an_cost_no_word_opens_only_the_transcript(self):
+    def test_an_cost_no_word_opens_only_transcript_and_guard_py(self):
         # Catches: the check reads a file, such as a glossary or a record, even when the reply has no "answered".
         for reply in ("Lane 4 is still running.", "The owner answers in chat.", "The lane is answering now."):
             with self.subTest(reply=reply):
                 out, opened, transcript = self.guard_opens(reply)
                 self.assertEqual(out, "")
-                self.assertEqual(set(opened), {transcript})
+                self.assertEqual(set(opened), {transcript, GUARD_PY})
 
-    def test_an_cost_offending_line_still_opens_only_the_transcript(self):
+    def test_an_cost_offending_line_still_opens_only_transcript_and_guard_py(self):
         # The block is the red part. The read is the cost: the verdict reads the reply, and nothing else opens.
         out, opened, transcript = self.guard_opens("Answered: no permission rule can lift it.")
         self.assertEqual((json.loads(out) if out else {}).get("decision"), "block", out)
-        self.assertEqual(set(opened), {transcript})
+        self.assertEqual(set(opened), {transcript, GUARD_PY})
 
 
 class PendingRefusalTests(unittest.TestCase):
