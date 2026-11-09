@@ -9,7 +9,7 @@ import tempfile
 
 import guard_core
 from guard_core import (
-    GIT_CHECKOUT_TAKES_NAME, PATH_EXTENSION, PATH_PREFIX, REDIRECTION, _inside_work_tree,
+    GIT_CHECKOUT_TAKES_NAME, PATH_EXTENSION, PATH_PREFIX, REDIRECTION, _git, _inside_work_tree,
     _segment_git_c_target, basename, git_calls, long_flag_abbrev, pathspec_from_file_flag, porcelain,
     resolve_command,
     segment_tokens, split_segments, stash_stack, worktree_prune_subject, worktree_remove_subject,
@@ -19,11 +19,33 @@ from guard_branch_worktree import (
 )
 
 
+def lone_operand_is_dirty_file(root: str, name: str) -> bool:
+    """True when a bare `git checkout <name>` would be read by git as a path with an uncommitted
+    change: `name` is no revision (git's own rule reads a name that is both a branch and a file as
+    the branch), it exists under `root`, and `git status` reports a tracked change for it. The
+    spelling decides nothing, so an extensionless file reads the same as `a.json`. An unreadable
+    answer is False and is logged as `subject-unread`, the form this read used to leave unjudged."""
+    if not name or name.startswith(("-", ":")) or not os.path.lexists(os.path.join(root, name)):
+        return False
+    rev = _git(root, "rev-parse", "--verify", "--quiet", name + "^{commit}")
+    if rev is None:
+        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)
+        return False
+    if rev.returncode == 0:
+        return False
+    lines = porcelain(root, [name])
+    if lines is None:
+        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)
+        return False
+    return any(line[:2] != "??" for line in lines)
+
+
 def checkout_names_a_path(args, root: str = "") -> str:
     """Return the matched text when a `git checkout` names a path, else ''.
 
     Also matched: a forced switch (`-f`, `--force`), a pathspec file, and, when `root` is given,
-    a lone bare operand that is a folder under `root` (git reads it as a path)."""
+    a lone bare operand that is a folder under `root` or a tracked file with an uncommitted change
+    that no branch shares its name with (git reads each as a path)."""
     if "--" in args:
         return " ".join(["--"] + args[args.index("--") + 1:]).strip()
     plain = []
@@ -47,6 +69,8 @@ def checkout_names_a_path(args, root: str = "") -> str:
         ):
             return arg
     if root and len(plain) == 1 and os.path.isdir(os.path.join(root, plain[0])):
+        return plain[0]
+    if root and len(plain) == 1 and lone_operand_is_dirty_file(root, plain[0]):
         return plain[0]
     for arg in args:
         if arg in ("-f", "--force") or pathspec_from_file_flag(arg):

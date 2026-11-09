@@ -62,6 +62,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  git's tracked files under a folder, suites left out (testing/tracked_tree.py)
 GUARD = os.path.join(HERE, "guard.py")
 SUITE = os.path.join(HERE, "test_guard.py")
 WATCH = os.path.join(HERE, "config_watch.py")
@@ -152,6 +154,22 @@ MUTATIONS = [
      '            if agent_owned_worktree(root) is True:',
      '            if False:', "guard",
      'agent-owned worktree is allowed and noted, not asked'),
+    ("shared-tree: a lone operand that is also a revision still reads as a dirty file",
+     '    if rev.returncode == 0:\n        return False\n',
+     '    if False:\n        return False\n', "guard",
+     'per-file bare: checkout of a dirty file that is also a branch in the shared checkout allows'),
+    ("shared-tree: a lone operand with no tracked change still reads as a dirty file",
+     '    return any(line[:2] != "??" for line in lines)\n',
+     '    return True\n', "guard",
+     'per-file bare: checkout of an untracked extensionless file in the shared checkout allows'),
+    ("shared-tree: a revision read that gets no answer is no longer logged as subject-unread",
+     '    if rev is None:\n        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)\n',
+     '    if rev is None:\n        pass\n', "guard",
+     'a bare checkout of a dirty file with no git on PATH is allowed and logged once as subject-unread'),
+    ("shared-tree: a status read that gets no answer is no longer logged as subject-unread",
+     '    if lines is None:\n        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)\n',
+     '    if lines is None:\n        pass\n', "guard",
+     'a bare checkout of a dirty file whose status git cannot read is allowed and logged once as subject-unread'),
 
     # ---- rule 1's three new git forms: branch delete, worktree remove, worktree prune. Each
     # mutation breaks one arm of the state read the plan named as the safety hole in this rule.
@@ -907,7 +925,7 @@ MUTATIONS = [
     ("per-file: the allow ignores a second distinct -C target in the command",
      '    return len(targets) <= 1',
      '    return True', "guard",
-     'per-file ask: two -C targets, lane then a second linked worktree, both per-file restores'),
+     'per-file ask: two -C targets in one checkout'),
     ("config-edit: stop noting project config edits, shell tool",
      '    matched = project_config_shell_hit(stripped, cwd)\n'
      '    if matched:\n'
@@ -993,6 +1011,14 @@ MUTATIONS = [
      '    return any(os.path.normcase(parts[i + 1]) == "scratchpad"',
      '    return False and any(os.path.normcase(parts[i + 1]) == "scratchpad"', "guard",
      "audit-high paths: test-author Edit of another session's scratchpad outside a repo is refused"),
+    ("scratchpad-commit-msg-owner: the rule never fires",
+     "matched = agent and scratchpad_message_file(segment, cite_where)",
+     "matched = False and scratchpad_message_file(segment, cite_where)", "guard",
+     "scratchpad-message: an agent's commit -F of a scratchpad file is refused"),
+    ("scratchpad-commit-msg-owner: an orchestrator's call is refused too",
+     "matched = agent and scratchpad_message_file(segment, cite_where)",
+     "matched = scratchpad_message_file(segment, cite_where)", "guard",
+     "scratchpad-message: an orchestrator's commit -F of the same scratchpad file is allowed"),
     ("shared-tree: restore collapses back to a name match, --staged or not",
      '    staged = "--staged" in args or "-S" in args\n'
      '    worktree = "--worktree" in args or "-W" in args\n'
@@ -2203,19 +2229,19 @@ MUTATIONS = [
      'ENTRY_OWN = re.compile(r"^never-seen:")', "guard",
      "builder-refuse: a reset to a commit that holds the builder's own test edit is denied at push"),
     ("role-diff: a merge commit is judged against its first parent, not git's own merge",
-     '        old = merge_tree(root, *parents) if len(parents) == 2 else (parents[0] if parents else "")',
-     '        old = parents[0] if parents else ""', "guard",
+     '            merged = merge_tree(root, *parents)',
+     '            merged = (parents[0], ())', "guard",
      "builder-refuse: a merge of main with a product-file conflict, while main changed a test file, is allowed at push and stop"),
     ("role-diff: a merge in progress is judged against HEAD, not git's own merge",
-     '        old = merge_tree(root, "HEAD", merging.stdout.strip())', '        old = "HEAD"', "guard",
+     '        merged = merge_tree(root, "HEAD", merging.stdout.strip())', '        merged = ("HEAD", ())', "guard",
      "builder-refuse: a merge of main with a product-file conflict, while main changed a test file, is allowed at commit"),
     ("role-diff: a rebase pick is read as the builder's resolved replay",
      'REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")',
      'REBASE_PLAIN_STEPS = ("start", "finish", "abort", "reword", "edit")', "guard",
      "builder-refuse: a rebase onto main where a test-author's commit and main change the same test file in different hunks"),
     ("role-diff: a replay in progress is refused as the builder's own work",
-     '    changes.append((old, None, paths, NOTED if replaying else OWN))',
-     '    changes.append((old, None, paths, OWN))', "guard",
+     '    changes.append((old, None, paths, NOTED if replaying else OWN, conflicts))',
+     '    changes.append((old, None, paths, OWN, conflicts))', "guard",
      "builder-refuse: a builder's cherry-pick of a test-author's commit with --no-commit is allowed at commit"),
     ("role-diff: a write of the upstream side after a rebase is logged only",
      '            if not builder or kind == OWN:',
@@ -2229,12 +2255,29 @@ MUTATIONS = [
      '        if sha in lost:\n            continue', '        if False:\n            continue', "guard",
      "builder-refuse: a builder's conflicted merge of a test file, which it then resets away, is allowed and logs no builder-diff line"),
     ("role-diff: every path a builder changes offends",
-     '            bad = any(is_test_rel(n) for n in names) or (', '            bad = True or (', "guard",
+     '            bad = any(is_builder_test_rel(n) for n in names) or (', '            bad = True or (', "guard",
      "builder-refuse: a builder's conflicted merge of a product file, both sides changed it, is allowed and logs no builder-diff line"),
     ("role-diff: a test-author's change is judged as a builder's",
      '        elif role == AUTHOR_ROLE:\n            bad = not all(author_path_ok(n) for n in names)',
      '        elif False:\n            bad = not all(author_path_ok(n) for n in names)', "guard",
-     "builder-refuse: a test-author's conflicted merge of a test file is never refused and logs nothing"),
+     "builder-refuse: a test-author's ordinary commit of a test file is never refused and logs no author-diff line"),
+    ("role-diff: a test-author's conflicted path is judged like any other",
+     '        if role == AUTHOR_ROLE and all(norm(n) in merge_route_paths(conflicts) for n in names):', '        if False:', "guard",
+     "builder-refuse: a test-author's merge commit that resolves a conflicted test file and a conflicted product file"),
+    ("test-author: the write tool refuses a product path its merge left conflicted",
+     '            if where and norm(rel).lstrip("/") in merge_route_paths(merge_conflicts(where) or ()):', '            if False:', "guard",
+     "test-author: Edit of a product file its merge conflicts is allowed"),
+    ("test-author: the merge route is given to a merge with no test path conflicted",
+     '    if not any(is_test_rel(path) for path in conflicts):', '    if False:', "guard",
+     "test-author: Edit of a product file its merge conflicts, with no test path conflicted, is refused"),
+    ("role-diff: a test-author's commit gives the merge route to a merge with no test path conflicted",
+     '        if role == AUTHOR_ROLE and all(norm(n) in merge_route_paths(conflicts) for n in names):',
+     '        if role == AUTHOR_ROLE and all(norm(n) in conflicts for n in names):', "guard",
+     "builder-refuse: a test-author's merge commit that resolves a product-only conflict logs author-diff"),
+    ("test-author: the merge route covers a conflicted workflow, test config or manifest",
+     '    return [path for path in conflicts if not (is_workflow_rel(path) or author_path_ok(path))]',
+     '    return list(conflicts)', "guard",
+     "test-author: Edit of a workflow that changes a non-test step in a mixed merge is refused"),
     ("role-diff: a flag on a line that calls a runner is not read",
      'any(TEST_RUNNER_CONTEXT.search(near) for near', 'any(False for near', "guard", "builder-test: addopts --deselect added to pytest.ini is refused"),
     ("role-diff: --deselect no longer disables tests",
@@ -2282,7 +2325,7 @@ MUTATIONS = [
     ("test-author: the scope is never enforced in the diff",
      '            bad = not all(author_path_ok(n) for n in names)', '            bad = False', "guard", "builder-diff: the diff check refuses a builder's test change and logs a test-author's diff"),
     ("test-author: the write tool lets any path through",
-     '        return "" if repo_rel(target, cwd, outside=False) is None else target', '        return ""', "guard",
+     '                return ""\n        return target\n    if role == WRITER_ROLE:', '                return ""\n        return ""\n    if role == WRITER_ROLE:', "guard",
      "test-author: Edit of product code is refused"),
     ("test-author: test config is not its own",
      '    return (is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES',
@@ -2312,8 +2355,14 @@ MUTATIONS = [
      '    while index < len(args) and args[index].startswith("-"):', "    while False:", "guard",
      "builder-test: python3 -u in place of python3 on a test run is allowed"),
     ("test-author: a mutation test is not its own",
-     '            or norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS)', '            or False)', "guard",
+     '            or is_mutation_test_rel(rel))', '            or False)', "guard",
      "test-author: Edit of mutation test hooks/mutate_guard.py is allowed"),
+    ("builder-test: is_builder_test_rel drops the mutation tests",
+     '    return is_test_rel(rel) or is_mutation_test_rel(rel)', '    return is_test_rel(rel)', "guard",
+     "builder-test: Edit of mutation test hooks/mutate_guard.py is refused"),
+    ("builder-test: is_mutation_test_rel stops folding case",
+     '    return norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS', '    return norm(rel).lstrip("/") in AUTHOR_MUTATION_TESTS', "guard",
+     "builder-test: Edit of HOOKS/mutate_guard.py is refused (case folds)"),
     ("role-diff: the builder reason drops the remedy",
      '"report. The orchestrator assigns it to a test-author."', '"report."', "guard",
      "builder-test: Write of a test file is refused"),
@@ -2946,6 +2995,29 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
+    # records-page: a commit of MERGE_HEAD's page is allowed only for a commit on origin/<base>'s first-parent line.
+    ("records-page: MERGE_HEAD is not read against origin/<base>, so another branch's page is allowed",
+     '    return ids[1] if line is not None and line.returncode == 0 and ids[0] in line.stdout.split() else ""',
+     '    return ids[1]',
+     "guard", "a test-author commit of a non-base merge's page, the feature branch's, origin/main moved on"),
+    ("records-page: the line is not first-parent only, so a branch merged into the base is allowed",
+     '"rev-list", "--first-parent", origin)',
+     '"rev-list", origin)',
+     "guard", "off its first-parent line"),
+    ("records-page: the page is not compared with MERGE_HEAD's, so a rebuilt page is allowed",
+     '            if not page_id or page_id != _merge_head_page(top, base):',
+     '            if not page_id or not _merge_head_page(top, base):',
+     "guard", "a test-author commit of a page rebuilt after the merge, origin/main moved on"),
+    ("records-page: MERGE_HEAD's page is never read, so the merge's own page is refused",
+     '            if not page_id or page_id != _merge_head_page(top, base):',
+     '            if True:',
+     "guard", "a test-author commit of the merge's own page, after origin/main moved on"),
+    # An absent page (a deletion staged in the index) is refused unless no merge brings one. Without the check, a
+    # deleted page with no merge in progress compares '' with '' and is allowed.
+    ("records-page: the absent-page check is dropped, so a commit that deletes the page is allowed with no merge",
+     '            if not page_id or page_id != _merge_head_page(top, base):',
+     '            if page_id != _merge_head_page(top, base):',
+     "guard", "a commit that deletes the page, with no merge in progress"),
     # Rule brief-destructive-git: the check reads no brief, so an ordered discard passes.
     ("brief-destructive-git: the check finds no ordered discard, so a brief that orders a reset passes",
      "                if match and match[1] not in BRIEF_DESTRUCTIVE_SKIP",
@@ -3959,10 +4031,7 @@ def run_mutant(sources, work: str, entry):
     _path, suite, variable, stem = TARGETS[target]
     if target in ("guard", "simlease"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
-        # module that holds it. The suite loads the copied guard.py, which finds its siblings. The
-        # simulator refusal imports janitor/sweep.py from ../janitor and fails open when it cannot, so
-        # the copy takes sweep.py and temp_sweep.py beside its hooks folder, as a checkout has them.
-        # Without them every simulator arm would be judged against a guard that allows everything.
+        # module that holds it. The suite loads the copied guard.py, which finds its siblings.
         root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
         tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
@@ -3975,13 +4044,12 @@ def run_mutant(sources, work: str, entry):
             mutate_shared.apply_mutant(tree, old, new)
             shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
         copy_path = os.path.join(tree, "guard.py")
-        os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
-        for name in ("sweep.py", "temp_sweep.py"):
-            shutil.copy(os.path.join(HERE, "..", "janitor", name), os.path.join(root, "janitor"))
-        # guard.py reads lint/layout.py from ../lint (_layout_module), which is root/lint for this copy. Without
-        # it the role-model table reads as unread and every role-model arm passes unjudged.
-        shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
-                        ignore=shutil.ignore_patterns("__pycache__"))
+        # The guard family reads the folders beside its hooks folder as a checkout has them: ../lint (layout.py,
+        # the role-model table: without it every role-model arm passes unjudged), ../janitor (the simulator
+        # refusal fails open without sweep.py) and ../skills (waiting-page, impeccable). Git's own list of each
+        # folder fills them, so a file the guard starts to read cannot be left out. git is read from the source
+        # checkout, never from this scaffold.
+        tracked_tree.copy_tracked(root, "lint", "janitor", "skills", root=os.path.dirname(HERE))
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
         mutated = sources[target].replace(old, new, 1)
@@ -4102,8 +4170,7 @@ def main() -> int:
     # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
     # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The ruling and
     # decision copies read their own tree/lint instead (above). A guard copy carries its own lint folder (run_mutant).
-    shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(work, "lint"),
-                    ignore=shutil.ignore_patterns("__pycache__"))
+    tracked_tree.copy_tracked(work, "lint", root=os.path.dirname(HERE))
 
     try:
         return mutate_shared.run_mutants(
