@@ -15722,13 +15722,14 @@ class ReviewStampSince(unittest.TestCase):
 
     def tool_read_stop(self, root):
         """-> the message of the Stop that review_stamp_since raises for `root` when the merge tool's checkout gives no cutover. A read that does not stop fails here,
-        and so does one that raises ImportError instead: a failed import must not replace the Stop."""
+        and so does one that raises any other exception instead: a failed import must not replace the Stop."""
+        stamp_since = review_fn(self, "review_stamp_since")
         try:
-            got = review_fn(self, "review_stamp_since")(root, "main")
+            got = stamp_since(root, "main")
         except merge.Stop as stop:
             return str(stop)
-        except ImportError as e:
-            self.fail("review_stamp_since raised %r, not the Stop that names the failed tool read" % (e,))
+        except Exception as e:
+            self.fail("review_stamp_since raised %s, not the Stop that names the failed tool read: %s" % (type(e).__name__, e))
         self.fail("review_stamp_since returned %r while the merge tool's checkout gives no cutover, instead of stopping" % (got,))
 
     def failed_tool_read(self, launch_imports):
@@ -15744,6 +15745,21 @@ class ReviewStampSince(unittest.TestCase):
                     __import__("launch")
             message = self.tool_read_stop(root)
         return message, source
+
+    @contextlib.contextmanager
+    def broken_launch(self):
+        """A context in which `import launch` raises SyntaxError. A scratch folder in this run's folder holds a launch.py that does not compile, and
+        merge.MERGE_DIR and sys.path name that folder first, so the real merge/launch.py is never read or changed. sys.path and sys.modules are restored on exit."""
+        folder = os.path.realpath(tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder()))
+        self.addCleanup(shutil.rmtree, folder, True)
+        with open(os.path.join(folder, "launch.py"), "w", encoding="utf-8") as f:
+            f.write('TOOL_SOURCE_ENV = "MERGE_TOOL_SOURCE"\ndef (:\n')
+        with unittest.mock.patch.object(merge, "MERGE_DIR", folder), unittest.mock.patch.object(sys, "path", [folder, *sys.path]), \
+                unittest.mock.patch.dict(sys.modules):
+            sys.modules.pop("launch", None)  # an earlier case may have cached the real launch
+            with self.assertRaises(SyntaxError):  # the premise: the import of launch is the SyntaxError
+                __import__("launch")
+            yield
 
     def safe_path_read(self, pythonpath=None):
         """-> the outcome of the merge tool's stamp read in a child run under PYTHONSAFEPATH=1: {"raised": the class name of what it raised, "message": its text}.
@@ -15812,6 +15828,29 @@ class ReviewStampSince(unittest.TestCase):
         self.assertIn("could not read the merge tool's source checkout", message, "the Stop does not name the failed tool read:\n" + message)
         self.assertIn("a temporary copy of " + source, message, "the Stop does not name the source checkout MERGE_TOOL_SOURCE holds:\n" + message)
         self.assertIn("repair " + source, message, "the Stop does not say to repair the source checkout:\n" + message)
+
+    def test_a_successful_tool_read_with_a_broken_launch_returns_the_cutover(self):
+        # tool_source_env runs before every read and catches only ImportError, so a launch.py that does not compile raised SyntaxError from a read
+        # that needs no note. The control is test_without_a_salt_commit_the_cutover_is_the_tool_checkouts: the same read with launch importable.
+        stamp_since = review_fn(self, "tool_stamp_since")
+        with self.tool_checkout(), self.broken_launch():
+            tool = self.tool_root()
+            self.assertIn("REVIEW_STAMP_SALT =", sh(tool, "git", "show", "HEAD:merge/merge.py"), "the merge tool's checkout does not hold the salt commit")
+            try:
+                cutover = stamp_since()
+            except Exception as e:
+                self.fail("tool_stamp_since raised %s on a read that needs no note, instead of the cutover, because launch.py does not compile: %s" % (type(e).__name__, e))
+        self.assertEqual(cutover, "2026-10-21T15:04:05Z", "tool_stamp_since gave %r, not the cutover of the tool checkout's salt commit" % (cutover,))
+
+    def test_a_failed_tool_read_with_a_broken_launch_stops_naming_the_checkout(self):
+        # A launch.py that does not compile must not replace the Stop of a failed tool read. The control is
+        # test_a_tool_checkout_whose_git_read_fails_stops_naming_the_checkout: the same read with no broken launch.
+        root = self.repo(salt_at=None)
+        with self.tool_checkout(repo=False), self.broken_launch():
+            tool = self.tool_root()
+            message = self.tool_read_stop(root)
+        self.assertIn("could not read the merge tool's source checkout", message, "the Stop is not the failed tool read:\n" + message)
+        self.assertIn(tool, message, "the Stop does not name the merge tool's checkout:\n" + message)
 
     def test_two_roots_in_one_process_read_the_tool_checkout_once(self):
         # The tool checkout's cutover is cached for the process. Two roots with no salt commit each need it, and the tool's git log runs once.
