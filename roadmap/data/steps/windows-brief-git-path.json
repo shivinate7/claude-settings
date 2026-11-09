@@ -1,0 +1,10 @@
+{
+  "title": "On Windows, the destructive-git brief check reads a scratch-repo path as inside the scratchpad",
+  "why": "Coordinator 23:13 CST Nov 8: workflow_dispatch run 42561302134 failed checks-windows-guard-2 and checks-windows-guard-3 on two Agent-tool cases of rule brief-destructive-git already on main (hooks/test_guard.py: the scratch-repo case, and likely BRIEF_ALLOW_PARAGRAPHS). The fixture joins an unquoted `C:\\...` SCRATCH_REPO into the brief; the brief reader drops the backslashes as bash does, so the path no longer reads as inside a scratchpad and the brief is denied.",
+  "note": "Lead from lane merge-repo-dir-flag (session_013NEJL19PYKPFXLekGuTmnX): its same-class fix is aba33d049. Lane started by the coordinator 23:13 CST Nov 8.",
+  "phase": "now",
+  "owner": "coordinator",
+  "status": "doing",
+  "order": 873,
+  "updatedAt": "2026-11-08T23:12:00-06:00"
+}
