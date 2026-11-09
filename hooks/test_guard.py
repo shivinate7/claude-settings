@@ -12470,6 +12470,7 @@ lazy_fixture([OCT_THREE, OCT_FOUR, OCT_TWO, OCT_PLAIN, OCT_REMOTE, OCT_EMPTY, OC
 # a new branch cut from origin/main.
 OCT_ALARM = os.path.join(ROOT, "oct-alarm")          # topic, at the base and pushed, merges origin/main
 OCT_ALARM_NEW = os.path.join(ROOT, "oct-alarm-new")  # as oct-alarm, plus a new three-parent merge on topic
+OCT_ALARM_REMOTE = os.path.join(CMKREMOTE, os.path.basename(OCT_ALARM) + ".git")   # the bare remote of oct-alarm
 OCT_FRESH = os.path.join(ROOT, "oct-fresh")          # branch fresh, cut from origin/main, with no tracking ref
 OCT_FRESH_TRUNK = os.path.join(ROOT, "oct-fresh-trunk")  # as oct-fresh, but origin's default branch is trunk, at the base
 
@@ -12503,6 +12504,7 @@ def _oct_merged_origin(where):
 
 def _build_octopus_origin():
     _oct_merged_origin(OCT_ALARM)
+    _oct_must(OCT_ALARM_REMOTE, "main", [3], "the bare remote of oct-alarm holds the octopus on main")
     _oct_merged_origin(OCT_ALARM_NEW)
     _oct_branch(OCT_ALARM_NEW, "x2", "x2.txt", "x2\n")
     _oct_branch(OCT_ALARM_NEW, "y2", "y2.txt", "y2\n")
@@ -12562,6 +12564,11 @@ oct_allow("a push of a new branch cut from origin/main, whose octopus is already
           VCS + " push origin fresh", OCT_FRESH)
 oct_allow("a push of a new branch cut from origin/main, when origin's default branch lacks that octopus",
           VCS + " push origin fresh", OCT_FRESH_TRUNK)
+
+# A push to a URL names no configured remote, so no remote-tracking ref is read for it. The bare repository holds
+# the octopus on main, so the push sends only the merge, and it passes.
+oct_allow("a push to the remote's path, whose octopus is already on its main",
+          VCS + " push " + slash(OCT_ALARM_REMOTE) + " topic", OCT_ALARM)
 oct_refuse("a push of a topic with a new three-parent merge above a merge of origin/main",
            VCS + " push origin topic", OCT_ALARM_NEW)
 
