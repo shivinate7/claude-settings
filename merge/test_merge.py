@@ -15820,8 +15820,8 @@ class ReviewStampSince(unittest.TestCase):
         self.assertIn("a temporary copy of " + source, message, "a Stop whose source is another checkout names no temporary copy of it, so the three cases above prove nothing:\n" + message)
 
     def test_a_failed_launch_import_leaves_the_tool_read_stop_standing(self):
-        # tool_source_env reads launch.py's variable before the try that raises the tool-read Stop. A launch.py that cannot be imported leaves the
-        # note off, and the Stop stands: it names the failed read, and no note comes from the failed import.
+        # A failed tool read builds its note through tool_source_env, under a broad guard, so the Stop stands when launch.py cannot be imported.
+        # The test checks that the Stop names the failed read, and that no note comes from the failed import.
         message, _ = self.failed_tool_read(launch_imports=False)
         self.assertIn("could not read the merge tool's source checkout", message, "the Stop does not name the failed tool read:\n" + message)
         self.assertNotIn("temporary copy", message, "a failed launch import still added the temporary copy note:\n" + message)
@@ -15834,8 +15834,8 @@ class ReviewStampSince(unittest.TestCase):
         self.assertIn("repair " + source, message, "the Stop does not say to repair the source checkout:\n" + message)
 
     def test_a_successful_tool_read_with_a_broken_launch_returns_the_cutover(self):
-        # tool_source_env runs before every read and catches only ImportError, so a launch.py that does not compile raised SyntaxError from a read
-        # that needs no note. The control is test_without_a_salt_commit_the_cutover_is_the_tool_checkouts: the same read with launch importable.
+        # A successful read never imports launch: only a failed read's note needs it. So a launch.py that does not compile cannot fail this read.
+        # The control is test_without_a_salt_commit_the_cutover_is_the_tool_checkouts: the same read with launch importable.
         stamp_since = review_fn(self, "tool_stamp_since")
         with self.tool_checkout(), self.broken_launch():
             tool = self.tool_root()
