@@ -178,6 +178,16 @@ def merge_module():
     return None
 
 
+def fix_check_read(pr):
+    """-> (records, live head) of pull request `pr`, from the merge tool's pr_review_chain, read under the shared deadline. Raises on any failure:
+    the tool not loading, a failed gh read. The spawn guard's fix check rule calls it and fails open on a raise (decision hold-unsafe-after-round-3)."""
+    module = merge_module()
+    if module is None:
+        raise RuntimeError("the merge tool could not be loaded")
+    with module.shared_deadline(MERGE_READ_TIMEOUT):
+        return module.pr_review_chain(pr, module.Host())
+
+
 def has_workflows(where: str) -> bool:
     """True when the checkout at `where` holds a workflow file, or when that cannot be told: a
     head with nothing reported is then unsettled, never green."""

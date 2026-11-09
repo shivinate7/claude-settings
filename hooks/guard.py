@@ -186,8 +186,9 @@ Other tools, in `judge` order:
                        pin and no default model is set. An Explore whose brief's first line
                        carries the `Audit:` marker, a reviewer on a later-round brief, a reviewer
                        whose brief's first non-blank line starts with `Fix check` (up to Sonnet;
-                       owner item 444 a) and every Opus spawn pass it. An unread record
-                       passes and is noted as `agent-role-model-unread`. The general override lifts an
+                       owner item 444 a) and every Opus spawn pass it; a fix check brief is also
+                       judged on its PR's review chain by merge.fix_check_refusal. An unread record,
+                       or a fix check chain that cannot be read, passes and is noted as `agent-role-model-unread`. The general override lifts an
                        above-row refusal; no override lifts the no-model refusal. A Workflow
                        `agent()` call is judged as a spawn; one whose model or agentType the scan
                        cannot read is skipped, and an unread brief is judged as an empty brief.
@@ -399,7 +400,7 @@ while True:
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
-            undrafted_pr_create, uses_merge_tool,
+            undrafted_pr_create, uses_merge_tool, fix_check_read, merge_module,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -2978,6 +2979,16 @@ ROLE_MODEL_REASON = (
 # A reviewer has a second way past its row, so only its refusal names it. Rounds come from the constant at call time.
 ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
 ROLE_REVIEWER_FIX_CHECK_REMEDY = ", or, when this brief is a fix check, open its first line with the `%s` marker"
+# A fix check brief is also judged on its pull request's review chain, by the merge tool's own rule (merge.fix_check_refusal). Its reviewed head
+# and pull request come from the brief: `PR <n>` opens the line after the marker line, and `Reviewed head: <40-hex>` stands on any later line.
+# Fail open: a brief with no such lines, or a chain read that raises, passes and is noted as unread (decision hold-unsafe-after-round-3).
+ROLE_FIX_CHECK_PR_LINE = re.compile(r"[ \t]*PR[ \t]+(\d+)\b")
+ROLE_FIX_CHECK_HEAD_LINE = re.compile(r"(?m)^[ \t]*Reviewed head:[ \t]*([0-9a-f]{40})\b")
+ROLE_FIX_CHECK_REASON = (
+    "Rule (configuration): the merge tool would refuse to record this fix check: %s. Remedy: preview "
+    "`merge <pr> --review-record ... --fix-check` first, then brief the reviewer with the newest earlier record's Head as `Reviewed head:`. "
+    "(decision hold-unsafe-after-round-3)"
+)
 # An Explore has a second way past its row, so only its refusal names it, and only for a ranked model: the marker
 # does not lift a model the table does not rank.
 ROLE_EXPLORE_AUDIT_REMEDY = ", or, when this brief is an audit, open its first line with the `%s` marker"
@@ -3183,6 +3194,26 @@ def role_model_check(tool: str, tool_input):
     return unread
 
 
+def fix_check_chain_hit(brief, pointer):
+    """(reason, matched, unread) for a fix check brief judged on its pull request's review chain. The pull request is read from the line after the
+    first non-blank line only, the reviewed head from any later line, and the verdict is merge.fix_check_refusal's. A brief that names no pull
+    request or no reviewed head, a tool that does not load and a read that raises each pass as unread (fail open). Cost: one chain read (gh REST
+    calls through the merge tool) per fix check spawn."""
+    lines = brief.split("\n") if isinstance(brief, str) else []
+    first = next((i for i, line in enumerate(lines) if line.strip()), None)
+    rest = lines[first + 1:] if first is not None else []
+    pr = ROLE_FIX_CHECK_PR_LINE.match(rest[0]) if rest else None
+    head = ROLE_FIX_CHECK_HEAD_LINE.search("\n".join(rest))
+    if not pr or not head:
+        return "", pointer, True
+    try:
+        records, live = fix_check_read(int(pr.group(1)))
+        why = merge_module().fix_check_refusal(records, head.group(1), live)
+    except (Exception, SystemExit):
+        return "", pointer, True
+    return (ROLE_FIX_CHECK_REASON % why, head.group(1), False) if why else ("", "", False)
+
+
 def role_model_one(tool_input):
     """(reason, matched, unread) for one spawn against its role's row. `reason` is the deny, or "".
     `unread` is true when the table or the agent files could not be read: the spawn then passes. With no pointer checkout the rule stands down, silent. A spawn on Opus is left to
@@ -3214,7 +3245,7 @@ def role_model_one(tool_input):
                                                       for kind, n in brief_markers(tool_input.get("prompt"))):
             return "", "", False
         if role == "reviewer" and named < top and ("fixcheck", None) in marker_hits(tool_input.get("prompt")):
-            return "", "", False
+            return fix_check_chain_hit(tool_input.get("prompt"), pointer)
         if named > ROLE_MODEL_RANK.index(row):
             extra = ""
             if role == EXPLORE_ROLE and named < top:

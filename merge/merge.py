@@ -3451,6 +3451,30 @@ def fix_check_arg(text):
         raise argparse.ArgumentTypeError(f"{text!r} is not REVIEWED_HEAD:{REVIEW_ROLES[0]}:MODEL:VERDICT, with a full 40-hex head and VERDICT {'|'.join(REVIEW_FIX_VERDICTS)}")
     return m.group(1, 2, 3, 4)
 
+FIX_CHECK_EMPTY = "the reviewed head must differ from the live head, or the fix diff is empty"
+FIX_CHECK_CHAIN = "the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line"
+
+def fix_check_refusal(records, reviewed_head, live_head):
+    """-> "" when a fix check from `reviewed_head` may be recorded, else the reason. The one home of the rule: `--fix-check` and the spawn guard both call it.
+    `records` are the pull request's parse_review results, oldest first (None for a malformed body); `live_head` is the pull request's head. A reviewed head
+    equal to the live head has an empty fix diff. Else the newest record must name the reviewed head as its Head and carry no Fix check line: a fix never
+    follows a fix, and a malformed newest record or no record refuses."""
+    if reviewed_head == live_head:
+        return FIX_CHECK_EMPTY
+    last = records[-1] if records else None
+    if not last or last["head"] != reviewed_head or last["fix"]:
+        return FIX_CHECK_CHAIN
+    return ""
+
+def review_chain(host, pr, created):
+    """-> the review records on pull request `pr`, oldest first (None for a malformed body), from the issue comments since `created`. A failed read is a Stop."""
+    return [parse_review(b) for b in host.review_comments(created or "1970-01-01T00:00:00Z").get(pr, [])]
+
+def pr_review_chain(pr, host):
+    """-> (records, live head) of pull request `pr`: review_chain and the head `host` reads for it. A failed read is a Stop, never an empty chain."""
+    info = host.pr(pr)
+    return review_chain(host, pr, info.get("created")), info["head"]
+
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
 
 def role_path():
@@ -3631,10 +3655,9 @@ def main(argv, host=None, lock=None, hosts=None):
             if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
-                earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
-                last = earlier[-1] if earlier else None
-                if not last or last["head"] != a.fix_check[0] or last["fix"]:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
+                why = fix_check_refusal(review_chain(h, a.pr, info.get("created")), a.fix_check[0], info["head"])
+                if why:
+                    print(f"merge: --fix-check: {why}. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)

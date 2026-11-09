@@ -74,6 +74,7 @@ OVERRIDE = os.path.join(HERE, "override.py")
 CALL_JUDGE = os.path.join(HERE, "call_judge.py")
 CALL_JUDGE_SUITE = os.path.join(HERE, "test_call_judge.py")
 SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
+MERGE_TOOL = os.path.join(HERE, "..", "merge", "merge.py")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -86,6 +87,8 @@ TARGETS = {
     "calljudge": (CALL_JUDGE, CALL_JUDGE_SUITE, "CALL_JUDGE_UNDER_TEST", "call_judge"),
     # bin/sim-lease, which the guard loads by path (hooks/guard.py sim_lease_holds). The suite is the guard's.
     "simlease": (SIM_LEASE, SUITE, "GUARD_UNDER_TEST", "sim_lease"),
+    # The merge tool, which the guard loads by path for the fix check rule (guard_merge.merge_module). The suite is the guard's.
+    "mergefix": (MERGE_TOOL, SUITE, "GUARD_UNDER_TEST", "merge_fix"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -1054,6 +1057,33 @@ MUTATIONS = [
      r're.escape(FIX_CHECK_MARKER) + r"\b", "first-line"),',
      r're.escape(FIX_CHECK_MARKER), "first-line"),', "guard",
      'role-model: fix check: reviewer on sonnet with Fix checkpoint on line one is denied'),
+    # The fix check chain (decision hold-unsafe-after-round-3): the guard reads the pull request's review chain and asks the merge tool's own rule.
+    ("role-model: the fix check lift never reads the chain, so a fix check on an ineligible chain walks past",
+     '            return fix_check_chain_hit(tool_input.get("prompt"), pointer)\n        if named > ROLE_MODEL_RANK.index(row):',
+     '            return "", "", False\n        if named > ROLE_MODEL_RANK.index(row):', "guard",
+     "role-model: fix check chain: a fix check whose newest record has a fix check is refused, with the tool's reason"),
+    ("role-model: a fix check chain read that raises is refused, so the guard fails closed on its own error",
+     '    except (Exception, SystemExit):\n        return "", pointer, True\n    return (ROLE_FIX_CHECK_REASON',
+     '    except (Exception, SystemExit):\n        return ROLE_FIX_CHECK_REASON % "the chain could not be read", head.group(1), False\n    return (ROLE_FIX_CHECK_REASON', "guard",
+     "role-model: fix check chain: a chain read that raises fails open, allows the spawn and logs the unread row"),
+    ("role-model: the fix check reads its pull request from a later line, so a PR named in the context is judged",
+     '    pr = ROLE_FIX_CHECK_PR_LINE.match(rest[0]) if rest else None',
+     '    pr = ROLE_FIX_CHECK_PR_LINE.search("\\n".join(rest[1:]))', "guard",
+     "role-model: fix check chain: the PR is read from line two only, a PR named later in the brief is ignored"),
+    ("role-model: a round reviewer brief reads the fix check chain too",
+     '                                                      for kind, n in brief_markers(tool_input.get("prompt"))):\n            return "", "", False',
+     '                                                      for kind, n in brief_markers(tool_input.get("prompt"))):\n            return fix_check_chain_hit(tool_input.get("prompt"), pointer)', "guard",
+     "role-model: fix check chain: a round 2 reviewer brief reads no chain (control)"),
+    # The rule's one home is merge.fix_check_refusal; each mutant breaks one arm and the guard's chain cases read it.
+    ("fix-check-rule: a newest record with a fix check no longer refuses",
+     'if not last or last["head"] != reviewed_head or last["fix"]:', 'if not last or last["head"] != reviewed_head:', "mergefix",
+     "role-model: fix check chain: a fix check whose newest record has a fix check is refused, with the tool's reason"),
+    ("fix-check-rule: a reviewed head that is not the newest record's head no longer refuses",
+     'if not last or last["head"] != reviewed_head or last["fix"]:', 'if not last or last["fix"]:', "mergefix",
+     "role-model: fix check chain: a reviewed head that is not the newest record's head is refused, with the tool's reason"),
+    ("fix-check-rule: a reviewed head equal to the live head no longer refuses",
+     'if reviewed_head == live_head:\n        return FIX_CHECK_EMPTY', 'if False:\n        return FIX_CHECK_EMPTY', "mergefix",
+     "role-model: fix check chain: a reviewed head equal to the live head is refused as an empty fix diff"),
     ("role-model: Opus is no longer left to the ceiling, so a builder on opus is denied here",
      'named == top or row is None:',
      'row is None:', "guard",
@@ -3523,7 +3553,7 @@ def run_mutant(sources, work: str, entry):
     if skip:
         return label, None, [], required, skip
     _path, suite, variable, stem = TARGETS[target]
-    if target in ("guard", "simlease"):
+    if target in ("guard", "simlease", "mergefix"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
         # module that holds it. The suite loads the copied guard.py, which finds its siblings. The
         # simulator refusal imports janitor/sweep.py from ../janitor and fails open when it cannot, so
@@ -3538,8 +3568,16 @@ def run_mutant(sources, work: str, entry):
             with open(os.path.join(root, "bin", "sim-lease"), "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(sources[target].replace(old, new, 1))
         else:
-            mutate_shared.apply_mutant(tree, old, new)
+            if target == "guard":
+                mutate_shared.apply_mutant(tree, old, new)
             shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
+        # The guard loads ../merge/merge.py beside its hooks folder for the fix check rule, so the copy takes it too, mutated or not.
+        os.makedirs(os.path.join(root, "merge"), exist_ok=True)
+        if target == "mergefix":
+            with open(os.path.join(root, "merge", "merge.py"), "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(sources[target].replace(old, new, 1))
+        else:
+            shutil.copy(MERGE_TOOL, os.path.join(root, "merge"))
         copy_path = os.path.join(tree, "guard.py")
         os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
         for name in ("sweep.py", "temp_sweep.py"):
@@ -3579,7 +3617,7 @@ def run_mutant(sources, work: str, entry):
         copy_path = os.path.join(tree, "call_judge.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
-    elif target not in ("guard", "simlease"):
+    elif target not in ("guard", "simlease", "mergefix"):
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
