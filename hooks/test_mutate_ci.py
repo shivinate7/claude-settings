@@ -1643,11 +1643,12 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertEqual(sorted(named - guard_family_names()), [],
                          "a row names a family that hooks/test_guard.py does not have")
 
-    def test_tests_for_guard_kill_prints_only_the_kill_family_line(self):
+    def test_tests_for_guard_kill_prints_the_kill_and_git_env_lines(self):
         code, out, err = run_cli(["--tests-for", "hooks/guard_kill.py"])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        self.assertEqual(out.splitlines(), ["hooks/test_guard.py::kill"],
-                         "guard_kill.py's suite is the kill family alone, with no import-walk suite beside it")
+        self.assertEqual(out.splitlines(), ["hooks/test_guard.py::git-env", "hooks/test_guard.py::kill"],
+                         "guard_kill.py's suites are the git-env and kill families, one line each, sorted: "
+                         "guard_kill.py holds the GIT_ENV_WATCH walk")
 
     def test_tests_for_guard_env_prints_its_two_family_lines(self):
         code, out, err = run_cli(["--tests-for", "hooks/guard_env.py"])
