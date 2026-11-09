@@ -40,6 +40,10 @@ CI: read live by merge --reviewed
 - `parse_review` ignores trailing whitespace on each line, the marker line included, and trailing blank lines.
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
 - The newest record for a head counts. A record for an old head is stale.
+- The read side refuses a hand-edited record. The merge tool never edits a record comment, so a comment whose `updated_at` differs from its `created_at` was edited by hand. A missing or null `updated_at` is no edit. `Host.review_comments` gives each record as (body, time, edited), and `merge --reviewed` reads an edited record as `bad` and names it hand-edited.
+- Ruling (orchestrator, 2026-11-08 17:38 CST, incidents PR #2294 and PR #2251): the newest record decides. If the newest record is hand-edited, the PR reads bad. An older unedited record does not count, because the edited text is unknown.
+- `--fix-check` follows the same rule. It exits 2 and names the record as hand-edited when the newest earlier record was edited. It does not fall back to an older record.
+- The cutover still dates a record by its last edit (see "The cutover"). An edited record is refused before that date is read.
 - `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a push after the review never relabels old rounds as current.
 - The lane-lint check. `merge <pr> --review-record` checks the lint before it prints a record whose state is `done` (`review_state`). A done record is what the lane gives the batch runner, and a lane gives it only a head that passes `merge --lane-lint` (decision `lanes-run-no-full-ci-job`). That includes a delete-only record after a round 1 FAIL, and a docs-only record with no round. A PASS kept open by a design-reviewer FAIL is not done, so it prints whatever the lint says. Incident: PR #1502 was given to the batch runner with CiCoverage red.
 - A record the lint refuses prints no body and exits nonzero. The refusal names `merge --lane-lint <pr>` as its remedy. `lane_lint` stays the one home of the lint: the render calls it with the checked head sha and the PR's base, inside `release_on_signals`, so a SIGTERM still removes its temporary worktree. A FAIL is final: no flag lifts it, and the refusal keeps the line that no override lifts it. An unknown step that `lane_lint` can lift refuses and names `--lint-unknown-ok "REASON"`. The render passes that reason to `lane_lint`, which logs it, and prints the record. A timed-out or odd-exit lint is final, like a FAIL. On an open record the lint does not run, so the flag has no effect.
@@ -65,6 +69,7 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 
 Counted as real `gh` calls, one call per page of a list read. Most reads fit one page of 100.
 
+- The hand-edited check adds no read. It compares two fields of the comments the list read already holds.
 - `merge --reviewed` makes two list reads per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
 - Not a `gh` call: `merge --reviewed` and `--fix-check` each run one `git log` (`review_stamp_since`) to find the cutover. It is cached for the process, reads one file's history on `origin/<base>`, and writes nothing.
