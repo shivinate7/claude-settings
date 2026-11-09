@@ -5617,6 +5617,14 @@ sh("git-after-cd: UNFAILING-TAIL, an elif body after an if test of pytest with |
    "if pytest -q || true; then :; elif [ -f x ]; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: UNFAILING-TAIL, an else body after an if test of [ -f a with || true, which never fails, passes",
    "if [ -f a ] || true; then :; elif pytest -q; then :; else %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
+# A REDIRECT TO A FILE CAN FAIL, SO A TAIL THAT HAS ONE IS NOT UNFAILING. `echo bad >/no/dir` fails when the folder is
+# missing, so the test fails after a failed pytest and the elif runs its push. An fd copy (`>&2`) opens no file and cannot
+# fail, so the test always succeeds, the elif never runs, and its push passes.
+sh("git-after-cd: UNFAILING-TAIL, an elif body after an if test of pytest with || echo bad >/no/dir, whose tail can fail, is refused",
+   "if pytest -q || echo bad >/no/dir; then :; elif [ -f x ]; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: UNFAILING-TAIL, an elif body after an if test of pytest with || echo bad >&2, whose tail cannot fail, passes",
+   "if pytest -q || echo bad >&2; then :; elif [ -f x ]; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
 # A `||` TAIL THAT IS NOT THE LAST STEP. `echo "$(date)"` exits 0 whatever pytest did, so the then body runs after a
 # failed check. `true && [ -f x ]` ends on the `[` status, so the then body runs after a failed pytest when x exists.
 sh('git-after-cd: UNFAILING-TAIL, an if test of pytest with || echo "$(date)", then a git push -u in its then body, is refused',
@@ -5639,9 +5647,18 @@ sh("git-after-cd: UNFAILING-TAIL, an if ! test of pytest with || true, then a gi
 sh("git-after-cd: UNFAILING-TAIL, an until test of pytest with || true, whose body never runs, is refused (decision limit)",
    "until pytest -q || true; do %s push -u origin b; done" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&",))
-# THE CONTROL. The last step of the test is a check, so the then body runs only after that check passed.
-sh("git-after-cd: UNFAILING-TAIL, an if test of pytest with || true && pytest -q, whose last step is a check, passes",
-   "if pytest -q || true && pytest -q; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
+# A CHECK BEFORE A CANNOT-FAIL TAIL IS SWALLOWED, WHATEVER FOLLOWS THE TAIL (lane pick 2026-11-09 01:08 CST). The `|| true`
+# makes the test succeed after a failed pytest, so the then body runs on that failure. A check after the tail does not
+# save it, whatever the last step is.
+sh("git-after-cd: UNFAILING-TAIL, an if test of pytest with || true && pytest -q is refused, a check before the tail is swallowed (lane pick 2026-11-09 01:08 CST)",
+   "if pytest -q || true && pytest -q; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: UNFAILING-TAIL, an if test of pytest with || true && make lint, then a git push -u in its then body, is refused (lane pick 2026-11-09 01:08 CST)",
+   "if pytest -q || true && make lint; then %s push -u origin b; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: UNFAILING-TAIL, a while test of pytest with || true && make lint, then a git push -u in its body, is refused (lane pick 2026-11-09 01:08 CST)",
+   "while pytest -q || true && make lint; do %s push -u origin b; break; done" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
 # A GLUED `(if true` WITH A PUSH IN ITS ELSE BODY. The `true` test always runs its then body, so the push in the else
 # body never runs on a failed check and passes. The unglued form and the spaced `( if` form pass today. The glued `(if`
 # is refused as a false alarm: `_push_segment_inert` does not pop the `(` in front of `if`.
