@@ -2494,9 +2494,11 @@ def _gh_json(args, cwd, end):
 
 
 def _budget_spent(err, end):
-    """True when `err` is the Stop's budget running out, not a read that failed: a read cut at its timeout, our own refusal to start one, or a Stop
-    raised once the budget is gone (merge's review_stamp_since raises Stop on a spent deadline). A failed git read leaves time on the clock."""
-    return isinstance(err, (TimeoutError, subprocess.TimeoutExpired)) or end - time.monotonic() <= 0
+    """True when the Stop's budget has run out: the clock decides, never the type of `err`. Each path that spends the budget leaves the clock at or past
+    `end`: a read cut at the time it was given (the lesser of its own cap and what was left), our own refusal to start a read with nothing left, and a Stop
+    raised by merge's review_stamp_since on a spent deadline. A read cut at its own cap with time left on the clock (a slow git read) is a failed read,
+    not a run-out. Decision `pr-review-record`."""
+    return end - time.monotonic() <= 0
 
 
 def _newest_marked(comments, merge_mod):
