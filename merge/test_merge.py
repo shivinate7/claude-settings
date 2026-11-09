@@ -13374,8 +13374,8 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         self.assertIn("Round 1: reviewer, sonnet, PASS", posted_body(self, out).splitlines(), "the plain round line changed")
 
     def test_round_heads_fix_path_refuses_a_foreign_round_head_at_write(self):
-        # the --fix-check branch runs the same own-commit check as the plain one. The fix base is the top round's sha, which is the foreign head, so
-        # the refusal comes from that check, not from the fix base rule. The copy names its own first round head, and the new second round names a
+        # the --fix-check branch runs the same own-commit check as the plain one. The fix base is the top round's sha, which is the foreign head (decision
+        # pr-review-record), so the refusal comes from that check, not from the fix base rule. The copy names its own first round head, and the new second round names a
         # head of another pull request
         earlier = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=(f"Round 1: reviewer, sonnet, PASS, {REVIEW_OLD_HEAD}",)))
         rounds = (f"1:reviewer:sonnet:PASS:{REVIEW_OLD_HEAD}", f"2:reviewer:sonnet:PASS:{self.FOREIGN[0]}")
@@ -13700,6 +13700,21 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         self.assertEqual(rc, 0, "control: a fix check from a chain link with a passed fix check was refused:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.OWN_TWO, "reviewer", "sonnet", "PASS"),
                          "the printed fix check does not start from the chain link")
+
+    def test_fix_base_top_round_chain_link_older_than_the_newest_record_is_written(self):
+        # a pin (decision pr-review-record): the base is the Head of the older record, whose fix check PASSed, so it is a chain link. The newest record
+        # is another record, so a rule that reads only the newest record refuses this base
+        older = review_comment(1, 7, record_text(head=self.OWN_TWO, rounds=(f"Round 1: reviewer, haiku, PASS, {self.OWN_THREE}",),
+                                                 fix=(fix_check_line(verdict="PASS", head=self.OWN, model="haiku"),)))
+        newer = review_comment(2, 7, record_text(head=self.HEAD_B, rounds=(f"Round 1: reviewer, haiku, PASS, {self.OWN_THREE}",)))
+        for label, body in (("the older", older["body"]), ("the newer", newer["body"])):
+            self.assertIsNotNone(review_fn(self, "parse_review")(body), f"scope: the {label} record does not parse, so the case tests nothing")
+        host = self.record_host(older, newer, diffs=self.own_replies(self.OWN_TWO, self.OWN_THREE))
+        rc, out, err = self.write_at(host, (f"1:reviewer:haiku:PASS:{self.OWN_THREE}",), extra=("--fix-check", f"{self.OWN_TWO}:reviewer:sonnet:PASS"))
+        self.assertTrue(any("comments" in rel for rel, _ in host.list_calls), "scope: the write did not read the comment list:\n" + err)
+        self.assertEqual(rc, 0, "a fix check from the chain link of an older record was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.OWN_TWO, "reviewer", "sonnet", "PASS"),
+                         "the printed fix check does not start from the chain link of the older record")
 
     def test_fix_base_top_round_old_form_record_keeps_the_earlier_head_as_its_base(self):
         # control: an old-form record names no head, so today's rule holds: its fix base is the earlier record's Head, and another base is refused
@@ -14651,12 +14666,13 @@ class ReviewFixRemedies(ReviewChainFixture):
         self.assert_own_remedy(rc, out, err, "this record drops or reorders Round 1: design-reviewer, opus, FAIL", self.DROPPED_REMEDY)
 
     def test_round_heads_r1_a_copy_that_drops_or_reorders_a_round_line_with_a_sha_names_the_line_with_its_sha(self):
-        # control, green on the old code: a copy that keeps both lines, in order, is written, with each line's head an own commit of this pull request.
-        # The fix base is s1, a sha the top round names, and every copy below keeps that line, so the base rule takes it from the copy's own rounds
+        # a pin (decision pr-review-record): a copy that keeps both top round lines, in order, is written from the earliest of their shas. s1 is an
+        # ancestor of s2, as the compare reply for the pair below says, so s1 is the earliest. The copies below change the lines and are refused
         s1, s2 = "4a" * 20, "4b" * 20
         lines = (f"Round 1: reviewer, sonnet, PASS, {s1}", f"Round 1: design-reviewer, opus, PASS, {s2}")
         comments = self.pair(None, rounds=lines)
         diffs = {pair: compare_of("ahead") for sha in (s1, s2) for pair in ((sha, self.LIVE), ("main", sha))}
+        diffs[(s1, s2)] = compare_of("ahead")
         rc, out, err, _ = self.run_chain(s1, comments, diffs=diffs, rounds=round_args(lines))
         self.assertEqual(rc, 0, "control: a copy that keeps every round line was refused:\n" + out + err)
         for label, copy in (("drops the design line", lines[:1]), ("reorders the two lines", lines[::-1])):
