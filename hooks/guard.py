@@ -3145,9 +3145,10 @@ ROLE_MODEL_REASON = (
     "Rule (configuration): this spawn names a model above the one its role runs on. Remedy: %s. (decision agent-model-cap)"
 )
 ROLE_MODEL_REMEDY = "drop the model field, or name the role's model"
-# A reviewer on Sonnet is refused with this remedy in place of ROLE_MODEL_REMEDY: round 1 runs the row's model, and only a
-# marker lifts Sonnet. The rounds fill the first %s and the fix check marker the second, from the constants at call time. It names no model.
-ROLE_REVIEWER_SONNET_REMEDY = ("round 1 runs the role's own model; Sonnet needs a first-line `Round N of 3` marker, %s, "
+# A reviewer on Sonnet is refused with this remedy in place of ROLE_MODEL_REMEDY: round 1 runs the role's own model, and only a
+# marker lifts a different one. The rounds fill the first %s and the fix check marker the second, from the constants at call time.
+# It names no model, so the refusal never offers a model by name. The round marker counts at any line start (hooks/shared_names.py).
+ROLE_REVIEWER_SONNET_REMEDY = ("round 1 runs the role's own model; a different model needs a `Round N of 3` marker at a line start (%s), "
                                "or a first line that opens with the `%s` marker")
 # A reviewer has a second way past its row, so only its refusal names it. Rounds come from the constant at call time.
 ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
