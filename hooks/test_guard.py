@@ -32960,6 +32960,10 @@ ROLE_LACKS = ("docs/decisions", "agent-model-cap.md", "agents/")
 # the guard under test (ROLE_REVIEWER_FREE_ROUNDS), never copied here. A refusal for any other role names neither.
 ROUND_MARKER = "Round N of 3"
 FREE_ROUND_MARKERS = tuple("Round %s of 3" % n for n in _load_guard_module().ROLE_REVIEWER_FREE_ROUNDS)
+# The sentence a reviewer's refusal says about the first round and the test-author, as a literal (never the guard's text).
+ROUND_ONE_SENTENCE = "round 1 and the test-author run on their role's model"
+# The first-line form a fix check on a later round names: the round marker, then the fix check words.
+ROUND_FIX_FORM = "Round N of 3 (fix check)"
 # The Explore audit marker (shiv, Nov 1 11:43 CST, page item 107, pick a). A literal, not the guard's EXPLORE_AUDIT_MARKER:
 # that constant is new, and a read at import time would fail every case on the old code.
 EXPLORE_MARKER = "Audit:"
@@ -33959,6 +33963,51 @@ role_model_refuse("role-model: fix check: test-author on sonnet with the marker 
 role_model_refuse("role-model: fix check: Explore on sonnet with the marker is denied, only the audit marker lifts an Explore",
                   "Explore", "sonnet", FIX_MARKER + ". Find where X is defined.", carries=(EXPLORE_MARKER,),
                   lacks=ROLE_LACKS + (FIX_MARKER,))
+
+# A reviewer's refusal names each brief form that lifts it above its row: rounds 2 and 3, and the fix check on line one.
+# It also says the first round and the test-author run on their role's model. A builder's refusal names none of these.
+role_model_refuse("role-model: reviewer on sonnet with no round line names each brief form and the round 1 sentence",
+                  "reviewer", "sonnet", "Check the diff for typos.",
+                  carries=(ROLE_REMEDY, ROUND_MARKER, ROUND_ONE_SENTENCE, FIX_MARKER, ROUND_FIX_FORM) + FREE_ROUND_MARKERS)
+role_model_refuse("role-model: builder on fable names no reviewer form and no round 1 sentence",
+                  "builder", "fable", "Fix the failing case.",
+                  lacks=ROLE_LACKS + (ROUND_MARKER, FIX_MARKER, ROUND_FIX_FORM, ROUND_ONE_SENTENCE) + FREE_ROUND_MARKERS)
+# A fix check on a later round lifts a reviewer on Sonnet when its first line is the round marker and the fix check words.
+# The round row reads that line, so the lift comes from the row, not from the fix check marker.
+role_model_allow("role-model: round row: reviewer on sonnet with Round 2 of 3 (fix check) on line one is allowed, as a round 2 brief",
+                 "reviewer", "sonnet", "Round 2 of 3 (fix check). Re-run the cases.")
+# The first-round sentence and the fix check round form stay out of an Explore's and a test-author's refusal.
+role_model_refuse("role-model: Explore on sonnet names neither the round 1 sentence nor the fix check round form",
+                  "Explore", "sonnet", "Find where X is defined.", carries=(EXPLORE_MARKER,),
+                  lacks=ROLE_LACKS + (ROUND_ONE_SENTENCE, ROUND_FIX_FORM))
+role_model_refuse("role-model: test-author on sonnet names neither the round 1 sentence nor the fix check round form",
+                  "test-author", "sonnet", "Write the failing cases.",
+                  lacks=ROLE_LACKS + (ROUND_ONE_SENTENCE, ROUND_FIX_FORM))
+def flipped_guard_path(name, old, new):
+    """The guard, with one line of it replaced, run from a tree of its own: hooks/ holds every guard module, and
+    lint/ sits beside it, since the guard reads lint/layout.py from ../lint (without it the role table reads as
+    unread and every role-model arm passes). A line that is not found once, or is found twice, leaves the tree
+    unedited, so the case that names it fails on its first carry."""
+    root = os.path.join(ROOT, "flipped", name)
+    tree = os.path.join(root, "hooks")
+    mutate_shared.guard_tree(tree)
+    shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    try:
+        mutate_shared.apply_mutant(tree, old, new)
+    except (mutate_shared.StaleMutant, mutate_shared.AmbiguousMutant):
+        pass
+    return os.path.join(tree, "guard.py")
+
+
+# The first round is free: the copied guard's free-rounds constant reads every round, so the refusal names it among them.
+# Its sentence then says the test-author runs on its role's model, and does not say the first round runs on its row.
+FLIPPED_GUARD = flipped_guard_path("round-one-free", 'ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")',
+                                   'ROLE_REVIEWER_FREE_ROUNDS = ("1", "2", "3")')
+add("role-model: round 1 free: reviewer on sonnet names round 1 among the free rounds, and says the test-author runs on its role's model",
+    "deny", ROLE_RULE, tool="Agent", config=ROLE_REAL_CFG, guard=FLIPPED_GUARD,
+    carries=("the test-author runs on its role's model", "review round 1 or 2 or 3", ROLE_REMEDY),
+    lacks=ROLE_LACKS + (ROUND_ONE_SENTENCE,), **role_input("reviewer", "sonnet", "Check the diff for typos."))
 
 
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
