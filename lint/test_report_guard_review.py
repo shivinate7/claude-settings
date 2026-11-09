@@ -703,7 +703,7 @@ class ReviewRecordTests(unittest.TestCase):
         # Catches: an unstamped record with a note after its CI line, and no cutover, named with the CI-line cause. The record
         # has no Stamp line, so the Stamp cause is the one to name.
         body = unstamped(record()) + "\n" + INCIDENT_NOTE + "\n"
-        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: a cutover is set for main")
+        self.assertIsNone(self.in_process_cutover("main"), "fixture: a cutover is set for main")
         self.assertIsNone(merge_mod.parse_review(body, None, None), "fixture: merge reads the record with a note after the CI line")
         self.serve(comments=[body])
         out = self.stop(self.lane_turn(report(CLAIM)))
