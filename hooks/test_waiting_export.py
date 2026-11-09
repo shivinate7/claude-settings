@@ -206,9 +206,11 @@ def page_write(when, tid="w1", action="set", url=PAGE_URL, name=ARTIFACT_TOOL, s
             result(when + 1, tid, "error: 403" if is_error else "ok", is_error, sidechain)]
 
 
-def export_run(when, tid="e1", verdict="same", command=EXPORT_CMD, name="Bash"):
-    """A call of export_page.py (Bash, or PowerShell by `name`) and its result, the verdict as the last line."""
-    return [call(when, tid, name, {"command": command}), result(when + 1, tid, verdict + "\n")]
+def export_run(when, tid="e1", verdict="same", command=EXPORT_CMD, name="Bash", held=(), exit_code=0):
+    """A call of export_page.py (Bash, or PowerShell by `name`) and its result, as the transcript records it: a nonzero
+    exit is an error result whose first line is `Exit code N`, then the verdict and any held lines."""
+    lines = ([f"Exit code {exit_code}"] if exit_code else []) + [verdict, *held]
+    return [call(when, tid, name, {"command": command}), result(when + 1, tid, "\n".join(lines) + "\n", bool(exit_code))]
 
 
 def writer_get(when, writer, tid="m1"):
@@ -386,6 +388,22 @@ def case_s3c_grep_of_the_script_is_no_export_run():
     grep = [call(at(19, 5), "g1", "Bash", {"command": "grep -n same skills/waiting-page/export_page.py"}),
             result(at(19, 6), "g1", "20:  same       nothing differs; exit 0\n")]
     expect_block("S3c", run_stop("s3c", root, [owner(at(18, 50))] + page_write(at(19)) + grep), (SCRIPT,))
+
+
+def case_s3d_same_then_held_lines_clears_the_single_form():
+    """S3 with one change: the single form exits 4 and prints the verdict `same`, then a held line. The copy was judged
+    and is unchanged, and the held line is enforced at the republish, so the write is cleared as in S3."""
+    root = base_repo("s3d")
+    held = ["held item 292: The picture of option A shows nothing the focus names."]
+    records = [owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="same", held=held, exit_code=4)
+    expect_pass("S3d", run_stop("s3d", root, records))
+
+
+def case_s3e_error_run_without_same_still_blocks():
+    """S3 with one change: the run exits 1 with a refusal and no `same` line. An error result with no verdict clears nothing."""
+    root = base_repo("s3e")
+    records = [owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="refused - 1 find(s)", exit_code=1)
+    expect_block("S3e", run_stop("s3e", root, records), (SCRIPT,))
 
 
 def case_s4_write_to_reference_artifact_passes():
@@ -589,6 +607,14 @@ def case_n6b_all_form_verdict_for_another_artifact_blocks():
     expect_block("N6b", run_stop("n6b", queue_repo("n6b"), records), (SCRIPT,))
 
 
+def case_n6c_all_form_same_then_held_lines_clears_the_waiting_page():
+    """N6 with one change: the `--all` form exits 4 and prints the waiting page's `same`, then its held line."""
+    held = [QUEUE_ID + ": held item 292: The picture of option A shows nothing the focus names."]
+    records = ([owner(at(18, 50))] + page_write(at(19), url=QUEUE_URL)
+               + export_run(at(19, 5), verdict=QUEUE_ID + ": same", command=EXPORT_ALL, held=held, exit_code=4))
+    expect_pass("N6c", run_stop("n6c", queue_repo("n6c"), records))
+
+
 def case_n7_powershell_run_with_same_passes():
     """The same verdict from a PowerShell run of export_page.py clears a write."""
     records = [owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="same", name="PowerShell")
@@ -710,6 +736,8 @@ CASES.extend((
     case_s2_later_copy_commit_passes,
     case_s3_same_export_after_the_write_passes,
     case_s3b_verdict_other_than_same_does_not_clear_it,
+    case_s3d_same_then_held_lines_clears_the_single_form,
+    case_s3e_error_run_without_same_still_blocks,
     case_s3c_grep_of_the_script_is_no_export_run,
     case_s4_write_to_reference_artifact_passes,
     case_s5_failed_write_passes,
@@ -737,6 +765,7 @@ CASES.extend((
     case_n5_writer_delete_of_an_exported_collection_blocks,
     case_n6_all_form_verdict_for_the_page_id_passes,
     case_n6b_all_form_verdict_for_another_artifact_blocks,
+    case_n6c_all_form_same_then_held_lines_clears_the_waiting_page,
     case_n7_powershell_run_with_same_passes,
     case_n8_no_repo_and_no_page_write_gives_no_note,
     case_n10_unknown_writer_passes_with_no_note,
