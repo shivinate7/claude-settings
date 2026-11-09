@@ -5160,6 +5160,14 @@ sh('detached: grep "((" log.txt & make test, a spaced & after a quoted (( , is r
    '[quoted paren red]', 'grep "((" log.txt & make test', "deny", "detached-launch", cwd=NOGIT)
 sh("detached: echo $(( 3 & 1 )), a spaced & inside arithmetic, allows [arithmetic control]",
    "echo $(( 3 & 1 ))", "allow", cwd=NOGIT)
+# `((a) & (b))` is a subshell that holds two background jobs, not arithmetic, so a `((` mask must not take it. The
+# `(( a & b ))` and `echo $(( 3 & 1 ))` rows above are the controls.
+sh("detached: ((npm run dev) & (npm run watch)) is two background jobs in a subshell, is refused [nested red]",
+   "((npm run dev) & (npm run watch))", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: ((python3 server.py) & (python3 worker.py)) is two background jobs in a subshell, is refused [nested red]",
+   "((python3 server.py) & (python3 worker.py))", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: (( (x+1) & (y) )) is arithmetic with parens inside, allows [arithmetic control]",
+   "(( (x+1) & (y) ))", "allow", cwd=NOGIT)
 # `&>` redirects both streams, so this is a pause, not a job. The waiter refuses it today, and the pin holds that.
 sh("waiter: sleep 1&>/dev/null is a pause the waiter refuses, as today [redirect pin]",
    "sleep 1&>/dev/null", "deny", "waiter", cwd=NOGIT)
@@ -12814,6 +12822,19 @@ sh("frozen shell: an if body with cd docs whose test may fail, then sed -i on se
    "if test -f x; then\ncd docs\nfi\nsed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=CFG)
 sh("frozen shell: the same if body, then sed -i on notes.txt, from the config folder, allows [if body may not run control]",
    "if test -f x; then\ncd docs\nfi\nsed -i s/a/b/ notes.txt", "allow", cwd=CFG)
+# A heredoc body line that starts with an opener word (`for`, `if`, `while`, `until`, `select`, `case`) is text the
+# interpreter reads, not a shell block, so it opens none. The cd after the heredoc moves the shell into docs, where
+# settings.json is not frozen. The control has no opener line and allows the same way.
+sh("frozen shell: a heredoc body line that starts with for opens no block, then cd docs and sed -i on settings.json, "
+   "from the config folder, allows [heredoc opener red]",
+   "python3 - <<'PY'\nfor f in x:\n pass\nPY\ncd docs\nsed -i s/a/b/ settings.json", "allow", cwd=CFG)
+sh("frozen shell: the same heredoc with no opener line, then cd docs and sed -i on settings.json, from the config folder, "
+   "allows [heredoc opener control]",
+   "python3 - <<'PY'\n pass\nPY\ncd docs\nsed -i s/a/b/ settings.json", "allow", cwd=CFG)
+for _opener in ("if", "while", "until", "select", "case"):
+    sh("frozen shell: a heredoc body line that starts with %s opens no block, then cd docs and sed -i on settings.json, "
+       "from the config folder, allows [heredoc opener red]" % _opener,
+       "python3 - <<'PY'\n%s x:\n pass\nPY\ncd docs\nsed -i s/a/b/ settings.json" % _opener, "allow", cwd=CFG)
 # Five cds, then a frozen write. The absolute chain is refused. The `../` chain reaches the same folders, and the walk
 # normalises each `..` step, so it is refused too. Both chains end on the config folder, and the notes.txt rows are the
 # same chains on a file that is not frozen.
