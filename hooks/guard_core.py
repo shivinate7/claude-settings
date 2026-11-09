@@ -1056,29 +1056,62 @@ def shell_abs(path: str, base):
     return path
 
 
-def _in_background_list(segments, ends, at: int) -> bool:
-    """True when `segments[at]` is in a list that a lone `&` ends (an end of `&`, as `_split_jobs` gives
-    it). Bash runs that whole list in a subshell: in `cd a && b &` the `cd` moves no shell, as in
-    `cd a &`. The list runs on through `&&`, `||` and `|` up to its first other end. A `&` inside a
-    `( ... )` that opens after the segment ends that group's own list, not this one."""
-    depth = 0
-    for later in range(at, len(segments)):
-        for _, char, quote in walk_quotes(segments[later]):
-            if not quote and char in "()":
-                depth += 1 if char == "(" else -1
-        if depth < 0:
-            return False   # the group that holds the segment closes: its own paren restores the folder
-        end = ends[later] if later < len(ends) else ""
-        if depth:
+def split_background(segment):
+    """`segment` cut at each lone, unquoted `&` (a background job ends there, so the next word starts a
+    command, as after `;`). `&&`, `|&`, `>&`, `<&` and `&>` hold an `&` that is no break. A quoted or escaped
+    `&` is text. `split_segments` keeps a lone `&` inside its segment, for callers that read a job as one. A
+    quote that bash leaves open at the end of the segment is read again with each apostrophe after a letter
+    or digit as text, so `echo don't&sed ...` still splits at its `&`."""
+    steps = list(walk_quotes(segment))
+    # The quote open after the last step, as `quote_advance` reads it: `$'c'` closes at its last `'`.
+    unclosed = bool(steps) and bool(steps[-1][2]) and bool(quote_advance(segment, *steps[-1][::2])[1])
+    parts, start = [], 0
+    for at, char, quote in (walk_quotes(segment, True) if unclosed else steps):
+        if char != "&" or quote:
             continue
-        if end == "&":
-            return True
-        if end not in ("&&", "||", "|"):
-            return False
-    return False
+        if (segment[at - 1:at] if at else "") in ("&", "|", ">", "<") or segment[at + 1:at + 2] in ("&", ">"):
+            continue
+        parts.append(segment[start:at])
+        start = at + 1
+    parts.append(segment[start:])
+    return [type(segment)(part) for part in parts]
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
+# Commands that print or change folder and end at once, so a `&` after one starts nothing that outlives it.
+PRINTERS = frozenset(("echo", "printf", "cat", "grep", "wc", "jq"))
+QUIET_COMMANDS = PRINTERS | {"cd", "set-location"}
+CHAIN_ENDS = ("&&", "||", "|")   # an end that keeps the next segment in the same list
+_BODY_WORDS = ("then", "else", "elif", "do")   # a cd after one of these runs only when its branch or loop does
+_STATE_LIMIT = 8   # folders a segment may run in before the walk gives up and calls it unknown
+_HEREDOC_HEADER = re.compile(r"<<-?(?!<)(.+)")
+
+
+def _cd_may_not_run(tokens, before: str) -> bool:
+    """True when a `cd` segment might not move the shell: it follows `&&` or `||`, sits in a `then`,
+    `else`, `elif` or `do` body, or names more than one folder (bash refuses that and stays)."""
+    index = resolve_command(tokens)
+    operands = [t for t in tokens[index + 1:]
+                if t == "-" or not (t.startswith("-") or t[:1] in "<>" or REDIRECTION.match(t))]
+    return before in ("&&", "||") or any(word in _BODY_WORDS for word in tokens[:index]) or len(operands) > 1
+
+
+def _cd_step(move, where, prev, failed_cd_stays):
+    """(folder, folder before the move, failed) for a `cd` that runs from `where`."""
+    if move is CD_UNKNOWN:
+        return None, where, False
+    if move == "-":
+        return prev, where, False
+    if any(mark in move for mark in "$%`"):
+        return None, where, False
+    target = shell_abs(move or "~", where)
+    if target and os.path.isdir(target):
+        return target, where, False
+    if target and failed_cd_stays:
+        return where, prev, True   # the shell stays, and `cd -` still goes to the folder before the last cd that worked
+    return None, where, False
+
+
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, each=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1086,61 +1119,69 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
     is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
     where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
-    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe. A
-    `cd` in a list that a lone `&` ends is a background job: its `cd` moves nothing
-    (`_in_background_list`).
+    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe. A list
+    that a lone `&` ends is a background job in a subshell: a `cd` in it moves the later segments of
+    that list, and the shell is back where the list began once the list ends. A heredoc body works
+    the same way, up to its closing line.
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
     a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
-    fails closed on an untrusted `cd` keeps doing so."""
+    fails closed on an untrusted `cd` keeps doing so.
+    `each` walks once and returns, for every segment up to `number`, a tuple of each folder that
+    segment may run in. A `cd` that might not run (`_cd_may_not_run`) adds its folder beside the one
+    before it, so the segment is judged in both. One call per command keeps the cost linear."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
-    prev, stack = None, []
+    states = ((where, None),)   # each possible (folder, folder before the last move)
+    list_start = states
+    frames = []   # (states, list_start) for each `(` still open
+    heredoc = None   # (closing word, states before the body) while inside a heredoc body
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
+    seen = []
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
-        stack.extend([(where, prev)] * marks.count("("))
         end = ends[at] if at < len(ends) else ""
+        before = ends[at - 1] if 0 < at <= len(ends) else ""
+        if before not in CHAIN_ENDS:
+            list_start = states
+        for _ in range(marks.count("(")):
+            frames.append((states, list_start))
+            list_start = states
+        seen.append((None,) if skipping else tuple(dict.fromkeys(folder for folder, _ in states)))
         if at == number:
-            return None if skipping else where
+            return seen if each else (None if skipping else states[0][0])
         if skipping:
             skipping = end in ("&&", "|")
             for _ in range(marks.count(")")):
-                if stack:
-                    where, prev = stack.pop()
+                if frames:
+                    states, list_start = frames.pop()
                     skipping = False
+            continue
+        if heredoc and segment.strip() == heredoc[0]:
+            states, heredoc = heredoc[1], None
             continue
         tokens = segment_tokens(segment)
         move = _segment_cd_move(tokens) if tokens else None
-        if move is not None and not is_powershell(segment) and "|" in (
-                ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
+        if move is not None and not is_powershell(segment) and "|" in (end, before):
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
-        if move is not None and not is_powershell(segment) and _in_background_list(segments, ends, at):
-            move = None   # a backgrounded `cd` runs in a subshell, so the shell stays where it was
         if tokens is None:
-            where = None
+            states = ((None, None),)
         elif move is not None:
-            old = where
-            if move is CD_UNKNOWN:
-                where = None
-            elif move == "-":
-                where = prev
-            elif any(mark in move for mark in "$%`"):
-                where = None
-            else:
-                target = shell_abs(move or "~", where)
-                if target and os.path.isdir(target):
-                    where = target
-                elif target and failed_cd_stays:
-                    skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
-                    old = prev   # a failed cd leaves the folder `cd -` goes back to alone
-                else:
-                    where = None
-            prev = old
+            steps = [_cd_step(move, folder, prev, failed_cd_stays and not each) for folder, prev in states]
+            moved = [(folder, old) for folder, old, _ in steps]
+            if each and _cd_may_not_run(tokens, before):
+                moved = list(dict.fromkeys(list(states) + moved))
+            states = tuple(moved) if len(moved) <= _STATE_LIMIT else ((None, None),)
+            skipping = not each and steps[0][2] and end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
+        header = next((m.group(1) for m in map(_HEREDOC_HEADER.fullmatch, tokens or ()) if m), None)
+        if header and not heredoc:
+            heredoc = (header, states)
         for _ in range(marks.count(")")):
-            if stack:
-                where, prev = stack.pop()
-    return where
+            if frames:
+                states, list_start = frames.pop()
+        if end == "&":
+            states = list_start   # the list ran in a subshell: the shell is where the list began
+    return seen if each else states[0][0]
 
 
 def _segment_git_c_target(tokens):

@@ -400,8 +400,8 @@ while True:
         from guard_kill import (
             DETACHED_LAUNCH_REASON, GIT_ENV_REASON, KILL_PID_REASON, KILL_REASON,
             PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill,
-            git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, kills_group_pid,
-            lsof_pids_reach_kill, playwright_command_hit, playwright_install_hit,
+            git_env_command_hit, glued_background_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit,
+            kills_group_pid, lsof_pids_reach_kill, playwright_command_hit, playwright_install_hit,
         )
         _loading = "guard_stream"
         from guard_stream import (
@@ -3600,6 +3600,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = builder_shell_test_hit(raw, stripped, cwd)
         if matched:
             refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
+
+    # 7d. A glued `&` is a background job like a spaced one (rule 2b). Judged after the rules that read the
+    # command's own act, so a refusal for that act keeps its name; the waiter has read a long pause by now.
+    matched = glued_background_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "detached-launch", DETACHED_LAUNCH_REASON, matched)
 
     # 8. The agent model cap. The PATH comes from the stripped command, the same machinery the
     # frozen path uses, so a redirect, a `tee`, a `sed -i` and a heredoc header all read as writes.

@@ -9,9 +9,9 @@ import re
 
 import guard_core
 from guard_core import (
-    LOOP_KEYWORDS, REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally,
+    LOOP_KEYWORDS, PRINTERS, QUIET_COMMANDS, REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally,
     _walk_wrappers, basename, checkout_root_by_stat, dir_before_segment, is_powershell, norm,
-    path_is_inside, resolve_command, segment_tokens, split_segments,
+    path_is_inside, resolve_command, segment_tokens, split_background, split_segments,
 )
 from guard_env import _quoted_words, _substitutions
 
@@ -371,16 +371,14 @@ def _resolve_vars(cmd: str) -> str:
 # RESIDUAL GAPS: a write made by a program's own code;
 # `cat <<EOF | sh`, an eval of a heredoc, a subshell `( ... > P)` and `"$( ... )"`; `git config --file P`, `>| P` and a quoted redirect target with a space.
 # Main missed these too. `sort -o`, `less -o` and `git diff --output` are read (`_output_targets`).
-_PRINTERS = frozenset(("echo", "printf", "cat", "grep", "wc", "jq"))
-_QUIET = _PRINTERS | {"cd", "set-location"}
-# Read-only tools beside the printers, for a sed `e` command (`_sed_command_words`). Not part of `_PRINTERS`:
+# Read-only tools beside the printers, for a sed `e` command (`_sed_command_words`). Not part of `PRINTERS`:
 # that set also makes a segment quiet (`_kind`), and `sort -o P` or `uniq in P` write. `_command_reads` drops
 # the forms of each tool that write.
 _READ_ONLY_TOOLS = frozenset(("head", "tail", "ls", "less", "sort", "uniq", "diff", "stat", "file", "find"))
 # A command that never runs another command, so a word of its that spells `sed -i` or `perl -i` is text. Every
 # other command word, listed or not, may run one, and `writes_to` keeps the match-anywhere read for it
 # (`_reads_only`). `find` is left out: `-exec` runs a command.
-_READERS = _PRINTERS | (_READ_ONLY_TOOLS - {"find"}) | frozenset(("rg", "ag", "test", "["))
+_READERS = PRINTERS | (_READ_ONLY_TOOLS - {"find"}) | frozenset(("rg", "ag", "test", "["))
 _FIND_WRITERS = frozenset(("-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"))
 
 
@@ -446,42 +444,21 @@ def _output_targets(words):
             targets.append(rest[at + 1])
     script = guard_core.inline_script(words)
     for segment in split_segments(script) if script else ():
-        for part in _split_background(segment):
+        for part in split_background(segment):
             targets.extend(_output_targets([_unquoted(word) for word in _quoted_words(part, True)]))
     return targets
 
 
-def _split_background(segment):
-    """`segment` cut at each lone, unquoted `&` (a background job ends there, so the next word starts a
-    command, as after `;`). `&&`, `|&`, `>&`, `<&` and `&>` hold an `&` that is no break. A quoted or escaped
-    `&` is text. `split_segments` keeps a lone `&` inside its segment, for callers that read a job as one. A
-    quote that bash leaves open at the end of the segment is read again with each apostrophe after a letter
-    or digit as text, so `echo don't&sed ...` still splits at its `&`."""
-    steps = list(guard_core.walk_quotes(segment))
-    # The quote open after the last step, as `quote_advance` reads it: `$'c'` closes at its last `'`.
-    unclosed = bool(steps) and bool(steps[-1][2]) and bool(guard_core.quote_advance(segment, *steps[-1][::2])[1])
-    parts, start = [], 0
-    for at, char, quote in (guard_core.walk_quotes(segment, True) if unclosed else steps):
-        if char != "&" or quote:
-            continue
-        if (segment[at - 1:at] if at else "") in ("&", "|", ">", "<") or segment[at + 1:at + 2] in ("&", ">"):
-            continue
-        parts.append(segment[start:at])
-        start = at + 1
-    parts.append(segment[start:])
-    return [type(segment)(part) for part in parts]
-
-
 def _split_jobs(segments, ends):
-    """(segments, ends) with each segment cut at its lone `&` (`_split_background`), so `echo x&sed -i s/a/b/ P`
+    """(segments, ends) with each segment cut at its lone `&` (`split_background`), so `echo x&sed -i s/a/b/ P`
     reads as two commands, as `echo x&&sed ...` already does. A part cut at a `&` ends with `&`; the last part
     keeps the end of the segment it came from, unless the segment ends with its `&` (`cd sub &` before a
-    newline): that part ends with `&`, so `dir_before_segment` reads it as a background job. A segment with
+    newline): that part ends with `&`, so `dir_before_segment` reads the list as a background job. A segment with
     no lone `&` stays as it is."""
     cut, cut_ends = [], []
     for at, segment in enumerate(segments):
         end = ends[at] if at < len(ends) else ""
-        pieces = _split_background(segment)
+        pieces = split_background(segment)
         parts = [part for part in pieces if part.strip()]
         if len(pieces) < 2 or not parts:
             cut.append(segment)
@@ -497,7 +474,7 @@ def _command_reads(command: str, args) -> bool:
     form that writes or runs a program. `find` with `-exec` or `-delete`, `sort` with an output, compress or
     temp-folder option (any short flag cluster that holds `o` or `T`), `uniq` with a second operand (its output
     file), `less` with a log file, and `file -C` (writes a compiled magic file) are not reads."""
-    if command in _PRINTERS:
+    if command in PRINTERS:
         return True
     if command not in _READ_ONLY_TOOLS:
         return False
@@ -586,10 +563,10 @@ def _kind(words, plain: str) -> str:
     if not words or _GROUP_MARK.search(_FD_DUP.sub("", plain)):
         return ""
     name = _name(words[0])
-    if name in _PRINTERS and re.search(r"[/\\]", words[0]):
+    if name in PRINTERS and re.search(r"[/\\]", words[0]):
         return ""   # `./cat` or `b/echo` is a local program, not the printer (review r2 H3)
-    if name in _QUIET:
-        return "cd" if name not in _PRINTERS else "printer"
+    if name in QUIET_COMMANDS:
+        return "cd" if name not in PRINTERS else "printer"
     if name == "git":
         index = 1
         while words[index:index + 1] == ["-C"]:
@@ -1480,6 +1457,8 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
+    # One walk gives every segment's folders; asking per segment would walk the segments before it each time.
+    places = dir_before_segment(segments, len(segments) - 1, cwd, ends, each=True) if follow_cd and segments else ()
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     for number, raw in enumerate(parsed):
         linked = _cp_link_source(raw, holds, cwd, bool(fed))
@@ -1539,28 +1518,29 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
             shown.extend((">", target))
             script.extend((">", target))
         text = " ".join(shown)
-        at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
-        for _files, commands in sed_targets.values():
-            for command in commands:   # a sed `e` runs a shell command in the sed's folder: its redirects are read too
-                hit = _shell_write_scan(command, at, predicate, holds, follow_cd, command_position,
-                                        predicate_command)
-                if hit:
-                    return _from_cwd(hit, at, cwd) if follow_cd else hit
         chain = _pipe_chain(number, ends, len(parsed))
         reads_only = all(own[k] for k in chain) and not _stages_a_script(parsed, chain)
         verb = _segment_command(words)[0] if predicate_command else ""
-        for word in words:
-            if word.startswith("-") or REDIRECT.fullmatch(word):
-                continue
-            if not word or word in (">", ">>"):
-                continue
-            if follow_cd and word == '""':
-                continue   # the data placeholder is no path, though `cd tests` makes it one in that folder
-            # A `)` or backtick glued to the path closes a subshell or a substitution (`(sed -i s/a/b/ P)`): the
-            # path is the word without it.
-            for path in dict.fromkeys((word, word.rstrip(")`") or word)):
-                if (predicate(path, at, verb) if predicate_command else predicate(path, at)) and writes_to(path, text, *(_segment_command(script) if command_position else ()), reads_only=reads_only):
-                    return _from_cwd(path, at, cwd) if follow_cd else path
+        # A cd that might not run leaves the segment two possible folders: it is judged in each.
+        for at in dict.fromkeys((folder or cwd) for folder in places[number]) if follow_cd else (cwd,):
+            for _files, commands in sed_targets.values():
+                for command in commands:   # a sed `e` runs a shell command in the sed's folder: its redirects are read too
+                    hit = _shell_write_scan(command, at, predicate, holds, follow_cd, command_position,
+                                            predicate_command)
+                    if hit:
+                        return _from_cwd(hit, at, cwd) if follow_cd else hit
+            for word in words:
+                if word.startswith("-") or REDIRECT.fullmatch(word):
+                    continue
+                if not word or word in (">", ">>"):
+                    continue
+                if follow_cd and word == '""':
+                    continue   # the data placeholder is no path, though `cd tests` makes it one in that folder
+                # A `)` or backtick glued to the path closes a subshell or a substitution (`(sed -i s/a/b/ P)`): the
+                # path is the word without it.
+                for path in dict.fromkeys((word, word.rstrip(")`") or word)):
+                    if (predicate(path, at, verb) if predicate_command else predicate(path, at)) and writes_to(path, text, *(_segment_command(script) if command_position else ()), reads_only=reads_only):
+                        return _from_cwd(path, at, cwd) if follow_cd else path
     return ""
 
 
@@ -1803,12 +1783,12 @@ def _sed_command_words(command):
     """The words of a sed `e` command that count as written: none when each command in it only reads
     (`_command_reads`: a printer or a read-only tool), else every word, since a printer can feed a writer (`e echo tests/x | xargs rm`). So
     `e cat tests/x` reads and `e touch tests/x` writes. A lone `&` ends a command as `;` does
-    (`_split_background`), so `e head a & tee tests/x` writes. The file an output flag names (`sort -otests/x`)
+    (`split_background`), so `e head a & tee tests/x` writes. The file an output flag names (`sort -otests/x`)
     counts as written beside the words (`_output_targets`). A command with text the segment split cannot see
     (`_SCRIPT_RUNS_HIDDEN`) counts every word. Its redirects are read apart, by the shell scan of the
     whole command (`_shell_write_scan`)."""
     commands = [[_unquoted(word) for word in _quoted_words(part, True)]
-                for segment in split_segments(command) for part in _split_background(segment)]
+                for segment in split_segments(command) for part in split_background(segment)]
     if not _SCRIPT_RUNS_HIDDEN.search(command):
         if all(_command_reads(*_segment_command(words)) for words in commands if words):
             return []

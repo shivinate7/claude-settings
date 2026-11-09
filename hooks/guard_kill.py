@@ -19,11 +19,11 @@ except ImportError:  # same fallback as _nowindow above: no read, so a PPID-1 pi
         return False
 
 from guard_core import (
-    QUOTE_MARKS,
+    QUIET_COMMANDS, QUOTE_MARKS,
     ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
     POWERSHELL_CALL, PowerShellScript, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
     _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script,
-    resolve_command, segment_tokens, split_segments,
+    resolve_command, segment_tokens, split_background, split_segments,
 )
 from guard_env import _substitutions
 
@@ -604,6 +604,28 @@ def bare_background_hit(cmd: str) -> str:
         for i in range(start + 1, len(tokens)):
             if tokens[i] == "&":
                 return tokens[i - 1] + " &"
+    return ""
+
+
+def glued_background_hit(cmd: str) -> str:
+    """The matched text when a lone `&` with a word after it touches a word on either side (`sleep 2 &echo ok`,
+    `sleep 2& echo ok`, `a&b`) after a command word, with no pid captured anywhere in the command, else ''. Bash reads it as a
+    background job as it reads a spaced `&`, but the tokens never hold a bare `&` for `bare_background_hit`
+    to find. A printer or a `cd` before it (`echo x&sed ...`, `cd sub &sed ...`) ends at once, so it
+    detaches nothing. The waiter judges the command first: it reads `sleep 99 &echo ok` as a long pause."""
+    cmd = _strip_heredoc_bodies_unconditionally(cmd)
+    if "$!" in cmd:
+        return ""
+    for segment in split_segments(cmd):
+        pieces = split_background(segment)
+        for at in range(len(pieces) - 1):
+            left, right = pieces[at], pieces[at + 1]
+            if not right.strip() or not (left[-1:] not in (" ", "\t") or right[:1] not in (" ", "\t")):
+                continue   # a `&` that ends the segment (`sleep 2&`) is not read: other rules pin that verdict today
+            tokens = segment_tokens(left) if left.strip() else None
+            index = resolve_command(tokens) if tokens else None
+            if index is not None and basename(tokens[index]) not in QUIET_COMMANDS:
+                return tokens[-1] + " &"
     return ""
 
 
