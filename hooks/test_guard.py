@@ -6012,6 +6012,145 @@ add("check-tail: a roster name after a quoted #, backgrounded, is allowed", "all
 add("check-tail: a roster name in a multi-line quote, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command='echo "first line\nmerge --lane-lint 1 | tail -3\nlast line"')
+# Wrapper forms (`uv run`, a versioned python, a `VAR=x` prefix) read as the bare spellings do. The
+# allow cases name calls a wider match must not refuse: a pytest run and a grep that names the script.
+add("check-tail: uv run ci-job checks --lint piped to tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="uv run ci-job checks --lint 2>&1 | tail -20")
+add("check-tail: env VAR=x then ci-job checks --lint piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="env CI=1 ~/.claude/bin/ci-job checks --lint | tail -5")
+add("check-tail: python3 runs the ci-job script piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 bin/ci-job checks --lint | tail -5")
+add("check-tail: python3 -W ignore runs the ci-job script piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 -W ignore bin/ci-job checks --lint | tail -5")
+add("check-tail: uv run python -m pytest piped to tail, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="uv run python -m pytest | tail -5")
+add("check-tail: uv run grep naming the script piped to tail, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='uv run grep -n "--lane-lint" merge/merge.py | tail -20')
+add("check-tail: uv run -w pytest then ci-job checks --lint piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="uv run -w pytest ci-job checks --lint | tail -5")
+add("check-tail: uv run --cache-dir then ci-job checks --lint piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="uv run --cache-dir /tmp/c ci-job checks --lint | tail -5")
+add("check-tail: pytest with bin/ci-job as an argument piped to tail, backgrounded, is allowed",
+    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 -m pytest hooks/test_guard.py -k bin/ci-job | tail -5")
+
+# Wrapper forms in the foreground: each deny reads its check through the wrapper, each allow does not.
+sh("check-tail: uv run python runs the script piped to tail in the foreground is refused",
+   "uv run python merge/merge.py --lane-lint 7 2>&1 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: uv run runs merge --lane-lint piped to tail in the foreground is refused",
+   "uv run merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3.11 runs the script piped to tail in the foreground is refused",
+   "python3.11 merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: env VAR=x then merge --lane-lint piped to tail in the foreground is refused",
+   "env FOO=1 merge --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: env VAR=x then python3 runs the script piped to head in the foreground is refused",
+   "env FOO=1 python3 merge/merge.py --review-record --head 0123456789abcdef0123456789abcdef01234567 "
+   "| head -5", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a VAR=x prefix on merge --lane-lint piped to tail in the foreground is refused",
+   "FOO=1 merge --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: uv run python -m pytest piped to tail in the foreground is allowed",
+   "uv run python -m pytest | tail -5", "allow", cwd=NOGIT)
+sh("check-tail: uv run --no-group dev then merge --lane-lint piped to tail in the foreground is refused",
+   "uv run --no-group dev merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a uv global flag before run, then merge --lane-lint piped to tail is refused",
+   "uv --quiet run merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: uv run --with-editable then python runs the script piped to tail is refused",
+   "uv run --with-editable . python merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
+   cwd=NOGIT)
+# `uv run` runs a script operand with no interpreter word, so the script is the command word. The check
+# reads only an interpreter's operand, so these uv spellings must still be refused.
+sh("check-tail: uv run merge/merge.py --lane-lint piped to tail in the foreground is refused",
+   "uv run merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: uv run --with x merge/merge.py --review-record piped to head is refused",
+   "uv run --with x merge/merge.py --review-record 7 | head -5", "deny", "check-tail", cwd=NOGIT)
+# Pins: pythonw and the -X value flag are read as interpreter spellings already. Dropping pythonw from
+# SCRIPT_INTERPRETER, or -X from INTERPRETER_VALUE_FLAGS, turns the matching row red.
+sh("check-tail: pythonw runs the merge script piped to tail in the foreground is refused",
+   "pythonw merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 -X dev runs the merge script piped to tail in the foreground is refused",
+   "python3 -X dev merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+# Control: a uv run of another script that names --lane-lint is not the merge script, so it is allowed.
+sh("check-tail: uv run of another script naming --lane-lint piped to tail is allowed",
+   "uv run lint/other.py --lane-lint | tail -3", "allow", cwd=NOGIT)
+# An unquoted substitution in the script operand splits into several words, so the first word after the
+# interpreter is not the script. Each spelling below names the merge script, so each must still be refused.
+sh("check-tail: an unquoted $(git rev-parse) script path piped to tail in the foreground is refused",
+   "python3 $(git rev-parse --show-toplevel)/merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: an unquoted $(dirname $0) script path piped to head in the foreground is refused",
+   "python3 $(dirname $0)/merge/merge.py --review-record 7 | head -5", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a backtick script path piped to tail in the foreground is refused",
+   "python3 `git rev-parse --show-toplevel`/merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
+   cwd=NOGIT)
+# Pins: a quoted substitution and one with no space are one word already, so these pass on the current guard.
+sh("check-tail: a quoted $(git rev-parse) script path piped to tail in the foreground is refused",
+   'python3 "$(git rev-parse --show-toplevel)/merge/merge.py" --lane-lint 7 | tail -3', "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: a $(pwd) script path with no space piped to tail in the foreground is refused",
+   "python3 $(pwd)/merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+# Control: an unquoted substitution that names another script is not the merge script, so it is allowed.
+sh("check-tail: an unquoted $(git rev-parse) path to another script naming --lane-lint is allowed",
+   "python3 $(git rev-parse --show-toplevel)/lint/other.py --lane-lint | tail -3", "allow", cwd=NOGIT)
+
+# A pipe out of verdict is refused whatever wraps the call (uv run, env VAR=x) and whatever follows
+# the pipeline (;, &&, ||), since the pipe hides verdict's exit. A verdict call with no pipe is allowed.
+verdict_pipe("env VAR=x then verdict merge --lane-lint piped to tail is refused",
+             "env FOO=1 verdict merge --lane-lint 7 | tail -3", "deny")
+verdict_pipe("uv run verdict merge --lane-lint piped to tail is refused",
+             "uv run verdict merge --lane-lint 7 | tail -3", "deny")
+verdict_pipe("verdict piped to tail, then && commit, is refused",
+             "verdict python3 lint/check_x.py 2>&1 | tail -3 && git commit -m x", "deny")
+verdict_pipe("the absolute bin path piped to tail, then ;, is refused",
+             "~/.claude/bin/verdict python3 hooks/test_guard.py | tail -5; git push", "deny")
+verdict_pipe("two verdict pipes joined by ; are refused",
+             "verdict python3 lint/a.py 2>&1 | tail -3; verdict python3 lint/b.py 2>&1 | tail -3",
+             "deny")
+verdict_pipe("verdict piped to tail, then ; echo, is refused",
+             "verdict python3 lint/a.py | tail -1; echo ---", "deny")
+verdict_pipe("the relative bin path piped to head, then &&, is refused",
+             "bin/verdict make check | head -3 && echo ok", "deny")
+verdict_pipe("an env assignment before verdict piped to tail, then &&, is refused",
+             "GUARD_FAMILY=stream verdict python3 hooks/test_guard.py 2>&1 | tail -3 && git push",
+             "deny")
+verdict_pipe("the shortened incident line piped to tail, then && add and commit, is refused",
+             "~/.claude/bin/verdict python3 lint/ste_lint.py docs/decisions/x.md 2>&1 | tail -1 && "
+             "git add docs/decisions/x.md && git commit -q -m x", "deny")
+verdict_pipe("verdict piped to tail, then || echo, is refused",
+             "verdict python3 lint/check_x.py | tail -1 || echo failed", "deny")
+verdict_pipe("verdict piped to grep -q, then && push, is refused",
+             "verdict python3 lint/check_x.py 2>&1 | grep -q PASS && git push", "deny")
+verdict_pipe("verdict piped to sed -n, then && push, is refused",
+             "verdict make check | sed -n 1p && git push", "deny")
+verdict_pipe("verdict.cmd piped to tail, then && push, is refused",
+             "verdict.cmd python3 lint/check_x.py | tail -3 && git push", "deny")
+verdict_pipe("verdict piped to tail as the last pipeline is refused",
+             "verdict python3 lint/check_x.py | tail -3", "deny")
+verdict_pipe("verdict piped to grep as the last command is refused",
+             "verdict make check | grep FAIL", "deny")
+verdict_pipe("pipefail set earlier with set -o does not lift the refusal, then && commit, is refused",
+             "set -o pipefail; verdict python3 lint/check_x.py | tail -3 && git commit -m x", "deny")
+verdict_pipe("pipefail set earlier in set -euo does not lift the refusal, then && push, is refused",
+             "set -euo pipefail && verdict python3 lint/check_x.py | tail -3 && git push", "deny")
+verdict_pipe("set +o pipefail undoes an earlier set -o, then && push, is refused",
+             "set -o pipefail; set +o pipefail; verdict python3 lint/check_x.py | tail -3 && git push",
+             "deny")
+add("verdict-pipe: verdict piped to tail, then && commit, backgrounded, is refused", "deny",
+    VERDICT_PIPE, cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="verdict python3 lint/check_x.py 2>&1 | tail -3 && git commit -m x")
+verdict_pipe("a bare verdict call is allowed", "verdict python3 lint/check_x.py", "allow")
+verdict_pipe("verdict then && commit, with no pipe, is allowed",
+             "verdict python3 lint/check_x.py && git commit -m x", "allow")
+verdict_pipe("a pipe with no verdict in it is allowed", "cat x.log | tail -3 && echo ok", "allow")
+verdict_pipe("verdict inside single quotes is not a call",
+             "echo 'verdict a | tail -1 && b'", "allow")
 
 # Foreground: merge --lane-lint and merge --review-record piped to tail or head are refused. ci-job is
 # not refused in the foreground. A verdict call piped to tail is refused by verdict-pipe; with no pipe
