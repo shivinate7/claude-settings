@@ -68,6 +68,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -130,6 +131,14 @@ STREET = "123 Main Street"
 API_VALUE = "abcdefgh" + "12345678"
 SESSION_VALUE = "q9W8e7R6" + "t5Y4u3I2"
 CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
+GLUED_VALUE = "Yt6Nb3Kd9Hj2" + "Pq7W"  # a credential value of letters and digits, built from parts
+# Two hundred random-looking letters: a digit after them sits at offset 200, past a lookahead of 20 characters.
+LETTERS_200 = LETTERS_16 * 12 + "xKqPzLmR"
+NPM_VALUE = "npm_Ab3Cd5Ef7Gh9Ij1Kl3" + "Mn5"  # an npm token shape, built from parts
+# A scan that re-reads a run from each start position takes about 16 times as long over four times the run; a linear
+# scan takes about 4 times. The bound sits between them. RUN_N is the shorter run, the longer run is four times it.
+RUN_N = 20000
+GROWTH_BOUND = 10
 # Hyphenated letters for the words test, built from parts. Each comment names the check the value fails.
 TIGHT_COMPACT = "tight-" + "compact"  # a plain option key that passes: each part holds a vowel, and no part has five consonants in a row
 ICON_COMPACT = "icon-" + "compact"  # a plain option key that passes: a vowel in each part
@@ -209,6 +218,10 @@ RED = [
     ("PWD path with a second keyword after an ampersand", "PWD=/home/x&" + "password=" + "hunter2", "hunter2"),
     # Refused today, kept so that a fix which matches a prefix, or a lower-case path, goes red.
     ("password with a plain word and digits", "password: " + "none123", "none123"),
+    # A real password value stays refused when prose follows it on its line, and when it sits in backticks.
+    ("password with a colon and a value of letters and digits", "password: " + "hunter2xyz", "hunter2xyz"),
+    ("password with a real value before prose", "password: " + "hunter2xyz" + " for the guest.", "hunter2xyz"),
+    ("password assignment in backticks", "`password=" + "hunter2xyz" + "`", "hunter2xyz"),
     ("lower-case pwd with a path value", "pwd=" + "/Users/x", "/Users/x"),
     ("email address", "person.name" + "@" + "example.com", "person.name@example.com"),
     ("phone number", "+1 (555) 010-2345", "+1 (555) 010-2345"),
@@ -247,6 +260,18 @@ RED = [
     ("apikey with no separator", "apikey=" + API_VALUE, API_VALUE),
     ("authtoken with a colon", "authtoken: " + SESSION_VALUE, SESSION_VALUE),
     ("SECRET_KEY_BASE assignment", "SECRET_KEY_BASE=" + "w8Kd2Lp9" + "Vx4Qz7Mn", "w8Kd2Lp9" + "Vx4Qz7Mn"),
+    # A key word at the start of a name, after `_` or at a camelCase hump, still names a credential when its value has digits.
+    ("secret_key assignment with digits", "secret_key=" + "Yt6Nb3Kd" + "Hj9Pq2Wr", "Yt6Nb3Kd" + "Hj9Pq2Wr"),
+    ("GITHUB_TOKEN assignment with digits", "GITHUB_TOKEN=" + "Rt4Vb8Nm" + "Ls2Qw6Yp", "Rt4Vb8Nm" + "Ls2Qw6Yp"),
+    # A key word glued to the word before it, with no `_` and no camelCase hump, still names a credential.
+    ("CI_NPMTOKEN with an npm token value", "CI_NPMTOKEN=" + NPM_VALUE, NPM_VALUE),
+    ("DEPLOY_GITHUBTOKEN with digits", "DEPLOY_GITHUBTOKEN=" + GLUED_VALUE, GLUED_VALUE),
+    ("MYAPPSECRET with digits", "MYAPPSECRET=" + GLUED_VALUE, GLUED_VALUE),
+    ("NPMTOKEN with digits", "NPMTOKEN=" + GLUED_VALUE, GLUED_VALUE),
+    ("dbkey with digits", "dbkey=" + GLUED_VALUE, GLUED_VALUE),
+    # A long name that ends in a key word is a credential name however long it runs before the word.
+    ("a long name ending in token with digits",
+     "token_for_the_production_environment_of_the_billing_service=" + GLUED_VALUE, GLUED_VALUE),
     ("API_KEY_V2 assignment", "API_KEY_V2=" + "Hk3Lm9Qp" + "Wz7Rt2Yc", "Hk3Lm9Qp" + "Wz7Rt2Yc"),
     ("clientSecret as a JSON pair", '"clientSecret": "' + CLIENT_VALUE + '"', CLIENT_VALUE),
     # A credential name set to a value of 12 or more characters is refused, digits or not. These values have no digit.
@@ -315,6 +340,36 @@ RED = [
     ("password with a plain word before a secret", "password: " + "none hunter2", "hunter2"),
     ("password with a plain word and a comma before a secret", "password: " + "none, hunter2", "hunter2"),
     ("password with a quoted plain word before a secret", "password: " + '"none" hunter2', "hunter2"),
+    # A key word inside a longer name is a credential name too. The stem of an everyday word (mon, turn, hoc) is no
+    # reason to skip it. The value is the one the turnkey control in GREEN uses.
+    ("commonKey with a value of letters and digits", "commonKey: " + GLUED_VALUE, GLUED_VALUE),
+    ("daemonKey with a value of letters and digits", "daemonKey: " + GLUED_VALUE, GLUED_VALUE),
+    ("adHocKey with a value of letters and digits", "adHocKey: " + GLUED_VALUE, GLUED_VALUE),
+    ("returnKey with a value of letters and digits", "returnKey: " + GLUED_VALUE, GLUED_VALUE),
+    # A letters-only secret after a plain word and prose is one. The prose after the plain word must not hide it.
+    ("letters-only secret after a plain word, a semicolon and `is`",
+     "password: required to log in; default is swordfish", "swordfish"),
+    ("letters-only secret after a plain word and `and`", "password: none and swordfish", "swordfish"),
+    # Each separator word or mark before a non-function word starts a second value, so the password value is refused.
+    ("letters-only secret after a plain word and `or`", "password: none or swordfish", "swordfish"),
+    ("letters-only secret after a plain word and `but`", "password: none but swordfish", "swordfish"),
+    ("letters-only secret after a plain word and `is`", "password: none is swordfish", "swordfish"),
+    ("letters-only secret after a plain word and `are`", "password: none are swordfish", "swordfish"),
+    ("letters-only secret right after a plain word and a semicolon", "password: none; swordfish", "swordfish"),
+    ("letters-only secret after prose and a comma", "password: none for the guest, swordfish", "swordfish"),
+    # A semicolon after prose starts a second value as a comma does. Only the `;` in the separator check refuses this.
+    ("letters-only secret after prose and a semicolon", "password: none for the guest; swordfish", "swordfish"),
+    # A prose tail after a plain value passes only as a function word first, then letter words. A letter word with no
+    # function word first, a digit in a later word, and a symbol inside a later word each refuse.
+    ("password none then a letter word with no function word first", "password: none " + "swordfish", "swordfish"),
+    ("password none then a function word and a word with a digit", "password: none for " + "hunter2", "hunter2"),
+    ("password none then a function word and a word with a trailing mark and a digit",
+     "password: none for " + "hunter2!", "hunter2!"),
+    ("password none then a function word and a symbol inside a word", "password: none for " + "hunter&co", "hunter&co"),
+    # VALUE_LOOKAHEAD_MAX pin: a value whose digit sits past the first 20 characters is refused only at the full cap.
+    ("api_key of 200 random letters then a digit", "api_key: " + LETTERS_200 + "7", LETTERS_200 + "7"),
+    # Control for the pin above: the same 200 letters with no digit are refused by the letters-only branch at any cap.
+    ("api_key of 200 random letters with no digit", "api_key: " + LETTERS_200, LETTERS_200),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -375,6 +430,21 @@ GREEN = [
     ("a time with PM and a street word in prose", "Due 5 PM. Way forward is clear"),
     ("a number before the word Park in prose", "Phase 2 Park the lane"),
     ("a key inside a longer word", "turnkey solution"),
+    # A key word inside a longer word is no credential name, even with a value of letters and digits after it.
+    ("a key word inside a longer word with a value", "monkey: Banana12345"),
+    ("a key word inside a longer word with a camel value", "hotkey: Ctrl1Shift2"),
+    # The control for the longer names in RED: the everyday word with the same value passes.
+    ("turnkey with a value of letters and digits", "turnkey: " + GLUED_VALUE),
+    # The same holds for other words that end in key, with a value of letters and digits.
+    ("turkey with a value", "turkey: Gobble2024"),
+    ("donkey with a value", "donkey: Kong1981"),
+    ("whiskey with a value", "whiskey: Jameson12"),
+    ("jockey with a value", "jockey: Rider123"),
+    # Each word of EVERYDAY_KEY_WORDS has its own row with a random-looking value. Dropping a word from the list
+    # turns that row red.
+    ("turnkey with a random value", "turnkey=" + "Xq7Zt2Lm" + "9Qw4"),
+    ("hockey with a random value", "hockey: " + "Rk4Ps8Vn" + "2Tz6"),
+    ("lackey with a random value", "lackey=" + "Wm3Bq9Jd" + "5Hx7"),
     ("a keyboard label with a number", "keyboard: 104 keys"),
     # A shell variable, an ssh remote, a no-reply address, and the placeholders and masks: none names a secret.
     ("password word with optional", "password: " + "optional"),
@@ -399,6 +469,12 @@ GREEN = [
     ("single-quoted optional after a password word", "password: " + "'optional'"),
     ("parenthesized none after a password word", "password: " + "(none)"),
     ("none with a period after a password word", "password: " + "none."),
+    # A placeholder word with prose after it on the same line, and a backticked shell path, name no secret.
+    ("password word with optional and prose after it", "Set password: optional for the guest."),
+    ("password word with none and prose after it", "password: none for the guest"),
+    # A function word after a comma is no second value: only a non-function word after a separator is one.
+    ("password word with none, prose, a comma and a function word", "password: none for the guest, and the"),
+    ("backticked shell path after PWD", "`PWD=/Users/x`"),
     # Near misses of the three new shapes: a digit count, a tail length, a prefix inside a word, and a clock time pass.
     ("Telegram token with 11 digits before the colon", "12345678901:" + TG_TAIL),
     ("Telegram token with a 34-character tail", "123456789:" + TG_TAIL[:34]),
@@ -603,19 +679,19 @@ class Base(unittest.TestCase):
     def out(self, name="waiting"):
         return os.path.join(self.tmp.name, name)
 
-    def run_cmd(self, *args, env=None):
+    def run_cmd(self, *args, env=None, timeout=60):
         if not os.path.isfile(CMD):
             self.fail("export_page.py is not built: no file at %s" % CMD)
         env = env or dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
-        return subprocess.run([sys.executable, CMD, *args], capture_output=True, text=True, timeout=60, env=env)
+        return subprocess.run([sys.executable, CMD, *args], capture_output=True, text=True, timeout=timeout, env=env)
 
-    def export(self, fetched, out, page=None, allow_empty=()):
+    def export(self, fetched, out, page=None, allow_empty=(), timeout=60):
         args = ["--fetched", fetched, "--out", out]
         if page:
             args += ["--page", page]
         for name in allow_empty:
             args += ["--allow-empty", name]
-        return self.run_cmd(*args)
+        return self.run_cmd(*args, timeout=timeout)
 
     def assertVerdict(self, r, want, secrets=()):
         self.assertTrue(says(r, want), "verdict %r not printed. Output:\n%s" % (want, shown(r, secrets)))
@@ -677,6 +753,43 @@ class Scan(Base):
                 self.assertFalse(says(r, "refused"), "%s: the scan refused a non-secret. Output:\n%s" % (label, shown(r)))
                 self.assertEqual(r.returncode, 0, "%s: the run failed without a refusal. Output:\n%s" % (label, shown(r)))
                 self.assertEqual(read_text(os.path.join(out, "items", "ok.json")), canonical(doc), label)
+
+    def timed_export(self, fetched, folder, timeout):
+        """Seconds for one export of `fetched` into a fresh copy. The exit code is asserted before the time is used."""
+        start = time.perf_counter()
+        r = self.export(fetched, self.out(folder), timeout=timeout)
+        took = time.perf_counter() - start
+        self.assertEqual(r.returncode, 0, "%s did not export (exit %d). Output:\n%s" % (folder, r.returncode, shown(r)))
+        return took
+
+    def timed_growth(self, folder, make_note):
+        """(growth, short, long) for the scan of a run of 4 x RUN_N characters over the scan of a run of RUN_N, both timed
+        in this process. Each size is the faster of two exports, so one slow export does not set the ratio. The timeout is
+        a hang guard only: the scan takes well under a second at RUN_N, and a quadratic scan takes minutes at 4 x RUN_N."""
+        timings = {}
+        for size in (RUN_N, 4 * RUN_N):
+            fetched = self.fetch(items={"ok": {"id": "ok", "title": "Ok", "note": make_note(size)}})
+            timings[size] = min(self.timed_export(fetched, "%s-%d-%d" % (folder, size, run), timeout=900)
+                                for run in (1, 2))
+        return timings[4 * RUN_N] / timings[RUN_N], timings[RUN_N], timings[4 * RUN_N]
+
+    def assert_grows_no_faster_than_linear(self, folder, make_note, what):
+        growth, short, long_run = self.timed_growth(folder, make_note)
+        self.assertLess(growth, GROWTH_BOUND,
+                        "the scan of %s grew %.1f times, from %.3f s at %d characters to %.3f s at %d; a linear scan "
+                        "grows 4 times, and the bound is %d" % (what, growth, short, RUN_N, long_run, 4 * RUN_N, GROWTH_BOUND))
+
+    def test_a_long_run_of_name_characters_grows_no_faster_than_linear(self):
+        # Name characters with no keyword in them.
+        self.assert_grows_no_faster_than_linear("long-run", lambda n: "aB3_-" * (n // 5), "a run of name characters")
+
+    def test_a_long_run_of_underscores_grows_no_faster_than_linear(self):
+        # The password shape's name prefix takes `_`, so a run of them is re-read from each start position.
+        self.assert_grows_no_faster_than_linear("underscores", lambda n: "_" * n, "a run of underscores")
+
+    def test_a_long_run_of_key_equals_grows_no_faster_than_linear(self):
+        # The credential-name value lookaheads scan to the end of a run of `key=`, from each start position.
+        self.assert_grows_no_faster_than_linear("key-equals", lambda n: "key=" * (n // 4), "a run of key=")
 
 
 class Mirror(Base):
