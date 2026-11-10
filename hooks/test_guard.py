@@ -4919,6 +4919,14 @@ hm_refuse("a PowerShell call with -C and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, tool="PowerShell", cwd=NOGIT)
 hm_refuse("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
 hm_refuse("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
+# A cd into a variable folder is judged where the shell runs the command, so it takes the verdict of its
+# literal twin. The -C form reads its variable on another branch only, so it has no row here.
+hm_refuse("a variable folder, cd \"$R\", then a tree outside home is refused, as the literal cd is",
+        "R=" + HMIN + "; cd \"$R\" && " + HMADD + HMSCRATCH, cwd=NOGIT)
+hm_refuse("a braced variable folder, cd \"${R}\", then a tree outside home is refused",
+        "R=" + HMIN + "; cd \"${R}\" && " + HMADD + HMSCRATCH, cwd=NOGIT)
+hm_refuse("the literal twin: cd into the primary, then a tree outside home, is refused",
+        "cd " + HMIN + " && " + HMADD + HMSCRATCH, cwd=NOGIT)
 hm_refuse("a for loop that builds the tree path from its variable is the incident",
         "for c in A B; do " + VCS + " worktree add -q --detach " + HMSCRATCH + "/wt-$c $c; done")
 
@@ -4948,6 +4956,12 @@ hm_allow("a heredoc body that holds the words passes",
          "cat <<'EOF'\ngit worktree add ../x\nEOF")
 hm_allow("a folder that is no git tree passes, since unknown is no hit",
          HMADD + "../lane-x", cwd=NOGIT)
+hm_allow("a variable folder holding the primary's home folder, cd \"$R\", then a tree in home passes",
+         "R=" + HMIN + "; cd \"$R\" && " + HMADD + ".claude/worktrees/lane6", cwd=NOGIT)
+hm_allow("a variable folder holding a throwaway repo, cd \"$R\", then a tree beside it passes",
+         "R=" + slash(HMTMPREPO) + "; cd \"$R\" && " + HMADD + "../hmtmp-sibling", cwd=NOGIT)
+hm_allow("the literal twin: cd into a throwaway repo, then a tree beside it passes",
+         "cd " + slash(HMTMPREPO) + " && " + HMADD + "../hmtmp-sibling", cwd=NOGIT)
 
 # AGENT. A call with a valid agent_id that adds a tree inside the primary's folder is refused, unless
 # the tree is the agent's own recorded home or its own red-run folder. Each call runs from that home,
@@ -8327,6 +8341,40 @@ sh("silent-write throwaway: -C names the throwaway repo, and it is judged there"
    VCS + " -C " + TSLASH + " commit -m x >/dev/null", "allow", cwd=GITMAIN)
 sh("silent-write throwaway: cd into the throwaway repo, and it is judged there",
    "cd " + TSLASH + " && " + VCS + " commit -m x >/dev/null", "allow", cwd=GITMAIN)
+# A variable folder is read where the shell runs the commit, as its literal twin is.
+sh("silent-write throwaway: a variable folder holding the throwaway repo, cd \"$R\" then a discarded commit, is allowed",
+   "R=" + TSLASH + "; cd \"$R\" && " + VCS + " commit -m x >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write real: a variable folder holding the real checkout, cd \"$R\" then a discarded commit, is refused",
+   "R=" + slash(GITMAIN) + "; cd \"$R\" && " + VCS + " commit -m x >/dev/null", "deny", "silent-write",
+   cwd=THROWAWAY)
+sh("silent-write real: the literal twin, cd into the real checkout then a discarded commit, is refused",
+   "cd " + slash(GITMAIN) + " && " + VCS + " commit -m x >/dev/null", "deny", "silent-write", cwd=THROWAWAY)
+# A variable is read only from a plain assignment that runs in this shell. A walk that reads the throwaway
+# folder in the first and third rows allows the commit; the one-quote row is denied either way. Judged from the
+# real checkout, each row stays denied.
+sh("silent-write [cdvar-unread]: D=<throwaway> mkdir -p, cd \"$D\", then a discarded commit from the real checkout, is refused",
+   "D=" + TSLASH + " mkdir -p \"$D\"; cd \"$D\" && " + VCS + " commit -m x >/dev/null 2>&1", "deny", "silent-write",
+   cwd=GITMAIN)
+sh("silent-write [cdvar-unread]: R=<throwaway>, a quote, R=<real>, cd \"$R\", then a discarded commit, is refused",
+   "R=" + TSLASH + "; echo \"it's\"; R=" + slash(GITMAIN) + "; cd \"$R\" && " + VCS + " commit -m x >/dev/null 2>&1",
+   "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write [cdvar-unread]: as the row before, with a second quote after R=<real>, is refused",
+   "R=" + TSLASH + "; echo \"it's\"; R=" + slash(GITMAIN) + "; echo \"it's\"; cd \"$R\" && " + VCS
+   + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)
+# A `[ -d <missing> ] &&` may fail, so the assignment after it may not run and the cd target is unknown:
+# the discarded commit is refused. A walk that reads the assignment as run allows the commit and fails this row.
+# The row after it is its twin with the assignment first, which runs, so the throwaway repo is judged.
+sh("silent-write [cdvar-unread]: [ -d <missing> ] && R=<throwaway>, cd \"$R\", then a discarded commit, is refused",
+   "[ -d " + slash(os.path.join(ROOT, "no-such-folder")) + " ] && R=" + TSLASH + "; cd \"$R\" && " + VCS
+   + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write [cdvar-unread]: control: R=<throwaway> && cd \"$R\", then a discarded commit, is allowed",
+   "R=" + TSLASH + " && cd \"$R\" && " + VCS + " commit -m x >/dev/null 2>&1", "allow", cwd=GITMAIN)
+# A `ls <missing> &&` may fail, so the cd after it may not run and the commit's folder is unknown: the
+# discarded commit is refused. A walk that reads the cd as run allows the commit; the product denies it, as
+# the row expects.
+sh("silent-write [cdvar-unread]: R=<throwaway>; ls <missing> && cd \"$R\", then a discarded commit from the real checkout, is refused",
+   "R=" + TSLASH + "; ls " + slash(os.path.join(ROOT, "no-such-folder")) + " && cd \"$R\"; " + VCS
+   + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)
 sh("silent-write throwaway: --git-dir names the throwaway repo, and it is judged there",
    VCS + " --git-dir=" + TSLASH + "/.git commit -m x >/dev/null", "allow", cwd=GITMAIN)
 sh("silent-write throwaway: a discarded pipe tail in a throwaway repo",
@@ -10361,6 +10409,10 @@ nm_case("linked-nm: cd into a real folder, then npm ci, is allowed, though the p
         "cd " + slash(NMREAL) + " && npm ci", "allow", NMLINKED)
 nm_case("linked-nm: cd into a folder with no node_modules, then npm ci, is allowed",
         "cd " + slash(NMABSENT) + " && npm ci", "allow", NMLINKED)
+nm_case("linked-nm: a variable folder linked, cd \"$R\" then npm ci, is refused, as the literal cd is",
+        "R=" + slash(NMLINKED) + "; cd \"$R\" && npm ci", "deny", NMABSENT)
+nm_case("linked-nm: the literal twin, a cd to the linked folder then npm ci, is refused",
+        "cd " + slash(NMLINKED) + " && npm ci", "deny", NMABSENT)
 
 # THE PREFIX FLAG. `npm ci --prefix <dir>` installs into <dir>, so the folder the flag names is the one judged,
 # not the working folder. Each case is the other folder's answer: a real prefix from a linked folder is allowed,
@@ -16254,6 +16306,15 @@ cmk_refuse("a real merge conflict left in a file, then add -A and commit",
          VCS + " add -A && " + VCS + " commit -m x", CMK_MERGE)
 cmk_refuse("a triplet staged in a source file, then commit", VCS + " commit -m x", CMK_STAGED)
 cmk_refuse("a triplet staged, behind a false command in the chain", "false && " + VCS + " commit -m x", CMK_STAGED)
+# A plain VAR=value runs nothing, so `_chain_safe` keeps the chain readable and the commit is judged. Before
+# that change, the assignment made the chain unreadable and the commit was allowed.
+cmk_refuse("[cdvar-unread] a triplet staged, behind a plain assignment in the chain", "CDVAR=1 && " + VCS + " commit -m x",
+           CMK_STAGED)
+# A variable folder is read where the shell runs the commit, as its literal twin is (failed_cd_stays).
+cmk_refuse("a variable folder holding a triplet staged in a source file, cd \"$R\" then commit",
+           "R=" + slash(CMK_STAGED) + "; cd \"$R\" && " + VCS + " commit -m x", NOGIT)
+cmk_refuse("the literal twin, cd to a folder holding a staged triplet then commit, from no repository",
+           "cd " + slash(CMK_STAGED) + " && " + VCS + " commit -m x", NOGIT)
 
 # 2. The working tree: an add in the chain, or a commit that names its file, holds that file's content.
 cmk_refuse("commit -am with the triplet in a tracked, modified file", VCS + " commit -am x", CMK_AM)
@@ -29525,6 +29586,25 @@ def worktree_home_cd_parse_forms_case():
     return True, "a relative climb, a subshell and a PowerShell Set-Location into another checkout are refused"
 
 
+def worktree_home_cd_variable_climb_case():
+    """Rule 0, other-checkout, the `cd` act with a variable folder: a relative cd made from the folder a
+    variable names is judged from that folder, as from the literal folder. From lane-a, `cd "$R" && cd
+    ../lane-b` moves into lane-b and is refused, as `cd <lane-a> && cd ../lane-b` is."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcocdvar")
+    problems = []
+    rows = (
+        ("the literal folder", "cd %s && cd ../lane-b && ls" % slash(lane_a)),
+        ("a variable folder", 'R=%s; cd "$R" && cd ../lane-b && ls' % slash(lane_a)),
+    )
+    for label, command in rows:
+        got, reason = _decide_full("Bash", lane_a, command=command)
+        problems += _other_checkout_problems(label, got, reason,
+                                             (ROOT, slash(ROOT), lane_b, slash(lane_b)))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a relative cd from a variable folder into another checkout is refused, as from a literal one"
+
+
 def worktree_home_cd_agent_sibling_case():
     """Rule 0, other-checkout, the `cd` act for an agent in its own worktree: a `cd` into a sibling
     agent's tree, bare or chained, is refused, and so is a folder whose name only starts with the
@@ -29836,11 +29916,11 @@ def worktree_home_cd_then_write_case():
 
 
 def worktree_home_cd_after_untracked_case():
-    """Rule 0, other-checkout, a later absolute cd is judged where it lands. After a move the guard
-    cannot read (`"$HOME"`, `-`), or after a cd to a folder that is missing, an absolute cd into another
-    checkout is still refused. A cd whose target is missing makes the folder unknown again, so a
-    relative cd after it is not judged. That is a declared limit, and it keeps ordinary work from a
-    worktree root (a folder made, entered and left) allowed. From a lane."""
+    """Rule 0, other-checkout, a later absolute cd is judged where it lands. After a move whose folder
+    the guard cannot tell (`-`, and `"$HOME"` on the current code), or after a cd to a folder that is
+    missing, an absolute cd into another checkout is still refused. A cd whose target is missing makes
+    the folder unknown again, so a relative cd after it is not judged. That is a declared limit, and it
+    keeps ordinary work from a worktree root (a folder made, entered and left) allowed. From a lane."""
     primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcountracked")
     ghost = os.path.join(lane_a, "ghost")  # a folder that does not exist, so its cd fails
     deny = (
@@ -31217,6 +31297,12 @@ for _label, _check in LOG_CHECKS:  # the literal above is not appended: tag it h
     LOG_FAMILY.setdefault(_label, _family(_label))
 
 
+# The cd act with a variable folder joins the worktree-home family, as the cd cases above it do.
+FAMILY = "worktree-home"
+LOG_CHECKS_EXTRA.append(("worktree-home: a relative cd from a variable folder into another checkout is "
+                         "refused, as from a literal folder", worktree_home_cd_variable_climb_case))
+
+
 # =========================================================================== session-home
 #
 # Rule session-home: a session whose linked worktree is gone may not write into the primary
@@ -32000,6 +32086,36 @@ def session_home_variable_folder_commit_case():
     return True, "a commit whose folder is a variable passes, by cd and by -C"
 
 
+def session_home_variable_primary_case():
+    """Rule session-home, a variable folder: while the record is lost, a git commit or a shell write into
+    the primary checkout is refused when its folder comes from a variable (cd "$R") as from its path. The
+    refusal names session-home and EnterWorktree, and names no path."""
+    primary = sh_new_primary("varprimary")
+    lane, branch = sh_add_lane(primary, "lane-varprimary")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    rows = (
+        ("the literal folder, cd then a commit", "cd " + slash(primary) + " && " + VCS + " commit -m x"),
+        ("a variable folder, cd \"$R\" then a commit",
+         'R=' + slash(primary) + '; cd "$R" && ' + VCS + " commit -m x"),
+        ("the literal folder, cd then a shell write", "cd " + slash(primary) + " && echo x > f.txt"),
+        ("a variable folder, cd \"$R\" then a shell write",
+         'R=' + slash(primary) + '; cd "$R" && echo x > f.txt'),
+    )
+    for label, command in rows:
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        problems += sh_refusal_problems(label, got, reason, primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a commit or a shell write into the primary checkout by a variable folder is refused, as by a literal one"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a commit or a shell write into the primary checkout by a variable "
+                         "folder is refused, as by a literal folder", session_home_variable_primary_case))
 LOG_CHECKS_EXTRA.append(("session-home: a top-level call inside an agent's worktree writes no session "
                          "record, and the primary write and commit pass once that tree is removed",
                          session_home_agent_tree_inspect_case))
