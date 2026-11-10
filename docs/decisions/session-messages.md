@@ -4,9 +4,11 @@ Kind: build
 Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
 Status: draft. Q1 to Q3, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
-Q4 (a timed check-in) is open with the owner. The build is on branch smp-mailbox-build; it is not in main.
-Next step: build step 2, the Mac and Windows auth check for `ls-remote`. Until it runs, `MAILBOX_REPO`
-is unset in settings.json, and a session sets it in its env.
+Q4 (a timed check-in) is open with the owner. The build is on main: PR #1371 (the mailbox build) merged
+2026-11-08 as merge commit f1488533f (integration batch batch-65g).
+Next step: build step 2, the Mac and Windows auth check for `ls-remote`. `MAILBOX_REPO` is still unset in
+settings.json; a session sets it in its env. Step 2 and the 20-message trial (step 5) need a Mac session.
+The settings.json default needs the owner's typed words.
 
 ## Ruling
 
@@ -147,6 +149,18 @@ Design:
 - Risks: how `janitor/sweep.py` treats a `mail` branch that never merges is unknown. The
   UserPromptSubmit time budget is shared with `local_time`.
 
+## Reach across GitHub accounts (plan, not built)
+
+- The store is the private repo shivinate7/session-mailbox. A cloud session under the owner's second
+  account, ssemwal-cdc, reaches it only if that account can read and write it.
+- The owner's one act, as shivinate7: open https://github.com/shivinate7/session-mailbox/settings/access,
+  press "Add people", pick ssemwal-cdc, role Write, send the invite. Accepting is a second press: the same
+  person accepts at https://github.com/shivinate7/session-mailbox/invitations, signed in as ssemwal-cdc.
+- Unmeasured: whether a cloud session under ssemwal-cdc reaches the store through the git proxy.
+  The proxy served the store only after `add_repo` for the measuring session; such a session needs the
+  repo attached by that account's Claude GitHub connection. Measure with one `mail read` after the invite.
+- Nothing is changed until the owner presses, and this lane changed no access. No code change is expected.
+
 ## Build in work order
 
 1. Rewrite the record and skill text for this ruling. Add the GLOSSARY row "mailbox". Never "inbox":
@@ -160,10 +174,14 @@ Design:
    Cloud: a lane session pushes branches to claude-settings through the proxy (same session).
    Cloud to the private store (page item 312): send, read, take and a refused second take, through the
    proxy (2026-11-06 15:58 CST). `ls-remote` from a cloud session: 391 to 608 ms over 5 runs.
+   Cloud round trip through the proxy between two agents with distinct addresses (`cloud/session_rtripa`,
+   `cloud/session_rtripb`), 2026-11-09 19:34 CST: send message 2979e0b314d0 (request), read, take (exit 0),
+   reply message 60884f559348, reply read and taken by the sender (exit 0), second take of 2979e0b314d0
+   refused "taken by another" (exit 1). Cloud only; Mac and Windows auth still not measured.
    Not yet measured: Mac and Windows auth for `ls-remote`.
 3. Test-author: red cases against a `file://` bare `MAILBOX_REPO`: round trip, push race, take race,
    inform close, offline, cost counts.
-4. Builder, on branch smp-mailbox-build (not merged): `hooks/mail.py`, `bin/mail`, `bin/mail.cmd` and the
+4. Builder, merged as #1371 (f1488533f): `hooks/mail.py`, `bin/mail`, `bin/mail.cmd` and the
    `hooks/local_time.py` call. The `settings.json` env default stays unset until step 2 measures Mac and
    Windows auth for `ls-remote`.
 5. Skill section rewrite. Check: a two-session trial of 20 messages, cloud to Mac, none lost, none acted
