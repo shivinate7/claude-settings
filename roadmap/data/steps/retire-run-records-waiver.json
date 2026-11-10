@@ -1,0 +1,12 @@
+{
+  "title": "A dispatched run on a lane branch waives the stale docs/records.md page, as a PR run does",
+  "phase": "now",
+  "status": "doing",
+  "order": 963,
+  "owner": "lane",
+  "why": "A debt-retiring lane's Retire-run always ends red, so lint/check_debt_retire.py, which needs \"success\", can never retire a debt.",
+  "note": "Coordinator 03:06 CST Nov 10; lane session_013NEJL3m8RA79gxYptq8LiK started 03:07 CST. A dispatched run on a lane branch does not waive the stale docs/records.md page as a PR run does, so the Retire-run ends red on lint/test_hook_catalog.py r10. Incident: notes-fix-page lane, #2024 run 42782146249 and #1969 run 42782509944; #2293 and #2311 blocked too.",
+  "updatedAt": "2026-11-10T03:07:00-06:00",
+  "lane": "session_013NEJL3m8RA79gxYptq8LiK",
+  "blockedBy": []
+}
