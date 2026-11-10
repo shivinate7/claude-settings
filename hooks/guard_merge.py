@@ -1005,10 +1005,26 @@ REPO_REASON = (
     "(list_sessions, tag cs-build:batch-runner). "
     "(decision merge-confirm-repo, a cloud merge acts only in a repo its own record names)"
 )
+# The one deny that get_session cannot clear: a `$(` holds a `|`, `;` or `&&`, so the merge's arguments sit in another segment.
+REPO_SUBST_LABEL = "merge --confirm with a $( cut open"
+REPO_SUBST_REASON = (
+    "merge-confirm-repo: the merge's arguments cannot be read, because a `$( ... )` in this command holds a `|`, `;` or `&&`, "
+    "which cuts it into separate commands. Write the pull request number as a literal, then retry. "
+    "(decision merge-confirm-repo, a cloud merge acts only in a repo its own record names)"
+)
+
+
+def repo_reason(matched: str) -> str:
+    """The refusal text for a label repo_proof_hit returned: its own text for a cut-open `$(`, else REPO_REASON."""
+    return REPO_SUBST_REASON if matched == REPO_SUBST_LABEL else REPO_REASON
 
 
 class _FlagsUnreadable(Exception):
     """The merge tool's own parser refused a command's arguments."""
+
+
+class _SubstitutionOpen(_FlagsUnreadable):
+    """A `$(` is still open where the splitter cut the segment, so the flags after it are never read."""
 
 
 def _merge_flags(rest):
@@ -1060,7 +1076,8 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
     tokenizes once they are gone (a quote left open), the merge is denied, never skipped."""
     if not is_cloud():
         return ""
-    return "merge --confirm" if _unproved_confirm(stripped, cwd, transcript, 0) else ""
+    found = _unproved_confirm(stripped, cwd, transcript, 0)
+    return found if found == REPO_SUBST_LABEL else ("merge --confirm" if found else "")
 
 
 MERGE_NEST_DEPTH = 4  # `bash -c` inside `bash -c` is followed this far; a deeper script is judged as a refusal
@@ -1078,8 +1095,9 @@ def _unreadable_confirm(segment: str) -> bool:
     return opener is not None and merge_tool_args(segment[:opener]) is not None
 
 
-def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
-    """True when a `merge --confirm` in `text` acts in a checkout the own record does not prove. `text` is the command, or a script a
+def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int):
+    """True when a `merge --confirm` in `text` acts in a checkout the own record does not prove, or REPO_SUBST_LABEL (also true) when
+    that is because a `$(` was cut open, else False. `text` is the command, or a script a
     segment hands on (`bash -c`, `sh -c`, `eval`: inner_commands, the one reader of those wrappers), which runs in the directory its own
     segment is in. A `)` or `&` glued to the last word ends the merge's arguments (_command_words), so a merge closing a subshell is read."""
     ends = []
@@ -1095,8 +1113,10 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
                     return True
             else:
                 where = dir_before_segment(segments, number, cwd, ends) or ""
-                if any(_unproved_confirm(script, where, transcript, depth + 1) for script in scripts):
-                    return True
+                for script in scripts:
+                    found = _unproved_confirm(script, where, transcript, depth + 1)
+                    if found:
+                        return found
         if tokens is None and _unreadable_confirm(segment):
             return True
         if merge_tool_args(segment) is None:
@@ -1120,6 +1140,8 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
                 tags, tagged_after = _own_session_read(transcript, own_id)
                 if tags is not None and not tagged_after and any(repo_tag_names(tag, repo) for tag in tags):
                     continue
+        except _SubstitutionOpen:
+            return REPO_SUBST_LABEL
         except Exception:
             pass
         return True
@@ -1236,7 +1258,7 @@ def _glued_counts(segment: str, args, later: str = ""):
     if len(words) != len(tokens) or len(args) > len(words):
         raise _FlagsUnreadable("the quote walk and the tokens split the segment differently")
     if depth > 0 and ("--confirm" in later or any("--confirm" in arg for arg in args)):
-        raise _FlagsUnreadable("a $( is open at the end of the segment")
+        raise _SubstitutionOpen("a $( is open at the end of the segment")
     counts = []
     for word, arg, still_open in zip(words[skip:], args, ends_open[skip:]):
         run = 0
