@@ -1,0 +1,231 @@
+diff --git a/hooks/guard_core.py b/hooks/guard_core.py
+index 20b226af4..c34da398c 100644
+--- a/hooks/guard_core.py
++++ b/hooks/guard_core.py
+@@ -1073,26 +1073,133 @@ def shell_abs(path: str, base):
+     return path
+ 
+ 
+-def _in_background_list(segments, ends, at: int) -> bool:
+-    """True when `segments[at]` is in a list that a lone `&` ends (an end of `&`, as `_split_jobs` gives
+-    it). Bash runs that whole list in a subshell: in `cd a && b &` the `cd` moves no shell, as in
+-    `cd a &`. The list runs on through `&&`, `||` and `|` up to its first other end. A `&` inside a
+-    `( ... )` that opens after the segment ends that group's own list, not this one."""
+-    depth = 0
+-    for later in range(at, len(segments)):
+-        for _, char, quote in walk_quotes(segments[later]):
+-            if not quote and char in "()":
+-                depth += 1 if char == "(" else -1
+-        if depth < 0:
+-            return False   # the group that holds the segment closes: its own paren restores the folder
+-        end = ends[later] if later < len(ends) else ""
+-        if depth:
+-            continue
+-        if end == "&":
+-            return True
+-        if end not in ("&&", "||", "|"):
+-            return False
+-    return False
++@functools.lru_cache(maxsize=4096, typed=True)   # typed: a PosixScript is not its plain twin
++def _cd_facts(segment, powershell: bool):
++    """What `dir_before_segment` reads of one segment: its open and close parentheses outside quotes, its
++    tokens (None when they do not parse), the directory move it makes (`_segment_cd_move`) and whether a
++    bash pipe would make that move a subshell's. The answer depends on the text and on `powershell` alone,
++    so a loop that a command unrolls into a thousand segments reads each segment once, not once per later
++    segment (`dir_before_segment` runs for each of them). `powershell` is in the key, as in
++    `_split_segments_cached`: the readers below read `POWERSHELL_CALL[0]`."""
++    marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
++    tokens = segment_tokens(segment)
++    move = _segment_cd_move(tokens) if tokens else None
++    return marks.count("("), marks.count(")"), tokens, move, not is_powershell(segment)
++
++
++class _DirWalk:
++    """One walk over a command's segments, kept so that the next `dir_before_segment` call on the same
++    segments resumes it. A rule that judges every segment asks for each one's folder in turn: a walk from
++    the first segment for each ask grows as the square of the segments, so the walk runs ahead only as
++    far as the furthest ask and answers an earlier ask from what it saw. The segments and ends are read,
++    never changed, while a walk is kept."""
++
++    def __init__(self, segments, ends, shell_cwd, failed_cd_stays):
++        self.segments, self.ends, self.failed_cd_stays = segments, ends, failed_cd_stays
++        self.size = (len(segments), len(ends))
++        self.powershell = POWERSHELL_CALL[0]
++        self.where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
++        self.prev, self.stack = None, []
++        self.skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
++        self.last = None   # the segment last walked past
++        self.before = []   # before[at]: what `dir_before_segment` answers for segments[at], for each one walked past
++        self.background = {}   # at: `_in_background_list` for a segment that starts at paren depth 0
++
++    def fresh_for(self, segments, ends):
++        """True when this walk still reads these segments: no segment was added, and the last one it
++        walked past is the same text object."""
++        return (self.size == (len(segments), len(ends))
++                and (not self.before or segments[len(self.before) - 1] is self.last))
++
++    def folder_before(self, number):
++        segments = self.segments
++        if number < len(self.before):
++            return self.before[number]
++        while len(self.before) < min(number, len(segments)):
++            at = len(self.before)
++            self.before.append(None if self.skipping else self.where)
++            self.last = segments[at]
++            self._pass(at)
++        if number >= len(segments):
++            return self.where
++        return None if self.skipping else self.where
++
++    def _end(self, at):
++        return self.ends[at] if at < len(self.ends) else ""
++
++    def _pass(self, at):
++        """Walk past `segments[at]`: the shell's folder after it runs."""
++        opens, closes, tokens, move, is_bash = _cd_facts(self.segments[at], self.powershell)
++        self.stack.extend([(self.where, self.prev)] * opens)
++        end = self._end(at)
++        if self.skipping:
++            self.skipping = end in ("&&", "|")
++            for _ in range(closes):
++                if self.stack:
++                    self.where, self.prev = self.stack.pop()
++                    self.skipping = False
++            return
++        if move is not None and is_bash and "|" in (end, self._end(at - 1) if at else ""):
++            move = None   # a bash pipe's part: a subshell, so the shell stays where it was
++        if move is not None and is_bash and self._in_background_list(at):
++            move = None   # a backgrounded `cd` runs in a subshell, so the shell stays where it was
++        if tokens is None:
++            self.where = None
++        elif move is not None:
++            old = self.where
++            if move is CD_UNKNOWN:
++                self.where = None
++            elif move == "-":
++                self.where = self.prev
++            elif any(mark in move for mark in "$%`"):
++                self.where = None
++            else:
++                target = shell_abs(move or "~", self.where)
++                if target and os.path.isdir(target):
++                    self.where = target
++                elif target and self.failed_cd_stays:
++                    self.skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
++                    old = self.prev   # a failed cd leaves the folder `cd -` goes back to alone
++                else:
++                    self.where = None
++            self.prev = old
++        for _ in range(closes):
++            if self.stack:
++                self.where, self.prev = self.stack.pop()
++
++    def _in_background_list(self, at: int) -> bool:
++        """True when `segments[at]` is in a list that a lone `&` ends (an end of `&`, as `_split_jobs` gives
++        it). Bash runs that whole list in a subshell: in `cd a && b &` the `cd` moves no shell, as in
++        `cd a &`. The list runs on through `&&`, `||` and `|` up to its first other end. A `&` inside a
++        `( ... )` that opens after the segment ends that group's own list, not this one. A scan that
++        reaches a segment at paren depth 0 reads on as that segment's own scan would, so every such
++        segment it passed gets the one answer, and a chain of `cd a && cd b && ...` is read once."""
++        depth, answer, starts = 0, False, []
++        for later in range(at, len(self.segments)):
++            if not depth:
++                if later in self.background:
++                    answer = self.background[later]
++                    break
++                starts.append(later)
++            opens, closes = _cd_facts(self.segments[later], self.powershell)[:2]
++            depth += opens - closes
++            if depth < 0:
++                break   # the group that holds the segment closes: its own paren restores the folder
++            if depth:
++                continue
++            end = self._end(later)
++            if end == "&":
++                answer = True
++                break
++            if end not in ("&&", "||", "|"):
++                break
++        for start in starts:
++            self.background[start] = answer
++        return answer
++
++
++_DIR_WALKS = {}   # (id of segments, id of ends, folder, failed_cd_stays, PowerShell) -> the walk; the newest last
++_DIR_WALKS_KEPT = 8   # a rule that reads a nested script's segments between two asks keeps its own walk
+ 
+ 
+ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
+@@ -1105,59 +1212,23 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
+     where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
+     in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe. A
+     `cd` in a list that a lone `&` ends is a background job: its `cd` moves nothing
+-    (`_in_background_list`).
++    (`_DirWalk._in_background_list`).
+     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
+     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
+     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
+     a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
+-    fails closed on an untrusted `cd` keeps doing so."""
+-    where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
+-    prev, stack = None, []
+-    skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
+-    for at, segment in enumerate(segments[:number + 1]):
+-        marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
+-        stack.extend([(where, prev)] * marks.count("("))
+-        end = ends[at] if at < len(ends) else ""
+-        if at == number:
+-            return None if skipping else where
+-        if skipping:
+-            skipping = end in ("&&", "|")
+-            for _ in range(marks.count(")")):
+-                if stack:
+-                    where, prev = stack.pop()
+-                    skipping = False
+-            continue
+-        tokens = segment_tokens(segment)
+-        move = _segment_cd_move(tokens) if tokens else None
+-        if move is not None and not is_powershell(segment) and "|" in (
+-                ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
+-            move = None   # a bash pipe's part: a subshell, so the shell stays where it was
+-        if move is not None and not is_powershell(segment) and _in_background_list(segments, ends, at):
+-            move = None   # a backgrounded `cd` runs in a subshell, so the shell stays where it was
+-        if tokens is None:
+-            where = None
+-        elif move is not None:
+-            old = where
+-            if move is CD_UNKNOWN:
+-                where = None
+-            elif move == "-":
+-                where = prev
+-            elif any(mark in move for mark in "$%`"):
+-                where = None
+-            else:
+-                target = shell_abs(move or "~", where)
+-                if target and os.path.isdir(target):
+-                    where = target
+-                elif target and failed_cd_stays:
+-                    skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
+-                    old = prev   # a failed cd leaves the folder `cd -` goes back to alone
+-                else:
+-                    where = None
+-            prev = old
+-        for _ in range(marks.count(")")):
+-            if stack:
+-                where, prev = stack.pop()
+-    return where
++    fails closed on an untrusted `cd` keeps doing so.
++
++    A call on the same `segments` and `ends` objects resumes the walk the last such call left
++    (`_DirWalk`), so a rule that asks for each segment's folder in turn walks the command once."""
++    key = (id(segments), id(ends), shell_cwd, failed_cd_stays, POWERSHELL_CALL[0])
++    walk = _DIR_WALKS.pop(key, None)
++    if walk is None or walk.segments is not segments or walk.ends is not ends or not walk.fresh_for(segments, ends):
++        walk = _DirWalk(segments, ends, shell_cwd, failed_cd_stays)
++        while len(_DIR_WALKS) >= _DIR_WALKS_KEPT:
++            del _DIR_WALKS[next(iter(_DIR_WALKS))]
++    _DIR_WALKS[key] = walk
++    return walk.folder_before(number)
+ 
+ 
+ def _segment_git_c_target(tokens):
