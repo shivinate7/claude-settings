@@ -7,9 +7,14 @@ branch>, through the one waiting-copy reader (feedback_guard's Homes.filed_numbe
 refuses an Input Needed line that cites a closed item. The rules the cases pin:
 
 - Cite forms, in the Input Needed section only: "item 214", "page item 214", "items 214, 381 and 383",
-  "items 214 or 381", "items 214/381", "items 214-216" (both ends), "Items: 214, 381", "item(s) 214",
-  "item **214**", "items:" then a bullet list, "Cockpit item 214", "item 214 a". Not in Done or Next, not inside
-  backticks or quotes, not PR numbers ("PR 214", "#214"), not a date ("item 2026-11-10"), not a bare number.
+  "items 214 or 381", "items 214/381", "items 214-216" (both ends), "Items: 214, 381", "**Items:** 214",
+  "**Items**: 214", "item(s) 214", "item **214**", "items:" then a bullet list whose bullets may carry text
+  ("> - 214: pick a or b"), a label such as "Items waiting on you:" before such a list, "Cockpit item 214",
+  "item 214 a", "item 1 of 3" (cites 1). Not in Done or Next, not inside backticks or quotes, not PR numbers
+  ("PR 214", "#214"), not a date ("item 2026-11-10"), not a bare number, not a list marker ("> 1. 214" cites 214).
+- Not a cite, though a number follows the item: a count ("214 and 5 others", "381, 2 of which"), a clock time,
+  a percent, an hour count, an ordinal, a fraction ("11/10"), a dash option ("214 - 3 options"), a blockquoted
+  bullet option after the item ("item 214" then "> - 3 options").
 - A cited item whose status is `closed` in the copy refuses the Stop. The refusal states that each closed item
   reads closed in the waiting copy, and names no step for the session.
 - An open or missing item passes. A same-turn ArtifactData read of collection `items` that shows the item open
@@ -56,6 +61,15 @@ FORTY = ((214, "closed"),) + tuple((100 + i, "open") for i in range(39))
 CLOSED_RANGE = ((214, "closed"), (215, "open"), (216, "closed"))  # 215 is the middle of the range, an accepted gap
 CLOSED_2 = ((2, "closed"), (214, "open"))
 DATE_PARTS = ((2026, "closed"), (10, "closed"), (11, "closed"))  # every number of "2026-11-10" closed
+CLOSED_PAIR = ((214, "closed"), (381, "closed"), (383, "open"))
+CLOSED_1_OF_3 = ((1, "closed"), (3, "open"))  # 3 stays open, so the M of "item 1 of 3" is not pinned
+NUMBERED = ((1, "closed"), (2, "closed"), (214, "closed"), (381, "closed"))
+SEVEN_NINE = ((7, "closed"), (9, "closed"))
+# Every closed number a false cite could read as. The copy holds each one closed, so a false cite is refused by name.
+# 381 is closed too: "items 214 and 381, 2 of which" cites it, so a list that stops at "and" is caught.
+FALSE_CITES = ((1, "closed"), (2, "closed"), (3, "closed"), (5, "closed"), (10, "closed"), (11, "closed"),
+               (24, "closed"), (214, "closed"), (381, "closed"))
+FALSE_NUMS = (1, 2, 3, 5, 10, 11, 24)
 
 
 def setUpModule():
@@ -151,6 +165,16 @@ class ClosedItemFixture(unittest.TestCase):
         self.assertIn("waiting copy", reason, "%s: the refusal does not say the waiting copy shows it" % what)
         self.assertNotIn("get or query", reason, "%s: the refusal names a step (get or query)" % what)
         self.assertNotIn("is read before", reason, "%s: the refusal names a step (is read before)" % what)
+
+    def assert_cites_only(self, out, cited, what):
+        """A refusal that names each cited closed item and no other number in FALSE_NUMS, the numbers a false cite
+        reads as. Each of those is closed in the copy, so a false cite would be named."""
+        self.assert_refused(out, cited, what)
+        reason = out.get("reason", "")
+        for n in FALSE_NUMS:
+            if n not in cited:
+                self.assertNotRegex(reason, r"(?<!\d)%d(?!\d)" % n,
+                                    "%s: the refusal names %d, which the text does not cite" % (what, n))
 
     def assert_passes(self, out, what):
         self.assertIsNone(out, "%s: expected no refusal and no note, got %r" % (what, out))
@@ -343,6 +367,125 @@ class ClosedItemCiteFormTests(ClosedItemFixture):
         self.assertEqual(copy_status(repo, 2026), "closed", "the fixture copy must hold item 2026 closed")
         self.assert_passes(self.stop(self.turn(report("item 2026-11-10 is open.")), repo),
                            "item 2026-11-10, with 2026, 10 and 11 closed in the copy")
+
+    def test_bold_label_colon_names_every_item(self):
+        # Catches: "**Items:** 214, 381" with the colon inside the bold, so no cite is read and item 214 closed passes.
+        repo = copy_repo("closed-pair", CLOSED_PAIR)
+        self.assertEqual(copy_status(repo, 381), "closed", "the fixture copy must hold item 381 closed")
+        out = self.stop(self.turn(report("**Items:** 214, 381 are open.")), repo)
+        self.assert_refused(out, [214, 381], "**Items:** 214, 381, both closed")
+
+    def test_bold_label_colon_after_bold_names_every_item(self):
+        # Catches: "**Items**: 214, 381" with the colon after the bold, so no cite is read and item 214 closed passes.
+        repo = copy_repo("closed-pair", CLOSED_PAIR)
+        self.assertEqual(copy_status(repo, 381), "closed", "the fixture copy must hold item 381 closed")
+        out = self.stop(self.turn(report("**Items**: 214, 381 are open.")), repo)
+        self.assert_refused(out, [214, 381], "**Items**: 214, 381, both closed")
+
+    def test_bold_label_bullet_list_names_every_item(self):
+        # Catches: "**Items:**" then a bullet list read as no cite, so item 214 closed passes.
+        repo = copy_repo("closed-pair", CLOSED_PAIR)
+        self.assertEqual(copy_status(repo, 381), "closed", "the fixture copy must hold item 381 closed")
+        out = self.stop(self.turn(report("**Items:**\n> - 214\n> - 381")), repo)
+        self.assert_refused(out, [214, 381], "**Items:** then a bullet list of 214 and 381, both closed")
+
+    def test_bullet_with_text_after_its_number_names_every_item(self):
+        # Catches: a bullet's text after its number ("214: pick a or b") ending the list, so 381 closed passes.
+        repo = copy_repo("closed-pair", CLOSED_PAIR)
+        self.assertEqual(copy_status(repo, 381), "closed", "the fixture copy must hold item 381 closed")
+        out = self.stop(self.turn(report("Items:\n> - 214: pick a or b\n> - 381: pick c")), repo)
+        self.assert_refused(out, [214, 381], "Items: then bullets with text after 214 and 381, both closed")
+
+    def test_labelled_bullets_name_every_item(self):
+        # Catches: a list under a label such as "Items waiting on you:" read as no cite, so item 214 closed passes.
+        repo = copy_repo("closed-pair", CLOSED_PAIR)
+        self.assertEqual(copy_status(repo, 381), "closed", "the fixture copy must hold item 381 closed")
+        out = self.stop(self.turn(report("Items waiting on you:\n> - 214: pick\n> - 381: pick")), repo)
+        self.assert_refused(out, [214, 381], "Items waiting on you: then bullets of 214 and 381, both closed")
+
+    def test_numbered_list_names_the_items_not_the_markers(self):
+        # Catches: the list markers "1." and "2." read as cites, and items 214 and 381 after them read as no cite.
+        repo = copy_repo("numbered-list", NUMBERED)
+        self.assertEqual(copy_status(repo, 1), "closed", "the fixture copy must hold item 1 closed")
+        out = self.stop(self.turn(report("items:\n> 1. 214\n> 2. 381")), repo)
+        self.assert_cites_only(out, [214, 381], "items: then a numbered list of 214 and 381, 1 and 2 closed")
+
+    def test_items_list_with_and_names_all_three(self):
+        # Catches: "items 214, 381 and 383" read as fewer than its three items.
+        repo = copy_repo("closed-all", CLOSED_ALL)
+        self.assertEqual(copy_status(repo, 383), "closed", "the fixture copy must hold item 383 closed")
+        out = self.stop(self.turn(report("items 214, 381 and 383 are open.")), repo)
+        self.assert_refused(out, [214, 381, 383], "items 214, 381 and 383, all closed")
+
+    def test_two_item_list_names_both(self):
+        # Catches: "items 7 and 9" read as item 7 alone, so item 9 closed passes.
+        repo = copy_repo("closed-7-9", SEVEN_NINE)
+        self.assertEqual(copy_status(repo, 9), "closed", "the fixture copy must hold item 9 closed")
+        out = self.stop(self.turn(report("items 7 and 9 are open.")), repo)
+        self.assert_refused(out, [7, 9], "items 7 and 9, both closed")
+
+    def test_item_n_of_m_names_item_n(self):
+        # Catches: "Item 1 of 3" read as no cite. Item 1 is the cite; the 3 is not pinned here (a note).
+        repo = copy_repo("closed-1-of-3", CLOSED_1_OF_3)
+        self.assertEqual(copy_status(repo, 1), "closed", "the fixture copy must hold item 1 closed")
+        out = self.stop(self.turn(report("Item 1 of 3 needs your pick.")), repo)
+        self.assert_refused(out, [1], "Item 1 of 3, item 1 closed")
+
+
+class ClosedItemFalseCiteTests(ClosedItemFixture):
+    """A number in the text that is no page item is no cite. Each text refuses on its real item alone, with the false
+    number closed in the copy, so a false cite would name it in the refusal."""
+
+    def check_false_cite(self, text, false_n, what, cited=(214,)):
+        repo = copy_repo("false-cites", FALSE_CITES)
+        self.assertEqual(copy_status(repo, false_n), "closed", "the fixture copy must hold item %d closed" % false_n)
+        out = self.stop(self.turn(report(text)), repo)
+        self.assert_cites_only(out, list(cited), what)
+
+    def test_count_after_list_is_no_cite(self):
+        # Catches: "381, 2 of which" read as a list that cites item 2. Items 214 and 381 are the cites.
+        self.check_false_cite("items 214 and 381, 2 of which are open.", 2, "items 214 and 381, 2 of which are open",
+                              cited=(214, 381))
+
+    def test_count_after_and_is_no_cite(self):
+        # Catches: "and 5 others" read as a list that cites item 5.
+        self.check_false_cite("item 214 and 5 others.", 5, "item 214 and 5 others")
+
+    def test_more_after_and_is_no_cite(self):
+        # Catches: "and 3 more tests" read as a list that cites item 3.
+        self.check_false_cite("item 214 and 3 more tests.", 3, "item 214 and 3 more tests")
+
+    def test_dash_option_is_no_cite(self):
+        # Catches: "214 - 3 options" read as a range that cites item 3.
+        self.check_false_cite("item 214 - 3 options.", 3, "item 214 - 3 options")
+
+    def test_clock_time_is_no_cite(self):
+        # Catches: the hour of "10:30 CST" read as a list item that cites item 10.
+        self.check_false_cite("item 214, 10:30 CST.", 10, "item 214, 10:30 CST")
+
+    def test_fraction_is_no_cite(self):
+        # Catches: "11/10" read as cites of items 11 and 10.
+        self.check_false_cite("item 214 and 11/10.", 11, "item 214 and 11/10")
+
+    def test_ordinal_is_no_cite(self):
+        # Catches: "3rd" read as item 3.
+        self.check_false_cite("item 214 or 3rd.", 3, "item 214 or 3rd")
+
+    def test_percent_is_no_cite(self):
+        # Catches: "5% done" read as item 5.
+        self.check_false_cite("item 214, 5% done.", 5, "item 214, 5% done")
+
+    def test_hour_count_is_no_cite(self):
+        # Catches: "24h wait" read as item 24.
+        self.check_false_cite("item 214 and 24h wait.", 24, "item 214 and 24h wait")
+
+    def test_blockquoted_bullet_option_after_item_is_no_cite(self):
+        # Catches: the same bullet, blockquoted, read as a cite of item 3.
+        self.check_false_cite("item 214\n> - 3 options", 3, "item 214, then a blockquoted bullet '> - 3 options'")
+
+    def test_option_bullet_after_a_pick_is_no_cite(self):
+        # Catches: the option bullet "- 1 a: ship" under "Pick for item 214" read as a cite of item 1.
+        self.check_false_cite("Pick for item 214\n> - 1 a: ship", 1, "Pick for item 214, then a bullet '- 1 a: ship'")
 
 
 class ClosedItemPassTests(ClosedItemFixture):
