@@ -1,0 +1,12 @@
+{
+ "title": "A PR template holds the body lines the merge tool reads, shipped to other repos by skill project-ops",
+ "phase": "now",
+ "status": "todo",
+ "order": 1034,
+ "owner": "triage",
+ "why": "Retrospective session's pick under rule parallelism-keep-going (reversible), from the owner's 16:20 CST question \"... there is no PR template ... is there something to address here?\".",
+ "note": "Add .github/pull_request_template.md with Retire-run: and Drops-lines:, and ship it through skill project-ops. Stops sessions reporting 'no PR template'. Not an owner ruling.",
+ "updatedAt": "2026-11-10T16:27:00-06:00",
+ "lane": "",
+ "blockedBy": []
+}
