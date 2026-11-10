@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 16:25 CST.
+the history. Last rewrite: 2026-11-10 16:29 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -199,6 +199,19 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   list. After it, wrong refusals are notes only. If they turn out to be a problem again, revisit a
   threshold (a guard with 3 recorded wrong refusals gets its own lane). Home: new decision
   cull-guard-wrong-refusals, beside cull-rules (PR #2568, branch cull-false-alarms-once).
+- **R16. A mistake is filed as a missing guard, by a hook.** Owner 16:22 CST Nov 10: "i thought i've
+  already set something really high up in claude.md or elsewhere that sessions/agents should never
+  assume an error is their own and instead should strongly be raised awareness that any error they make
+  might be a strong INDICATOR that a guard/something-0mechanical should be in place?"; 16:25 CST: "yes
+  agreed-- that or we create a hook taht looks for this kind of prose when the session says it so taht
+  way the HOOK/judge files it not the session itself". Rule building-mistake-names-its-guard opens:
+  "Read a mistake first as a missing guard or check, never as a fault to own: the way we work should
+  make accidents hard." The report gives `Cause:` (what made it easy) and `Guard:` (built, queued or
+  debt). A Stop hook spots a mistake told in a reply and its judge files the missing guard to triage,
+  so the session does not file it itself. It runs inside the existing Stop hook; no new process.
+  Cause that led here: the feedback-log hook writes a message heading without telling the session, so
+  it wrote a second one twice (step inbox-dup-heading-merge). Home: CLAUDE.md
+  building-mistake-names-its-guard; decision guard-remedy-not-to-owner.
 
 ### 3.7 One model table
 
