@@ -11,7 +11,7 @@ session_013NEJKynEHKFPsDyJTieAUi	09:42 CST	09:43 CST	KEEP
 session_013NEJKynFH16ipe94euH9od	09:42 CST	09:43 CST	handoff-B
 session_013NEJKyoXvBfn7q6bpofjYg	09:42 CST	09:43 CST	KEEP
 session_013NEJKyooYBqTh9KkQWNHwe	09:42 CST	09:43 CST	KEEP
-session_013CpPcA1xXsuDXLdsWU4WYc	09:42 CST		send-failed: elevated_session_untrusted_device (session runs on owner computer; needs owner trust card)
+session_013CpPcA1xXsuDXLdsWU4WYc	09:42 CST		send-failed: owner-computer session; owner 10:17 CST: disregard (asked separately)
 session_013NEJKyoqH7Pdyv1k1rK8bE	09:43 CST	09:43 CST	KEEP
 session_013NEJKypkpzqdbSUr7rAwAn	09:43 CST	09:44 CST	handoff-B
 session_013NEJKypwFEtaJwfYrMpZ5T	09:43 CST	09:43 CST	handoff-B
@@ -187,69 +187,69 @@ session_013NEJL1UMoM1VHADdYGDUZz	09:53 CST	09:53 CST	KEEP
 session_013NEJL1Umc5vUUPV286bXnV	09:53 CST	09:54 CST	handoff-B
 session_013NEJL1VtpMs3Aw5JLtyvVD	09:53 CST	09:54 CST	KEEP
 session_013NEJL1WFQtTFeWPY7r1qYP	09:53 CST	09:54 CST	KEEP
-session_013NEJL1Ww5ei4o5dFv1mdT9	09:53 CST		sent
+session_013NEJL1Ww5ei4o5dFv1mdT9	09:53 CST	09:54 CST	handoff-B
 session_013NEJL1YhjiXhaxqz8244Ge	09:53 CST	09:54 CST	handoff-B
-session_013NEJL1YxsYqim39RK6JeZP	09:53 CST		sent
+session_013NEJL1YxsYqim39RK6JeZP	09:53 CST	09:54 CST	handoff-B
 session_013NEJL1bHn1Kqa94WW5wnW4	09:53 CST	09:53 CST	handoff-B
-session_013NEJL1cp45E4ttwFy1ngig	09:53 CST		sent
+session_013NEJL1cp45E4ttwFy1ngig	09:53 CST	09:54 CST	KEEP
 session_013NEJL1f9CA1PTZPYsRhFQV	09:53 CST		sent
-session_013NEJL1fQaNp75QW37StZfW	09:53 CST		sent
+session_013NEJL1fQaNp75QW37StZfW	09:53 CST	09:54 CST	KEEP
 session_013NEJL1fiv86hWsZGWhjPR6	09:53 CST	09:54 CST	handoff-B
-session_013NEJL1h7mKMtSVohetjaW1	09:53 CST		sent
-session_013NEJL1jPC89ae6X6Pa4jmf	09:53 CST		sent
-session_013NEJL1kNibiCCZ1b61YNWy	09:53 CST		sent
-session_013NEJL1kQxGCtbbcv6xGfeE	09:53 CST		sent
-session_013NEJL1kqjrZZqdqpz3eaGB	09:53 CST		sent
-session_013NEJL1nA83YuznrBBaUdv6	09:55 CST		sent
-session_013NEJL1nAsHBKJTpeHV1sJN	09:55 CST		sent
-session_013NEJL1oJqBhSKif1484UZ4	09:55 CST		sent
-session_013NEJL1q9xCaEWZfB6KebLx	09:55 CST		sent
-session_013NEJL1qigiKQJb7Z7QZ4WT	09:55 CST		sent
-session_013NEJL1rJepBiu21f6Rv9jG	09:55 CST		sent
-session_013NEJL1s91Kb775BV6ECCxH	09:55 CST		sent
+session_013NEJL1h7mKMtSVohetjaW1	09:53 CST	09:54 CST	handoff-B
+session_013NEJL1jPC89ae6X6Pa4jmf	09:53 CST	09:55 CST	handoff-B
+session_013NEJL1kNibiCCZ1b61YNWy	09:53 CST	09:54 CST	handoff-B
+session_013NEJL1kQxGCtbbcv6xGfeE	09:53 CST	09:54 CST	KEEP
+session_013NEJL1kqjrZZqdqpz3eaGB	09:53 CST	09:54 CST	handoff-B
+session_013NEJL1nA83YuznrBBaUdv6	09:55 CST	09:54 CST	handoff-B
+session_013NEJL1nAsHBKJTpeHV1sJN	09:55 CST	09:54 CST	KEEP
+session_013NEJL1oJqBhSKif1484UZ4	09:55 CST	09:54 CST	handoff-B
+session_013NEJL1q9xCaEWZfB6KebLx	09:55 CST	09:55 CST	KEEP
+session_013NEJL1qigiKQJb7Z7QZ4WT	09:55 CST	09:54 CST	handoff-B
+session_013NEJL1rJepBiu21f6Rv9jG	09:55 CST	09:54 CST	handoff-B
+session_013NEJL1s91Kb775BV6ECCxH	09:55 CST	09:54 CST	KEEP
 session_013NEJL1tSPqSx7QonoVwudz	09:55 CST		sent
-session_013NEJL1xdQmJC85BLQucDP9	09:55 CST		sent
-session_013NEJL1yXEvUDdtXJ7QhYRE	09:55 CST		sent
-session_013NEJL213WYGvCs1ZRhXX4V	09:55 CST		sent
+session_013NEJL1xdQmJC85BLQucDP9	09:55 CST	09:55 CST	KEEP
+session_013NEJL1yXEvUDdtXJ7QhYRE	09:55 CST	09:54 CST	handoff-B
+session_013NEJL213WYGvCs1ZRhXX4V	09:55 CST	09:55 CST	handoff-B
 session_013NEJL22VqTY2w3YtemTyH1	09:55 CST		sent
-session_013NEJL22tdtt5hCLt3whgm1	09:55 CST		sent
-session_013NEJL232Ko7dmr4v3fmrvF	09:55 CST		sent
+session_013NEJL22tdtt5hCLt3whgm1	09:55 CST	09:55 CST	handoff-B
+session_013NEJL232Ko7dmr4v3fmrvF	09:55 CST	09:56 CST	handoff-B
 session_013NEJL24NSUGQwdDXK4sqrb	09:55 CST		sent
-session_013NEJL25kXsYSFJpzGQnKKe	09:55 CST		sent
-session_013NEJL27ELEZB4SAw7gHmkq	09:55 CST		sent
-session_013NEJL27bB3sjZacDv3K9e4	09:55 CST		sent
-session_013NEJL27e8puG926YPKVUMf	09:55 CST		sent
-session_013NEJL28sozZFoz9wzHLJGb	09:55 CST		sent
-session_013NEJL294xwrFinHwofhyir	09:55 CST		sent
-session_013NEJL29GcaaeoS7a1SJYA2	09:55 CST		sent
-session_013NEJL29QJZ3US3nyhcFYrg	09:55 CST		sent
-session_013NEJL2B1oRJaBTe16wm1VG	09:55 CST		sent
-session_013NEJL2B6FrRWBCF8RWpq8y	09:55 CST		sent
-session_013NEJL2BusqrX6qy1CCAgoH	09:56 CST		sent
-session_013NEJL2C3ooJFEuJnsQf4yT	09:56 CST		sent
-session_013NEJL2CTcj9UVLR4KHoUN5	09:56 CST		sent
-session_013NEJL2ChVc4QiMs2icnEB8	09:56 CST		sent
-session_013NEJL2CijYGjSSCcJqnVvv	09:56 CST		sent
-session_013NEJL2D1c515dDRJrYJeuf	09:56 CST		sent
+session_013NEJL25kXsYSFJpzGQnKKe	09:55 CST	09:55 CST	handoff-B
+session_013NEJL27ELEZB4SAw7gHmkq	09:55 CST	09:55 CST	KEEP
+session_013NEJL27bB3sjZacDv3K9e4	09:55 CST	09:55 CST	handoff-B
+session_013NEJL27e8puG926YPKVUMf	09:55 CST	09:55 CST	handoff-B
+session_013NEJL28sozZFoz9wzHLJGb	09:55 CST	09:55 CST	KEEP
+session_013NEJL294xwrFinHwofhyir	09:55 CST	09:55 CST	KEEP
+session_013NEJL29GcaaeoS7a1SJYA2	09:55 CST	09:55 CST	KEEP
+session_013NEJL29QJZ3US3nyhcFYrg	09:55 CST	09:55 CST	handoff-B
+session_013NEJL2B1oRJaBTe16wm1VG	09:55 CST	09:55 CST	KEEP
+session_013NEJL2B6FrRWBCF8RWpq8y	09:55 CST	09:55 CST	KEEP
+session_013NEJL2BusqrX6qy1CCAgoH	09:56 CST	09:55 CST	handoff-B
+session_013NEJL2C3ooJFEuJnsQf4yT	09:56 CST	09:55 CST	handoff-B
+session_013NEJL2CTcj9UVLR4KHoUN5	09:56 CST	09:56 CST	handoff-B
+session_013NEJL2ChVc4QiMs2icnEB8	09:56 CST	09:56 CST	KEEP
+session_013NEJL2CijYGjSSCcJqnVvv	09:56 CST	09:56 CST	KEEP
+session_013NEJL2D1c515dDRJrYJeuf	09:56 CST	09:56 CST	handoff-B
 session_013NEJL2DBWxESS5TMW5cCFW	09:56 CST		sent
-session_013NEJL2DJxvbzn1xQzk8nkK	09:56 CST		sent
-session_013NEJL2DcpM9XMtKwYxrYiu	09:56 CST		sent
-session_013NEJL2DeoKFVg6TCE2pT2F	09:56 CST		sent
-session_013NEJL2ESvfj9vmLqdMhDQk	09:56 CST		sent
-session_013NEJL2Eio9EnSRWs5gWQ2Z	09:56 CST		sent
+session_013NEJL2DJxvbzn1xQzk8nkK	09:56 CST	09:56 CST	KEEP
+session_013NEJL2DcpM9XMtKwYxrYiu	09:56 CST	09:56 CST	handoff-B
+session_013NEJL2DeoKFVg6TCE2pT2F	09:56 CST	09:56 CST	handoff-B
+session_013NEJL2ESvfj9vmLqdMhDQk	09:56 CST	09:56 CST	KEEP
+session_013NEJL2Eio9EnSRWs5gWQ2Z	09:56 CST	09:56 CST	KEEP
 session_013NEJL2GCahFnLKLzmw1JAM	09:56 CST		sent
-session_013NEJL2GctUCgksFKSWZykD	09:56 CST		sent
+session_013NEJL2GctUCgksFKSWZykD	09:56 CST	09:56 CST	KEEP
 session_013NEJL2JcSvHjsxTcrYXxwa	09:56 CST		sent
-session_013NEJL2KVnRww4daXVBQyAK	09:56 CST		sent
+session_013NEJL2KVnRww4daXVBQyAK	09:56 CST	09:56 CST	KEEP
 session_013NEJL2KhBtBKhdyNpyv8c6	09:56 CST		sent
-session_013NEJL2L6zBtUfVRwm5DrXB	09:56 CST		sent
+session_013NEJL2L6zBtUfVRwm5DrXB	09:56 CST	09:56 CST	KEEP
 session_013NEJL2LYXQpmabnoQqYgNv	09:56 CST		sent
-session_013NEJL2NVN5RjCgjRQFXeps	09:56 CST		sent
+session_013NEJL2NVN5RjCgjRQFXeps	09:56 CST	09:56 CST	handoff-B
 session_013NEJL2NiG8k8Ni4BMMeSgi	09:56 CST		sent
 session_013NEJL2RXfa7QBPNAXaXgp4	09:56 CST		sent
 session_013NEJL2RYun1AZqEEhFo93w	09:56 CST		sent
 session_013NEJL2Rd7tasVqys45cgDA	09:56 CST		sent
-session_013NEJL2GCqtkmpEVLrpgPF2	09:56 CST		sent
+session_013NEJL2GCqtkmpEVLrpgPF2	09:56 CST	09:56 CST	handoff-B
 session_013NEJL2RiaN86vFhzoAaSH1	09:57 CST		sent
 session_013NEJL2TFqvPsYvtYHenDfX	09:57 CST		sent
 session_013NEJL2Tw3CgetFAQ4nj252	09:57 CST		sent
@@ -422,23 +422,23 @@ session_013NEJL4UZnwcbTxUfsYRPJa	10:05 CST		sent
 session_0144AEXiFqnP3ow1BYkrpztU	10:05 CST		sent
 session_014d4zM2pmw7Nd14cBJkxir8	10:05 CST		sent
 session_014t6xuYdftdKq28XUqfknku	10:05 CST		sent
-session_014yoGuf7dVnAJCg3BpduyST	10:05 CST		send-failed: elevated_session_untrusted_device (session runs on owner computer; needs owner trust card)
+session_014yoGuf7dVnAJCg3BpduyST	10:05 CST		send-failed: owner-computer session; owner 10:17 CST: disregard (asked separately)
 session_015B7wi5Etb2S3u2fy8pwnVG	10:05 CST		sent
-session_015SLfvnEjCkkqxPhA6P3tuD	10:05 CST		send-failed: elevated_session_untrusted_device (session runs on owner computer; needs owner trust card)
+session_015SLfvnEjCkkqxPhA6P3tuD	10:05 CST		send-failed: owner-computer session; owner 10:17 CST: disregard (asked separately)
 session_016NGoKJ4jh6KpoTTViKzNUx	10:05 CST		sent
 session_016UnUyB2EiEhYQZNftSptkt	10:05 CST		sent
 session_0174di3gEAr5vNVTXBeQR2rL	10:05 CST		sent
 session_017s8MMczdS2P8TSXCzZkaPC	10:05 CST		sent
 session_019xSGuF2J3MJzvVX7Ga3Ugb	10:05 CST		sent
-session_01AL1Jo6WJrsZ3jhw7pnuRrn	10:06 CST		send-failed: elevated_session_untrusted_device (session runs on owner computer; needs owner trust card)
-session_01B681pq5itFLcWGdeCWKppE	10:06 CST		send-failed: elevated_session_untrusted_device (session runs on owner computer; needs owner trust card)
+session_01AL1Jo6WJrsZ3jhw7pnuRrn	10:06 CST		send-failed: owner-computer session; owner 10:17 CST: disregard (asked separately)
+session_01B681pq5itFLcWGdeCWKppE	10:06 CST		send-failed: owner-computer session; owner 10:17 CST: disregard (asked separately)
 session_01BV8VSaD93LNrs46Egm6PoE	10:06 CST		sent
 session_01CZ4qz6ceNPvKDgQVJo4Xi2	10:06 CST		sent
 session_01CoYSFeLUuhpiRLDsUrmqkS	10:06 CST		sent
 session_01Cq53qcnUW15mgDVC39SP7T	10:06 CST		sent
-session_01DUdRXDfh6AEsbUwoHkeZBp	10:06 CST		send-failed: elevated_session_untrusted_device (session runs on owner computer; needs owner trust card)
+session_01DUdRXDfh6AEsbUwoHkeZBp	10:06 CST		send-failed: owner-computer session; owner 10:17 CST: disregard (asked separately)
 session_01DVTencg9t315P8JyYeAVG1	10:06 CST		sent
-session_01EF83E9waMWojCy4MN6ab32	10:06 CST		send-failed: elevated_session_untrusted_device (session runs on owner computer; needs owner trust card)
+session_01EF83E9waMWojCy4MN6ab32	10:06 CST		send-failed: owner-computer session; owner 10:17 CST: disregard (asked separately)
 session_01EovFXnH5Swyi83uZeFMoFX	10:06 CST		sent
 session_01FD5nuEeSeT9JNEbaUt4qFd	10:06 CST		sent
 session_01FkzhWvsqYKZ1TuUk429JvH	10:06 CST		sent
@@ -461,15 +461,15 @@ session_01RDGCUUkszkLPYzLQHxNtPK	10:07 CST		sent
 session_01RyyZrSx7rhXGKK32bddSnN	10:07 CST		sent
 session_01SgcjiBCba6VLikJZDC6K4Z	10:07 CST		sent
 session_01SpTenJpkDebQXfjUnch56H	10:07 CST		sent
-session_01T7m1AubUpe1uqF59qdRhUo	10:07 CST		send-failed: elevated_session_untrusted_device (session runs on owner computer; needs owner trust card)
-session_01TBn5AhuGreryJ88cTLC89x	10:07 CST		send-failed: elevated_session_untrusted_device (session runs on owner computer; needs owner trust card)
+session_01T7m1AubUpe1uqF59qdRhUo	10:07 CST		send-failed: owner-computer session; owner 10:17 CST: disregard (asked separately)
+session_01TBn5AhuGreryJ88cTLC89x	10:07 CST		send-failed: owner-computer session; owner 10:17 CST: disregard (asked separately)
 session_01TEvwDZ4iizDAvv1oQFoxXe	10:07 CST		sent
-session_01TdxbfSHJFiW5Rgnsxxtkvg	10:07 CST		send-failed: elevated_session_untrusted_device (session runs on owner computer; needs owner trust card)
+session_01TdxbfSHJFiW5Rgnsxxtkvg	10:07 CST		send-failed: owner-computer session; owner 10:17 CST: disregard (asked separately)
 session_01Tu2tJxUvHyxQxE7DRxwxhg	10:07 CST		sent
 session_01UPr96pUwvHdim1Sf5FfrwW	10:07 CST		sent
-session_01UVJG46KjTAHoH7UwwBQdM3	10:07 CST		send-failed: elevated_session_untrusted_device (session runs on owner computer; needs owner trust card)
+session_01UVJG46KjTAHoH7UwwBQdM3	10:07 CST		send-failed: owner-computer session; owner 10:17 CST: disregard (asked separately)
 session_01VHYEHNLx1q5gyBP7XgFQhV	10:07 CST		sent
-session_01XF8kTrDtsbzhV7zYbiraqk	10:07 CST		send-failed: elevated_session_untrusted_device (session runs on owner computer; needs owner trust card)
+session_01XF8kTrDtsbzhV7zYbiraqk	10:07 CST		send-failed: owner-computer session; owner 10:17 CST: disregard (asked separately)
 session_01XpdbbXWtWefP3bu6G4mpZc	10:07 CST		sent
 session_01YXgcE6ogd4kbEBbHphGyoz	10:07 CST		sent
 session_01YaMRQNMPVk9JotL4rwb9uR	10:07 CST		sent
