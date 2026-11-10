@@ -918,7 +918,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askc.rline .frow > .g { margin-top: 7px; }
 .frow .fhead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .frow .fhead .ftext { flex: 0 1 auto; }
-/* From 701px the head is one row: a long text shrinks and is cut with an ellipsis, so the number, the new mark and the home keep their place. Under 701px the head wraps, because 521 to 700px has no room for a readable title beside the number, the new mark and the home. */
+/* From 701px the head is one row: a long text shrinks and is cut with an ellipsis, so the number, the new mark and the home keep their place. Under 701px the head wraps. With the New reply mark drawn, a one-row head leaves the title under 60 px below about 665px, so the break sits at 701px, a round figure above that width with a margin. Its other widths are 520px and 960px, so 701px is this rule's own choice. */
 @media (min-width: 701px) {
   .frow .fhead { flex-wrap: nowrap; }
   .frow .fhead .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
