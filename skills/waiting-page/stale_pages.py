@@ -83,7 +83,9 @@ file, a file of the wrong shape (meta not an object, items or answers not a list
 `at` prints an `unknown:` line and exits 2.
 Cost: one python process, reads 3 files, writes none, starts no git, no timer.
 
-Unread mode, run by the writer at each wake and turn start (SKILL.md, "Read the answers"):
+Unread mode, run by the writer at a comment wake, never at turn start (SKILL.md, "Read the answers").
+At the end of that wake the writer writes `woke`: `ArtifactData update meta/page` with only `woke`, ISO UTC with a
+trailing Z, and never on exit 2.
 
     python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>
 
@@ -94,12 +96,14 @@ read back, in answers.json order, then exit 1:
 (`?` for a missing n or owner). An answer is listed when it is an item answer (not `park.<id>`, `parked: true` or
 act `park`), its item exists (open, or closed with the answer kept), its `at` is earlier than meta `woke` (the
 writer's previous wake) and no receipt with the answer's id has a `read` at or after `at`. A receipt with only `filed`
-does not clear it. With no `woke` (absent or null) every answer with no such receipt is listed, and the last field
-reads `before wake: none recorded`. With none listed, `unread: clean` and exit 0. A missing or unreadable file, a file
-of the wrong shape (meta not an object, the others not a list), an unreadable `woke`, an answer with no readable `at`
+does not clear it (the check reads `read` only, never `filed`). With no `woke` (absent or null) every answer with
+no such receipt is listed, and the last field reads `before wake: none recorded`. With none listed,
+`unread: clean` and exit 0. A missing or unreadable file, a file of the wrong shape (meta not an object, the others
+not a list), an unreadable `woke`, an answer with no readable `at`
 or a compared receipt with no readable `read` prints an `unknown:` line and exits 2.
 The mode reads no clock and has no time bound: what it lists depends on the saved files alone. `woke` is the writer's
-own optional field in meta/page. The incident: item 143's answer stayed unread for 10.5 hours.
+own optional field in meta/page. The incident: a page item whose answer sat unread 10.5 h (ask ask-mwa09pjosw,
+2026-11-09).
 Cost: one python process, reads 4 files, writes none, starts no git, no timer.
 
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
