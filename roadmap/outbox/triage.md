@@ -347,3 +347,7 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - touches-ignores-session-config (#2431): --touches ignores --session/--config; no test pins the closing-reason order.
 - red-run-term (#2431): "red run" in session-tiers.md and merge.py should read "failed run" (glossary).
 - red-fix-earlier-notes (#2431): one parsed line accounts for a whole failed job; rollup exempt even when cancelled; rollup matched by exact name.
+- pfr-model-space-done (#1538 fix-push-needs-fail-record round 3, coordinator 01:12 CST Nov 10): a Done line whose model name has a space, bracket or slash reads as no verdict (hooks guard_push_delete.py, Done-line parse).
+- pfr-fixed-not-cleared (#1538): a later plain record does not clear the Fix check flag.
+- pfr-non-head-push-refused (#1538): a delete, --tags or archive push is refused while a report is unrecorded.
+- pfr-assign-subst-create (#2359): `VAR=$(cat f) gh pr create` reads as no PR.
