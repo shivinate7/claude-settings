@@ -59,12 +59,16 @@ Each open PR gets exactly one next act. The tool reads it from GitHub alone. The
 
 - Done review record for the live head: `batch`.
 - Review record open: `lane round n`, n the next round owed. A failed fix check: `lane round 1`.
-- Review record stale, newest record has no Fix check line: fix check. Stale, it has one: fix check when that Fix check PASSed and the live head is a merge of the base into that record's Head, shaped as `--fix-check` accepts it. Otherwise new lane at round 1 (decision `pr-review-record`, its one exception; step `fix-check-after-main-merge`, a fix check after a merge of main; rule `roles-review-cap-three`).
+- Review record stale, newest record has no Fix check line: fix check.
+- Review record stale, newest record has a Fix check that PASSed: fix check only for a merge of the base. `--fix-check` admits the live head only when it has two parents, its first parent is the record's Head, and its second parent is on origin/main.
+  - Not built yet (step `fix-check-after-main-merge`, a fix check after a merge of main): the record's PASS must also read as done under `review_state`. The head's tree must equal git's clean merge of its two parents (`git merge-tree`).
+  - A conflicted merge is not a merge fix check. It needs its own fix check by a reviewer.
+- Review record stale, in any other case, a failed fix check included: new lane at round 1 (decision `pr-review-record`; rule `roles-review-cap-three`).
 - Label `held`, `parked` or `replaced`, with a `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line: `waits on` that debt or item.
 - Label `batch` on an integration PR: `batch run`. It counts against the batch limit, aged from the label's last `labeled` event.
 - Based on, or stacked on, #N: blocked on #N.
 - Draft with no record: `lane round 1`.
-- None of these: `NO NEXT ACT` (red).
+- None of these: no next act, shown red.
 
 The first match wins, in this order. A held or unparseable record matches no record rule, so it falls to the label, blocked and draft rules. A stacked PR with a done record reads `batch`; the merge refuses one that cannot merge cleanly.
 

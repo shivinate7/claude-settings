@@ -64,9 +64,9 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 
 The review a changed head owes. Coordinator pick (owner session coordinator, 2026-11-08 to 2026-11-09). Process-only, not the owner's words. A lane reads it instead of asking.
 
-- A chain gets one fix check, except a merge of the base into the fixed head after that fix check PASSed (see the last bullet under The limits).
+- A chain gets one fix check, except a clean merge of the base into the fixed head after that fix check PASSed (see the last bullet under The limits).
 - The PR gets one fresh full review at the live head when any of these holds:
-  - the newest record holds a fix check, unless that fix check PASSed on a merge of the base into the fixed head. Such a PASS closes the review for any change whose rounds are complete, with Guard or check `yes` or `no` (triage ruling, 2026-11-10 13:40 CST. Process-only, not the owner's words);
+  - the newest record holds a fix check, unless that fix check PASSed on a merge of the base into the fixed head and the merge meets the rules under The limits. Such a PASS closes the review for any change whose rounds are complete, with Guard or check `yes` or `no` (triage ruling, 2026-11-10 13:40 CST. Process-only, not the owner's words);
   - a fix check failed;
   - a round read an older head than the live one;
   - the record was made or edited by hand;
@@ -81,6 +81,7 @@ The review a changed head owes. Coordinator pick (owner session coordinator, 202
 - A round 3 FAIL with net value at or above zero merges (round 3 done rule above).
 - A lane merges origin/main once, after the pending batch lands. It uses an ordinary merge commit. It never replays, rebases or force-pushes.
 - A merge with both test and product conflicts waits for the mixed-merge route, which is on main (decision `builders-cannot-edit-tests`, Builders cannot edit tests, its merge route; owner, 2026-11-08 10:05 CST, waiting-page item 420 pick a; cases in `hooks/test_guard.py`).
+- Any other conflicted merge is not a merge fix check. It needs its own fix check by a reviewer, in place of the fresh full review above.
 
 ## The cost
 
@@ -90,7 +91,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
 - Each ready PR that has a record adds three reads: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
-- `merge <pr> --review-record`: one PR read, plus one read per page of 100 changed files: two reads for a PR of 100 files or fewer. The tests `ReviewGuardCost` and `ReviewGuardHostFiles` pin them. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. When the newest earlier record holds a PASS Fix check line, it also reads the `--head` commit, and one compare when that commit has two parents whose first is HEAD. It writes nothing.
+- `merge <pr> --review-record`: one PR read, plus one read per page of 100 changed files: two reads for a PR of 100 files or fewer. The tests `ReviewGuardCost` and `ReviewGuardHostFiles` pin them. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. When the newest earlier record holds a PASS Fix check line, it also reads the `--head` commit, and one compare when that commit has two parents whose first is HEAD. It writes nothing. Once the tree check is built, it adds one local `git merge-tree` run on that same path: a process start, no gh call, no file.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
 
@@ -108,12 +109,13 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
-- One fix check per record. A second fix on a fixed head starts a new lane at round 1, except a merge of the base into that head. `--fix-check` checks in this order:
+- One fix check per record. A second fix on a fixed head starts a new lane at round 1, except a clean merge of the base into that head (below). A conflicted merge gets its own fix check by a reviewer instead. `--fix-check` checks in this order:
   - HEAD must be the Head of the newest earlier record on the PR. Otherwise it refuses (exit 2).
   - If that record has no Fix check line, it accepts the fix check.
   - If that record has a PASS Fix check line, the `--head` commit must have exactly two parents. Its first parent must be HEAD. Its second parent must be on the PR's base branch: the base branch contains it, so GitHub's compare reads ahead or identical. Otherwise it refuses (exit 2).
   - A FAIL Fix check on that record refuses (exit 2).
-  - The exception is a coordinator's ask, 2026-11-10 13:03 CST, for roadmap step `fix-check-after-main-merge` (a fix check after a merge of main). Process-only, not the owner's words.
+  - Not built yet: the PASS record must also read as done under `review_state`, and the `--head` tree must equal git's clean merge of the two parents (`git merge-tree`). A conflicted merge fails that check.
+  - This route came from a coordinator's ask, 2026-11-10 13:03 CST, for roadmap step `fix-check-after-main-merge` (a fix check after a merge of main). Process-only, not the owner's words.
 
 ## Lane picks
 
