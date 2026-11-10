@@ -25,12 +25,12 @@ General rule, from the same answer: a margin multiplies the measured value, for 
 
 Nothing here is built. Each item is code, a value or a script.
 
-- The silence stop in each local tool. Each leaves the code for it: `merge/merge.py` `LINT_SECONDS = 1200` (the lint run and `ci_job_run`), `lint/check_debt_retire.py` `TIMEOUT = 600`, `hooks/mutate_guard.py` and `janitor/mutate_sweep.py` (one 1200 s `timeout=` each), `lint/check_python_floor.py` `TIMEOUT = 300`.
+- The silence stop in each local tool. Each leaves the code for it: `merge/merge.py` `LINT_SECONDS = 3600` (the lint run and `ci_job_run`; was 1200, the interim raise in pull request 2557), `lint/check_debt_retire.py` `TIMEOUT = 1800` (was 600, the interim raise in pull request 2557), `hooks/mutate_guard.py` and `janitor/mutate_sweep.py` (one 3600 s `timeout=` each; was 1200 s, the interim raise in pull request 2557), `lint/check_python_floor.py` `TIMEOUT = 900` (was 300, the interim raise in pull request 2557).
 - The silence stop for verdict checks in `hooks/stall_watch.py`. It never stops a job today.
 - The silence window per tool, and the multiplier. Neither value is set. The window N is unmeasured.
 - The CI job limits, computed by a script from recent green runs. Their stored values stay in force until the reader is built (decision `ci-job-caps`).
 - The limit of a new CI job: 1.5 times its nearest similar job's computed limit. A new job that hits its limit in its first one or two runs moves to 1.5 times the largest current job's computed limit (decision `ci-job-caps`, New jobs section).
-- `merge.deadlineMinutes` (65, stored in `.github/stamp.json`). It is computed from the current CI job limits, and never stored. It stays 65 until the reader is built.
+- `merge.deadlineMinutes` (80 today, stored in `.github/stamp.json`; was 65, the interim raise in pull request 2557). The rule: computed from the current CI job limits, never stored. The stored 80 stays until the reader is built.
 
 Kind: process
 Home: merge/merge.py
