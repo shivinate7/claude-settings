@@ -3,8 +3,8 @@
 Kind: build
 Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
-Status: draft until Q4 and build step 2 are settled. Q1 to Q3, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
-Q4 (a timed check-in) is open with the owner. The mailbox build is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
+Status: draft until build step 2 and the 20-message trial run. Q1 to Q4, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
+The mailbox build is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
 Next step: build step 2, the Mac and Windows auth check for `ls-remote`. Step 2 and the 20-message trial
 (step 5) need a Mac session. `MAILBOX_REPO` has no settings.json default until step 2 measures Mac and
 Windows auth. The default needs the owner's typed words. A session sets it in its env until then.
@@ -180,7 +180,7 @@ Design:
    Not yet measured: Mac and Windows auth for `ls-remote`.
 3. Test-author: red cases against a `file://` bare `MAILBOX_REPO`: round trip, push race, take race,
    inform close, offline, cost counts.
-4. Builder, merged as #1371 inside batch-65g (PR #2236): `hooks/mail.py`, `bin/mail`, `bin/mail.cmd` and the
+4. Builder, PR #1371 merged 2026-11-08 inside batch-65g (PR #2236): `hooks/mail.py`, `bin/mail`, `bin/mail.cmd` and the
    `hooks/local_time.py` call. The `settings.json` env default stays unset until step 2 measures Mac and
    Windows auth for `ls-remote`.
 5. Skill section rewrite. Check: a two-session trial of 20 messages, cloud to Mac, none lost, none acted
@@ -193,12 +193,11 @@ Design:
   cannot: the desktop count reads a fixed constant, and both flag-override hooks in the public build return nothing
   (binary 2.1.319, read 2026-11-06 13:14 CST: `getEnvironmentOverrides(){return null}`, `readConfigOverrides(){return}`).
 - Q2, how a lost message is noticed: a session that waits on a reply checks for it. Coordinator pick,
-  2026-11-06 12:48 CST; it can be undone. How it checks waits on Q4. Until then it checks at its next
-  turn start.
-- Q4, open with the owner (sent through triage 2026-11-06 13:22 CST): may a cloud session that waits on a
-  reply set one `send_later` check-in? Rule `outcomes-mechanize-rules` bars tracking on a timer, and rule
-  `git-ci-wait-checks-in` allows a timed check-in. Cost: one one-shot scheduled task per waiting request;
-  it starts no process and writes no file. Recommended: allow it. Owner, 2026-11-10 09:36 CST: has not
-  signed off on the check-in sentence in CLAUDE.md rule `outcomes-mechanize-rules` (commits f966e26e4,
-  7f3d2d601, 0b8296e8e; sessions wrote it); Q4 stays open.
+  2026-11-06 12:48 CST; it can be undone. It checks at its next turn start and may set that one check-in
+  (Q4).
+- Q4, answered by the owner, 2026-11-10 09:39 CST, in his words: "ok one check in is allowed, i just don't
+  think it'll be hollistic enough, but it's allowed that is enough". A cloud session that waits on a reply
+  may set one `send_later` check-in for that one reply. His note: one check-in alone will not cover
+  everything. The sentence in CLAUDE.md rule `outcomes-mechanize-rules` was written by sessions (commits
+  f966e26e4, 7f3d2d601, 0b8296e8e); his answer is what rules it.
 - Q3, scope: the debt fix (done, commit 7059961a) and the git-mailbox build steps 1 to 5. The parser for the message format was dropped 2026-11-06 13:15 CST and stays dropped (rule building-land-design-or-abandon). Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
