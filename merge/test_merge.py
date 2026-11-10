@@ -13455,6 +13455,13 @@ class ReviewFixForm(unittest.TestCase):
         self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(fix_check_line(head=REVIEW_HEAD),))),
                           "parse_review accepted a fix line whose reviewed head is the record's Head")
 
+    def test_a_posted_fix_check_naming_haiku_still_parses(self):
+        # A record posted before the model rule still parses: parse_review never checks the model. Owner item 444 a (decision pr-review-record)
+        # reads a fix check on another model open on every record, and ReviewFixSonnet judges that state.
+        # The case sits in the parser's class, so a builder that moves the model check into parse_review fails here.
+        haiku = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(model="haiku"),))
+        self.assertEqual(parse_text(self, haiku).get("fix"), (REVIEW_OLD_HEAD, "reviewer", "haiku", "PASS"), "the posted haiku fix check did not parse")
+
 class ReviewRecordForm(unittest.TestCase):
     """The form: review_body prints a record and parse_review reads it back. The parser accepts the form and refuses what it does not allow."""
 
@@ -13978,6 +13985,32 @@ class ReviewFixFlag(ReviewEnv):
         rc, out, err = self.run_args("7")
         self.assertEqual(rc, 0, out + err)
 
+    def test_a_fix_check_naming_a_model_other_than_sonnet_is_refused(self):
+        # A fix check runs sonnet (agent-model-cap, the reviewer row; owner item 444 a, the fix check on every pull request). The merge tool refuses the
+        # record that names another model: exit 2, no record, and an error that names the fix check and sonnet. Each refusal has the sonnet
+        # value beside it on the same earlier host, so a base refusal cannot pass for the model refusal.
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(model="sonnet"), host=self.earlier_host())
+        self.assertEqual(rc, 0, "the sonnet fix check, the control beside the refusals, was refused:\n" + out + err)
+        for model in ("haiku", "claude-haiku-5-5", "opus", "claude-opus-5-5", "fable"):
+            with self.subTest(model=model):
+                rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(model=model),
+                                             host=self.earlier_host())
+                self.assertEqual(rc, 2, f"a fix check naming {model} was not refused:\n" + out + err)
+                self.assertNotIn(REVIEW_MARKER, out, f"a fix check naming {model} was refused but still printed a record")
+                self.assertNotIn("Traceback", err)
+                self.assertIsNotNone(re.search(r"fix[ -]check", err, re.I), f"the refusal of {model} does not name the fix check:\n" + err)
+                self.assertIn("sonnet", err, f"the refusal of {model} does not name sonnet:\n" + err)
+
+    def test_a_fix_check_naming_sonnet_prints_the_record(self):
+        # control for the refusal above: sonnet prints the record with its fix line. Owner item 444 a (decision pr-review-record) refuses a longer
+        # id such as claude-sonnet-5-5, so it is not a control here.
+        for model in ("sonnet",):
+            with self.subTest(model=model):
+                rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(model=model),
+                                             host=self.earlier_host())
+                self.assertEqual(rc, 0, f"a fix check naming {model} was refused:\n" + out + err)
+                self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (REVIEW_OLD_HEAD, "reviewer", model, "PASS"))
+
 class ReviewFixBase(ReviewEnv):
     """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of the newest review record already on the pull request, and
     that record has no fix check line. The fix diff then starts from the head the last record reviewed, and a fix never follows a fix. The
@@ -14045,6 +14078,53 @@ class ReviewFixBase(ReviewEnv):
         malformed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus"))
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
         self.assert_refused(rc, out, err)
+
+class ReviewRoundModel(ReviewEnv):
+    """The --round values against the reviewer row (agent-model-cap): a review after the first names sonnet, the last review names opus only by
+    the owner's override, the first review names haiku or sonnet, and a design reviewer names opus. Each refusal sits beside its sonnet twin, which must print a
+    record first, so a missing flag cannot pass for the refusal."""
+
+    def round_flags(self, *rounds):
+        """The review flags for a record with the given --round values, in order, with --head set to the live head of the feature branch."""
+        return ("--kind", "normal", "--guard", "no", "--head", self.head(), *(flag for r in rounds for flag in ("--round", r)))
+
+    def test_a_round_two_or_three_naming_a_model_other_than_sonnet_is_refused(self):
+        pairs = (
+            (("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS"), ("1:reviewer:sonnet:FAIL", "2:reviewer:haiku:PASS"), "round 2 on haiku"),
+            (("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:PASS"),
+             ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:haiku:PASS"), "round 3 on haiku"),
+            (("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS"), ("1:reviewer:sonnet:FAIL", "2:reviewer:opus:PASS"), "round 2 on opus"),
+        )
+        for good, bad, label in pairs:
+            with self.subTest(case=label):
+                rc, out, err = self.run_args("7", "--review-record", *self.round_flags(*good))
+                self.assertEqual(rc, 0, f"the sonnet control for {label} was refused:\n" + out + err)
+                rc, out, err = self.run_args("7", "--review-record", *self.round_flags(*bad))
+                self.assertEqual(rc, 2, f"{label} was not refused:\n" + out + err)
+                self.assertNotIn(REVIEW_MARKER, out, f"{label} was refused but still printed a record")
+                self.assertNotIn("Traceback", err)
+
+    def test_the_rounds_the_row_allows_still_print(self):
+        # controls: the first review on haiku or sonnet, a design reviewer on opus in every review, and the last review on opus by the owner's override
+        cases = (
+            ("1:reviewer:haiku:PASS",),
+            ("1:reviewer:sonnet:PASS",),
+            ("1:reviewer:sonnet:FAIL", "1:design-reviewer:opus:PASS", "2:reviewer:sonnet:FAIL", "2:design-reviewer:opus:PASS",
+             "3:reviewer:sonnet:PASS", "3:design-reviewer:opus:PASS"),
+            ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS"),
+        )
+        for rounds in cases:
+            with self.subTest(rounds=rounds):
+                rc, out, err = self.run_args("7", "--review-record", *self.round_flags(*rounds))
+                self.assertEqual(rc, 0, "a record the row allows was refused:\n" + out + err)
+                parse_text(self, posted_body(self, out))
+
+    def test_a_posted_round_two_on_haiku_still_parses_and_judges_as_its_sonnet_twin(self):
+        # History is never re-judged: a later review on haiku, posted before the rule, parses and reads the same state as its sonnet twin.
+        haiku = record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, haiku, PASS"))
+        sonnet = record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))
+        parse_text(self, haiku)
+        self.assertEqual(record_state(self, haiku), record_state(self, sonnet), "a posted round 2 on haiku reads a different state from its sonnet twin")
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
