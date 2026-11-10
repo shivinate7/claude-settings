@@ -34,7 +34,7 @@
                           or it refuses (exit 2). A fix check's read head is the record's Head. A record that names heads reads done only
                           when every top-round line names the live head, or a fix check PASS follows; else stale. It refuses (exit 2) a
                           top round that is all PASS on a head where an earlier record's top round FAILed or PARTIALed. That earlier
-                          record's own Fix check PASS lifts this rule for its FAIL. A top round all PASS on the head where a lower round of
+                          record's own Fix check PASS lifts this rule for its FAIL. A top round all PASS that reads a head that a lower round of
                           the same record FAILed or PARTIALed is still refused, even with a fix check. A record that names no head compares
                           Heads, and FAIL and PARTIAL count. Cost: one PR read. A plain write adds one paged comment-list read of the repo's comments since
                           the PR opened; --fix-check reuses its own one. Each distinct SHA adds compare reads: one for the live head, two
@@ -3664,7 +3664,7 @@ def same_head_problem(earlier, rec, bodies=()):
     commit came between the two; else None. `earlier` is the parsed records of this pull request, oldest first, or the one source record a
     --fix-base-record names (a record that did not parse is already dropped). The head a round read is its line's named sha, or the record's Head
     when the record names none. An earlier record fails its top round with a FAIL or PARTIAL line. A lower FAIL or PARTIAL round of `rec` itself,
-    when `rec` names heads, fails on the head it names. A record with a Fix check PASS is skipped: its FAIL belongs to its fix base. `bodies` are the
+    when `rec` names heads, fails the head it names. A record with a Fix check PASS is skipped: its FAIL belongs to its fix base. `bodies` are the
     raw bodies of this pull request's records, and an earlier body that does not parse is read by line: only a FAIL or PARTIAL Round line refuses,
     when the head it names, or its body's stripped `Head:` line for a line that names none, is a head of this top round. Cost: none beyond the comment list the
     caller already read. The --fix-check path adds no read. The plain path adds one paged comment-list read of the repo's comments since the PR
