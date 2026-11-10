@@ -2315,12 +2315,19 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
             return ""
         # The merge route: a test-author resolves a whole merge that has a test conflict, so a product path git left
         # conflicted is its own.
-        # Git runs only here, for a path refused so far, and the answer reads none of the target's text.
+        # Git runs only here, for a path refused so far. A conflicted workflow or manifest is the test-author's only when
+        # the write leaves git's conflicted file with each block side-picked (`side_picked`), read from the merge tree.
         if role == AUTHOR_ROLE:
             where = norm(os.path.normpath(full))
             where = where[:len(where) - len(rel)] if rel and where.endswith(rel) else ""
-            if where and norm(rel).lstrip("/") in merge_route_paths(merge_conflicts(where) or ()):
+            state = merge_state(where) if where else None
+            mine = norm(rel).lstrip("/")
+            if state and mine in merge_route_paths(state[1]):
                 return ""
+            if state and mine in merge_route_side_paths(state[1]):
+                written = written_text(tool_input, full)
+                if written is not None and side_picked(text_at(where, state[0], mine), written):
+                    return ""
         return target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
@@ -2413,25 +2420,98 @@ def merge_tree(root: str, ours: str, theirs: str):
     return tree.strip(), sorted(conflicts)
 
 
-def merge_route_paths(conflicts):
-    """The paths a test-author owns in a merge that left `conflicts` (decision builders-cannot-edit-tests).
-    The route needs a test path among the conflicts, and covers product paths only: a workflow, test
-    config or manifest keeps its own content check (`role_offences`), so it is no product path."""
+def merge_route_side_paths(conflicts):
+    """The paths a test-author may resolve by side-picking (`side_picked`) in a merge that left `conflicts`: every
+    conflicted path, but only when a test path is among them (decision builders-cannot-edit-tests)."""
     if not any(is_test_rel(path) for path in conflicts):
         return []
-    return [path for path in conflicts if not (is_workflow_rel(path) or author_path_ok(path))]
+    return list(conflicts)
 
 
-def merge_conflicts(root: str):
-    """The paths git's own merge of HEAD and MERGE_HEAD left conflicted, for the merge in progress at
-    `root`; [] when no merge is in progress; None when git failed."""
+def merge_route_paths(conflicts):
+    """The paths a test-author owns outright in a merge that left `conflicts` (decision builders-cannot-edit-tests).
+    The route needs a test path among the conflicts, and covers product paths only: a workflow, test
+    config or manifest keeps its own content check (`role_offences`), or the side-picked route, so it is no
+    product path."""
+    return [path for path in merge_route_side_paths(conflicts) if not (is_workflow_rel(path) or author_path_ok(path))]
+
+
+CONFLICT_MARK = re.compile(r"^(<{7}|\|{7}|={7}|>{7})(?: .*)?\r?\n?$")
+
+
+def side_picked(conflicted: str, result: str) -> bool:
+    """True when `result` is `conflicted` (git's merged text, conflicts left as markers) with each conflict block
+    replaced by its ours side, its theirs side, ours then theirs, or theirs then ours, and all text outside the blocks
+    unchanged. A block that keeps its markers, any other text and a reordered line are not side-picked. The one home of
+    this verdict, for the write tool and the commit check."""
+    outside, blocks, ours, theirs, where = [""], [], [], [], None
+    for line in re.findall(r"[^\n]*\n|[^\n]+", conflicted):
+        mark = CONFLICT_MARK.match(line)
+        kind = mark.group(1)[0] if mark else ""
+        if where is None:
+            if kind == "<":
+                where, ours, theirs = "ours", [], []
+            else:
+                outside[-1] += line
+        elif kind == "=" and where in ("ours", "base"):
+            where = "theirs"
+        elif kind == "|" and where == "ours":
+            where = "base"
+        elif kind == ">" and where == "theirs":
+            blocks.append(("".join(ours), "".join(theirs)))
+            outside.append("")
+            where = None
+        elif kind:
+            return False
+        elif where == "ours":
+            ours.append(line)
+        elif where == "theirs":
+            theirs.append(line)
+    if where is not None:
+        return False
+    # Every offset of `result` the blocks read so far can reach.
+    reach = {0}
+    for index, (mine, theirs_side) in enumerate(blocks):
+        reach = {at + len(outside[index]) + len(pick)
+                 for at in reach if result.startswith(outside[index], at)
+                 for pick in (mine, theirs_side, mine + theirs_side, theirs_side + mine)
+                 if result.startswith(pick, at + len(outside[index]))}
+    return any(result[at:] == outside[-1] for at in reach)
+
+
+def written_text(tool_input, full: str):
+    """The text of the file at `full` once a Write, Edit or MultiEdit makes its change; None when the call is
+    none of these or an edit's old text is not in the file."""
+    if not isinstance(tool_input, dict):
+        return None
+    if "content" in tool_input:
+        return tool_input["content"] if isinstance(tool_input["content"], str) else None
+    edits = tool_input.get("edits")
+    if not isinstance(edits, list):
+        edits = [tool_input]
+    try:
+        with open(full, encoding="utf-8", errors="replace", newline="") as handle:
+            text = handle.read()
+    except Exception:
+        return None
+    for edit in edits:
+        old, new = edit.get("old_string") if isinstance(edit, dict) else None, (
+            edit.get("new_string") if isinstance(edit, dict) else None)
+        if not isinstance(old, str) or not isinstance(new, str) or not old or old not in text:
+            return None
+        text = text.replace(old, new) if edit.get("replace_all") else text.replace(old, new, 1)
+    return text
+
+
+def merge_state(root: str):
+    """`(tree, conflicts)` of git's own merge of HEAD and MERGE_HEAD, for the merge in progress at `root`;
+    `("", [])` when no merge is in progress; None when git failed."""
     merging = guard_core._git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
     if merging is None or merging.returncode not in (0, 1):
         return None
     if merging.returncode:
-        return []
-    merged = merge_tree(root, "HEAD", merging.stdout.strip())
-    return None if merged is None else merged[1]
+        return "", []
+    return merge_tree(root, "HEAD", merging.stdout.strip())
 
 
 def upstream_kept(root: str, orig: str, onto: str):
@@ -2608,6 +2688,9 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None, con
         real = os.path.realpath(os.path.join(top, rel))
         names = [rel, os.path.relpath(real, top)]
         if role == AUTHOR_ROLE and all(norm(n) in merge_route_paths(conflicts) for n in names):
+            continue
+        if role == AUTHOR_ROLE and all(norm(n) in merge_route_side_paths(conflicts) for n in names) and side_picked(
+                text_at(root, old, rel, top), text_at(root, new, rel, top)):
             continue
         if role == AUTHOR_ROLE and is_workflow_rel(rel) and all(
                 is_workflow_rel(n) or author_path_ok(n) for n in names):
