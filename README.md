@@ -265,10 +265,12 @@ in all three is refused, and the refusal names both files and the variable. The 
 The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 2): use `--app` and
 `tools/ios-ship.json`.
 
-* `ios-ship testflight [CONFIG] [--app NAME]... [--export-only]` archives each app as Release and uploads it to TestFlight.
+* `ios-ship testflight [CONFIG] [--app NAME]... [--export-only [--method debugging|release-testing]]` archives each app as Release and uploads it to TestFlight.
   It refuses unless the tree is clean and HEAD is `origin/main`, just fetched. All apps share one build number. It
   stops at the first app that fails, and prints one verdict line. `--export-only` skips the main check, exports the
   `.ipa` files to a folder it prints, and deletes the `.ipa` of each app that has `copy_in`.
+  `--method` sets the export method: `debugging` for a development `.ipa`, `release-testing` for a release `.ipa` for registered devices. The default is
+  `app-store-connect`. It is refused without `--export-only`.
 * `ios-ship install [CONFIG] [--app NAME]... [--no-install] [--debug] [--force]` builds each app in its own clone under
   `~/Library/Application Support/ios-adblock-reinstall` and installs it on the phone. One app's failure does not stop
   the others. Exit 75 means that the phone was not reachable. `--no-install` stops after a build for generic iOS.

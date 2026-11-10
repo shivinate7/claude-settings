@@ -1573,6 +1573,7 @@ WALK_SUITES = {
     "hooks/guard_branch_worktree.py": ["hooks/test_auto_mode_allow.py"],
     "hooks/guard_merge.py": ["lint/test_hook_catalog.py"],
     "hooks/guard_mask_script.py": [],
+    "hooks/guard_argv.py": [],
 }
 
 

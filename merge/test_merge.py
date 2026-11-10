@@ -132,6 +132,7 @@ def record(id_, slug):
 class FakeHost:
     """The GitHub half, scripted. `other` is a second clone that plays a competing pusher and the merger."""
     built = True
+    own_number = 7  # the lane's own PR: pr() serves its head from the branch; the lane-lint cases name it 7
 
     def __init__(self, root, other, branch="feat"):
         self.root, self.other, self.branch = root, other, branch
@@ -145,8 +146,9 @@ class FakeHost:
         self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
         self.pr_calls = []  # each n the run read through pr(): a refusal before any host read leaves it empty
         self.readies, self.ready_refuse = [], None  # readies: each n a draft confirm asked to mark ready; ready_refuse: the reason the host refuses
-        self.pulls, self.created, self.batch_pr_calls = {}, [], []  # pulls: the pull requests add_pr and create_pr hold, by number; created: each create_pr; batch_pr_calls: each branch batch_pr read
+        self.batch_pulls, self.created, self.batch_pr_calls = {}, [], []  # batch_pulls: the batch pull requests add_pr and create_pr hold, by number; created: each create_pr; batch_pr_calls: each branch batch_pr read
         self.to_drafts, self.to_draft_refuse, self.on_to_draft = [], None, None  # to_drafts: each n a to_draft call named; to_draft_refuse: the reason the host refuses; on_to_draft: a hook a case sets, called on each call before it answers
+        self.pulls, self.pull_list_reads = None, 0  # pulls: {number: REST row} of the other PRs a case scripts (None: the own PR only); pull_list_reads: each open_pulls call
         self.changed, self.files_error = [("README.md", "modified", 0)], None  # changed: the (path, status, additions) triples pr_files reports; files_error: raised by pr_files instead
         self.changed_files = None  # the changed_files count pr reports; None is the length of changed. The count check is the real Host's, so this fake does not check it
 
@@ -157,13 +159,26 @@ class FakeHost:
 
     def pr(self, n):
         self.pr_calls.append(n)
-        if n in self.pulls:  # a batch case's pull request, read from its own entry
+        if n in self.batch_pulls:  # a batch case's pull request, read from its own entry
             return self.pr_info(n)
+        if self.pulls is not None and n != self.own_number:  # a scripted PR: its row, or the 404 Host.pr raises for a PR that is not there
+            if n not in self.pulls:
+                raise merge.Stop(f"reading the pull request failed: HTTP 404: Not Found (#{n})")
+            row = self.pulls[n]
+            return {"head": row["head"]["sha"], "branch": row["head"]["ref"], "base": row["base"]["ref"], "state": row["state"].upper(),
+                    "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": bool(row["draft"]), "body": row["body"] or ""}
         head = merge.origin_head(self.root, self.branch)
         base = (self.base_seq.pop(0) if len(self.base_seq) > 1 else self.base_seq[0]) if self.base_seq else self.base
         return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
                 "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": self.draft, "body": self.body,
                 "changed_files": len(self.changed) if self.changed_files is None else self.changed_files}
+
+    def open_pulls(self):
+        """-> the open pull requests as `GET pulls` lists them: the own PR, then each scripted row that is open. Each call is one list read."""
+        self.pull_list_reads += 1
+        head = self.head_override or merge.origin_head(self.root, self.branch)
+        own = REST.list_item(self.own_number, head, self.branch, self.base, body=self.body, draft=self.draft)
+        return [own] + [row for row in (self.pulls or {}).values() if row["state"] == "open"]
 
     def required_names(self):
         return ["checks"]
@@ -204,26 +219,26 @@ class FakeHost:
         self.readies.append(n)
         if self.ready_refuse:
             return False, self.ready_refuse
-        if n in self.pulls:  # the batch cases: the pull request's own draft flag clears too
-            self.pulls[n]["draft"] = False
+        if n in self.batch_pulls:  # the batch cases: the pull request's own draft flag clears too
+            self.batch_pulls[n]["draft"] = False
         self.draft = False
         return True, ""
 
     def add_pr(self, n, branch, base="main", state="OPEN", draft=False, body=""):  # a pull request by number, with its head branch on origin
-        self.pulls[n] = {"branch": branch, "base": base, "state": state, "draft": draft, "body": body}
+        self.batch_pulls[n] = {"branch": branch, "base": base, "state": state, "draft": draft, "body": body}
 
     def pr_info(self, n):  # the same fields as pr(), read from the entry add_pr or create_pr made
-        p = self.pulls[n]
+        p = self.batch_pulls[n]
         return {"head": merge.origin_head(self.root, p["branch"]), "branch": p["branch"], "base": p["base"], "state": p["state"],
                 "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": p["draft"], "body": p["body"]}
 
     def batch_pr(self, branch):  # the open pull request whose head is `branch`, as (n, info), or None
         self.batch_pr_calls.append(branch)
-        hits = [n for n, p in self.pulls.items() if p["branch"] == branch and p["state"] == "OPEN"]
+        hits = [n for n, p in self.batch_pulls.items() if p["branch"] == branch and p["state"] == "OPEN"]
         return (hits[0], self.pr_info(hits[0])) if hits else None
 
     def open_prs(self):  # every open pull request as [(n, info)] in number order: a rebuild finds the on-batches among them
-        return [(n, self.pr_info(n)) for n in sorted(self.pulls) if self.pulls[n]["state"] == "OPEN"]
+        return [(n, self.pr_info(n)) for n in sorted(self.batch_pulls) if self.batch_pulls[n]["state"] == "OPEN"]
 
     def create_pr(self, branch, base, title, body, draft=False):  # the pull request holds the draft flag the caller sends
         n = 900 + len(self.created)
@@ -237,14 +252,14 @@ class FakeHost:
             self.on_to_draft(n)
         if self.to_draft_refuse:
             return False, self.to_draft_refuse
-        if n in self.pulls:
-            self.pulls[n]["draft"] = True
+        if n in self.batch_pulls:
+            self.batch_pulls[n]["draft"] = True
         else:
             self.draft = True
         return True, ""
 
     def set_body(self, n, body):
-        self.pulls[n]["body"] = body
+        self.batch_pulls[n]["body"] = body
 
 def wait_sites(src):
     """-> (count, in_loop) over the `wait_checks` calls in a Python source. A call inside a for or while may run many
@@ -3881,9 +3896,9 @@ def pull(number, head, head_ref, base_ref, state="open", merged=False, draft=Fal
             "mergeable_state": mergeable_state, "merge_commit_sha": merge_commit_sha, "html_url": "https://github.com/o/r/pull/%d" % number,
             "head": {"ref": head_ref, "sha": head, "label": "o:" + head_ref}, "base": {"ref": base_ref, "sha": "b" * 40, "label": "o:" + base_ref}}
 
-def list_item(number, head, head_ref, base_ref):
-    """An open pull request as `GET pulls` lists it: no mergeable, merged or mergeable_state."""
-    full = pull(number, head, head_ref, base_ref)
+def list_item(number, head, head_ref, base_ref, body="", draft=False, state="open"):
+    """A pull request as `GET pulls` lists it: no mergeable, merged or mergeable_state. An empty body is null, as on GitHub."""
+    full = pull(number, head, head_ref, base_ref, state=state, draft=draft, body=body)
     return {k: v for k, v in full.items() if k not in ("merged", "mergeable", "mergeable_state")}
 '''
 
@@ -4288,6 +4303,55 @@ def gh_case_setup(test):
     test.ticks, test.paused, test.at_pause = 0, [], []
     GhHalf.set(test, checks_seq=[[("checks", "pass", "")]])
 
+WS_PROBE = " \t\n\r\f\v"  # the whitespace characters a \s repeat can take
+
+def adjacent_whitespace_repeats(pattern):
+    """-> where in `pattern` a repeat that can take a whitespace run is followed, with only skippable items between, by a repeat that can take a whitespace run too.
+    Both repeats then take the same run, so a search backtracks over it once for each split between them. Reads the parsed pattern, never its source text, and reads no clock."""
+    try:
+        from re import _parser as sre_parse, _compiler as sre_compile  # Python 3.11 and later
+    except ImportError:  # Python 3.10 and earlier
+        import sre_parse, sre_compile
+    repeats = (sre_parse.MAX_REPEAT, sre_parse.MIN_REPEAT)
+
+    def begins_ws(body):
+        """True when the sub-pattern `body` can consume a whitespace character at its first position."""
+        compiled = sre_compile.compile(body)
+        for c in WS_PROBE:
+            for tail in ("", c, "x", "#2390"):
+                m = compiled.match(c + tail)
+                if m is not None and m.end() > 0:
+                    return True
+        return False
+
+    def sub_patterns(value):
+        if isinstance(value, sre_parse.SubPattern):
+            yield value
+        elif isinstance(value, (tuple, list)):
+            for v in value:
+                yield from sub_patterns(v)
+
+    found = []
+
+    def walk(seq, where):
+        items = list(seq.data)
+        for i, (op, av) in enumerate(items):
+            if op not in repeats or not begins_ws(av[2]):
+                continue
+            for j in range(i + 1, len(items)):
+                op2, av2 = items[j]
+                if op2 in repeats and begins_ws(av2[2]):
+                    found.append(f"{where}: items {i} and {j}")
+                    break
+                if not (op2 in repeats and av2[0] == 0):  # a required item stops the scan: nothing skippable lies between
+                    break
+        for i, (op, av) in enumerate(items):
+            for sub in sub_patterns(av):
+                walk(sub, f"{where}/{i}")
+
+    walk(sre_parse.parse(pattern), "top")
+    return found
+
 class CloseKeywordReason(Env):
     """A reason flag's reason lands in the merge commit (lift_message), and GitHub closes an issue that a commit names after a closing keyword.
     So a reason with a closing keyword before an issue ref is refused, after argparse and before the lock, any host read and any write.
@@ -4296,17 +4360,18 @@ class CloseKeywordReason(Env):
     NINE = ("close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved")
     REFUSED = ([f"{word} #2390" for word in NINE]
                + ["FiXeS #2390", "CLOSED #2390", "rEsOlVeS #2390", "fixes: #2390", "fixes:#2390", "fixes#2390", "Resolves:   #2390",
-                  "fixes shivinate7/claude-settings#2390", "closes owner/repo#2390", "base red; this fixes #2390 too"])
+                  "fixes shivinate7/claude-settings#2390", "closes owner/repo#2390", "base red; this fixes #2390 too",
+                  "fixes   #2390", "fixes : #2390", "fixes\t#2390", "fixes\n#2390"])
     REFUSED_URL = ([f"{word} https://github.com/o/r/issues/2390" for word in NINE]
                    + ["Fixes: https://github.com/o/r/issues/2390", "resolves http://github.com/o/r/issues/2390",
                       "closed www.github.com/o/r/issues/2390", "fix https://github.com/o/r/pull/2390",
                       "fixes https://www.github.com/o/r/issues/2390", "closes:https://github.com/shivinate7/claude-settings/issues/2390",
                       "base red; this fixes https://github.com/o/r/issues/2390 too"])
     ALLOWED = ("PR #2390", "#2390", "fix the base", "fix the base, see #2390", "prefixes #2390", "cause and fix: PR 2390",
-               "see https://github.com/o/r/issues/2390", "fix https://example.com/issues/5")
+               "see https://github.com/o/r/issues/2390", "fix https://example.com/issues/5",
+               "fixtures/x#12", "prefix fixtures/x#12")
     REWORD = "cause and fix: PR 2390"  # the example the refusal gives
-    CLOSE_FORM = re.compile(r"(?i)\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b\s*:?\s*"
-                            r"(?:(?:https?://)?(?:www\.)?github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/\d+|(?:[\w.-]+/[\w.-]+)?#\d+)")  # a closing keyword before an issue ref or an issue URL
+    LONG_RUN = " " * 20000  # the whitespace run after a keyword: one home for the long-run cases
 
     def refused_each(self, flag, reasons):
         """Each refused reason, given with `flag`, stops before the host read. The PR is CLOSED, so a run that reads it stops on a CLOSED line instead."""
@@ -4319,7 +4384,7 @@ class CloseKeywordReason(Env):
                 self.assertEqual(rc, 1, out + err)
                 self.assertIn(self.REWORD, err, "the refusal does not give the reword example")
                 self.assertRegex(err, r"(?i)reword", "the refusal does not say to reword the reason")
-                self.assertIsNone(self.CLOSE_FORM.search(out + err), "the refusal prints a closing keyword before an issue ref or URL")
+                self.assertIsNone(merge.CLOSE_FORM.search(out + err), "the refusal prints a closing keyword before an issue ref or URL")
                 self.assertNotIn("Traceback", err)
 
     def refusal_writes_nothing(self, flag, reason="fixes #2390"):
@@ -4355,17 +4420,44 @@ class CloseKeywordReason(Env):
     def test_close_keyword_undo_check_unknown_ok_refused_issue_url_takes_no_lock_and_writes_nothing(self):
         self.refusal_writes_nothing("--undo-check-unknown-ok", "fixes https://github.com/o/r/issues/2390")
 
+    def reaches_host_read(self, *flag_reasons):
+        """A run with these flag and reason pairs is not refused, so it reaches the PR's state read. The caller sets the PR CLOSED, so the run stops on the CLOSED line."""
+        reads = len(self.host.pr_calls)
+        rc, out, err = self.run_args("7", "--confirm", *flag_reasons)
+        self.assertGreater(len(self.host.pr_calls), reads, "the reason was refused before the host read")
+        self.assertIn("CLOSED", err, "the run did not reach the PR's state read")
+        self.assertNotRegex(err, r"(?i)reword", "an allowed reason got the reword refusal")
+
     def test_close_keyword_allowed_reasons_reach_the_host_read_for_both_flags(self):
         # the controls: a reason with no closing form before a ref is not refused, so the run goes on to read the PR, which is CLOSED here
         self.host.pr_state = "CLOSED"
         for flag in self.FLAGS:
             for reason in self.ALLOWED:
                 with self.subTest(flag=flag, reason=reason):
-                    reads = len(self.host.pr_calls)
-                    rc, out, err = self.run_args("7", "--confirm", flag, reason)
-                    self.assertGreater(len(self.host.pr_calls), reads, "the reason was refused before the host read")
-                    self.assertIn("CLOSED", err, "the run did not reach the PR's state read")
-                    self.assertNotRegex(err, r"(?i)reword", "an allowed reason got the reword refusal")
+                    self.reaches_host_read(flag, reason)
+
+    def test_close_keyword_pattern_has_no_adjacent_whitespace_repeats(self):
+        # the cause: two repeats that both take the same whitespace run, with nothing required between them. A search backtracks over the run once for each split between them.
+        found = adjacent_whitespace_repeats(merge.CLOSE_FORM.pattern)
+        self.assertEqual(found, [], f"the closing-form pattern has two repeats that take the same whitespace run, with nothing required between them: {found}")
+
+    def test_close_keyword_repeat_check_flags_each_respelling_and_passes_the_group_form(self):
+        # the check's own pins, read from the parsed text: each two-run respelling is flagged, and the group form is not
+        for pattern in (r"\s*:?\s*", r"\s*:{0,1}\s*", r"\s*[:-]?\s*"):
+            with self.subTest(pattern=pattern):
+                self.assertTrue(adjacent_whitespace_repeats(pattern), "the check does not flag a two-run respelling")
+        self.assertEqual(adjacent_whitespace_repeats(r"\s*(?::\s*)?"), [], "the check flags the group form, which takes one run")
+
+    def test_close_keyword_long_whitespace_run_keeps_its_result(self):
+        # result only, no timing: a closing word with a long run and no ref after it is allowed, and the same run before a ref is refused
+        cases = (("keyword, run, no ref", "fixes" + self.LONG_RUN + "x"),
+                 ("keyword, run, #-less ref", "fixes" + self.LONG_RUN + "2390"),
+                 ("bare keyword, run", "fix" + self.LONG_RUN),
+                 ("keyword, run, colon, run, no ref", "fixes" + self.LONG_RUN[:10000] + ":" + self.LONG_RUN[:10000] + "x"))
+        for label, text in cases:
+            with self.subTest(case=label):
+                self.assertIsNone(merge.CLOSE_FORM.search(text), "a closing word with a long run and no issue ref after it was refused")
+        self.assertIsNotNone(merge.CLOSE_FORM.search("fixes" + self.LONG_RUN + "#2390"), "a closing word with a long run before an issue ref was allowed")
 
 class GhHalf(Env):
     """Host against a `gh` shim on PATH. The shim merges into the local bare origin through the `other` clone."""
@@ -12009,6 +12101,116 @@ class RedMainBrake(Env):
         self.merged(rc, out)
         self.assertNotIn("actions/runs/1302/jobs", self.host.reads, "only the newest completed run of the group is judged")
 
+    # The cancelled-newest shape (decision no-merge-onto-red-main): main's newest push run, 1403, was cancelled with no red job. Its older
+    # green push run 1402 passed every job of the older red schedule run 1401. The verdict stays red, and the cancelled run is named beside
+    # it with its own re-run as the way out. A lone cancelled run is UNKNOWN, and names the same way out.
+    CAN_RED, CAN_GREEN, CAN_CANCELLED = 1401, 1402, 1403
+
+    def cancelled_beside_red(self):
+        """-> (runs, jobs) of the incident, newest run first, as `go` takes them."""
+        runs = [main_run(self.CAN_CANCELLED, "cancelled"), main_run(self.CAN_GREEN, "success"), main_run(self.CAN_RED, "failure", event="schedule")]
+        jobs = {self.CAN_RED: [main_job("checks", "failure", 20), main_job("scope", "success")],
+                self.CAN_GREEN: [main_job("scope", "success"), main_job("checks", "success", 20), main_job("checks-macos", "success", 30)],
+                self.CAN_CANCELLED: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]}
+        return runs, jobs
+
+    def lone_cancelled(self):
+        """-> (runs, jobs) of a cancelled newest run with no run beneath it."""
+        return [main_run(self.CAN_CANCELLED, "cancelled")], {self.CAN_CANCELLED: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]}
+
+    def assert_rerun_remedy(self, text, run_id):
+        """The way out for a cancelled run is its own re-run, which tests that run's own commit."""
+        self.assertIn(f"gh run rerun {run_id}", text, f"the cancelled run {run_id} is not named with its re-run, `gh run rerun {run_id}`")
+        self.assertIn("own commit", text, "the remedy does not say the re-run tests the run's own commit")
+
+    def test_a_cancelled_newest_run_beside_a_red_run_is_named_with_its_rerun(self):
+        rc, out, before = self.go(*self.cancelled_beside_red())
+        self.refused(rc, out, before)
+        self.assertIn(f"run {self.CAN_RED}", out)
+        self.assertIn("checks: fail", out)
+        self.assert_rerun_remedy(out, self.CAN_CANCELLED)
+        self.assertNotIn(f"gh run rerun {self.CAN_RED}", out, "the red run gets no re-run remedy: only a cancelled run does")
+
+    def test_a_lone_cancelled_newest_run_is_unknown_and_names_its_rerun(self):
+        rc, out, before = self.go(*self.lone_cancelled())
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+        self.assertIn(f"run {self.CAN_CANCELLED}", out)
+        self.assert_rerun_remedy(out, self.CAN_CANCELLED)
+
+    def test_base_verdict_names_the_rerun_of_the_cancelled_run_beside_a_red_run(self):
+        runs, jobs = self.cancelled_beside_red()
+        self.host = MainRunsHost(self.co, self.other, runs, jobs)
+        verdict, detail = merge.base_verdict(self.co, self.host, "main")
+        self.assertEqual(verdict, "red", detail)
+        self.assertIn(f"run {self.CAN_RED}", detail)
+        self.assert_rerun_remedy(detail, self.CAN_CANCELLED)
+
+    def test_base_verdict_names_the_rerun_of_a_lone_cancelled_run(self):
+        runs, jobs = self.lone_cancelled()
+        self.host = MainRunsHost(self.co, self.other, runs, jobs)
+        verdict, detail = merge.base_verdict(self.co, self.host, "main")
+        self.assertEqual(verdict, "unknown", detail)
+        self.assert_rerun_remedy(detail, self.CAN_CANCELLED)
+
+    def test_the_preview_line_names_the_rerun_beside_a_red_run(self):
+        rc, out, before = self.go(*self.cancelled_beside_red(), confirm=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.refs(), before)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("red", line[0])
+        self.assert_rerun_remedy(line[0], self.CAN_CANCELLED)
+
+    def test_the_preview_line_names_the_rerun_of_a_lone_cancelled_run(self):
+        rc, out, before = self.go(*self.lone_cancelled(), confirm=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.refs(), before)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("unknown", line[0].lower())
+        self.assert_rerun_remedy(line[0], self.CAN_CANCELLED)
+
+    # Pins: these pass on the code as it is. The red run gets no re-run remedy, a re-run still going keeps its wait, and a re-run that
+    # passes reads green. Each is the green control beside the red cases above.
+
+    def test_a_red_newest_run_alone_is_refused_with_no_rerun_remedy(self):
+        rc, out, before = self.go([main_run(1421, "failure")], {1421: [main_job("checks", "failure", 20)]})
+        self.refused(rc, out, before)
+        self.assertIn("run 1421", out)
+        self.assertNotIn("gh run rerun", out, "a red run is never offered a re-run")
+
+    def test_a_re_run_in_flight_keeps_its_wait_text_and_names_no_rerun(self):
+        rc, out, before = self.re_run_over_green("in_progress")
+        self.assert_unknown_for_re_run(rc, out, before, "in_progress", 1301)
+        self.assertNotIn("gh run rerun", out, "a re-run still going is waited for, never offered a re-run")
+
+    def test_a_cancelled_run_re_run_to_success_reads_green_and_merges(self):
+        # the re-run keeps its id at attempt 2 and is completed success: as the newest push run it clears the older red schedule run
+        rc, out, _ = self.go([main_run(self.CAN_CANCELLED, "success", run_attempt=2), main_run(self.CAN_RED, "failure", event="schedule")],
+                             {self.CAN_RED: [main_job("checks", "failure", 20), main_job("scope", "success")],
+                              self.CAN_CANCELLED: [main_job("scope", "success"), main_job("checks", "success", 20), main_job("checks-macos", "success", 30)]})
+        self.merged(rc, out)
+
+    # A cancelled run gets its re-run named only when its commit is the base's head: the head_sha of the newest run in the page read.
+    # Here the cancelled run's commit A is older than the newest run's commit B, so no re-run is named.
+    FA_A, FA_B = "a" * 40, "b" * 40
+
+    def test_a_cancelled_run_older_than_an_in_progress_newest_run_is_named_with_no_rerun(self):
+        rc, out, before = self.go([main_run(1502, None, status="in_progress", sha=self.FA_B), main_run(1501, "cancelled", sha=self.FA_A)],
+                                  {1501: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]})
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+        self.assertIn("run 1501", out)
+        self.assertNotIn("gh run rerun", out, "the cancelled run 1501 is on a commit that is not the base's head, so no re-run is named")
+
+    def test_a_cancelled_run_older_than_a_green_schedule_newest_run_is_named_with_no_rerun(self):
+        rc, out, before = self.go([main_run(1602, "success", event="schedule", sha=self.FA_B), main_run(1601, "cancelled", sha=self.FA_A)],
+                                  {1602: [main_job("scope", "success")], 1601: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]})
+        self.refused(rc, out, before)
+        self.assertIn("run 1601", out)
+        self.assertNotIn("gh run rerun 1601", out, "the cancelled run 1601 is on a commit that is not the base's head, so no re-run is named")
+
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
     def test_main_refuses_before_taking_the_lock(self):
@@ -16282,7 +16484,7 @@ class BatchFreeze(CloudSession):
         return {line.split()[1] for line in out.splitlines() if len(line.split()) == 2}
 
     def body(self, n):
-        return self.host.pulls[n]["body"]
+        return self.host.batch_pulls[n]["body"]
 
     def snapshot(self, n):
         """What a refused run must leave alone: origin's batch-nightly head, and the body of pull request n."""
@@ -16493,12 +16695,12 @@ class BatchFreeze(CloudSession):
         self.record_pushes()
         for draft in (True, False):  # the draft comes first: its red is the one the old build's ready call makes
             with self.subTest(draft=draft):
-                self.host.pulls[pr]["draft"], self.host.readies = draft, []
+                self.host.batch_pulls[pr]["draft"], self.host.readies = draft, []
                 with self.no_lint_or_ready_check():
                     rc, out = self.run_batch("--batch-build", "nightly", "102", "101")
                 self.assertEqual(self.host.readies, [], "the same set again called Host.ready on a %s batch PR: a rerun leaves it as it is: %s"
                                  % ("draft" if draft else "ready", out))
-                self.assertEqual(self.host.pulls[pr]["draft"], draft, "the same set again changed the draft flag: %s" % out)
+                self.assertEqual(self.host.batch_pulls[pr]["draft"], draft, "the same set again changed the draft flag: %s" % out)
                 self.assertEqual(rc, 0, "the same set again was refused: %s" % out)
                 self.assertEqual(len(self.host.created), 1, "the same set again opened a second pull request: %s" % out)
                 self.assert_untouched(pr, snap, out)
@@ -16512,7 +16714,7 @@ class BatchFreeze(CloudSession):
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
         self.assertEqual(self.host.readies, [], "the build on a draft called Host.ready: only --ready marks a batch ready: %s" % out)
-        self.assertTrue(self.host.pulls[pr]["draft"], "the build on a draft marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "the build on a draft marked the batch PR ready: %s" % out)
         self.assertEqual(len(self.host.created), 1, "the build on a draft opened a second pull request: %s" % out)
         self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
 
@@ -16527,7 +16729,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.readies, [pr], "--ready did not ask the host to mark the batch PR ready once: %s" % out)
         self.assertIn(self.host.ready_refuse, out, "the refused ready's reason is not printed: %s" % out)
         self.assertEqual(rc, 1, "a refused ready did not exit 1: %s" % out)
-        self.assertTrue(self.host.pulls[pr]["draft"], "the batch PR went ready though the host refused it")
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "the batch PR went ready though the host refused it")
 
     # --ready: the one lint of the batch head, then the mark ready. A refused or failed lint never reaches Host.ready.
 
@@ -16541,7 +16743,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.lint_calls(mocks), [("batch-nightly", "main", "")],
                          "--ready did not lint the batch head once, and no other lint: %s" % out)
         self.assertEqual(self.host.readies, [pr], "--ready did not call Host.ready once after a passing lint: %s" % out)
-        self.assertFalse(self.host.pulls[pr]["draft"], "the batch PR is still a draft after --ready: %s" % out)
+        self.assertFalse(self.host.batch_pulls[pr]["draft"], "the batch PR is still a draft after --ready: %s" % out)
         self.assertEqual(rc, 0, "--ready exited %s: %s" % (rc, out))
         self.assertEqual(self.pushes(), [], "--ready pushed: it lints and marks ready, and pushes nothing")
         self.assertFalse(self.lock_ref(), "--ready took the merge lock")
@@ -16554,7 +16756,7 @@ class BatchFreeze(CloudSession):
             rc, out = self.run_batch("--batch-build", "nightly", "--ready")
         self.assertEqual(len(self.lint_calls(mocks)), 1, "--ready did not lint the batch head once: %s" % out)
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
         self.assertIn("FAILs", out, "the FAIL of the batch head is not printed: %s" % out)
         self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
 
@@ -16566,7 +16768,7 @@ class BatchFreeze(CloudSession):
             rc, out = self.run_batch("--batch-build", "nightly", "--ready")
         self.assertEqual(len(self.lint_calls(mocks)), 1, "--ready did not lint the batch head once: %s" % out)
         self.assertEqual(self.host.readies, [], "an unknown lint of the batch head called Host.ready with no --lint-unknown-ok: %s" % out)
-        self.assertTrue(self.host.pulls[pr]["draft"], "an unknown lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "an unknown lint marked the batch PR ready: %s" % out)
         self.assertIn("is unknown, not a pass", out, "the unknown lint is not refused by name: %s" % out)
         self.assertEqual(rc, 1, "an unknown lint without --lint-unknown-ok exited %s, not 1: %s" % (rc, out))
 
@@ -16580,7 +16782,7 @@ class BatchFreeze(CloudSession):
                          "--ready did not pass --lint-unknown-ok to the one lint of the batch head: %s" % out)
         self.assertIn("tool missing on this box", out, "the reason of --lint-unknown-ok is not logged: %s" % out)
         self.assertEqual(self.host.readies, [pr], "--ready with --lint-unknown-ok did not mark the batch PR ready once: %s" % out)
-        self.assertFalse(self.host.pulls[pr]["draft"], "the batch PR is still a draft after --ready: %s" % out)
+        self.assertFalse(self.host.batch_pulls[pr]["draft"], "the batch PR is still a draft after --ready: %s" % out)
         self.assertEqual(rc, 0, "--ready with --lint-unknown-ok exited %s: %s" % (rc, out))
 
     def test_ready_on_a_ready_batch_says_already_ready_and_lints_and_calls_nothing(self):
@@ -16632,7 +16834,7 @@ class BatchFreeze(CloudSession):
         finally:
             self.host.branch = lane_branch
         self.assertEqual(refusal, "", "setup: the merge of batch-x's pull request into main was refused: %s" % refusal)
-        self.host.pulls[x]["state"] = "MERGED"
+        self.host.batch_pulls[x]["state"] = "MERGED"
         self.assertTrue(self.ancestor(self.head("batch-x"), "origin/main"), "setup: batch-x is not contained in main after its pull request merged")
         lanes_before = [line for line in block_lines(self.body(nightly)) or [] if line.startswith("Lane: ")]
         with self.no_lint_or_ready_check(ready_state="pass") as mocks:
@@ -16698,7 +16900,7 @@ class BatchFreeze(CloudSession):
         self.assertIn("#102", out, "the lint FAIL names lanes/102.txt but does not name #102, the one frozen lane whose diff touches it: %s" % out)
         self.assertEqual(len(self.lint_calls(mocks)), 1, "--ready did not lint the batch head once: %s" % out)
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
         self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
 
     def test_ready_lint_fail_names_both_lanes_that_touch_the_failing_path(self):
@@ -16712,7 +16914,7 @@ class BatchFreeze(CloudSession):
         for n in (101, 102):
             self.assertIn(f"#{n}", out, "the lint FAIL names lanes/shared.txt, which #101 and #102 both touch, but does not name #%d: %s" % (n, out))
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
         self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
 
     def test_ready_lint_fail_on_a_path_no_lane_touches_says_the_blame_is_unknown_and_prints_no_drop_command(self):
@@ -16728,7 +16930,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.drop_pr_numbers(out, "nightly"), [],
                          "the lint FAIL names docs/unrelated.md, which no frozen lane touches, yet prints a drop command: a guess: %s" % out)
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
         self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
 
     def test_ready_lint_fail_does_not_blame_a_lane_that_only_a_passing_step_prints(self):
@@ -16745,7 +16947,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.drop_pr_numbers(out, "nightly"), [],
                          "a passing step printed lanes/102.txt, which #102 touches, yet the run prints a drop command for #102: a whole-log scan, not the failing step: %s" % out)
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
         self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
 
     def test_ready_lint_fail_with_a_log_that_is_not_there_says_the_blame_is_unknown_and_prints_no_drop_command(self):
@@ -16760,7 +16962,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.drop_pr_numbers(out, "nightly"), [],
                          "the lint FAIL's log is not there, yet the run prints a drop command: a guess: %s" % out)
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
         self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
 
     def ready_lint_fail_naming_lane_102(self, variant, **fail):
@@ -16777,7 +16979,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.drop_pr_numbers(out, "nightly"), ["102"], "%s: the lint FAIL names lanes/102.txt, which #102 touches, but prints no "
                          "`merge --batch-drop nightly 102`: %s" % (variant, out))
         self.assertEqual(self.host.readies, [], "%s: a FAILing lint of the batch head called Host.ready: %s" % (variant, out))
-        self.assertTrue(self.host.pulls[pr]["draft"], "%s: a FAILing lint marked the batch PR ready: %s" % (variant, out))
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "%s: a FAILing lint marked the batch PR ready: %s" % (variant, out))
         self.assertEqual(rc, 1, "%s: a FAILing lint exited %s, not 1: %s" % (variant, rc, out))
 
     def test_ready_lint_fail_with_a_runner_failure_marker_after_its_rc_still_blames_the_lane_its_step_touches(self):
@@ -16804,7 +17006,7 @@ class BatchFreeze(CloudSession):
         self.assertNotIn("102", self.drop_pr_numbers(out, "nightly"),
                          "a path only the passing step printed names #102, and the run prints its drop command: %s" % out)
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
-        self.assertTrue(self.host.pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
         self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
 
     def test_a_blamed_lane_dropped_leaves_a_draft_that_needs_ready_again_and_the_next_ready_lints_once(self):
@@ -16821,7 +17023,7 @@ class BatchFreeze(CloudSession):
             rc, out = self.run_batch("--batch-drop", "nightly", "102")
         self.assertEqual(rc, 0, "the drop the lint named exited %s: %s" % (rc, out))
         self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
-        self.assertTrue(self.host.pulls[pr]["draft"], "the drop of a draft batch changed its draft flag: %s" % out)
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "the drop of a draft batch changed its draft flag: %s" % out)
         self.assertEqual(self.host.to_drafts, [], "the drop of a draft batch called to_draft: %s" % out)
         self.assertIn("merge --batch-build nightly --ready", out, "the drop does not say the batch needs --ready again: %s" % out)
         self.assertEqual(self.host.readies, [], "the drop called Host.ready: %s" % out)
@@ -16830,7 +17032,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.lint_calls(mocks), [("batch-nightly", "main", "")],
                          "the --ready after the drop did not lint the batch head once, and no other lint: %s" % out)
         self.assertEqual(self.host.readies, [pr], "the --ready after the drop did not mark the batch PR ready once: %s" % out)
-        self.assertFalse(self.host.pulls[pr]["draft"], "the batch PR is still a draft after the --ready that passed: %s" % out)
+        self.assertFalse(self.host.batch_pulls[pr]["draft"], "the batch PR is still a draft after the --ready that passed: %s" % out)
         self.assertEqual(rc, 0, "the --ready after the drop exited %s: %s" % (rc, out))
 
     # Drop: one lane off the branch, the block rewritten, nothing else touched.
@@ -16891,7 +17093,7 @@ class BatchFreeze(CloudSession):
         for n in (101, 102):
             self.lane(n)
         pr = self.frozen_batch("nightly", [101, 102])
-        self.host.pulls[pr]["body"] = "Notes kept by hand.\n\n```\n" + self.body(pr) + "```\n"
+        self.host.batch_pulls[pr]["body"] = "Notes kept by hand.\n\n```\n" + self.body(pr) + "```\n"
         snap = self.snapshot(pr)
         self.record_pushes()
         rc, out = self.run_batch("--batch-drop", "nightly", "102")
@@ -16902,7 +17104,7 @@ class BatchFreeze(CloudSession):
         for n in (101, 102, 103):
             self.lane(n)
         pr = self.frozen_batch("nightly", [101, 102, 103])
-        self.host.pulls[pr]["body"] = "Notes kept by hand.\n\n" + self.body(pr) + "\nFooter kept.\n"
+        self.host.batch_pulls[pr]["body"] = "Notes kept by hand.\n\n" + self.body(pr) + "\nFooter kept.\n"
         before = self.body(pr)
         rc, out = self.run_batch("--batch-drop", "nightly", "102")
         self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
@@ -16915,7 +17117,7 @@ class BatchFreeze(CloudSession):
         for n in (101, 102):
             self.lane(n)
         pr = self.frozen_batch("nightly", [101, 102])
-        self.host.pulls[pr]["body"] = self.body(pr) + self.body(pr)
+        self.host.batch_pulls[pr]["body"] = self.body(pr) + self.body(pr)
         snap = self.snapshot(pr)
         self.record_pushes()
         for argv in (("--batch-build", "nightly", "101", "102"), ("--batch-drop", "nightly", "102")):
@@ -16938,7 +17140,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.to_drafts, [pr], "a drop of a ready batch did not return it to draft once: %s" % out)
         self.assertEqual(seen, [before], "the return to draft came after batch-nightly was pushed: %s" % out)
         self.assertIn("--batch-build nightly --ready", out, "the drop does not say the batch needs --ready again: %s" % out)
-        self.assertTrue(self.host.pulls[pr]["draft"], "the drop did not leave the batch PR a draft: %s" % out)
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "the drop did not leave the batch PR a draft: %s" % out)
         self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
         self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
         self.assertEqual(self.host.readies, [], "the drop called Host.ready: %s" % out)
@@ -16958,7 +17160,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(block_lines(self.body(pr)), freeze_inner("nightly", [(101, self.heads[101]), (103, self.heads[103])], dropped=[102]),
                          "the frozen block does not drop #102 after a refused return to draft: %s" % out)
         self.assertEqual(self.host.to_drafts, [pr], "the drop did not try to return the ready batch to draft: %s" % out)
-        self.assertFalse(self.host.pulls[pr]["draft"], "a refused return to draft changed the draft flag: %s" % out)
+        self.assertFalse(self.host.batch_pulls[pr]["draft"], "a refused return to draft changed the draft flag: %s" % out)
 
     def test_a_drop_of_a_ready_batch_whose_return_to_draft_is_refused_still_says_it_needs_ready_again(self):
         for n in (101, 102, 103):
@@ -16968,7 +17170,7 @@ class BatchFreeze(CloudSession):
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-drop", "nightly", "102")
         self.assertEqual(self.host.to_drafts, [pr], "setup: the drop did not try to return the ready batch to draft: %s" % out)
-        self.assertFalse(self.host.pulls[pr]["draft"], "setup: the refused return to draft changed the draft flag: %s" % out)
+        self.assertFalse(self.host.batch_pulls[pr]["draft"], "setup: the refused return to draft changed the draft flag: %s" % out)
         self.assertIn("merge --batch-build nightly --ready", out,
                       "the drop of a ready batch whose return to draft was refused does not say the batch needs --ready again: %s" % out)
         self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
@@ -16981,7 +17183,7 @@ class BatchFreeze(CloudSession):
             rc, out = self.run_batch("--batch-drop", "nightly", "102")
         self.assertIn("--batch-build nightly --ready", out, "the drop of a draft does not say the batch needs --ready again: %s" % out)
         self.assertEqual(self.host.to_drafts, [], "the drop of a draft batch called to_draft: %s" % out)
-        self.assertTrue(self.host.pulls[pr]["draft"], "the drop of a draft batch changed the draft flag: %s" % out)
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "the drop of a draft batch changed the draft flag: %s" % out)
         self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
         self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
 
@@ -16994,7 +17196,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(sorted(self.host.to_drafts), sorted([x, nightly]),
                          "the drop of batch-x did not return batch-x and its ready on-batch to draft, once each: %s" % out)
         self.assertIn((nightly, old_nightly), seen, "batch-nightly was rebuilt before it went to draft: %s" % out)
-        self.assertTrue(self.host.pulls[x]["draft"] and self.host.pulls[nightly]["draft"], "the drop left batch-x or batch-nightly ready: %s" % out)
+        self.assertTrue(self.host.batch_pulls[x]["draft"] and self.host.batch_pulls[nightly]["draft"], "the drop left batch-x or batch-nightly ready: %s" % out)
         self.assertTrue(self.ancestor(self.head("batch-x"), self.head("batch-nightly")),
                         "batch-nightly was not rebuilt on the new head of batch-x: %s" % out)
         self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
@@ -17009,7 +17211,7 @@ class BatchFreeze(CloudSession):
                       "the refused return to draft does not warn: %s" % out)
         self.assertTrue(self.ancestor(self.head("batch-x"), self.head("batch-nightly")),
                         "a refused return to draft blocked the rebuild of batch-nightly: %s" % out)
-        self.assertFalse(self.host.pulls[nightly]["draft"], "a refused return to draft changed batch-nightly's draft flag: %s" % out)
+        self.assertFalse(self.host.batch_pulls[nightly]["draft"], "a refused return to draft changed batch-nightly's draft flag: %s" % out)
         self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
 
     def test_a_restack_of_a_ready_on_batch_whose_return_to_draft_is_refused_still_says_it_needs_ready_again(self):
@@ -17018,7 +17220,7 @@ class BatchFreeze(CloudSession):
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-drop", "x", "102")
         self.assertTrue(self.ancestor(self.head("batch-x"), self.head("batch-nightly")), "setup: the drop did not restack batch-nightly on batch-x: %s" % out)
-        self.assertFalse(self.host.pulls[nightly]["draft"], "setup: the refused return to draft changed batch-nightly's draft flag: %s" % out)
+        self.assertFalse(self.host.batch_pulls[nightly]["draft"], "setup: the refused return to draft changed batch-nightly's draft flag: %s" % out)
         self.assertIn("merge --batch-build nightly --ready", out,
                       "the restack of a ready batch-nightly whose return to draft was refused does not say it needs --ready again: %s" % out)
         self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
@@ -17113,7 +17315,7 @@ class BatchFreeze(CloudSession):
     def test_a_lane_pr_that_is_not_open_is_refused_before_any_push(self):
         for n in (101, 102):
             self.lane(n)
-        self.host.pulls[102]["state"] = "MERGED"
+        self.host.batch_pulls[102]["state"] = "MERGED"
         self.record_pushes()
         rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
         self.assertEqual(rc, 1, "a merged lane PR was not refused with exit 1: %s" % out)
@@ -17237,7 +17439,7 @@ class BatchFreeze(CloudSession):
     def test_a_lane_whose_pr_targets_another_base_is_refused_and_nothing_moves(self):
         for n in (101, 102):
             self.lane(n)
-        self.host.pulls[101]["base"] = "release"  # lane #101's pull request targets release, and the batch targets main
+        self.host.batch_pulls[101]["base"] = "release"  # lane #101's pull request targets release, and the batch targets main
         self.record_pushes()
         rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
         self.assertEqual(rc, 1, "a lane whose pull request targets another base was not refused with exit 1: %s" % out)
@@ -17352,8 +17554,8 @@ class BatchFreeze(CloudSession):
             self.lane(n)
         self.frozen_batch("nightly", [101, 102, 103])
         self.lane(990)  # an ordinary lane pull request, not a batch: its body quotes the begin marker on a line of its own
-        self.host.pulls[990]["body"] = "A note that quotes the marker:\n" + BATCH_BEGIN + "\nand goes on.\n"
-        self.assertIsNone(block_raw(self.host.pulls[990]["body"]), "setup: the quoted marker is read as a whole block")
+        self.host.batch_pulls[990]["body"] = "A note that quotes the marker:\n" + BATCH_BEGIN + "\nand goes on.\n"
+        self.assertIsNone(block_raw(self.host.batch_pulls[990]["body"]), "setup: the quoted marker is read as a whole block")
         rc, out = self.run_batch("--batch-drop", "nightly", "102")
         self.assertEqual(rc, 0, "a good drop exited %s because an unrelated pull request quotes a lone begin marker: %s" % (rc, out))
         self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
@@ -17363,7 +17565,7 @@ class BatchFreeze(CloudSession):
             self.lane(n)
         self.frozen_batch("nightly", [101, 102])
         late = self.frozen_batch("late", [104], on="batch-nightly")
-        self.host.pulls[late]["body"] = "\n".join([BATCH_BEGIN, "Batch: late", "Lane: #104 not-a-sha", BATCH_END]) + "\n"
+        self.host.batch_pulls[late]["body"] = "\n".join([BATCH_BEGIN, "Batch: late", "Lane: #104 not-a-sha", BATCH_END]) + "\n"
         rc, out = self.run_batch("--batch-drop", "nightly", "102")
         self.assertIn(f"#{late}", out, "the drop did not name batch-late, whose frozen block it cannot read: %s" % out)
         self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
@@ -17533,7 +17735,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.to_drafts, [pr], "the heal of a drifted ready batch did not return it to draft once: %s" % out)
         self.assertEqual(seen, [drifted], "the return to draft did not come before the heal's push to batch-nightly: %s" % out)
         self.assertTrue(self.on_origin(self.heads[102], "batch-nightly"), "the heal did not put lane #102 back on batch-nightly: %s" % out)
-        self.assertTrue(self.host.pulls[pr]["draft"], "the heal left the batch PR ready: %s" % out)
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "the heal left the batch PR ready: %s" % out)
         self.assertIn("merge --batch-build nightly --ready", out, "the heal does not say the batch needs --ready again: %s" % out)
         self.assertEqual(self.host.readies, [], "the heal called Host.ready: %s" % out)
         self.assertEqual(rc, 0, "the heal exited %s: %s" % (rc, out))
@@ -17543,7 +17745,7 @@ class BatchFreeze(CloudSession):
     def test_a_drop_rerun_that_heals_a_ready_batch_returns_it_to_draft_once_before_its_push(self):
         self.host.to_draft_refuse = "no mark-draft route is open to this session"
         pr = self.killed_drop((101, 102, 103), 102)  # the lanes are made here; the return to draft was refused, then the push was killed: still ready
-        self.assertFalse(self.host.pulls[pr]["draft"], "setup: the killed drop left the batch a draft, so the rerun would not heal a ready batch")
+        self.assertFalse(self.host.batch_pulls[pr]["draft"], "setup: the killed drop left the batch a draft, so the rerun would not heal a ready batch")
         self.host.to_draft_refuse = None
         drifted = self.head("batch-nightly")
         seen, before = [], len(self.host.to_drafts)
@@ -17553,7 +17755,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.to_drafts[before:], [pr], "the rerun drop that heals a ready batch did not return it to draft once: %s" % out)
         self.assertEqual(seen, [drifted], "the return to draft did not come before the heal's push to batch-nightly: %s" % out)
         self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the rerun drop left dropped lane #102 on batch-nightly: %s" % out)
-        self.assertTrue(self.host.pulls[pr]["draft"], "the rerun drop left the batch PR ready: %s" % out)
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "the rerun drop left the batch PR ready: %s" % out)
         self.assertEqual(rc, 0, "the rerun drop exited %s: %s" % (rc, out))
 
     def test_a_refused_return_to_draft_on_a_heal_warns_and_the_heal_still_pushes(self):
@@ -17567,7 +17769,7 @@ class BatchFreeze(CloudSession):
         self.assertIn("could not return to draft: no mark-draft route is open to this session; the push restarts CI", out,
                       "the refused return to draft on a heal does not warn, with its reason: %s" % out)
         self.assertTrue(self.on_origin(self.heads[102], "batch-nightly"), "a refused return to draft blocked the heal of batch-nightly: %s" % out)
-        self.assertFalse(self.host.pulls[pr]["draft"], "a refused return to draft changed the batch PR's draft flag: %s" % out)
+        self.assertFalse(self.host.batch_pulls[pr]["draft"], "a refused return to draft changed the batch PR's draft flag: %s" % out)
         self.assertEqual(rc, 0, "the heal with a refused return to draft exited %s, not 0: %s" % (rc, out))
 
     def test_a_refused_return_to_draft_on_a_heal_of_a_ready_batch_still_says_it_needs_ready_again(self):
@@ -17579,7 +17781,7 @@ class BatchFreeze(CloudSession):
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
         self.assertEqual(self.host.to_drafts, [pr], "setup: the heal did not try to return the ready batch to draft: %s" % out)
-        self.assertFalse(self.host.pulls[pr]["draft"], "setup: the refused return to draft changed the batch PR's draft flag: %s" % out)
+        self.assertFalse(self.host.batch_pulls[pr]["draft"], "setup: the refused return to draft changed the batch PR's draft flag: %s" % out)
         self.assertIn("merge --batch-build nightly --ready", out,
                       "the heal of a ready batch whose return to draft was refused does not say the batch needs --ready again: %s" % out)
         self.assertEqual(rc, 0, "the heal exited %s: %s" % (rc, out))
@@ -17593,7 +17795,7 @@ class BatchFreeze(CloudSession):
             rc, out = self.run_batch("--batch-build", "nightly", "102", "101")
         self.assertEqual(self.pushes(), [], "the same-set rerun pushed batch-nightly: %s" % out)
         self.assertEqual(self.host.to_drafts, [], "a rerun that pushes nothing called to_draft: %s" % out)
-        self.assertFalse(self.host.pulls[pr]["draft"], "the same-set rerun changed the batch PR's draft flag: %s" % out)
+        self.assertFalse(self.host.batch_pulls[pr]["draft"], "the same-set rerun changed the batch PR's draft flag: %s" % out)
         self.assertEqual(rc, 0, "the same-set rerun exited %s: %s" % (rc, out))
 
     # Green control: the fixtures and the push recorder work on main, where no batch code exists.
@@ -17613,12 +17815,12 @@ class BatchFreeze(CloudSession):
     def test_green_control_the_draft_fixtures_hold_and_to_draft_flips_the_flag(self):
         self.lane(101)
         pr = self.frozen_batch("nightly", [101], draft=True)
-        self.assertTrue(self.host.pulls[pr]["draft"], "control: frozen_batch(draft=True) is not a draft")
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "control: frozen_batch(draft=True) is not a draft")
         self.assertTrue(self.host.created[-1]["draft"], "control: create_pr(draft=True) did not record the draft flag")
         self.assertEqual(self.host.ready(pr), (True, ""), "control: ready() did not succeed")
-        self.assertFalse(self.host.pulls[pr]["draft"], "control: ready() did not clear the draft flag")
+        self.assertFalse(self.host.batch_pulls[pr]["draft"], "control: ready() did not clear the draft flag")
         self.assertEqual(self.host.to_draft(pr), (True, ""), "control: to_draft() did not succeed")
-        self.assertTrue(self.host.pulls[pr]["draft"], "control: to_draft() did not set the draft flag")
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "control: to_draft() did not set the draft flag")
         self.assertEqual(self.host.to_drafts, [pr], "control: to_draft() did not record its call")
 
 
