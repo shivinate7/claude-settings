@@ -287,6 +287,17 @@ def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, 
 
 UNDO_MEMO = {}
 UNDO_FLAG, RED_FLAG = "--undo-check-unknown-ok", "--base-red-ok"  # the reason flags: Claude may type each with a reason (decisions silent-undo-check-design, no-merge-onto-red-main)
+CLOSE_CITE = "(decision silent-undo-check-design, a reason flag's reason lands in the merge commit)"
+CLOSE_FORM = re.compile(r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*"
+                        r"(?:(?:https?://)?(?:www\.)?github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/\d+|(?:[\w.-]+/[\w.-]+)?#\d+)")  # GitHub closes the issue that a commit message names after one of these words, by number or by URL
+
+def refuse_closing_reason(*reasons):
+    """The reason lands in the merge commit, and GitHub closes an issue a commit names after a closing keyword.
+    The message never echoes the reason: it would print the closing form into the log."""
+    for flag, reason in zip((UNDO_FLAG, RED_FLAG), reasons):
+        if CLOSE_FORM.search(reason):
+            raise Stop(f"the reason given with {flag} would close an issue when the merge commit lands. Reword the reason so no closing word comes right before an issue number, for example \"cause and fix: PR 2390\". {CLOSE_CITE}")
+
 
 def record_lift(lifts, flag, reason):
     """Keep a reason flag that lifted a check in `lifts` ({flag: reason}), so the merge can carry it. `reason` is what the check returned: None when it passed with no lift.
@@ -3716,6 +3727,7 @@ def main(argv, host=None, lock=None, hosts=None):
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, --reviewed, or --role TIER")
     try:
+        refuse_closing_reason(a.undo_check_unknown_ok, a.base_red_ok)  # first: before the role check, any lock, host read or write
         if a.idle_lanes:
             return idle_lanes(a.live)  # before the role check and any lock: it reads, merges and posts nothing
         if a.lane_lint:
