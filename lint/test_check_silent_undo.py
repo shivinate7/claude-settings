@@ -1082,19 +1082,28 @@ class LaneUndo(unittest.TestCase):
         self.assertTrue(any("app.txt" in p and note[:9] in p for p in got),
                         "no FAIL names app.txt and main's note commit %s: %r" % (note[:9], got))
 
-    def rewrite_then_restore_test_lines(self, count):
-        """Main holds `count` card test lines. The lane rewrites all of them, then puts main's text back, byte for byte."""
+    def land_then_restore_card_test(self, main, lane_text, lane_line=None):
+        """Main holds the card test file at `main`. The lane commits `lane_text` to it, then, with lane_line, adds that line in
+        a commit of its own, then puts main's text back, byte for byte. Returns the lane's commits: A, then L when given, then B."""
         r = self.r
-        main = "".join("card test line %d checks the title\n" % i for i in range(1, count + 1))
-        marked = "".join("card test line %d checks the title  # reviewed\n" % i for i in range(1, count + 1))
         r.sh("checkout", "-q", "main")
-        r.commit("main adds %d card test lines" % count, tests__card_txt=main)
+        r.commit("main adds the card test lines", tests__card_txt=main)
         r.push()
         r.sh("checkout", "-q", "-B", "lane", "origin/main")  # the lane starts from the main that holds the file
-        a = r.commit("A: mark the card test lines as reviewed", tests__card_txt=marked)
-        b = r.commit("B: take the review marks out again", tests__card_txt=main)
-        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit, and it rewrites A's lines
-        self.assertEqual(r.sh("rev-parse", b + ":tests/card.txt"), r.sh("rev-parse", "origin/main:tests/card.txt"))  # scope: B puts main's blob back
+        commits = [r.commit("A: change the card test lines", tests__card_txt=lane_text)]
+        if lane_line is not None:
+            commits.append(r.commit("L: add a lane line", tests__card_txt=lane_text + lane_line))
+        commits.append(r.commit("B: put main's text back", tests__card_txt=main))
+        self.assertEqual(self.lane(), commits)  # scope: B is the last lane commit, after A and any L
+        self.assertEqual(r.sh("rev-parse", commits[-1] + ":tests/card.txt"), r.sh("rev-parse", "origin/main:tests/card.txt"))  # scope: B puts main's blob back
+        return commits
+
+    def rewrite_then_restore_test_lines(self, count, lane_line=None):
+        """Main holds `count` card test lines. The lane rewrites all of them, then (with lane_line) adds that line, then puts
+        main's text back, byte for byte. Returns the lane's commits."""
+        main = "".join("card test line %d checks the title\n" % i for i in range(1, count + 1))
+        marked = "".join("card test line %d checks the title  # reviewed\n" % i for i in range(1, count + 1))
+        return self.land_then_restore_card_test(main, marked, lane_line)
 
     def test_a_lane_that_rewrites_five_test_lines_and_then_puts_them_back_is_green(self):
         self.rewrite_then_restore_test_lines(5)
@@ -1103,6 +1112,24 @@ class LaneUndo(unittest.TestCase):
     def test_a_lane_that_rewrites_six_test_lines_and_then_puts_them_back_is_green(self):
         self.rewrite_then_restore_test_lines(6)
         self.assertEqual(self.r.verdict(), [], "a restore of the lane's own rewrite of six main lines is read as an undo")
+
+    def test_a_put_back_of_a_lane_rewrite_that_also_drops_a_later_lane_line_in_the_file_is_red(self):
+        """The whole-file put-back is no undo only when it loses nothing the earlier commit did not write. Here it loses L's line."""
+        a, added, b = self.rewrite_then_restore_test_lines(6, lane_line="card test lane line\n")
+        self.assertIn("card test lane line", self.r.sh("show", added + ":tests/card.txt"))  # scope: L holds the lane line
+        self.assertNotIn("card test lane line", self.r.sh("show", b + ":tests/card.txt"))  # scope: B drops it
+        assert_finding(self, self.r.verdict(), "tests/card.txt", b, a)
+
+    def test_a_commit_that_deletes_two_lines_and_rewrites_four_in_other_hunks_then_restores_main_is_red(self):
+        """A pure delete hunk is no in-place rewrite (the `o and n` test in rewrote_in_place), so B's restore is an undo."""
+        main = "".join("card test line %d checks the title\n" % i for i in range(1, 11))
+        lane = ("".join("card test line %d checks the title\n" % i for i in (1, 2, 5, 6))
+                + "".join("card test line %d checks the title  # reviewed\n" % i for i in range(7, 11)))
+        a, b = self.land_then_restore_card_test(main, lane)
+        hunks = [x for x in self.r.sh("diff", "-U0", a + "^", a, "--", "tests/card.txt").splitlines() if x.startswith("@@")]
+        self.assertEqual(len(hunks), 2, "scope: A makes two hunks, a delete and a rewrite: %r" % hunks)  # scope: two hunks, not one
+        self.assertNotIn("card test line 3 checks the title", self.r.sh("show", a + ":tests/card.txt").splitlines())  # scope: A deletes line 3
+        assert_finding(self, self.r.verdict(), "tests/card.txt", b, a)
 
     def test_a_commit_that_adds_five_lines_and_rewords_a_main_line_then_restores_the_file_is_red(self):
         r = self.r
