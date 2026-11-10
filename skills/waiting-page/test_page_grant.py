@@ -76,9 +76,19 @@ def answer(**fields):
     return merged({"at": AT, "choice": "a", "item": ITEM_ID, "n": ITEM_N, "note": ""}, fields)
 
 
+def label_of(choice):
+    """The label the counted line prints for a choice: the option's label, a list of them for several, null for overturn.
+    options() names each label, so the key fixes it."""
+    if choice == "overturn":
+        return None
+    if "+" in choice:
+        return ["Option " + key.upper() for key in choice.split("+")]
+    return "Option " + choice.upper()
+
+
 def verdict(choice, note=None):
-    """The counted line for item 231. `choice` is a key, or `a+c` for a list."""
-    line = "counted item=%s n=%d choice=%s at=%s" % (ITEM_ID, ITEM_N, choice, AT)
+    """The counted line for item 231. `choice` is a key, or `a+c` for a list. The label goes after `at`, before `note`."""
+    line = "counted item=%s n=%d choice=%s at=%s label=%s" % (ITEM_ID, ITEM_N, choice, AT, json.dumps(label_of(choice)))
     return line if note is None else line + " note=" + json.dumps(note)
 
 
@@ -167,6 +177,13 @@ class Base(unittest.TestCase):
                          % (r.returncode, r.stdout, r.stderr))
         self.assertEqual(r.stdout.splitlines(), [line], "the counted line differs from the answer")
 
+    def assertLabelled(self, r, line):
+        """The counted line with its label. A line with no label, or a label not quoted as JSON, fails on that alone."""
+        self.assertEqual(r.returncode, 0, "a clear answer is not counted: exit %d, stdout %r, stderr %r"
+                         % (r.returncode, r.stdout, r.stderr))
+        self.assertEqual(r.stdout.splitlines(), [line],
+                         "the counted line does not print the picked option's label as label=<json>")
+
     def assertNotCounted(self, r, case, reason=None):
         """`reason`, a lower-case word, must appear in the verdict's reason, so the case fails for its own rule."""
         self.assertEqual(r.returncode, 1, "%s: expected exit 1, got %d, stdout %r, stderr %r"
@@ -189,7 +206,7 @@ class Base(unittest.TestCase):
 class Counted(Base):
     def test_replay_item_231_counted(self):
         r = self.check(self.repo(), self.pair(), pick="a")
-        self.assertCounted(r, "counted item=review-fix-check-go n=231 choice=a at=2026-11-04T13:56:29.078Z")
+        self.assertCounted(r, 'counted item=review-fix-check-go n=231 choice=a at=2026-11-04T13:56:29.078Z label="Option A"')
 
     def test_code_artifact_form_of_the_page_counted(self):
         r = self.check(self.repo(), self.pair(), page=PAGE_CODE_URL, pick="a")
@@ -267,6 +284,31 @@ class Counted(Base):
         self.assertEqual((snapshot(root), snapshot(fetched)), before, "the checker changed a file under root or fetched")
         self.assertFalse(os.path.exists(fetched + ".stamp"), "the checker left its stamp unused")
         self.assertTrue(os.path.isfile(fetched + ".stamp.used"), "the checker did not keep its used stamp")
+
+
+class CountedLabel(Base):
+    """The counted line prints the picked option's label as `label=<JSON>`, after `at` and before `note`, on one line."""
+
+    def test_counted_line_prints_the_picked_option_label(self):
+        r = self.check(self.repo(), self.pair(), pick="a")
+        self.assertLabelled(r, 'counted item=review-fix-check-go n=231 choice=a at=%s label="Option A"' % AT)
+
+    def test_label_with_quotes_a_fake_token_and_a_newline_prints_one_json_string(self):
+        label = 'Set "relayed" choice=b at=X\nin settings.json'
+        opts = [{"key": "a", "label": label}, {"key": "b", "label": "Option B"}]
+        r = self.check(self.repo(), self.pair(item_fields={"options": opts}), pick="a")
+        self.assertLabelled(r, 'counted item=review-fix-check-go n=231 choice=a at=%s '
+                               'label="Set \\"relayed\\" choice=b at=X\\nin settings.json"' % AT)
+
+    def test_multi_item_prints_its_labels_as_a_json_list(self):
+        r = self.check(self.repo(), self.pair(item_fields={"multi": True, "options": options("abc")},
+                                              answer_fields={"choice": ["a", "c"]}), pick="a+c")
+        self.assertLabelled(r, 'counted item=review-fix-check-go n=231 choice=a+c at=%s label=["Option A", "Option C"]' % AT)
+
+    def test_overturn_prints_label_null(self):
+        r = self.check(self.repo(), self.pair(item_fields={"arbiter": True}, answer_fields={"choice": "overturn"}),
+                       pick="overturn")
+        self.assertLabelled(r, "counted item=review-fix-check-go n=231 choice=overturn at=%s label=null" % AT)
 
 
 class NotCounted(Base):
