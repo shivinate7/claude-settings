@@ -8,15 +8,13 @@ import os
 import re
 import subprocess
 try:
-    import _nowindow  # the one home of a no-window child start; a flat hooks/ file, not a guard-set member
-except ImportError:  # install-hooks-whole: the guard set lands whole, the helper beside it a moment later; the guard still judges
+    import _nowindow  # the one home of a no-window child start; a flat hooks/ file, also a guard-set member (the install lists name it)
+except ImportError:  # install-hooks-whole: the install lists land the helper with the guard; a failed landing or an older install can lack it, and the guard still judges
     _nowindow = subprocess
 import sys
-try:
-    from proc_env import holds_session_tag  # the one home of the exec-environment read (hooks/proc_env.py)
-except ImportError:  # same fallback as _nowindow above: no read, so a PPID-1 pid stays foreign
-    def holds_session_tag(pid, session_id):
-        return False
+# Not in a try: a failed import fails guard.py's load, which waits and refuses as guard-crash (decision
+# install-hooks-whole). A guard that judged a kill with the read missing would call every PPID-1 pid foreign.
+from proc_env import holds_session_tag  # the one home of the exec-environment read (hooks/proc_env.py)
 
 from guard_core import (
     QUOTE_MARKS,
@@ -26,6 +24,7 @@ from guard_core import (
     resolve_command, segment_tokens, split_segments,
 )
 from guard_env import substitution_commands
+import own_session  # the one home of the agent transcript folder
 
 
 # ------------------------------------------------------------------ a machine-wide kill
@@ -317,8 +316,7 @@ def in_own_agent_worktree(pid: int, transcript: str) -> bool:
         return False   # left-behind only: a pid whose parent is alive stays foreign
     cwd = _pid_cwd(pid)
     found = AGENT_WORKTREE_RE.search((cwd or "").replace("\\", "/"))
-    return bool(found) and os.path.isfile(
-        os.path.join(transcript[:-len(".jsonl")], "subagents", "agent-%s.jsonl" % found.group(1)))
+    return bool(found) and os.path.isfile(own_session.agent_transcript_path(transcript, found.group(1)))
 
 
 def _kill_pids(tokens):
@@ -1014,7 +1012,7 @@ PLAYWRIGHT_PATH_REASON = (
     "One is a stale `__dirlock` in the Playwright cache, left by an install that stopped "
     "halfway. The other is an install that hangs while it unpacks under Node 26.11 with "
     "Playwright 1.58. "
-    "Remedy: run `pgrep -fl playwright` to confirm that no install is running, then remove the "
+    "Remedy: run `pgrep -f playwright` (it prints pids only) to confirm that no install is running, then remove the "
     "stale `__dirlock`. If the install still hangs, run it under Node 22 with `npx -y node@22 "
     "node_modules/playwright/cli.js install`, which unpacks in under a second."
 )

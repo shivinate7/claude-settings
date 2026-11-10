@@ -110,8 +110,8 @@ def _ensure_transcript_helpers():
     global is_last_human, tool_uses, records_after_last_human, read_transcript, read_turn
     if tool_uses is not None:
         return
-    here = os.path.dirname(os.path.abspath(__file__))
-    lint_dir = os.path.join(here, "..", "lint")
+    from shared_names import install_root  # stdlib only: the one home of the install root
+    lint_dir = os.path.join(install_root(os.path.dirname(os.path.abspath(__file__))), "lint")
     if lint_dir not in sys.path:
         sys.path.insert(0, lint_dir)
     from _transcript import (
