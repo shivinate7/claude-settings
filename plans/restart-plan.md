@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 17:00 CST.
+the history. Last rewrite: 2026-11-10 17:13 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -364,6 +364,27 @@ After 3.11, because its third part uses the same owner grant route.
   every owner question was sent twice and the copies drift; the H1 grant reached the coordinator only by
   a chat relay. Cost: one hop through triage before the asker wakes (unmeasured). Home: skill
   waiting-page; decision relayed-grant-read-from-page, rewritten in place.
+- **R19. Debts and notes are kept in place, like the roadmap.** Owner 17:00 CST Nov 10: "need to know
+  if triage is properly reviewing and adjusting the debts and notes lists just like i have it adjust
+  the roadmap/questions posted or i have all my sessions rewrite their handoff entirely in place rather
+  than just append -- does this make sense? in general something like notes/debts probably should be
+  visible from the artifact itself too"; 17:03 CST: "why it's so hard for AI to track the time"; 17:11
+  CST: "approved".
+  1. Owner item 358 lands first (sightings and expiry, one debt-fix lane per batch; step
+     notes-sightings-expiry, PR #1619, not on main). It gives the 190 `Until:` lines a reader.
+  2. Triage owns debts and notes as it owns the roadmap: its whole review at each batch merge merges
+     families into one line, closes what is stale or past `Until:`, and rewrites the rest to what is
+     true now.
+  3. The page shows both: notes count, growth, oldest and largest families; the debt count fixed (today
+     122 counts README.md and notes.md); the cull panel reads live numbers (today 47, from Oct 20).
+  4. The writing tool stamps every page and roadmap time from the clock, never the model; a guard
+     refuses a blank or unreadable time (step page-time-field-valid). Cause: about 190 blank times
+     written Nov 10 from a misread clock tool, repaired by hand.
+  Evidence (audit 17:06 CST, main 2d6f67f7c): notes.md 1,918 lines (504 KB), up 27% since Nov 7; 120
+  debts; 24% of notes over 14 days old; about 2% cite gone code, 2-3% repeat; no rule makes anyone
+  review notes (CLAUDE.md roles-findings-are-debts-or-notes is filing only). Folds in roadmap steps
+  c55 (re-weigh as a whole, notes stay short; owner Oct 26) and o8 (every debt and note on the page).
+  Home: CLAUDE.md roles-findings-are-debts-or-notes; skill roadmap; docs/debts/README.md.
 
 ## Stage 5. Express pass for prose
 
