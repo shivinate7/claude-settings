@@ -13,7 +13,7 @@ recommended pick:
 5. Probe the `PreToolUse` hook gate first, the mod `tool.check` gate second.
 6. Design A, the server-attested pointer, only. Design B only if Design A's computer probes fail.
 7. Keep the cloud merge allow rule (`merge/cloud_allow.json`) until the probe shows why batch
-   runner 8 was refused. Waits on ruling 3: no merge refusal is on record after 2026-11-01.
+   runner 8 was refused. Superseded, pending ruling 3: no merge refusal is on record after 2026-11-01.
 
 Build step 1 is a probe in one session. Nothing past it is built until the probe reads back.
 
