@@ -5,6 +5,6 @@
   "order": 951,
   "owner": "coordinator",
   "why": "Source: branch archive/no-undo-extra-acts (commit e6053e86b), dropped from #1099 as beyond its brief (coordinator 21:16 CST Nov 9). The change lets the coordinator write those folders in a record checkout (hooks/guard.py, about lines 5653-5745), an act main refuses today.",
-  "note": "Before a lane starts, name the incident it answers (rule building-guard-needs-incident): it loosens a guard. No owner question yet. Related: P43 (triage is the only page writer). Filed 21:15 CST Nov 9.",
-  "updatedAt": "2026-11-09T21:15:00-06:00"
+  "note": "Before a lane starts, name the incident it answers (rule building-guard-needs-incident): it loosens a guard. No owner question yet. Related: P43 (triage is the only page writer). Filed 21:15 CST Nov 9. Incident, round 3 of #1099 (coordinator 22:33 CST Nov 9): decision session-tiers line 31 says the coordinator writes the waiting page when no triage runs, and that write now meets a coordinator-scope refusal.",
+  "updatedAt": "2026-11-09T22:32:00-06:00"
 }

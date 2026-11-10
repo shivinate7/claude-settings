@@ -1,0 +1,13 @@
+{
+  "title": "`merge --lane-lint` finishes on a large head inside ci-job's time cap",
+  "phase": "now",
+  "status": "todo",
+  "order": 956,
+  "owner": "coordinator",
+  "why": "A lane cannot finish its own lint on a large head, so its verdict reads UNKNOWN.",
+  "note": "Incident: on #1099, `merge --lane-lint` ended UNKNOWN at ci-job's 1200 s cap in 3 runs: 89 steps, many 74-113 s each, load about 1 on 4 CPUs (coordinator 22:33 CST Nov 9). Fix idea: split the job, or size the cap from measured step times. Related: lane-lint-cloud-time-limit (ready; measures step times, cuts suites to picked ones), lane-lint-load-timeout (ready; cap under load from other processes), lane-lint-parallel-cap (ready), lane-lint-hub-cost (todo). Check first whether those PRs, once merged, already close #1099's case.",
+  "updatedAt": "2026-11-09T22:32:00-06:00",
+  "lane": null,
+  "blockedBy": null,
+  "paused": null
+}
