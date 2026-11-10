@@ -1716,7 +1716,7 @@ def written_time_hit(tool: str, tool_input, cwd: str = ""):
             off = _minutes_ahead(then, now) if isinstance(then, datetime) else _fragment_ahead(then, now)
             if off is not None and off > STAMP_LIMIT_MINUTES:
                 return what, WRITTEN_REASON.format(
-                    what=what, off=off, now=local_time.central_hhmm(now), central=local_time.central_iso_minute(now),
+                    what=what, off=off, now=local_time.central_hhmm(now), central=local_time.central_iso(now, seconds=False),
                     utc=now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"))
     except (ImportError, ValueError, OverflowError):
         return None

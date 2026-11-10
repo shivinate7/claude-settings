@@ -102,22 +102,16 @@ def central_hhmm(at):
     return " ".join(line(lambda: at).split()[3:5])
 
 
-def central_iso_minute(at):
-    """`YYYY-MM-DDTHH:MM-06:00` for an instant, in Central with its offset: the time line's own clock."""
-    parts = line(lambda: at).split()
-    return "%sT%s%s" % (parts[2], parts[3], parts[5].strip("()")[3:])
-
-
 def central_full(at):
     """`YYYY-MM-DD HH:MM CDT` (or CST) for an instant: the stamp without the offset text."""
     local, name = central_parts(at)
     return "%s %s" % (local.strftime(STAMP_FORMAT), name)
 
 
-def central_iso(at):
-    """`YYYY-MM-DDTHH:MM:SS-05:00` (or -06:00) for an instant: ISO-8601 with the Central offset."""
+def central_iso(at, seconds=True):
+    """`YYYY-MM-DDTHH:MM:SS-05:00` (or -06:00) for an instant: ISO-8601 with the Central offset. `seconds=False` drops `:SS`."""
     local, name = central_parts(at)
-    return local.strftime("%Y-%m-%dT%H:%M:%S") + STAMP_ZONES[name][len("UTC"):]
+    return local.strftime("%Y-%m-%dT%H:%M" + (":%S" if seconds else "")) + STAMP_ZONES[name][len("UTC"):]
 
 
 def override_line(result):
