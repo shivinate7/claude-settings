@@ -73,18 +73,18 @@
 # zizmor action never fails a passing lint, and its PASS line ends `; <the whole drift line>`, which starts with the marker
 # `ste-changed: pin note: ` (hooks/pin_note.py). A --step run (merge's ready checks) never gets the variable: a drifted pin
 # exits 3 and the step reads FAIL. No other step gets it either, even when the caller exports it. A failing lint is FAIL.
-# Under --lint, lint steps run at once, up to N workers: CI_JOB_LINT_WORKERS when it is a positive integer, else min(CPU count, 4),
+# Under --lint, lint CI steps run at once, up to N workers: CI_JOB_LINT_WORKERS when it is a positive integer, else min(CPU count, 4),
 # at least 1 (a lane runs only the checks its change needs, decision lanes-run-no-full-ci-job; one CI step at a time, the lint run outlasted
 # merge's 1200 s bound). N=1 is the serial run. An install CI step is
 # a barrier: it runs alone, after every earlier CI step has finished, and before any later one starts. Each parallel CI step logs to a file of its
-# own, so the reads from its start offset see only its output; each log is appended to $VERDICT_LOG in step order, and each verdict line
-# prints in step order, whatever order the CI steps finish. A `start:` or heartbeat line is written whole, so two never mix. A plain run,
+# own, so the reads from its start offset see only its output; each log is appended to $VERDICT_LOG in CI step order, and each verdict line
+# prints in CI step order, whatever order the CI steps finish. A `start:` or heartbeat line is written whole, so two never mix. A plain run,
 # --step and --plan stay serial.
-# Cost: one process per step (bin/verdict and the step's shell), one log file; no timer, no lasting process. Under
+# Cost: one process per CI step (bin/verdict and the CI step's shell), one log file; no timer, no lasting process. Under
 # --lint each install CI step adds its processes, plus network and disk only when a job has one; a pip install writes to the active Python.
-# With N above 1, --lint adds one thread per worker, one temp folder, and one log file per lint step run, all deleted when ci-job ends
+# With N above 1, --lint adds one thread per worker, one temp folder, and one log file per lint CI step run, all deleted when ci-job ends, except a log whose copy into $VERDICT_LOG failed (then the folder stays)
 # (a SIGKILL from merge's timeout reaches only ci-job: it leaves the folder in TMPDIR and may leave verdict children running). Each `not run` line,
-# the summary and each step's `start: <name>` line on stderr (before it runs, so a caller sees which step is running)
+# the summary and each CI step's `start: <name>` line on stderr (before it runs, so a caller sees which CI step is running)
 # are one print.
 import concurrent.futures, os, re, shutil, subprocess, sys, tarfile, tempfile, threading
 BIN = os.path.dirname(os.path.realpath(__file__))
@@ -529,14 +529,20 @@ def run_step(name, step, install, detail, shell, env, cwd, ctx, log):
     return state, first
 
 
-def append_log(src, dst):
-    """Add a finished parallel step's log to the run's log, then delete it."""
+def append_log(src, dst, name):
+    """Add a finished parallel CI step's log to the run's log, then delete it. A failed copy keeps the CI step's log and names
+    it on stderr: its verdict names the run's log, which then lacks that output. Returns True when the log was kept."""
     try:
         with open(src, "rb") as f, open(dst, "ab") as g:
             shutil.copyfileobj(f, g)
+    except OSError:
+        err_line("ci-job: could not add the log of CI step %s to the run's log; its output is kept in %s\n" % (name, src))
+        return True
+    try:
         os.remove(src)
     except OSError:
-        pass  # only the log's copy is lost: the step's verdict came from its exit code and is already in hand
+        pass  # the copy is in; the folder's removal at the end of the run takes what is left
+    return False
 
 
 def main(argv):
@@ -617,6 +623,7 @@ def main(argv):
     workers = lint_workers() if lint and not dry else 1
     pool = concurrent.futures.ThreadPoolExecutor(workers) if workers > 1 else None  # one worker is the serial path
     logdir = tempfile.mkdtemp(prefix="ci-job-lint-") if pool else None  # each parallel step's own log, until it is added to the run's
+    kept_logs = False
     futures, logs = {}, {}  # by step index: the queued run, and its log
     try:
         for n, step in enumerate(steps, 1):
@@ -666,7 +673,8 @@ def main(argv):
                                                      planned[i][3], planned[i][4], ctx, logs[i])
                 state, first = futures.pop(n - 1).result()
                 own = logs.pop(n - 1)
-                append_log(own, log)  # in step order, so the run's log reads as a serial run's
+                if append_log(own, log, name):  # in CI step order, so the run's log reads as a serial run's
+                    kept_logs = True
                 first = first.replace(own, log)  # the verdict line names the log that stays
             else:
                 state, first = run_step(name, step, install, detail, shell, env, cwd, ctx, log)
@@ -676,7 +684,8 @@ def main(argv):
     finally:
         if pool:
             pool.shutdown(cancel_futures=True)
-            shutil.rmtree(os.path.abspath(logdir), ignore_errors=True)
+            if not kept_logs:  # a log that did not reach the run's log stays in the folder for the reader
+                shutil.rmtree(os.path.abspath(logdir), ignore_errors=True)
     if lint and not ran_lint and not tally["FAIL"] and not tally["unknown"]:  # a pass that ran no lint CI step proved nothing; any other line already gives the exit
         tally["unknown"] += 1
         print("%-15s no lint CI step %s: %d of the job's %d steps are lint CI steps, and each one is skipped, not run, or unknown" % (
