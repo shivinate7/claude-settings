@@ -356,3 +356,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - acfs-merge-route-untested (#2334): no test pins the merge route with brief scope.
 - acfs-pointer-macos-scratch (#2334): the pointer read allows only the checkout or the temp folder; the macOS scratchpad is unchecked (fails open).
 - gh-write-repo-flag-release (#2462 gh-write-repo-flag-gap round 3): the cloud guard does not judge `gh release|repo|run -R o/r` writes (same as main).
+- docs-only-lookalike-untested (#2452 docs-only-record-checks-diff round 3, coordinator 01:18 CST Nov 10): no test for a docs-prefix look-alike path such as docs-old/x.md; a startswith("docs") mutant survives. The code is right today.
+- docs-only-notes-stale-after-2452 (#2452): after #2452 merges, rewrite the docs/debts/notes.md lines docs-only-rule-text and docs-only-non-md-docs: docs-only no longer passes CLAUDE.md or skills, and the rule is not only "not ending in .md".
