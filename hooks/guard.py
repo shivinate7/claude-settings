@@ -2287,8 +2287,8 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
             return target
         if repo_rel(target, cwd, outside=False) is None:
             return ""
-        # The merge route: a test-author resolves a whole merge that has a test conflict, so a product path git left
-        # conflicted is its own.
+        # The merge route: a test-author resolves a whole merge that has a builder-refused conflict (a test path or a
+        # mutation test), so a product path git left conflicted is its own.
         # Git runs only here, for a path refused so far, and the answer reads none of the target's text.
         if role == AUTHOR_ROLE:
             where = norm(os.path.normpath(full))
@@ -2389,9 +2389,11 @@ def merge_tree(root: str, ours: str, theirs: str):
 
 def merge_route_paths(conflicts):
     """The paths a test-author owns in a merge that left `conflicts` (decision builders-cannot-edit-tests).
-    The route needs a test path among the conflicts, and covers product paths only: a workflow, test
-    config or manifest keeps its own content check (`role_offences`), so it is no product path."""
-    if not any(is_test_rel(path) for path in conflicts):
+    The route needs a path a builder is refused among the conflicts (a test path or a mutation test, the
+    one predicate `is_builder_test_rel`): then no builder role can commit the merge. It
+    covers product paths only: a workflow, test config or manifest keeps its own content check
+    (`role_offences`), so it is no product path."""
+    if not any(is_builder_test_rel(path) for path in conflicts):
         return []
     return [path for path in conflicts if not (is_workflow_rel(path) or author_path_ok(path))]
 
