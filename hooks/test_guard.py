@@ -3604,8 +3604,8 @@ chained_ask("per-file ask: two -C targets in one checkout, the lane by path then
 
 # FIVE SHAPES THAT RUN A PER-FILE DISCARD IN THE SHARED CHECKOUT. Each one points the discard at
 # the shared checkout while the shell, or a `-C` that names the lane, still reads as the lane. Each
-# verdict is the one each row below pins: deny for 1 to 4 (4 is a Set-Location move, read as a cd),
-# ask for 5 (main reads the lane for 5, so it asks and does not deny; the branch must not allow).
+# verdict is the one each row below pins: deny for all five (4 is a Set-Location move, read as a cd;
+# 5 is an env -C or --chdir, read as the run folder, so other-checkout denies it as it denies git -C).
 # Controls that stay allowed are pinned above: "per-file allow: restore of one modified file"
 # (cwd lane) and "one -C target repeated".
 # 1. --work-tree names the shared checkout, whatever -C says.
@@ -3633,23 +3633,40 @@ for _cd in ("sl", "chdir", "Push-Location"):
     sh("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout"
        % _cd, _cd + " " + slash(GITMAIN) + "; " + VCS + " restore f.txt",
        "deny", "other-checkout", tool="PowerShell", cwd=GITWT)
-# 5. env's own chdir flags. main does not read them and asks, so ask is pinned.
-sh("per-file ask: env -C into the shared checkout, then restore f.txt, from a worktree",
-   "env -C " + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree", cwd=GITWT)
-sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from a worktree",
-   "env --chdir=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree",
+# 5. env's own chdir flags. The guard reads env -C and env --chdir as the run folder, the folder git
+# then runs in, so other-checkout denies each one as it denies a git -C into the shared checkout.
+sh("per-file ask: env -C into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout",
+   "env -C " + slash(GITMAIN) + " " + VCS + " restore f.txt", "deny", "other-checkout", cwd=GITWT)
+sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout",
+   "env --chdir=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "deny", "other-checkout",
    cwd=GITWT)
+# A `cd` after an `env -C` sets the folder the restore runs in, so the restore is judged in the shared
+# checkout, as the plain `cd` form is. The control is the same chain without the env wrapper, which the
+# reader already reads the way the rule needs, so it stays green.
+sh("per-file deny: env -C into the lane, then cd into the shared checkout and restore f.txt, from a folder in no checkout, denies by shared-tree",
+   "env -C " + slash(GITWT) + " " + VCS + " status && cd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
+   "deny", "shared-tree", cwd=NOGIT, lacks=(CHAIN_ASK,))
+sh("per-file deny: control, a plain status, then cd into the shared checkout and restore f.txt, from a folder in no checkout, denies by shared-tree",
+   VCS + " status && cd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
+   "deny", "shared-tree", cwd=NOGIT, lacks=(CHAIN_ASK,))
+# A bare restore of the whole tree is a discard the lane's own dirty tracked file would lose, so it asks in the
+# lane, and chained with a status it denies. The control is that chain with no env wrapper. The decision row puts
+# an env -C on a clean checkout ahead of the status. The shell's folder stays the lane, so the restore must still
+# deny. The verb is restore ., not restore f.txt: a restore of one modified file in the lane is allowed by design
+# (the per-file allow rows), so that verb cannot tell the two readings apart.
+chained_ask("per-file deny: control, a status and a bare restore of the whole tree in a lane with a dirty file, denies as a chained ask command",
+            VCS + " status && " + VCS + " restore .", cwd=GITWT)
+chained_ask("per-file deny: env -C into a clean checkout, then a bare restore of the whole tree in the lane, denies as a chained ask command",
+            "env -C " + slash(SUBJCLEAN) + " " + VCS + " status && " + VCS + " restore .", cwd=GITWT)
 
 # LATE PROBES (named "late probe", so MUTATE_ONLY="late probe" runs this block alone). Each runs a
-# per-file restore in the shared checkout from the lane by a spelling the guard must still read.
-# The chdir flags only name the shared checkout, so they still ask. The control stays allowed.
+# per-file restore in the shared checkout from the lane. env -vC is read as env -C, so other-checkout
+# denies it. The --ch= abbreviation is not read as --chdir, so it still asks. The control stays allowed.
 _SH = slash(GITMAIN)
-for _label, _cmd in (
-    ("env -vC", "env -vC " + _SH + " " + VCS + " restore f.txt"),
-    ("env --ch= abbreviation", "env --ch=" + _SH + " " + VCS + " restore f.txt"),
-):
-    sh("per-file ask: late probe, %s names the shared checkout, from a worktree" % _label, _cmd,
-       "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: late probe, env -vC names the shared checkout, from a worktree, denies by other-checkout",
+   "env -vC " + _SH + " " + VCS + " restore f.txt", "deny", "other-checkout", cwd=GITWT)
+sh("per-file ask: late probe, env --ch= abbreviation names the shared checkout, from a worktree",
+   "env --ch=" + _SH + " " + VCS + " restore f.txt", "ask", "shared-tree", cwd=GITWT)
 sh("per-file allow: late probe control, a harmless GIT_TRACE prefix in the lane",
    "GIT_TRACE=1 " + VCS + " restore f.txt", "allow", cwd=GITWT)
 
@@ -5058,6 +5075,8 @@ TEMP_DIR = None   # back to the system temp for the sections below
 HM_REFUSED_PATH = "hm-text-lane"
 # The call shape every EnterWorktree remedy names. A `path` makes Claude Code ask the owner to approve the worktree.
 ENTER_WORKTREE_SHAPE = "with a `name` and no `path`"
+# An existing checkout needs `path`, not `name`; the approval prompt a `path` triggers is the accepted cost.
+OTHER_CHECKOUT_ENTER_SHAPE = "call the EnterWorktree tool with `path` set to"
 
 
 def hand_made_refusal_text_case():
@@ -29781,6 +29800,38 @@ def worktree_home_cd_into_other_checkout_case():
     return True, "every cd into another checkout is refused, bare or chained, and names no path"
 
 
+def _remedy_problems(label, got, reason):
+    """The other-checkout remedy names OTHER_CHECKOUT_ENTER_SHAPE, and no `cd` or `env -C` route.
+    A verdict other than deny is one problem, and the remedy is not read."""
+    if got != "deny":
+        return ["%s: want deny, got %s (%s)" % (label, got, reason[:120])]
+    problems = []
+    if OTHER_CHECKOUT_ENTER_SHAPE not in reason:
+        problems.append("%s: the remedy does not say %r: %s" % (
+            label, OTHER_CHECKOUT_ENTER_SHAPE, reason[:160]))
+    if "`cd`" in reason:
+        problems.append("%s: the remedy names `cd`: %s" % (label, reason[:160]))
+    if "env -C" in reason:
+        problems.append("%s: the remedy names env -C: %s" % (label, reason[:160]))
+    return problems
+
+
+def worktree_home_other_checkout_remedy_case():
+    """Rule 0, `other-checkout`, the remedy on both refusals: a write into a sibling checkout, and a
+    `cd` into one, each name the EnterWorktree call with `path` set to the checkout, and neither names
+    `cd` or `env -C` as a route. A refusal must not name the route it refused, or the agent takes that route."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcocd")
+    in_b = os.path.join(lane_b, "src", "app.py")
+    problems = []
+    got, reason = _decide_full("Write", lane_a, file_path=in_b, content="x")
+    problems += _remedy_problems("write into a sibling checkout", got, reason)
+    got, reason = _decide_full("Bash", lane_a, command="cd " + slash(lane_b))
+    problems += _remedy_problems("cd into a sibling checkout", got, reason)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the write and the cd refusals name the EnterWorktree call with path, and no cd or env -C route"
+
+
 def worktree_home_cd_parse_forms_case():
     """Rule 0, other-checkout, the `cd` act's parse: a relative climb, a subshell and a PowerShell
     `Set-Location` each move into another checkout, and each is refused."""
@@ -31201,6 +31252,139 @@ LOG_CHECKS_EXTRA.append(("other-checkout: a top-level git -C commit into a sibli
                          _gcx_row("deny", "primary", "git -C @SIB commit -m x", agent=None,
                                   session=GCX_TOP_SESSION, scope=_gcx_top_lane_scope)))
 
+# env -C and env --chdir set the folder the git after them runs in, so a git verb that env moves into a
+# checkout is judged there, as the git -C form is. Each row is one spelling, so a failure names one form.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C commit into the primary checkout is refused",
+                         _gcx_row("deny", "home", "env -C @PRIMARY git commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env --chdir add in the primary checkout is refused",
+                         _gcx_row("deny", "home", "env --chdir @PRIMARY git add f")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env --chdir=<path> add in the primary checkout is refused",
+                         _gcx_row("deny", "home", "env --chdir=@PRIMARY git add f")))
+# Read from the agent's home, the git -C part alone stays inside the home, so only the env -C climb reaches
+# the primary checkout.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C then git -C, two relative folders that together reach "
+                         "the primary checkout, is refused",
+                         _gcx_row("deny", "home", "env -C ../../.. git -C . rm f")))
+# These rows pin the allows the guard must keep, so each is a guard, not a red case.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C status of the primary checkout is allowed",
+                         _gcx_row("allow", "home", "env -C @PRIMARY git status")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C commit into a variable folder is allowed",
+                         _gcx_row("allow", "home", 'env -C "$WT" git commit -m x')))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C commit into its own home is allowed",
+                         _gcx_row("allow", "home", "env -C @HOME git commit -m x")))
+def _guard_core_under_test():
+    """The guard_core module the run-folder rows read: the folder of GUARD, loaded fresh on each call, so a
+    GUARD_UNDER_TEST copy is the one read."""
+    import importlib.util
+    folder = os.path.dirname(GUARD)
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    spec = importlib.util.spec_from_file_location("guard_core_under_test", os.path.join(folder, "guard_core.py"))
+    core = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(core)
+    return core
+
+
+def run_dir_env_c_case():
+    """_run_dir returns the folder an `env -C <dir>` names, as it returns the folder a `git -C <dir>` names.
+    The git -C form is the control and pins the reader's answer; the env -C form must match it, not the cwd.
+    guard_core loads from the folder of GUARD, so a GUARD_UNDER_TEST copy is the one read. Both folders are
+    named under ROOT, the run folder, and nothing is read or written on disk."""
+    core = _guard_core_under_test()
+    target = os.path.join(ROOT, "run-dir-target")
+    cwd = os.path.join(ROOT, "run-dir-cwd")
+    control = core._run_dir("git -C \"%s\" status" % slash(target), cwd)
+    if os.path.normpath(control) != os.path.normpath(target):
+        return False, "control: git -C reads %s, want %s" % (control, target)
+    got = core._run_dir("env -C \"%s\" git status" % slash(target), cwd)
+    if os.path.normpath(got) != os.path.normpath(target):
+        return False, "env -C reads %s, want %s (the cwd is %s)" % (got, target, cwd)
+    return True, "env -C and git -C both read the named folder"
+
+
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads the folder an env -C names, as it reads a git -C",
+                         run_dir_env_c_case))
+
+
+# THE RUN FOLDER OF A COMMAND TYPED FROM A LINKED LANE. _run_dir names the folder each spelling runs in: a
+# relative env -C joins onto the folder the earlier cd left, not the shell cwd, and a cd after an env -C sets
+# the folder over it. Each row is one spelling, so a failure names one form. Scope before subject (P7): the
+# plain cd into the primary is read first, and a row reports on its own spelling only when that cd reads right.
+RUN_DIR_PRIM = os.path.join(ROOT, "run-dir-prim")   # the primary checkout
+RUN_DIR_LANE = os.path.join(ROOT, "run-dir-lane")   # the linked lane the command is typed from
+RUN_DIR_CLEAN = os.path.join(ROOT, "run-dir-clean")  # another folder, neither the primary nor the lane
+
+
+def _run_dir_names(command, want, cause):
+    """_run_dir of `command`, typed from RUN_DIR_LANE, names `want`. `cause` is the one misreading a miss shows."""
+    core = _guard_core_under_test()
+    scope = core._run_dir("cd %s && git status" % slash(RUN_DIR_PRIM), RUN_DIR_LANE)
+    if os.path.normpath(scope) != os.path.normpath(RUN_DIR_PRIM):
+        return False, "scope: a plain cd into the primary checkout reads %s, want %s" % (scope, RUN_DIR_PRIM)
+    got = core._run_dir(command, RUN_DIR_LANE)
+    if os.path.normpath(got) != os.path.normpath(want):
+        return False, "%s: _run_dir reads %s, want %s" % (cause, got, want)
+    return True, "_run_dir reads %s for: %s" % (want, command)
+
+
+def _run_dir_row(command, want, cause):
+    """One row: a zero-argument case that runs _run_dir_names on one spelling."""
+    return lambda: _run_dir_names(command, want, cause)
+
+
+_RELATIVE_ENV_C = "a relative env -C joined onto the shell cwd, not onto the folder the earlier cd left"
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir joins a relative env -C onto the folder an earlier cd left",
+                         _run_dir_row("cd %s && env -C . git status" % slash(RUN_DIR_PRIM), RUN_DIR_PRIM,
+                                      _RELATIVE_ENV_C)))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir joins a relative env -C sub onto the folder an earlier cd left",
+                         _run_dir_row("cd %s && env -C sub git status" % slash(RUN_DIR_PRIM),
+                                      os.path.join(RUN_DIR_PRIM, "sub"), _RELATIVE_ENV_C)))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir lets a cd after an env -C decide the folder over the env -C",
+                         _run_dir_row("env -C %s git status && cd %s && git status"
+                                      % (slash(RUN_DIR_LANE), slash(RUN_DIR_PRIM)),
+                                      RUN_DIR_PRIM, "an env -C folder beat the cd after it")))
+# A guard row: an env -C of the primary checkout alone must be read as the primary, or the guard judges the wrong checkout.
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads an env -C of the primary checkout as the primary",
+                         _run_dir_row("env -C %s git status" % slash(RUN_DIR_PRIM), RUN_DIR_PRIM,
+                                      "an env -C of the primary checkout was read as something else")))
+
+# An env -C moves only the program it runs. Its folder reaches a bare git that follows it only when EVERY git
+# segment of the command carries an env -C folder. Otherwise a bare git runs in the shell's folder: the cwd,
+# or the folder the last cd left. The three red rows are the three places a bare git can sit beside an env -C
+# into another folder: after it, after a cd and it, and ahead of it. Each row is one spelling, so a failure
+# names one form.
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads a bare git after an env -C into another folder in the shell's folder",
+                         _run_dir_row("env -C %s git status && git log" % slash(RUN_DIR_CLEAN), RUN_DIR_LANE,
+                                      "a bare git after an env -C reads the env folder, as if the env -C moved the shell")))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads a bare git after a cd and an env -C in the cd's folder",
+                         _run_dir_row("cd %s && env -C %s git status && git log" % (slash(RUN_DIR_PRIM), slash(RUN_DIR_CLEAN)),
+                                      RUN_DIR_PRIM,
+                                      "a bare git after a cd and an env -C reads the env folder, as if the env -C moved the shell past the cd")))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads a bare git ahead of an env -C into another folder in the shell's folder",
+                         _run_dir_row("git status && env -C %s git log" % slash(RUN_DIR_CLEAN), RUN_DIR_LANE,
+                                      "a bare git ahead of an env -C reads the env folder, as if the env -C moved the shell for it")))
+# The guards below pin what each red row must keep. A git -C under an env -C joins onto that env folder, and a
+# relative one chains onto it. A non-git env -C moves nothing. A relative git -C after a cd reads the shell's
+# folder, and a git -C ahead of a cd keeps its folder over the cd. With an env -C on every git segment, the last
+# env -C folder is read.
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir joins a git -C onto the env -C folder of its own segment",
+                         _run_dir_row("env -C a git -C b status", os.path.join(RUN_DIR_LANE, "a", "b"),
+                                      "a git -C under an env -C was not joined onto that env folder")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a git after an env -C of a non-git program as the shell's folder",
+                         _run_dir_row("env -C %s true && git status" % slash(RUN_DIR_PRIM), RUN_DIR_LANE,
+                                      "an env -C of a non-git program moved the shell's folder")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a relative git -C after a cd in the shell's folder",
+                         _run_dir_row("cd %s && git -C . status" % slash(RUN_DIR_PRIM), RUN_DIR_LANE,
+                                      "a relative git -C after a cd joined onto the cd folder, not the shell's folder")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a git -C ahead of a cd in its own folder, not the cd's",
+                         _run_dir_row("git -C %s status && cd %s && git status" % (slash(RUN_DIR_LANE), slash(RUN_DIR_PRIM)),
+                                      RUN_DIR_LANE,
+                                      "a cd after a git -C decided the folder over the git -C")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads the last env -C folder when every git segment carries one",
+                         _run_dir_row("env -C %s git status && env -C %s git log" % (slash(RUN_DIR_PRIM), slash(RUN_DIR_CLEAN)),
+                                      RUN_DIR_CLEAN,
+                                      "with an env -C on every git segment, the first env -C folder was read, not the last")))
+
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
@@ -31297,6 +31481,9 @@ LOG_CHECKS = (
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
      worktree_home_cd_into_other_checkout_case),
+    ("worktree-home: the other-checkout refusal names the EnterWorktree call with `path` for a write "
+     "and for a cd, and names neither `cd` nor env -C as a route",
+     worktree_home_other_checkout_remedy_case),
     ("worktree-home: a cd into another checkout is refused when it is a relative climb, a subshell or "
      "a PowerShell Set-Location", worktree_home_cd_parse_forms_case),
     ("worktree-home: an agent's cd into a sibling agent tree, or into a folder that only starts with "
@@ -41158,6 +41345,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: an owner override lifts the cross-checkout", "worktree-home"),
     ("worktree-home: the cross-checkout read costs", "worktree-home"),
     ("worktree-home: a cd into another checkout of the clone is refused", "worktree-home"),
+    ("worktree-home: the other-checkout refusal names the EnterWorktree call", "worktree-home"),
     ("worktree-home: a cd into another checkout is refused when it is a relative climb", "worktree-home"),
     ("worktree-home: an agent's cd into a sibling agent tree", "worktree-home"),
     ("worktree-home: a cd to a checkout's own root", "worktree-home"),
