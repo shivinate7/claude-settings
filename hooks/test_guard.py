@@ -20725,6 +20725,115 @@ for _label, _check in (
     LOG_CHECKS_EXTRA.append((_label, _check))
 
 
+# The agent's own transcript folder has one home (rule agent-transcript-path-one-home): own_session's agent_transcript_dir,
+# The agent folder beside the transcript: <transcript minus .jsonl>/subagents/agent-<id>.jsonl. The copies in hooks/guard_kill.py and hooks/stall_watch.py must name that folder.
+# The copies in lint/report_guard.py and lint/ruling_census.py are pinned in their own suites.
+AGENT_HOME_ID = "ab12cd34ef56a7890"  # an agent id as the harness sends it: 17 hex characters
+
+
+def load_hook(name, file_name):
+    """A hooks module beside the guard under test (GUARD), loaded by path, so a mutant copy of the guard reads its own copy."""
+    import importlib.util
+    hooks = os.path.dirname(GUARD)
+    if hooks not in sys.path:
+        sys.path.insert(0, hooks)  # guard_kill imports its siblings by name
+    spec = importlib.util.spec_from_file_location(name, os.path.join(hooks, file_name))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def agent_home_shape_check():
+    """agent_transcript_dir names the agent folder beside the transcript, for a transcript path with .jsonl, without it, and dotted."""
+    own = _load_own_session()
+    if not hasattr(own, "agent_transcript_dir"):
+        return False, "own_session has no agent_transcript_dir: the one home of the agent folder is not built"
+    base = os.path.join(ROOT, "agenthome")
+    for name in ("sess.jsonl", "sess", "sess.v2"):
+        got = own.agent_transcript_dir(os.path.join(base, name))
+        want = os.path.join(base, name[:-len(".jsonl")] if name.endswith(".jsonl") else name, "subagents")
+        if got != want:
+            return False, "agent_transcript_dir(%s) is %s, want %s" % (name, got, want)
+    return True, "agent_transcript_dir names the agent folder beside the transcript for each shape"
+
+
+def agent_path_check():
+    """agent_transcript_path is the agent's file in the home folder."""
+    own = _load_own_session()
+    if not hasattr(own, "agent_transcript_dir"):
+        return False, "own_session has no agent_transcript_dir: agent_transcript_path has no home to build on"
+    transcript = os.path.join(ROOT, "agenthome", "sess.jsonl")
+    got = own.agent_transcript_path(transcript, AGENT_HOME_ID)
+    want = os.path.join(own.agent_transcript_dir(transcript), "agent-" + AGENT_HOME_ID + ".jsonl")
+    if got != want:
+        return False, "agent_transcript_path is %s, want %s" % (got, want)
+    return True, "agent_transcript_path is the agent's file in the home folder"
+
+
+def agent_kill_finds_check():
+    """in_own_agent_worktree finds the agent file beside a .jsonl transcript, for a pid whose parent is init in its worktree."""
+    kill = load_hook("guard_kill_home_check", "guard_kill.py")
+    base = os.path.join(ROOT, "agenthome-kill")
+    transcript = os.path.join(base, "live.jsonl")
+    write(transcript, "{}\n")
+    write(os.path.join(base, "live", "subagents", "agent-" + AGENT_HOME_ID + ".jsonl"), "{}\n")
+    cwd = os.path.join(base, ".claude", "worktrees", "agent-" + AGENT_HOME_ID)
+    kill._ps_ppid = lambda pid: 1  # a pid whose parent is init
+    kill._pid_cwd = lambda pid: cwd  # a cwd inside this agent's worktree
+    if not kill.in_own_agent_worktree(4242, transcript):
+        return False, "in_own_agent_worktree does not find the agent file beside the transcript"
+    return True, "in_own_agent_worktree finds the agent file beside the transcript"
+
+
+def agent_stall_finds_check():
+    """agent_transcripts lists the agent file beside the session first."""
+    stall = load_hook("stall_watch_home_check", "stall_watch.py")
+    base = os.path.join(ROOT, "agenthome-stall")
+    got = stall.agent_transcripts(os.path.join(base, "sess.jsonl"), AGENT_HOME_ID, "")[:1]
+    want = [os.path.join(base, "sess", "subagents", "agent-" + AGENT_HOME_ID + ".jsonl")]
+    if got != want:
+        return False, "agent_transcripts lists %r first, want %r" % (got, want)
+    return True, "agent_transcripts lists the agent file beside the session first"
+
+
+def agent_copies_agree_check():
+    """The stall_watch and guard_kill copies name the agent folder beside the transcript, for each transcript shape."""
+    own = _load_own_session()
+    stall = load_hook("stall_watch_home_agree", "stall_watch.py")
+    kill = load_hook("guard_kill_home_agree", "guard_kill.py")
+    base = os.path.join(ROOT, "agenthome-agree")
+    for name in ("sess.jsonl", "sess", "sess.v2"):
+        transcript = os.path.join(base, name)
+        stem = name[:-len(".jsonl")] if name.endswith(".jsonl") else name
+        agent_file = os.path.join(base, stem, "subagents", "agent-" + AGENT_HOME_ID + ".jsonl")
+        write(agent_file, "{}\n")
+        got = stall.agent_transcripts(transcript, AGENT_HOME_ID, "")[0]
+        if got != agent_file:
+            return False, "agent_transcripts names %s for %s, want %s" % (got, name, agent_file)
+    if not hasattr(own, "agent_transcript_dir"):
+        return False, "own_session has no agent_transcript_dir: the copies have no home to agree with"
+    jsonl = os.path.join(base, "sess.jsonl")  # guard_kill reads a transcript that ends in .jsonl, by its own gate
+    kill._ps_ppid = lambda pid: 1
+    kill._pid_cwd = lambda pid: os.path.join(base, ".claude", "worktrees", "agent-" + AGENT_HOME_ID)
+    if not kill.in_own_agent_worktree(4242, jsonl):
+        return False, "in_own_agent_worktree finds no agent file in the folder beside sess.jsonl"
+    return True, "the stall_watch and guard_kill copies name the home's folder for each shape"
+
+
+for _label, _check in (
+        ("agent-transcript-path-one-home: agent_transcript_dir names the agent folder beside the transcript, with or without .jsonl",
+         agent_home_shape_check),
+        ("agent-transcript-path-one-home: agent_transcript_path is the agent's file in the home folder",
+         agent_path_check),
+        ("agent-transcript-path-one-home: guard_kill finds the agent file beside a .jsonl transcript",
+         agent_kill_finds_check),
+        ("agent-transcript-path-one-home: stall_watch lists the agent file beside the session first",
+         agent_stall_finds_check),
+        ("agent-transcript-path-one-home: the stall_watch and guard_kill copies name the home's folder for each shape",
+         agent_copies_agree_check)):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+
+
 def _still_open(fd):
     """True while this process holds `fd` open."""
     try:
