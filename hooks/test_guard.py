@@ -33550,7 +33550,7 @@ HCS_TX_LINES = {
                  hcs_tool("e2", "Bash", {"command": "git rev-parse --short HEAD"})],
     "ev_p2_p3": [hcs_read("q1", "docs/decisions/premise-format.md"),
                  hcs_tool("q2", "Bash", {"command": VCS + " show 624dcc188 --stat"})],
-    # The incident: reads for P1 and P2 only. The handoff's own Read is in it too, and backs nothing.
+    # Reads for P1 and P2 only. The handoff's own Read is in it too, and backs nothing.
     "incident": [hcs_read("i1", "hooks/precompact_handoff.py"), hcs_read("i2", "docs/decisions/premise-format.md"),
                  hcs_handoff_read("i3")],
     "no_boundary": [hcs_read("n1", "hooks/precompact_handoff.py"), hcs_read("n2", "docs/decisions/premise-format.md"),
@@ -33568,7 +33568,7 @@ HCS_TX_LINES = {
     # Full-size: a boundary, 2000 unrelated reads, then the evidence for P1 at the end.
     "long": [HCS_BOUNDARY] + [hcs_read("L%d" % n, "lib/unrelated-%d.md" % n) for n in range(2000)]
             + [hcs_read("lz", "hooks/precompact_handoff.py")],
-    # Round 2, case 2: a Write or Edit of another file, or a git commit, that names a Source backs nothing. A read does.
+    # A Write or Edit of another file, or a git commit, that names a Source backs nothing. A read does.
     "write_other": [hcs_tool("x1", "Write", {"file_path": HCS_WT + "/notes.md", "content": "The guard is hooks/guard.py."})],
     "edit_other": [hcs_tool("x2", "Edit", {"file_path": HCS_WT + "/notes.md", "old_string": "TODO",
                                            "new_string": "See hooks/guard.py."})],
@@ -33577,12 +33577,12 @@ HCS_TX_LINES = {
     "grep_guard": [hcs_tool("g2", "Grep", {"pattern": "handoff_stamp_hit", "path": HCS_WT + "/hooks/guard.py"})],
     "glob_guard": [hcs_tool("g3", "Glob", {"pattern": "hooks/guard.py"})],
     "bash_read_guard": [hcs_tool("g4", "Bash", {"command": "grep -n handoff_stamp_hit " + HCS_WT + "/hooks/guard.py"})],
-    # Round 2, case 3: a failed call backs nothing, and the same call with a good result does. A failure is an error
+    # A failed call backs nothing, and the same call with a good result does. A failure is an error
     # result, or a toolUseResult that says success false (lint/_transcript.py failed_tool_use_ids reads both).
     "failed_read": [hcs_read("f1", "hooks/precompact_handoff.py"), hcs_result("f1", error=True)],
     "failed_flag": [hcs_read("f2", "hooks/precompact_handoff.py"), hcs_result("f2", tool_use_result={"success": False})],
     "ok_read": [hcs_read("k1", "hooks/precompact_handoff.py"), hcs_result("k1")],
-    # Round 2, case 4: a send, or a write-named MCP tool, backs nothing, with the token or without it. A read-named one does.
+    # A send, or a write-named MCP tool, backs nothing, with the token or without it. A read-named one does.
     "send_token": [hcs_tool("s1", "mcp__claude-code-remote__send_message", {"text": "P1 is in hooks/precompact_handoff.py."})],
     "send_only": [hcs_tool("s2", "mcp__claude-code-remote__send_message", {"text": "Premises checked."})],
     "review_token": [hcs_tool("r1", "mcp__github__pull_request_review_write",
@@ -33595,7 +33595,7 @@ HCS_TX_LINES = {
                            {"owner": "org", "repo": "repo", "path": "hooks/precompact_handoff.py"})],
     "get_only": [hcs_tool("m2", "mcp__github__get_file_contents", {"owner": "org", "repo": "repo", "path": "README.md"})],
 }
-# Round 2, case 3, full size: the same last call after 2000 unrelated reads, with an error result and with a good one.
+# Full size: the same last call after 2000 unrelated reads, with an error result and with a good one.
 HCS_TX_LINES["long_failed"] = HCS_TX_LINES["long"] + [hcs_result("lz", error=True)]
 HCS_TX_LINES["long_ok"] = HCS_TX_LINES["long"] + [hcs_result("lz")]
 
@@ -33670,8 +33670,8 @@ def hcs_twin(label, refused, allowed):
 
 NO_EVIDENCE = hcs_write(HCS_T_P1, transcript=hcs_tx("none"))   # the control most allow cases share
 
-# --- Deny cases: plain add() cases, red on main because the rule does not exist.
-# The incident: five premises restamped, evidence for two. It refuses the three unbacked, and names neither of the two.
+# --- Deny cases: plain add() cases, each one expects the rule to refuse.
+# Five premises restamped, evidence for two. It refuses the three unbacked, and names neither of the two.
 add("handoff-checked-stamp: five restamped premises, backed for two, are refused, naming the three unbacked and not the two",
     "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("incident"),
     carries=("P3", "P4", "P5", "624dcc188", "hooks/reread_check.py", "git rev-parse --short HEAD"),
@@ -33912,8 +33912,8 @@ LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: an allowed restamp writes no fi
                          "guard.log line and reads the transcript once; an unchanged write reads no transcript", hcs_cost_check))
 
 
-# --- Round 2 cases (review round 1). Each is red on d739af7f8, except a control, which is green there on purpose: it
-# keeps a fix from over-refusing a restamp that the rule allows.
+# --- Cases for stamps spelled `Checked:` or `Re-checked`, a stamp that is absent or empty, a new premise line,
+# and a premise whose kind changes in the write. A control keeps the rule from refusing a restamp it allows.
 HCS_SID_COLON = "4b8e1d62-0000-4000-8000-00000000c0a2"    # a handoff whose stamps are spelled `Checked: <value>`
 HCS_COLON = hs_handoff(HCS_CFG, HCS_SID_COLON)
 HCS_GUARD = ("P8", "read", "The guard refuses a restamp with no evidence", "hooks/guard.py:1176")
