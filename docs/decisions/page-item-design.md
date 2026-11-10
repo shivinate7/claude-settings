@@ -10,7 +10,7 @@ An item write whose picture the page would refuse, or would draw as a thin strip
   - It measures every option card picture, ranked cards too: the `.opic .dfitwrap` of the card that holds the option's input, read with `getBoundingClientRect`.
   - The stub item gets `kind` "decision" when the write has none. The page draws option cards only for a decision, so an `update` with no `kind` is still measured.
   - The floor: a picture is a miss when the page drew it under `MIN_PIC` high and scaled it below 0.5 (`SHRUNK` in `check_designs.mjs`).
-    - The height comes from `MIN_PIC` in `page.html`, the page's width floor for a picture it shrinks. The checker reuses it as a height floor.
+    - The height floor is `MIN_PIC` in `page.html`, a width constant that the checker reads as a height floor. `fitFrame` no longer uses it for the card picture.
     - Why 0.5: the incident strips sit near 0.1 (a 2400x300 design draws at 0.12). A good 390x56 full-width focus draws at 0.75, and a 300x40 bar at 0.97. Both are under `MIN_PIC` high, and both pass. Measured here, 1 sample each.
     - A strip scaled below 0.5 is the item 43 shape.
   - A design the page does not hold passes: the page warns in its frame, so the floor does not read it.
