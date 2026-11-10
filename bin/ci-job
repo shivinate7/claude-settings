@@ -73,11 +73,20 @@
 # zizmor action never fails a passing lint, and its PASS line ends `; <the whole drift line>`, which starts with the marker
 # `ste-changed: pin note: ` (hooks/pin_note.py). A --step run (merge's ready checks) never gets the variable: a drifted pin
 # exits 3 and the step reads FAIL. No other step gets it either, even when the caller exports it. A failing lint is FAIL.
-# Cost: one process per step (bin/verdict and the step's shell), one log file; no timer, no lasting process. Under
-# --lint each install CI step adds its processes, plus network and disk only when a job has one; a pip install writes to the active Python. Each `not run` line,
-# the summary and each step's `start: <name>` line on stderr (before it runs, so a caller sees which step is running)
+# Under --lint, lint CI steps run at once, up to N workers: CI_JOB_LINT_WORKERS when it is a positive integer, else min(CPU count, 4),
+# at least 1 (a lane runs only the checks its change needs, decision lanes-run-no-full-ci-job; one CI step at a time, the lint run outlasted
+# merge's 1200 s bound). N=1 is the serial run. An install CI step is
+# a barrier: it runs alone, after every earlier CI step has finished, and before any later one starts. Each parallel CI step logs to a file of its
+# own, so the reads from its start offset see only its output; each log is appended to $VERDICT_LOG in CI step order, and each verdict line
+# prints in CI step order, whatever order the CI steps finish. A `start:` or heartbeat line is written whole, so two never mix. A plain run,
+# --step and --plan stay serial.
+# Cost: one process per CI step (bin/verdict and the CI step's shell), one log file; no timer, no lasting process. Under
+# --lint each install CI step adds its processes, plus network and disk only when a job has one; a pip install writes to the active Python.
+# With N above 1, --lint adds one thread per worker, one temp folder, and one log file per lint CI step run, all deleted when ci-job ends, except a log whose copy into $VERDICT_LOG failed (then the folder stays)
+# (a SIGKILL from merge's timeout reaches only ci-job: it leaves the folder in TMPDIR and may leave verdict children running). Each `not run` line,
+# the summary and each CI step's `start: <name>` line on stderr (before it runs, so a caller sees which CI step is running)
 # are one print.
-import os, re, shutil, subprocess, sys, tarfile, tempfile
+import concurrent.futures, os, re, shutil, subprocess, sys, tarfile, tempfile, threading
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
@@ -449,6 +458,93 @@ def plan(step, pr, values, top, lint=False, pinned=False):
     return "run", body, argv, env, step_key(step, "working-directory")
 
 
+ERR_LOCK = threading.Lock()  # a parallel run writes stderr from several threads: one whole line at a time
+
+
+def err_line(text):
+    """One whole line to stderr, flushed at once: the stall watch reads it, and a caller sees which step is running."""
+    with ERR_LOCK:
+        try:
+            sys.stderr.write(text)
+            sys.stderr.flush()
+        except OSError:
+            pass  # reader gone: the step's verdict still prints
+
+
+def lint_workers():
+    """How many --lint steps run at once: CI_JOB_LINT_WORKERS when it is a positive integer, else the CPU count capped at 4, at least 1."""
+    raw = os.environ.get("CI_JOB_LINT_WORKERS", "").strip()
+    if raw.isascii() and raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return max(1, min(os.cpu_count() or 1, 4))
+
+
+def run_step(name, step, install, detail, shell, env, cwd, ctx, log):
+    """Run one step through bin/verdict, its output appended to `log`: (state, the step's one line). ctx: (top, base,
+    values, pinned). A parallel step gets a log of its own, so the reads from its start offset see only its output."""
+    top, base, values, pinned = ctx
+    err_line("start: %s\n" % name)
+    with tempfile.NamedTemporaryFile("w", suffix=".ps1" if shell[0] == "pwsh" else ".sh", delete=False,
+                                     encoding="utf-8", newline="\n") as f:
+        f.write("$ErrorActionPreference = 'stop'\n" + detail if shell[0] == "pwsh" else detail)
+        script = f.name
+    try:
+        start = os.path.getsize(log) if os.path.exists(log) else 0
+        kept = []
+        with _nowindow.Popen([sys.executable, os.path.join(BIN, "verdict"), *shell, script],
+                             cwd=os.path.join(top, cwd) if cwd else top, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True,
+                             env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV}},
+                                  **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
+                                  **env, "VERDICT_LOG": log}) as proc:
+            for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
+                if line.startswith("verdict: still running"):
+                    err_line(line)
+                else:
+                    kept.append(line)
+        rc = proc.returncode
+        gone = missing_in_log(log, start, script)
+        unstarted, only = could_not_start(log, start) if known_action(step) == "code-check" else ([], False)
+    finally:
+        os.remove(script)
+    first = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "SKIP ", "FAIL "))),
+                 "(verdict printed no verdict line)")
+    if known_action(step) == "code-check":
+        first += " (code_check.py: %s)" % code_check(top, step, pinned)[0]
+    if rc == 127 or gone:
+        state = "unknown"
+        first = "tool missing (%s); %s" % (", ".join(gone) or "exit 127", first)
+    elif unstarted and only:
+        state = "unknown"
+        first = "tool missing (%s); %s" % ("; ".join(unstarted), first)
+    else:
+        state = "FAIL" if rc else "SKIP" if first.startswith("SKIP ") else "PASS"
+        if install and state == "FAIL":  # the tree at fault, not the change: unknown, never FAIL
+            state, first = "unknown", "install failed, so each lint step after it is unknown; " + first
+        if unstarted:
+            first = "%s; also tool missing (%s)" % (first, "; ".join(unstarted))
+        notes = pin_notes(log, start) if state == "PASS" and known_action(step) == "ste-lint" else []
+        if notes:  # a passing lint with a stale pin: the lane keeps its place and moves the pin in a lane of its own
+            first = "%s; %s" % (first, "; ".join(notes))
+    return state, first
+
+
+def append_log(src, dst, name):
+    """Add a finished parallel CI step's log to the run's log, then delete it. A failed copy keeps the CI step's log and names
+    it on stderr: its verdict names the run's log, which then lacks that output. Returns True when the log was kept."""
+    try:
+        with open(src, "rb") as f, open(dst, "ab") as g:
+            shutil.copyfileobj(f, g)
+    except OSError:
+        err_line("ci-job: could not add the log of CI step %s to the run's log; its output is kept in %s\n" % (name, src))
+        return True
+    try:
+        os.remove(src)
+    except OSError:
+        pass  # the copy is in; the folder's removal at the end of the run takes what is left
+    return False
+
+
 def main(argv):
     args = list(argv)
     opts = {"--workflow": None, "--base": None}
@@ -523,96 +619,73 @@ def main(argv):
     planned = [plan(st, bool(base), values, top, lint) if k else None for st, k in zip(steps, kind)]
     runs = [k == "lint" and p[0] == "run" for k, p in zip(kind, planned)]  # an install runs only if a lint step after it does
     ran, ran_lint, blocker = 0, 0, None  # blocker: the install step that did not finish
-    for n, step in enumerate(steps, 1):
-        name = names[n - 1]
-        if wanted and name not in wanted:
-            continue
-        if lint and not kind[n - 1]:
-            if LOCAL_ACTION.fullmatch(uses(step)):
+    ctx = (top, base, values, pinned)
+    workers = lint_workers() if lint and not dry else 1
+    pool = concurrent.futures.ThreadPoolExecutor(workers) if workers > 1 else None  # one worker is the serial path
+    logdir = tempfile.mkdtemp(prefix="ci-job-lint-") if pool else None  # each parallel step's own log, until it is added to the run's
+    kept_logs = False
+    futures, logs = {}, {}  # by step index: the queued run, and its log
+    try:
+        for n, step in enumerate(steps, 1):
+            name = names[n - 1]
+            if wanted and name not in wanted:
+                continue
+            if lint and not kind[n - 1]:
+                if LOCAL_ACTION.fullmatch(uses(step)):
+                    tally["unknown"] += 1
+                    print("%-15s %s: --lint cannot run this repo's action %s" % ("unknown", name, uses(step)))
+                else:
+                    print("%-15s %s: --lint runs only lint and install steps; %s" % (
+                        "not run", name, "this is an action (uses: %s)" % uses(step) if uses(step) else "its run: is neither a lint nor an install command"))
+                continue
+            if kind[n - 1] == "install" and (blocker or not any(runs[n:])):
+                print("%-15s %s: %s" % ("not run", name, "install step %s did not finish" % blocker if blocker
+                                        else "no lint step after it will run"))
+                continue
+            if kind[n - 1] == "lint" and blocker and runs[n - 1]:
                 tally["unknown"] += 1
-                print("%-15s %s: --lint cannot run this repo's action %s" % ("unknown", name, uses(step)))
+                print("%-15s %s: --lint did not run it: install step %s did not finish" % ("unknown", name, blocker))
+                continue
+            state, detail, shell, env, cwd = planned[n - 1] or plan(step, bool(base), values, top, lint, pinned)
+            if lint and kind[n - 1] == "lint" and state == "skipped" and condition(step_key(step, "if"), True) is not False \
+                    and not base:  # a required CI step (its if: reads true on a pull-request run) that did not run proved nothing
+                state, detail = "unknown", "a pull-request step, skipped for want of a base (pass --base)"
+            if state != "run":
+                if wanted and state != "unknown":  # a named step that did not run proved nothing: never a pass
+                    state, detail = "unknown", "--step named it, but it did not run (%s): %s" % (state, detail)
+                print("%-15s %s: %s" % (state, name, detail))
+                tally["unknown"] += state == "unknown"
+                blocker = blocker or (name if kind[n - 1] == "install" and state == "unknown" else None)
+                continue
+            ran += 1
+            ran_lint += kind[n - 1] == "lint"
+            if dry:
+                print("%-15s %s" % ("would run", name))
+                continue
+            install = kind[n - 1] == "install"
+            if pool and kind[n - 1] == "lint":
+                if n - 1 not in futures:  # the first step of a segment: queue each lint step up to the next install, in order
+                    end = next((i for i in range(n, len(steps)) if kind[i] == "install"), len(steps))
+                    for i in range(n - 1, end):
+                        if runs[i]:
+                            logs[i] = os.path.join(logdir, "%d.log" % i)
+                            futures[i] = pool.submit(run_step, names[i], steps[i], False, planned[i][1], planned[i][2],
+                                                     planned[i][3], planned[i][4], ctx, logs[i])
+                state, first = futures.pop(n - 1).result()
+                own = logs.pop(n - 1)
+                if append_log(own, log, name):  # in CI step order, so the run's log reads as a serial run's
+                    kept_logs = True
+                first = first.replace(own, log)  # the verdict line names the log that stays
             else:
-                print("%-15s %s: --lint runs only lint and install steps; %s" % (
-                    "not run", name, "this is an action (uses: %s)" % uses(step) if uses(step) else "its run: is neither a lint nor an install command"))
-            continue
-        if kind[n - 1] == "install" and (blocker or not any(runs[n:])):
-            print("%-15s %s: %s" % ("not run", name, "install step %s did not finish" % blocker if blocker
-                                    else "no lint step after it will run"))
-            continue
-        if kind[n - 1] == "lint" and blocker and runs[n - 1]:
-            tally["unknown"] += 1
-            print("%-15s %s: --lint did not run it: install step %s did not finish" % ("unknown", name, blocker))
-            continue
-        state, detail, shell, env, cwd = planned[n - 1] or plan(step, bool(base), values, top, lint, pinned)
-        if lint and kind[n - 1] == "lint" and state == "skipped" and condition(step_key(step, "if"), True) is not False \
-                and not base:  # a required CI step (its if: reads true on a pull-request run) that did not run proved nothing
-            state, detail = "unknown", "a pull-request step, skipped for want of a base (pass --base)"
-        if state != "run":
-            if wanted and state != "unknown":  # a named step that did not run proved nothing: never a pass
-                state, detail = "unknown", "--step named it, but it did not run (%s): %s" % (state, detail)
-            print("%-15s %s: %s" % (state, name, detail))
-            tally["unknown"] += state == "unknown"
-            blocker = blocker or (name if kind[n - 1] == "install" and state == "unknown" else None)
-            continue
-        ran += 1
-        ran_lint += kind[n - 1] == "lint"
-        if dry:
-            print("%-15s %s" % ("would run", name))
-            continue
-        try:
-            sys.stderr.write("start: %s\n" % name)
-            sys.stderr.flush()
-        except OSError:
-            pass  # reader gone: the step's verdict still prints
-        with tempfile.NamedTemporaryFile("w", suffix=".ps1" if shell[0] == "pwsh" else ".sh", delete=False,
-                                         encoding="utf-8", newline="\n") as f:
-            f.write("$ErrorActionPreference = 'stop'\n" + detail if shell[0] == "pwsh" else detail)
-            script = f.name
-        try:
-            start = os.path.getsize(log) if os.path.exists(log) else 0
-            kept = []
-            with _nowindow.Popen([sys.executable, os.path.join(BIN, "verdict"), *shell, script],
-                                 cwd=os.path.join(top, cwd) if cwd else top, stdout=subprocess.PIPE,
-                                 stderr=subprocess.STDOUT, text=True,
-                                 env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV}},
-                                      **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
-                                      **env, "VERDICT_LOG": log}) as proc:
-                for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
-                    if not line.startswith("verdict: still running"):
-                        kept.append(line)
-                        continue
-                    try:
-                        sys.stderr.write(line)
-                        sys.stderr.flush()
-                    except OSError:
-                        pass  # reader gone: keep reading, keep the step's verdict
-            rc = proc.returncode
-            gone = missing_in_log(log, start, script)
-            unstarted, only = could_not_start(log, start) if known_action(step) == "code-check" else ([], False)
-        finally:
-            os.remove(script)
-        first = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "SKIP ", "FAIL "))),
-                     "(verdict printed no verdict line)")
-        if known_action(step) == "code-check":
-            first += " (code_check.py: %s)" % code_check(top, step, pinned)[0]
-        if rc == 127 or gone:
-            state = "unknown"
-            first = "tool missing (%s); %s" % (", ".join(gone) or "exit 127", first)
-        elif unstarted and only:
-            state = "unknown"
-            first = "tool missing (%s); %s" % ("; ".join(unstarted), first)
-        else:
-            state = "FAIL" if rc else "SKIP" if first.startswith("SKIP ") else "PASS"
-            if kind[n - 1] == "install" and state == "FAIL":  # the tree at fault, not the change: unknown, never FAIL
-                state, first = "unknown", "install failed, so each lint step after it is unknown; " + first
-            if unstarted:
-                first = "%s; also tool missing (%s)" % (first, "; ".join(unstarted))
-            notes = pin_notes(log, start) if state == "PASS" and known_action(step) == "ste-lint" else []
-            if notes:  # a passing lint with a stale pin: the lane keeps its place and moves the pin in a lane of its own
-                first = "%s; %s" % (first, "; ".join(notes))
-        tally["FAIL" if state == "FAIL" else "unknown"] += state not in ("PASS", "SKIP")
-        blocker = blocker or (name if kind[n - 1] == "install" and state == "unknown" else None)
-        print("%-15s %s: %s" % (state, name, first))
+                state, first = run_step(name, step, install, detail, shell, env, cwd, ctx, log)
+            tally["FAIL" if state == "FAIL" else "unknown"] += state not in ("PASS", "SKIP")
+            blocker = blocker or (name if install and state == "unknown" else None)
+            print("%-15s %s: %s" % (state, name, first))
+    finally:
+        if pool:
+            pool.shutdown(cancel_futures=True)
+            if not kept_logs:  # a log that did not reach the run's log stays in the folder for the reader
+                shutil.rmtree(os.path.abspath(logdir), ignore_errors=True)
     if lint and not ran_lint and not tally["FAIL"] and not tally["unknown"]:  # a pass that ran no lint CI step proved nothing; any other line already gives the exit
         tally["unknown"] += 1
         print("%-15s no lint CI step %s: %d of the job's %d steps are lint CI steps, and each one is skipped, not run, or unknown" % (
