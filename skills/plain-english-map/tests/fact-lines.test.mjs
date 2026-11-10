@@ -29,12 +29,12 @@
 //       the scanner rule needs strings too, and case R7 asserts it), then a literal parse.
 //       A set comes back as an array, in any order. A missing python3 or a file that does not parse is ok: false, never ok: true.
 //
-//   scripts/map-check.mjs, MAP_FORMAT_VERSION in scripts/lib/map-config.mjs: 5, after the tested-by bump.
+//   scripts/map-check.mjs, MAP_FORMAT_VERSION in scripts/lib/map-config.mjs: 6, the version the fixtures hold.
 //   scripts/lib/map-config.mjs, validateMapConfig: the optional key `mapPaths`, a list of path prefixes. See map-paths.test.mjs.
 //
 // The fixture (tests/fixture/) gained: src/retry.py, src/caller.py, config.json, docs/map/homes.md, and fact lines in core.md.
 // Its codeExtensions stay ["ts"]: the readers read .py and .json facts without them being code files. Adding them would change
-// the upgrade of `/api/runs.json:1` (case 7a) and the config of case 4, which are green on main.
+// the upgrade of `/api/runs.json:1` (case 7a) and the config of case 4, which those cases pin as they stand.
 // Each case that edits the fixture edits a scratch copy in this run's temp folder, never the checkout.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

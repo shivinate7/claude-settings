@@ -285,6 +285,19 @@ class FixerSafetyTests(unittest.TestCase):
         text = "Copy the file .env now.\n"
         self.assertEqual(ste_lint.apply_fixes(text)[0], text)
 
+    def test_s11_double_backtick_span_unchanged(self):
+        # A two-backtick span holds a single backtick, so the whole span is code and stays.
+        text = "Run ``in order to `x`` now.\n"
+        self.assertEqual(ste_lint.apply_fixes(text)[0], text,
+                         msg="a fix changed text inside a double-backtick code span")
+
+    def test_s12_lone_backtick_does_not_stop_the_fix(self):
+        # A lone backtick opens no span, so the prose after it is fixed and the span stays.
+        text = "A lone ` here in order to and ``prior to`` there.\n"
+        self.assertEqual(ste_lint.apply_fixes(text)[0],
+                         "A lone ` here to and ``prior to`` there.\n",
+                         msg="a lone backtick stopped the fix of the prose after it")
+
 
 # ------------------------------------------------------------------ eight STE011 rows without a fix
 
