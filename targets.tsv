@@ -1,0 +1,477 @@
+session_011DaUc41jAEUmhXE72v4uUb	SESSION_STATUS_IDLE		August session
+session_011qC7XdGEvViSU9PuJEJ35C	SESSION_STATUS_IDLE		August session
+session_012oh85uKXAanQ2UciVzBEQN	SESSION_STATUS_IDLE		August session
+session_013CpPcA1xXsuDXLdsWU4WYc	SESSION_STATUS_IDLE		Prune stale q_max worktrees
+session_013NEJKyggQsYbfxs62CE1mx	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:time-from-one-helper,cs-topic:written-time	lane: time-from-one-helper
+session_013NEJKygtZewTzZqVEvmyLu	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:widening-rule-guideline,cs-topic:widening-rule-guideline	lane: widening-rule-guideline
+session_013NEJKyh5DtXyHyFdAmQUUz	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:report-guard-role-default-model,cs-topic:guards	Lane: report-guard-role-default-model
+session_013NEJKyiKdHCgMQbb5n6Rnp	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:model-refusal-names-forms,cs-topic:model-refusal-names-forms	model-refusal-names-forms
+session_013NEJKyixLRXW96LSwHDY2h	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:red-fix-finds-open-pr,cs-topic:red-fix-finds-open-pr	red-fix-finds-open-pr
+session_013NEJKyjEhPeuaT1HrHD16Y	SESSION_STATUS_RUNNING	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:release-check-script,cs-topic:release-check-script	release-check-script
+session_013NEJKynEHKFPsDyJTieAUi	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:builder-workflow-fragment-blind,cs-topic:guard	lane: builder-workflow-fragment-blind
+session_013NEJKynFH16ipe94euH9od	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:coordinator-writes-page-data,cs-topic:coordinator-writes-page-data	lane: coordinator-writes-page-data
+session_013NEJKyoXvBfn7q6bpofjYg	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:habit-is-not-a-guard,cs-topic:report-guard	lane: habit-is-not-a-guard
+session_013NEJKyooYBqTh9KkQWNHwe	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:brief-pr-branch-is-head-ref,cs-topic:guards	lane: brief-pr-branch-is-head-ref
+session_013NEJKyoqH7Pdyv1k1rK8bE	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:mutate-sweep-control,cs-topic:mutation	Lane: mutate-sweep-control
+session_013NEJKypkpzqdbSUr7rAwAn	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:past-ruling-timeout,cs-topic:past-ruling-check	Lane: past-ruling-timeout
+session_013NEJKypwFEtaJwfYrMpZ5T	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:ci-guard-headroom,cs-topic:ci	lane: ci-guard-headroom
+session_013NEJKyq9tjSV3zNiViAp4E	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:shell-could-write-linear,cs-topic:guard-speed	lane: shell-could-write-linear
+session_013NEJKyqF79t9UigCgm3qjb	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:test-dirs-include-testing,cs-topic:guards	lane: test-dirs-include-testing
+session_013NEJKyqU19UoQgbHWPzXBz	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:roadmap-blank-pages,cs-topic:waiting-page	lane: roadmap-blank-pages
+session_013NEJKyrFd5no3Kf2HBuL79	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:docs-only-record-checks-diff,cs-topic:docs-only-record-checks-diff	Lane docs-only-record-checks-diff
+session_013NEJKyrvZKvULem1eZzY1o	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:commit-trailer-model,cs-topic:models	lane commit-trailer-model
+session_013NEJKys31F9TckFXjRxWER	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:ste-lint-run-exit-codes,cs-topic:ste-lint-run-exit-codes	ste-lint-run-exit-codes
+session_013NEJKysbEmRBBB3QEfDm2H	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:fix-check-after-notes-commit,cs-topic:review-rounds	fix-check-after-notes-commit
+session_013NEJKytPs46Qp4KDoqbDvz	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:env-file-shell-c,cs-topic:env-file-shell-c	env-file-shell-c
+session_013NEJKyuRd6zdQhuiRC27g9	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:findings-ride-in-lane,cs-topic:review-findings	lane: findings-ride-in-lane
+session_013NEJKyuyMvkyfa5EDmUpJS	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:push-refs-drop-redirects,cs-topic:push-refs-drop-redirects	Lane push-refs-drop-redirects
+session_013NEJKyvCWXz9w73Km3i8RM	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:cloud-snapshot-age-check,cs-topic:cloud-snapshot-age-check	lane: cloud-snapshot-age-check
+session_013NEJKywfKL1Vp4zHaUEbot	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:builder-report-in-head,cs-topic:review	lane builder-report-in-head
+session_013NEJKyxJkZYdX2VVW9dgp2	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-slug-unique,cs-topic:notes	lane: notes-slug-unique
+session_013NEJKyxUS8epcpStRJ8CAA	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:impeccable-cd-false-alarms,cs-topic:impeccable-cd-false-alarms	impeccable-cd-false-alarms
+session_013NEJKyxaNeXMMuUruLyQ5T	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:role-guard-plumbing-bypass,cs-topic:role-guard-plumbing-bypass	Lane: role-guard-plumbing-bypass
+session_013NEJKyxnHZUhFjmTh4XbJa	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:prose-judge-exact-title-backed,cs-topic:prose-judge-exact-title-backed	prose-judge-exact-title-backed
+session_013NEJKyyiqygSunVG2xGMSr	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:batch64-prose-judge-docs,cs-topic:prose-judge-docs	Lane: batch64-prose-judge-docs
+session_013NEJKyzA8bkZSm147VHnke	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:override-plain-ask,cs-topic:owner-override	lane: override-plain-ask
+session_013NEJKyzEbN117XUjYmkEjB	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-repo:shivinate7/degen,cs-step:degen-mutation-install,cs-topic:degen-mutation-install	lane: degen-mutation-install
+session_013NEJKyzGL3yZ2cjQt9Jbj9	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:watcher-builtin-hook-survey,cs-topic:watchers-one-rule	lane: watchers-one-rule
+session_013NEJKyzbBcReBkq8QRSuUh	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/banchi,cs-repo:shivinate7/claude-settings,cs-step:block-signature-drift	lane: block-signature-drift (banchi)
+session_013NEJKyzg9A9SDZ926jRCSU	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:runner-drops-handed-lane,cs-topic:runner-drops-handed-lane	lane: runner-drops-handed-lane
+session_013NEJKz13TfcPPchNJveuuF	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:reviewer-probe-helper,cs-topic:reviewer-probe-helper	Lane: reviewer-probe-helper
+session_013NEJKz26y1pT4XskPQbQbz	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:record-post-runs-lane-lint,cs-topic:merge-tool	lane: record-post-runs-lane-lint
+session_013NEJKz3J95T7tJBtSYUXZ9	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:stop-push-skips-merged,cs-topic:stop-push-skips-merged	Lane stop-push-skips-merged
+session_013NEJKz3Pbvh8FJVoT2ydk8	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-lint-runs-comment-check,cs-topic:lane-lint-runs-comment-check	Lane lane-lint-runs-comment-check
+session_013NEJKz49VptC1nSSWVrPN8	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:prose-governance-workflow,cs-topic:prose-governance-workflow	lane: prose-governance-workflow
+session_013NEJKz5A22GYG2gprVFFPX	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:reason-flag-no-close-keyword,cs-topic:reason-flag-no-close-keyword	reason-flag-no-close-keyword
+session_013NEJKz5DUxWNjsPPXNF5q1	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:narration-red-on-head,cs-topic:comment-narration	Lane: narration-red-on-head
+session_013NEJKz6tCDukV1yMoiPQ83	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-repo:shivinate7/q_max,cs-step:qmax-merge-deadline,cs-topic:qmax-merge-deadline	lane: qmax-merge-deadline
+session_013NEJKz7673bPpSLv4TxyA7	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:no-self-written-notification,cs-topic:no-self-written-notification	no-self-written-notification
+session_013NEJKz785dJ3UKyxpvQuZu	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:handoff-per-agent,cs-topic:handoff	lane: handoff-per-agent
+session_013NEJKz8JXQTvhuGYo4UJpi	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:red-run-pre-push,cs-topic:git-guards	lane: red-run-pre-push
+session_013NEJKz9HoqeRzdjbw9Fnga	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:guard-fix-check-sonnet,cs-topic:review-rounds	lane: guard-fix-check-sonnet
+session_013NEJKz9f8KxCfb9zS1HSNV	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-fix-reverify-small,cs-topic:notes-backlog	lane: notes-fix-reverify-small
+session_013NEJKzBfRycskE32T2Pj9F	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:reviewed-sends-back,cs-topic:review-send-back	lane: reviewed-sends-back
+session_013NEJKzCN6jU5Pj5pSZe2Wy	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:git-dash-c-other-checkout,cs-topic:git-dash-c-other-checkout	git-dash-c-other-checkout
+session_013NEJKzCSKTt9Mrr6n9GKiR	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:stop-block-cites,cs-topic:stop-block-cites	stop-block-cites
+session_013NEJKzCcVJYhu39C4BXuSP	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:rm-after-cd-one-walk,cs-topic:rm-after-cd-one-walk	Lane rm-after-cd-one-walk
+session_013NEJKzDBTjFbhzwzV96i8v	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:builder-probe-false-alarm,cs-topic:builder-test-edit	Lane: builder-probe-false-alarm
+session_013NEJKzDXZ6E5hL4PUShA7C	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:live-test-reads-step-lane,cs-topic:live-test-reads-step-lane	live-test-reads-step-lane
+session_013NEJKzEeXJNdTNedKPwtGc	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-count-reader,cs-topic:debt-note-counts	lane: notes-count-reader
+session_013NEJKzFnj7mworq4H2kygK	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-lint-in-isolated-worktree,cs-topic:lane-lint-in-isolated-worktree	lane-lint-in-isolated-worktree
+session_013NEJKzGm25T6yUwjjibfGN	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:runner-repos-in-parallel,cs-topic:runner-repos-in-parallel	runner-repos-in-parallel
+session_013NEJKzHURrN9PNYKYoXWNg	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:push-ask-reads-brief,cs-topic:guards	lane: push-ask-reads-brief
+session_013NEJKzHdMUT3sLtNCaxGEf	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:export-scan-key-false-alarms,cs-topic:export-scan-key-false-alarms	Lane export-scan-key-false-alarms
+session_013NEJKzHfqng3CH3MhVZhgo	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:archive-push-gates-delete,cs-topic:archive-push-gates-delete	archive-push-gates-delete
+session_013NEJKzJ8sWrQskj5XRB52E	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:agent-model-cap-string-false-alarm,cs-topic:agent-model-cap-string-false-alarm	agent-model-cap-string-false-alarm
+session_013NEJKzJ9NM4S4A4u3afRoi	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/banchi,cs-repo:shivinate7/claude-settings,cs-step:banchi-roadmap-seed,cs-topic:banchi-roadmap-seed	lane: banchi-roadmap-seed
+session_013NEJKzJDLMd4ijoisYSN9Y	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-lint-waits-pushed-head,cs-topic:merge-lane-lint	Lane: lane-lint-waits-pushed-head
+session_013NEJKzJF4Kh97883YXFunk	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:child-repo-archive-scope,cs-topic:child-repo-archive-scope	lane: child-repo-archive-scope
+session_013NEJKzJF4PJoASnkH4btJj	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:ruling-skip-check,cs-topic:ruling-skip-check	lane: ruling-skip-check
+session_013NEJKzJNm3bZgR7SadQNrU	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:page-save-reaches-auto-mode,cs-topic:page-grant-auto-mode	lane: page-save-reaches-auto-mode
+session_013NEJKzJxDxuXzuwNe7fhYn	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:guard-relative-write-escape,cs-topic:guard	lane guard-relative-write-escape
+session_013NEJKzKA8bkAW7ossmC85D	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:item-cite-carries-name,cs-topic:item-cite-carries-name	item-cite-carries-name
+session_013NEJKzKzETHfW4dE8dxrRG	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:guards-read-comment-bodies-as-text,cs-topic:guards-read-comment-bodies-as-text	lane: guards-read-comment-bodies-as-text
+session_013NEJKzLH6miLgNXpJmSXFA	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:session-mailbox-followups,cs-topic:session-mailbox-followups	lane: session-mailbox-followups
+session_013NEJKzLjdrBsFWzoCdBwG7	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:substitution-in-token-callers,cs-topic:guard-substitution	Lane: substitution-in-token-callers
+session_013NEJKzLxn6c25hHUunkJmW	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:stale-clone-blocks-refresh,cs-topic:session-start	lane stale-clone-blocks-refresh
+session_013NEJKzMBfrPdhX9rxFg8p8	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:real-reftable-fixture,cs-topic:real-reftable-fixture	Lane real-reftable-fixture
+session_013NEJKzMCRUtnAKtxwqd7q1	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-union-batch-revival,cs-topic:notes-union-batch-revival	notes-union-batch-revival
+session_013NEJKzPMtfKqsAuMKqn9cf	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-name-their-fix,cs-topic:debts	lane: notes-name-their-fix
+session_013NEJKzPiiVLh3Sr1Jdoj76	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:stall-watch-agents,cs-topic:stall-watch	lane: stall-watch-agents
+session_013NEJKzQsAzQkvsohtkLuJP	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:judge-timeout-retries-once,cs-topic:judge-timeout-retries-once	lane: judge-timeout-retries-once
+session_013NEJKzQzNgKVLCQZtWj18k	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:page-check-at-publish,cs-topic:page-check-at-publish	lane: page-check-at-publish
+session_013NEJKzSDXuw4rJESuzdw1Y	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:sim-lease-gaps,cs-topic:sim-lease-gaps	lane: sim-lease-gaps
+session_013NEJKzSuTz4WyUf1vuMgxT	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:merge-guard-flag-from-paths,cs-topic:merge-guard-flag-from-paths	lane: merge-guard-flag-from-paths
+session_013NEJKzUUyEjaYnf5oBR6Wp	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:one-load-definition,cs-topic:one-load-definition	lane: one-load-definition
+session_013NEJKzUe9U19voH62VbCNA	SESSION_STATUS_REQUIRES_ACTION	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:review-record-provenance,cs-topic:review-records	Lane: review-record-provenance
+session_013NEJKzVTWMbokJ3KFanBBC	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:tier-boundaries-enforced	cs lane: tier-boundaries-enforced
+session_013NEJKzVgPmUsPHuYf3Ptxy	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lease-sha-form-hint,cs-topic:lease-sha-form-hint	lane: lease-sha-form-hint
+session_013NEJKzVtYoetutgUL9DkfZ	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:zizmor-pin-bump,cs-topic:zizmor-pin-bump	lane: zizmor-pin-bump
+session_013NEJKzWDQFGYf8UFfU8Rve	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:red-checkout-own-cd,cs-topic:red-checkout-own-cd	Lane red-checkout-own-cd
+session_013NEJKzXJPDWrSRe3i1fGJd	SESSION_STATUS_REQUIRES_ACTION	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:commit-refuses-conflict-markers,cs-topic:guards	lane: commit-refuses-conflict-markers
+session_013NEJKzXmA85KHJfwprwzBb	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:repo-protected-paths,cs-topic:project-thread-hooks	repo-protected-paths
+session_013NEJKzXneQD9Ua2o3ww8hJ	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:export-after-page-write,cs-topic:waiting-page	lane: export-after-page-write
+session_013NEJKzXyKNARtJsbz3Q1R2	SESSION_STATUS_REQUIRES_ACTION	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lint-before-record-push,cs-topic:prose-checks	lane: lint-before-record-push
+session_013NEJKzYhDtNPLcEdeVFEVe	SESSION_STATUS_RUNNING	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:fail-record-ancestor-head,cs-topic:review-records	Lane: fail-record-ancestor-head
+session_013NEJKzZtu1sv8D47NpC3yx	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:round-one-reset,cs-topic:round-one-reset	lane: round-one-reset
+session_013NEJKza26i1MbAYrau5Aye	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:answers-write-guard,cs-topic:page-answers-guard	lane: answers-write-guard
+session_013NEJKza5KBoiFbNuiDDxQn	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:replay-profile-parts,cs-topic:mutation-ci	replay-profile-and-imports
+session_013NEJKzacZeiWBs4yJ82HvC	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:report-guard-spawn-model,cs-topic:report-guard-spawn-model	report-guard-spawn-model
+session_013NEJKzanUvmhhL9K3XCNgT	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:gap-check-merge-rebase,cs-topic:gap-check-merge-rebase	gap-check-merge-rebase
+session_013NEJKzayeNCJa4csSCBG7k	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:test-author-ci-step-false-alarm,cs-topic:guard	lane test-author-ci-step-false-alarm
+session_013NEJKzbDHRpreufhWY48Vb	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:one-home-check,cs-topic:one-home-check	lane: one-home-check
+session_013NEJKzbfZGapcF3iSufHh1	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:step-grant-judge-marker,cs-topic:step-grant-judge-marker	lane: step-grant-judge-marker
+session_013NEJKzc39M5wFtru1uU5u4	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:reviewer-no-session-tools,cs-topic:agent-roles	reviewer-no-session-tools
+session_013NEJKzeYTAqv5GuuSXY1ru	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:merge-passes-settings-dir,cs-topic:notes-backlog	lane: merge-passes-settings-dir
+session_013NEJKzfKKumSC9zYS7gonr	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:review-state-guard-needs-round-3,cs-topic:review-state-guard-needs-round-3	review-state-guard-needs-round-3
+session_013NEJKzfcSeBe5Ym9pCtxHn	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:review-rounds-rework,cs-topic:review-rounds	review-rounds-rework
+session_013NEJKzhQbKBYLydFg93MHt	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:gh-search-only,cs-topic:gh-search-only	lane: gh-search-only
+session_013NEJKzhVo8BrXKn2ZpYnYx	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:idle-lane-archive-at-merge,cs-step:live-file-archive-fields,cs-step:step-landed-from-prs,cs-topic:lane-archive	lane: idle-lane-archive-at-merge
+session_013NEJKziVLcE1RT5jq36KVX	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lanes-sonnet-trial,cs-topic:lane-model-sonnet	lane-model-sonnet
+session_013NEJKzjZ5GyfuZwVjJyTQL	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:export-check-writer-page,cs-topic:export-check-writer-page	lane: export-check-writer-page
+session_013NEJKzjkypcToggneCjJN8	SESSION_STATUS_RUNNING	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-fix-page,cs-topic:notes-backlog	lane: notes-fix-page
+session_013NEJKzk1MsAcMP53yRaVu1	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-lint-unshallow,cs-topic:ci	lane: lane-lint-unshallow
+session_013NEJKzmHFbqZ9QC2TAupBc	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:review-record-post-check,cs-topic:merge-tool	lane: review-record-post-check
+session_013NEJKznZeoFs9GZiN7syv9	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:batch-local-checks-cmd,cs-topic:batch-local-checks-cmd	batch-local-checks-cmd
+session_013NEJKzngbRfxA5R33GLjsA	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:live-hooks-lag-named,cs-topic:session-start	lane: live-hooks-lag-named
+session_013NEJKzoJ3vzUKGDk62Hr6K	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-lint-guard-suite-install,cs-topic:lane-lint	lane lane-lint-guard-suite-install
+session_013NEJKzoN2eD5oih2K39Be8	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-repo:shivinate7/degen,cs-step:degen-ui-step-own-job,cs-topic:degen-ui-step-split	lane: degen-ui-step-split
+session_013NEJKzp1xjTHtzDvmMRpKj	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:grants-read-from-main,cs-topic:hooks	Lane: grants-read-from-main
+session_013NEJKzp9uMCVGV7smPn7qJ	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:push-calls-substitution-mutant,cs-topic:push-calls-substitution-mutant	push-calls-substitution-mutant
+session_013NEJKzpRGRNNVi8C4bL4wM	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:pr-body-placeholder-check,cs-topic:pr-body-placeholder-check	lane: pr-body-placeholder-check
+session_013NEJKzpdAiMKMRoL5YWGDX	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:pointer-move-unseen,cs-topic:pointer-move-unseen	Lane pointer-move-unseen
+session_013NEJKzr9wjJhiTbhubR8Hc	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-lint-stack-holds-base,cs-topic:lane-lint-stack-holds-base	lane-lint-stack-holds-base
+session_013NEJKzsDSbaL3UN9VrRHTu	SESSION_STATUS_IDLE		
+session_013NEJKzsUKjkcSWJSe2tXSP	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:git-dash-c-other-checkout,cs-topic:git-dash-c-other-checkout	lane: git-dash-c-other-checkout
+session_013NEJKzsquF2AHqJn51qxTj	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-lint-cap,cs-topic:lane-lint-cap	lane-lint-cap: lane lint finishes inside ci-job's cap
+session_013NEJKzstsLQzGsUXajpze5	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-lint-parallel-cap,cs-topic:notes-backlog	lane: lane-lint-parallel-cap
+session_013NEJKztJBZ8cbKoGJKQYgL	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:batch68-mockup-home-wrong-cause,cs-topic:batch68-mockup-home-wrong-cause	lane: batch68-mockup-home-wrong-cause
+session_013NEJKzvB3W9ncBB7N3RBEo	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:octopus-merge-push-refused,cs-topic:guard-push	Lane: octopus-merge-push-refused
+session_013NEJKzvLxxYCL8moqZGiPM	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-repo:shivinate7/degen,cs-step:degen-merge-deadline,cs-topic:degen-merge-deadline	lane: degen-merge-deadline
+session_013NEJKzvX8gzYSZhs2sfsew	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:agent-served-model-check,cs-topic:agent-served-model-check	lane: agent-served-model-check
+session_013NEJKzw6Mmu5eviHC3vobt	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:relayed-yes-allow,cs-topic:auto-mode	lane: relayed-yes-allow
+session_013NEJKzxNVwYRpqaGSyiXos	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:guard-brief-reproduces-incident,cs-topic:guard-quality	guard-brief-reproduces-incident
+session_013NEJKzxRE91RXP3PNdpC7J	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:grant-reaches-lanes,cs-topic:grant-reaches-lanes-build	lane: grant-reaches-lanes-build
+session_013NEJKzxuVkjiW6xKfSdu5G	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:write-then-run-test-edit,cs-topic:write-then-run-test-edit	lane: write-then-run-test-edit
+session_013NEJKzyHL14AinPBcJmTJo	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:sweep-contains-lane-branch,cs-topic:janitor	lane: sweep-contains-lane-branch
+session_013NEJKzyKZ2mup6VLjVo4RE	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:page-checks-reach-triage,cs-topic:waiting-page	lane: page-checks-reach-triage
+session_013NEJKzzZDgvR1V3J7cTEZ6	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:page-item-id-check,cs-topic:page-item-id-check	lane: page-item-id-check
+session_013NEJKzzx35nAWSwPacHRXt	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:draft-pr-guard-heredoc,cs-topic:draft-pr-guard-heredoc	draft-pr-guard-heredoc
+session_013NEJL12vbyCvRzwm56SQpM	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:hook-output-pin-finder,cs-topic:hook-output-pin-finder	Lane hook-output-pin-finder
+session_013NEJL1333yS5ziKFeWsjHC	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:agent-report-shas-resolve,cs-topic:guards	lane: agent-report-shas-resolve
+session_013NEJL14Nf51Qm3VatcpdAQ	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-fix-large-2,cs-topic:notes-backlog	lane: notes-fix-large-2
+session_013NEJL14UraPZKQB8r9Ue3J	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:archive-refuses-unpr-branch,cs-topic:guards	lane: archive-refuses-unpr-branch
+session_013NEJL15NwHsPTuK9zxtCig	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:archive-guard-reads-agent-calls,cs-topic:ci-fix	Lane: archive-guard-windows-fixture (#2224)
+session_013NEJL17gMWcgUJ44gi3ZRs	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-fix-merge-ci,cs-topic:notes-backlog	lane: notes-fix-merge-ci
+session_013NEJL17nZ2ZrDoa3wBz7Ao	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-repo:shivinate7/degen,cs-step:degen-write-slot-clock,cs-topic:degen-write-slot-clock	lane: degen-write-slot-clock
+session_013NEJL18oZSggg3BpqSJqPJ	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:merge-red-main-latest-run,cs-topic:merge-red-main-latest-run	lane: merge-red-main-latest-run
+session_013NEJL18smzkUjB4HfZkmrC	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:env-const-in-literal,cs-topic:env-const-in-literal	env-const-in-literal
+session_013NEJL19PYKPFXLekGuTmnX	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:merge-repo-dir-flag	lane: merge-repo-dir-flag
+session_013NEJL1A3ynZBdqa9GKtySk	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:argv-dump-guard,cs-topic:argv-dump-guard	lane: argv-dump-guard
+session_013NEJL1AYEki9v2TCeUZ9Si	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:judge-no-readable-verdict,cs-topic:judge-no-readable-verdict	lane: judge-no-readable-verdict
+session_013NEJL1Aq6pKaCrB1kxda68	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:agent-name-on-spawn,cs-topic:agent-name-on-spawn	lane: agent-name-on-spawn
+session_013NEJL1BCgLVUACYU5ujv9A	SESSION_STATUS_REQUIRES_ACTION	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:verdict-instruction-false-alarm,cs-topic:reviewer-brief	lane: verdict-instruction-false-alarm
+session_013NEJL1BcjeYCubrQhUmWKz	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:mcp-tools-in-guard-matcher,cs-topic:guard-coverage	lane: mcp-tools-in-guard-matcher
+session_013NEJL1Cejen3sLS5Yn3sA6	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:auto-mode-middle-ground,cs-topic:auto-mode-middle-ground	lane: auto-mode-middle-ground
+session_013NEJL1CxMTqgaXC4PMxQLc	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:mixed-merge-resolver,cs-topic:roles	lane: mixed-merge-resolver
+session_013NEJL1DSd9D3Fftt6Rgch4	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:ste-lint-diff-fail-closed,cs-topic:ste-lint	lane: ste-lint-diff-fail-closed
+session_013NEJL1DTMYoLhbUX1pHGkU	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:records-gloss-link-sweep,cs-topic:notes-backlog	records-gloss-link-sweep
+session_013NEJL1DWLhvA7rFvCxUjdV	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:brief-destructive-git-windows,cs-topic:brief-destructive-git-windows	brief-destructive-git-windows (main red fix)
+session_013NEJL1E2M7ciXj66Y5zdLH	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:windows-local-lint,cs-topic:windows-lint	lane: windows-local-lint
+session_013NEJL1E4aAkTZ2bok4QsVD	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:compact-resume-runs-start,cs-topic:session-start	lane compact-resume-runs-start
+session_013NEJL1Eaa8LA5StpPbWgvA	SESSION_STATUS_REQUIRES_ACTION	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:git-write-after-failed-cd,cs-topic:guards	Lane: git-write-after-failed-cd
+session_013NEJL1GYPmzZHut7tx4d68	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:page-pics-fill-card,cs-topic:page-pics-fill-card	lane: page-pics-fill-card
+session_013NEJL1HRER1fc7nQ4BtSVb	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:guard-path-expand-forms,cs-topic:guards	Lane: guard-path-expand-forms
+session_013NEJL1JwGYbs71pjwKZCfb	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:export-after-page-write,cs-topic:waiting-export	lane: export-after-page-write
+session_013NEJL1LjuMhUrYHFuei6Me	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:artifact-lane,cs-topic:artifact-lane	artifact-lane
+session_013NEJL1LqNG3bTFW9NtcAoS	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:mutation-guard-family-map,cs-topic:mutation-guard-family-map	mutation-guard-family-map
+session_013NEJL1M5FMSnTFvUd8wY9u	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:reviewed-batch-line-reads,cs-topic:batch-line-reads	lane: reviewed-batch-line-reads
+session_013NEJL1MAU4nrqwiN3pHJzz	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:fix-check-render-first,cs-topic:fix-check-render-first	Lane fix-check-render-first
+session_013NEJL1MUZiHTf89ikYeMTX	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:ready-checks-use-pinned-tools,cs-topic:merge-tool	lane: ready-checks-use-pinned-tools
+session_013NEJL1MjgTgHAgcXw66Gsk	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:zizmor-pin-bump,cs-topic:ci	lane: zizmor-pin-bump
+session_013NEJL1N3YkCMouc1pELXyu	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-lint-runs-local-tools,cs-topic:ready-checks	lane: lane-lint-runs-local-tools
+session_013NEJL1NByCSpoZkrQEnyu8	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:merge-route-author-paths,cs-topic:merge-route	lane merge-route-author-paths
+session_013NEJL1PAG3NhmQAbveNQLo	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/banchi,cs-repo:shivinate7/claude-settings,cs-step:notes-reverify-flags,cs-topic:notes-backlog	notes-reverify-flags
+session_013NEJL1PUcS4Dxhd9Rr1sk2	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-lint-cloud-time-limit,cs-topic:lane-lint	lane lane-lint-cloud-time-limit
+session_013NEJL1PXbLxTPnJbzMxnZn	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:builder-edits-mutation-tests,cs-topic:hooks	Lane: builder-edits-mutation-tests
+session_013NEJL1PfmnFVDD3X2P28Kk	SESSION_STATUS_RUNNING	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:message-time-matches-clock,cs-topic:session-messaging	lane: message-time-matches-clock
+session_013NEJL1PnU1732wEno9CEj7	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:capability-verbs-widen,cs-topic:report-guard	capability-verbs-widen
+session_013NEJL1PyP6demZ4Pyj8fYX	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:review-fix-check-round,cs-topic:review-rounds	lane: review-fix-check-round
+session_013NEJL1RmnRj8FcU6Dx48pJ	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:red-checkout-restore-absolute,cs-topic:red-checkout-restore-absolute	red-checkout-restore-absolute
+session_013NEJL1Ro26WbnrcSPVsLuX	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:windows-brief-git-red,cs-topic:windows-brief-git-red	lane: windows-brief-git-red
+session_013NEJL1SSD89Hzb8ahrTmfs	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:batch-freeze-lane-set-enforce,cs-topic:batch-freeze-lane-set-enforce	Lane batch-freeze-lane-set-enforce
+session_013NEJL1SsG5NZULw1mG6qgB	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:model-guard-reads-next,cs-topic:report-guard	lane: model-guard-reads-next
+session_013NEJL1TctxZavHdqbiX2y7	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-pr-opens-as-draft,cs-topic:lane-pr-opens-as-draft	lane-pr-opens-as-draft
+session_013NEJL1Tkb6PbuYpqLF1eDg	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:parked-line-id-guard,cs-topic:parked-line-id-guard	lane: parked-line-id-guard
+session_013NEJL1UMoM1VHADdYGDUZz	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:task-names-check-line-not-truth,cs-topic:waiting-page	lane: task-names-check-line-not-truth
+session_013NEJL1Umc5vUUPV286bXnV	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:silent-undo-checks-pr-base,cs-topic:silent-undo-checks-pr-base	lane: silent-undo-checks-pr-base
+session_013NEJL1VtpMs3Aw5JLtyvVD	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:idle-lane-steps-unknown,cs-topic:idle-lane-steps-unknown	lane: idle-lane-steps-unknown
+session_013NEJL1WFQtTFeWPY7r1qYP	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:replacement-pr-carries-review,cs-topic:replacement-pr-review	lane: replacement-pr-carries-review
+session_013NEJL1Ww5ei4o5dFv1mdT9	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:guard-remedy-not-to-owner,cs-topic:guard-remedy-not-to-owner	lane: guard-remedy-not-to-owner
+session_013NEJL1YhjiXhaxqz8244Ge	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:report-guard-stamped-copy,cs-topic:report-guard-stamped-copy	Lane report-guard-stamped-copy
+session_013NEJL1YxsYqim39RK6JeZP	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:push-head-upstream-name,cs-topic:guards	lane: push-head-upstream-name
+session_013NEJL1bHn1Kqa94WW5wnW4	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:docs-only-record-checks-diff,cs-topic:docs-only-record-checks-diff	docs-only-record-checks-diff
+session_013NEJL1cp45E4ttwFy1ngig	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:env-heredoc-name-in-prose,cs-topic:env-heredoc-name-in-prose	Lane: env-heredoc-name-in-prose
+session_013NEJL1f9CA1PTZPYsRhFQV	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lint-config-guard-paths,cs-topic:lint-config-guard-paths	lane: lint-config-guard-paths
+session_013NEJL1fQaNp75QW37StZfW	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:page-dup-helpers,cs-topic:waiting-page	lane: page-html-cleanups
+session_013NEJL1fiv86hWsZGWhjPR6	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:cloud-heavy-check-brake,cs-topic:load-brake	lane: cloud-heavy-check-brake
+session_013NEJL1h7mKMtSVohetjaW1	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:handoff-keeps-owner-waits,cs-topic:handoff-keeps-owner-waits	handoff-keeps-owner-waits
+session_013NEJL1jPC89ae6X6Pa4jmf	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:timing-tests,cs-topic:timing-tests	lane: timing-tests
+session_013NEJL1kNibiCCZ1b61YNWy	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lint-reads-uncommitted,cs-topic:ci-job-lint	Lane: lint-reads-uncommitted
+session_013NEJL1kQxGCtbbcv6xGfeE	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:item-reply-back,cs-topic:waiting-page	lane: item-reply-back
+session_013NEJL1kqjrZZqdqpz3eaGB	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-repo:shivinate7/q_max,cs-step:qmax-worktree-db-after-neon-purge,cs-topic:qmax-worktree-db-after-neon-purge	lane: qmax-worktree-db-after-neon-purge
+session_013NEJL1nA83YuznrBBaUdv6	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:agent-branch-push-refuses,cs-topic:push-guard	lane: agent-branch-push-refuses
+session_013NEJL1nAsHBKJTpeHV1sJN	SESSION_STATUS_RUNNING	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:pick-guard-cloud-writer,cs-topic:pick-guard-cloud-writer	lane: pick-guard-cloud-writer
+session_013NEJL1oJqBhSKif1484UZ4	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:batch-freeze-lane-set,cs-topic:batch-freeze-lane-set	Lane batch-freeze-lane-set
+session_013NEJL1q9xCaEWZfB6KebLx	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:mutate-guard-split,cs-topic:ci	lane: mutate-guard-split
+session_013NEJL1qigiKQJb7Z7QZ4WT	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:ste-lint-diff-fail-closed	lane: ste-lint-diff-fail-closed
+session_013NEJL1rJepBiu21f6Rv9jG	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:records-page-before-ready,cs-topic:records-page-before-ready	records-page-before-ready
+session_013NEJL1s91Kb775BV6ECCxH	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:handoff-checked-stamp,cs-topic:handoff	lane: handoff-checked-stamp
+session_013NEJL1tSPqSx7QonoVwudz	SESSION_STATUS_RUNNING	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:answered-leaves-page,cs-topic:answered-leaves-page	answered-leaves-page
+session_013NEJL1xdQmJC85BLQucDP9	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:reviewer-model-hook-latest,cs-topic:guards	lane: reviewer-model-hook-latest
+session_013NEJL1yXEvUDdtXJ7QhYRE	SESSION_STATUS_REQUIRES_ACTION	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:pr-state-is-on-the-pr,cs-topic:pr-state-is-on-the-pr	lane: pr-state-is-on-the-pr
+session_013NEJL213WYGvCs1ZRhXX4V	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:agent-process-marker,cs-topic:worktree-cleanup	agent-process-marker
+session_013NEJL22VqTY2w3YtemTyH1	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:guard-pr-runs-windows-shards,cs-topic:ci	lane: guard-pr-runs-windows-shards
+session_013NEJL22tdtt5hCLt3whgm1	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:cloud-bin-on-path,cs-topic:cloud-bin-on-path	cloud-bin-on-path
+session_013NEJL232Ko7dmr4v3fmrvF	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:draft-pr-guard-text-false-alarm,cs-topic:guard-false-alarms	lane: draft-pr-guard-text-false-alarm
+session_013NEJL24NSUGQwdDXK4sqrb	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-push-frozen-in-batch,cs-topic:lane-push-frozen-in-batch	Lane lane-push-frozen-in-batch
+session_013NEJL25kXsYSFJpzGQnKKe	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:answered-section-folded,cs-topic:answered-section-folded	answered-section-folded
+session_013NEJL27ELEZB4SAw7gHmkq	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:why-cite-matches-act,cs-topic:report-guard	why-cite-matches-act
+session_013NEJL27bB3sjZacDv3K9e4	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:gh-write-repo-flag-gap,cs-topic:gh-write-repo-flag-gap	Lane gh-write-repo-flag-gap
+session_013NEJL27e8puG926YPKVUMf	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lease-push-c-and-d,cs-topic:git-guards	lane: lease-push-c-and-d
+session_013NEJL28sozZFoz9wzHLJGb	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:debt-classifier-lease-push,cs-topic:debt-classifier-lease-push	lane: debt-classifier-lease-push
+session_013NEJL294xwrFinHwofhyir	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:judge-sees-named-code,cs-topic:prose-truth	lane: judge-sees-named-code
+session_013NEJL29GcaaeoS7a1SJYA2	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:scratchpad-file-ownership,cs-topic:scratchpad	lane scratchpad-file-ownership
+session_013NEJL29QJZ3US3nyhcFYrg	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-repo:shivinate7/mailaudit,cs-step:native-shipped-facts	lane: native-shipped-facts (mailaudit)
+session_013NEJL2B1oRJaBTe16wm1VG	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:spawn-model-cap-all-roles,cs-topic:agent-models	spawn-model-cap-all-roles
+session_013NEJL2B6FrRWBCF8RWpq8y	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:ci-macos-idle-measure,cs-topic:notes-backlog	ci-macos-idle-measure
+session_013NEJL2BusqrX6qy1CCAgoH	SESSION_STATUS_RUNNING	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:mixed-merge-no-role,cs-topic:agent-roles	lane: mixed-merge-no-role
+session_013NEJL2C3ooJFEuJnsQf4yT	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:scratchpad-commit-msg-owner,cs-topic:scratchpad-commit-msg-owner	scratchpad-commit-msg-owner (#2271)
+session_013NEJL2CTcj9UVLR4KHoUN5	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:merge-conflict-mixed-roles,cs-topic:merge-conflict-mixed-roles	Lane: merge-conflict-mixed-roles
+session_013NEJL2ChVc4QiMs2icnEB8	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:fix-none-cite-check,cs-topic:fix-none-cite-check	lane: fix-none-cite-check
+session_013NEJL2CijYGjSSCcJqnVvv	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:answered-leaves-page,cs-topic:waiting-page	lane: answered-leaves-page
+session_013NEJL2D1c515dDRJrYJeuf	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:merge-keeps-main-verbatim,cs-topic:silent-undo	lane merge-keeps-main-verbatim
+session_013NEJL2DBWxESS5TMW5cCFW	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-repo:shivinate7/q_max,cs-step:pr-state-is-on-the-pr,cs-topic:qmax-revive-idle	lane: qmax-revive-idle
+session_013NEJL2DJxvbzn1xQzk8nkK	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-start-overlap-check,cs-topic:guards	lane: lane-start-overlap-check
+session_013NEJL2DcpM9XMtKwYxrYiu	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:frozen-crash-followups,cs-topic:frozen-crash-followups	Lane frozen-crash-followups
+session_013NEJL2DeoKFVg6TCE2pT2F	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:past-ruling-reads-newer-ruling,cs-step:pick-guard-cloud-writer,cs-topic:past-ruling-reads-newer-ruling	lane: past-ruling-reads-newer-ruling
+session_013NEJL2ESvfj9vmLqdMhDQk	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:close-replaced-at-open,cs-topic:close-replaced-at-open	lane: close-replaced-at-open
+session_013NEJL2Eio9EnSRWs5gWQ2Z	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:code-check-mjs-ts-graph,cs-topic:code-check-mjs-ts-graph	lane: code-check-mjs-ts-graph
+session_013NEJL2GCahFnLKLzmw1JAM	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:pr-backlog-clear,cs-topic:revive-1042	lane: revive-1042-coordinator-scope
+session_013NEJL2GCqtkmpEVLrpgPF2	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:env-runner-child-command,cs-topic:guard-env	Lane: env-runner-child-command
+session_013NEJL2GctUCgksFKSWZykD	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lint-codes-unique,cs-topic:lint	lint-codes-unique
+session_013NEJL2JcSvHjsxTcrYXxwa	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:windows-stamp-suite-hang,cs-topic:windows-stamp-suite-hang	lane: windows-stamp-suite-hang
+session_013NEJL2KVnRww4daXVBQyAK	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:pick-ack-past-ruling,cs-topic:pick-ack-past-ruling	lane: pick-ack-past-ruling
+session_013NEJL2KhBtBKhdyNpyv8c6	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/q_max,cs-step:qmax-ste-lint-in-narrow-checks,cs-topic:qmax-checks	Lane: qmax-ste-lint-in-narrow-checks
+session_013NEJL2L6zBtUfVRwm5DrXB	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:export-page-cookie-linear,cs-topic:waiting-page	export-page-cookie-linear
+session_013NEJL2LYXQpmabnoQqYgNv	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:stall-watch-quiet-lint,cs-topic:notes-backlog	lane: stall-watch-quiet-lint
+session_013NEJL2NVN5RjCgjRQFXeps	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:step-landed-from-prs,cs-topic:step-landed-from-prs	step-landed-from-prs
+session_013NEJL2NiG8k8Ni4BMMeSgi	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:archive-pushes-remote-tip,cs-topic:archive-pushes-remote-tip	archive-pushes-remote-tip
+session_013NEJL2RXfa7QBPNAXaXgp4	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-lint-before-push,cs-topic:lane-lint-before-push	lane: lane-lint-before-push
+session_013NEJL2RYun1AZqEEhFo93w	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:parallel-wrapper-flags,cs-topic:parallel-wrapper-flags	Lane parallel-wrapper-flags
+session_013NEJL2Rd7tasVqys45cgDA	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:pr-review-range-check,cs-topic:pr-review-range-check	lane: pr-review-range-check
+session_013NEJL2RiaN86vFhzoAaSH1	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-repo:shivinate7/degen,cs-step:degen-milestone-ref,cs-topic:degen-milestone-ref	lane: degen-milestone-ref
+session_013NEJL2TFqvPsYvtYHenDfX	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:merge-ready-uses-pin,cs-topic:merge-ready-uses-pin	Lane: merge-ready-uses-pin
+session_013NEJL2Tw3CgetFAQ4nj252	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:step-pick-claims-match-page,cs-topic:step-pick-claims-match-page	step-pick-claims-match-page
+session_013NEJL2UNZuVUR4h2LWR5QH	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:check-line-reader,cs-topic:check-line-reader	lane: check-line-reader
+session_013NEJL2Vu74Q9bbbrv5anAi	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:guard-marker-wording,cs-topic:review-rounds	lane: guard-marker-wording
+session_013NEJL2WHAcHrb2a1N5E29K	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:coordinator-pick-needs-record,cs-topic:handoff-rules	lane: coordinator-pick-needs-record
+session_013NEJL2WYHwGu4KngBLPUaF	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:review-record-past-head,cs-topic:merge-tool	lane: review-record-past-head
+session_013NEJL2Xf2CDoR4VGP4EE6P	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:shoot-job-cap,cs-topic:ci-caps	lane shoot-job-cap
+session_013NEJL2YQfYFx8hbZ2Nta3d	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-scope-own-lines,cs-topic:notes-scope-own-lines	notes-scope-own-lines
+session_013NEJL2Yi1iyx98kfwkRJxW	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:no-undo-lane-commits,cs-topic:lane-undo-check	lane: lane-undo-check
+session_013NEJL2ZJUtVxqpKrEjh7X2	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:sim-tool-lease-check,cs-topic:sim	lane: sim-tool-lease-check
+session_013NEJL2ZbrUt2zRpHHNsMec	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:pr-state-is-on-the-pr,cs-topic:cs-revive-ready	lane: cs-revive-ready
+session_013NEJL2btGMLKqHs4cDQSZ6	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:session-messaging-plan,cs-topic:session-messaging-plan	lane: session-messaging-plan
+session_013NEJL2d6geUTHwAgWHvF7h	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:856,cs-topic:waiting-page-cost-line-ste	Lane 856 waiting-page-cost-line-ste
+session_013NEJL2ffE4xixcyVkMbpuV	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:token-spend-sources,cs-topic:token-spend-sources	token-spend-sources
+session_013NEJL2g4J2bZLchTFF8RGp	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:review-record-parse-warn,cs-topic:review-record-parse-warn	lane: review-record-parse-warn
+session_013NEJL2gUM72J6NNfjNQWrR	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-fix-other-2,cs-topic:notes-backlog	lane: notes-fix-other-2
+session_013NEJL2hBkMAyffTo9CdawZ	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:merge-requires-guard-round3,cs-topic:review-rounds	lane: merge-requires-guard-round3
+session_013NEJL2hXLvodLuczRGgNHP	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-step-dup-check,cs-topic:lane-step-dup-check	lane-step-dup-check
+session_013NEJL2iDXGHZSMmcwaj9bV	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:review-record-before-any-push,cs-topic:review-record-before-push	Lane: review-record-before-any-push
+session_013NEJL2iRRDz4vLswobTwYf	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-reverify-flags,cs-topic:notes-reverify-flags	notes-reverify-flags
+session_013NEJL2jTS37z97cavLKVTC	SESSION_STATUS_RUNNING	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:review-fix-check-round,cs-topic:review-fix-check-round	review-fix-check-round
+session_013NEJL2k68U41yt5xBhfp93	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:cloud-install-code-check-config,cs-topic:cloud-install	Lane: cloud-install-code-check-config
+session_013NEJL2mzycmcUKim3G7RkZ	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:job-cap-expressions,cs-topic:job-cap-expressions	lane: job-cap-expressions
+session_013NEJL2nvHYs3wA2QnMZfJG	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:builder-brief-names-code-check,cs-topic:builder-brief-done-check	lane: builder-brief-names-code-check
+session_013NEJL2pSKbDkTpUe76U2wp	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-sim-hold-path,cs-topic:sim	lane: lane-sim-hold-path
+session_013NEJL2pbVwCShrQnHJDsmU	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:tci-10-one-pin-per-repo,cs-step:tci-11-qmax-shards,cs-topic:q_max-ci-hygiene	lane: q_max-ci-hygiene
+session_013NEJL2pjRytKQdMCgTwxa6	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-pointer-check,cs-topic:notes	Lane: notes-pointer-check
+session_013NEJL2qBDyNbgXYNEhpSrf	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-fix-report,cs-topic:notes-backlog	lane: notes-fix-report
+session_013NEJL2sZ68ECc62SiwfqPk	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:merge-lock-expired-delete-race,cs-topic:merge-tool	lane: merge-lock-expired-delete-race
+session_013NEJL2t7akPLp9rbWSVEeF	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:silent-undo-session-url-footer,cs-topic:merge-checks	silent-undo-session-url-footer
+session_013NEJL2tHzdSpdQQdKHDpij	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:mutate-guard-split,cs-topic:mutate-guard-cap-45	lane: mutate-guard-cap-45
+session_013NEJL2tg4yAv8wfAhJc6Tq	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:branch-cleanup,cs-topic:branch-cleanup	lane: agent-branch-push
+session_013NEJL2tvhNJHroYMGnVvnc	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-repo:shivinate7/q_max,cs-step:lane-runs-tests-for-set,cs-topic:lane-checks	lane-runs-tests-for-set
+session_013NEJL2unJ4dLGLaDdtaezc	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:agent-commit-file-scope,cs-topic:agent-commit-file-scope	Lane: agent-commit-file-scope
+session_013NEJL2vaREMqJHVJ16kbQf	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-sightings-expiry,cs-topic:notes-backlog	notes-sightings-expiry
+session_013NEJL2zoQmF8pg5MUiNBCj	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:agent-transcript-path-one-home,cs-topic:agent-transcript-path-one-home	Lane agent-transcript-path-one-home
+session_013NEJL3115C7kVTQidSxvGj	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:reason-flag-no-close-keyword,cs-topic:reason-flag-no-close-keyword	reason-flag-no-close-keyword
+session_013NEJL33qiuVEZBa4bipxtY	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:review-state-guard-needs-round-3,cs-topic:review-state-guard-needs-round-3	Lane: review-state-guard-needs-round-3
+session_013NEJL33wvLc6xtDnBTJDAw	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:record-claim-cites-code,cs-topic:fresh-prose	record-claim-cites-code
+session_013NEJL34KjkQwzUueKThXhM	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:cite-range-symbol-match,cs-topic:stale-cites	lane: cite-range-symbol-match
+session_013NEJL34RSeYaFjiSJz4Lk5	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:override-strips-status-block,cs-topic:owner-override	lane: override-strips-status-block
+session_013NEJL36oZi9XZ76KB8nFQy	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:reviewed-head-push-ask,cs-topic:review-records	Lane: reviewed-head-push-ask
+session_013NEJL37B9ZSA9toGnPeeVa	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:encoded-retry-after-refusal,cs-topic:encoded-retry-after-refusal	Lane: encoded-retry-after-refusal
+session_013NEJL37Ec6fLvdD1sAMqxo	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:pointer-checkout-edit,cs-topic:pointer-checkout-edit	Lane pointer-checkout-edit
+session_013NEJL37UFXTQuAcox7s8fD	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:comment-check-scans-shell,cs-topic:notes-backlog	lane: comment-check-scans-shell
+session_013NEJL37oquqZQEcaccyiTU	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:windows-brief-git-path,cs-topic:windows-brief-git-path	lane: windows-brief-git-path
+session_013NEJL382EZLqWkzVvjj7UP	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:agent-worktree-add-in-tool-dir,cs-topic:guard	lane agent-worktree-add-in-tool-dir
+session_013NEJL38tqHPZrQNHNdo9ba	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-fix-delete-leftovers,cs-topic:notes-backlog	lane: notes-fix-delete-leftovers
+session_013NEJL38w4WDs3n4aTNNHkB	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:option-tradeoff-pushback,cs-topic:question-judge	Lane: option-tradeoff-pushback
+session_013NEJL39DAqcWWfdNFXmxnC	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:merge-builds-batches,cs-topic:merge-tool	lane: merge-builds-batches
+session_013NEJL39dinAf2VGG2b3Weo	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:step-names-its-gap,cs-topic:roadmap	lane: step-names-its-gap
+session_013NEJL3AdFi6DGipDwcmKEb	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:pr-backlog-clear,cs-topic:batch63-lint-b	lane: batch63-lint-b
+session_013NEJL3Afk9GLMC8PGGpQ51	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:archive-guard-reads-agent-calls,cs-topic:archive-guard-reads-agent-calls	lane: archive-guard-reads-agent-calls
+session_013NEJL3Ci1xJoJyTgLU5Nt7	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:fresh-round3-route,cs-topic:fresh-round3-route	fresh-round3-route (record)
+session_013NEJL3DwgdW1HVejfR77Se	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:report-guard-spawn-model,cs-topic:report-guard-spawn-model	report-guard-spawn-model
+session_013NEJL3EVBLm5RkyvoamcXP	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:step-cite-resolves,cs-topic:step-cite-resolves	step-cite-resolves
+session_013NEJL3FLmYSCJLFHzCk8R9	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:child-question-checks-home,cs-topic:owner-questions	lane: child-question-checks-home
+session_013NEJL3G6vFtN2TjNZrMETW	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-fix-guard-1,cs-topic:notes-backlog	lane: notes-fix-guard-1
+session_013NEJL3HcTDWvQyBwmisvYG	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:reviewer-brief-blind,cs-topic:reviewer-brief-blind	lane: reviewer-brief-blind
+session_013NEJL3JoPTyn7Ny4jUb88L	SESSION_STATUS_RUNNING	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-lint-hook-suites,cs-topic:merge-flow	lane: lane-lint-hook-suites
+session_013NEJL3K9EJKrLHccAdQtmi	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:grant-reaches-lanes,cs-topic:grant-reaches-lanes	grant-reaches-lanes
+session_013NEJL3KYY5NYuanNGEoyjW	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:review-record-from-render,cs-topic:review-rounds	review-record-from-render
+session_013NEJL3KhxJ9MV6PvgDun3P	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:fix-push-needs-fail-record,cs-topic:review-records	lane: fix-push-needs-fail-record
+session_013NEJL3KvrWSBxStMe8hDMw	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-repo:shivinate7/q_max,cs-step:qmax-browser-main-red,cs-topic:ci	lane: qmax-browser-main-red fix
+session_013NEJL3Lf166yzVq69LsAxg	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:guards-read-comment-bodies-as-text,cs-topic:guards-read-comment-bodies-as-text	guards-read-comment-bodies-as-text
+session_013NEJL3MgGYEmmygRpZfXzy	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:push-branch-held-elsewhere,cs-topic:push-branch-held-elsewhere	push-branch-held-elsewhere
+session_013NEJL3NAnujQ8Pbt5dXkwP	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:merge-batch-split-and-pipeline,cs-topic:merge-flow	lane: merge-batch-split-and-pipeline
+session_013NEJL3QM1W7vvrGbQKkPDH	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-repo:shivinate7/q_max,cs-step:qmax-map-format-5,cs-topic:qmax-map-format-5	lane: qmax-map-format-5
+session_013NEJL3R2CBFavz7grtbJY8	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:other-checkout-cp-own,cs-topic:guards	lane: other-checkout-cp-own
+session_013NEJL3RGpDc8Vc7qqAzAR7	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:roadmap-blank-pages,cs-topic:roadmap-blank-pages	lane: roadmap-blank-pages
+session_013NEJL3RdQ8rPEF8bMo6YPB	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:input-needed-reads-page-status,cs-topic:input-needed-reads-page-status	input-needed-reads-page-status
+session_013NEJL3UQqL6MJxhGPdHzdE	SESSION_STATUS_RUNNING	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:refuter-row-any-agent,cs-topic:refuter-row-any-agent	lane: refuter-row-any-agent
+session_013NEJL3UmACWzQ3FibMH7ad	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:input-needed-reads-page-status,cs-topic:input-needed-reads-page-status	lane: input-needed-reads-page-status
+session_013NEJL3VS6pwMdVzvbdxQ9J	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:process-held-end-to-end,cs-topic:process-mechanics	Lane: process-held-end-to-end
+session_013NEJL3Vfjwv16ew8kaDkSs	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:review-body-rejects-bad-net,cs-topic:review-body-rejects-bad-net	lane: review-body-rejects-bad-net
+session_013NEJL3WEUbAnzxPEbgtS2X	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:option-keys-match-chat,cs-topic:option-keys-match-chat	option-keys-match-chat
+session_013NEJL3WMfUf8CyoxsgvqVr	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:page-narrow-word-breaks,cs-topic:page-narrow-word-breaks	lane: page-narrow-word-breaks
+session_013NEJL3WQPFqTPj2r8Y7rrH	SESSION_STATUS_REQUIRES_ACTION	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:records-gloss-link-sweep,cs-topic:records-gloss-link-sweep	records-gloss-link-sweep
+session_013NEJL3WizfBeubmNydf4EV	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:live-build-threads-optional,cs-topic:live-build-threads-optional	live-build-threads-optional
+session_013NEJL3WkjDpDX48MYiGdbs	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:worktree-unique-branch,cs-topic:git-guards	lane: worktree-unique-branch
+session_013NEJL3WwPeF1P9q883Pktu	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:capability-verbs-widen,cs-topic:capability-verbs-widen	capability-verbs-widen
+session_013NEJL3XjWoVXFLZP2Lfwy4	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:mcp-merge-unguarded,cs-topic:mcp-merge-unguarded	lane: mcp-merge-unguarded
+session_013NEJL3Z48gxyFumeJZGMHp	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:challenger-page-against,cs-topic:challenger-page-against	lane: challenger-page-against
+session_013NEJL3ZjZdzrS8tBezxY85	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:bg-tail-loses-verdict,cs-topic:guards	Lane: bg-tail-loses-verdict
+session_013NEJL3Zo2s3uQCh8o4Mfwo	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:sim-boot-screen-check,cs-topic:sim	lane: sim-boot-screen-check
+session_013NEJL3ZtjRrvWWB5nAzQiv	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:past-ruling-on-send,cs-topic:report-guard	lane: past-ruling-on-send
+session_013NEJL3ZzwXePsQpNjbbeKu	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:ci-hygiene-undo-no-upstream,cs-topic:ci-hygiene-undo-no-upstream	Lane ci-hygiene-undo-no-upstream
+session_013NEJL3a6tqDKidXRwjLeAE	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:waiting-export-receipts,cs-topic:waiting-page	lane: waiting-export-receipts
+session_013NEJL3bvXbg7UQvaKpwwq9	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:resume-msg-role-check,cs-topic:resume-msg-role-check	resume-msg-role-check
+session_013NEJL3c8B95wK1Rg8uhD4P	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:scratchpad-commit-msg-owner,cs-topic:scratchpad-commit-msg-owner	scratchpad-commit-msg-owner
+session_013NEJL3cfg1yrBuezf45D4i	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:shoot-touch-per-size,cs-topic:shoot-touch-per-size	lane: shoot-touch-per-size
+session_013NEJL3dPpqbux58j4atEY5	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:builder-diff-judges-own-commits,cs-topic:builder-diff-judges-own-commits	builder-diff-judges-own-commits
+session_013NEJL3fy7PDPhWER5r89ep	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:refusal-guard-never-clears,cs-topic:refusal-guard-never-clears	refusal-guard-never-clears
+session_013NEJL3gDkEvHawhJUPygWa	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:record-after-each-round,cs-topic:review-rounds	lane: record-after-each-round
+session_013NEJL3gbJkES3NR7ybj7YZ	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:page-answer-session-field,cs-topic:waiting-page	page-answer-session-field
+session_013NEJL3hRvWLoxZuEPVQkD2	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:agent-served-model-check,cs-topic:agent-served-model-check	lane: agent-served-model-check
+session_013NEJL3ixw3qjVWMvVLFtg5	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-finds-triage,cs-topic:lane-finds-triage	lane-finds-triage
+session_013NEJL3jZu7VBFpZ1EZJZGo	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:silent-undo-restored-line,cs-topic:silent-undo	lane: silent-undo-restored-line
+session_013NEJL3jcPCBE8pDPGuF8Ts	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lane-end-releases-steps,cs-topic:lane-end-releases-steps	lane: lane-end-releases-steps
+session_013NEJL3kYhJPjjsWYNCApSh	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:artifact-guard-matcher-names,cs-topic:guard	lane: artifact-guard-matcher-names
+session_013NEJL3m8RA79gxYptq8LiK	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:retire-run-records-waiver,cs-topic:retire-run-records-waiver	retire-run-records-waiver: a dispatched run waives the stale records p
+session_013NEJL3mV1216ziTuNnhQyH	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:builder-diff-auto-merge-reflog,cs-topic:builder-diff-auto-merge-reflog	builder-diff-auto-merge-reflog
+session_013NEJL3oJPK1MdV96LKjYfK	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:pwsh-c-text-mode,cs-topic:ci-fix	Lane: pwsh-c-mutation-anchor (#1774)
+session_013NEJL3oV3tarYB15cE84H6	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:resolve-vars-quote-split,cs-topic:guard-frozen-resolver	Lane: resolve-vars-quote-split
+session_013NEJL3otrRs5sCK9CN5FpB	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:role-ids-in-brief,cs-topic:briefs	lane role-ids-in-brief
+session_013NEJL3pjhuGumnmrJ5gvqd	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:claims-backing-repoint,cs-topic:claims-backing-repoint	claims-backing-repoint
+session_013NEJL3qDimXFeUC8aPbjdg	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:auto-merge-refused,cs-topic:merge-guard	Lane: auto-merge-refused
+session_013NEJL3qFTVRyGAJWFkrALJ	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:pro-slot-udid,cs-topic:sim-lease	lane pro-slot-udid (#1709)
+session_013NEJL3qKvwXBThPagV7fsa	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:merge-records-page-route,cs-topic:merge-records-page-route	Lane: merge-records-page-route
+session_013NEJL3qSsV2LJ6R1a1HMCB	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:resume-finished-reviewer-no-tree,cs-topic:guards	lane: resume-finished-reviewer-no-tree
+session_013NEJL3qwtN2VRPNsTZMhZD	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:record-tool-posts-itself,cs-topic:merge-review-record	Lane: record-tool-posts-itself
+session_013NEJL3r8JbyJKhCzBoC6sF	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:newer-run-clears-red,cs-step:red-main-same-sha,cs-topic:red-main-merge	lane: red-main-same-sha
+session_013NEJL3rTtVuJHBka4oSALE	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:page-save-reaches-auto-mode,cs-topic:page-save-reaches-auto-mode	page-save-reaches-auto-mode
+session_013NEJL3sBYfjKAhvyn761vu	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-keep-reverify,cs-topic:notes-backlog	lane: notes-keep-reverify
+session_013NEJL3ttjVfExjpp5nLDcz	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:item-cite-carries-name,cs-topic:item-cite-carries-name	item-cite-carries-name
+session_013NEJL3uzxpVTQAsNhcR9t9	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:model-call-auth-check,cs-topic:model-call-auth	lane: model-call-auth-check
+session_013NEJL3vDrEuXnStMw1crbY	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:repo-typecheck-hook,cs-topic:project-thread-hooks	repo-typecheck-hook
+session_013NEJL3wJ76K34vkvm4cKVr	SESSION_STATUS_REQUIRES_ACTION	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-fix-other-1,cs-topic:notes-backlog	lane: notes-fix-other-1
+session_013NEJL3xYkfnbekjjC4nzCL	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:page-answer-no-receipt-list,cs-topic:waiting-page	lane page-answer-no-receipt-list
+session_013NEJL3yjhPT25wMf2PRhE2	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:skill-text-once,cs-topic:waiting-page	lane: skill-text-once
+session_013NEJL3z5XQbr2LcTV4ejh2	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:mutate-harness-change-timed-run,cs-topic:mutate-harness-change-timed-run	lane: mutate-harness-change-timed-run
+session_013NEJL3zaJYqXCK4XMrELwY	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:judge-replay-corpus,cs-topic:judge-replay-corpus	lane: judge-replay-corpus
+session_013NEJL3zgkU58DQSPkEYVkP	SESSION_STATUS_RUNNING	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:agent-model-cap-string-false-alarm,cs-topic:interpreter-string-false-alarm	lane: agent-model-cap-string-false-alarm
+session_013NEJL41VrPLwKBbnK7TWVn	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:cost-line-pinned,cs-topic:records	lane cost-line-pinned
+session_013NEJL43pWHtXmcY4uquu7S	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:lease-remedy-form,cs-topic:lease-remedy-form	lane: lease-remedy-form
+session_013NEJL43txwp8ioromcR8yF	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:unknown-read-one-rule,cs-topic:unknown-read-one-rule	lane: unknown-read-one-rule
+session_013NEJL4487j21efFiHf2AHP	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:854,cs-topic:cd-var-dir-unread	Lane 854 cd-var-dir-unread
+session_013NEJL448rTgL9ZZJPUnxU1	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:record-granted-round,cs-topic:review-record	lane record-granted-round
+session_013NEJL44GoM1qXT1kTES4kX	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-repo:shivinate7/q_max,cs-step:ste-pin-follows-main,cs-topic:qmax-ste-pin	lane: qmax-ste-pin
+session_013NEJL44p2pd4nwYgCQXqTg	SESSION_STATUS_REQUIRES_ACTION	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:artifact-guard-matcher-names,cs-topic:artifact-guard-matcher-names	artifact-guard-matcher-names
+session_013NEJL453SB7Xa11kWihGtm	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:encoded-retry-after-refusal,cs-topic:encoded-retry-after-refusal	encoded-retry-after-refusal
+session_013NEJL456ejBKaXgyyLuYHS	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:install-change-runs-install-jobs,cs-topic:ci-scope	lane install-change-runs-install-jobs
+session_013NEJL45afxTyvacTQtAEwZ	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:report-names-record-url,cs-topic:report-guard	report-names-record-url
+session_013NEJL45hcvDWv3G6x2UbGB	SESSION_STATUS_REQUIRES_ACTION	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:guard-shard-value-no-slash,cs-topic:guard-shard-value-no-slash	lane: guard-shard-value-no-slash
+session_013NEJL46S2R9TXaCJ1azufQ	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:local-triage-tier-build,cs-topic:local-triage-tier-build	lane: local-triage-tier-build
+session_013NEJL47tLSmUKDXddQy9Pf	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:live-stream-monitor-allowed,cs-topic:live-stream-monitor-allowed	live-stream-monitor-allowed
+session_013NEJL485VByFJqzsMRBr5M	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:tci-10-one-pin-per-repo,cs-step:tci-4,cs-step:tci-4-show-skips,cs-topic:ios-adblock-ci-hygiene	lane: ios-adblock-ci-hygiene
+session_013NEJL48TK8WDdmrKwyXguu	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:ask-alone-push-not-force,cs-topic:ask-alone-push-not-force	ask-alone-push-not-force
+session_013NEJL498Vy1KbTBNwN6b4Y	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:cloud-refused-acts-any-repo,cs-topic:cloud-refused-acts-any-repo	lane: cloud-refused-acts-any-repo
+session_013NEJL49Ps22j3DnVXnSBk6	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:state-file-parse-check,cs-topic:state-file-parse-check	lane: state-file-parse-check
+session_013NEJL49cWWQx8kXJAVpNoi	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:artifact-pages-other-account,cs-topic:artifact-pages-other-account	lane: artifact-pages-other-account
+session_013NEJL49gUhQAEPTctz3JHn	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:resumed-agent-stale-tree,cs-topic:roles	lane: resumed-agent-stale-tree
+session_013NEJL49purHJfNkeGSVsuH	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:step-done-needs-check,cs-topic:step-done-needs-check	lane: step-done-needs-check
+session_013NEJL4AAzqht4DA1vp1chR	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:retire-use-hooks-home,cs-topic:retire-use-hooks-home	Lane retire-use-hooks-home
+session_013NEJL4AKgGnEPYfk6PZTMQ	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:records-page-stacked-base,cs-topic:records-page	lane records-page-stacked-base
+session_013NEJL4AKgUjS1CWQvcdNwc	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-fix-reverify-large,cs-topic:notes-backlog	lane: notes-fix-reverify-large
+session_013NEJL4B7Z8T1QiJsywtHYt	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:ruling-cite-in-commit,cs-topic:ruling-cite-in-commit	lane: ruling-cite-in-commit
+session_013NEJL4C3s2DVWmjssD9zh1	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:page-usage-counters,cs-topic:waiting-page	lane: page-usage-counters
+session_013NEJL4DA5XcyP7kY5qkXP5	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:open-asks-listed-at-wake,cs-topic:open-asks-listed-at-wake	open-asks-listed-at-wake
+session_013NEJL4DMjyFzNbLSgpm8Cm	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:protect-snippet-uses-tool,cs-topic:protect-snippet-uses-tool	lane: protect-snippet-uses-tool
+session_013NEJL4DPEKRiC91yHkQV7m	SESSION_STATUS_RUNNING	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-fix-large-1,cs-topic:notes-backlog	lane: notes-fix-large-1
+session_013NEJL4E3uV2CMHXZSfo6xv	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:pr-state-is-on-the-pr,cs-topic:cs-revive-unfinished	lane: cs-revive-unfinished
+session_013NEJL4ErXeDSsWmZzHBqG7	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:builder-test-config-check,cs-topic:builder-test-config-check	lane: builder-test-config-check
+session_013NEJL4F7fFtXaQnEzxbLmh	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:session-messaging-plan,cs-topic:session-messaging-plan	session-messaging-plan (build)
+session_013NEJL4Fy1bpdDySC3FKhf6	SESSION_STATUS_REQUIRES_ACTION	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-fix-page,cs-topic:notes-fix-page	notes-fix-page fix checks (fresh hooks)
+session_013NEJL4HFe7Gz9VNMNryxaZ	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:report-model-from-role,cs-topic:report-guard	lane: report-model-from-role
+session_013NEJL4J7jxH2NTeETZEdne	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:mixed-merge-helper,cs-topic:merge-route	lane mixed-merge-helper
+session_013NEJL4JCSmBupBJbVWwRUE	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:notes-fix-guard-2,cs-topic:notes-backlog	lane: notes-fix-guard-2
+session_013NEJL4KAVGBcxoZzRnGNpj	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:orchestrator-mixed-merge-refused,cs-topic:guard-roles	lane: orchestrator-mixed-merge-refused
+session_013NEJL4KjioFCNuafMd8V8Q	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:roadmap-push-refusal-says-fetch,cs-topic:roadmap-push-refusal-says-fetch	roadmap-push-refusal-says-fetch
+session_013NEJL4PiqDj45oM8x6XYaK	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:push-after-check-notes,cs-topic:push-after-check-notes	notes-fix-large-4: push-after-check notes stack
+session_013NEJL4QVUDvL2methRX8HA	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:handoff-sections-kept,cs-topic:handoff-sections-kept	Lane: handoff-sections-kept
+session_013NEJL4Sbj1KE96HjpE6VWN	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:pr-state-is-on-the-pr,cs-topic:report-counts	lane: report-backlog-counts
+session_013NEJL4T4kkeqmaqeHiWDLJ	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:git-push-after-failed-commit,cs-topic:guards	lane: git-push-after-failed-commit
+session_013NEJL4TDRWqka4aSU2Bv7L	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:silent-undo-reads-retire-run,cs-topic:merge-checks	lane: silent-undo-reads-retire-run
+session_013NEJL4U9VGY1K4VRnZxKUo	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:ios-ship-export-method,cs-step:ios-ship-install-second-home,cs-topic:ios-ship-export-method	lane: ios-ship-export-method
+session_013NEJL4UKALWPAbsRE1HhUo	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:branch-force-other-worktree,cs-topic:branch-force-other-worktree	Lane branch-force-other-worktree
+session_013NEJL4UZnwcbTxUfsYRPJa	SESSION_STATUS_IDLE	cs-build:lane,cs-repo:shivinate7/claude-settings,cs-step:artifact-lane,cs-topic:artifact-homes	lane: artifact-lane
+session_0144AEXiFqnP3ow1BYkrpztU	SESSION_STATUS_IDLE		August session
+session_014d4zM2pmw7Nd14cBJkxir8	SESSION_STATUS_IDLE		August session
+session_014t6xuYdftdKq28XUqfknku	SESSION_STATUS_IDLE		August session
+session_014yoGuf7dVnAJCg3BpduyST	SESSION_STATUS_IDLE		Orchestrator oversight and merge authority
+session_015B7wi5Etb2S3u2fy8pwnVG	SESSION_STATUS_IDLE		August session
+session_015SLfvnEjCkkqxPhA6P3tuD	SESSION_STATUS_IDLE		CI questions
+session_016NGoKJ4jh6KpoTTViKzNUx	SESSION_STATUS_IDLE		August session
+session_016UnUyB2EiEhYQZNftSptkt	SESSION_STATUS_IDLE		August session
+session_0174di3gEAr5vNVTXBeQR2rL	SESSION_STATUS_IDLE		August session
+session_017s8MMczdS2P8TSXCzZkaPC	SESSION_STATUS_IDLE		Prove a cloud session runs the q_max checks
+session_019xSGuF2J3MJzvVX7Ga3Ugb	SESSION_STATUS_IDLE		September q_max-era session
+session_01AL1Jo6WJrsZ3jhw7pnuRrn	SESSION_STATUS_IDLE		Ultrawide monitor window snapping
+session_01B681pq5itFLcWGdeCWKppE	SESSION_STATUS_IDLE		Agent Q speed audit
+session_01BV8VSaD93LNrs46Egm6PoE	SESSION_STATUS_IDLE		September q_max-era session
+session_01CZ4qz6ceNPvKDgQVJo4Xi2	SESSION_STATUS_IDLE		September q_max-era session
+session_01CoYSFeLUuhpiRLDsUrmqkS	SESSION_STATUS_IDLE		August session
+session_01Cq53qcnUW15mgDVC39SP7T	SESSION_STATUS_IDLE		September q_max-era session
+session_01DUdRXDfh6AEsbUwoHkeZBp	SESSION_STATUS_IDLE		Live-test Q's answers in a browser
+session_01DVTencg9t315P8JyYeAVG1	SESSION_STATUS_IDLE		August session
+session_01EF83E9waMWojCy4MN6ab32	SESSION_STATUS_IDLE		Build the Excel UI kit repo
+session_01EovFXnH5Swyi83uZeFMoFX	SESSION_STATUS_IDLE		August session
+session_01FD5nuEeSeT9JNEbaUt4qFd	SESSION_STATUS_IDLE		August session
+session_01FkzhWvsqYKZ1TuUk429JvH	SESSION_STATUS_IDLE		August session
+session_01H3nGtUocstzhfPRvPctLnM	SESSION_STATUS_IDLE		September q_max-era session
+session_01HKC4y9GQQ6oofDhYnm7WZh	SESSION_STATUS_IDLE		August session
+session_01JJ4PhmGuc5JUvGfig96gHB	SESSION_STATUS_IDLE		August session
+session_01K6A46KPVHpqCGE27qRwTSx	SESSION_STATUS_IDLE		August session
+session_01KPPc3i5Dw2pu6C5DmiDreG	SESSION_STATUS_IDLE		August session
+session_01L1WS4xFgid8HahjMm9Eade	SESSION_STATUS_IDLE		Plugins vs skills architecture
+session_01LqpHhRBfsMPFCQFfHFS64U	SESSION_STATUS_IDLE		August session
+session_01NFN27EKoJVvr9X7dnetB5o	SESSION_STATUS_IDLE		August session
+session_01NG8hy4MkzYj4q7tUQH76q8	SESSION_STATUS_IDLE		September q_max-era session
+session_01NaNecQeuJXvFZvMNEKzPM9	SESSION_STATUS_IDLE		August session
+session_01PZobUonrUofk4JeQ2yHHhx	SESSION_STATUS_IDLE		August session
+session_01Pft3iBxbJA3Wg6LUom195k	SESSION_STATUS_IDLE		August session
+session_01PtNkwji8XU3iQ67xjDgThc	SESSION_STATUS_IDLE		September q_max-era session
+session_01QKvJsJZ4h5tCGcevnxVkvE	SESSION_STATUS_IDLE		August session
+session_01QjEoEcwkknNe9ByuYGLHwY	SESSION_STATUS_IDLE		September q_max-era session
+session_01RDGCUUkszkLPYzLQHxNtPK	SESSION_STATUS_IDLE		August session
+session_01RyyZrSx7rhXGKK32bddSnN	SESSION_STATUS_IDLE		August session
+session_01SgcjiBCba6VLikJZDC6K4Z	SESSION_STATUS_IDLE		August session
+session_01SpTenJpkDebQXfjUnch56H	SESSION_STATUS_IDLE		August session
+session_01T7m1AubUpe1uqF59qdRhUo	SESSION_STATUS_IDLE		Invoice macros repository search
+session_01TBn5AhuGreryJ88cTLC89x	SESSION_STATUS_IDLE		Build the RFP request and GC upload link
+session_01TEvwDZ4iizDAvv1oQFoxXe	SESSION_STATUS_IDLE		September q_max-era session
+session_01TdxbfSHJFiW5Rgnsxxtkvg	SESSION_STATUS_IDLE		Request slide for KYC Ryan Brewer
+session_01Tu2tJxUvHyxQxE7DRxwxhg	SESSION_STATUS_IDLE		August session
+session_01UPr96pUwvHdim1Sf5FfrwW	SESSION_STATUS_IDLE		August session
+session_01UVJG46KjTAHoH7UwwBQdM3	SESSION_STATUS_IDLE		Code-prose alignment review
+session_01VHYEHNLx1q5gyBP7XgFQhV	SESSION_STATUS_IDLE		August session
+session_01XF8kTrDtsbzhV7zYbiraqk	SESSION_STATUS_REQUIRES_ACTION		September q_max-era session
+session_01XpdbbXWtWefP3bu6G4mpZc	SESSION_STATUS_IDLE		August session
+session_01YXgcE6ogd4kbEBbHphGyoz	SESSION_STATUS_IDLE		August session
+session_01YaMRQNMPVk9JotL4rwb9uR	SESSION_STATUS_IDLE		September q_max-era session
+session_01Ybf1EuvpkUVGZwZCAB3qVq	SESSION_STATUS_IDLE		September q_max-era session
+session_01YbzaMy829MrhEKUGpQbBES	SESSION_STATUS_IDLE		August session
