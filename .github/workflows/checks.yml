@@ -664,6 +664,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_merge.py
 
+      - name: Merge tool grant review-record fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_merge_grant.py
+
       - name: Merge launcher fixture suite (bin/merge)
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_cmd.py
@@ -686,8 +690,8 @@ jobs:
 
       - name: install.sh checkout-detection suite
         if: ${{ needs.scope.outputs.code == 'true' }}
-        # Own cap: slowest 6.98 min is 70% of it, so a hang reads red at this step.
-        timeout-minutes: 10
+        # Own cap: n6 min: 7.90, 8.62, 8.67, 9.60, 9.68 green (runs 42682869856, 42733987294, 42669400649, 42717988296, 42700538152) and 10.22 cut at the old 10 min cap (run 42708195330, a floor); cap 15 = 10.22 / 0.7 = 14.6, rounded up (decision ci-job-caps).
+        timeout-minutes: 15
         run: sh hooks/test_install_src.sh
 
       - name: cloud-setup.sh suite
@@ -773,8 +777,10 @@ jobs:
   checks-shoot:
     runs-on: ubuntu-latest
     needs: scope
-    # Cap 10 min (provisional, until 5 green runs; decision ci-job-caps). The export fixture suite is the longest
-    # step, 57 s locally. The browser install is the only network step, and it does not wait on apt.
+    # Cap 10 min, 10x the slowest of 30 runs, 1.0 min (decision ci-job-caps). The 30 runs predate the
+    # waiting page suite, which moved to checks-waiting-page after it ran 9.5 min and hit this cap. The
+    # browser install is the only network step, and it no longer waits on apt. Re-measure this job
+    # without that suite before lowering the cap.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -798,18 +804,6 @@ jobs:
         shell: bash
         run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs
 
-      # The waiting page template (skill waiting-page) in the same browser. ci-scope.sh sets `shoot`
-      # for its paths and for the files its suites import, so a change there runs this job. A red shoot suite above
-      # skips this step; it runs again once that suite is green. The merged-page cases run the
-      # roadmap build and the splice (tests/merged_page.py), so the runner needs python3 and git.
-      # ubuntu-latest has both; the first line fails the step at once if one goes missing.
-      - name: waiting page suite
-        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
-        shell: bash
-        run: |
-          python3 --version && git --version
-          NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs
-
       # The export suite's picture cases run check_designs.mjs in Playwright. A case that cannot run fails, so
       # this suite cannot sit in `checks`, which installs no browser. loadPlaywright reads NODE_PATH.
       - name: Waiting page export fixture suite
@@ -822,6 +816,39 @@ jobs:
         shell: bash
         run: |
           NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/roadmap/tests/page.test.mjs
+
+  # The waiting page suite, split from checks-shoot after it ran 9.5 min there and the job hit its
+  # 10 min cap (decision ci-job-caps). Same install and same scope conditions as checks-shoot.
+  checks-waiting-page:
+    runs-on: ubuntu-latest
+    needs: scope
+    # The suite split off checks-shoot. Provisional cap 60: one run so far, 12.7 min and red (run
+    # 42733987294, n=1; an earlier run cut the suite inside checks-shoot at 9.5 min, runs 42708195330
+    # and 42717988296). Re-measure on a green run and at 5 green runs, then set cap = slowest / 0.7,
+    # rounded up (decision ci-job-caps).
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Playwright and Chromium, no apt step
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
+        uses: $/actions/playwright-setup
+        with:
+          package-dir: .github/shoot
+
+      # The waiting page template (skill waiting-page) in the same browser, in its own job. Its paths fall to the
+      # all-on arm of ci-scope.sh, so a change there runs this job. The merged-page cases run the
+      # roadmap build and the splice (tests/merged_page.py), so the runner needs python3 and git.
+      # ubuntu-latest has both; the first line fails the step at once if one goes missing.
+      - name: waiting page suite
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
+        shell: bash
+        run: |
+          python3 --version && git --version
+          NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
@@ -865,13 +892,13 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install-bin-eol.test.ps1
 
   # /bin/bash on macOS is 3.2.57 (2007) and /var is a symlink to /private/var. The
-  # checkout-detection suite, the ios-ship suite and the sim-test suite (bash 3.2 scripts for macOS) are the only checks
+  # checkout-detection suite, the ios-ship suite, the sim-test suite and the duo-fold suite (bash 3.2 scripts for macOS) are the only checks
   # whose result depends on either. checks-macos below covers the rest of the suite, so this job stays narrow, on purpose.
   shell-macos:
     runs-on: macos-latest
     needs: scope
-    # n30 green, median 21.1, slowest 23.2 min (run 42120437163): cap 34 = slowest / 0.7, rounded up (decision ci-job-caps).
-    timeout-minutes: 34
+    # n30 green, slowest 23.2 min with its suite step at 11.68 (run 42120437163), so about 11.5 min of other steps; the suite step's floor is now 16.2 min (n6, runs 42708195330, 42717988296): 27.7 min is a projection: the step floor 16.2 plus about 11.5 min of other steps from run 42120437163; run 42733987294 measured 24.4 min for the job; cap 40 = 27.7 / 0.7, rounded up (decision ci-job-caps).
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
@@ -890,8 +917,8 @@ jobs:
         run: bash -n install.sh
       - name: install.sh checkout-detection suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
-        # Own cap: slowest 11.68 min is 73% of it, so a hang reads red at this step.
-        timeout-minutes: 16
+        # Own cap: n7 (green 9.65, 11.08, 14.32, 14.98, 15.00 min, runs 42700538152, 42682869856, 42676155839, 42733987294, 42669400649; 16.22 and 16.2 min, runs 42708195330 and 42717988296, each cut at the old 16 min cap with every case passing, so floors): cap 24 = 16.2 / 0.7, rounded up (decision ci-job-caps).
+        timeout-minutes: 24
         run: sh hooks/test_install_src.sh
       - name: install_from_main suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
@@ -908,6 +935,12 @@ jobs:
       - name: sim-test fixture suite (bash on PATH)
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         run: bash lint/test_sim_test.sh
+      - name: duo-fold fixture suite (/bin/bash 3.2)
+        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
+        run: /bin/bash lint/test_duo_fold.sh
+      - name: duo-fold fixture suite (bash on PATH)
+        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
+        run: bash lint/test_duo_fold.sh
 
   # The owner runs this repo on macOS. Before this job, every Python suite in the checks
   # and checks-windows jobs above proved itself only on Linux and Windows, never on a real
@@ -1879,6 +1912,7 @@ jobs:
       - checks-guard
       - checks-guard-2
       - checks-shoot
+      - checks-waiting-page
       - pointer-windows
       - shell-macos
       - checks-macos
@@ -1914,6 +1948,7 @@ jobs:
       - checks-guard
       - checks-guard-2
       - checks-shoot
+      - checks-waiting-page
       - pointer-windows
       - shell-macos
       - checks-macos
