@@ -6,6 +6,7 @@
 # Exit 0 is FAIL if the output holds a runner marker, no test ran, or a test run read no test count (a test success marker at a line start, or `xcodebuild test` or `swift test` as typed), else SKIP (`SKIP <cmd>, N skipped (<secs>s)`, exit 0) if N > 0 tests skipped, else PASS.
 # N is the larger of two counts: the sum of the runner summaries in the run (`skipped=N`, `N skipped`, node's `# skipped N` and `ℹ skipped N`), and the lines that start `SKIP `, `SKIPPED` or `SKIP:`. A summary line `SKIP: N check` is not one of them, so it never counts on top of its cases. XCTest `Executed N tests, with M tests skipped` lines nest (class, bundle, All tests), so their max is one term of the sum. Colour codes (SGR) are ignored. A count of 10 or more digits reads as 10**9. A count of 0 is PASS. Why: a test that always skips must not read as a pass.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 7 days from the temp folder: regular files whose first line is our own header only; errors skipped.
+# $VERDICT_LABEL, when set, is the name the run's log header carries in place of the command (bin/ci-job sets it to each CI step's name, so a reader finds a CI step's section by name); the verdict line keeps the command. The child does not inherit it.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
 import os, re, shutil, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
@@ -49,6 +50,7 @@ def main(argv):
     for s in (sys.stdout, sys.stderr): s.reconfigure(encoding="utf-8", errors="replace")  # a cp1252 pipe cannot print the excerpt
     if not argv: sys.exit("usage: verdict <cmd...>")
     name = " ".join(argv)
+    label = " ".join(os.environ.pop("VERDICT_LABEL", "").split()) or name  # popped: a verdict the command starts must not reuse it
     by_argv = test_argv(argv)
     argv = [shutil.which(argv[0]) or argv[0]] + argv[1:]  # finds .cmd/.bat shims on Windows
     log = os.environ.get("VERDICT_LOG")
@@ -60,7 +62,7 @@ def main(argv):
     try: f = open(log, "ab")
     except OSError as e: print(f"FAIL {name} rc=1 cannot open log: {e} ({time.time() - t:.1f}s) log={log}"); return 1
     with f:
-        f.write(f"=== verdict run {time.strftime('%Y-%m-%d %H:%M:%S')}: {name}\n".encode()); f.flush()
+        f.write(f"=== verdict run {time.strftime('%Y-%m-%d %H:%M:%S')}: {label}\n".encode()); f.flush()
         start = f.tell()
         try: beat = int(os.environ.get("VERDICT_HEARTBEAT") or 120)
         except ValueError: beat = 120

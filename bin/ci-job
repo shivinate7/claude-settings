@@ -496,7 +496,7 @@ def run_step(name, step, install, detail, shell, env, cwd, ctx, log):
                              stderr=subprocess.STDOUT, text=True,
                              env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV}},
                                   **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
-                                  **env, "VERDICT_LOG": log}) as proc:
+                                  **env, "VERDICT_LOG": log, "VERDICT_LABEL": name}) as proc:
             for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
                 if line.startswith("verdict: still running"):
                     err_line(line)
