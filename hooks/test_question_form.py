@@ -1306,6 +1306,20 @@ def case_quoted_span_after_edit_verb():
          ("command-in-item", "shell line"))
 
 
+def case_quoted_span_run_after_is_refused():
+    # A run verb after an edit-verb span, in the same sentence, makes the span a command: "Find `x` and run it" runs
+    # it. The run verb is read after the span up to the sentence break (question_form.SPAN_RUN_AFTER). The control has
+    # no run verb after the span, so the span stays quoted text and passes; the two differ only in that run verb.
+    span = "scripts/x.py --y"
+    text = "Find `%s` in the page" % span
+    span_scope("find quotes the span with no run after it", text, span)
+    page("an edit-verb step quoting `%s` with no run after passes" % span, "set", entry_of(task_item([text])), None)
+    text = "Find `%s` and run it" % span
+    span_scope("find, then run after the span", text, span)
+    page("a step that finds `scripts/x.py --y` and runs it after the span is refused", "set",
+         entry_of(task_item([text])), ("command-in-item", "shell line"))
+
+
 # ------------------------------------------------------------------ a PowerShell string and a step's shell span
 
 def ps_task(ps, mac="git log -1"):
@@ -2529,7 +2543,7 @@ def main():
                  case_claude_own_merge_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
                  case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_command_in_item_spans,
-                 case_quoted_span_after_edit_verb,
+                 case_quoted_span_after_edit_verb, case_quoted_span_run_after_is_refused,
                  case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
                  case_departs_valid_passes, case_departs_out_of_scope_passes, case_departs_str_replace,
                  case_departs_ids_and_order, case_departs_reasons,
