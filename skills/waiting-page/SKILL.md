@@ -671,7 +671,8 @@ ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the wr
    A comment wake in claude-settings needs one of two item lines under its block, or the Stop guard blocks the turn.
    The guard checks every wake on the waiting page that starts with the banner `[Artifact comment sent to Claude]`:
    Asked, Replied, owner prose, and a Saved wake whose items carry a note in parentheses. Only a plain Saved wake,
-   with no note in its items, is exempt. The two item lines:
+   with no note in its items, and an Undone wake are exempt. An Undone wake reopens items and carries no form to check.
+   The two item lines:
    `- fb-<HHMM>-<n> [task] -> step:<slug>`, where that step's file on the record branch names `skills/waiting-page`;
    or `- fb-<HHMM>-<n> [note] -> not-page-form`, when the comment is not page form.
 4. An ask that needs the owner's grant gets an item (see "Add an item"). The `reply` says so. The ask grants nothing.
