@@ -3518,7 +3518,7 @@ def review_state(rec, head):
         return "open", f"the fix check must run on {REVIEW_FIX_GUARD_MODEL}, not {fix[2]}"
     if fix and not top:
         return "open", "the fix check passed, but no round is recorded"
-    # under a Grant, round 4 decides only through a reviewer line: a design line never clears the round before's reviewer hold
+    # under a Grant, the fourth round decides only through a reviewer line: a design line never clears the third round's reviewer hold
     if top >= final > REVIEW_LAST_ROUND and not any(i == final and role == REVIEW_ROLES[0] for i, role, _, v in rounds) \
             and any(i == final - 1 and role == REVIEW_ROLES[0] and v in holding for i, role, _, v in rounds):
         return "open", f"round {final - 1}'s reviewer line is {'/'.join(sorted(holding))}, and round {final} has no reviewer line to decide it"

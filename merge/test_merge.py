@@ -15212,7 +15212,7 @@ class ReviewFixBaseRecord(ReviewEnv):
         self.assertNotIn("Traceback", err)
 
     def test_a_granted_round_four_source_record_starts_the_fix_check_with_the_grant(self):
-        # the grant defect at merge.py line 4112: the stand-in reached round 4 and is granted, so the body the floor check reads must carry the grant too
+        # the grant defect at merge.py line 4112: the stand-in reached the fourth round and is granted, so the body the floor check reads must carry the grant too
         round_four = (*REVIEW_FAILED_THREE, "Round 4: reviewer, opus, PASS")
         grant = "#7, item 396 a, owner, 2026-11-08 06:08 CST"  # this pull request's grant: the PR 7 form, as test_merge_grant.py's REVIEW_GRANT
         source_grant = "Grant: #1541, item 396 a, owner, 2026-11-08 06:08 CST"  # the source record's own grant, naming its own pull request
