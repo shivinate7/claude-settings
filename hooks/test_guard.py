@@ -105,6 +105,7 @@ FAMILIES = {
     "push-delete": "push and delete",
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
+    "argv": "process arguments: a ps, pgrep or /proc form that prints other processes' full arguments is refused; pid-and-name forms, quoted or heredoc text and the guard's own readers pass",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "hook-bypass": "a git commit, merge or push that skips the git hooks: core.hooksPath on the command or in the environment, --no-verify, and -n on commit; the mutation tool's own exemption",
     "merge": "merge into main, draft pull requests and the merge guard",
@@ -234,9 +235,11 @@ TEMP_DIR = None
 
 
 def _family(name):
-    """The family a case or a log check takes: session-log and rm-var by name, else FAMILY."""
+    """The family a case or a log check takes: session-log and argv by prefix, rm-var by name, else FAMILY."""
     if name.startswith("session-log:"):
         return "session-log"
+    if name.startswith("argv:"):
+        return "argv"
     return "rm-var" if "rm-var" in name else FAMILY
 
 
@@ -12343,6 +12346,265 @@ sh("hook-bypass allow: -c core.hooksPath on status, which is not commit, merge o
 # the file, so this allow holds only while that code still sets the key.
 sh("hook-bypass allow: running hooks/mutate_shared.py, whose own checkout sets core.hooksPath",
    "python3 hooks/mutate_shared.py", "allow", cwd=GITMAIN)
+
+# ============================================================ process arguments (rule process-args)
+#
+# A process's full arguments can hold a secret, an auth key in a flag, and a session that prints
+# them puts the secret in its transcript. The rule refuses a command that prints other processes'
+# FULL arguments. Its remedy names the forms that stay: a pid, a name, a parent id, a start time.
+# Every case here is named `argv:`, so it takes the family `argv` (see _family) and GUARD_FAMILY=argv
+# runs only these. Every case runs in NOGIT.
+#
+# A refuse case reads `allow` on a guard without the rule, so each one is red there. An allow case
+# checks a form the rule must keep passing, so a fix that refuses too much fails it.
+
+# The shell readers that the guard and the sweep spawn. They are read from source, so a reader that
+# changes is tested as it now reads.
+ARGV_READER_FILES = ("hooks/guard_kill.py", "hooks/git_reads.py", "janitor/sweep.py")
+# The readers that print full arguments, by their exact argv. A session that typed one would be
+# refused by the rule, so no case says these pass. They run in Python and never reach the hook.
+ARGV_FULL_ARGS_READERS = (
+    ("ps", "-o", "command=", "-p", "123"),   # janitor/sweep.py, one pid's command line
+    ("ps", "-axo", "pid=,ppid=,uid=,command="),   # janitor/sweep.py, the whole table
+)
+
+
+def _argv_readers():
+    """{argv: file} for each `ps`, `pgrep` or `lsof` list the readers build. A non-literal element
+    reads as a pid, so `str(pid)` is 123. Stops the run when a reader file holds no such list, so the
+    readers case never runs on nothing."""
+    found = {}
+    for rel in ARGV_READER_FILES:
+        with open(os.path.join(HERE, "..", rel), encoding="utf-8") as handle:
+            tree = ast.parse(handle.read(), filename=rel)
+        lists = 0
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.List) or not node.elts:
+                continue
+            head = node.elts[0]
+            if not (isinstance(head, ast.Constant) and head.value in ("ps", "pgrep", "lsof")):
+                continue
+            lists += 1
+            words = tuple(e.value if isinstance(e, ast.Constant) and isinstance(e.value, str) else "123"
+                          for e in node.elts)
+            found.setdefault(words, rel)
+        if not lists:
+            sys.exit("process-args: no ps, pgrep or lsof argv list in %s" % rel)
+    return found
+
+
+def _playwright_remedy_commands():
+    """The commands the Playwright refusal tells a session to run: its backticked `pgrep` or `ps` spans.
+    Read from the constant's literal, so a changed remedy is the one tested."""
+    with open(os.path.join(HERE, "guard_kill.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), filename="guard_kill.py")
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "PLAYWRIGHT_PATH_REASON" for t in node.targets):
+            commands = re.findall(r"`((?:pgrep|ps)\b[^`]*)`", ast.literal_eval(node.value))
+            if not commands:
+                sys.exit("process-args: PLAYWRIGHT_PATH_REASON names no pgrep or ps command")
+            return commands
+    sys.exit("process-args: no PLAYWRIGHT_PATH_REASON literal in hooks/guard_kill.py")
+
+
+ARGV_REFUSED = (
+    "ps aux", "ps -ef", "ps -eo pid,args", "ps -o args", "ps -A -o pid,command", "ps auxww",
+    "ps -fp 123", "ps -ef | grep tailscale", "ps -eo pid,comm,args",
+    "pgrep -a x", "pgrep -fa x", "pgrep -fl x", "pgrep -af x", "pgrep -l -f x",
+    "cat /proc/*/cmdline", "cat /proc/123/cmdline", r"tr '\0' ' ' < /proc/$pid/cmdline",
+    "cat /proc/[0-9]*/cmdline",
+    "/usr/bin/ps aux", "sudo ps aux", "bash -c 'ps -ef'", "x=$(ps aux)", "env FOO=1 ps aux",
+    "ls && ps aux", "true; ps -ef", "pgrep -f node | xargs ps -fp",
+)
+for _cmd in ARGV_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+
+ARGV_ALLOWED = (
+    "ps -o pid,comm", "ps -eo pid,comm", "ps -A -o pid=,ppid=", "ps -o ppid= -p 123",
+    "ps -o comm= -p 123", "ps -o lstart= -p 123", "ps -p 123 -o pid,comm",
+    "pgrep x", "pgrep -f x", "pgrep -l x", "pgrep -x node", "pidof node",
+    "cat /proc/123/status", "cat /proc/123/comm", "ls /proc/123/fd",
+)
+for _cmd in ARGV_ALLOWED:
+    sh("argv: allow, " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+for _words, _rel in _argv_readers().items():
+    if _words in ARGV_FULL_ARGS_READERS:
+        continue
+    _cmd = " ".join(_words)
+    sh("argv: allow, the reader in %s spawns: %s" % (_rel, _cmd), _cmd, "allow", cwd=NOGIT)
+
+# The Playwright refusal tells a session to run a pgrep. A command the rule refuses would send the
+# session into a refusal, so each command it names must pass. The case fails when the rule refuses one of
+# them, so a remedy that names a refused form fails here.
+for _cmd in _playwright_remedy_commands():
+    sh("argv: allow, the Playwright remedy tells a session to run: " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+# The remedy of the refusal names the safe forms and never a refused one, since a remedy that names a
+# refused form sends the session into the same refusal.
+sh("argv: deny, the remedy names the safe forms and no refused one (ps)", "ps aux", "deny", "process-args",
+   cwd=NOGIT, carries=("ps -o pid,comm", "pgrep -l", "pgrep -f x", "pids only"),
+   lacks=("ps aux", "ps -ef", "pgrep -a", "pgrep -fl", "pgrep -l -f"))
+sh("argv: deny, the remedy names the safe forms and no refused one (pgrep)", "pgrep -fa x", "deny",
+   "process-args", cwd=NOGIT, carries=("pgrep -l", "pgrep -f x", "pids only"),
+   lacks=("pgrep -fa", "pgrep -af", "pgrep -a", "pgrep -fl", "pgrep -l -f", "ps aux", "ps -ef"))
+
+# A quoted, commented or heredoc form is text: the rule judges what a shell would run, not the words.
+# Each refused form after such text still refuses. These are the string cases of building-scanner-respects-strings.
+ARGV_TEXT_ALLOWED = (
+    ("quoted name of the form", 'echo "ps aux"'),
+    ("the form in a commit message", 'git commit -m "refuse ps -ef"'),
+    ("a pattern that names the path", "grep -n 'cmdline' file"),
+    ("a file name that holds the word", "cat notes-about-cmdline.txt"),
+    ("a lone apostrophe inside double quotes", 'echo "Don\'t run ps aux here"'),
+    ("a comment opener inside double quotes", 'echo "# ps aux is text"'),
+    ("a comment after a command", "echo hi # ps aux"),
+    ("a comment line", "# ps aux\nls"),
+    ("a quoted heredoc body", "cat > notes.md <<'EOF'\nps aux lists every process\nEOF"),
+    ("a commit message from a quoted heredoc",
+     "git commit -m \"$(cat <<'EOF'\nps aux lists every process\nEOF\n)\""),
+    ("a multi-line double-quoted string", "printf '%s\\n' \"first line\nps aux is named here\""),
+)
+ARGV_TEXT_REFUSED = (
+    ("a comment opener in quotes, then a real command", 'echo "a # b" && ps aux'),
+    ("a lone apostrophe in quotes, then a real command", 'echo "Don\'t" && ps aux'),
+    ("a quoted hash, then a real command", 'echo "#"; ps -ef'),
+    ("a quoted heredoc, then a real command", "cat <<'EOF'\nnotes\nEOF\nps -ef"),
+    ("a substitution inside double quotes", 'echo "$(ps -ef)"'),
+    ("a substitution in double quotes, piped", 'echo "tailscale: $(ps -ef | grep tailscale)"'),
+    ("a substitution in an unquoted heredoc body", "cat <<EOF\n$(ps aux)\nEOF"),
+)
+for _label, _cmd in ARGV_TEXT_ALLOWED:
+    sh("argv: allow, text: " + _label, _cmd, "allow", cwd=NOGIT)
+for _label, _cmd in ARGV_TEXT_REFUSED:
+    sh("argv: deny, text: " + _label, _cmd, "deny", "process-args", cwd=NOGIT)
+
+# Each refuse case below names a form the rule must read. Each pass control beside it names a form the
+# rule must still allow, so a fix that reads too much fails a control.
+
+# BSD `x` lists the processes with no controlling terminal. Under the BSD personality its COMMAND
+# column is the full argument list. The operand form (`ps ax`) is a separate refusal with no case here.
+# The flag forms are pinned, including `-a -x`, split into two words, which lists the same processes as `-ax`.
+ARGV_BSD_X_REFUSED = ("ps -x", "ps -ax", "ps -Ax", "ps -ex", "ps -xw", "ps -a -x")
+for _cmd in ARGV_BSD_X_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+# An explicit -o format decides alone, even with the BSD x flag.
+ARGV_BSD_X_ALLOWED = ("ps -xo pid,comm", "ps -x -o comm=")
+for _cmd in ARGV_BSD_X_ALLOWED:
+    sh("argv: allow, " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+# A read of a process's cmdline by any command, not only cat or tac. The pid is a number, a glob, a
+# variable, or a thread under one (`task/N`). A command that takes the path as an argument, or reads it
+# through `xargs -a`, is refused as cat is.
+ARGV_CMDLINE_REFUSED = (
+    "grep -a tailscale /proc/*/cmdline", "head -c 200 /proc/1/cmdline", "tail -c 200 /proc/1/cmdline",
+    "strings /proc/1/cmdline", "od -c /proc/1/cmdline", "sed -n l /proc/1/cmdline",
+    "xargs -0 -a /proc/1/cmdline echo", "cat /proc/1/task/1/cmdline", "cat /proc/$pid/task/1/cmdline",
+    r"tr '\0' ' ' < /proc/1/task/1/cmdline",
+)
+for _cmd in ARGV_CMDLINE_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+# The shell's own pid and self stay, under every reader. Other proc files stay, and so does a path
+# that only names the cmdline inside text.
+ARGV_CMDLINE_ALLOWED = (
+    "cat /proc/self/cmdline", "cat /proc/$$/cmdline", "head -c 200 /proc/self/cmdline",
+    "strings /proc/$$/cmdline", "cat /proc/1/comm", "cat /proc/1/status", "echo /proc/1/cmdline",
+    'git commit -m "read /proc/1/cmdline"', "grep -n cmdline file.txt",
+)
+for _cmd in ARGV_CMDLINE_ALLOWED:
+    sh("argv: allow, " + _cmd, _cmd, "allow", cwd=NOGIT)
+ARGV_CMDLINE_TEXT_ALLOWED = (
+    ("a heredoc body that names the read", "cat > notes.md <<'EOF'\nhead -c 200 /proc/1/cmdline\nEOF"),
+    ("a comment that names the read", "ls # head -c 200 /proc/1/cmdline"),
+)
+for _label, _cmd in ARGV_CMDLINE_TEXT_ALLOWED:
+    sh("argv: allow, text: " + _label, _cmd, "allow", cwd=NOGIT)
+
+# pstree prints the full command line with -a or -c, and top with -c. The default tree and the
+# default top columns stay.
+ARGV_TREE_REFUSED = ("pstree -a", "pstree -ap", "pstree -ca", "top -c -bn1", "top -bc")
+for _cmd in ARGV_TREE_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+ARGV_TREE_ALLOWED = ("pstree -p", "pstree", "top -bn1", "top -b -n 1 -o %CPU")
+for _cmd in ARGV_TREE_ALLOWED:
+    sh("argv: allow, " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+# The PowerShell tool reads a process's command line through CIM, WMI or wmic, as the CommandLine
+# property. The pid, name and process-table forms stay.
+ARGV_PS_REFUSED = (
+    "Get-CimInstance Win32_Process | Select CommandLine",
+    "(Get-WmiObject Win32_Process).CommandLine",
+    "wmic process get commandline",
+    "Get-Process | Select Name,CommandLine",
+)
+for _cmd in ARGV_PS_REFUSED:
+    sh("argv: deny, PowerShell, " + _cmd, _cmd, "deny", "process-args", tool="PowerShell", cwd=NOGIT)
+ARGV_PS_ALLOWED = (
+    "Get-Process", "Get-Process | Select Id,ProcessName", "Get-CimInstance Win32_Process | Select ProcessId,Name",
+)
+for _cmd in ARGV_PS_ALLOWED:
+    sh("argv: allow, PowerShell, " + _cmd, _cmd, "allow", tool="PowerShell", cwd=NOGIT)
+# PowerShell text is a string, a comment or a here-string, never a command. Each shape the scanner meets
+# gets a control, and a refused command after the text still refuses.
+ARGV_PS_TEXT_ALLOWED = (
+    ("a quoted Win32_Process CommandLine", 'Write-Output "Win32_Process CommandLine"'),
+    ("a comment opener inside double quotes", 'Write-Output "# Get-CimInstance Win32_Process | Select CommandLine"'),
+    ("a comment line that names the read", "# (Get-WmiObject Win32_Process).CommandLine\nGet-Process"),
+    ("a here-string that names the read",
+     "@'\nGet-CimInstance Win32_Process | Select CommandLine\n'@ | Out-File notes.md"),
+    ("a lone apostrophe inside double quotes", 'Write-Output "Don\'t read CommandLine"'),
+)
+ARGV_PS_TEXT_REFUSED = (
+    ("a comment opener in quotes, then a real command",
+     'Write-Output "a # b"; Get-CimInstance Win32_Process | Select CommandLine'),
+    ("a lone apostrophe in quotes, then a real command", 'Write-Output "Don\'t"; wmic process get commandline'),
+)
+for _label, _cmd in ARGV_PS_TEXT_ALLOWED:
+    sh("argv: allow, PowerShell text: " + _label, _cmd, "allow", tool="PowerShell", cwd=NOGIT)
+for _label, _cmd in ARGV_PS_TEXT_REFUSED:
+    sh("argv: deny, PowerShell text: " + _label, _cmd, "deny", "process-args", tool="PowerShell", cwd=NOGIT)
+
+# The remedy names no refused form of these families. Each case's trigger is a refused form of a family
+# above, so the case also pins the remedy text that the refusal prints.
+ARGV_NEW_FORMS_NOT_IN_REMEDY = (
+    "ps -x", "ps -ax", "ps -xw", "pstree -a", "pstree -ca", "top -c", "top -bc", "cmdline", "xargs -a",
+    "CommandLine", "wmic",
+)
+sh("argv: deny, the remedy names no refused BSD, tree or cmdline form (trigger ps -xw)", "ps -xw", "deny",
+   "process-args", cwd=NOGIT, lacks=ARGV_NEW_FORMS_NOT_IN_REMEDY)
+sh("argv: deny, the remedy names no refused PowerShell form (trigger CommandLine)",
+   "Get-Process | Select Name,CommandLine", "deny", "process-args", tool="PowerShell", cwd=NOGIT,
+   lacks=ARGV_NEW_FORMS_NOT_IN_REMEDY)
+
+# A grep-style command takes its pattern as a bare word, or after -e. A cmdline path given as the pattern
+# names no file, so each form here passes. The path is a file only when a later operand follows.
+ARGV_GREP_PATTERN_ALLOWED = (
+    r'grep -rn "/proc/1/cmdline" docs',
+    r'grep -e "/proc/1/cmdline" hooks/test_guard.py',
+    "echo hi | grep /proc/1/cmdline",
+    "egrep -n /proc/1/cmdline notes.md",
+    "fgrep /proc/1/cmdline notes.md",
+    'rg "/proc/1/cmdline" docs',
+    "rg -n -e /proc/1/cmdline docs",
+)
+for _cmd in ARGV_GREP_PATTERN_ALLOWED:
+    sh("argv: allow, " + _cmd, _cmd, "allow", cwd=NOGIT)
+# The file operand of a grep-style command is a read, whether the pattern is bare or given with -e. These
+# are controls: a fix that exempts the whole command, or reads only the first operand, fails them.
+ARGV_GREP_FILE_REFUSED = (
+    "grep tailscale /proc/1/cmdline", "grep -a x /proc/*/cmdline", "rg x /proc/1/cmdline",
+    "grep -e tailscale /proc/1/cmdline",
+)
+for _cmd in ARGV_GREP_FILE_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+# find runs its -exec command on each path it takes, so the command after -exec reads the cmdline file.
+ARGV_FIND_EXEC_REFUSED = (
+    r"find /proc/1/cmdline -exec cat {} \;",
+    r"find /proc/*/cmdline -exec grep -a tailscale {} +",
+)
+for _cmd in ARGV_FIND_EXEC_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
 
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
@@ -27097,8 +27359,10 @@ REASON_MAY_NAME = {
 def playwright_remedy_case():
     """The playwright refusal names the real check and points nowhere else.
 
-    The remedy must name the stale `__dirlock` and `pgrep -fl playwright`, the two checks that
-    find the real cause. It must not name the variable it refused, nor any path to set instead.
+    The remedy must name the stale `__dirlock` and `pgrep -f playwright`, the two checks that
+    find the real cause. `pgrep -f` prints pids only. The `-fl` form prints full process arguments,
+    which the process-args rule refuses, so the remedy must never name it. The remedy must not name
+    the variable it refused, nor any path to set instead.
     """
     got, reason = decide({
         "raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
@@ -27107,13 +27371,15 @@ def playwright_remedy_case():
     })
     if got != "deny":
         return False, "expected deny, got %s" % got
-    missing = [f for f in ("__dirlock", "pgrep -fl playwright") if f not in reason]
+    if "pgrep -fl playwright" in reason:
+        return False, "the remedy still names the refused form 'pgrep -fl playwright'"
+    missing = [f for f in ("__dirlock", "pgrep -f playwright") if f not in reason]
     if missing:
         return False, "the remedy does not name %r: %s" % (missing[0], reason[:90])
     named = [f for f in ("PLAYWRIGHT_BROWSERS_PATH", "/tmp", "scratch", "C:\\") if f in reason]
     if named:
         return False, "the remedy names %r, a forbidden target or another path" % named[0]
-    return True, "refused, and the remedy names the stale __dirlock and pgrep -fl playwright"
+    return True, "refused, and the remedy names the stale __dirlock and pgrep -f playwright"
 
 
 def powershell_backslash_case():
