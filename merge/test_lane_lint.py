@@ -1288,7 +1288,7 @@ class CrossMeasure(LaneFixture):
 
 
 LINT_FLAGS = "lint-flags"  # the lane branch the case lints: a pushed branch whose checks job holds the four CI steps below
-BATCH_MISSING = "batch-lint-flags-no-red-run"  # the same checks job with the Red-run trailer's script left out
+LINT_MISSING = "lint-flags-no-red-run"  # the same checks job with the Red-run trailer's script left out
 BASE = "main"  # the base the lint runs against: lane_lint's base, and the PR base the CI steps read
 BATCH_CI_STEPS = ("Silent undo check", "Comment narration check", "Red-run trailer", "STE lint")  # checks.yml's job `checks` CI steps this suite lints
 STE = "STE lint"  # the one CI step whose script is bin/ste-changed, not a file of the batch
@@ -1380,9 +1380,8 @@ class BatchLintFlags(tm.Env):
     """`merge --lane-lint <lane>` runs the real bin/ci-job on a lane's checks job with the lint flags: each of its four lint CI steps runs once, with the argv checks.yml gives it."""
 
     def assert_lint_flags_route(self, branch):
-        """The scope of a lint-flags case: the branch name lacks merge's batch prefix, so lane_lint runs the lint steps and no batch checks."""
-        self.assertFalse(branch.startswith(merge.BATCH_PREFIX),
-                         "%s starts with %s, so lane_lint runs the batch checks, not the lint steps" % (branch, merge.BATCH_PREFIX))
+        """The scope of a lint-flags case: the branch is a lane's, not an integration branch, so lane_lint runs the lint steps and no batch checks."""
+        self.assertNotRegex(branch, r"^batch-", "%s is an integration branch name, so lane_lint may run the batch checks, not the lint steps" % branch)
 
     def setUp(self):
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):  # Env.setUp makes its repos in the temp dir: keep them in this run's folder
@@ -1476,11 +1475,12 @@ class BatchLintFlags(tm.Env):
                              "bin/ste-changed sets FAIL to other than the PR-path fail of checks.yml")
 
     def test_a_missing_check_script_refuses_and_never_passes(self):
+        self.assert_lint_flags_route(LINT_MISSING)
         red_run = dict(self.found)["Red-run trailer"]
-        self.push_batch(BATCH_MISSING, skip={script_of(red_run)})
+        self.push_batch(LINT_MISSING, skip={script_of(red_run)})
         out = io.StringIO()
         with self.assertRaises(merge.Stop) as raised:
-            self.lane_lint(BATCH_MISSING, out)
+            self.lane_lint(LINT_MISSING, out)
         self.assertNotIsInstance(raised.exception, merge.Liftable, "a missing check script reads as unknown, not as a failed check: " + out.getvalue())
         self.assertIn("FAILs:", str(raised.exception), "the refusal does not say the lint FAILs: " + out.getvalue())
         self.assertIn("Red-run trailer", str(raised.exception), "the refusal does not name the CI step whose script is missing: " + out.getvalue())
@@ -1514,20 +1514,23 @@ class BatchLintFlags(tm.Env):
         self.assertIn(PUSH_ONLY, lines[0], text)
 
 
-BATCH_LANE = "batch-full-checks"  # a batch branch: its name starts `batch-`, so the lane lint runs the batch checks
-BATCH_DEBT = "batch-retire-debt"  # a batch whose head closes a debt (the fixture of tm.DebtRetire)
+BATCH_LANE = "batch-73"  # an integration branch: `batch-` and a number, so the lane lint runs the batch checks
+BATCH_DEBT = "batch-74"  # an integration branch whose head closes a debt (the fixture of tm.DebtRetire)
 FULL_PASS = [("PASS", "record slugs"), ("PASS", "comment narration")]  # the batch's full checks job, green
 FULL_FAIL = [("PASS", "record slugs"), ("FAIL", "shard suite")]
 FULL_UNKNOWN = [("PASS", "record slugs"), ("unknown", "shard suite")]
 # A stub ci-job that answers by where it runs: `where` is "head" on the batch's head and "base" on origin/main (a re-run in a
 # temp tree). It answers by the job asked: lint, the Windows slice (checks-windows-guard), or the full job. --step names
 # filter the rows, and a name the job lacks is unknown, as ci-job reads it. Exit 1 on a FAIL, 2 on an unknown, else 0.
-ROUTED_STUB = '''import json, os, subprocess, sys
+# A FAIL run writes its log to a file of its own, as ci-job does, and prints its `log=` line. The log holds one section per
+# step, each opening with verdict's header; a FAIL step's section holds the unittest lines its case names come from (PLAN's `cases`).
+ROUTED_STUB = '''import json, os, subprocess, sys, tempfile
 LOG, PLAN, STEP_LOG = __LOG__, __PLAN__, __STEP_LOG__
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 head = git("rev-parse", "HEAD")
 where = "base" if head == git("rev-parse", "origin/main") else "head"
+CASES = PLAN[where].get("cases", {})
 argv = sys.argv[1:]
 kind = "windows" if "checks-windows-guard" in argv else ("lint" if "--lint" in argv else "full")
 rows = list(PLAN[where].get(kind, []))
@@ -1545,12 +1548,32 @@ if "--plan" in argv:
 lines = ["%-15s %s: %s" % (state, name, "stub step") for state, name in rows]
 print("\\n".join(lines))
 if any(state == "FAIL" for state, _name in rows):
-    with open(STEP_LOG, "w", encoding="utf-8") as f:
-        f.write("\\n".join(lines) + "\\n")
-    print("log=" + STEP_LOG)
+    fd, path = tempfile.mkstemp(prefix="ci-job-step-", suffix=".log", dir=os.path.dirname(STEP_LOG))
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        for state, name in rows:
+            f.write("=== verdict run 2026-11-10 00:00:00: %s\\n" % name)
+            if state == "FAIL":
+                f.writelines(line + "\\n" for line in CASES.get(name, []))
+    print("log=" + path)
     sys.exit(1)
 sys.exit(2 if any(state == "unknown" for state, _name in rows) else 0)
 '''
+
+
+class ScriptedShard(unittest.TestCase):
+    """The cases failing_cases runs: its methods are set there, one per case name, so a run names exactly the cases asked for."""
+
+
+def failing_cases(*names):
+    """-> the `FAIL: <case>` lines unittest prints for the cases `names`, each one a scripted failure. The lines come from a real
+    run, since the layout differs by Python version: none is typed by hand."""
+    def scripted_fail(self):
+        self.fail("scripted failure")
+    for name in names:
+        setattr(ScriptedShard, name, scripted_fail)
+    buf = io.StringIO()
+    unittest.TextTestRunner(stream=buf).run(unittest.TestSuite(ScriptedShard(name) for name in names))
+    return [line for line in buf.getvalue().splitlines() if line.startswith("FAIL: ")]
 
 
 def windows_slice_name():
@@ -1564,10 +1587,11 @@ def windows_slice_name():
 
 
 class BatchLane(LaneFixture):
-    """`merge --lane-lint <batch>`: a branch whose name starts `batch-` runs the whole checks job and the Windows slice of
-    checks-windows-guard, after the records page is rebuilt in its tree. A FAIL or UNKNOWN that main has too is named and
-    does not stop the lint; one that only the head has stops it. A closed debt whose Retire check times out prints its cite
-    and the lint goes on; one whose Retire check fails stops it."""
+    """`merge --lane-lint <integration branch>`: a branch named `batch-` and a number runs the whole checks job and the Windows
+    slice of checks-windows-guard, after the records page is rebuilt in its tree. A FAIL whose case names main also has is named
+    and does not stop the lint; one with a case main lacks stops it. An UNKNOWN that main has too refuses without
+    --lint-unknown-ok, and is lifted by it. One that only the head has stops it. A closed debt whose Retire check times out
+    prints its cite and the lint goes on; one whose Retire check fails stops it."""
 
     def setUp(self):
         super().setUp()
@@ -1583,12 +1607,13 @@ class BatchLane(LaneFixture):
             print(json.dumps({"argv": ["<rebuild>"], "cwd": wt, "rebuild": True}), file=f)
         return False
 
-    def use_routed_ci_job(self, head_full, base_full=FULL_PASS):
+    def use_routed_ci_job(self, head_full, base_full=FULL_PASS, head_cases=None, base_cases=None):
         """merge.CI_JOB becomes ROUTED_STUB: `head_full` answers the full job on the batch head, `base_full` on origin/main.
-        The lint and the Windows slice pass on both."""
+        The lint and the Windows slice pass on both. `head_cases` and `base_cases` map a step name to the unittest lines its
+        FAIL section holds (see failing_cases), so a case reads the case names each run's failing step names."""
         windows = [("PASS", self.windows_name)]
-        plan = {"head": {"full": head_full, "lint": PASSING, "windows": windows},
-                "base": {"full": base_full, "lint": PASSING, "windows": windows}}
+        plan = {"head": {"full": head_full, "lint": PASSING, "windows": windows, "cases": head_cases or {}},
+                "base": {"full": base_full, "lint": PASSING, "windows": windows, "cases": base_cases or {}}}
         text = ROUTED_STUB.replace("__LOG__", repr(self.log)).replace("__PLAN__", repr(plan)).replace("__STEP_LOG__", repr(self.step_log))
         tm.put(self.stub, text)
         patch = unittest.mock.patch.object(merge, "CI_JOB", self.stub)
@@ -1667,13 +1692,14 @@ class BatchLane(LaneFixture):
         self.assertEqual(self.rebuilds(), [], "a non-batch head rebuilt the records page\n" + out)
         self.assertEqual(set(self.budgets_of(spy)), {merge.LINT_SECONDS}, "a non-batch head's lint left the lint budget\n" + out)
 
-    def test_a_fail_that_main_also_has_is_named_red_on_main_too_and_does_not_stop(self):
+    def test_a_fail_whose_case_names_main_also_has_is_named_red_on_main_too_and_does_not_stop(self):
         self.push_branch_of(BATCH_LANE)
-        self.use_routed_ci_job(FULL_FAIL, base_full=FULL_FAIL)
+        same = {"shard suite": failing_cases("test_old_case")}
+        self.use_routed_ci_job(FULL_FAIL, base_full=FULL_FAIL, head_cases=same, base_cases=same)
         rc, out = self.run_lane("--lane-lint", BATCH_LANE)
-        self.assertEqual(rc, 0, "a FAIL that main also has stopped the batch lint\n" + out)
+        self.assertEqual(rc, 0, "a FAIL whose case names main also has stopped the batch lint\n" + out)
         self.assertTrue(any("shard suite" in line and "red on main too" in line for line in out.splitlines()),
-                        "the FAIL that main also has is not named 'red on main too'\n" + out)
+                        "the FAIL whose case names main also has is not named 'red on main too'\n" + out)
 
     def test_an_unknown_that_main_also_has_is_named_unknown_on_main_too_and_does_not_stop(self):
         self.push_branch_of(BATCH_LANE)
