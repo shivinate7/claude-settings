@@ -102,8 +102,8 @@ no such receipt is listed, and the last field reads `before wake: none recorded`
 not a list), an unreadable `woke`, an answer with no readable `at`
 or a compared receipt with no readable `read` prints an `unknown:` line and exits 2.
 The mode reads no clock and has no time bound: what it lists depends on the saved files alone. `woke` is the writer's
-own optional field in meta/page. The incident: an answer that sat unread 10.5 h (owner's report,
-2026-11-09). Write `read` and `filed` as ISO UTC with a trailing Z: a time with no zone is read in the host's zone.
+own optional field in meta/page. The incident: an answer that sat unread 10.5 h (owner's report).
+Write `read` and `filed` as ISO UTC with a trailing Z: a time with no zone is read in the host's zone.
 Cost: one python process, reads 4 files, writes none, starts no git, no timer.
 
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
