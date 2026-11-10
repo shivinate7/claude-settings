@@ -16500,7 +16500,7 @@ class ReviewCutover(ReviewEnv):
         earlier = without_stamp(record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",)))
         host = self.record_host(review_comment(1, 7, earlier, created=REVIEW_BEFORE), head=self.head())
         flags = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:FAIL", "--head", self.head(),
-                 "--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:haiku:PASS")
+                 "--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:sonnet:PASS")
         events, real = [], merge.git
 
         def recording_git(cwd, *a, **k):
