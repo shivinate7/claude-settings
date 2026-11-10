@@ -2804,7 +2804,7 @@ def plan_names(wt, args):
 def batch_run(root, wt, base, notes):
     """The checks of a batch head, run before its integration PR goes ready: the whole `checks` job and the Windows slice,
     each through ci_job_run on the BATCH_SECONDS bound. A FAIL or unknown step is run again on origin/<base> in a temporary tree: the same
-    state there is named `red on main too` or `unknown on main too` and does not stop the lint. -> (state, lines, log, liftable, excused) as
+    state there is named as a step that main has too, and does not stop the lint. -> (state, lines, log, liftable, excused) as
     ci_job_run, but with the main-too steps taken out of `lines` and named in `excused`. A step with no name to compare, or any timeout or
     odd exit, is never excused."""
     ref = f"origin/{base}"
