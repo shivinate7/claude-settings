@@ -2875,16 +2875,17 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state,
         if (Math.ceil(bh * narrow) <= maxH + 1) { scroll = false; wrap.classList.remove("scroll"); g = 0; }
       }
       pw = Math.min(Math.ceil(bw * sc), room0 - (scroll ? g : 0)); // ceil can pass the room by 1px from float error
-      sizer.style.width = pw + "px"; sizer.style.height = Math.ceil(bh * sc) + "px";
       const o = wrap.closest(".opic"); if (o) picHint(o, scroll);
       if (!po && wrap.parentElement && window.ResizeObserver) { po = new ResizeObserver(fit); po.observe(wrap.parentElement); }
       if (wrap.parentElement) {
         // The width and height come from the column. bh is the declared height until the mockup reports its own, so the first paint is the height it settles to.
+        sizer.style.width = pw + "px"; sizer.style.height = Math.ceil(bh * sc) + "px"; sizer.style.aspectRatio = ""; sizer.style.marginBottom = "";
         wrap.style.width = pw + 2 + g + "px"; wrap.style.aspectRatio = ""; wrap.style.maxHeight = "";
         wrap.style.height = (scroll ? maxH : Math.ceil(bh * sc)) + "px";
       } else {
-        // Not placed yet, so the column is unknown: the box takes the column's width and the picture's aspect by CSS, and the placement fits it again before the first paint.
-        wrap.style.width = ""; wrap.style.height = ""; wrap.style.maxHeight = ""; wrap.style.aspectRatio = bw + " / " + bh;
+        // Not placed yet, so the column is unknown. The sizer takes the column's width inside the border and the picture's aspect by CSS. Its margin takes back the 2px of border, so the box is as high as the placed one (the border-box height ceil(bh * sc)). The placement fits it again.
+        sizer.style.width = ""; sizer.style.height = ""; sizer.style.aspectRatio = bw + " / " + bh; sizer.style.marginBottom = "-2px";
+        wrap.style.width = ""; wrap.style.height = ""; wrap.style.maxHeight = ""; wrap.style.aspectRatio = "";
       }
     }
     f.style.height = ht + "px";
