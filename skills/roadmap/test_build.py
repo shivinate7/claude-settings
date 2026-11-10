@@ -41,6 +41,9 @@ BUCKET_REVIEW_READY = "SESSION_STATUS_BUCKET_REVIEW_READY"
 BUCKET_WORKING = "SESSION_STATUS_BUCKET_WORKING"
 BUCKET_BLOCKED = "SESSION_STATUS_BUCKET_BLOCKED"
 BUCKET_FAILED = "SESSION_STATUS_BUCKET_FAILED"
+# A live session's id, as a step's `lane` field names it, and an id that no sessions row holds (the lane-field cases).
+LANE_SESSION = "session_013NEJL4TDRWqka4aSU2Bv7L"
+UNLISTED_SESSION = "session_013NEJL5ZkQ8mWr2Tn6Xa4Cd"
 
 # The page script the roadmap branch's build.py put in front of the viewer. The
 # script's stub must stay byte for byte this, so the viewer reads the data as it did.
@@ -1048,6 +1051,79 @@ class StalledStep(UpkeepFixture):
         self.assertEqual(stalled["items"], [], "an empty items list reads zero, not unknown")
         self.assertEqual(self.stalled_lines(out), [])
 
+    def lane_steps(self):
+        """Two doing steps that show whatever the lane field says: c3, the working session's own step (its cs-step tag
+        names it), and c4, a control with no lane key, which stays stalled and so shows the stalled list is known."""
+        git(self.repo, "checkout", "-q", "roadmap")
+        self.commit_step("c3", status="doing", order=3)
+        self.commit_step("c4", status="doing", order=4)
+
+    def working_row(self, tag, sid=LANE_SESSION):
+        """A working sessions row of this repo that carries `tag`: the kind of row a step's lane field can name."""
+        return session_row(sid, "SESSION_STATUS_RUNNING", self.REPO, tag, status_bucket=BUCKET_WORKING)
+
+    def lane_step_ids(self, lane, sessions):
+        """Commit c2, a doing step whose lane field is `lane`, publish `sessions`, and build from main. Returns the
+        stalled step ids and the output. The read is known, so the stalled steps are a list before any id is read.
+        A case repeats the same lane across its builds, and commit_step cannot commit an unchanged step, so this
+        commits with --allow-empty."""
+        git(self.repo, "checkout", "-q", "roadmap")
+        self.write_step("c2", dict(STEP, status="doing", order=2, lane=lane))
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "step c2 lane")
+        self.publish(sessions=sessions, items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertIsNotNone(stalled["steps"], "the live read is known, so the steps list is a list")
+        return [s["id"] for s in stalled["steps"]], out
+
+    def test_doing_step_whose_lane_names_a_live_session_is_not_stalled(self):
+        self.lane_steps()
+        ids, out = self.lane_step_ids(LANE_SESSION, [self.working_row("cs-step:c3")])
+        self.assertEqual(ids, ["c4"], "c2's lane names a live session that works c3, so only the control c4 is stalled")
+        self.assertEqual(self.stalled_lines(out), ["stalled step: c4 (resume, pause or done)"])
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_lane_session_archived_or_ended_does_not_clear_the_step(self):
+        self.lane_steps()
+        ended = {
+            "archived": session_row(LANE_SESSION, "SESSION_STATUS_ARCHIVED", self.REPO, "cs-step:c3", status_bucket=BUCKET_WORKING),
+            "completed": session_row(LANE_SESSION, "SESSION_STATUS_IDLE", self.REPO, "cs-step:c3", status_bucket=BUCKET_COMPLETED),
+            "failed": session_row(LANE_SESSION, "SESSION_STATUS_IDLE", self.REPO, "cs-step:c3", status_bucket=BUCKET_FAILED),
+        }
+        for name, row in ended.items():
+            with self.subTest(name):
+                # The live control comes first: the same lane clears c2 while its session is live, so the lane is what clears it.
+                ids, _ = self.lane_step_ids(LANE_SESSION, [self.working_row("cs-step:c3")])
+                self.assertEqual(ids, ["c4"], "a live lane session clears c2")
+                ids, _ = self.lane_step_ids(LANE_SESSION, [row])
+                self.assertEqual(ids, ["c2", "c3", "c4"], "the %s session holds no step, so c2 and c3 stay stalled" % name)
+
+    def test_lane_session_of_another_repo_does_not_clear_the_step(self):
+        self.lane_steps()
+        other = session_row(LANE_SESSION, "SESSION_STATUS_RUNNING", "cs-repo:owner/other-repo", "cs-step:c3",
+                            status_bucket=BUCKET_WORKING)
+        ids, _ = self.lane_step_ids(LANE_SESSION, [self.working_row("cs-step:c3")])  # the live control
+        self.assertEqual(ids, ["c4"], "a live lane session clears c2")
+        ids, _ = self.lane_step_ids(LANE_SESSION, [other])
+        self.assertEqual(ids, ["c2", "c3", "c4"], "a session of another repo holds no step, so c2 and c3 stay stalled")
+
+    def test_lane_prose_holding_a_live_session_id_clears_the_step(self):
+        self.lane_steps()
+        prose = "coordinator (%s) to route" % LANE_SESSION
+        ids, _ = self.lane_step_ids(prose, [self.working_row("cs-step:c3")])
+        self.assertEqual(ids, ["c4"], "a lane whose prose holds the live session's id clears c2")
+
+    def test_lane_naming_no_listed_session_or_empty_or_null_keeps_the_step_stalled(self):
+        self.lane_steps()
+        live = [self.working_row("cs-step:c3")]
+        ids, _ = self.lane_step_ids(LANE_SESSION, live)  # the live control: the bare id clears c2
+        self.assertEqual(ids, ["c4"], "a bare live session id clears c2")
+        for name, lane in (("an id not in the list", UNLISTED_SESSION), ("empty", ""), ("null", None)):
+            with self.subTest(name):
+                ids, _ = self.lane_step_ids(lane, live)
+                self.assertEqual(ids, ["c2", "c4"], "the lane names no live session (%s), so c2 stays stalled" % name)
+
     def test_topic_session_does_not_keep_a_doing_step_live(self):
         self.commit_step("c1", status="doing")  # control: its cs-step session keeps c1 live, so c1 is not stalled
         self.commit_step("c2", status="doing", order=2)
@@ -1303,6 +1379,16 @@ class ReadyNotStarted(ReadyFixture):
         self.known_read(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-topic:c2")])
         page, _ = self.build_from_main("--live", str(self.live))
         self.assertEqual(self.ready_ids(self.ready_block(page)), ["c2", "c3"], "a cs-topic tag never holds a step back")
+
+    def test_todo_step_whose_lane_names_a_live_session_is_not_listed(self):
+        self.ready_step("c2", order=2, lane=LANE_SESSION)
+        self.ready_step("c3", order=3)  # control: no lane, so it is listed
+        self.ready_step("c4", order=4, status="doing")  # the live session works c4, the step its cs-step tag names
+        working = session_row(LANE_SESSION, "SESSION_STATUS_RUNNING", self.REPO, "cs-step:c4", status_bucket=BUCKET_WORKING)
+        self.known_read(sessions=[working])
+        page, out = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3"], "a todo step whose lane names a live session is not listed")
+        self.assertEqual(self.ready_lines(out), ["ready not started: c3 (3h)"], "and it prints no ready line")
 
     def test_valid_paused_excludes_the_step_and_a_wrong_shaped_one_keeps_it(self):
         self.ready_step("c3", order=3)  # control
