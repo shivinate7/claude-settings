@@ -13857,6 +13857,13 @@ class ReviewEnv(Env):
         for value in (old, new):
             self.assertRegex(err, rf"(?<![\w-]){re.escape(value)}(?![\w-])", f"the refusal does not name the value {value!r}:\n" + err)
 
+    def run_or_fail(self, *argv, host):
+        """-> (rc, out, err), as run_args gives them. An exception that escapes merge.main fails the case by name: a process would print a traceback and exit 1."""
+        try:
+            return self.run_args(*argv, host=host)
+        except Exception as e:  # a crash is a failed case, not an error, and the name says what escaped
+            self.fail(f"merge raised {type(e).__name__}: {e}")
+
     def set_origin(self, name):
         """This checkout's origin is GitHub repo `name` (owner/name). The layout reads a repo's GitHub name from its origin."""
         sh(self.co, "git", "remote", "set-url", "origin", f"https://github.com/{name}.git")
@@ -15021,24 +15028,26 @@ class ReviewFixBaseRecord(ReviewEnv):
     def link(self, n=SOURCE_PR, cid=SOURCE_ID, owner="o", repo="r", kind="pull"):
         return f"https://github.com/{owner}/{repo}/{kind}/{n}#issuecomment-{cid}"
 
-    def source(self, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, cid=SOURCE_ID, n=SOURCE_PR, guard="no", net="not owed"):
-        """The source record: a comment on pull request n, which holds a record of head `head`, with the guard and Net value given."""
-        return review_comment(cid, n, record_text(n=n, head=head, rounds=rounds, guard=guard, net=net))
+    def source(self, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, cid=SOURCE_ID, n=SOURCE_PR, guard="no", net="not owed", grant=()):
+        """The source record: a comment on pull request n, which holds a record of head `head`, with the guard, Net value and Grant lines given."""
+        return review_comment(cid, n, record_text(n=n, head=head, rounds=rounds, guard=guard, net=net, grant=grant))
 
     def fix_of(self, head=REVIEW_OLD_HEAD):
         return f"{head}:reviewer:sonnet:PASS"
 
-    def argv(self, fix, url=None, rounds=("1:reviewer:sonnet:PASS",), guard="no", kind="normal", net=None):
-        """The review flags of pull request 7 at REVIEW_HEAD, with --fix-check `fix` and, when given, --fix-base-record `url`. `net`, when given, is --net-value."""
+    def argv(self, fix, url=None, rounds=("1:reviewer:sonnet:PASS",), guard="no", kind="normal", net=None, grant=None):
+        """The review flags of pull request 7 at REVIEW_HEAD, with --fix-check `fix` and, when given, --fix-base-record `url`. `net`, when given, is --net-value,
+        and `grant`, when given, is --grant."""
         argv = ["7", "--review-record", "--head", REVIEW_HEAD, "--kind", kind, "--guard", guard]
         argv += [a for r in rounds for a in ("--round", r)]
+        argv += ["--grant", grant] if grant is not None else []
         argv += ["--fix-check", fix]
         argv += ["--net-value", net] if net is not None else []
         return argv + (["--fix-base-record", url] if url is not None else [])
 
     def flagged(self, argv, host):
         """The run of `argv` on `host`. A parser that has never heard of --fix-base-record says so on stderr, which fails here by that name."""
-        rc, out, err = self.run_args(*argv, host=host)
+        rc, out, err = self.run_or_fail(*argv, host=host)
         for old in OLD_PARSER_ERRORS:
             self.assertNotIn(old, err, "merge.py takes no --fix-base-record flag:\n" + err)
         return rc, out, err
@@ -15201,6 +15210,20 @@ class ReviewFixBaseRecord(ReviewEnv):
         self.assertEqual(rc, 1, "a failed read of the source comment did not stop the run:\n" + out + err)
         self.assertNotIn(REVIEW_MARKER, out, "a failed read of the source comment still printed a record")
         self.assertNotIn("Traceback", err)
+
+    def test_a_granted_round_four_source_record_starts_the_fix_check_with_the_grant(self):
+        # the grant defect at merge.py line 4112: the stand-in reached round 4 and is granted, so the body the floor check reads must carry the grant too
+        round_four = (*REVIEW_FAILED_THREE, "Round 4: reviewer, opus, PASS")
+        grant = "#7, item 396 a, owner, 2026-11-08 06:08 CST"  # this pull request's grant: the PR 7 form, as test_merge_grant.py's REVIEW_GRANT
+        source_grant = "Grant: #1541, item 396 a, owner, 2026-11-08 06:08 CST"  # the source record's own grant, naming its own pull request
+        host = self.record_host(self.source(rounds=round_four, grant=(source_grant,)), head=REVIEW_HEAD)
+        rc, out, err = self.run_args(*self.argv(self.fix_of(), rounds=round_args(round_four), grant=grant), host=host)  # control, green on the old code: no flag, no record here
+        self.assert_refused(rc, out, err)
+        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link(), rounds=round_args(round_four), grant=grant), host)
+        self.assertEqual(rc, 0, "a granted round-4 stand-in refused the granted fix check:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertIn(f"Grant: {grant}", body.splitlines(), "the printed record has no Grant line:\n" + body)
+        self.assertEqual(parse_text(self, body).get("fix"), REVIEW_FIX_PASS, "the printed record has no PASS fix check line:\n" + body)
 
 class ReviewFixKeepsRounds(ReviewChainFixture):
     """A fix check record copies every Round line of the record it follows (rule roles-review-cap-three, decision pr-review-record). That record is the
