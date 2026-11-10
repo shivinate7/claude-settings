@@ -17157,7 +17157,7 @@ sh("cap data: the incident shape whose body calls sys.stdout.write allows",
    "python3 - <<'PYEOF'\n" + INCIDENT_BODY + "sys.stdout.write(guard.cap_change(cmd))\nPYEOF",
    "allow", cwd=NOGIT)
 sh("cap data: the incident shape whose body calls d.copy() allows",
-   "python3 - <<'PYEOF'\n" + INCIDENT_BODY + "args = {\"cmd\": cmd}.copy()\nPYEOF",
+   "python3 - <<'PYEOF'\n" + INCIDENT_BODY + "d = {\"cmd\": cmd}\nargs = d.copy()\nPYEOF",
    "allow", cwd=NOGIT)
 sh("cap data: the incident shape whose body reads sys.executable allows",
    "python3 - <<'PYEOF'\n" + INCIDENT_BODY + "print(sys.executable)\nPYEOF",
