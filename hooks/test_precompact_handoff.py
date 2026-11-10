@@ -1166,6 +1166,14 @@ def list_home_missing(step_text):
     return best
 
 
+def case_prompt_step5_names_checked_stamp():
+    """Step 5 names the rule that refuses a restamp of a premise without evidence (decision precompact-handoff,
+    item 10; roadmap step handoff-checked-stamp), so a session reading step 5 knows the write will be checked."""
+    step5 = step_body(prompt_source(), 5) or ""
+    check("prompt step 5: names the handoff-checked-stamp rule",
+          "handoff-checked-stamp" in step5, "step 5 holds %d characters and no rule name" % len(step5))
+
+
 def case_prompt_names_list_home_not_copy():
     # Step 4 must say to name where a list lives and never to copy it: a copy goes stale.
     with open(os.path.join(HERE, "precompact_handoff_prompt.md"), "r", encoding="utf-8") as f:
@@ -2321,6 +2329,7 @@ def main() -> int:
     case_handoffs_dir_is_made()
     case_handoffs_dir_keeps_other_sessions()
     case_prompt_lists_working_premises()
+    case_prompt_step5_names_checked_stamp()
     case_prompt_names_list_home_not_copy()
     case_reorient_lists_weak_premises()
     case_reorient_premise_lines_survive_odd_text()
