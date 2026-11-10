@@ -12226,13 +12226,12 @@ for _label, _cmd in ARGV_TEXT_ALLOWED:
 for _label, _cmd in ARGV_TEXT_REFUSED:
     sh("argv: deny, text: " + _label, _cmd, "deny", "process-args", cwd=NOGIT)
 
-# The forms the rule does not read yet. Each refuse case below is allowed by the build as it stands,
-# so each is red there. Each pass control beside it is allowed too, and stays green after the fix,
-# so a fix that is too broad fails a control.
+# Each refuse case below names a form the rule must read. Each pass control beside it names a form the
+# rule must still allow, so a fix that reads too much fails a control.
 
 # BSD `x` lists the processes with no controlling terminal. Under the BSD personality its COMMAND
-# column is the full argument list. `ps ax` is refused already, as a bare BSD operand, so it is not a
-# case here. `-a -x` split into two words is the same listing as `-ax`.
+# column is the full argument list. The operand form (`ps ax`) is a separate refusal with no case here.
+# The flag forms are pinned, including `-a -x`, split into two words, which lists the same processes as `-ax`.
 ARGV_BSD_X_REFUSED = ("ps -x", "ps -ax", "ps -Ax", "ps -ex", "ps -xw", "ps -a -x")
 for _cmd in ARGV_BSD_X_REFUSED:
     sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
@@ -12248,6 +12247,7 @@ ARGV_CMDLINE_REFUSED = (
     "grep -a tailscale /proc/*/cmdline", "head -c 200 /proc/1/cmdline", "tail -c 200 /proc/1/cmdline",
     "strings /proc/1/cmdline", "od -c /proc/1/cmdline", "sed -n l /proc/1/cmdline",
     "xargs -0 -a /proc/1/cmdline echo", "cat /proc/1/task/1/cmdline", "cat /proc/$pid/task/1/cmdline",
+    r"tr '\0' ' ' < /proc/1/task/1/cmdline",
 )
 for _cmd in ARGV_CMDLINE_REFUSED:
     sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
@@ -12291,12 +12291,28 @@ ARGV_PS_ALLOWED = (
 )
 for _cmd in ARGV_PS_ALLOWED:
     sh("argv: allow, PowerShell, " + _cmd, _cmd, "allow", tool="PowerShell", cwd=NOGIT)
-sh('argv: allow, PowerShell text: a quoted Win32_Process CommandLine',
-   'Write-Output "Win32_Process CommandLine"', "allow", tool="PowerShell", cwd=NOGIT)
+# PowerShell text is a string, a comment or a here-string, never a command. Each shape the scanner meets
+# gets a control, and a refused command after the text still refuses.
+ARGV_PS_TEXT_ALLOWED = (
+    ("a quoted Win32_Process CommandLine", 'Write-Output "Win32_Process CommandLine"'),
+    ("a comment opener inside double quotes", 'Write-Output "# Get-CimInstance Win32_Process | Select CommandLine"'),
+    ("a comment line that names the read", "# (Get-WmiObject Win32_Process).CommandLine\nGet-Process"),
+    ("a here-string that names the read",
+     "@'\nGet-CimInstance Win32_Process | Select CommandLine\n'@ | Out-File notes.md"),
+    ("a lone apostrophe inside double quotes", 'Write-Output "Don\'t read CommandLine"'),
+)
+ARGV_PS_TEXT_REFUSED = (
+    ("a comment opener in quotes, then a real command",
+     'Write-Output "a # b"; Get-CimInstance Win32_Process | Select CommandLine'),
+    ("a lone apostrophe in quotes, then a real command", 'Write-Output "Don\'t"; wmic process get commandline'),
+)
+for _label, _cmd in ARGV_PS_TEXT_ALLOWED:
+    sh("argv: allow, PowerShell text: " + _label, _cmd, "allow", tool="PowerShell", cwd=NOGIT)
+for _label, _cmd in ARGV_PS_TEXT_REFUSED:
+    sh("argv: deny, PowerShell text: " + _label, _cmd, "deny", "process-args", tool="PowerShell", cwd=NOGIT)
 
-# The remedy names no refused form of these families either. Each case is red on the build as it
-# stands (its trigger is a form the rule does not read yet), and it pins the remedy once the rule
-# reads that form.
+# The remedy names no refused form of these families. Each case's trigger is a refused form of a family
+# above, so the case also pins the remedy text that the refusal prints.
 ARGV_NEW_FORMS_NOT_IN_REMEDY = (
     "ps -x", "ps -ax", "ps -xw", "pstree -a", "pstree -ca", "top -c", "top -bc", "cmdline", "xargs -a",
     "CommandLine", "wmic",
