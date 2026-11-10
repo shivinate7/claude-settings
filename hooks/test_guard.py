@@ -36539,6 +36539,23 @@ role_model_allow("role-model: test-author with no model is allowed when the defa
            "test-author", None, "Write the failing cases.", env=UNSET_DEFAULT)
 role_model_allow("role-model: Explore with no model is allowed when the default is unset (its file pins haiku)",
            "Explore", None, "Audit the glossary for meaning drift.", env=UNSET_DEFAULT)
+# ---- D2: a spawn that names no model and whose role's agent file pins one runs on the pin, and the pin beats the env
+# value (decision agent-model-cap, "No pin"). So the env value must not refuse it, on sonnet or on opus. Failure class:
+# a false deny, a pinned role refused above its row for an env value its pin beats.
+role_model_allow("role-model: reviewer round 1 with no model is allowed when the default is sonnet (its file pins haiku)",
+           "reviewer", None, "Check the diff for typos.", env=SONNET_DEFAULT)
+role_model_allow("role-model: reviewer round 1 with no model is allowed when the default is opus (its file pins haiku)",
+           "reviewer", None, "Check the diff for typos.", env=OPUS_DEFAULT)
+role_model_allow("role-model: test-author with no model is allowed when the default is sonnet (its file pins haiku)",
+           "test-author", None, "Write the failing cases.", env=SONNET_DEFAULT)
+role_model_allow("role-model: Explore with no model and no Audit: marker is allowed when the default is sonnet (its file pins haiku)",
+           "Explore", None, "Find where X is defined.", env=SONNET_DEFAULT)
+role_model_allow("role-model: Explore with no model and no Audit: marker is allowed when the default is opus (its file pins haiku)",
+           "Explore", None, "Find where X is defined.", env=OPUS_DEFAULT)
+# The control: a round 2 reviewer must name sonnet itself. The step-up reads the named model only, so the env value is no name.
+add("role-model: reviewer Round 2 of 3 with no model is denied when the default is sonnet (the step-up reads the named model only)",
+    "deny", STEP_UP, tool="Agent", config=ROLE_REAL_CFG, env=SONNET_DEFAULT,
+    carries=("Reviewer round 2 runs on Sonnet.",), **role_input("reviewer", None, "Round 2 of 3. Re-check the diff."))
 
 # ---- E: a decision file that cannot be read fails open. The spawn passes, and the rule never denies.
 role_model_allow("role-model: a missing decision file fails open for test-author on sonnet",
