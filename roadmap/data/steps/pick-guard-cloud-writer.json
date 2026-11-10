@@ -1,11 +1,11 @@
 {
   "title": "The pick guard learns the page writer in a cloud session",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 948,
   "owner": "coordinator",
   "why": "Possible false alarm, from Degen (via the coordinator 20:30 CST Nov 9). The pick guard says \"the page writer is not known to this session\" and refuses even when the Degen coordinator sent the question to the page writer (session_01MVD32PDiZ5xNCJSseGvSyx) by send_message in the same turn (2026-11-09 19:53 CST, twice). A cloud session has no way to learn the page writer.",
-  "note": "Fix: the guard reads the writer from the repo's layout (waiting-page key) or from a same-turn send_message to the writer. Related: skill waiting-page. Filed 20:27 CST Nov 9. Lane session_013NEJL1nAsHBKJTpeHV1sJN (coordinator 20:36-20:41 CST Nov 9). Layout extras key renamed to `page-writer` (glossary refused waiting-page-writer); mutants follow-up: step pick-guard-cloud-writer-mutants (coordinator 01:52 CST Nov 10). Parked 01:59 CST Nov 10: #2489 round 3 found negative net value (decision hold-unsafe-after-round-3); page item 474 asks the owner for one fix pass (an errored send no longer counts).",
-  "updatedAt": "2026-11-10T02:01:00-06:00",
+  "note": "Fix: the guard reads the writer from the repo's layout (waiting-page key) or from a same-turn send_message to the writer. Related: skill waiting-page. Filed 20:27 CST Nov 9. Lane session_013NEJL1nAsHBKJTpeHV1sJN (coordinator 20:36-20:41 CST Nov 9). Layout extras key renamed to `page-writer` (glossary refused waiting-page-writer); mutants follow-up: step pick-guard-cloud-writer-mutants (coordinator 01:52 CST Nov 10). Parked 01:59 CST Nov 10: #2489 round 3 found negative net value (decision hold-unsafe-after-round-3); page item 474 asks the owner for one fix pass (an errored send no longer counts). Done: #2489 head on origin/main in batch 73 (#2567, 2d6f67f7c; merge-base read by triage 15:50 CST Nov 10).",
+  "updatedAt": "2026-11-10T15:49:00-06:00",
   "lane": "session_013NEJL1nAsHBKJTpeHV1sJN"
 }

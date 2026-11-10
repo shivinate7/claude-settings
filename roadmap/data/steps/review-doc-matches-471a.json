@@ -1,14 +1,12 @@
 {
   "title": "The review record doc and the review_state docstring say what the code reads after item 471 a",
   "phase": "now",
-  "status": "blocked",
+  "status": "ready",
   "order": 977,
   "owner": "claude-settings",
   "why": "After #2252 merges, the doc and the docstring will state a rule the code does not enforce, so a lane that reads them owes a round the guard never asks for.",
-  "note": "Record step (coordinator 08:20 CST Nov 10). Blocked until #2252 (review-state-guard-needs-round-3, home of item 471 a) merges. After that, docs/decisions/pr-review-record.md line 62 and the review_state docstring still say a delete-only guard change with a failed round 1 owes round 3, but the code reads done after a passing round 2. Line 52 lacks the fix-check exception. A record lane.",
-  "updatedAt": "2026-11-10T08:20:00-06:00",
+  "note": "Record step (coordinator 08:20 CST Nov 10). Blocked until #2252 (review-state-guard-needs-round-3, home of item 471 a) merges. After that, docs/decisions/pr-review-record.md line 62 and the review_state docstring still say a delete-only guard change with a failed round 1 owes round 3, but the code reads done after a passing round 2. Line 52 lacks the fix-check exception. A record lane. Unblocked: #2252 landed in batch 73 (#2567, 2d6f67f7c; triage 15:50 CST Nov 10).",
+  "updatedAt": "2026-11-10T15:49:00-06:00",
   "lane": "",
-  "blockedBy": [
-    "review-state-guard-needs-round-3"
-  ]
+  "blockedBy": []
 }
