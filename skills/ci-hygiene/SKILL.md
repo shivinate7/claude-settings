@@ -66,8 +66,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `~/.claude/bin/merge --build-batch [--push <new branch>]`: it joins each PR with a done review record, in PR order. A PR with a held, parked or
    replaced label stays out. A stack joins whole or not at all. It lints each PR in parallel and posts
    `Lint: red <head> <steps>` on a red one. Before it marks the integration PR
-   ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration PR> --integration` on the batch
-   head; a PASS sets the `batch` label, which `merge --reviewed` reads as `batch run`. A FAIL keeps it a draft and sets no label. A hand list of checks never stands in for that run: `bin/ci-job`
+   ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration branch>` on the batch
+   head. A FAIL keeps it a draft. A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
    **When the build starts, freeze the lane set** (decision `batch-freeze-lane-set`, a batch's lane set

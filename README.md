@@ -154,9 +154,8 @@ merge --build-batch [--base BRANCH] [--push BRANCH]   build an integration branc
                         in parallel unless its merge base holds main's newest lint change. A red lint leaves the PR out and posts `Lint: red <head> <steps>`.
                         Prints `joins:`, `left out:` and `batch: N PRs`. Only --push moves a ref, to a new branch.
 merge --reviewed --root DIR [--root DIR ...]
-                        the same ledger for each repo checkout DIR, one block each, then one batch line per repo:
+                        for each repo checkout DIR, one block: each PR's review-record state and live CI, then one batch line:
                         `open batch now: OWNER/NAME #a`, or `build next batch on the running head: ...`. A failed root prints unknown.
-merge --lane-lint <pr> --integration   the lane lint; after a PASS it adds the `batch` label to the integration PR (one POST).
 merge --dev ...         run the checkout's own tree, not origin main
 ```
 
