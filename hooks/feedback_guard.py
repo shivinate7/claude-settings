@@ -88,7 +88,7 @@ a turn end in these cases:
     shared_names.SETTINGS_REPO) and in the page writer's session (the transcript's newest meta/page get names the
     hook's session id: _transcript.page_writer_id), a block that starts with the "[Artifact comment sent to
     Claude]" banner, whose `Artifact:` url passes layout.is_waiting_page_url, and whose quoted wake is not a Saved
-    wake with no note in parentheses after `Items:`, needs one item line of two forms: `[task] -> step:<slug>`
+    or Undone wake with no note in parentheses after `Items:`, needs one item line of two forms: `[task] -> step:<slug>`
     whose step file at origin/<record branch> holds shared_names.TEMPLATE_DIR, or `[note] -> not-page-form`. The
     remedy names both. Risk kind: likely risk. Incident: owner, Nov 10 09:13 CST (every page feedback goes into the
     shared template). Cost: one regex per block plus the transcript read the guard already makes, and one
@@ -924,6 +924,7 @@ def grant_problem(b, text, items):
 PAGE_BANNER = re.compile(r"\[Artifact comment sent to Claude\]\s*\nArtifact:[ \t]*(\S+)")  # a block's start, and its page
 PAGE_QUOTE = re.compile(r"^=== BEGIN ARTIFACT COMMENT (\S+) ===\n(.*?)\n=== END ARTIFACT COMMENT \1 ===", re.M | re.S)
 SAVED_WAKE = "Saved on the waiting page"
+UNDONE_WAKE = "Undone on the waiting page"  # page.html builds it with a tail, so its items carry no note
 
 
 def page_form_problem(text, items, homes, pages, session):
@@ -935,8 +936,8 @@ def page_form_problem(text, items, homes, pages, session):
         return None
     quote = PAGE_QUOTE.search(text)
     wake = "\n".join(re.sub(r"^> ?", "", ln) for ln in quote.group(2).split("\n")) if quote else ""
-    if wake.startswith(SAVED_WAKE) and "(" not in wake.partition("Items:")[2]:
-        return None  # a plain save: no owner words to route
+    if wake.startswith((SAVED_WAKE, UNDONE_WAKE)) and "(" not in wake.partition("Items:")[2]:
+        return None  # a plain save or an undo: no owner words to route
     scope = homes.page_form_scope(banner.group(1))
     if scope is None or not pages.is_writer(session):
         return None
