@@ -4058,6 +4058,9 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
         os.makedirs(os.path.join(tree, "hooks"), exist_ok=True)
         os.makedirs(os.path.join(tree, "lint"), exist_ok=True)
         shutil.copy(os.path.join(HERE, "..", "lint", "_transcript.py"), os.path.join(tree, "lint"))
+        if target == "ruling":
+            # ruling_home.py imports shared_names beside itself (its install-root lookup), so a bare copy crashes too.
+            shutil.copy(os.path.join(HERE, "shared_names.py"), os.path.join(tree, "hooks"))
         if target == "decision":
             mutate_shared.guard_tree(os.path.join(tree, "hooks"))
         copy_path = os.path.join(tree, "hooks", os.path.basename(TARGETS[target][0]))
