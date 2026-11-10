@@ -3950,11 +3950,11 @@ def main(argv, host=None, lock=None, hosts=None):
                     ok = False
                 elif not last["fix"]:
                     ok = True
-                else:  # a fix never follows a fix, but a merge of main into the fixed head is a new head: first parent the fixed head, second parent on the base
-                    parents = h.commit_parents(a.head)
+                else:  # a fix never follows a fix, but a merge of main into a fix that PASSED is a new head: first parent the fixed head, second parent on the base
+                    parents = h.commit_parents(a.head) if last["fix"][3] == "PASS" else []  # after a FAIL fix check no merge qualifies
                     ok = len(parents) == 2 and parents[0] == a.fix_check[0] and h.holds_head(parents[1], info["base"])
                 if not ok:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line, unless the pull request head is a merge of the base into that Head. " + REVIEW_CITE, file=sys.stderr)
+                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line, unless that line passed and the pull request head is a merge of the base into that Head. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
