@@ -1267,6 +1267,59 @@ class CannotClaimTests(unittest.TestCase):
                 out = self.stop([trg.human("push the branch"), record])
                 self.assert_passes(out, "a can't Why yours line with a dated cite (%s)" % shape)
 
+    def test_cc_red_a_why_yours_could_not_line_with_reject_is_still_a_claim(self):
+        # Catches: "reject" in the skip set, so cannot_lines skipped a could-not Why yours line that names the remote's
+        # reject. Main reads the line and names no check in it, so it is refused.
+        line = "Why yours: I could not open the PR, the API would reject it (measured 2026-11-09, nothing happened)."
+        for shape, record in why_yours_replies(line):
+            with self.subTest(shape=shape):
+                out = self.stop([trg.human("open the PR"), record])
+                self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_red_a_why_yours_rejecting_line_is_still_a_claim(self):
+        # Catches: "rejecting" in the skip set, which skipped a could-not Why yours line before the cannot-claim check.
+        line = "Why yours: I could not open the PR, it keeps rejecting pushes (measured 2026-11-09, nothing happened)."
+        for shape, record in why_yours_replies(line):
+            with self.subTest(shape=shape):
+                out = self.stop([trg.human("open the PR"), record])
+                self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_red_a_why_yours_not_able_line_with_reject_is_still_a_claim(self):
+        # Catches: "reject" in the skip set, which skipped a not-able-to Why yours line with no check named.
+        line = ("Why yours: I am not able to open the PR, the API would reject it "
+                "(measured 2026-11-09, nothing happened).")
+        for shape, record in why_yours_replies(line):
+            with self.subTest(shape=shape):
+                out = self.stop([trg.human("open the PR"), record])
+                self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_red_a_why_yours_no_way_to_line_with_reject_is_still_a_claim(self):
+        # Catches: "reject" in the skip set, which skipped a no-way-to Why yours line with no check named.
+        line = ("Why yours: there is no way to open the PR, the API would reject it "
+                "(measured 2026-11-09, nothing happened).")
+        for shape, record in why_yours_replies(line):
+            with self.subTest(shape=shape):
+                out = self.stop([trg.human("open the PR"), record])
+                self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_red_a_why_yours_could_not_line_with_401_is_still_a_claim(self):
+        # Catches: the status 401 in the skip set, which skipped a could-not Why yours line that names no check. Main's
+        # skip set holds 403 only.
+        line = "Why yours: I could not open the PR, the API said 401 (measured 2026-11-09, nothing happened)."
+        for shape, record in why_yours_replies(line):
+            with self.subTest(shape=shape):
+                out = self.stop([trg.human("open the PR"), record])
+                self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_green_a_why_yours_could_not_line_with_403_stays_the_hand_off_guards(self):
+        # Control: 403 is in the skip set on main and on the widened set, so this Why yours line stays with the
+        # hand-off guard on both, and its dated cite passes.
+        line = "Why yours: I could not open the PR, the API said 403 (measured 2026-11-09, nothing happened)."
+        for shape, record in why_yours_replies(line):
+            with self.subTest(shape=shape):
+                out = self.stop([trg.human("open the PR"), record])
+                self.assert_passes(out, "a could-not Why yours line with a 403 and a dated cite (%s)" % shape)
+
     def test_cc_red_a_failed_try_before_a_peer_message_does_not_back_a_claim(self):
         # Catches: a failed try from an earlier peer-driven turn read as this turn's try, so the claim beside it passed.
         line = "I cannot merge PR 12; `gh pr merge` exited 1."
