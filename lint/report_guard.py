@@ -1647,7 +1647,8 @@ _CAPABILITY_CORE = _forms_re(_clause.CANT_FORMS) + (
     r"|\bunavailable\b|\b403\b|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)")
 # The words only the hand-off cite reads: the two _clause.COULD_NOT_FORMS, the reject forms, and the 401 token.
 _CAPABILITY_CITE_ONLY = _forms_re(_clause.COULD_NOT_FORMS) + r"|\breject(?:s|ed|ing)?\b|\b401\b"
-# The hand-off cite reads the five forms (CANT_FORMS and COULD_NOT_FORMS), the reject forms, and the 401 or 403 token.
+# The hand-off cite reads both pieces: the five forms (CANT_FORMS and COULD_NOT_FORMS), the reject forms, the 401 or 403
+# token, and the other core words.
 CAPABILITY_RE = re.compile(_CAPABILITY_CORE + "|" + _CAPABILITY_CITE_ONLY, re.I)
 # cannot_lines leaves a Why yours line to the hand-off guard when it reads one of the core words. A line whose only
 # capability word is a could-not form, a reject form or 401 stays in the cannot-claim check, which asks for the check that
