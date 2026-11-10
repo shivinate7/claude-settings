@@ -1912,15 +1912,15 @@ MUTATIONS = [
      'return host.head_read("", nothing_is_green', "guard",
      'merge-checks: the pull request and repo of the call are the ones read'),
     ("merge-checks: the long repo flag goes unread",
-     '        elif arg.startswith("--repo="):',
-     '        elif False:', "guard", 'merge-checks: the long repo flag names the repo too'),
+     '        elif taken:',
+     '        elif taken and not arg.startswith("--repo="):', "guard", 'merge-checks: the long repo flag names the repo too'),
     ("merge-checks: a body flag's value is read as the pull request",
      'MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body",',
      'MERGE_VALUE_FLAGS = {"-R", "--repo", "--body",', "guard",
      'merge-checks: a flag value is no pull request'),
     ("merge-checks: any word that spells gh is the command word",
-     '    index = resolve_command(tokens)\n    if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):\n        return None\n    rest, root = tokens[index + 1:], []',
-     '    index = next((i for i, t in enumerate(tokens) if basename(t) in ("gh", "gh.exe")), None)\n    if index is None:\n        return None\n    rest, root = tokens[index + 1:], []',
+     '    index = resolve_command(tokens)\n    if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):\n        return None\n    rest, root, group = tokens[index + 1:], [], []',
+     '    index = next((i for i, t in enumerate(tokens) if basename(t) in ("gh", "gh.exe")), None)\n    if index is None:\n        return None\n    rest, root, group = tokens[index + 1:], [], []',
      "guard", 'merge-checks: the words of a merge in an echo are no merge'),
     ("merge-checks: the read has no time limit",
      '            module.SH_TIMEOUT = MERGE_READ_TIMEOUT',
@@ -2839,6 +2839,12 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
+    # The second pass of gh_call_of's loop reads a repo flag right after the group word (`gh pr -R o/r comment`).
+    # Only that pass goes: the first pass, before the group word, still reads its flags.
+    ("gh-group-flag: a repo flag after the group word goes unread",
+     '    for _ in (0, 1):',
+     '    for _ in (0,):',
+     "guard", "after the group word"),
     # records-page: a commit of MERGE_HEAD's page is allowed on origin/<base>'s first-parent line, or for a stacked
     # lane (some best merge base of HEAD and MERGE_HEAD is off origin/<base>).
     ("records-page: MERGE_HEAD is not read against origin/<base>, so another branch's page is allowed",
