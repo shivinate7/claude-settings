@@ -76,7 +76,11 @@ def reason(stderr):
     if re.search(r"Authentication failed|could not read (Username|Password)|Permission denied", text):
         return "auth"
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    return re.sub(r"^(fatal|error): ", "", lines[-1])[:120] if lines else "git failed"
+    if not lines:
+        return "git failed"
+    # git ends a refused push with a generic "failed to push some refs" line; the cause sits in an earlier line.
+    cause = next((line for line in lines if re.match(r"(! \[(remote )?rejected\]|error:|remote:)", line)), lines[-1])
+    return re.sub(r"^(fatal|error): ", "", cause)[:160]
 
 
 def must(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None):
