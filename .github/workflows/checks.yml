@@ -894,7 +894,7 @@ jobs:
         run: bash -n install.sh
       - name: install.sh checkout-detection suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
-        # Own cap: n6 (green 9.65, 11.08, 14.32, 15.00 min, runs 42700538152, 42682869856, 42676155839, 42669400649; 16.22 and 16.2 min, runs 42708195330 and 42717988296, each cut at the old 16 min cap with every case passing, so floors): cap 24 = 16.2 / 0.7, rounded up (decision ci-job-caps).
+        # Own cap: n7 (green 9.65, 11.08, 14.32, 14.98, 15.00 min, runs 42700538152, 42682869856, 42676155839, 42733987294, 42669400649; 16.22 and 16.2 min, runs 42708195330 and 42717988296, each cut at the old 16 min cap with every case passing, so floors): cap 24 = 16.2 / 0.7, rounded up (decision ci-job-caps).
         timeout-minutes: 24
         run: sh hooks/test_install_src.sh
       - name: install_from_main suite
