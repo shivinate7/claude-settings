@@ -84,6 +84,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .ov-tier { display: grid; gap: 8px; align-items: start; padding-top: 12px; border-top: 1px solid var(--line); }
 .ov-head { display: flex; align-items: center; gap: 7px; min-height: 32px; color: var(--ink); text-decoration: none; font: 700 16px var(--body); font-variant-numeric: tabular-nums; }
 .ov-head .ct { margin-left: auto; padding-left: 8px; color: var(--muted); font-weight: 600; }
+@media (pointer: coarse) { .ov-head { min-height: 44px; } }
 .chips-n { display: flex; flex-wrap: wrap; gap: 6px; }
 .nchip { width: 48px; height: 32px; padding: 0; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 13.5px var(--mono); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .nchip:hover { border-color: var(--acc); }
@@ -105,6 +106,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
   .nchip .no { flex: none; min-width: 2ch; text-align: end; font-variant-numeric: tabular-nums; }
   .nchip .nt { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px var(--body); }
 }
+@media (pointer: coarse) { .nchip, .pairchips .nchip { height: 44px; } }
 @media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
 
 .list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
@@ -247,7 +249,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
 .btn.alt { background: transparent; color: var(--acc); }
 .btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
-.btn.dash { border: 1.5px dashed var(--line); background: transparent; color: var(--muted); font-weight: 500; }
+.btn.dash { border: 1.5px dashed var(--faint); background: transparent; color: var(--muted); font-weight: 500; }
 .btn.dash[aria-pressed="true"] { border-style: solid; border-color: var(--ink); color: var(--ink); }
 .btn:disabled { opacity: .45; cursor: default; }
 .note { display: grid; gap: 6px; }
@@ -342,12 +344,9 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .pkb .on, .pkb[aria-pressed="true"] .off { visibility: hidden; }
 .pkb[aria-pressed="true"] .on { visibility: visible; }
 .btn.alt.pkb[aria-pressed="true"] { background: var(--acc); color: var(--on-acc); }
-/* Drop's dashed edge reads at 3:1 (a11y.md, control edge): --faint, where .btn.dash elsewhere uses --line. */
-.btn.dash.pkb { border-color: var(--faint); }
-.btn.dash.pkb[aria-pressed="true"] { border-color: var(--ink); }
 /* Off: still focusable, with a solid --faint edge (3:1, a11y.md state cue) and a struck label, so an off act never rests on colour alone.
    This strike marks an off button. A staged Drop strikes the line text, never its button. The reason shows as .pk-why under the line.
-   This rule stays after .btn.dash.pkb: both have the same weight, so the source order decides. */
+   This rule stays after .btn.dash[aria-pressed="true"]: both have the same weight, so the source order decides. */
 .btn.pkb[aria-disabled="true"] { border-style: solid; border-color: var(--faint); background: transparent; color: var(--muted); cursor: default; font-weight: 500; }
 .btn.pkb[aria-disabled="true"] .off { text-decoration: line-through; text-decoration-thickness: 1.5px; }
 /* The Sent panel names a parked act by its act, where an item shows "No. n". */
@@ -508,6 +507,8 @@ body.sheet-open { overflow: hidden; }
 .now h3 { font: 600 13.5px/1.3 var(--body); color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
 .now .ph { font: 700 19px/1.2 var(--body); }
 .now .lead { padding: 0; font-size: 14px; color: var(--muted); }
+/* The count line breaks only between groups ("2 in progress,"): a group never splits. */
+.now .lead .grp { white-space: nowrap; }
 .now ul, .now ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
 .now li { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: 14.5px; }
 .now li .id { flex: none; font-size: 13px; color: var(--muted); }
@@ -524,6 +525,8 @@ body.sheet-open { overflow: hidden; }
 .segbar i.done { background: var(--acc); }
 .segbar i.act { background: color-mix(in srgb, var(--acc) 45%, transparent); }
 .segbar i.blk { background: var(--holds); }
+.segbar i.stl { background: repeating-linear-gradient(135deg, var(--holds) 0 2px, transparent 2px 4px); }
+.segbar i.pzd { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 
 /* The view switch sits right above the view it changes. What every view shares sits above the switch. */
 .views { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 3px; max-width: 520px; background: var(--chip); border-radius: 11px; }
@@ -602,7 +605,10 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .rsteps .active > .rrow { background: var(--acc-soft); box-shadow: inset 3px 0 0 var(--acc); }
 .rsteps .active .ttl { font-weight: 700; }
 .rsteps .blocked > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
-.rsteps .stl-row > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
+.rsteps .stl-row > .rrow { background: color-mix(in srgb, var(--holds) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--holds); }
+/* A paused step keeps status active: no tint, and a muted edge in the paused band's grey. */
+.rsteps .pzd-row > .rrow { background: none; box-shadow: inset 3px 0 0 var(--muted); }
+.rsteps .pzd-row > .rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
 .rsteps .done .ttl { text-decoration: line-through; text-decoration-color: var(--line); color: var(--muted); }
 .rbody { display: none; padding: 2px 14px 12px 70px; font-size: 14px; color: var(--muted); }
 .rsteps li.open .rbody { display: block; }
@@ -966,7 +972,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 
 <!-- The one list of top-level item fields. The page warns on a field outside it, and the guard (rule item-field-rendered) refuses a write of one.
      Add a field here when the page draws it. A key inside options or steps is not listed. -->
-<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits"]</script>
+<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits", "repo", "checked_with"]</script>
 
 <!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The page writer replaces it on each publish
      (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
@@ -1635,8 +1641,8 @@ function buildRuling(it) {
   return card;
 }
 // The fold control. The visible words name the act and what it opens; the hidden words name the item. All three labels sit in one grid cell (see .unfold).
-// A draft, a stood pick or a pending withdraw holds an act Send would submit, so a seen or answered card's fold stays open and its control is locked.
-const foldLocked = (it) => !!eff(it) || withdrawing(it);
+// A draft, a stood pick or a pending withdraw locks the fold open. A saved item never locks.
+const foldLocked = (it) => !isSaved(it) && (!!eff(it) || withdrawing(it));
 // words ({ show, hide }) names the fold of a sunk answered card, which holds its note, last answer and reply instead of options, steps or commands.
 function unfoldBtn(it, open, locked, ncmd, words) {
   const dec = it.kind === "decision", tail = ncmd > 1 ? " and the " + ncmd + " commands" : ncmd ? " and the command" : "";
@@ -1671,7 +1677,7 @@ function replyMark(it) {
   return replyFirst(it) ? h("span", { class: "newmark" }, REPLY_WORDS[0], h("span", { class: "sr" }, REPLY_WORDS[1]))
     : h("span", { class: "newmark dot", title: full }, h("span", { class: "sr" }, full));
 }
-const parkBtn = (it, d) => h("button", { class: "btn dash parkbtn", type: "button", id: "b-park-" + it.id, "aria-pressed": String(d.act === "park"), onclick: () => pressPark(it, "park") }, ACT_NAME.park);
+const parkBtn = (it, d) => h("button", { class: "btn dash parkbtn", type: "button", id: "b-park-" + it.id, "aria-label": ACT_NAME.park + " No. " + it.n, "aria-pressed": String(d.act === "park"), onclick: () => pressPark(it, "park") }, ACT_NAME.park);
 function buildCard(it) {
   if (isRuling(it)) return buildRuling(it);
   const T = tierOf(it), byWait = isByWait(it), saved = isSaved(it) || byWait, d = eff(it) || {}, rc = rcOf(it), sunk = isSunk(it);
@@ -1719,7 +1725,7 @@ function buildCard(it) {
   if (thread) card.append(thread);
   const more = !!state.more[it.id], ctxText = it.context || "";
   card.append(h("p", { class: "ctx" + (more || ctxText.length <= 220 ? "" : " clamp"), id: "ctx-" + it.id }, ctxText));
-  if (ctxText.length > 220) card.append(h("button", { class: "morebtn", type: "button", "aria-expanded": String(more), "aria-controls": "ctx-" + it.id, onclick: () => { state.more[it.id] = !more; repaint(it); } }, more ? "Less" : "More context"));
+  if (ctxText.length > 220) card.append(h("button", { class: "morebtn", id: "b-more-" + it.id, type: "button", "aria-expanded": String(more), "aria-controls": "ctx-" + it.id, onclick: () => { state.more[it.id] = !more; repaint(it); } }, more ? "Less" : "More context"));
   if (it.ref) card.append(h("p", { class: "about" }, it.ref));
   if (state.notice[it.id]) card.append(h("p", { class: "status", role: "status" }, state.notice[it.id]));
   // A sunk card changed on the page (a Change keeps it in the Answered section) folds every part the owner answers with, behind one control. An item the owner still owes never folds. Outside the fold: the top row, title, stakes, thread, context and the Lands-in line.
@@ -1734,14 +1740,14 @@ function buildCard(it) {
     if (multi) put(h("p", { class: "multihint", id: "mh-" + it.id }, it.ranked === true ? "Tick any that apply, then order them, best first." : "Tick any that apply."));
     put(opts, ...((it.options || []).some((o) => marks(it, o).length) ? [h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart."))] : []), readyRow,
       h("div", { class: "alts" },
-        h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"), parkBtn(it, d)));
+        h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-label": "None of these on No. " + it.n, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"), parkBtn(it, d)));
   } else {
     const cmds = cmdBlocks(it); ncmd = cmds.length;
     put(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
     put(...cmds);
     if (linksOf(it).length) put(h("div", { class: "links" }, linksOf(it).map(linkEl)));
     put(ready, h("div", { class: "alts" },
-      h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done, act: null }); repaint(it); } }, "Mark done"), parkBtn(it, d)));
+      h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-label": "Mark done on No. " + it.n, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done, act: null }); repaint(it); } }, "Mark done"), parkBtn(it, d)));
   }
   const need = d.choice === NONE, nb = h("div", { class: "note" + (need && !(d.note || "").trim() ? " need" : "") });
   const ta = h("textarea", { id: "n-" + it.id, placeholder: need ? "Say what you want instead." : "Anything the session should know" });
@@ -2093,7 +2099,7 @@ function renderBar() {
   if (state.barNote) parts.push(state.barNote);
   else {
     if (st.length) { parts.push(h("b", {}, String(st.length)), " ready"); const why = [stood && stood + " where my pick stands", toPark && toPark + " to park", over && over + " overturn", pks && pks + " on " + (pks === 1 ? "a parked line" : "parked lines")].filter(Boolean); if (why.length) parts.push(" (" + why.join(", ") + ")"); parts.push(". "); }
-    if (left) parts.push(h("b", {}, String(left)), " stay open.");
+    if (left) parts.push(h("b", {}, String(left)), left === 1 ? " stays open." : " stay open.");
     if (state.items.length && !open.length) parts.push(h("b", {}, "All answered."));
   }
   $("barStatus").replaceChildren(...parts);
@@ -2340,9 +2346,13 @@ const ASK_SEEN = readStamp("waiting.askSeen");
 const ASK_LOADED = Date.now();
 const askFresh = (a) => { const t = Date.parse(a.answered) || Date.parse(a.at); return ASK_SEEN !== null ? t > ASK_SEEN : ASK_LOADED - t < ASK_NEW_MS; };
 const askIsOpen = (t) => (t.id in askState.open ? askState.open[t.id] : askFresh(askLatest(t) || t));
-const markAsksSeen = () => writeStamp("waiting.askSeen");
-document.addEventListener("visibilitychange", () => { if (document.hidden) markAsksSeen(); });
-window.addEventListener("pagehide", markAsksSeen);
+// The stamp moves only while the answer list (#askList, below the form) is on screen: an answer that lands on a hidden tab or below the fold has not been seen.
+// Hiding the tab stamps once, at the hide time. A visibilitychange or pagehide of a tab already hidden stamps nothing.
+const asksOnScreen = () => { const r = $("askList").getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; };
+const markAsksSeen = () => { if (asksOnScreen()) writeStamp("waiting.askSeen"); };
+let tabWasHidden = document.hidden;
+document.addEventListener("visibilitychange", () => { const hiding = document.hidden && !tabWasHidden; tabWasHidden = document.hidden; if (hiding) markAsksSeen(); });
+window.addEventListener("pagehide", () => { if (!document.hidden) markAsksSeen(); });
 const saveAskDraft = () => { try { const v = $("askText").value; if (v) localStorage.setItem("waiting.askDraft", v); else localStorage.removeItem("waiting.askDraft"); } catch (e) {} };
 try { $("askText").value = localStorage.getItem("waiting.askDraft") || ""; } catch (e) {}
 // The stack is kept beside the draft, so a reload shows it again. An ask already written to the store is not kept. An edit left open keeps its words.
@@ -2929,10 +2939,11 @@ $("dFull").onclick = () => {
   try { window.open(URL.createObjectURL(new Blob([DESIGN_HTML[d.slug] || ""], { type: "text/html" })) + (stateOf(d) ? "#" + stateHash(stateOf(d)) : ""), "_blank", "noopener"); } catch (e) {}
 };
 // A card keeps its click closures while its content is unchanged, but the items are rebuilt as new objects, so match by id, never by object.
-// No exact match: open by slug and state. No match at all: open nothing, never a wrong design.
+// No exact match: open the design with the same slug and state only when exactly one has them. None, or several: open nothing, never a wrong design.
 function openShown(it, d) {
   const all = allDesigns(), same = (x) => x.it.id === it.id && x.slug === d.slug && stateOf(x) === stateOf(d);
-  let at = all.findIndex((x) => same(x) && x.label === d.label); if (at < 0) at = all.findIndex(same);
+  let at = all.findIndex((x) => same(x) && x.label === d.label);
+  if (at < 0) { const m = all.map((x, i) => same(x) ? i : -1).filter((i) => i >= 0); if (m.length === 1) at = m[0]; }
   if (at >= 0) openDesign(null, all, at);
 }
 function openDesign(slug, list, at) {
@@ -3054,7 +3065,11 @@ const phaseName = (k) => (PH.find((p) => p.k === k) || {}).n || k;
 const unknownRead = (r) => String(r).startsWith("unknown");
 // "unknown (why)" shows as its why, so the word "unknown" appears once on the screen, at the plan.
 const reason = (r) => { const m = /^unknown \(([\s\S]*)\)$/.exec(String(r == null ? "" : r)); return m ? m[1] : String(r == null ? "" : r); };
-const segs = (d, a, b, n) => '<i class="done"></i>'.repeat(d) + '<i class="act"></i>'.repeat(a) + '<i class="blk"></i>'.repeat(b) + "<i></i>".repeat(Math.max(0, n - d - a - b)) + (n ? "" : "<i></i>");
+const segs = (c, n) => ["done", "act", "stl", "pzd", "blk"].map((k) => `<i class="${k}"></i>`.repeat(c[k])).join("") + "<i></i>".repeat(Math.max(0, n - c.done - c.act - c.stl - c.pzd - c.blk)) + (n ? "" : "<i></i>");
+// The bar's cell counts for a phase's steps, one per cell kind. shownState decides in progress, stalled and paused; the tallies read status for done and blocked.
+const tally = (ss) => ({ done: ss.filter((s) => s.status === "done").length, act: ss.filter((s) => shownState(s) === "active").length, stl: ss.filter((s) => shownState(s) === "stalled").length, pzd: ss.filter((s) => shownState(s) === "paused").length, blk: ss.filter((s) => s.status === "blocked").length });
+// ", 2 in progress, 3 stalled, 1 paused, 1 blocked", with a kind left out when it has no steps.
+const stallWords = (c) => (c.act ? ", " + c.act + " in progress" : "") + (c.stl ? ", " + c.stl + " stalled" : "") + (c.pzd ? ", " + c.pzd + " paused" : "") + (c.blk ? ", " + c.blk + " blocked" : "");
 
 /* Status marks: shape and colour together, never colour alone. */
 const GLY = {
@@ -3190,6 +3205,8 @@ const stall = (() => {
   return { steps: rows, paused: ids(r.paused), bad, items: Array.isArray(r.items) ? r.items.filter((x) => x && x.n != null) : null, itemsWhy: typeof r.itemsWhy === "string" ? r.itemsWhy : "" };
 })();
 const stalledIds = new Set(stall.steps ? stall.steps.map((x) => x.id) : []), pausedIds = new Set(stall.paused || []);
+// A stalled or paused step keeps status active, so a count or a mark that reads the status alone calls it In progress.
+const shownState = (s) => (s.status !== "active" ? s.status : stalledIds.has(s.id) ? "stalled" : pausedIds.has(s.id) ? "paused" : s.status);
 
 /* ---------- read-at stamps and live work ---------- */
 function readAt() {
@@ -3230,7 +3247,10 @@ function stalledBand() {
     return `<div class="livenone" id="stBand"><p><span class="lh">Stalled steps</span> <span class="unk"><span class="rg unk" aria-hidden="true"></span> not read: ${esc(stall.plain)}</span></p>`
       + `<details><summary>What the build said</summary><pre>${esc(reason(stall.why))}</pre></details></div>`;
   }
-  const items = stall.items, n = stall.steps.length + (items ? items.length : 0);
+  // The band takes a listed step only when shownState says it is that kind. A listed id with no step in the plan stays.
+  const holds = (id, k) => { const s = steps.find((x) => x.id === id); return !s || shownState(s) === k; };
+  const stl = stall.steps.filter((x) => holds(x.id, "stalled")), pzd = stall.paused.filter((id) => holds(id, "paused"));
+  const items = stall.items, n = stl.length + (items ? items.length : 0);
   const title = (id) => { const s = steps.find((x) => x.id === id); return s && s.title ? s.title : "Untitled step"; };
   const head = n
     ? `<div class="sth"><h3>${rg("stalled")}Stalled: <span class="num">${n}</span></h3><span class="lead">No live lane and no open pull request. Triage resumes, pauses or closes each.</span></div>`
@@ -3241,14 +3261,14 @@ function stalledBand() {
     if (marks.length) return `<span class="fx land">done: landed in ${esc(marks.join(", "))}</span>`;
     return Object.prototype.hasOwnProperty.call(stall.bad, x.id) ? `<span class="fx bad">Pause not counted: ${esc(stall.bad[x.id])}.</span>` : "";
   };
-  const stepRows = stall.steps.map((x) => `<li><span class="k"><span class="id">${esc(x.id)}</span></span><span><button type="button" class="tx" data-go="${esc(x.id)}">${esc(title(x.id))}</button>${fix(x)}</span></li>`).join("");
+  const stepRows = stl.map((x) => `<li><span class="k"><span class="id">${esc(x.id)}</span></span><span><button type="button" class="tx" data-go="${esc(x.id)}">${esc(title(x.id))}</button>${fix(x)}</span></li>`).join("");
   const itemPart = !items
     ? `<h4>Waiting items</h4><ul><li class="unkrow"><span class="unk"><span class="rg unk" aria-hidden="true"></span> not read: no item carries its lane yet</span>`
       + (reason(stall.itemsWhy) ? `<details><summary>What the build said</summary><pre>${esc(reason(stall.itemsWhy))}</pre></details>` : "") + "</li></ul>"
     : items.length ? `<h4>Waiting items</h4><ul>${items.map((it) => `<li class="it"><span class="k"><span>Item <span class="num">${esc(it.n)}</span></span></span><span>Answer routed to <span class="ln">${esc(it.lane)}</span>; lane gone</span></li>`).join("")}</ul>` : "";
-  const stepPart = stall.steps.length ? (items && !items.length ? `<ul>${stepRows}</ul>` : `<h4>Steps</h4><ul>${stepRows}</ul>`) : "";
-  const pz = stall.paused.length
-    ? `<details class="pz"${n ? "" : " open"}><summary>${rg("paused")}Paused: <span class="num">${stall.paused.length}</span></summary><ul>${stall.paused.map((id) => {
+  const stepPart = stl.length ? (items && !items.length ? `<ul>${stepRows}</ul>` : `<h4>Steps</h4><ul>${stepRows}</ul>`) : "";
+  const pz = pzd.length
+    ? `<details class="pz"${n ? "" : " open"}><summary>${rg("paused")}Paused: <span class="num">${pzd.length}</span></summary><ul>${pzd.map((id) => {
       const p = (steps.find((x) => x.id === id) || {}).paused || {}, at = when(p.at), who = DECIDES[p.decides];
       const line = [who ? who + " decides" : "", at ? `paused <span class="num">${esc(fmt(at.toISOString()))}</span>` : ""].filter(Boolean).join("; ");
       return `<li><span class="k"><span class="id">${esc(id)}</span></span><span><button type="button" class="tx" data-go="${esc(id)}">${esc(title(id))}</button>${p.why ? `<span class="fx why">${esc(p.why)}</span>` : ""}${line ? `<span class="fx">${line}</span>` : ""}</span></li>`;
@@ -3259,15 +3279,15 @@ function stalledBand() {
 
 /* ---------- where you are ---------- */
 function renderNow() {
-  const cur = curPhase(), ss = byPhase(cur.k), done = ss.filter((s) => s.status === "done").length, act = ss.filter((s) => s.status === "active").length;
+  const cur = curPhase(), ss = byPhase(cur.k), c = tally(ss), done = c.done, act = c.act;
   const tot = steps.length, tdone = steps.filter((s) => s.status === "done").length;
   const active = workOrder(steps.filter((s) => s.status === "active")), nu = nextUp(), off = offTrack();
   $("svNow").innerHTML = `
   <div><h3>Phase${cur.none ? "" : ` <span class="num">${numbered().indexOf(cur) + 1}/${numbered().length}</span>`}</h3><div class="ph">${esc(cur.n)}</div>
-    <div class="lead"><span class="num">${done}</span> of <span class="num">${ss.length}</span> done${act ? `, <span class="num">${act}</span> in progress` : ""}</div>
-    <div class="segbar" aria-hidden="true">${segs(done, act, 0, ss.length)}</div>
+    <div class="lead">${[`<span class="num">${done}</span> of <span class="num">${ss.length}</span> done`, ...[[act, "in progress"], [c.stl, "stalled"], [c.pzd, "paused"], [c.blk, "blocked"]].filter((x) => x[0]).map((x) => `<span class="num">${x[0]}</span> ${x[1]}`)].map((g) => `<span class="grp">${g}</span>`).join(", ")}</div>
+    <div class="segbar" aria-hidden="true">${segs(c, ss.length)}</div>
     <div class="lead">Whole plan <span class="num">${tdone}/${tot}</span> done</div></div>
-  <div><h3>Doing now</h3><ul>${active.map((s) => `<li>${stalledIds.has(s.id) ? rgl("stalled") : pausedIds.has(s.id) ? rgl("paused") : rg("active")}<span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing in progress. Pick the first step up next.</li>'}</ul></div>
+  <div><h3>Doing now</h3><ul>${active.map((s) => `<li>${["stalled", "paused"].includes(shownState(s)) ? rgl(shownState(s)) : rg("active")}<span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing in progress. Pick the first step up next.</li>'}</ul></div>
   <div><h3>Up next <span style="font-weight:400">in work order</span></h3><ol>${nu.map((s, i) => `<li><span class="ix">${i + 1}</span><span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing left to start in this phase.</li>'}</ol></div>
   <div class="offt"><h3>Off track <span class="num" style="color:${off.length ? "var(--holds)" : "var(--muted)"}">${off.length}</span></h3><ul>${off.map((o) => {
     const s = steps.find((x) => x.id === o.id);
@@ -3279,9 +3299,9 @@ function renderNow() {
 function renderRail() {
   const cur = curPhase(), shown = shownPhase();
   $("svRail").innerHTML = PH.map((p) => {
-    const ss = byPhase(p.k), d = ss.filter((s) => s.status === "done").length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
+    const ss = byPhase(p.k), c = tally(ss), d = c.done;
     const u = ss.filter(stepNew).length;
-    return `<button type="button" data-phase="${esc(p.k)}" aria-pressed="${p.k === shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${p === cur && !p.none ? ", current phase" : ""}${u ? ", " + u + " updated since your last visit" : ""}"><span class="nm"><span>${esc(p.n)}${p === cur && !p.none ? '<span class="here" title="Current phase: the first with work left"></span>' : ""}</span><span class="nmr">${u ? countMark(u) : ""}<span class="num" aria-hidden="true">${d}/${ss.length}</span></span></span><span class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</span></button>`;
+    return `<button type="button" data-phase="${esc(p.k)}" aria-pressed="${p.k === shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${stallWords(c)}${p === cur && !p.none ? ", current phase" : ""}${u ? ", " + u + " updated since your last visit" : ""}"><span class="nm"><span>${esc(p.n)}${p === cur && !p.none ? '<span class="here" title="Current phase: the first with work left"></span>' : ""}</span><span class="nmr">${u ? countMark(u) : ""}<span class="num" aria-hidden="true">${d}/${ss.length}</span></span></span><span class="segbar" aria-hidden="true">${segs(c, ss.length)}</span></button>`;
   }).join("");
 }
 
@@ -3342,10 +3362,10 @@ const countMark = (n) => `<span class="newmark ct" aria-hidden="true" title="${n
 const landed = (id) => { const w = B && B.landed && B.landed[id]; return Array.isArray(w) && w.length ? w : null; };
 function stepRow(s, nextIds) {
   const ni = nextIds.indexOf(s.id), lw = landed(s.id);
-  const stl = stalledIds.has(s.id), pzd = pausedIds.has(s.id), isNew = stepNew(s);
+  const stl = shownState(s) === "stalled", pzd = shownState(s) === "paused", isNew = stepNew(s);
   const tags = [ni >= 0 ? `Next ${ni + 1}` : "", s.status === "blocked" ? "Blocked" : "", lw ? "Landed in " + lw.join(", ") : "", stl ? "Stalled" : "", pzd ? "Paused" : "", isNew ? "Updated since your last visit" : ""];
   const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id), lbl = stl ? LBL.stalled : pzd ? LBL.paused : LBL[s.status] || LBL.todo;
-  return `<li class="${s.status}${stl ? " stl-row" : ""}${open ? " open" : ""}" id="s-${esc(s.id)}">
+  return `<li class="${s.status}${stl ? " stl-row" : ""}${pzd ? " pzd-row" : ""}${open ? " open" : ""}" id="s-${esc(s.id)}">
     <button type="button" class="rrow" data-row="${esc(s.id)}" aria-expanded="${open}" aria-label="${esc(s.id)}, ${lbl}: ${esc(s.title || "Untitled step")}${tags.filter(Boolean).length ? ". " + esc(tags.filter(Boolean).join(". ")) : ""}">${rg(stl ? "stalled" : pzd ? "paused" : s.status)}<span class="id">${esc(s.id)}</span><span class="ttl">${esc(s.title || "Untitled step")}</span>
       <span class="meta">${tags[0] ? `<span class="tag next">${tags[0]}</span>` : ""}${tags[1] ? '<span class="tag blk">Blocked</span>' : ""}${lw ? `<span class="tag landed" title="Merged; waiting for triage to close the step">${esc(tags[2])}</span>` : ""}${stl ? `<span class="tag stl ic" role="img" aria-label="Stalled" title="Stalled: no live lane and no open pull request">${GLY.stalled}</span>` : ""}${pzd ? `<span class="tag pzd ic" role="img" aria-label="Paused" title="Paused: ${esc((s.paused || {}).why || "")}">${GLY.paused}</span>` : ""}${isNew ? stepMark(s) : ""}</span><span class="chev" aria-hidden="true">▶</span></button>
     <div class="rbody"><dl>
@@ -3368,7 +3388,7 @@ const defaultPage = (list) => { const ix = list.findIndex((s) => s.status !== "d
 function renderPhase() {
   stepWords = true;
   const k = shownPhase(), p = PH.find((x) => x.k === k), ss = byPhase(k);
-  const open = openList(k), done = doneList(k), d = done.length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
+  const open = openList(k), done = doneList(k), d = done.length, c = tally(ss);
   const nextIds = nextUp().map((s) => s.id), size = pageSize();
   const pages = Math.max(1, Math.ceil(open.length / size));
   if (ui.page[k] == null) ui.page[k] = defaultPage(open);
@@ -3385,7 +3405,7 @@ function renderPhase() {
   // "Phase 13" for steps with no phase would be false, so that group is headed by its name alone.
   const n = numbered().indexOf(p) + 1;
   $("svPhases").innerHTML = `<section class="box phase" id="p-${p.none ? "none" : esc(k)}" aria-label="${p.none ? "No phase" : `Phase ${n}, ${esc(p.n)}`}">
-    <div class="ph-head"><h3>${p.none ? "No phase" : `Phase ${n}<span class="sr">, ${esc(p.n)}</span>`}</h3><div class="prog"><span class="num" aria-hidden="true">${d}/${ss.length}</span><span class="sr">${d} of ${ss.length} steps done</span><div class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</div></div></div>
+    <div class="ph-head"><h3>${p.none ? "No phase" : `Phase ${n}<span class="sr">, ${esc(p.n)}</span>`}</h3><div class="prog"><span class="num" aria-hidden="true">${d}/${ss.length}</span><span class="sr">${d} of ${ss.length} steps done${stallWords(c)}</span><div class="segbar" aria-hidden="true">${segs(c, ss.length)}</div></div></div>
     ${asof ? `<div class="asof">${asof}</div>` : ""}
     ${k === "cleanup" && ui.how && cull && cull.note ? `<div class="howbody">${esc(cull.note)}</div>` : ""}
     <div class="tiles">${tiles}</div>
@@ -3434,7 +3454,7 @@ function feedCard(n = 8) {
   const recent = steps.filter((s) => when(s.updatedAt)).sort((a, b) => when(b.updatedAt) - when(a.updatedAt)).slice(0, n);
   if (!recent.length) return "";
   return `<section class="box"><header><h3>Latest changes</h3><span class="lbl">${esc(dayLabel(new Date()))}</span></header>
-    <ul class="feed">${recent.map((s) => `<li><span class="when">${esc(fresh(s.updatedAt) ? timeLabel(when(s.updatedAt)) : ago(s.updatedAt))}</span>${rgl(s.status)}<span><button type="button" class="lnk" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> ${esc(s.title)}</button></span></li>`).join("")}</ul>
+    <ul class="feed">${recent.map((s) => `<li><span class="when">${esc(fresh(s.updatedAt) ? timeLabel(when(s.updatedAt)) : ago(s.updatedAt))}</span>${rgl(shownState(s))}<span><button type="button" class="lnk" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> ${esc(s.title)}</button></span></li>`).join("")}</ul>
     <button type="button" class="morelink" data-view-go="log">All changes by day →</button></section>`;
 }
 function renderSide() {
@@ -3454,7 +3474,7 @@ function renderLog() {
     const all = ev.filter((e) => dayKey(e.d) === g.k), nd = all.filter((e) => e.s.status === "done").length, cont = gi === 0 && before === g.k;
     return `<div class="day"><h3><span>${esc(dayLabel(g.d))}${cont ? ' <span class="lbl">continued</span>' : ""}</span><span class="lbl">${perDay[g.k]} change${perDay[g.k] === 1 ? "" : "s"}${nd ? ` · <span style="color:var(--good)">${nd} done</span>` : ""}</span></h3>
     ${g.list.map((e) => { const s = e.s;
-      return `<div class="ev ${s.status}"><span class="when">${esc(timeLabel(e.d))}</span>${rgl(s.status)}<div><button type="button" class="lnk" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> <span class="t">${esc(s.title)}</span></button>
+      return `<div class="ev ${s.status}"><span class="when">${esc(timeLabel(e.d))}</span>${rgl(shownState(s))}<div><button type="button" class="lnk" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> <span class="t">${esc(s.title)}</span></button>
         <div class="gist">${esc(firstSentence(s.note) || firstSentence(s.why))}</div></div></div>`; }).join("")}</div>`;
   }).join("")}${pager("log", pg, pages, ev.length, "changes")}</section>
   <p class="lead">Each step shows once, on the day it last changed.</p>`;
