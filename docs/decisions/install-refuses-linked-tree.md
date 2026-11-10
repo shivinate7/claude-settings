@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The installer refuses a linked worktree. The one exception is exactly `<clone>-live`, detached at the clone's local main commit (owner ruling 2026-10-15).
+The installer refuses a linked worktree. The one exception is exactly `<clone>-live`, detached at the clone's local main commit (owner ruling 2026-10-15). The stamped worktree `<clone>-live-<12 hex>`, which the `<clone>-live` link points at, is ruled by `merge-reinstalls-from-main`, ruling 3; `live_pin_clone` in `install.sh` takes both forms.
 
 - The path alone is not enough. A `-live` worktree on a lane branch, or detached at another commit, is refused.
 - `install.sh` and `install.ps1` refuse before any write. A refusal exits non-zero, leaves the config pointer and the config folder as they were, and writes nothing into `HOME`.
