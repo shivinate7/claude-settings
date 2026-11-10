@@ -34,10 +34,12 @@ Owner, 14:36 CST: "b is probably fine for now, with some sorta flag that if it q
 
 Rule, not built:
 
-- Option b, in the retrospective session's words to the owner: "until a new job has green runs, its limit is its nearest similar job's computed limit times 1.5". "Nearest similar job" is not yet defined (asked of the owner 14:43 CST).
+- Option b, in the retrospective session's words to the owner: "until a new job has green runs, its limit is its nearest similar job's computed limit times 1.5".
+- Session pick by the retrospective session, 2026-11-10 14:59 CST, not an owner ruling. The owner may overturn it: a job stops counting as new after its first green run.
+- Session pick, same time, same right to overturn: the nearest similar job is one doing the same kind of work (lint, test, mutation or build). With no such job, the limit is 1.5 times the largest current job's computed limit.
 - A new job that hits its limit in its first one or two runs is flagged misjudged. Its limit then moves to 1.5 times the computed limit of the largest current job.
 - The retrospective session's reading, which the owner's 14:37 words ("fails in its first run or two") back but do not state: a hit is a run that reaches the job's time limit, not a red test.
-- The end of this new-job phase is open (asked of the owner 14:43 CST). The stored provisional limits stay until the reader is built (triage reading, process only).
+- The stored provisional limits stay until the reader is built (triage reading, process only).
 
 ## The table
 
