@@ -3347,7 +3347,7 @@ def default_lock(root):
 
 # The review record: a comment on the pull request (decision pr-review-record). This is the one home of its form.
 REVIEW_MARKER = "<!-- review-record -->"
-REVIEW_CI_LINE = "CI: read live by merge --reviewed"  # the comment never stores CI state. The wording is the form's last line, kept as posted records carry it; --reviewed no longer reads CI per PR (it reads the base's runs: host.base_state)
+REVIEW_CI_LINE = "CI: read live by merge --reviewed"  # the comment never stores CI state. The wording is the form's last line, kept as posted records carry it; --reviewed alone reads no CI per PR (only the base's runs: host.base_state); --reviewed --root does (reviewed_read)
 REVIEW_KINDS, REVIEW_GUARDS = ("normal", "delete-only", "docs-only"), ("yes", "no")
 REVIEW_ROLES, REVIEW_VERDICTS = ("reviewer", "design-reviewer"), ("PASS", "FAIL", "PARTIAL")
 REVIEW_NETS = ("not owed", "zero", "positive", "negative")
@@ -3615,8 +3615,8 @@ def reviewed_read(h):
     return lines + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls
 
 def reviewed_read_lines(h):
-    """-> the lines of `merge --reviewed --root` for one repo (see reviewed_read, which holds the gh cost of one repo). `--root` runs this once per root, so the
-    gh calls scale with the number of roots; no new process, file or timer."""
+    """-> the lines of `merge --reviewed --root` for one repo (see reviewed_read, which holds the gh cost of one repo). It prints no batch line;
+    `--root` calls reviewed_block, which adds one. No new process, file or timer."""
     return reviewed_read(h)[0]
 
 def reviewed_block(h):

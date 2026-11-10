@@ -149,9 +149,8 @@ merge --reviewed        the ledger: one line per open PR with its one next act (
                         RED past the age limit or with no next act. The last line: the longest wait since a done record, and the count
                         with no next act. Exit 0 nothing red, 1 any red, 2 on a failed read (a malformed field too).
 merge --reviewed --root DIR [--root DIR ...]
-                        the same ledger for each repo checkout DIR, one block each, then one batch line per repo:
+                        for each repo checkout DIR, one block: each PR's review-record state and live CI, then one batch line:
                         `open batch now: OWNER/NAME #a`, or `build next batch on the running head: ...`. A failed root prints unknown.
-merge --lane-lint <pr> --integration   the lane lint; after a PASS it adds the `batch` label to the integration PR (one POST).
 merge --dev ...         run the checkout's own tree, not origin main
 ```
 

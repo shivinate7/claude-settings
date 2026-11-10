@@ -23,7 +23,7 @@ Later coordinator rulings, Nov 7:
 - Coordinator, 2026-11-07 13:20 CST: a gap gets fixed, not filed as a note.
 - Coordinator, 2026-11-07 13:41 CST: part 3 is split. 3a is the ready-steps change on branch `ready-steps-next-act`: ready and stalled steps get one next act in `build.py`, plus a ready count. 3b comes after part 1 merges: `build.py` shows a PR's next act from `merge --reviewed --json`.
 - Coordinator, 2026-11-07 13:53 CST: a draft with no record reads `lane round 1`. An integration PR labelled `batch` reads `batch run`.
-- Coordinator, 2026-11-07 13:54 CST: `merge --lane-lint <pr> --integration` sets the `batch` label after a PASS only.
+- Coordinator, 2026-11-10 01:07 CST: `merge --lane-lint` stays read-only, so the `batch` label write moves out of part 1. Part 4 builds it as its own write, with its target check.
 - Coordinator, 2026-11-07 14:40 CST: a lane whose status bucket is completed or failed is not live. Every other bucket stays live, `review_ready` included; an idle session status is live.
 - Coordinator, 2026-11-07 15:10 CST: design times use the delivery time, 12:33 CST.
 
@@ -91,8 +91,8 @@ Build order. Part 3b starts only after part 1 merges. This record sets no other 
 1. The ledger in `merge/merge.py`. Lane `pr-state-is-on-the-pr` builds it. Its labels cover held, parked, replaced and batch. Its sweep is this ledger read.
 2. The lane check in `lint/report_guard.py`.
 3a. Ready and stalled steps get one next act in `skills/roadmap/build.py`, plus a ready count. Branch `ready-steps-next-act`.
-3b. After part 1 merges: `merge/merge.py` adds `--reviewed --json` and makes the stale-record act match this record. A held record on an old head falls through to the label rules, as above; part 1 tests stale first, so 3b fixes that order. The publisher runs it inside the read it already makes and passes the result in the live file. `skills/roadmap/build.py` shows each PR's next act and prints the `stalled pr:` line; it starts no process.
-4. `lint/report_guard.py` checks the report's `Unstarted:` line against the ready list, the on-merge Deviations line, and the parser gaps on PR #1503. It also holds triage until each `stalled pr:` line is disposed, as it does for `stalled step:` lines. Per the 13:20 ruling, those gaps are fixed here, not filed as notes.
+3b. After part 1 merges: `merge/merge.py` adds `--reviewed --json` and makes the stale-record act match this record. A held record on an old head falls through to the label rules, as above; part 1 tests stale first, so 3b fixes that order. The publisher runs it inside the read it already makes and passes the result in the live file. `skills/roadmap/build.py` shows each PR's next act and prints the `stalled pr:` line; it starts no process. 3b also makes these rules (coordinator 04:04 CST Nov 8): a held or replaced label wins over a done record; a base cycle is red; an unknown main verdict prints one line, unknown and why, exit 2. It rewrites the CI form line of decision `pr-review-record` to what is true and keeps its parse (coordinator 00:08 CST Nov 8). It adds tests for the label-event order and name, the newest `Waits on:` line, the hold-label order and the round-3 cap.
+4. `lint/report_guard.py` checks the report's `Unstarted:` line against the ready list, the on-merge Deviations line, and the parser gaps on PR #1503. It also holds triage until each `stalled pr:` line is disposed, as it does for `stalled step:` lines. Per the 13:20 ruling, those gaps are fixed here, not filed as notes. Part 4 also builds the `batch` label write, apart from `--lane-lint`, with a check that its target is the integration PR, and the label's removal.
 
 ## The cost
 
