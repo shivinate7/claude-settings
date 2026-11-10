@@ -13,7 +13,7 @@ ios-adblock). Not q_max, banchi or joyous, which ship none.
 | Area | Gold standard | Checked by |
 | --- | --- | --- |
 | Account IDs (team, phone, API key) | Once, in `~/.config/ios-ship/account.json` on the Mac. Never as `DEVELOPMENT_TEAM` in a project file, Makefile or workflow: `ios-ship` passes the team itself. A repo's `tools/ios-ship.json` may override a value (decision ios-ship-is-one-shared-tool, one shared ship tool), and the probe grades that `partial`. | `account ids` |
-| Phone install and TestFlight | `make phone` first. `make testflight` when `make phone` fails. Both call `ios-ship` directly, with no script of the repo's own (decision ios-mac-install-first, Mac install first). | `ship path` |
+| Phone install and TestFlight | `make phone` first. `make testflight` when `make phone` fails. Both call `ios-ship` directly, with no script of the repo's own (decision ios-mac-install-first, how a build reaches the phone). | `ship path` |
 | Same commands everywhere | `make phone`, `make testflight` and `make native-check` in every repo, and each does the same job. | `make targets` |
 | Where app logic lives | A Swift package in the repo (`<App>Kit`). Its tests run in seconds with no simulator. A tiny app may skip it. | `kit package` |
 | Project file | A short `project.yml`, made into the `.xcodeproj` by XcodeGen. Never commit the `.xcodeproj`. | `project file` |
