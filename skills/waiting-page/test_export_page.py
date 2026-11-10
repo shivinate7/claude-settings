@@ -106,6 +106,10 @@ RUN_FOLDER = None  # made in setUpModule
 TOKEN = "ghp_" + TAIL  # a GitHub-token shape, built at run time
 MAIL = "person.name" + "@" + "example.com"  # a personal-email shape, built at run time
 PASSWORD = "hunter2"  # a password value; the URLs below join it at run time, so no credential URL is a literal here
+SUP_PASSWORD = "Sup3r" + "S3cret"  # letters, digits and capitals, joined from parts, for the concatenated and templated URL rows
+HUNTER_PASSWORD = "Hunter" + "2xx"  # a literal password, joined from parts, for the templated-user URL rows
+QUOTE_PASSWORD = "O'" + "Neil2020"  # a literal password that holds a single quote, joined from parts
+QUOTE_IN_PASSWORD = 'p"' + "ss"  # a literal password that holds a double quote, joined from parts
 DB_IP_URL = "postgres://app:" + PASSWORD + "@10.0.0.5:5432/db"  # credentials on an IP host, with a port
 BUILD_IP_URL = "https://svc:" + PASSWORD + "@10.0.0.5/build"  # credentials on an IP host, with no port
 DB_NAME_URL = "postgres://app:" + PASSWORD + "@db.example.com:5432/db"  # the control: a host name refuses today
@@ -356,6 +360,108 @@ RED = [
     ("password with a plain word before a secret", "password: " + "none hunter2", "hunter2"),
     ("password with a plain word and a comma before a secret", "password: " + "none, hunter2", "hunter2"),
     ("password with a quoted plain word before a secret", "password: " + '"none" hunter2', "hunter2"),
+    # Real-looking secrets of the three kinds whose false positives are narrowed: they stay refused.
+    ("credential name with a live-key value", "API_KEY='" + "sk_live_" + "9fQ2xZ7Lk3'", "9fQ2xZ7Lk3"),
+    ("password in minified code with a real value", 'password:"' + "hunter2" + '-Secret!"', "hunter2-Secret!"),
+    ("URL credentials on a host name with a short password", "https://user:" + "p4ss" + "@host.example.com/", "p4ss"),
+    ("password that starts with !0", "password:" + "!0hunter2", "!0hunter2"),
+    ("credential name with a value that starts with return", "api_key=" + "return9fQ2xZ7Lk3", "return9fQ2xZ7Lk3"),
+    # A URL password may hold a bracket, a bar or a quote: the credential is still in the URL. Each password is joined from parts.
+    ("URL password with a bar", "https://user:" + "pa|ss" + "@host", "pa|ss"),
+    ("URL password with brackets", "postgres://app:" + "Qz9(Lk2Xm7)" + "@db.internal/x", "Qz9(Lk2Xm7)"),
+    ("URL password with quotes around it", 'https://user:"' + "secret1" + '"@api.example.com/', "secret1"),
+    ("URL password with dollars and brackets on an IP host", "mongodb://admin:" + "Pa$$(word)" + "@10.0.0.7:27017",
+     "Pa$$(word)"),
+    # A minified boolean such as !0 or !1 after a password word is not the value: the real value after it is the secret.
+    ("password with a minified boolean and a comma before a real value", "password:" + "!0," + "hunter2", "hunter2"),
+    ("password with = and a minified boolean before a real value", "password=" + "!0," + "Xk9mP2qL", "Xk9mP2qL"),
+    ("password with a minified boolean and a semicolon before a real value", "password: " + "!1;" + "Tr0ub4dorX",
+     "Tr0ub4dorX"),
+    ("password with a minified boolean and a space before a real value", "password: " + "!0 " + "hunter2secret",
+     "hunter2secret"),
+    # A credential name, a keyword prefix, a symbol, then a real value: the value after the symbol is the secret.
+    ("api_key with a keyword prefix, a hyphen and a real value", "api_key=" + "return-" + "9fQ2xZ7Lk3",
+     "return-9fQ2xZ7Lk3"),
+    ("token with a keyword prefix, a plus and a real value", "token=" + "void+" + "Ab3dEf7Hi9", "void+Ab3dEf7Hi9"),
+    ("SECRET with a keyword prefix, a tilde and a real value", "SECRET=" + "typeof~" + "Kq8LmZ2xW", "typeof~Kq8LmZ2xW"),
+    # A URL password may hold a closing paren, a quote, a brace or a pair of bars, and an IPv6 host is in brackets: the
+    # credential is still in the URL, so each row refuses.
+    ("URL password with a closing paren on a host name", "postgres://app:" + "Qz9Lk2Xm7)" + "@localhost:5432/db", "Qz9Lk2Xm7)"),
+    ("URL password with a quote inside it", "postgres://app:" + "O'Neil2020" + "@localhost/db", "O'Neil2020"),
+    ("URL password with a brace on a MySQL host with a port", "mysql://root:" + "pa}ss" + "@db:3306/app", "pa}ss"),
+    ("URL password on a bracketed IPv6 host", "postgres://app:" + "Qz9Lk2Xm7" + "@[::1]:5432/db", "Qz9Lk2Xm7"),
+    ("URL password with two bars and a bare host", "https://u:" + "p||" + "@h", "p||"),
+    # A minified boolean is no value, and a member after it can hold one: each member after the boolean is checked alone.
+    ("password word, a boolean, then pwd with a real value", "password:" + "!0," + "pwd:" + "hunter2", "hunter2"),
+    ("password word, a boolean, then password with a real value", "password:" + "!0," + "password:" + "hunter2", "hunter2"),
+    ("password word, a boolean, then token with a real value", "password:" + "!0," + "token:" + "hunter2", "hunter2"),
+    ("password word, a boolean, then pass with a real value", "password:" + "!0," + "pass:" + "Tr0ub4dor", "Tr0ub4dor"),
+    ("password word, a boolean, then a semicolon assignment", "password:" + "!0;" + "a=" + "hunter2", "hunter2"),
+    ("password word, a boolean, then a brace and a pwd assignment", "password:" + "!0};" + "pwd=" + "hunter2", "hunter2"),
+    # Hole 1: a connection string built by concatenation. The password before the `@` is a literal, and the host after
+    # the `@` is code, so the literal is still a credential in the URL.
+    ("concatenated postgres DSN with a literal password and a code host",
+     'dsn = "postgres://admin:' + SUP_PASSWORD + '@" + host + "/app"', SUP_PASSWORD),
+    ("concatenated mongodb URL with a literal password and a code host",
+     "'mongodb://admin:" + SUP_PASSWORD + "@' + HOST", SUP_PASSWORD),
+    ("concatenated mysql URL with a literal password and an environ host",
+     '"mysql://root:' + PASSWORD + '@" + os.environ["DB_HOST"]', PASSWORD),
+    # Hole 2: a literal password before a template or shell host. The host is a placeholder, so the password is a secret.
+    ("postgres URL with a literal password and a braced template host",
+     "postgres://admin:" + SUP_PASSWORD + "@{db_host}/app", SUP_PASSWORD),
+    ("postgres URL with a literal password and a double-braced template host",
+     "postgres://admin:" + SUP_PASSWORD + "@{{ db_host }}/app", SUP_PASSWORD),
+    ("postgres URL with a literal password and a braced host with a port",
+     "postgres://admin:" + SUP_PASSWORD + "@{host}:5432", SUP_PASSWORD),
+    ("postgres URL with a literal password and an angle-bracket host",
+     "postgres://admin:" + SUP_PASSWORD + "@<host>/app", SUP_PASSWORD),
+    ("postgres URL with a literal password and a bare shell host",
+     "postgres://admin:" + SUP_PASSWORD + "@$HOST/app", SUP_PASSWORD),
+    ("postgres URL with a literal password and a braced shell host",
+     "postgres://admin:" + SUP_PASSWORD + "@${HOST}/app", SUP_PASSWORD),
+    # A literal password may hold a code character, one of + | ( ) [ ] { }, and the host after its @ may be code, a quote,
+    # a brace or a bracket. The password is still a literal before the @, so the URL carries a credential.
+    ("concatenated DSN with a plus in the literal password, then @ and a quote",
+     'dsn = "postgres://admin:' + "Pa+ss" + '@" + host', "Pa+ss"),
+    ("postgres URL with a plus in the literal password and a braced template host",
+     "postgres://admin:" + "Pa+ss" + "@{db_host}/app", "Pa+ss"),
+    ("https URL with two bars in the literal password, then @ and a quote",
+     "https://u:" + "p||" + '@"+h', "p||"),
+    ("https URL with two bars in the literal password and a braced host",
+     "https://u:" + "p||" + "@{h}", "p||"),
+    ("postgres URL with parens in the literal password and a braced host",
+     "postgres://admin:" + "p(w)" + "@{host}/app", "p(w)"),
+    # A templated or shell user does not make the password a placeholder. The literal after the user's colon is the credential,
+    # whatever the host is: a dotless host, a templated host or a braced one.
+    ("postgres URL with a templated user, a literal password and a dotless host",
+     "postgres://{user}:" + SUP_PASSWORD + "@localhost:5432/app", SUP_PASSWORD),
+    ("f-string postgres URL with a templated user, a literal password and a templated host",
+     'f"postgres://{user}:' + SUP_PASSWORD + '@{host}/app"', SUP_PASSWORD),
+    ("postgres URL with a shell-variable user, a literal password and a braced template host",
+     "postgres://${USER}:" + SUP_PASSWORD + "@{db_host}/app", SUP_PASSWORD),
+    # A templated user that is not a whole {word} does not make the password a placeholder. The literal after the user's
+    # colon is the credential, whatever the template form and whatever the dotted host. Today the email rule refuses these
+    # rows, since Hunter2xx@db.example.com reads as an address; the family after the postgres rows is the one that pins
+    # the URL-credentials rule.
+    ("postgres URL with an attribute user, a literal password and a dotted host",
+     "postgres://{cfg.user}:" + HUNTER_PASSWORD + "@db.example.com/app", HUNTER_PASSWORD),
+    ("postgres URL with a self attribute user, a literal password and a dotted host",
+     "postgres://{self.user}:" + HUNTER_PASSWORD + "@db.example.com/app", HUNTER_PASSWORD),
+    ("postgres URL with a double-braced user, a literal password and a dotted host",
+     "postgres://{{user}}:" + HUNTER_PASSWORD + "@db.example.com/app", HUNTER_PASSWORD),
+    ("postgres URL with a percent-format user, a literal password and a dotted host",
+     "postgres://%(user)s:" + HUNTER_PASSWORD + "@db.example.com/app", HUNTER_PASSWORD),
+    ("postgres URL with a dotted shell-variable user, a literal password and a dotted host",
+     "postgres://${var.db_user}:" + HUNTER_PASSWORD + "@db.example.com/app", HUNTER_PASSWORD),
+    ("postgres URL with a conversion-flag user, a literal password and a dotted host",
+     "postgres://{user!r}:" + HUNTER_PASSWORD + "@db.example.com/app", HUNTER_PASSWORD),
+    ("postgres URL with an indexed user, a literal password and a dotted host",
+     "postgres://{cfg[user]}:" + HUNTER_PASSWORD + "@db.example.com/app", HUNTER_PASSWORD),
+    # A literal password may hold a quote. The quote sits in the password, so a quote or a brace after the @ is still a host.
+    ("postgres URL with a quote in the literal password, then @ and a quote and a plus",
+     "postgres://admin:" + QUOTE_PASSWORD + '@"+h', QUOTE_PASSWORD),
+    ("f-string URL with a double quote in the literal password and a braced template host",
+     'f"postgres://admin:' + QUOTE_IN_PASSWORD + '@{host}/db"', QUOTE_IN_PASSWORD),
     # A key word inside a longer name is a credential name too. The stem of an everyday word (mon, turn, hoc) is no
     # reason to skip it. The value is the one the turnkey control in GREEN uses.
     ("commonKey with a value of letters and digits", "commonKey: " + GLUED_VALUE, GLUED_VALUE),
@@ -395,10 +501,69 @@ RED = [
     # Control for the pin above: the same 200 letters with no digit are refused by the letters-only branch at any cap.
     ("api_key of 200 letters, one 16-letter block repeated, with no digit", "api_key: " + LETTERS_200, LETTERS_200),
 ]
+# A paren in the password keeps the email rule from reading the dotted host as an address, so only the URL-credentials rule
+# can refuse these. Each templated user form must refuse on its own.
+TEMPLATED_USERS = ("{cfg.user}", "{self.user}", "{{user}}", "%(user)s", "${var.db_user}", "{user!r}", "{cfg[user]}")
+RED += [("templated user %s, a literal password with a paren and a dotted host" % user,
+         "postgres://" + user + ":" + HUNTER_PASSWORD + "(@db.example.com/app", HUNTER_PASSWORD + "(")
+        for user in TEMPLATED_USERS]
+# Dashed and short vendor-style keys, each set in four credential-name carriers. Each value is joined from parts, so no
+# key-looking literal sits whole in the source. A hyphen-joined value of letters and digits is a key shape, so the
+# hyphen-words rule must not pass it. The underscored row and the six-character last part are refused today; they pin
+# that a fix keeps the refusal.
+DASHED_KEYS = (
+    ("dashed sk live key", "sk-" + "live-" + "ab12"),
+    ("underscored sk live key", "sk_" + "live_" + "ab12"),
+    ("dashed sk test key", "sk-" + "test-" + "ab12"),
+    ("dashed pk live key", "pk-" + "live-" + "ab12"),
+    ("dashed sk live key with a six-character last part", "sk-" + "live-" + "ab12cd"),
+    ("dashed ghp token", "ghp-" + "ab12cd"),
+    ("dashed rk live key", "rk-" + "live-" + "ab12"),
+)
+KEY_CARRIERS = (
+    ("KEY single-quoted", "KEY='%s'"),
+    ("api_key unquoted", "api_key=%s"),
+    ("token with a colon", "token: %s"),
+    ("SECRET_KEY double-quoted", 'SECRET_KEY="%s"'),
+)
+RED += [("%s in %s" % (name, carrier), fmt % value, value)
+        for name, value in DASHED_KEYS for carrier, fmt in KEY_CARRIERS]
+# Dashed vendor-style keys after an unquoted KEY= or token= carrier. A separate tuple: KEY_CARRIERS also feeds the 7-character GREEN rows.
+VENDOR_KEYS = (
+    ("dashed sk proj key", "sk-" + "proj-" + "abcdefgh1"),
+    ("dashed sk ant key", "sk-" + "ant-" + "api03-" + "abcdefg1"),
+    ("dashed stripe live key", "stripe-" + "live-" + "ab12"),
+    ("dashed sk proj live key", "sk-" + "proj-" + "live-" + "ab12"),
+    ("dashed sk key of nine characters", "sk-" + "abcd12"),
+    ("dashed ghp key of eight characters", "ghp-" + "ab12"),
+)
+VENDOR_CARRIERS = (("KEY unquoted", "KEY=%s"), ("token unquoted", "token=%s"))
+RED += [("%s in %s" % (name, carrier), fmt % value, value)
+        for name, value in VENDOR_KEYS for carrier, fmt in VENDOR_CARRIERS]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
 GREEN = [
     ("token budget", "token budget"),
+    # Code text the scan misread: a localStorage key name, a minified JS boolean, a URL-looking run that crosses quotes,
+    # brackets and `|`, and keyCode handling.
+    ("key name of lower-case words joined by hyphens", "KEY='automations-v3-review'"),
+    # Hyphen-joined lower-case words with a digit take the hyphen-words path, the path a fix to the key shape narrows. Each
+    # has a short part (`key`, `v`), so a fix that refuses short parts goes red here.
+    ("key name of hyphen words with a short part and a digit", "KEY='cache-key-v2'"),
+    ("token name of hyphen words with a short part and a digit", "token: page-length-v2"),
+    ("storage key name of hyphen words with a short part and a digit", 'storageKey:"page-length-v2"'),
+    # A keyword word, then a space and a digit, is minified code. It is not a secret, and a keyword-prefix fix must not refuse it.
+    ("minified void 0 after a token word", "token:void 0,"),
+    ("minified JS boolean after a password word", "password:!0"),
+    ("minified code with :// and a colon and @ across quotes and brackets", '"https://a"})];U&&(c=I==null||x:y@b'),
+    # A password made of code, a quote and `+`, then `@` and a quote, is code and not a credential. It must stay green
+    # once the hole rows above refuse a literal password before the `@`.
+    ("code password joined by plus, then @ and a quote", '"http://h:"+port+"@"'),
+    ("code password joined by plus, then @[ and code", '"http://h:"+p+"@["+x'),
+    ("minified keyCode comparison", "e.keyCode===13&&e.preventDefault()"),
+    # The same shapes as a real bundled page has them: booleans in a run, and a switch case on a key event name.
+    ("minified JS booleans in a run after a password word", "password:!0,range:!0,search:!0,tel:!0};function"),
+    ("minified switch case on a key event name", 'switch(a){case "keyup":return-1!==Hj.indexOf(b.keyCode);'),
     ("password manager", "password manager"),
     ("private key rotation", "rotate the private key"),
     # A public key block is not a secret. A fix that drops PRIVATE from the shape would refuse it.
@@ -556,6 +721,11 @@ GREEN = [
     ("CSS custom property ending in token", "--color-token: rgba(0,0,0,0.5);"),
     ("prose with Token before a sentence", "Token: Authorization needed before we continue"),
 ]
+
+# A 7-character value is under the shared 8-character floor on purpose, so each carrier passes.
+SEVEN_CHAR_KEYS = (("dashed sk key of seven characters", "sk-" + "ab12"),)
+GREEN += [("%s in %s" % (name, carrier), fmt % value)
+          for name, value in SEVEN_CHAR_KEYS for carrier, fmt in KEY_CARRIERS]
 
 
 def canonical(data):

@@ -573,13 +573,16 @@ class UpkeepFixture(Fixture):
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "step " + sid)
 
-    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None):
-        """Write the --live file. The sessions and items keys appear only when given. readAt is five minutes old by default."""
+    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None, landed=None):
+        """Write the --live file. The sessions, items and landedPulls keys appear only when given, and landed is written
+        as given (a case may send a value that is not a list). readAt is five minutes old by default."""
         value = {"readAt": read_at or iso_ago(5), "threads": list(threads), "pulls": list(pulls)}
         if sessions is not None:
             value["sessions"] = list(sessions)
         if items is not None:
             value["items"] = items
+        if landed is not None:
+            value["landedPulls"] = landed
         self.write_live(value)
         return value
 
@@ -622,6 +625,15 @@ class UpkeepFixture(Fixture):
         row = {"number": number, "title": title or "lane " + branch, "branch": branch, "draft": True}
         if created is not None:
             row["createdAt"] = created
+        return row
+
+    def pull_row(self, number, branch, head=None, merged=None):
+        """One landedPulls row. head and merged are left out when None, so a case can send a row with neither."""
+        row = {"number": number, "branch": branch}
+        if head is not None:
+            row["head"] = head
+        if merged is not None:
+            row["merged"] = merged
         return row
 
     def created_before(self, minutes, read_ago=5):
@@ -673,6 +685,269 @@ class UpkeepFixture(Fixture):
             self.land(sid, pr, **fields)
             prs[sid] = pr
         return prs
+
+    def no_trailer_on_main(self):
+        """Scope check: main holds no Step trailer, so a landed mark in the case must come from a landedPulls row."""
+        trailers = git(self.repo, "log", "main", "--format=%(trailers:key=Step,valueonly)").strip()
+        self.assertEqual(trailers, "", "main holds a Step trailer, so the case would not show the landedPulls read")
+
+
+class LandedPulls(UpkeepFixture):
+    """Landed marks from the live file's landedPulls rows (closed or merged lane pulls). A row marks its step when its
+    branch is the step or lane/<step>, the step is open, and the row is merged or its head is an ancestor of main.
+    The cases run through build.main, which ignores the key today, so each red is a missing landed entry or a
+    missing printed line. A negative case shares its live file with a row that marks, so an empty result cannot pass."""
+
+    def is_ancestor(self, sha, ref):
+        done = subprocess.run(["git", "-C", str(self.repo), "merge-base", "--is-ancestor", sha, ref], capture_output=True)
+        return done.returncode == 0
+
+    def behind_main(self):
+        """A full sha that main has moved past: the tip before an empty commit lands on main. Leaves HEAD on main."""
+        self.on_main()
+        behind = git(self.repo, "rev-parse", "HEAD").strip()
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "later work on main")
+        return behind
+
+    def off_main(self):
+        """The record branch's tip. Its history shares nothing with main, so main never reaches it."""
+        return git(self.repo, "rev-parse", "roadmap").strip()
+
+    def landed_build(self):
+        """(page, out) of a build from main that reads the live file. A doing step with no lane exits 1."""
+        return self.build_from_main("--live", str(self.live), expect=(0, 1))
+
+    def build_with_head(self, head_of):
+        """A doing c2 whose lane/c2 row names head_of(an ancestor of main) as its head, built from main."""
+        self.commit_step("c2", status="doing", order=2)
+        behind = self.behind_main()
+        self.assertTrue(self.is_ancestor(behind, "main"), "scope: the head must be an ancestor of main")
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[self.pull_row(12, "lane/c2", head=head_of(behind))])
+        return self.landed_build()
+
+    def test_bare_step_branch_row_marks_its_doing_step_landed(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.commit_step("c1", status="doing")  # control: its live session keeps it off the stalled lines
+        self.no_trailer_on_main()
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")],
+                     items=[], landed=[self.pull_row(12, "c2", merged=True)])
+        page, out = self.landed_build()
+        self.assertEqual(build_info(page)["landed"], {"c2": ["#12"]}, "a merged row on branch c2 marks c2 landed")
+        self.assertIn("stalled step: c2 (done: landed in #12)", out.splitlines())
+        self.assertEqual(self.row(out, "landed, waiting for triage to close"), (1, "c2 (#12)"))
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_lane_branch_row_merged_marks_it_whatever_its_head(self):
+        self.commit_step("c2", status="doing", order=2)
+        off = self.off_main()
+        self.assertFalse(self.is_ancestor(off, "main"), "scope: the head must be off main")
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[self.pull_row(12, "lane/c2", head=off, merged=True)])
+        page, out = self.landed_build()
+        self.assertEqual(build_info(page)["landed"], {"c2": ["#12"]}, "merged true marks the step, its head off main or not")
+        self.assertIn("stalled step: c2 (done: landed in #12)", out.splitlines())
+
+    def test_full_sha_head_on_main_marks_its_step_landed(self):
+        page, out = self.build_with_head(lambda sha: sha)
+        self.assertEqual(build_info(page)["landed"], {"c2": ["#12"]}, "an ancestor head marks the step with no merged key")
+        self.assertIn("stalled step: c2 (done: landed in #12)", out.splitlines())
+
+    def test_abbreviated_sha_head_on_main_marks_its_step_landed(self):
+        page, out = self.build_with_head(lambda sha: sha[:7])
+        self.assertEqual(build_info(page)["landed"], {"c2": ["#12"]}, "a 7-character head on main marks the step")
+        self.assertIn("stalled step: c2 (done: landed in #12)", out.splitlines())
+
+    def test_head_not_on_main_marks_nothing(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.commit_step("c3", status="doing", order=3)
+        off = self.off_main()
+        self.assertFalse(self.is_ancestor(off, "main"), "scope: the head must be off main")
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[self.pull_row(12, "lane/c2", head=off, merged=False),
+                                                    self.pull_row(13, "lane/c3", merged=True)])
+        page, _ = self.landed_build()
+        landed = build_info(page)["landed"]
+        self.assertEqual(landed.get("c3"), ["#13"], "control: the merged row on lane/c3 marks c3")
+        self.assertNotIn("c2", landed, "an unmerged row whose head is off main marks nothing")
+
+    def test_row_with_no_usable_head_and_not_merged_marks_nothing(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.commit_step("c3", status="doing", order=3)
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[
+            self.pull_row(14, "lane/c2"),  # no head, not merged
+            self.pull_row(15, "lane/c2", head="nothex"),  # a head that is no sha
+            self.pull_row(16, "lane/c2", merged=False),
+            self.pull_row(17, "lane/c2", merged="true"),  # merged must be the JSON true, not text
+            self.pull_row(18, "lane/c3", merged=True)])  # control
+        page, _ = self.landed_build()
+        landed = build_info(page)["landed"]
+        self.assertEqual(landed.get("c3"), ["#18"], "control: the merged row on lane/c3 marks c3")
+        self.assertNotIn("c2", landed, "a row with no usable head that is not merged marks nothing")
+
+    def test_head_git_cannot_read_marks_nothing(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.commit_step("c3", status="doing", order=3)
+        self.no_trailer_on_main()
+        for head in ("f" * 40, "fffffff"):
+            with self.subTest(head=head):
+                self.publish(sessions=[], items=[], landed=[self.pull_row(19, "lane/c2", head=head),
+                                                            self.pull_row(20, "lane/c3", merged=True)])
+                page, _ = self.landed_build()
+                landed = build_info(page)["landed"]
+                self.assertEqual(landed.get("c3"), ["#20"], "control: the merged row on lane/c3 marks c3")
+                self.assertNotIn("c2", landed, "a head git cannot read marks nothing")
+
+    def test_branch_must_be_the_step_or_its_lane_branch_exactly(self):
+        self.commit_step("c1", status="done")
+        self.commit_step("c2", status="doing", order=2)
+        self.commit_step("c3", status="doing", order=3)
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[
+            self.pull_row(21, "c1", merged=True),  # a done step never reads landed
+            self.pull_row(22, "lane/c2x", merged=True),  # a longer name is not c2's lane
+            self.pull_row(23, "c9", merged=True),  # no such step
+            self.pull_row(24, "feature/c2", merged=True),  # another prefix
+            self.pull_row(25, "lane/c3", merged=True)])  # control
+        page, _ = self.landed_build()
+        landed = build_info(page)["landed"]
+        self.assertEqual(landed.get("c3"), ["#25"], "control: the merged row on lane/c3 marks c3")
+        self.assertEqual(sorted(landed), ["c3"], "only the control step reads landed")
+
+    def test_trailer_and_row_for_one_step_list_each_pr_once(self):
+        self.land("c1", 7)  # a Step trailer on main, from PR #7
+        self.publish(sessions=[], items=[], landed=[self.pull_row(9, "lane/c1", merged=True),
+                                                    self.pull_row(7, "lane/c1", merged=True)])
+        page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(sorted(build_info(page)["landed"]["c1"]), ["#7", "#9"],
+                         "the trailer's PR and the row's PR both name c1, each once")
+
+    def test_no_landed_pulls_key_or_empty_list_keeps_the_trailer_marks(self):
+        # Green on the old code: the trailer marks are unchanged, so this is the control beside the red cases.
+        self.land("c1", 9)
+        self.publish(sessions=[], items=[])
+        page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(build_info(page)["landed"], {"c1": ["#9"]}, "a file with no landedPulls key keeps the trailer mark")
+        self.publish(sessions=[], items=[], landed=[])
+        page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(build_info(page)["landed"], {"c1": ["#9"]}, "an empty landedPulls list keeps the trailer mark")
+
+    def test_bad_rows_are_counted_in_skipped_and_mark_nothing(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.commit_step("c3", status="doing", order=3)
+        self.no_trailer_on_main()
+        bad = ["lane/c2",  # a row that is not an object
+               {"number": "12", "branch": "lane/c2", "merged": True},  # number is text
+               {"number": True, "branch": "lane/c2", "merged": True},  # number is a bool
+               {"branch": "lane/c2", "merged": True}]  # no number
+        self.publish(sessions=[], items=[], landed=bad + [self.pull_row(13, "lane/c3", merged=True)])
+        page, _ = self.landed_build()
+        landed, live = build_info(page)["landed"], build_info(page)["live"]
+        self.assertEqual(landed.get("c3"), ["#13"], "control: the good row beside the bad ones still marks c3")
+        self.assertNotIn("c2", landed, "a bad row marks nothing")
+        self.assertEqual(len(live["skipped"]), 4, "each of the four bad rows is counted in skipped: %r" % (live["skipped"],))
+
+    def test_landed_pulls_that_is_not_a_list_is_skipped_and_marks_nothing(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.no_trailer_on_main()
+        for value in ({"number": 12, "branch": "lane/c2", "merged": True}, "lane/c2"):
+            with self.subTest(value=value):
+                self.publish(sessions=[], items=[], landed=value)
+                page, _ = self.landed_build()
+                self.assertEqual(build_info(page)["landed"], {}, "a landedPulls that is not a list marks nothing")
+                self.assertEqual(len(build_info(page)["live"]["skipped"]), 1,
+                                 "the value is counted in skipped, as the other not-a-list keys are")
+
+    def test_thirty_two_landed_rows_mark_thirty_two_steps(self):
+        for n in range(1, 33):
+            self.write_step("L%02d" % n, dict(STEP, status="doing", order=n))
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "32 steps")
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[self.pull_row(100 + n, "lane/L%02d" % n, merged=True)
+                                                    for n in range(1, 33)])
+        page, _ = self.landed_build()
+        self.assertEqual(build_info(page)["landed"], {"L%02d" % n: ["#%d" % (100 + n)] for n in range(1, 33)},
+                         "every one of the 32 landed rows marks its step")
+
+    def test_landed_todo_step_is_not_ready(self):
+        ready = dict(status="todo", phase="now", note="Brief is written. Ready.")
+        self.commit_step("c2", order=2, **ready)
+        self.commit_step("c3", order=3, **ready)  # control: unlanded, so it is listed
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[self.pull_row(31, "lane/c2", merged=True)])
+        page, _ = self.landed_build()
+        listed = [s["id"] for s in self.ready_block(page)["steps"]]
+        self.assertIn("c3", listed, "control: an unlanded ready step is listed")
+        self.assertNotIn("c2", listed, "a todo step that landed is not ready")
+
+    def test_merged_that_is_not_a_json_bool_skips_the_row_and_marks_nothing(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.commit_step("c3", status="doing", order=3)
+        self.no_trailer_on_main()
+        for merged in ("true", 1):
+            with self.subTest(merged=merged):
+                self.publish(sessions=[], items=[], landed=[self.pull_row(17, "lane/c2", merged=merged),
+                                                            self.pull_row(18, "lane/c3", merged=True)])  # control
+                page, _ = self.landed_build()
+                landed, live = build_info(page)["landed"], build_info(page)["live"]
+                self.assertEqual(landed.get("c3"), ["#18"], "control: the merged row on lane/c3 marks c3")
+                self.assertNotIn("c2", landed, "a merged value that is not a JSON bool marks nothing")
+                self.assertEqual(len(live["skipped"]), 1,
+                                 "the row with a non-bool merged is counted in skipped: %r" % (live["skipped"],))
+
+    def test_a_skipped_landed_pull_row_reads_the_stale_and_pull_reasons_unknown(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[self.pull_row(13, "lane/c2", merged=True)])  # control: nothing skipped
+        page, _ = self.landed_build()
+        live = build_info(page)["live"]
+        self.assertIsNone(live["staleWhy"], "control: a file with no skipped row reads no stale reason")
+        self.assertIsNone(live["pullWhy"], "control: a file with no skipped row reads no pull reason")
+        self.publish(sessions=[], items=[], landed=[{"number": "12", "branch": "lane/c2", "merged": True}])
+        page, _ = self.landed_build()
+        live = build_info(page)["live"]
+        self.assertEqual(live["staleWhy"], "unknown (1 landedPulls rows skipped)",
+                         "a skipped landedPulls row makes the live read unknown, as a skipped pull row does")
+        self.assertEqual(live["pullWhy"], "unknown (1 landedPulls rows skipped)",
+                         "the pull line reads the same unknown reason as the stale read")
+
+    def test_merged_row_with_no_main_ref_marks_nothing(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[self.pull_row(12, "lane/c2", merged=True)])
+        page, _ = self.landed_build()
+        self.assertEqual(build_info(page)["landed"], {"c2": ["#12"]}, "control: with main read, the merged row marks c2")
+        page, out = self.build_from_main("--live", str(self.live), "--main-branch", "nomain", expect=(0, 1))
+        self.assertEqual(build_info(page)["landed"], {},
+                         "with no main ref a merged row marks nothing, as the trailer path reads unknown")
+        self.assertIn("stalled step: c2 (resume, pause or done)", out.splitlines())
+
+    def test_head_with_surrounding_spaces_marks_nothing(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.commit_step("c3", status="doing", order=3)
+        behind = self.behind_main()
+        self.assertTrue(self.is_ancestor(behind, "main"), "scope: the head must be an ancestor of main")
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[self.pull_row(19, "lane/c2", head=" %s " % behind),
+                                                    self.pull_row(20, "lane/c3", head=behind)])  # control
+        page, _ = self.landed_build()
+        landed = build_info(page)["landed"]
+        self.assertEqual(landed.get("c3"), ["#20"], "control: a clean ancestor head marks c3")
+        self.assertNotIn("c2", landed, "a head with surrounding spaces is no sha and marks nothing")
+
+    def test_branch_names_are_case_sensitive(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.commit_step("c3", status="doing", order=3)
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[self.pull_row(21, "LANE/c2", merged=True),
+                                                    self.pull_row(22, "C2", merged=True),
+                                                    self.pull_row(23, "lane/c3", merged=True)])  # control
+        page, _ = self.landed_build()
+        landed = build_info(page)["landed"]
+        self.assertEqual(landed.get("c3"), ["#23"], "control: the merged row on lane/c3 marks c3")
+        self.assertNotIn("c2", landed, "LANE/c2 and C2 are not lane/c2 or c2 and mark nothing")
 
 
 class StaleInProgress(UpkeepFixture):
@@ -3312,11 +3587,11 @@ class IdleLanes(UpkeepFixture):
         """A sessions row for a lane of this repo that names `step`, with its get_session bucket."""
         return session_row(sid, status, "cs-build:lane", "cs-step:" + step, self.REPO, status_bucket=bucket)
 
-    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=()):
+    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=(), landed=None):
         """UpkeepFixture.publish with the items key present: [] unless a case names rows. items=None leaves the key out,
         the file a publisher writes before the waiting page had items."""
         return super().publish(sessions=sessions, pulls=pulls, threads=threads, read_at=read_at,
-                               items=None if items is None else list(items))
+                               items=None if items is None else list(items), landed=landed)
 
     def land(self, steps):
         """Write {step id: fields} on the record branch in one commit. Each step is written whole, from STEP."""
@@ -3732,6 +4007,19 @@ class IdleLanes(UpkeepFixture):
         count, entries = self.archive()
         self.assertEqual(count, 1, "wrong-form buckets read as %r, not one unknown entry" % (entries,))
         self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
+
+    def test_completed_lane_landed_only_by_a_landed_pull_row_is_listed(self):
+        # session_a's step is doing with no Step trailer on main, so only its landedPulls row proves it landed.
+        # session_b is the control: its step is done.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.no_trailer_on_main()
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     landed=[self.pull_row(12, "lane/c1", merged=True)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_b"]),
+                         "the completed lane on the landed step is listed beside the done one: %r" % (entries,))
+        self.assertEqual(self.ids(build.idle_lanes_report(self.repo, str(self.live))), ["session_a", "session_b"],
+                         "the merge tool's read lists the same lanes")
 
 
 class SharedTagNames(unittest.TestCase):

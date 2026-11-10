@@ -4,7 +4,7 @@ Lane brief: <step-slug>. Topic: <topic-slug>. <Plain name of the step>.
 starts it with the tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`. Base: <branch and commit>.
 The coordinator also tags the lane `cs-topic:<topic slug>`, its one topic. The step slug is the step id.
 The guard reads the Topic on the first line and refuses a brief whose Topic differs from that tag (rule `lane-one-topic`), so keep this line first.
-The start prompt is `/effort medium` alone. This brief follows with `send_message` (`agent-model-cap`, the lane effort pin).
+The start names `model` (the lane row's) and `source_url` (the repo). The start prompt is `/effort medium` alone. This brief follows with `send_message` (`agent-model-cap`, the lane effort pin).
 Never rebase onto main after review. Push record-branch edits to that branch only. Only triage publishes the page.
 Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap` before the first Opus spawn and after triage writes a step grant. The guard reads only that local ref. A plain fetch does not write it in a shallow clone.
 
@@ -33,6 +33,7 @@ Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane han
 `~/.claude/bin/merge --lane-lint <pr>` once and report its verdict. It runs
 `bin/ci-job checks --lint` at the PR head: the fast lint steps of the checks job, the STE lint
 among them, and no full suite. A red lane does not hand off.
+Run `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
 
 A fix round is a fresh isolated spawn from the branch head (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
 
