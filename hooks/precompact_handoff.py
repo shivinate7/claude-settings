@@ -744,12 +744,16 @@ def _same_path(a, b):
 
 def backed_premises(transcript, need, handoff):
     """The ids of `need` ([(id, tokens)] from stamp_changes) that the session's own transcript backs, or None when the
-    transcript cannot be read (the caller fails open). Evidence is a read-type tool_use (`_is_read`; a shell call must
-    not write) of the main session after the newest `compact_boundary` record (none: the whole transcript) whose input
+    transcript cannot be read or `need` is not a list of (id, tokens) pairs (the caller fails open). Evidence is a
+    read-type tool_use (`_is_read`; a shell call must not write) of the main session after the newest `compact_boundary` record (none: the whole transcript) whose input
     holds a token of the premise's Source; a premise with no token is backed by any one such call. Not evidence: a
     record of an agent (isSidechain, or an agent_id), a Write or Edit, a send (`_transcript.SEND_TOOLS`), a Read of
     `handoff` itself, and a call whose result failed (`_transcript.failed_tool_use_ids`, over the whole transcript).
     One open of the transcript."""
+    if not isinstance(need, (list, tuple)) or not all(
+            isinstance(pair, (list, tuple)) and len(pair) == 2 and isinstance(pair[0], str)
+            and isinstance(pair[1], (list, tuple)) for pair in need):
+        return None
     lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
     if lint not in sys.path:
         sys.path.insert(0, lint)

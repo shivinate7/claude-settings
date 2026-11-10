@@ -1176,10 +1176,12 @@ def handoff_sections_hit(tool, tool_input, target, cwd, result=False):
     prompt or marker gives none. A Write is refused for any name its text lacks. An Edit or MultiEdit is
     refused only for a name the result lacks and the file holds now: it drops nothing from a handoff that
     already lacked the name. The prompt is read once per call, and both texts are judged against that read.
-    A failed import allows. `result` is handoff_sections_result's value when the caller has it already."""
+    A failed import or a `result` that is not a (before, after) pair of texts allows. `result` is
+    handoff_sections_result's value when the caller has it already."""
     if result is False:
         result = handoff_sections_result(tool, tool_input, target, cwd)
-    if result is None:
+    if result is None or not (isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], str)
+                              and (result[0] is None or isinstance(result[0], str))):
         return ""
     try:
         from precompact_handoff import missing_sections, required_sections
