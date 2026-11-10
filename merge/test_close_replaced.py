@@ -156,7 +156,7 @@ class CloseAsReplaced(CloseEnv):
         self.assertEqual(kind_lines(block, REPLACED), [f"close as replaced: o/alpha #{n} by #{n + 1}" for n in range(1, 12)], "\n".join(block))
 
     def test_a_mutual_replaces_closes_neither(self):
-        # A mutual pair closes neither: #1 says Replaces #2 and #2 says Replaces #1, so closing one would drop both. Control: #8 replaces open #6 and prints.
+        # A mutual pair closes neither: #1 says Replaces #2 and #2 says Replaces #1. Control: #8 replaces open #6 and prints.
         pulls = [named_pull(1, head_of(1), body="Replaces #2"), named_pull(2, head_of(2), body="Replaces #1"),
                  named_pull(6, head_of(6)), named_pull(8, head_of(8), body="Replaces #6")]
         lines = kind_lines(self.block_for_alpha(pulls=pulls), REPLACED)
@@ -242,7 +242,7 @@ class CloseAsCarried(CloseEnv):
         self.assertEqual(kind_lines(block, CARRIED), ["close as carried: o/alpha #5 by #9"], "\n".join(block))
 
     def test_a_replaced_pr_holds_no_carry(self):
-        # A replaced PR holds nothing. #4 holds #3, and #5 names #4 as replaced without holding #3, so #3 must not be carried by #4:
+        # A replaced PR carries nothing. #4's head holds #3, and #5 names #4 as replaced without holding #3, so #3 must not be carried by #4:
         # #3 gets no carried line, and the replaced line for #4 prints.
         pulls = [named_pull(3, head_of(3)), named_pull(4, head_of(4)), named_pull(5, head_of(5), body="Replaces #4")]
         host = closed_host("o/alpha", pulls=pulls, comments=[record_of(3, head_of(3))], check_rows={head_of(3): green()},
@@ -252,7 +252,7 @@ class CloseAsCarried(CloseEnv):
         self.assertEqual(kind_lines(block, CARRIED), [], "#3 is carried by #4, which is named replaced:\n" + "\n".join(block))
 
     def test_a_done_pr_held_only_by_a_replaced_pr_stays_on_the_batch_line(self):
-        # Pin: #4 is the only PR whose head holds #3, and #5 names #4 as replaced. #4 holds
+        # Pin: #4 is the only PR whose head holds #3, and #5 names #4 as replaced. #4 carries
         # nothing for the carried check, so #3 gets no carried line and stays on the batch line.
         pulls = [named_pull(3, head_of(3)), named_pull(4, head_of(4)), named_pull(5, head_of(5), body="Replaces #4")]
         host = closed_host("o/alpha", pulls=pulls, comments=[record_of(3, head_of(3))], check_rows={head_of(3): green()},
@@ -262,7 +262,7 @@ class CloseAsCarried(CloseEnv):
         self.assertEqual(batch_lines_of(block), ["open batch now: o/alpha #3"], "#3 left the batch line although only a replaced PR holds it:\n" + "\n".join(block))
 
     def test_an_identical_head_under_a_replaced_lower_is_not_carried(self):
-        # A replaced PR holds nothing: #10 is named replaced by #12. #11 has #10's head, so #10 would carry it, but #10 holds nothing.
+        # #10 is named replaced by #12, so #10 carries nothing. #11 has #10's head, and would be carried by #10 if #10 counted.
         same = head_of(10)
         pulls = [named_pull(10, same), named_pull(11, same), named_pull(12, head_of(12), body="Replaces #10")]
         host = closed_host("o/alpha", pulls=pulls, comments=[record_of(11, same)], check_rows={same: green()})
