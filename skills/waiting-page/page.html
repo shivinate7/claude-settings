@@ -1220,7 +1220,7 @@ const answerable = () => [...state.items, ...state.rulings];
 // The owner's saved answer. A ruling was an open item once, so a record under its id that is no overturn is stale and counts as none.
 const savedOf = (it) => { const a = state.answers[it.id]; return a && (!isRuling(it) || a.choice === OVERTURN) ? a : undefined; };
 const isSaved = (it) => !!savedOf(it) && !state.changing[it.id];
-// An item the owner answered that now waits on a CI run or a PR: `waits` and `lastAnswer` are both set. The page keeps no answers record for it.
+// An item the owner answered that now waits off the page, on a CI run, a PR or a lane: `waits` or `lane`, and `lastAnswer`, are set. The page keeps no answers record for it.
 // savedOf and isSaved stay out of this on purpose (Withdraw and the receipts read them), so each place that counts it asks here too.
 const waitsOf = (it) => {
   const w = it.waits;
@@ -1231,7 +1231,7 @@ const waitsOf = (it) => {
   if (num(w.pr)) return { repo: w.repo, pr: w.pr };
   return null;
 };
-const answeredByWait = (it) => !!waitsOf(it) && !!lastOf(it);
+const answeredByWait = (it) => (!!waitsOf(it) || !!laneOf(it)) && !!lastOf(it);
 // Drawn as answered on the page: a saved answer, or answered by its wait. A Change on either draws it as open again, until the next Send.
 const isByWait = (it) => !isRuling(it) && answeredByWait(it) && !savedOf(it) && !state.changing[it.id];
 const isAnswered = (it) => isSaved(it) || isByWait(it);
@@ -2065,7 +2065,7 @@ function renderRail() {
     h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
     h("div", { class: "sub" + (ready ? "" : " none") }, h("i", { class: "sw" }), ready + " ready to send"),
     h("div", { class: "track", "aria-hidden": "true" }, h("i", { class: "s", style: "width:" + (total ? (sent / total) * 100 : 0) + "%" }), h("i", { class: "r", style: "width:" + (total ? (ready / total) * 100 : 0) + "%" })))];
-  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : isByWait(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : isByWait(it) ? ", answered, waits on " + waitWords(waitsOf(it)) : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => { if (isSunk(it) && !state.answeredOpen) { state.answeredOpen = true; render(); } jump("item-" + it.id); } }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, shortOf(it)));
+  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : isByWait(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : isByWait(it) ? ", answered, waits on " + (waitsOf(it) ? waitWords(waitsOf(it)) : "lane " + laneOf(it)) : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => { if (isSunk(it) && !state.answeredOpen) { state.answeredOpen = true; render(); } jump("item-" + it.id); } }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, shortOf(it)));
   // The chips of a tier or of the Answered section, a group's chips side by side.
   const chipRow = (list) => {
     const row = h("div", { class: "chips-n" }), seen = new Set();

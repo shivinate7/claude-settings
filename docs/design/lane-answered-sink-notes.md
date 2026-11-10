@@ -10,7 +10,7 @@ The sample: the page loaded at 15:32. In Blocking, the owner sent No. 21, No. 25
 open. No. 61 arrived at 15:40, like page item 309.
 
 Settled by the rulings of Nov 6:
-- A lane item sinks only when its answers record exists (`isSaved`), as the base does. No lane + `lastAnswer` predicate (coordinator, 15:47 CST).
+- A lane item sinks only when its answers record exists (`isSaved`), as the base does. A lane item with `lastAnswer` and no answers row sinks too, folded, and stays open (owner page item 477, Nov 10, 09:06 CST; see `answered-lane-no-row-notes.md`).
 - Owner, page item 311 (page save 21:51:10Z): in each tier, every open card always sits above every card answered on this visit.
   Arrivals after load go first. A Send moves the sent card below the open ones, and a Change brings it back
   up. His words: "ux-order-holds-still ... is applied too strictly and is taking me away from the outcome i want here".
