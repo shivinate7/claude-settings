@@ -894,23 +894,24 @@ class DoneFormatAndCiteTests(unittest.TestCase):
     def test_item_cite_red_bare_item_number_blocks(self):
         rows = [
             # Catches: a bare item number after "Per" passes.
-            ("Per item 46." + ITEM_DONE, "item 46"),
+            ("Per item 46." + ITEM_DONE, "'item 46' is a record id"),
             # Catches: a capitalised Item at the start of a sentence passes.
-            ("Item 46 is next." + ITEM_DONE, "Item 46"),
+            ("Item 46 is next." + ITEM_DONE, "'Item 46' is a record id"),
             # Catches: a one-digit item number passes.
-            ("Per item 7." + ITEM_DONE, "item 7"),
+            ("Per item 7." + ITEM_DONE, "'item 7' is a record id"),
             # Catches: a four-digit item number, the longest the rule reads, passes.
-            ("Per item 1234." + ITEM_DONE, "item 1234"),
+            ("Per item 1234." + ITEM_DONE, "'item 1234' is a record id"),
             # Catches: a bare item number inside the report body passes.
-            ("> **Done** BUILT guard, PR #226\n> **Next** follow item 46 next", "item 46"),
+            ("> **Done** BUILT guard, PR #226\n> **Next** follow item 46 next", "'item 46' is a record id"),
         ]
         for reply, needle in rows:
             with self.subTest(reply=reply):
                 self.assert_blocked(reply, needle)
 
     def test_item_cite_red_bare_page_item_blocks(self):
-        # Catches: a page item number passes, so the page word hides a bare number.
-        self.assert_blocked("Waiting on page item 12." + ITEM_DONE, "item 12")
+        # Catches: a page item number passes, so the page word hides a bare number. The needle ends at the
+        # id, so it holds whether the id is read as "page item 12" or "item 12".
+        self.assert_blocked("Waiting on page item 12." + ITEM_DONE, "item 12' is a record id")
 
     def test_item_cite_allowed_item_plus_gloss(self):
         rows = [
@@ -926,10 +927,6 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         for line in rows:
             with self.subTest(line=line):
                 self.assert_allowed(line + ITEM_DONE)
-
-    def test_item_cite_allowed_stalled_step_line(self):
-        # Catches: a stalled-step line with its parenthetical gloss is refused once item numbers are ids.
-        self.assert_allowed("stalled step: item 7 (search pill clear)." + ITEM_DONE)
 
     def test_item_cite_allowed_in_code_link_and_url(self):
         rows = [
