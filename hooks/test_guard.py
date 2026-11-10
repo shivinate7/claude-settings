@@ -35774,6 +35774,12 @@ role_model_allow("role-model: served-model: record-writer with no model is allow
                  "pins haiku)", "record-writer", None, "Record the decision.", env=UNSET_DEFAULT)
 role_model_allow("role-model: served-model: record-writer with no model is allowed when the default is sonnet",
                  "record-writer", None, "Record the decision.", env=SONNET_DEFAULT)
+# The two edges of the fix check refusals, green on the old code too. The refusals lift a reviewer only, so a builder with no
+# model and the marker passes the default. A reviewer on Sonnet with the marker passes its lift, and the below-Sonnet test stops at Sonnet.
+role_model_allow("role-model: served-model: fix check, builder with no model and the marker is allowed when the default is sonnet",
+                 "builder", None, FIX_MARKER + ". Re-run the cases.", env=SONNET_DEFAULT)
+role_model_allow("role-model: served-model: fix check, reviewer on sonnet with the marker is allowed, the lift is to sonnet",
+                 "reviewer", "sonnet", FIX_MARKER + ". Re-run the cases.")
 
 # A reviewer's refusal names each brief form that lifts it above its row: rounds 2 and 3, and the fix check on line one.
 # It also says the first round and the test-author run on their role's model. A builder's refusal names none of these.
