@@ -1217,16 +1217,16 @@ OTHER_CHECKOUT_REASON = (
     "Rule (other checkout): this write lands in another checkout of this clone, not the one this "
     "session stands in. "
     "Remedy: write only inside your own checkout, or report the change to the session that owns "
-    "the other one. To remove a whole worktree, use `git worktree remove`, or leave it to the "
-    "janitor sweep."
+    "the other one. To work in a checkout you own, call the EnterWorktree tool with `path` set to "
+    "it. To remove a whole worktree, use `git worktree remove`, or leave it to the janitor sweep."
 )
 
 OTHER_CHECKOUT_CD_DETAIL = "cd into another checkout: "
 OTHER_CHECKOUT_CD_REASON = (
     "Rule (other checkout): this command changes directory into another checkout of this clone, "
     "not the one this session stands in. "
-    "Remedy: stay in your own checkout. To read another one, use `git -C <dir>` or a path, never "
-    "`cd`."
+    "Remedy: stay in your own checkout. To work in a checkout you own, call the EnterWorktree tool "
+    "with `path` set to it. To read another one, use `git -C <dir>` or a path."
 )
 
 OTHER_CLONE_DETAIL = "write into another clone: "
