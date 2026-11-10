@@ -105,7 +105,8 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, f
       return { threadId: target.threadId || "t-new-" + window.__sent.length, commentId: "c" + window.__sent.length };
     },
   };
-  window.claude = { use: async (cap) => { window.__uses.push(cap); return cap === "db" ? (noStore ? null : db) : cap === "comments" ? (cm || null) : null; } };
+  // The page draws only once its faces have loaded, so a first fit is measured in the served font, never a fallback.
+  window.claude = { use: async (cap) => { await Promise.all([...document.fonts].map((f) => f.load().catch(() => {}))); window.__uses.push(cap); return cap === "db" ? (noStore ? null : db) : cap === "comments" ? (cm || null) : null; } };
 }
 
 let browser;
@@ -117,6 +118,77 @@ function pageName() {
   return m[1];
 }
 after(async () => { if (browser) await browser.close(); });
+
+// Fonts. The page asks Google Fonts for Atkinson Hyperlegible Next and IBM Plex Mono. The harness answers that request with the faces in
+// testing/fonts (SIL OFL 1.1, each licence beside its files), so the served run measures the page's own faces on any machine. The
+// fallback run forces DejaVu Sans, the family the ubuntu CI runner resolves system-ui to, onto every role the page sets, so a layout
+// claim also holds where the web fonts fail. Pins are absolute boxes measured in the served run only (see layoutTest).
+const FONT_DIR = path.join(HERE, "..", "..", "..", "testing", "fonts");
+const SERVED_FONTS = [
+  { family: "Atkinson Hyperlegible Next", weight: "200 800", file: "atkinsonhyperlegiblenext/AtkinsonHyperlegibleNext[wght].ttf" },
+  { family: "IBM Plex Mono", weight: "400", file: "ibmplexmono/IBMPlexMono-Regular.ttf" },
+  { family: "IBM Plex Mono", weight: "500", file: "ibmplexmono/IBMPlexMono-Medium.ttf" },
+  { family: "IBM Plex Mono", weight: "600", file: "ibmplexmono/IBMPlexMono-SemiBold.ttf" },
+];
+const FALLBACK_FONT = { label: "DejaVu Sans", family: "DejaVu Sans", mono: "DejaVu Sans Mono" };
+const fontUrl = (file) => ORIGIN + "fonts/" + file.split("/").map(encodeURIComponent).join("/");
+const SERVED_FONT_CSS = SERVED_FONTS.map((f) => `@font-face { font-family: "${f.family}"; font-style: normal; font-weight: ${f.weight}; font-display: swap; src: url("${fontUrl(f.file)}") format("truetype"); }`).join("\n");
+const SERVED_FONT_FILES = new Map(SERVED_FONTS.map((f) => [fontUrl(f.file), path.join(FONT_DIR, f.file)]));
+// The override is part of the page the route serves, so it holds from first paint and after a reload. An addStyleTag would fail both.
+// The served run sets the wordmark's --wm to a served face (the page's default is system-ui); the fallback run sets every role.
+const fontOverride = (font) => `<style id="harness-font">:root { ${font
+  ? `--body: "${font.family}", sans-serif !important; --wm: "${font.family}", sans-serif !important; --mono: "${font.mono}", monospace !important;`
+  : `--wm: "Atkinson Hyperlegible Next", sans-serif !important;`} }</style>`;
+// The stand-in origin serves the page and its served font files. The Google Fonts stylesheet (any host path) gets the served faces.
+// Any other request is refused.
+const serveRequest = (r, body) => {
+  const url = r.request().url();
+  if (url === ORIGIN) return r.fulfill({ contentType: "text/html; charset=utf-8", body });
+  if (url.startsWith("https://fonts.googleapis.com/")) return r.fulfill({ contentType: "text/css; charset=utf-8", body: SERVED_FONT_CSS });
+  if (SERVED_FONT_FILES.has(url)) return r.fulfill({ path: SERVED_FONT_FILES.get(url), contentType: "font/ttf" });
+  return r.abort();
+};
+// The test context carries its font run: FALLBACK_FONT, or nothing for the served font. open(t) reads it, so no case passes a font down.
+const FONT_RUN = new WeakMap();
+const runFont = (t) => FONT_RUN.get(t) || null;
+const fontName = (t) => (runFont(t) ? runFont(t).label : "served");
+// A layout case runs twice: in the served font, and in the fallback. Absolute pins (PINS, PIN_ASK, REPLY_PINS) are plain tests: their numbers
+// are the served font's, and a fallback run of them would measure a different page.
+const layoutTest = (name, fn) => {
+  test(`${name}, served font`, (t) => { FONT_RUN.set(t, null); return fn(t); });
+  test(`${name}, ${FALLBACK_FONT.label} fallback`, (t) => { FONT_RUN.set(t, FALLBACK_FONT); return fn(t); });
+};
+// Served run: every face the page names must load, or the case fails. A face that never loads would measure the fallback.
+const assertServedFonts = async (page) => {
+  const faces = await page.evaluate(async () => {
+    await Promise.all([...document.fonts].map((f) => f.load().catch(() => {})));
+    return [...document.fonts].map((f) => ({ family: f.family, weight: f.weight, status: f.status }));
+  });
+  assert.equal(faces.length, SERVED_FONTS.length, `the page declares ${faces.length} font faces, not ${SERVED_FONTS.length}: ${JSON.stringify(faces)}`);
+  for (const f of faces) assert.equal(f.status, "loaded", `the ${f.family} face at weight ${f.weight} is ${f.status}, not loaded`);
+  const bodyFont = await page.evaluate(() => getComputedStyle(document.body).fontFamily);
+  assert.ok(bodyFont.startsWith('"Atkinson Hyperlegible Next"'), `the page's body font is ${bodyFont}, not the served Atkinson Hyperlegible Next`);
+};
+// Fallback run: the forced family must be installed and must reach the page's text. A family that is not installed measures the same as
+// the fallback, so the case fails rather than prove nothing.
+const assertFallbackFont = async (page, family) => {
+  const f = await page.evaluate((family) => {
+    const cs = getComputedStyle(document.body);
+    const width = (fam) => {
+      const s = document.createElement("span");
+      s.textContent = "Organize";
+      s.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font:${cs.fontWeight} ${cs.fontSize} ${fam}`;
+      document.body.append(s);
+      const w = s.getBoundingClientRect().width;
+      s.remove();
+      return w;
+    };
+    return { bodyFamily: cs.fontFamily, namedSerif: width(`"${family}", serif`), namedMono: width(`"${family}", monospace`), noneSerif: width('"No Such Font 7f3a", serif'), noneMono: width('"No Such Font 7f3a", monospace') };
+  }, family);
+  assert.notEqual(f.noneSerif, f.noneMono, "the font probe cannot tell a serif fallback from a monospace one on this runner");
+  assert.ok(Math.abs(f.namedSerif - f.namedMono) < 0.01, `"${family}" is not installed on this runner (the probe fell back to another font), so this run would prove nothing about it`);
+  assert.ok(f.bodyFamily.startsWith(`"${family}"`), `the page's body font is ${f.bodyFamily}, not "${family}": the forced font did not reach the page`);
+};
 
 // clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
 // only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
@@ -130,10 +202,10 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   page.setDefaultTimeout(Number(process.env.WP_TIMEOUT) || 5000);
   t.after(() => page.close());
   await page.emulateMedia({ colorScheme: scheme });
-  const body = designData ? pageHtml.replace(DESIGN_SLOT, `<script type="application/json" id="designData">${JSON.stringify(designData).replace(/</g, "\\u003c")}</script>`) : pageHtml;
+  const font = runFont(t);
+  const body = (designData ? pageHtml.replace(DESIGN_SLOT, `<script type="application/json" id="designData">${JSON.stringify(designData).replace(/</g, "\\u003c")}</script>`) : pageHtml) + fontOverride(font);
   // The page is served from a stand-in origin, so the init script and localStorage both apply.
-  // Every other request (the fonts) is refused.
-  await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
+  await page.route("**/*", (r) => serveRequest(r, body));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
   await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText, failUpdate, comments, meta, groups, receipts, holdReceipts, dbExtra, noStore, hold });
   await page.addInitScript(({ kv, keep }) => { for (const k in kv) { if (keep && localStorage.getItem(k) !== null) continue; localStorage.setItem(k, kv[k]); } }, { kv: storage, keep: keepStorage });
@@ -141,6 +213,7 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
   if (clock) await page.clock.setFixedTime(new Date(clock));
   await page.goto(ORIGIN);
+  if (font) await assertFallbackFont(page, font.family); else await assertServedFonts(page);
   // With no store there are no items to wait for: the page is loaded once its empty state is drawn.
   if (noStore) { await page.waitForFunction("state.loaded"); return page; }
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
@@ -826,7 +899,7 @@ const settleFit = (page, id) => page.waitForFunction((sel) => new Promise((done)
 }), boxSel(id), { polling: 50 });
 
 for (const width of [390, 1440]) {
-  test(`a tall picture in a 480px box draws min(221.8, column - 2 - gutter) wide and fills its box, with no sideways scroll, at ${width} wide`, async (t) => {
+  layoutTest(`a tall picture in a 480px box draws min(221.8, column - 2 - gutter) wide and fills its box, with no sideways scroll, at ${width} wide`, async (t) => {
     const it = picItem("scroll-width", 57);
     const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width, height: 900 } }); if (!page) return;
     await frameSettled(page, 2400);
@@ -1122,7 +1195,7 @@ test("a picture that differs from its siblings keeps its 3px border inside its b
   assert.ok(m.sh - m.ch > 100 && Math.abs(m.fw - m.cw) <= 1, "the differing picture does not scroll at the content width");
 });
 
-test("a tall picture adds no sideways scroll to the page at 390 wide, even scrolled to its end", async (t) => {
+layoutTest("a tall picture adds no sideways scroll to the page at 390 wide, even scrolled to its end", async (t) => {
   const it = picItem("sideways", 54);
   const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 } }); if (!page) return;
   await frameSettled(page, 2400);
@@ -1211,7 +1284,7 @@ test("option rows line up across sibling cards when only one option has a design
 });
 
 for (const scheme of ["light", "dark"]) {
-  test(`an option design fits a phone with no sideways scroll, ${scheme} scheme`, async (t) => {
+  layoutTest(`an option design fits a phone with no sideways scroll, ${scheme} scheme`, async (t) => {
     const it = mk("phone-design", 1, { options: [opt("a", "Red", "s1"), opt("b", "Blue")] });
     const page = await open(t, { items: [it], designData: DESIGNS, viewport: { width: 375, height: 800 }, scheme }); if (!page) return;
     const f = page.locator(optFrame(it, "a"));
@@ -1346,7 +1419,7 @@ test("the note box is open on every unseen open card, with no Add a note button,
 });
 
 // The send bar is fixed at the bottom of the viewport. The page is scrolled so the note box starts 2px above the bar's top.
-test("a focused note box at 390 wide ends above the send bar", async (t) => {
+layoutTest("a focused note box at 390 wide ends above the send bar", async (t) => {
   const it = mk("note-low", 62, { context: LONG });
   const page = await open(t, { items: [mk("filler-a", 60, { context: LONG }), it, mk("filler-b", 61, { context: LONG })], viewport: { width: 390, height: 844 } }); if (!page) return;
   const edge = (id) => page.evaluate((k) => ({ bottom: document.getElementById(k).getBoundingClientRect().bottom, barTop: document.getElementById("bar").getBoundingClientRect().top }), id);
@@ -2646,7 +2719,7 @@ for (const width of [390, 1440]) {
     assert.ok(m.viewH >= 40, "the View control is under 40px high: " + m.viewH);
   });
 
-  test(`the viewer head is one row, and the mockup is whole and centered, at ${width} wide`, async (t) => {
+  layoutTest(`the viewer head is one row, and the mockup is whole and centered, at ${width} wide`, async (t) => {
     const it = viewerItem();
     const page = await open(t, { items: [it], designData: { ...VIEWER_DATA, "v-a": FULLW }, viewport: { width, height: 900 } }); if (!page) return;
     // Stand-in for CI's wider fallback font: the one-row head is then wider than a phone.
@@ -2683,7 +2756,7 @@ for (const width of [390, 1440]) {
   });
 }
 
-test("a viewer whose head cuts the title names the design in a one-line caption above it", async (t) => {
+layoutTest("a viewer whose head cuts the title names the design in a one-line caption above it", async (t) => {
   const it = viewerItem();
   const page = await open(t, { items: [it], designData: { ...VIEWER_DATA, "v-a": FULLW }, viewport: { width: 390, height: 900 } }); if (!page) return;
   // Stand-in for CI's wider fallback font, so the head cuts "Layout A (Phone)" at 390.
@@ -2811,7 +2884,7 @@ test("the asks list is newest first by at, whatever order the records came in", 
   assert.ok(top["Newest ask text"] < top["Middle ask text"] && top["Middle ask text"] < top["Oldest ask text"], "the asks are not newest first: " + JSON.stringify(top));
 });
 
-test("a seen answer folds to one button row, and Show answer opens its reply", async (t) => {
+layoutTest("a seen answer folds to one button row, and Show answer opens its reply", async (t) => {
   const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: { "waiting.askSeen": "2026-10-31T00:00:00Z" } }); if (!page) return;
   await shownBox(page, ASK_ANSWERED.text);
   assert.equal(await page.getByText(ASK_ANSWERED.reply, { exact: true }).isVisible(), false, "a seen answer is open");
@@ -2952,12 +3025,12 @@ const pressGeo = (page, id) => page.evaluate((id) => {
 
 // Add to list and Send ask do not overlap, and no press covers the row's text, at 280, 240 and 180 wide.
 for (const width of [280, 240, 180]) for (const scheme of SCHEMES) {
-  test(`press rows, ${scheme}: at ${width} wide Add to list and Send ask do not overlap`, async (t) => {
+  layoutTest(`press rows, ${scheme}: at ${width} wide Add to list and Send ask do not overlap`, async (t) => {
     const page = await foldedRowPage(t, "dismiss", width, scheme); if (!page) return;
     const g = await pressGeo(page, FOLD_ROWS.dismiss.ask.id);
     assert.ok(!meets(g.add, g.send), `Add to list (${spanOf(g.add)}) and Send ask (${spanOf(g.send)}) overlap at ${width} wide`);
   });
-  for (const kind of PRESS_KINDS) test(`press rows, ${scheme}: at ${width} wide the ${FOLD_ROWS[kind].press} press does not cover the ${kind} row's text`, async (t) => {
+  for (const kind of PRESS_KINDS) layoutTest(`press rows, ${scheme}: at ${width} wide the ${FOLD_ROWS[kind].press} press does not cover the ${kind} row's text`, async (t) => {
     const page = await foldedRowPage(t, kind, width, scheme); if (!page) return;
     const id = FOLD_ROWS[kind].ask.id;
     foldedScope(await foldedDate(page, id), kind, width);
@@ -2969,7 +3042,7 @@ for (const width of [280, 240, 180]) for (const scheme of SCHEMES) {
 
 // The text column beside a side press is at least 8em of the root font size at 280 and 240 wide, and at least 90 px at 180 (the mockup's floor).
 for (const width of [280, 240]) for (const kind of SIDE_KINDS) for (const scheme of SCHEMES) {
-  test(`press rows, ${scheme}: at ${width} wide the ${kind} row's text column beside its press is at least 8em`, async (t) => {
+  layoutTest(`press rows, ${scheme}: at ${width} wide the ${kind} row's text column beside its press is at least 8em`, async (t) => {
     const page = await foldedRowPage(t, kind, width, scheme); if (!page) return;
     const id = FOLD_ROWS[kind].ask.id;
     foldedScope(await foldedDate(page, id), kind, width);
@@ -2991,7 +3064,7 @@ for (const kind of SIDE_KINDS) for (const scheme of SCHEMES) {
 
 // At 180 wide the page does not scroll sideways: a row or the Ask box must not run past the window.
 for (const scheme of SCHEMES) {
-  test(`press rows, ${scheme}: at 180 wide the page does not scroll sideways`, async (t) => {
+  layoutTest(`press rows, ${scheme}: at 180 wide the page does not scroll sideways`, async (t) => {
     const page = await foldedRowPage(t, "dismiss", 180, scheme); if (!page) return;
     const g = await pressGeo(page, FOLD_ROWS.dismiss.ask.id);
     assert.ok(g.scrollW <= g.innerW, `the page is ${g.scrollW} px wide in a ${g.innerW} px window at 180 wide`);
@@ -3010,7 +3083,7 @@ for (const scheme of SCHEMES) {
     assert.equal(g.rootSize, 2 * before.rootSize, `the root font size is ${g.rootSize} px after the zoom, not ${2 * before.rootSize} px`);
     assert.equal(g.titleSize, 2 * before.titleSize, `the row title is ${g.titleSize} px with the root font size doubled, not ${2 * before.titleSize} px, at 360 wide`);
   });
-  for (const kind of SIDE_KINDS) test(`press rows, ${scheme}: with the root font size doubled at 360 wide, the ${kind} row's text column beside its press is at least 8em`, async (t) => {
+  for (const kind of SIDE_KINDS) layoutTest(`press rows, ${scheme}: with the root font size doubled at 360 wide, the ${kind} row's text column beside its press is at least 8em`, async (t) => {
     const page = await foldedRowPage(t, kind, 360, scheme); if (!page) return;
     const id = FOLD_ROWS[kind].ask.id;
     await zoomText(page);
@@ -3019,7 +3092,7 @@ for (const scheme of SCHEMES) {
     const col = g.title.r - g.title.l, need = 8 * g.rootSize;
     assert.ok(col >= need, `the text column beside the ${FOLD_ROWS[kind].press} press is ${Math.round(col)} px with the root font size at ${g.rootSize} px, not at least ${need} px (8em)`);
   });
-  for (const kind of PRESS_KINDS) test(`press rows, ${scheme}: with the root font size doubled at 360 wide, the ${FOLD_ROWS[kind].press} press does not cover the ${kind} row's text`, async (t) => {
+  for (const kind of PRESS_KINDS) layoutTest(`press rows, ${scheme}: with the root font size doubled at 360 wide, the ${FOLD_ROWS[kind].press} press does not cover the ${kind} row's text`, async (t) => {
     const page = await foldedRowPage(t, kind, 360, scheme); if (!page) return;
     const id = FOLD_ROWS[kind].ask.id;
     await zoomText(page);
@@ -3028,7 +3101,7 @@ for (const scheme of SCHEMES) {
     const hit = g.text.find((b) => meets(b, g.press));
     assert.ok(!hit, `the ${FOLD_ROWS[kind].press} press at ${spanOf(g.press)} covers the row's text at ${hit && spanOf(hit)}, at 360 wide with the root font size doubled`);
   });
-  test(`press rows, ${scheme}: with the root font size doubled at 360 wide, Add to list and Send ask do not overlap`, async (t) => {
+  layoutTest(`press rows, ${scheme}: with the root font size doubled at 360 wide, Add to list and Send ask do not overlap`, async (t) => {
     const page = await foldedRowPage(t, "dismiss", 360, scheme); if (!page) return;
     await zoomText(page);
     const g = await pressGeo(page, FOLD_ROWS.dismiss.ask.id);
@@ -3100,7 +3173,7 @@ async function narrowestBeside(page, id) {
   return null;
 }
 for (const kind of SIDE_KINDS) for (const scheme of SCHEMES) {
-  test(`press rows, ${scheme}: at the narrowest width where the ${FOLD_ROWS[kind].press} press sits beside the ${kind} row's text, the text column is at least 8em`, async (t) => {
+  layoutTest(`press rows, ${scheme}: at the narrowest width where the ${FOLD_ROWS[kind].press} press sits beside the ${kind} row's text, the text column is at least 8em`, async (t) => {
     const page = await foldedRowPage(t, kind, 360, scheme); if (!page) return;
     const id = FOLD_ROWS[kind].ask.id;
     const hit = await narrowestBeside(page, id);
@@ -3137,7 +3210,7 @@ for (const width of [360, 390]) for (const scheme of SCHEMES) {
   });
 }
 for (const scheme of SCHEMES) {
-  test(`press rows, ${scheme}: with the root font size doubled at 390 wide, the reply form's Close and Send reply do not overlap`, async (t) => {
+  layoutTest(`press rows, ${scheme}: with the root font size doubled at 390 wide, the reply form's Close and Send reply do not overlap`, async (t) => {
     const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: RPL_NEW, viewport: { width: 390, height: 800 }, scheme }); if (!page) return;
     await openReply(page, RPL_ROOT);
     await zoomText(page);
@@ -3163,13 +3236,13 @@ async function replyFormAt(t, { width, scheme, zoom = false }) {
   return { page, g };
 }
 for (const scheme of SCHEMES) {
-  test(`press rows, ${scheme}: at 600 wide the reply form's Close sits left of Send reply on one line`, async (t) => {
+  layoutTest(`press rows, ${scheme}: at 600 wide the reply form's Close sits left of Send reply on one line`, async (t) => {
     const r = await replyFormAt(t, { width: 600, scheme }); if (!r) return;
     const { g } = r;
     assert.ok(Math.abs(g.rx.t - g.rs.t) <= 1, `Close (top ${Math.round(g.rx.t)} px) and Send reply (top ${Math.round(g.rs.t)} px) are not on one line at 600 wide`);
     assert.ok(g.rx.l < g.rs.l, `Close (x ${Math.round(g.rx.l)} px) is not left of Send reply (x ${Math.round(g.rs.l)} px) at 600 wide`);
   });
-  test(`press rows, ${scheme}: at 600 wide with the root font size doubled, Close and Send reply sit on one line in that order, or stack with Send reply first`, async (t) => {
+  layoutTest(`press rows, ${scheme}: at 600 wide with the root font size doubled, Close and Send reply sit on one line in that order, or stack with Send reply first`, async (t) => {
     const r = await replyFormAt(t, { width: 600, scheme, zoom: true }); if (!r) return;
     const { g } = r;
     if (Math.abs(g.rx.t - g.rs.t) <= 1) assert.ok(g.rx.l < g.rs.l, `Close (x ${Math.round(g.rx.l)} px) is right of Send reply (x ${Math.round(g.rs.l)} px) on one line at 600 wide with the root font size doubled`);
@@ -3208,7 +3281,7 @@ const dropGeo = (page, id) => page.evaluate((id) => {
 // The Restore press does not cover the Dismissed line's text, at 280 and 180 wide and at 360 with the root font size doubled.
 const DROP_OVERLAP = [[280, false, "280 wide"], [180, false, "180 wide"], [360, true, "360 wide with the root font size doubled"]];
 for (const [width, zoom, label] of DROP_OVERLAP) for (const scheme of SCHEMES) {
-  test(`press rows, ${scheme}: at ${label} the Restore press of the Dismissed line does not cover its text`, async (t) => {
+  layoutTest(`press rows, ${scheme}: at ${label} the Restore press of the Dismissed line does not cover its text`, async (t) => {
     const page = await droppedPage(t, width, scheme); if (!page) return;
     if (zoom) await zoomText(page);
     const g = await dropGeo(page, FOLD_ROWS.dismiss.ask.id);
@@ -3255,7 +3328,7 @@ for (const [width, zoom, label] of TAB_WIDTHS) for (const scheme of SCHEMES) {
     const g = await tabGeo(page);
     assert.ok(Math.abs(g.nav.b - g.q.b) <= 2, `the selected tab's bottom is ${Math.round(g.nav.b - g.q.b)} px above the tab list's border line at ${label}`);
   });
-  test(`tab list, ${scheme}: at ${label} the page does not scroll sideways`, async (t) => {
+  layoutTest(`tab list, ${scheme}: at ${label} the page does not scroll sideways`, async (t) => {
     const page = await open(t, { viewport: { width, height: 900 }, scheme }); if (!page) return;
     if (zoom) await zoomText(page);
     const g = await tabGeo(page);
@@ -3292,7 +3365,7 @@ const sidewaysFault = (page) => page.evaluate(() => {
 });
 for (const width of TAB_SIZES) for (const zoom of [false, true]) for (const designs of [false, true]) for (const sel of ["Questions", "Status"]) for (const scheme of SCHEMES) {
   const where = `at ${width} wide${zoom ? " with the root font size doubled" : ""}, ${designs ? "three tabs" : "two tabs"}, ${sel} selected`;
-  test(`tab list, ${scheme}: ${where}: the page does not scroll sideways`, async (t) => {
+  layoutTest(`tab list, ${scheme}: ${where}: the page does not scroll sideways`, async (t) => {
     const page = await tabSetPage(t, { width, zoom, designs, scheme, sel }); if (!page) return;
     const fault = await sidewaysFault(page);
     assert.ok(!fault, fault);
@@ -3324,7 +3397,7 @@ for (const width of TAB_SIZES) for (const zoom of [false, true]) for (const desi
 // 320 wide is the control: both fit there.
 const STATUS_STATES = [["no roadmap build", () => ({})], ["with a baked roadmap", () => ({ pageHtml: mergedPage() })]];
 for (const width of [320, 240, 180]) for (const [state, extra] of STATUS_STATES) for (const scheme of SCHEMES) {
-  test(`status view, ${scheme}: ${state}, at ${width} wide the page does not scroll sideways`, async (t) => {
+  layoutTest(`status view, ${scheme}: ${state}, at ${width} wide the page does not scroll sideways`, async (t) => {
     const page = await open(t, { ...extra(), viewport: { width, height: 900 }, scheme }); if (!page) return;
     await openStatus(page);
     const fault = await sidewaysFault(page);
@@ -4699,7 +4772,7 @@ test("a tall design with a long label is named in a caption with height, at 390 
   assert.equal(c.text, c.label); assert.ok(!c.cut, "the caption cuts the label");
 });
 
-test("at 768 wide a title the head cuts shows in the caption, and Prev to a short title hides it", async (t) => {
+layoutTest("at 768 wide a title the head cuts shows in the caption, and Prev to a short title hides it", async (t) => {
   const page = await openCap(t, ["Layout A in a sheet under the feed card", "B"], 768, "<p>a</p>"); if (!page) return;
   let c = await capState(page);
   assert.ok(c.titleCut, "the stand-in label fits the head; the test needs a longer one");
@@ -4711,7 +4784,7 @@ test("at 768 wide a title the head cuts shows in the caption, and Prev to a shor
   assert.ok(!c.shown, "the caption repeats a title that fits");
 });
 
-test("a title that fits the head gets no caption, at 390 wide", async (t) => {
+layoutTest("a title that fits the head gets no caption, at 390 wide", async (t) => {
   const page = await openCap(t, ["A", "B"], 390, "<p>a</p>"); if (!page) return;
   const c = await capState(page);
   assert.ok(!c.titleCut, "the short title is cut");
@@ -5623,7 +5696,7 @@ for (const scheme of ["light", "dark"]) for (const width of [1280, 390]) {
 }
 
 for (const scheme of ["light", "dark"]) for (const width of SIZES) {
-  test(`the rail's related-item frames and chips fit the rail at ${width}px wide, ${scheme} scheme`, async (t) => {
+  layoutTest(`the rail's related-item frames and chips fit the rail at ${width}px wide, ${scheme} scheme`, async (t) => {
     const long = "A very long title that runs across the whole width of the rail and then some more ";
     const items = [1, 2, 3].map((n) => mk("pr-" + n, n, { group: "pair", title: long + n })).concat([mk("alone", 4, { title: long + "alone" })]);
     const page = await open(t, { items, scheme, viewport: { width, height: 900 }, groups: { pair: { title: "Answer these together", why: "Linked." } } }); if (!page) return;
@@ -5764,7 +5837,7 @@ function sweepPage() {
   if (document.documentElement.scrollWidth > innerWidth) bad.push("page scrolls sideways: " + document.documentElement.scrollWidth + " > " + innerWidth);
   return bad;
 }
-test("containment sweep: nothing crosses its card, the rail or the Sent bar, nothing is cut without an ellipsis, no sideways scroll", async (t) => {
+layoutTest("containment sweep: nothing crosses its card, the rail or the Sent bar, nothing is cut without an ellipsis, no sideways scroll", async (t) => {
   const failures = [];
   for (const scheme of ["light", "dark"]) for (const width of SWEEP_WIDTHS) for (const [state, make, act] of STATES) {
     const page = await open(t, { ...make(), scheme, viewport: { width, height: 900 } }); if (!page) return;
@@ -5998,7 +6071,7 @@ test("a task with no command shows no command block, and a task with one shows i
 });
 
 for (const scheme of ["light", "dark"]) for (const width of [390, 1280]) {
-  test(`links and Copy are 44px tall or more, and a long command wraps without sideways scroll, at ${width} wide, ${scheme} scheme`, async (t) => {
+  layoutTest(`links and Copy are 44px tall or more, and a long command wraps without sideways scroll, at ${width} wide, ${scheme} scheme`, async (t) => {
     const page = await open(t, { items: [LINKED, WIDE_RUN], scheme, viewport: { width, height: 900 } }); if (!page) return;
     const link = card(page, LINKED).locator(`#k-${LINKED.id}-a a`);
     await need(link, "no link on option a");
@@ -6085,7 +6158,7 @@ test("a refused copy on one shell's block opens and selects only that block", as
 });
 
 for (const scheme of ["light", "dark"]) for (const width of [390, 1280]) {
-  test(`both shells' Copy is 44px tall or more, and neither command block scrolls sideways, at ${width} wide, ${scheme} scheme`, async (t) => {
+  layoutTest(`both shells' Copy is 44px tall or more, and neither command block scrolls sideways, at ${width} wide, ${scheme} scheme`, async (t) => {
     const page = await open(t, { items: [BOTH_WIDE], scheme, viewport: { width, height: 900 } }); if (!page) return;
     for (const shell of ["ps", "mac"]) {
       const box = card(page, BOTH_WIDE).locator(`#cmd-${BOTH_WIDE.id}-${shell}`);
@@ -6255,21 +6328,15 @@ test("page.html's static title is the page name, read from splice.py", () => {
 // sits. Each word is measured with a Range: more than one client rect is a word on two lines. The dot is
 // alone when its top is at or below the bottom of its name's last text line. The width is swept on one
 // page with setViewportSize, so the rail re-lays out as it does when a phone turns or a window is dragged.
-// The web fonts are blocked, so the rail is set in whatever fallback font the runner has, and a threshold
-// that holds for that font may fail in a wider one. So each case runs twice: in the runner's own font, and
-// with the page's --body forced to "DejaVu Sans", a wide font that the ubuntu CI images ship. The forced
-// run proves the font applied (installed, set on the rail, measured in the rail), and fails, never skips,
-// when it did not. The range reaches 540px so a threshold that rises for the wide font still shows 5 columns.
+// The served face is a web font, and a threshold that holds for it may fail in a wider one. So each case runs
+// twice (layoutTest): in the served font, and in the DejaVu Sans fallback, a wide font that the ubuntu CI images
+// ship. The fallback run proves the font applied (installed, set on the page and in the rail), and fails, never
+// skips, when it did not. The range reaches 540px so a threshold that rises for the wide font still shows 5 columns.
 
 const RAIL_WIDTHS = Array.from({ length: 540 - 320 + 1 }, (_, i) => 320 + i);
-const RAIL_FONTS = [{ label: "default", force: null }, { label: "DejaVu Sans", force: "DejaVu Sans" }];
 const RAIL_PHASES = [["cleanup", "Clean up"], ["organize", "Organize"], ["design", "Design"], ["rollout", "Roll out"], ["later", "Later"]];
-// Overrides --body on the page (the rail sets its text with var(--body)); the !important beats the :root rule.
-const forceRailFont = (page, family) => page.addStyleTag({ content: `:root { --body: "${family}", sans-serif !important; }` });
 // Measures "Organize" (a word of the rail) as the rail sets it, and again in a probe span with the same
-// weight and size but a named family. An installed family measures the same with a serif or a monospace
-// fallback; a missing one does not. The "no such font" pair shows the probe tells two fallbacks apart on
-// this runner.
+// weight and size set in the named family. The rail's width must equal the named family's width.
 const railFontProbe = (page, family) => page.evaluate((family) => {
   const nm = [...document.querySelectorAll(".prail .nm > span:first-child")].find((s) => s.textContent === "Organize");
   const cs = getComputedStyle(nm);
@@ -6286,15 +6353,13 @@ const railFontProbe = (page, family) => page.evaluate((family) => {
   };
   return {
     family: cs.fontFamily, rail: range.getBoundingClientRect().width,
-    namedSerif: width(`"${family}", serif`), namedMono: width(`"${family}", monospace`),
-    noneSerif: width('"No Such Font 7f3a", serif'), noneMono: width('"No Such Font 7f3a", monospace'),
+    namedSerif: width(`"${family}", serif`),
   };
 }, family);
 const assertRailFont = async (page, family) => {
+  await assertFallbackFont(page, family);
   const f = await railFontProbe(page, family);
   assert.ok(f.family.startsWith(`"${family}"`), `the rail's font-family is ${f.family}, not "${family}": the forced font did not reach the rail`);
-  assert.notEqual(f.noneSerif, f.noneMono, "the font probe cannot tell a serif fallback from a monospace one on this runner");
-  assert.ok(Math.abs(f.namedSerif - f.namedMono) < 0.01, `"${family}" is not installed on this runner (the probe fell back to another font), so this sweep would prove nothing about it`);
   assert.ok(Math.abs(f.rail - f.namedSerif) < 0.05, `the rail sets "Organize" ${f.rail}px wide, but "${family}" sets it ${f.namedSerif}px: the rail is not rendered in the forced font`);
 };
 const railWords = (page) => page.evaluate(() => {
@@ -6332,28 +6397,26 @@ const hitRuns = (hits) => {
 
 for (const scheme of ["light", "dark"]) {
   for (const [phase, name] of RAIL_PHASES) {
-    for (const font of RAIL_FONTS) {
-      test(`no phase name breaks inside a word or leaves its dot alone at any page width from 320 to 540px, ${name} current, ${scheme} theme, ${font.label} font`, async (t) => {
+    layoutTest(`no phase name breaks inside a word or leaves its dot alone at any page width from 320 to 540px, ${name} current, ${scheme} theme`, async (t) => {
+        const font = runFont(t);
         const page = await open(t, { pageHtml: mergedPage("--current", phase), viewport: { width: RAIL_WIDTHS[0], height: 900 }, scheme }); if (!page) return;
-        if (font.force) await forceRailFont(page, font.force);
         await openStatus(page);
         assert.equal(await page.locator(".prail > button").count(), 5, "the rail does not hold the five phases");
         assert.equal(await page.locator(".prail .here").count(), 1, "the rail marks no single current phase");
         assert.equal(await page.locator(".prail .nm:has(.here) > span:first-child").textContent(), name, "the current phase is not " + name);
-        if (font.force) await assertRailFont(page, font.force);
+        if (font) await assertRailFont(page, font.family);
         const hits = [], cols = new Set();
         for (const w of RAIL_WIDTHS) {
           await page.setViewportSize({ width: w, height: 900 });
           const m = await railWords(page); // the reads force a layout, so the container queries have resolved
           assert.deepEqual(m.words, ["Clean", "up", "Organize", "Design", "Roll", "out", "Later"], `${w}px: the rail's words`);
           cols.add(m.cols);
-          for (const word of m.split) hits.push({ w, key: `${name} current, ${font.label} font: "${word}" breaks inside the word`, box: m.box });
-          if (m.dotAlone) hits.push({ w, key: `${name} current, ${font.label} font: dot alone on a line`, box: m.box });
+          for (const word of m.split) hits.push({ w, key: `${name} current, ${fontName(t)} font: "${word}" breaks inside the word`, box: m.box });
+          if (m.dotAlone) hits.push({ w, key: `${name} current, ${fontName(t)} font: dot alone on a line`, box: m.box });
         }
         assert.deepEqual([...cols].sort(), [3, 5], "the sweep does not cross the rail's change from 3 to 5 columns, so it pins no threshold; columns seen: " + [...cols]);
         assert.equal(hits.length, 0, `the rail breaks at ${hits[0] && hits[0].w}px page width (rail box ${hits[0] && hits[0].box}px), ${hits[0] && hits[0].key}; every hit: ${hitRuns(hits)}`);
-      });
-    }
+    });
   }
 }
 
@@ -8249,7 +8312,7 @@ test("Change then clear on a sent park line, then Send, deletes answers/park.<id
   assert.deepEqual(await parkWrites(page), [["delete", "answers", parkKey(PARK_A)]], "Withdraw did not delete answers/park.<id> once");
 });
 
-test("at 1280 wide, sending a park act does not move the parked lines below it", async (t) => {
+layoutTest("at 1280 wide, sending a park act does not move the parked lines below it", async (t) => {
   const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [PARK_A, PARK_B, PARK_X] }, viewport: { width: 1280, height: 900 } }); if (!page) return;
   await parkLoaded(page);
   await need(parkBtn(page, PARK_A, "unpark"), "the parked line has no Unpark button");
