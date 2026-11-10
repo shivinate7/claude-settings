@@ -1377,12 +1377,14 @@ class LintCheckJoin(tm.CloudSession):
         super().setUp()
         tm.gh_case_setup(self)  # GhHalf's setUp: the shim on PATH, the wait's clock, and one green check
 
-    def join(self, comments, **state):
-        """-> (rc, stdout and stderr) of `merge 7 --confirm` run by the batch runner, with `comments` as the repo's issue comments."""
+    def join(self, comments, ran_on=None, **state):
+        """-> (rc, stdout and stderr) of `merge 7 --confirm --head <ran_on>` run by the batch runner, with `comments` as the repo's issue comments.
+        `ran_on` defaults to the live head of feat, read when the call is made (main's runner_confirm does the same)."""
         tm.GhHalf.set(self, issue_comments=comments, **state)
         self.put_role("batch-runner")
+        ran_on = ran_on or self.head("feat")
         with self.cloud():
-            return self.run_merge("7", "--confirm", host=tm.GhHalf.gh_host(self))
+            return self.run_merge("7", "--confirm", "--head", ran_on, host=tm.GhHalf.gh_host(self))
 
     def assert_refused(self, comments, cause, **state):
         """The join with `comments` and `state` is refused: rc 1, the remedy named, no merge call, no push. `cause` names the case in a failure. -> the output."""
@@ -1435,7 +1437,8 @@ class LintCheckJoin(tm.CloudSession):
         # shows the linted head (the lag). confirm reads the PR again under the lock, so the join must refuse the new head before any merge call.
         linted = self.head("feat")
         self.competitor_push()
-        rc, out = self.join([lint_comment(2, linted)], lag={"n": 1, "prior": linted})
+        # ran_on is the linted head: a live head would be refused by the join's head check before the lint, and confirm's recheck would not run
+        rc, out = self.join([lint_comment(2, linted)], ran_on=linted, lag={"n": 1, "prior": linted})
         self.assertEqual(rc, 1, "a join whose head moved after the lint read went ahead and merged the new head unchecked:\n" + out)
         self.assertNotIn("PUT pulls/7/merge", tm.GhHalf.calls(self), "the join merged a head the lint did not read:\n" + out)
 
