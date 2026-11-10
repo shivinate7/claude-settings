@@ -1,0 +1,10 @@
+{
+  "title": "A CI job cut at its time cap with failures so far reads red, not only cancelled",
+  "phase": "now",
+  "status": "todo",
+  "order": 939,
+  "owner": "coordinator",
+  "why": "Coordinator 19:48 CST Nov 9: in two batch-70 runs (#2470) the job cut at its time cap reported only \"cancelled\", which hid 126 failing waiting-page cases, so the batch read it as a cap problem (step shoot-job-cap).",
+  "note": "Fix: a suite run under a cap prints its failure count so far (or runs with fail-fast reporting) before the cut, so a capped job with reds reads red. Related: shoot-job-cap, ci-guard-headroom, time-pinned-tests-go. Filed 19:42 CST Nov 9 from the coordinator.",
+  "updatedAt": "2026-11-09T19:42:00-06:00"
+}
