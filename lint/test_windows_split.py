@@ -318,9 +318,14 @@ MUTATE_JOB = "checks-mutate-guard"
 # The bin/shoot suite and its browser install have their own Linux job, off the `checks` lint job.
 SHOOT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs'
 SHOOT_JOB = "checks-shoot"
+# The waiting page suite has its own job, so SHOOT_JOB keeps its cap (decision ci-job-caps). ROADMAP_CMD stays in SHOOT_JOB.
+WAITING_PAGE_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs'
+WAITING_PAGE_JOB = "checks-waiting-page"
+ROADMAP_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/roadmap/tests/page.test.mjs'
 # The scope flag each job skips on when the flag is not its own name.
 FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot", "checks-macos-b": "checks_macos",
            "checks-guard-2": "checks_guard"}
+FLAG_OF[WAITING_PAGE_JOB] = "shoot"
 # The lint jobs run on every PR with no scope condition: the Linux pair, read from its one home CHECKS_SUITE_JOBS.
 LINT_JOBS = CHECKS_SUITE_JOBS
 # all-jobs-passed is the one required check. Its needs are checked in lint/test_all_jobs_passed.py.
@@ -710,6 +715,30 @@ def shoot_problems(text):
     return problems
 
 
+def waiting_page_problems(text):
+    """The waiting page suite runs in WAITING_PAGE_JOB on Linux and in no other job. The roadmap suite runs in SHOOT_JOB
+    alone. Every step of WAITING_PAGE_JOB carries the scope condition alone (step_rest), so no step can add a condition that
+    skips it and read green. The condition's form is scope_problems'. Named failure: a suite in the wrong job, in two, or in
+    none; a step that adds to or lacks the scope condition."""
+    jobs = all_jobs(text)
+    problems = []
+    for cmd, want in ((WAITING_PAGE_CMD, [WAITING_PAGE_JOB]), (ROADMAP_CMD, [SHOOT_JOB])):
+        homes = [job for job, _ in split_homes(text, list(jobs), cmd)]
+        if homes != want:
+            problems.append(f"{cmd!r} runs in {homes}, want exactly {want}")
+    job = jobs.get(WAITING_PAGE_JOB)
+    if job:
+        if not (job["os"] or "").startswith("ubuntu"):
+            problems.append(f"{WAITING_PAGE_JOB} runs on {job['os']}, want ubuntu-latest")
+        scope_condition = read_scope_condition(job)
+        if scope_condition is None:
+            problems.append(f"{WAITING_PAGE_JOB}: its steps carry no one scope condition (none carries one, or they disagree)")
+        else:
+            problems += [f"{WAITING_PAGE_JOB}: step {st.get('name') or st.get('uses') or st.get('run')} does not carry the scope "
+                         f"condition alone: {step_if(st)}" for st in job["steps"] if step_rest(st, scope_condition) != ""]
+    return problems
+
+
 def run_lines(st):
     """A step's run commands: one per non-blank line of its run text, so a block scalar gives each of its lines."""
     return [ln.strip() for ln in (run_body(st) or "").split("\n") if ln.strip()]
@@ -778,6 +807,36 @@ def macos_split_problems(text):
     return problems
 
 
+SHOOT_SCOPE = "needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request'"
+SHOOT_IF = f"${{{{ {SHOOT_SCOPE} }}}}"
+
+
+def shoot_doc(lint_run="ruff", install_if=SHOOT_IF, suite_if=SHOOT_IF, suite_run=SHOOT_CMD,
+              runs_on="ubuntu-latest", extra="", shoot_extra="", roadmap_run=None, waiting_run=None, waiting_runs_on="ubuntu-latest",
+              waiting_checkout_if=SHOOT_IF, waiting_install_if=SHOOT_IF, waiting_suite_if=SHOOT_IF):
+    """A workflow for the shoot and waiting page checkers: the lint job `checks`; SHOOT_JOB with its install and suite, then
+    roadmap_run and shoot_extra when set; WAITING_PAGE_JOB with its checkout, install and suite when waiting_run is set. `extra`
+    adds steps to the lint job. An `if` of None leaves that step's `if:` out."""
+    def if_line(expr):
+        return f"        if: {expr}\n" if expr else ""
+    install = if_line(install_if)
+    suite = if_line(suite_if)
+    roadmap = f"      - name: roadmap page suite\n        run: {roadmap_run}\n" if roadmap_run else ""
+    waiting = ""
+    if waiting_run:
+        checkout = MOD_CHECKOUT.split("\n", 1)[0] + "\n"  # the pinned checkout line has one home, MOD_CHECKOUT
+        waiting = (f"  {WAITING_PAGE_JOB}:\n    runs-on: {waiting_runs_on}\n    needs: scope\n    steps:\n" + checkout
+                   + if_line(waiting_checkout_if)
+                   + f"      - name: Install the pinned Playwright and Chromium\n{if_line(waiting_install_if)}"
+                   + f"        uses: {PLAYWRIGHT_USES}\n"
+                   + f"      - name: waiting page suite\n{if_line(waiting_suite_if)}        run: {waiting_run}\n")
+    return ("jobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+            f"      - name: lint\n        run: {lint_run}\n" + extra
+            + f"  {SHOOT_JOB}:\n    runs-on: {runs_on}\n    needs: scope\n    steps:\n"
+            + f"      - name: Install Chromium\n{install}        run: playwright install chromium\n"
+            + f"      - name: shoot fixture suite\n{suite}        run: {suite_run}\n" + roadmap + shoot_extra + waiting)
+
+
 # The Linux guard split: the guard suite runs in two shards, one per job, each with its GUARD_SHARD value. Each shard step is
 # pinned as the macOS guard shards are: the scope `if:`, no shell, and the suite's own env plus its shard value.
 LINUX_GUARD_SHARD = {"checks-guard": "1/2", "checks-guard-2": "2/2"}
@@ -835,31 +894,52 @@ class WindowsSplit(unittest.TestCase):
         self.assertEqual(shoot_problems(self.text), [])
 
     def test_the_shoot_checker_sees_its_defects(self):
-        scope_condition = "needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request'"
-
-        def doc(lint_run="ruff", install_if=f"${{{{ {scope_condition} }}}}", suite_if=f"${{{{ {scope_condition} }}}}", suite_run=SHOOT_CMD,
-                runs_on="ubuntu-latest", extra=""):
-            install = f"        if: {install_if}\n" if install_if else ""
-            suite = f"        if: {suite_if}\n" if suite_if else ""
-            return ("jobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
-                    f"      - name: lint\n        run: {lint_run}\n" + extra
-                    + f"  {SHOOT_JOB}:\n    runs-on: {runs_on}\n    needs: scope\n    steps:\n"
-                    + f"      - name: Install Chromium\n{install}        run: playwright install chromium\n"
-                    + f"      - name: shoot fixture suite\n{suite}        run: {suite_run}\n")
-
-        good = doc()
+        good = shoot_doc()
         self.assertEqual(shoot_problems(good), [])
-        bad = {"back in checks": doc(extra=f"      - name: s\n        run: {SHOOT_CMD}\n"),
-               "install in checks": doc(lint_run="playwright install --with-deps chromium"),
-               "install in a checks block": doc(lint_run="|\n          ruff\n          playwright install chromium"),
-               "suite step adds its own condition": doc(suite_if=f"${{{{ ({scope_condition}) && false }}}}"),
-               "suite step lacks the scope condition": doc(suite_if=None),
-               "install step lacks the scope condition": doc(install_if=None),
-               "on windows": doc(runs_on="windows-latest"),
-               "suite dropped": doc(suite_run="true")}
+        bad = {"back in checks": shoot_doc(extra=f"      - name: s\n        run: {SHOOT_CMD}\n"),
+               "install in checks": shoot_doc(lint_run="playwright install --with-deps chromium"),
+               "install in a checks block": shoot_doc(lint_run="|\n          ruff\n          playwright install chromium"),
+               "suite step adds its own condition": shoot_doc(suite_if=f"${{{{ ({SHOOT_SCOPE}) && false }}}}"),
+               "suite step lacks the scope condition": shoot_doc(suite_if=None),
+               "install step lacks the scope condition": shoot_doc(install_if=None),
+               "on windows": shoot_doc(runs_on="windows-latest"),
+               "suite dropped": shoot_doc(suite_run="true")}
         for label, text in bad.items():
             with self.subTest(defect=label):
                 self.assertTrue(shoot_problems(text), label)
+
+    def test_the_waiting_page_suite_has_its_own_job(self):
+        # Named failure: the waiting page suite back in checks-shoot, where it hit that job's cap, or the roadmap suite moved out of it.
+        self.assertEqual(waiting_page_problems(self.text), [])
+
+    def test_the_waiting_page_checker_sees_its_defects(self):
+        good = shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD)
+        self.assertEqual(waiting_page_problems(good), [])
+        bad = {"waiting suite back in checks-shoot": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                              shoot_extra=f"      - name: w\n        run: {WAITING_PAGE_CMD}\n"),
+               "waiting suite in checks": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                    extra=f"      - name: w\n        run: {WAITING_PAGE_CMD}\n"),
+               "waiting suite dropped": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run="true"),
+               "waiting job missing": shoot_doc(roadmap_run=ROADMAP_CMD),
+               "waiting job on windows": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                   waiting_runs_on="windows-latest"),
+               "roadmap suite dropped": shoot_doc(waiting_run=WAITING_PAGE_CMD),
+               # Named failure: a step's if adds to the scope condition, so the step can skip the waiting page suite and read green.
+               "waiting suite step adds its own condition": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                                     waiting_suite_if=f"${{{{ ({SHOOT_SCOPE}) && false }}}}"),
+               "waiting suite step appends && false": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                               waiting_suite_if=f"${{{{ {SHOOT_SCOPE} && false }}}}"),
+               "waiting suite step lacks the scope condition": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                                        waiting_suite_if=None),
+               "waiting install step adds its own condition": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                                       waiting_install_if=f"${{{{ ({SHOOT_SCOPE}) && false }}}}"),
+               "waiting install step lacks the scope condition": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                                          waiting_install_if=None),
+               "waiting checkout step adds its own condition": shoot_doc(roadmap_run=ROADMAP_CMD, waiting_run=WAITING_PAGE_CMD,
+                                                                        waiting_checkout_if=f"${{{{ ({SHOOT_SCOPE}) && false }}}}")}
+        for label, text in bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(waiting_page_problems(text), label)
 
     def test_scope_job_checks_every_other_job(self):
         self.assertEqual(scope_problems(self.text), [])
