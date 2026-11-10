@@ -1,0 +1,10 @@
+{
+  "title": "A test pins the settings.json cloud-pull entry to start and resume only, never compact",
+  "phase": "now",
+  "status": "todo",
+  "order": 941,
+  "owner": "coordinator",
+  "why": "Lane compact-resume-runs-start (#2481), via the coordinator 20:10 CST Nov 9: no test pins the settings.json cloud-pull SessionStart entry (`startup|resume`, around line 175) to exclude compact. A later edit that adds compact there, as #2481 did for session_start.sh, would run the pull and install mid-task with the tests still green.",
+  "note": "Fix: one red case in the settings-matcher tests (lint/test_settings_matcher.py is the likely home) that fails when the cloud-pull entry matches compact. Related: compact-resume-runs-start. Filed 20:09 CST Nov 9.",
+  "updatedAt": "2026-11-09T20:09:00-06:00"
+}
