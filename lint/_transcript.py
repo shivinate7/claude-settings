@@ -368,6 +368,28 @@ def result_text(block):
     return body if isinstance(body, str) else ""
 
 
+def delivered_tool_use_ids(records):
+    """The tool_use ids of sends that reached their session: a tool_result whose text parses as the cloud
+    send_message success body {"status": "delivered"}, and no failure by `failed_tool_use_ids`. Only that cloud
+    body counts: the local SendMessage success shape is not measured, so it fails closed."""
+    failed = failed_tool_use_ids(records)
+    delivered = set()
+    for r in records:
+        if r.get("type") != "user":
+            continue
+        for b in tool_results(r):
+            use_id = b.get("tool_use_id")
+            if not isinstance(use_id, str) or use_id in failed:
+                continue
+            try:
+                body = json.loads(result_text(b))
+            except ValueError:
+                continue
+            if isinstance(body, dict) and body.get("status") == "delivered":
+                delivered.add(use_id)
+    return delivered
+
+
 def _finds_writer(node):
     if isinstance(node, dict):
         if isinstance(node.get("writer"), str) and node["writer"]:
