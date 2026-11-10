@@ -1536,19 +1536,28 @@ def selector_table(name):
 
 
 def logged_test(log, path, tail=""):
-    """A test file at `path`. When it runs it writes `<path> <interpreter> <cwd>` to `log`, then runs `tail`, code in the file's own language.
-    The interpreter word is what the line shows the file ran under: python, bash or node."""
+    """A test file at `path`. When it runs it appends one tab-separated line to `log`: its path, the interpreter that runs it as the
+    interpreter reports itself (sys.executable, $BASH, process.execPath), and its cwd. Then it runs `tail`, code in the file's own language."""
     if path.endswith(".py"):
-        return ("import os\n"
+        return ("import os, sys\n"
                 "with open(%r, 'a', encoding='utf-8') as f:\n"
-                "    f.write(%r + ' python ' + os.getcwd() + '\\n')\n" % (log, path)) + tail
+                "    f.write('\\t'.join([%s, sys.executable, os.getcwd()]) + '\\n')\n" % (log, json.dumps(path))) + tail
     if path.endswith(".sh"):
         return ("#!/bin/bash\n"
-                "echo \"%s bash ${BASH_VERSION:-not-bash} $(pwd -P)\" >> %s\n" % (path, shlex.quote(log))) + tail
+                "printf '%%s\\t%%s\\t%%s\\n' %s \"$BASH\" \"$(pwd -P)\" >> %s\n" % (shlex.quote(path), shlex.quote(log))) + tail
     if path.endswith(".mjs"):
         return ("import fs from 'node:fs';\n"
-                "fs.appendFileSync(%s, %s + ' node ' + process.cwd() + '\\n');\n" % (json.dumps(log), json.dumps(path))) + tail
+                "fs.appendFileSync(%s, [%s, process.execPath, process.cwd()].join('\\t') + '\\n');\n" % (json.dumps(log), json.dumps(path))) + tail
     return "# a .ps1 test: this suite never runs one on Linux\n"
+
+
+def pwsh_absent():
+    """A patch under which shutil.which finds no pwsh, whatever this machine has installed. Every other name is looked up as usual."""
+    real = shutil.which
+
+    def which(name, *args, **kwargs):
+        return None if name == "pwsh" else real(name, *args, **kwargs)
+    return unittest.mock.patch.object(shutil, "which", which)
 
 
 def names_count(line, n, word):
@@ -1569,6 +1578,7 @@ class TouchedTests(LaneFixture):
     def setUp(self):
         super().setUp()
         self.touched_log = os.path.join(self.t, "touched-runs.log")
+        self.pwsh_log = os.path.join(self.t, "pwsh-calls.log")  # the stub pwsh of pwsh_stub_on_path writes its argv here
         with open(SELECTOR, encoding="utf-8") as f:
             selector = f.read()
         self.push_commit("main", {
@@ -1615,16 +1625,32 @@ class TouchedTests(LaneFixture):
         rc, out, err = self.run_main(*argv, CLAUDE_CODE_REMOTE=None)
         return rc, out + err
 
+    def flagged_or_fail(self, *argv):
+        """flagged(), where an exception that escapes merge is the named cause: a traceback is never the answer to a touched test."""
+        try:
+            return self.flagged(*argv)
+        except Exception as e:  # merge's exits are SystemExit, which flagged returns; anything else escaped
+            self.fail("merge raised %s instead of refusing or passing: %s" % (type(e).__name__, e))
+
+    def pwsh_stub_on_path(self):
+        """A `pwsh` on PATH that appends its argv to self.pwsh_log and exits 0. -> the patch that puts it on PATH."""
+        bindir = os.path.join(self.t, "pwsh-bin")
+        os.makedirs(bindir)
+        stub = os.path.join(bindir, "pwsh")
+        tm.put(stub, "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %s\nexit 0\n" % shlex.quote(self.pwsh_log))
+        os.chmod(stub, 0o755)
+        return unittest.mock.patch.dict(os.environ, {"PATH": bindir + os.pathsep + os.environ.get("PATH", "")})
+
     def touched_lines(self):
-        """The lines the touched tests wrote in the last run, oldest first."""
+        """The rows the touched tests wrote in the last run, oldest first: [path, interpreter, cwd] each."""
         if not os.path.exists(self.touched_log):
             return []
         with open(self.touched_log, encoding="utf-8") as f:
-            return [line.rstrip("\n") for line in f if line.strip()]
+            return [line.rstrip("\n").split("\t") for line in f if line.strip()]
 
     def ran(self, path):
-        """The lines the touched test `path` wrote in the last run: one per run."""
-        return [line for line in self.touched_lines() if line.split(" ", 1)[0] == path]
+        """The rows the touched test `path` wrote in the last run: one per run."""
+        return [row for row in self.touched_lines() if row[0] == path]
 
     def lint_tree(self):
         """-> the directory of the one lint run of the last run. The touched tests must have run in it."""
@@ -1662,7 +1688,7 @@ class TouchedTests(LaneFixture):
         tree = self.lint_tree()
         runs = self.ran("lint/test_budget.py")
         self.assertEqual(len(runs), 1, "lane-a's touched test ran %d times alone, want once: %s" % (len(runs), text))
-        self.assertTrue(runs[0].endswith(" " + tree), "lane-a's touched test did not run in the lint tree: " + runs[0])
+        self.assertEqual(runs[0][2], tree, "lane-a's touched test did not run in the lint tree: " + "\t".join(runs[0]))
         lines = pass_lines(text)
         self.assertEqual(len(lines), 1, text)
         self.assertTrue(pass_has_counts(lines[0], 1, 0), "the PASS line does not name 1 run and 0 skipped: " + lines[0])
@@ -1701,6 +1727,8 @@ class TouchedTests(LaneFixture):
         self.assertEqual(rc, 0, "a lint read unknown and lifted by a reason was refused (rc %r): %s" % (rc, text))
         self.assertEqual(pass_lines(text), [], "an unknown lint read printed a PASS line: " + text)
         self.assertEqual(self.touched_lines(), [], "a touched test ran after the lint read unknown, not pass: " + text)
+        self.assertTrue(any("touched" in line and ("not run" in line or "did not run" in line) for line in text.splitlines()),
+                        "a lifted unknown lint printed no line saying the touched tests did not run: " + text)
 
     def test_a_heavy_touched_test_is_skipped_with_its_reason_and_never_run(self):
         heavy = selector_table("HEAVY")
@@ -1730,10 +1758,11 @@ class TouchedTests(LaneFixture):
         self.assertEqual(len(lines), 1, text)
         self.assertTrue(pass_has_counts(lines[0], 0, 1), "the PASS line does not name 0 run and 1 skipped: " + lines[0])
 
-    def test_a_powershell_touched_test_is_skipped_for_no_pwsh_and_is_neither_a_pass_nor_a_fail(self):
+    def test_a_powershell_touched_test_is_skipped_for_no_pwsh_when_pwsh_is_absent_and_is_neither_a_pass_nor_a_fail(self):
         self.push_commit("lane-p", {"lint/widget.test.ps1": logged_test(self.touched_log, "lint/widget.test.ps1")})
         self.use_ci_job(PASSING, 0)
-        rc, text = self.flagged("--lane-lint", "lane-p", "--touched-tests")
+        with pwsh_absent():
+            rc, text = self.flagged("--lane-lint", "lane-p", "--touched-tests")
         self.assertEqual(rc, 0, "a batch whose only touched test is a .ps1 was refused (rc %r): %s" % (rc, text))
         self.assertIn("skip lint/widget.test.ps1: no pwsh on this runner", text, "the .ps1 test was not skipped for no pwsh: " + text)
         self.assertFalse(any("FAIL" in line for line in text.splitlines()), "a skipped .ps1 read as a FAIL: " + text)
@@ -1748,14 +1777,15 @@ class TouchedTests(LaneFixture):
         rc, text = self.flagged("--lane-lint", "lane-i", "--touched-tests")
         self.assertEqual(rc, 0, "a batch of three touched tests was refused (rc %r): %s" % (rc, text))
         tree = self.lint_tree()
-        words = {"lint/test_one.py": " python ", "lint/two.test.sh": " bash ", "lint/three.test.mjs": " node "}
+        real = {"lint/test_one.py": sys.executable, "lint/two.test.sh": shutil.which("bash"), "lint/three.test.mjs": shutil.which("node")}
         for path in files:
             with self.subTest(test=path):
                 runs = self.ran(path)
                 self.assertEqual(len(runs), 1, "%s ran %d times, want once: %s" % (path, len(runs), text))
-                self.assertIn(words[path], runs[0], "%s did not run under its interpreter: %s" % (path, runs[0]))
-                self.assertNotIn("not-bash", runs[0], "%s ran under sh, not bash: %s" % (path, runs[0]))
-                self.assertTrue(runs[0].endswith(" " + tree), "%s did not run in the lint tree: %s" % (path, runs[0]))
+                logged = runs[0][1]
+                self.assertEqual(os.path.realpath(logged), os.path.realpath(real[path]),
+                                 "%s ran under %r, not the interpreter its extension names, %r" % (path, logged, real[path]))
+                self.assertEqual(runs[0][2], tree, "%s did not run in the lint tree: %r" % (path, runs[0][2]))
         lines = pass_lines(text)
         self.assertEqual(len(lines), 1, text)
         self.assertTrue(pass_has_counts(lines[0], 3, 0), "the PASS line does not name 3 run and 0 skipped: " + lines[0])
@@ -1781,15 +1811,22 @@ class TouchedTests(LaneFixture):
         self.push_commit("lane-t", {"lint/test_slow.py": logged_test(self.touched_log, "lint/test_slow.py")})
         self.use_ci_job(PASSING, 0)
         real_sh = merge.sh
+        timeouts = []  # the timeout= each touched-test run was given: a run with none would never end
 
         def time_out_the_touched_test(args, *rest, **kwargs):  # a run that never ends: the one way a child of the lint tree times out
             if any(isinstance(a, str) and a.endswith("lint/test_slow.py") for a in args):
+                timeouts.append(kwargs.get("timeout"))
                 raise subprocess.TimeoutExpired(args, 1)
             return real_sh(args, *rest, **kwargs)
 
         with unittest.mock.patch.object(merge, "sh", time_out_the_touched_test):
             rc, text = self.flagged("--lane-lint", "lane-t", "--touched-tests")
             self.assertEqual(rc, 1, "a touched test that timed out did not refuse (rc %r): %s" % (rc, text))
+            self.assertTrue(timeouts, "the touched test never ran through sh, so the case probes nothing: " + text)
+            bound = timeouts[0]
+            self.assertIsInstance(bound, (int, float), "the touched test ran with no numeric timeout: %r" % (bound,))
+            self.assertGreater(bound, 0, "the touched test ran with a timeout that is not positive: %r" % (bound,))
+            self.assertLessEqual(bound, merge.LINT_SECONDS, "the touched test ran with a timeout past LINT_SECONDS: %r" % (bound,))
             self.assertRegex(text, r"(?i)unknown", "a timed-out touched test does not read as unknown: " + text)
             self.assertEqual(pass_lines(text), [], "a timed-out touched test printed a PASS line: " + text)
             rc, text = self.flagged("--lane-lint", "lane-t", "--touched-tests", "--lint-unknown-ok", "the test box is slow")
@@ -1814,6 +1851,93 @@ class TouchedTests(LaneFixture):
         self.assertEqual(pass_lines(text), [], "a lifted selector read printed a PASS line: " + text)
 
 
+
+
+    def push_selector_override(self, lane, def_text):
+        """Push `lane` whose selector is the real one plus `def_text`: a definition that overrides one of the selector's functions. The lint
+        tree loads the lane's own selector, so the override is what run_touched_tests calls. The lane also touches a test that holds."""
+        with open(SELECTOR, encoding="utf-8") as f:
+            selector = f.read()
+        self.push_commit(lane, {
+            ".github/scripts/touched-tests.py": selector + "\n\n" + def_text,
+            "lint/test_budget.py": logged_test(self.touched_log, "lint/test_budget.py", BUDGET),
+        })
+
+    def assert_unknown_then_lifted(self, lane, cause):
+        """The lane's touched-test stage reads unknown: it refuses without a reason, with no PASS line, and a reason lifts it. `cause` names
+        the fault in every message. An exception that escapes merge fails the case by name."""
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.flagged_or_fail("--lane-lint", lane, "--touched-tests")
+        self.assertEqual(rc, 1, "%s did not refuse as unknown (rc %r): %s" % (cause, rc, text))
+        self.assertRegex(text, r"(?i)unknown", "%s does not read as unknown: %s" % (cause, text))
+        self.assertEqual(pass_lines(text), [], "%s printed a PASS line: %s" % (cause, text))
+        rc, text = self.flagged_or_fail("--lane-lint", lane, "--touched-tests", "--lint-unknown-ok", "the selector is being fixed")
+        self.assertEqual(rc, 0, "%s was not lifted by a reason (rc %r): %s" % (cause, rc, text))
+        self.assertIn("the selector is being fixed", text, "%s did not log its lifting reason: %s" % (cause, text))
+        self.assertEqual(pass_lines(text), [], "%s printed a PASS line once lifted: %s" % (cause, text))
+
+    def test_a_touched_test_with_a_non_ascii_name_that_fails_refuses_the_batch(self):
+        name = "lint/test_ünï.py"  # git quotes this name in `diff --name-only` and `ls-files` unless they run with -z
+        self.push_commit("lane-u", {name: logged_test(self.touched_log, name, "raise AssertionError('marker-unicode-fail')\n")})
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.flagged("--lane-lint", "lane-u", "--touched-tests")
+        self.assertEqual(rc, 1, "a failing touched test with a non-ASCII name passed (rc %r): %s" % (rc, text))
+        self.assertTrue(any("FAIL" in line and name in line for line in text.splitlines()),
+                        "the refusal does not name the non-ASCII touched test %s: %s" % (ascii(name), text))
+        self.assertIn("marker-unicode-fail", text, "the refusal lacks the non-ASCII test's last output: " + text)
+
+    def test_a_touched_test_with_a_space_in_its_name_that_fails_refuses_the_batch(self):
+        name = "lint/test_two words.py"
+        self.push_commit("lane-w", {name: logged_test(self.touched_log, name, "raise AssertionError('marker-space-fail')\n")})
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.flagged("--lane-lint", "lane-w", "--touched-tests")
+        self.assertEqual(rc, 1, "a failing touched test with a space in its name passed (rc %r): %s" % (rc, text))
+        self.assertTrue(any("FAIL" in line and name in line for line in text.splitlines()),
+                        "the refusal does not name the touched test with a space %s: %s" % (ascii(name), text))
+
+    def test_a_powershell_touched_test_runs_under_pwsh_when_pwsh_is_on_the_path(self):
+        self.push_commit("lane-q", {"lint/widget.test.ps1": logged_test(self.touched_log, "lint/widget.test.ps1")})
+        self.use_ci_job(PASSING, 0)
+        with self.pwsh_stub_on_path():
+            rc, text = self.flagged("--lane-lint", "lane-q", "--touched-tests")
+        self.assertEqual(rc, 0, "a batch whose only touched test is a .ps1 was refused with pwsh on the PATH (rc %r): %s" % (rc, text))
+        self.assertNotIn("skip lint/widget.test.ps1", text, "a .ps1 was skipped although pwsh is on the PATH: " + text)
+        calls = []
+        if os.path.exists(self.pwsh_log):
+            with open(self.pwsh_log, encoding="utf-8") as f:
+                calls = f.read().splitlines()
+        self.assertTrue(any("lint/widget.test.ps1" in call for call in calls),
+                        "pwsh was on the PATH, yet no pwsh run named the .ps1 test: " + text)
+        lines = pass_lines(text)
+        self.assertEqual(len(lines), 1, text)
+        self.assertTrue(pass_has_counts(lines[0], 1, 0), "the PASS line does not name 1 run and 0 skipped: " + lines[0])
+
+    def test_a_missing_interpreter_at_run_time_is_unknown_and_lifted_by_a_reason_not_a_traceback(self):
+        self.push_commit("lane-m", {"lint/test_budget.py": logged_test(self.touched_log, "lint/test_budget.py", BUDGET)})
+        self.use_ci_job(PASSING, 0)
+        real_sh = merge.sh
+
+        def no_interpreter(args, *rest, **kwargs):  # the program is gone between the selection and the run
+            if any(isinstance(a, str) and a.endswith("lint/test_budget.py") for a in args):
+                raise FileNotFoundError(2, "No such file or directory", args[0])
+            return real_sh(args, *rest, **kwargs)
+
+        with unittest.mock.patch.object(merge, "sh", no_interpreter):
+            rc, text = self.flagged_or_fail("--lane-lint", "lane-m", "--touched-tests")
+            self.assertEqual(rc, 1, "a touched test whose interpreter was missing did not refuse (rc %r): %s" % (rc, text))
+            self.assertRegex(text, r"(?i)unknown", "a missing interpreter does not read as unknown: " + text)
+            self.assertEqual(pass_lines(text), [], "a missing interpreter printed a PASS line: " + text)
+            rc, text = self.flagged_or_fail("--lane-lint", "lane-m", "--touched-tests", "--lint-unknown-ok", "node is not on this box")
+            self.assertEqual(rc, 0, "a missing interpreter was not lifted by a reason (rc %r): %s" % (rc, text))
+            self.assertIn("node is not on this box", text, "the lifted missing interpreter does not log its reason: " + text)
+
+    def test_a_selector_whose_candidates_raises_is_unknown_not_a_traceback(self):
+        self.push_selector_override("lane-c", "def candidates(path, tracked):\n    raise RuntimeError('selector candidates broke')\n")
+        self.assert_unknown_then_lifted("lane-c", "a selector whose candidates() raises")
+
+    def test_a_selector_whose_reason_raises_is_unknown_not_a_traceback(self):
+        self.push_selector_override("lane-r", "def reason(path, table):\n    raise RuntimeError('selector reason broke')\n")
+        self.assert_unknown_then_lifted("lane-r", "a selector whose reason() raises")
 
 
 def real_ci_steps():
