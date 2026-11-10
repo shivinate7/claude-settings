@@ -113,9 +113,13 @@ def central_full(at):
 
 
 def central_iso(at, seconds=True):
-    """`YYYY-MM-DDTHH:MM:SS-05:00` (or -06:00) for an instant: ISO-8601 with the Central offset. `seconds=False` drops `:SS`."""
-    local, name = central_parts(at)
-    return local.strftime("%Y-%m-%dT%H:%M" + (":%S" if seconds else "")) + STAMP_ZONES[name][len("UTC"):]
+    """`YYYY-MM-DDTHH:MM:SS-05:00` (or -06:00) for an instant: ISO-8601 with the Central offset. `seconds=False` drops `:SS`.
+    A display helper that never raises: anything that is not a datetime (or one out of range) gives "", not a guessed time."""
+    try:
+        local, name = central_parts(at)
+        return local.strftime("%Y-%m-%dT%H:%M" + (":%S" if seconds else "")) + STAMP_ZONES[name][len("UTC"):]
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return ""
 
 
 def override_line(result):
