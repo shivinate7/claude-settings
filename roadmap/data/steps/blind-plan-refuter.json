@@ -1,10 +1,10 @@
 {
   "title": "A second Opus agent tries to refute each plan from the brief alone",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 103.3665,
   "why": "Weak plans are caught before the build.",
-  "note": "Nov 6 12:53 CST (coordinator): lane session_013NEJKzkPg5RdSvbrCJQ8kf. Agents write \"challenger\" in one constant until item 282 picks the word.\nOwner picked d on item 279, 12:43 CST. Debate audit 12:40 CST. Cost: +1 Opus call per plan. Waits on owner item 279. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane session_013NEJKzr7y9tAbnr5i26bYC at 03:46-03:49 CST Nov 10.",
-  "updatedAt": "2026-11-10T03:49:00-06:00",
+  "note": "Nov 6 12:53 CST (coordinator): lane session_013NEJKzkPg5RdSvbrCJQ8kf. Agents write \"challenger\" in one constant until item 282 picks the word.\nOwner picked d on item 279, 12:43 CST. Debate audit 12:40 CST. Cost: +1 Opus call per plan. Waits on owner item 279. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane session_013NEJKzr7y9tAbnr5i26bYC at 03:46-03:49 CST Nov 10. Done, coordinator 03:51 CST Nov 10: on main at fb6dfa1c1. The 03:45 sweep sent it to ready by mistake, because it read open PRs only.",
+  "updatedAt": "2026-11-10T03:52:00-06:00",
   "lane": "session_013NEJKzr7y9tAbnr5i26bYC"
 }

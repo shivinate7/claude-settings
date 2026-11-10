@@ -1,10 +1,10 @@
 {
   "title": "stale_cites.py gets a whole-tree mode for dead and typo paths and path:N anchors",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 500,
   "why": "Child-guard survey verdict: promote. Plan docs/plans/child-guard-promotion.md, section 'Promotion lanes', on branch child-guard-promotion (PR #1119, head ea66d8e), lane 1.",
-  "note": "Promotion lane 1 of 11 (rank = work order). Removes copies in all five child repos. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Lane session_013NEJL3BCEdPwkKFkFy1R67, started by the coordinator Nov 3. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane session_013NEJL3beuggCMgfPCizUFP at 03:46-03:49 CST Nov 10.",
-  "updatedAt": "2026-11-10T03:49:00-06:00",
+  "note": "Promotion lane 1 of 11 (rank = work order). Removes copies in all five child repos. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Lane session_013NEJL3BCEdPwkKFkFy1R67, started by the coordinator Nov 3. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane session_013NEJL3beuggCMgfPCizUFP at 03:46-03:49 CST Nov 10. Done, coordinator 03:51 CST Nov 10: on main at ddf1ecfd2 (PR #1144). The 03:45 sweep sent it to ready by mistake, because it read open PRs only.",
+  "updatedAt": "2026-11-10T03:52:00-06:00",
   "lane": "session_013NEJL3beuggCMgfPCizUFP"
 }

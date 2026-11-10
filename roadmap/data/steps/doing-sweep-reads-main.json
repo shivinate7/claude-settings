@@ -1,0 +1,12 @@
+{
+  "title": "The triage sweep of doing steps reads main's merged work before it moves a step to ready",
+  "phase": "build",
+  "status": "ready",
+  "order": 965,
+  "owner": "triage",
+  "why": "Triage mistake, 03:45 CST Nov 10: the sweep moved 13 shipped steps to ready, because it read open PRs only. The coordinator then started lanes on 13 steps that were already done. The harm is lanes spent on shipped work.",
+  "note": "Guard: the sweep becomes a roadmap script. It checks each step's cited PRs (merged), its cited commits and a git log grep on main, and it refuses to set ready when any of them is on main. Owner: triage.",
+  "updatedAt": "2026-11-10T03:52:00-06:00",
+  "lane": null,
+  "blockedBy": []
+}

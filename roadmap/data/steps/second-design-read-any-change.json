@@ -1,11 +1,11 @@
 {
   "title": "Any screen-file change after code round 1 gets a second design read",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 103.4,
   "why": "Your item 259 a, 11:22 CST Nov 6: decision design-agents ran a second design read only on a \"layout\" change, a word the record never defined.",
-  "note": "Nov 6 14:40 CST (triage audit for PR #1340): paused. No live lane or open PR found at 14:40 CST, though a lane was named at 12:01 CST. Item 259 stays open. The coordinator restarts it or says where it stands.\nNov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): lane live.\nNov 6 11:33 CST (triage): the lane rewrites the one line in decision design-agents: a change to any screen file after code round 1 gets a second design read. Page item 259 stays open until its PR merges. The coordinator starts the lane. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane session_013NEJL1FKUScbDBnC4pdBAL at 03:46-03:49 CST Nov 10.",
-  "updatedAt": "2026-11-10T03:49:00-06:00",
+  "note": "Nov 6 14:40 CST (triage audit for PR #1340): paused. No live lane or open PR found at 14:40 CST, though a lane was named at 12:01 CST. Item 259 stays open. The coordinator restarts it or says where it stands.\nNov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): lane live.\nNov 6 11:33 CST (triage): the lane rewrites the one line in decision design-agents: a change to any screen file after code round 1 gets a second design read. Page item 259 stays open until its PR merges. The coordinator starts the lane. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane session_013NEJL1FKUScbDBnC4pdBAL at 03:46-03:49 CST Nov 10. Done, coordinator 03:51 CST Nov 10: on main at 1827d79f2 (#1296); page item 259 already closed. The 03:45 sweep sent it to ready by mistake, because it read open PRs only.",
+  "updatedAt": "2026-11-10T03:52:00-06:00",
   "paused": {
     "why": "No live lane or open PR found at 14:40 CST, though a lane was named at 12:01 CST. Item 259 stays open. The coordinator restarts it or says where it stands.",
     "decides": "coordinator",

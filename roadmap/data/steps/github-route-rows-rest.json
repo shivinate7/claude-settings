@@ -1,0 +1,12 @@
+{
+  "title": "hooks/route_rows.json gets the GitHub route rows it still lacks, each from a fresh cloud measure",
+  "phase": "build",
+  "status": "ready",
+  "order": 964,
+  "owner": null,
+  "why": "From lane github-route-claims (coordinator 03:51 CST Nov 10). The missing rows are: MCP update_pull_request state closed, MCP create_pull_request, MCP PR comment, branch delete 403, the force-with-lease refusals, and MCP merge.",
+  "note": "Debt ci-wake-misses-mcp-ready, which hooks/ci_wake.py cites, is on main (checked 03:53 CST Nov 10).",
+  "updatedAt": "2026-11-10T03:52:00-06:00",
+  "lane": null,
+  "blockedBy": []
+}
