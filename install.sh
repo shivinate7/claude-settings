@@ -711,7 +711,7 @@ log "wrote $TARGET_MD -> $POINTER"
 
 # land_guard_set SRC_HOOKS DEST_HOOKS: copy mode, the guard files (install-hooks-whole).
 # A guard run sees the old set or the new set, never a mix. Step 1 writes every guard file, stamped
-# with this run's id, and shared_names.py, git_reads.py, question_form.py, own_session.py and precompact_handoff.py, which the guard imports, into DEST_HOOKS/guard.d/<id>/,
+# with this run's id, and shared_names.py, git_reads.py, question_form.py, own_session.py, precompact_handoff.py, merge_options.py, override.py, _nowindow.py, proc_env.py, reread_check.py, call_judge.py, decision_watch.py, feedback_guard.py, local_time.py, ruling_home.py, route_match.py, reply_judge.py, stall_watch.py, agent_brief.py and mail.py, which the guard imports, into DEST_HOOKS/guard.d/<id>/,
 # where no guard reads it yet. Step 2 replaces
 # DEST_HOOKS/guard.py: the one landing that switches, because a stamped guard.py loads guard.d/<its
 # id>/ (see the comment above INSTALL_ID in hooks/guard.py). Step 3 lands the flat guard_*.py, kept
@@ -722,7 +722,7 @@ land_guard_set() {
   gdir="$2/guard.d/$INSTALL_ID_VALUE"
   prev_id=$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "$2/guard.py" 2>/dev/null | head -n1)
   mkdir -p "$gdir" || { log "could not make $gdir; the guard files stay as they were"; INSTALL_FAILED=1; return 1; }
-  for gf in "$1"/guard.py "$1"/guard_*.py "$1"/shared_names.py "$1"/git_reads.py "$1"/question_form.py "$1"/own_session.py "$1"/precompact_handoff.py; do
+  for gf in "$1"/guard.py "$1"/guard_*.py "$1"/shared_names.py "$1"/git_reads.py "$1"/question_form.py "$1"/own_session.py "$1"/precompact_handoff.py "$1"/merge_options.py "$1"/override.py "$1"/_nowindow.py "$1"/proc_env.py "$1"/reread_check.py "$1"/call_judge.py "$1"/decision_watch.py "$1"/feedback_guard.py "$1"/local_time.py "$1"/ruling_home.py "$1"/route_match.py "$1"/reply_judge.py "$1"/stall_watch.py "$1"/agent_brief.py "$1"/mail.py; do
     [ -f "$gf" ] || continue
     put_file "$gf" "$gdir/$(basename "$gf")" || { rm -rf "$gdir"; log "the guard files stay as they were"; return 1; }
   done
@@ -1028,11 +1028,37 @@ else
   fi
 fi
 
-# ~/.claude/bin on PATH, once, in the rc file of the login shell.
+# ~/.claude/bin on PATH, once, in the rc file of the login shell. Cloud too: a cloud container
+# does not have ~/.claude/bin on PATH, so a printed remedy naming wait-pid or verdict fails with rc 127.
+# In cloud the block goes at the TOP of the rc: a Debian ~/.bashrc opens with `[ -z "$PS1" ] && return`,
+# so a non-interactive `source ~/.bashrc` returns before an appended block. The new rc is built beside the
+# old one (cp -p keeps its mode) and moved over it, so a failed step leaves the rc as it was. A symlinked
+# rc is written through to its target, so the link stays. Off cloud the block is appended at the end.
 case "${SHELL:-}" in *zsh) RC="$HOME/.zshrc" ;; *) RC="$HOME/.bashrc" ;; esac
-if [ "$CLOUD" != 1 ] && ! grep -qsF '# claude-settings: ~/.claude/bin on PATH' "$RC"; then
-  printf '\n# claude-settings: ~/.claude/bin on PATH\nexport PATH="$HOME/.claude/bin:$PATH"\n' >> "$RC"
-  log "added ~/.claude/bin to PATH in $RC; a new session picks it up"
+PATH_MARK='# claude-settings: ~/.claude/bin on PATH'
+PATH_BLOCK=$(printf '%s\n%s' "$PATH_MARK" 'export PATH="$HOME/.claude/bin:$PATH"')
+if ! grep -qsF "$PATH_MARK" "$RC"; then
+  if [ "$CLOUD" = 1 ]; then
+    rc_file=$RC
+    [ ! -L "$RC" ] || rc_file=$(readlink -f "$RC" 2>/dev/null) || rc_file=
+    rc_new="$rc_file.cs-new"
+    if [ -n "$rc_file" ] && rm -f "$rc_new" \
+      && { [ ! -e "$rc_file" ] || cp -p "$rc_file" "$rc_new"; } \
+      && { printf '%s\n\n' "$PATH_BLOCK" && { [ ! -e "$rc_file" ] || cat "$rc_file"; }; } > "$rc_new" \
+      && mv_retry "$rc_new" "$rc_file"; then
+      rc_written=1
+    else
+      [ -z "$rc_file" ] || rm -f "$rc_new" 2>/dev/null; rc_written=0
+    fi
+  else
+    rc_written=0
+    printf '\n%s\n' "$PATH_BLOCK" >> "$RC" 2>/dev/null && rc_written=1
+  fi
+  if [ "$rc_written" = 1 ]; then
+    log "added ~/.claude/bin to PATH in $RC; a new session picks it up"
+  else
+    log "could not write $RC; ~/.claude/bin is not on PATH"
+  fi
 fi
 
 # Runs one startup entry bounded to $1 seconds where there is no `timeout` binary (macOS). The entry and a

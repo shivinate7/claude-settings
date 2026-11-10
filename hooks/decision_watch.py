@@ -91,11 +91,12 @@ if _GUARD_PATH:
 else:
     import guard
 
-from shared_names import STATE_DIR_NAME  # noqa: E402  stdlib only
+import shared_names  # noqa: E402  stdlib only
+from shared_names import STATE_DIR_NAME  # noqa: E402
 
 # The tail reader for the cheap check lives in lint/_transcript.py, the one home
 # (docs/decisions/hooks-share-the-transcript-reader.md). The older copies below predate it.
-sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+sys.path.insert(0, os.path.join(shared_names.install_root(HERE), "lint"))
 from _transcript import last_human_epoch, head_moved_since, is_last_human  # noqa: E402
 
 # THE TIME BUDGET. The mod (mods/decision-watch/hooks/register.mjs) runs this script, and it

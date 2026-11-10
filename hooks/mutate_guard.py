@@ -51,6 +51,7 @@ with a family row also prints its `hooks/test_guard.py::<family>` lines beside t
 """
 
 import contextlib
+import functools
 import os
 import shutil
 import signal
@@ -103,6 +104,11 @@ TARGETS = {
 # label's prose is a statement about which rule breaks, and the required name is the proof that some
 # case actually reads that break, not a different one nearby.
 MUTATIONS = [
+    # THE COPY'S INSTALL FOLDER. guard.py tells question_form its own folder, so a stamped copy in guard.d/<id>/ finds
+    # the install's lint/ and skills/. Without that, the copy reads no layout and allows a waiting-page write it refuses.
+    ("question-form: the copy is not told its install folder, so its waiting-page checks read no lint/",
+     '    question_form.use_hooks_home(_HERE)',
+     '    pass', "guard", "port question: a copy install with lint/ beside it denies a batch with today's item"),
     # THE TWO ROOTS. `--work-tree` names whose FILES a call discards, and `--git-dir` names whose
     # HEAD it moves. Each mutant makes one of them unread, or makes one root answer the other's
     # question.
@@ -2178,12 +2184,12 @@ MUTATIONS = [
     # The check rule (check-tail) reads any filter after a lane-lint or review-record run, through the
     # one pipeline walk the narrated rule uses.
     ('check-tail: the reach is tail and head only, as the narrated rule has it',
-     '            if (word.removesuffix(".exe") not in FILE_WRITER_STAGES) if any_filter else (word in TRUNCATING_FILTERS):',
-     '            if word in TRUNCATING_FILTERS:',
+     '(word.removesuffix(".exe") not in FILE_WRITER_STAGES) if any_filter',
+     '(word.removesuffix(".exe") not in FILE_WRITER_STAGES) if False',
      "guard", 'merge --lane-lint through sed -n, with no tail or head'),
     ('check-tail: a lone tee is read as a filter',
-     '            if (word.removesuffix(".exe") not in FILE_WRITER_STAGES) if any_filter else',
-     '            if (word.removesuffix(".exe") not in ("tee-object", "out-file")) if any_filter else',
+     '(word.removesuffix(".exe") not in FILE_WRITER_STAGES) if any_filter',
+     '(word.removesuffix(".exe") not in ("tee-object", "out-file")) if any_filter',
      "guard", 'merge --lane-lint through tee with nothing after it, backgrounded'),
     ('check-tail: Out-File is no file writer, so a lone one is read as a filter',
      'FILE_WRITER_STAGES = ("tee", "tee-object", "out-file")',
@@ -2194,16 +2200,16 @@ MUTATIONS = [
      'FILE_WRITER_STAGES = ("tee", "out-file")',
      "guard", 'merge --lane-lint through Tee-Object with nothing after it'),
     ('check-tail: the .exe strip is dropped, so a lone tee.exe is read as a filter',
-     '            if (word.removesuffix(".exe") not in FILE_WRITER_STAGES) if any_filter else',
-     '            if (word not in FILE_WRITER_STAGES) if any_filter else',
+     '(word.removesuffix(".exe") not in FILE_WRITER_STAGES) if any_filter',
+     '(word not in FILE_WRITER_STAGES) if any_filter',
      "guard", 'merge --lane-lint through tee.exe with nothing after it'),
     ('check-tail: a separator no longer ends the pipeline',
-     '        if end != "|":\n            hit = _pipeline_hit(stages, find_stage, any_filter)',
-     '        if False:\n            hit = _pipeline_hit(stages, find_stage, any_filter)',
+     '        if end != "|":\n            pipelines.append(stages)',
+     '        if False:\n            pipelines.append(stages)',
      "guard", 'a semicolon ends the pipeline, so a tail after it reads no live stream'),
     ('check-tail: a pipeline closed by a separator is never read',
-     'any_filter)\n            if hit:\n                return hit\n            stages = []',
-     'any_filter)\n            if False:\n                return hit\n            stages = []',
+     '    for pipelines in texts:\n        for stages in pipelines:\n            hit = _pipeline_hit(stages, background, any_filter=True)',
+     '    for pipelines in texts:\n        for stages in pipelines[-1:]:\n            hit = _pipeline_hit(stages, background, any_filter=True)',
      "guard", 'merge --lane-lint piped to tail, then a background &, is refused'),
     ('check-tail: ci-job is refused in the foreground too',
      '        return basename(tokens[index]) if background else ""',
@@ -2214,17 +2220,100 @@ MUTATIONS = [
      '        if False:\n            return True',
      "guard", 'ci-job checks --lint piped to grep, then a trailing background &'),
     ('check-tail: a merge script run by its own path is no check',
-     '            script = tokens[index]',
-     '            script = ""',
+     '    if not script and word.endswith(".py"):\n        script = tokens[index]',
+     '    if not script and word.endswith(".py"):\n        script = ""',
      "guard", './merge/merge.py --lane-lint piped to tail'),
     ('check-tail: any command word runs the roster script, not only an interpreter',
      '    return _roster_word(tokens, index, interpreter_only=True)',
      '    return _roster_word(tokens, index)',
      "guard", 'grep naming the script, piped to tail, backgrounded, is allowed'),
     ('check-tail: a roster command with no lane-lint or review-record flag is a check',
-     '    if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):',
+     '    if "--confirm" in tokens or not any(_merge_flag(tokens, flag) for flag in CHECK_FLAGS):',
      '    if "--confirm" in tokens:',
      "guard", 'narrate: a merge preview is not a wait'),
+
+    # check-tail: a lint piped to tail or head before a commit or a push, and the script operand reader.
+    ('check-tail lint: a uv run lint is not read through uv',
+     '    index = _skip_uv_run(tokens, index)\n    if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word\n'
+     '        return ""\n    script = _script_run(tokens, index)',
+     '    if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word\n'
+     '        return ""\n    script = _script_run(tokens, index)',
+     "guard", 'check-tail: uv run lint script piped to tail, then ; git commit, is refused'),
+    ('check-tail lint: a .py command word is no script',
+     '    if not script and word.endswith(".py"):\n        script = tokens[index]\n    return script',
+     '    return script',
+     "guard", 'check-tail: uv run lint script piped to tail, then ; git commit, is refused'),
+    ('check-tail lint: a redirect word is read as the script operand',
+     '    redirect = REDIRECT_WORD.match(tokens[at])\n    if not redirect:',
+     '    redirect = None\n    if not redirect:',
+     "guard", 'check-tail: python3 -u with a 2>&1 redirect before the script, piped to tail, is refused'),
+    ('check-tail lint: the lint pass reads the check roster, not lint scripts',
+     '            hit = _pipeline_hit(stages, background,\n'
+     '                                lambda segment, bg: lint_stage(segment, bg, in_lint, folder), any_later=True)\n',
+     '            hit = _pipeline_hit(stages, background, stage_of=check_stage, any_filter=False, any_later=False)\n',
+     "guard", 'check-tail: lint piped to tail, then && git commit is refused'),
+    ('check-tail lint: a lint piped to tail is refused with no commit or push after it',
+     '            if any(_commits_or_pushes(segment) for later in after for segment in later):',
+     '            if True:',
+     "guard", 'check-tail: lint piped to tail with no commit after is allowed'),
+    ('check-tail lint: a commit is no follow-up',
+     '    return any(verb in ("commit", "push") for verb, _args in git_calls(segment))',
+     '    return any(verb in ("push",) for verb, _args in git_calls(segment))',
+     "guard", 'check-tail: uv run lint script piped to tail, then ; git commit, is refused'),
+    ('check-tail lint: a push is no follow-up',
+     '    return any(verb in ("commit", "push") for verb, _args in git_calls(segment))',
+     '    return any(verb in ("commit",) for verb, _args in git_calls(segment))',
+     "guard", 'check-tail: python3.11 lint script piped to tail, then && git push, is refused'),
+    # The lint stage reads a lint/ folder script only, so a .py script elsewhere is no lint and is allowed.
+    ('check-tail lint: the lint stage reads any .py script, not only one under lint/',
+     r'LINT_SCRIPT = re.compile(r"(?:^|/)lint/[^/]+\.py$")',
+     r'LINT_SCRIPT = re.compile(r"(?:^|/)[^/]+\.py$")',
+     "guard", 'a .py script outside lint/ piped to tail'),
+    # A redirect target written apart from its word is skipped with it. Dropping that skip reads the target as the script.
+    ('check-tail lint: a separate redirect target is read as the script operand',
+     '    return 1 if redirect.group(1) else 2',
+     '    return 1',
+     "guard", 'lint behind a separate 2> /dev/null redirect'),
+    ('check-tail lint: a commit before the lint counts as a follow-up',
+     'after = list(pipelines[at + 1:])',
+     'after = list(pipelines)',
+     "guard", 'a commit before a lint piped to tail is allowed'),
+    # The lint-then-commit gate reads the exit, so any later stage masks it, a redirect word before the
+    # command and a substitution in the script path still count, and a `$(...)` is read as its own text.
+    ('check-tail lint: only tail and head mask the lint exit',
+     'if any_later or ((word.removesuffix(".exe") not in FILE_WRITER_STAGES) if any_filter',
+     'if ((word.removesuffix(".exe") not in FILE_WRITER_STAGES) if any_filter',
+     "guard", 'check-tail: lint piped to grep, then && git commit, is refused'),
+    ('check-tail lint: a redirect word before the command is the command',
+     '    index = _skip_redirects(tokens, index)\n    while index < len(tokens) and basename(tokens[index]) == "uv":',
+     '    while index < len(tokens) and basename(tokens[index]) == "uv":',
+     "guard", 'a 2>/dev/null redirect before the lint script, piped to tail'),
+    ('check-tail lint: a redirect word after uv run is the command',
+     '        index = _skip_redirects(tokens, start + at)\n',
+     '        index = start + at\n',
+     "guard", 'a 2>/dev/null redirect after uv run'),
+    # A redirect word between a pipe and its filter is skipped before the filter word is read.
+    ('check-tail lint: a redirect word between a pipe and its filter is skipped',
+     '            at = _skip_redirects(tokens, at)\n',
+     '',
+     "guard", 'check-tail: merge --lane-lint piped to a redirect word, then tail, is refused'),
+    ('check-tail: a substitution is not read as its own text',
+     '    texts = [_pipelines(text) for text, _in_message in texts]\n',
+     '    texts = [_pipelines(stripped)]\n',
+     "guard", 'a lint piped to tail inside $(...)'),
+    ('check-tail lint: a commit beside a lint in a substitution is no follow-up',
+     '            after = list(pipelines[at + 1:]) + [stages for text in others for stages in text]\n',
+     '            after = list(pipelines[at + 1:])\n',
+     "guard", 'a lint piped to tail inside $(...)'),
+    # A lint script is looked up in the folder the call runs in: a copy install's lint/ and another repo's lint/.
+    ("check-tail lint: a lint file is read from the guard's own lint/, not the call's folder",
+     '    return os.path.isfile(os.path.join(folder or LINT_DIR, name))',
+     '    return os.path.isfile(os.path.join(LINT_DIR, name))',
+     "guard", "check-tail: a copy install, cd lint, then ./ste_lint.py piped to tail, then && commit, is refused"),
+    ('check-tail lint: a commit word anywhere in a segment counts as a commit',
+     '    return any(verb in ("commit", "push") for verb, _args in git_calls(segment))',
+     '    return "commit" in segment or any(verb in ("commit", "push") for verb, _args in git_calls(segment))',
+     "guard", 'lint piped to tail, then ; echo commit'),
     ('ln-over-directory: never refuse',
      '        refuse(tool, "deny", "ln-over-directory", LN_DESCENDS_REASON, matched)',
      '        pass',
@@ -2349,6 +2438,10 @@ MUTATIONS = [
      '        for args, where, overrides in _push_calls(segment, stripped, cwd):\n            verdict = push_verdict(',
      '        for args, where, overrides in ([] if tool else _push_calls(segment, stripped, cwd)):\n            verdict = push_verdict(',
      "guard", "ask-step-hidden: a force push inside bash -c denies"),
+    ("push-calls-substitution: _push_calls reads only the wrapped script, so a force push inside a bash -c substitution passes",
+     '            for each in (stripped, *substitution_commands(text, stripped)):\n                for part in split_segments(each):\n                    yield from _push_calls(',
+     '            for each in (stripped,):\n                for part in split_segments(each):\n                    yield from _push_calls(',
+     "guard", "ask-step-hidden: a force push in a bash -c substitution denies"),
     ("ask-step-hidden: the trailing paren or backtick stays on the path word, so a subshell write hides its path",
      '                word = _typed(word.rstrip(")`") or word, word)   # keeps the PowerShell type of the word\n',
      '                word = _typed(word, word)   # keeps the PowerShell type of the word\n',
@@ -2534,8 +2627,8 @@ MUTATIONS = [
      "guard", 'override: a refusal an override lifts ends with the main override line'),
     ("override line: the missing-module deny stops saying that no override lifts it",
      '"then retry. No override lifts this refusal, because the failed guard cannot check "\n'
-     '                    "the acts that no override lifts. "\n'
-     '                    "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))',
+     '            "the acts that no override lifts. "\n'
+     '            "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))',
      '"then retry.")}}))',
      "guard", 'override: a missing-module deny says that no override lifts it'),
     ("override line: the Opus spawn ask no longer names the Opus word",
@@ -2568,8 +2661,8 @@ MUTATIONS = [
     # ---- lane-repo-tag. Each mutant breaks one clause of the lane repo tag check, or of git_reads.github_repo and
     # origin_slug, the reading of a checkout's GitHub repo that the rule shares with the roadmap build.
     ("lane-repo-tag: the rule never fires",
-     '    if lane_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
-     '    if False and lane_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
+     '    if repo_tag_hit_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
+     '    if False and repo_tag_hit_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
      "guard", "lane-repo-tag: lane tag with no repo tag is denied"),
     ("lane-repo-tag: a tag in other case no longer matches",
      '        if repo and repo_tag_names(tag, repo):',
@@ -2619,6 +2712,61 @@ MUTATIONS = [
      'LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>"))',
      'LANE_REPO_TAG_REASON % (REPO_TAG + "<owner>/<name>")',
      "guard", "lane-repo-tag: a denied lane names the expected repo tag in its reason"),
+    # ---- lane-start-settings. Each mutant breaks one clause of the rule in guard.py: the model and source_url
+    # reads, the empty and whitespace-only reads, the lane tag condition, or the refusal itself.
+    ("lane-start-settings: the model is not checked, so a lane with no model is allowed",
+     'missing = [k for k in ("model", "source_url")',
+     'missing = [k for k in ("source_url",)',
+     "guard", "lane-start-settings: lane tag with no model is denied"),
+    ("lane-start-settings: the source_url is not checked, so a lane with no source_url is allowed",
+     'missing = [k for k in ("model", "source_url")',
+     'missing = [k for k in ("model",)',
+     "guard", "lane-start-settings: lane tag with no source_url is denied"),
+    ("lane-start-settings: an empty string counts as present",
+     'if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]',
+     'if not (isinstance(tool_input.get(k), str) and (tool_input[k].strip() or tool_input[k] == ""))]',
+     "guard", "lane-start-settings: lane tag with an empty model is denied"),
+    ("lane-start-settings: a whitespace-only value counts as present, so the strip is dropped",
+     'if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]',
+     'if not (isinstance(tool_input.get(k), str) and tool_input[k])]',
+     "guard", "lane-start-settings: lane tag with a whitespace-only model is denied"),
+    ("lane-start-settings: the lane tag condition is dropped, so every create_session with no model or source_url is refused",
+     '    if not is_lane_create_session(tool, tool_input):\n'
+     '        return ""\n'
+     '    missing = [k for k in ("model", "source_url")',
+     '    missing = [k for k in ("model", "source_url")',
+     "guard", "lane-start-settings: coordinator call with no model and no source_url is allowed"),
+    ("lane-start-settings: the rule never refuses, so a lane with no model or source_url is allowed",
+     '    if lane_missing:\n        refuse(tool, "deny", "lane-start-settings"',
+     '    if False and lane_missing:\n        refuse(tool, "deny", "lane-start-settings"',
+     "guard", "lane-start-settings: lane tag with no model is denied"),
+    ("lane-start-settings: a value that is not text counts as present when its str() is not blank, so null, a number and a list are allowed",
+     'if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]',
+     'if not (k in tool_input and str(tool_input[k]).strip())]',
+     "guard", "lane-start-settings: lane tag with a non-text"),
+    # ---- lane-floor. The floor's refusal names the lane remedy for a lane create_session and the no-model remedy for
+    # every other spawn. Each mutant breaks that choice, or the one lane-tag reading the floor and the three lane checks
+    # share (is_lane_create_session). lane_tags holds no case handling; the casefold lives in is_lane_create_session.
+    ("lane-floor: a lane create_session below the floor gets the no-model remedy again",
+     'LANE_MODEL_FLOOR_REASON if is_lane_create_session(tool, tool_input) else MODEL_FLOOR_REASON,',
+     'MODEL_FLOOR_REASON,',
+     "guard", "floor lane: a lane create_session on haiku is denied with the lane remedy"),
+    ("lane-floor: every floor refusal gets the lane remedy, so an Agent spawn names the lane inputs",
+     'LANE_MODEL_FLOOR_REASON if is_lane_create_session(tool, tool_input) else MODEL_FLOOR_REASON,',
+     'LANE_MODEL_FLOOR_REASON,',
+     "guard", "floor remedy: Agent on haiku keeps the no-model remedy"),
+    ("lane-floor: is_lane_create_session is always False, so no lane check fires",
+     '    return tool == CREATE_SESSION_TOOL and any(',
+     '    return False and any(',
+     "guard", "lane-start-settings: lane tag with no model is denied"),
+    ("lane-floor: is_lane_create_session is always True, so every call is judged as a lane",
+     '    return tool == CREATE_SESSION_TOOL and any(',
+     '    return True or any(',
+     "guard", "lane-start-settings: coordinator call with no model and no source_url is allowed"),
+    ("lane-floor: the lane tag is matched without casefold, so an upper-case lane tag is no lane",
+     'isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))',
+     'isinstance(t, str) and t.strip() == LANE_TAG for t in lane_tags(tool_input))',
+     "guard", "floor lane: an upper-case lane tag on haiku gets the lane remedy"),
     # RULE roadmap-one-writer. A push to the record branch needs the triage tag in the own record, with no
     # set_session_tags call after it.
     ("roadmap-one-writer: the triage tag is not checked, so any own record is a proof",
@@ -2803,10 +2951,21 @@ MUTATIONS = [
      '        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)',
      '        pass',
      "guard", "handoff-unread: after compaction, Bash is refused while the handoff is unread"),
-    ("handoff-unread: a failed import of reread_check no longer fails open",
-     '    except Exception:\n        unread_handoff = None\n',
-     '    except Exception:\n        raise\n',
-     "guard", "handoff-unread: a guard copy without reread_check.py fails open"),
+    ("handoff-unread: a failed import of reread_check fails open again",
+     '        _loading = "reread_check"\n        import reread_check\n',
+     '        _loading = "reread_check"\n        try:\n            import reread_check\n'
+     '        except ImportError:\n'
+     '            reread_check = type("R", (), {"ph": 1, "unread_handoff": staticmethod(lambda payload: "")})\n',
+     "guard", "a guard copy without reread_check.py refuses as guard-crash"),
+    ("handoff-unread: a reread_check without its precompact_handoff sibling is let load again",
+     '        if reread_check.ph is None:',
+     '        if False:',
+     "guard", "a guard copy without precompact_handoff.py refuses as guard-crash"),
+    ("install-hooks-whole: a failed import of proc_env falls back to a foreign-pid read again",
+     'from proc_env import holds_session_tag  # the one home of the exec-environment read (hooks/proc_env.py)\n',
+     'try:\n    from proc_env import holds_session_tag\nexcept ImportError:\n'
+     '    def holds_session_tag(pid, session_id):\n        return False\n',
+     "guard", "a copy missing proc_env (guard_kill's session-tag read) refuses a Bash call as guard-crash"),
     ("handoff-unread: an agent's call is judged like the main session's",
      '        if ph is None or not isinstance(payload, dict) or payload.get("agent_id"):',
      '        if ph is None or not isinstance(payload, dict):',
@@ -3227,6 +3386,7 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_branch_worktree.py": ["branch-worktree"],
     "hooks/guard_merge.py": ["merge"],
     "hooks/guard_mask_script.py": ["mask-script"],
+    "hooks/guard_argv.py": ["argv"],
 }
 GUARD_MODULE_EXEMPT = {
     "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",
@@ -3892,36 +4052,45 @@ def mutation_parts(entry):
     return label, old, new, target, required, only_on
 
 
-def run_mutant(sources, work: str, entry):
-    """Apply one mutation, run its suite against it, and return (label, code, FAIL lines,
-    required, skip, ERROR lines).
+def lay_out_guard_reads(root: str) -> None:
+    """Copy into `root` the three files outside hooks/, lint/, janitor/ and skills/ that a copied guard family
+    reads from beside its hooks folder: bin/sim-lease, the merge tool and the CI alarm's events. The folders
+    lint/, janitor/ and skills/ come from the callers, through `tracked_tree.copy_tracked` (git's own list, so no
+    file is hand-picked). The simulator refusal imports janitor/sweep.py and fails open without it.
+    A guard copy gets its own `root`. The override copies sit one folder below `work`, so `main` calls this
+    once on `work`. Cost (rule outcomes-mechanize-rules): per guard-family copy, three files (about 275 KB), and
+    `main` makes one more under `work`. The folders copy_tracked lays out add git's list (225 files, about 4.8 MB,
+    at this commit) to each copy. They stay until the run ends, when `work` is removed. Without these, arms that
+    read them fail on every mutant alike, and the clean-layout control (`run_controls`) reads red."""
+    os.makedirs(os.path.join(root, "bin"), exist_ok=True)
+    shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
+    # guard_merge.py loads ../merge/merge.py (MERGE_TOOL_REL), which reads ../actions/ci-alarm/events.json (ALARM_EVENTS).
+    os.makedirs(os.path.join(root, "merge"), exist_ok=True)
+    shutil.copy(os.path.join(HERE, "..", "merge", "merge.py"), os.path.join(root, "merge"))
+    os.makedirs(os.path.join(root, "actions", "ci-alarm"), exist_ok=True)
+    shutil.copy(os.path.join(HERE, "..", "actions", "ci-alarm", "events.json"),
+                os.path.join(root, "actions", "ci-alarm"))
 
-    `required` is the case name (or a distinctive fragment of it) the caller must find among the
-    FAIL lines before trusting this mutant's death: see `mutate_shared.report_verdict`. `skip`,
-    when not None, is why this mutant did not run on this platform at all: the caller reports it
-    and counts it as neither killed, survived, nor wrong cause.
-    """
-    label, old, new, target, required, only_on = mutation_parts(entry)
-    if required is None:
-        raise ValueError("mutation carries no required case name: %s" % label)
-    skip = mutate_shared.skip_reason(only_on)
-    if skip:
-        return label, None, [], required, skip
-    _path, suite, variable, stem = TARGETS[target]
+
+def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> str:
+    """Lay out one copy of `target` under `work` with `old` replaced by `new`, and return the path
+    of the file its suite loads. `name` keys the copy's folder or file (through `mutate_shared.safe_name`).
+
+    A mutant and its clean-layout control both go through here, so they differ only in the text:
+    `old == new` is the control, the same layout with nothing mutated (see `run_controls`)."""
+    stem = TARGETS[target][3]
     if target in ("guard", "simlease"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
         # module that holds it. The suite loads the copied guard.py, which finds its siblings.
-        root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
         tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
-        # The guard loads ../bin/sim-lease beside its hooks folder, so the copy takes it too, mutated or not.
-        os.makedirs(os.path.join(root, "bin"), exist_ok=True)
+        lay_out_guard_reads(root)  # takes the original bin/sim-lease; a simlease mutant overwrites it below
         if target == "simlease":
             with open(os.path.join(root, "bin", "sim-lease"), "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(sources[target].replace(old, new, 1))
-        else:
+        elif old != new:  # old == new is the clean-layout control: no anchor to find
             mutate_shared.apply_mutant(tree, old, new)
-            shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
         copy_path = os.path.join(tree, "guard.py")
         # The guard family reads the folders beside its hooks folder as a checkout has them: ../lint (layout.py,
         # the role-model table: without it every role-model arm passes unjudged), ../janitor (the simulator
@@ -3930,13 +4099,13 @@ def run_mutant(sources, work: str, entry):
         # checkout, never from this scaffold.
         tracked_tree.copy_tracked(root, "lint", "janitor", "skills", root=os.path.dirname(HERE))
     else:
-        copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
+        copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(name)))
         mutated = sources[target].replace(old, new, 1)
     if target in ("ruling", "decision"):
         # ruling_home.py and decision_watch.py read `../lint/_transcript.py` beside itself. A bare copy in `work`
         # would crash on that import and read as red on every case, whatever was mutated
         # (a mutant's own cause of death must be checked). Lay out hooks/ and lint/ for the copy.
-        tree = os.path.join(work, "tree_%s" % mutate_shared.safe_name(label))
+        tree = os.path.join(work, "tree_%s" % mutate_shared.safe_name(name))
         os.makedirs(os.path.join(tree, "hooks"), exist_ok=True)
         os.makedirs(os.path.join(tree, "lint"), exist_ok=True)
         shutil.copy(os.path.join(HERE, "..", "lint", "_transcript.py"), os.path.join(tree, "lint"))
@@ -3946,7 +4115,7 @@ def run_mutant(sources, work: str, entry):
     if target == "override":
         # The guard family, local_time.py and the mutated override.py share one folder: the
         # copied guard and the suite's grant child both import the override module beside guard.py.
-        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
         mutate_shared.guard_tree(tree)
         for helper in ("local_time.py", "_nowindow.py"):
             shutil.copy(os.path.join(HERE, helper), tree)
@@ -3955,7 +4124,7 @@ def run_mutant(sources, work: str, entry):
         copy_path = os.path.join(tree, "guard.py")
     elif target == "calljudge":
         # call_judge.py imports guard_core and decision_watch beside itself: lay out the whole family.
-        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
         mutate_shared.guard_tree(tree)
         copy_path = os.path.join(tree, "call_judge.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
@@ -3963,6 +4132,77 @@ def run_mutant(sources, work: str, entry):
     elif target not in ("guard", "simlease"):
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
+    return copy_path
+
+
+def run_controls(sources, work: str, entries):
+    """Return {target: function} with one filtered control per target that has a mutation to run here.
+
+    A control is `run_suite` on the unmutated layout, built by `lay_out` with an identity mutation and
+    filtered to one required case of that target's own mutations (`run_control`). It answers one question:
+    does this layout run its suite at all? A layout that crashes (a missing sibling module, a wrong path)
+    fails every case whatever a mutant changed, and each FAIL line reads as a kill; one that exits 0 having
+    run no case is the same crash seen from the other side.
+    `mutate_shared.run_mutants` takes these functions as its `controls`: it runs them in the same pool as the
+    mutants, ahead of them, under MUTATE_JOBS, and makes every mutant of a red, empty or raising target UNKNOWN
+    (`mutate_shared.control_verdict`). `work` is `main`'s folder, after `main` has laid the shared guard family,
+    lint and guard reads in it.
+
+    Cost (rule outcomes-mechanize-rules): one filtered suite run and one temp tree per target per run, inside
+    the job cap. A filtered run takes seconds, as a mutant's first stage does. It writes no log and starts no
+    timer, thread or other long-lived process beyond the run's own pool."""
+    targets = []
+    for entry in entries:
+        _label, _old, _new, target, _required, only_on = mutation_parts(entry)
+        if target not in targets and not mutate_shared.skip_reason(only_on):
+            targets.append(target)
+    return {target: functools.partial(run_control, sources, work, target, entries) for target in targets}
+
+
+def control_name(target: str) -> str:
+    """The name keying a target's control copy, which `main` also checks for path collisions."""
+    return "clean layout of %s" % target
+
+
+def control_case(target: str, entries) -> str:
+    """The required case fragment a target's control runs: the first one among its mutations that run here."""
+    for entry in entries:
+        _label, _old, _new, entry_target, required, only_on = mutation_parts(entry)
+        if entry_target == target and required and not mutate_shared.skip_reason(only_on):
+            return required
+    raise ValueError("no mutation of target %s has a required case to run here" % target)
+
+
+def run_control(sources, work: str, target: str, entries=None):
+    """Run one filtered case of `target`'s suite on the unmutated layout. Return run_suite's result tuple.
+    `entries` defaults to MUTATIONS."""
+    _path, suite, variable, _stem = TARGETS[target]
+    name = control_name(target)
+    only = control_case(target, MUTATIONS if entries is None else entries)
+    copy_path = lay_out(sources, work, target, name, "", "")
+    config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(name))
+    os.makedirs(config_dir, exist_ok=True)
+    return run_suite(suite, variable, copy_path, config_dir, only)
+
+
+def run_mutant(sources, work: str, entry):
+    """Apply one mutation, run its suite against it, and return (label, code, FAIL lines,
+    required, skip, ERROR lines).
+
+    `required` is the case name (or a distinctive fragment of it) the caller must find among the
+    FAIL lines before trusting this mutant's death: see `mutate_shared.report_verdict`. `skip`,
+    when not None, is why this mutant did not run on this platform at all: the caller reports it
+    and counts it as neither killed, survived, nor wrong cause. This verdict is not yet trusted: `run_mutants`
+    judges it against its target's clean-layout control (`run_controls`).
+    """
+    label, old, new, target, required, only_on = mutation_parts(entry)
+    if required is None:
+        raise ValueError("mutation carries no required case name: %s" % label)
+    skip = mutate_shared.skip_reason(only_on)
+    if skip:
+        return label, None, [], required, skip
+    _path, suite, variable, _stem = TARGETS[target]
+    copy_path = lay_out(sources, work, target, label, old, new)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
     os.makedirs(config_dir, exist_ok=True)
     code, red, seen = mutate_shared.staged_suite_seen(
@@ -4035,6 +4275,29 @@ def main() -> int:
                 return 1
             seen_paths[key] = (index, label)
 
+    # Each target's clean-layout control (run_controls) writes its own copy and config folder, and
+    # must not collide with a mutant's either. The control's index is past every mutation's.
+    for control_index, target in enumerate(sorted({mutation_parts(e)[3] for e in MUTATIONS}),
+                                           start=len(MUTATIONS)):
+        label = control_name(target)
+        safed = mutate_shared.safe_name(label)
+        for candidate in ("%s_%s.py" % (TARGETS[target][3], safed), "cfg_%s" % safed):
+            other = seen_paths.get(candidate.lower())
+            if other is not None:
+                print("ERROR two mutations share one path on a case-insensitive filesystem: "
+                      "%r and %r both produce %s" % (other[1], label, candidate))
+                return 1
+            seen_paths[candidate.lower()] = (control_index, label)
+
+    # MUTATE_ONLY=<label> runs that one mutation. It filters after the anchor loop above, which checks every entry.
+    chosen = MUTATIONS
+    only = os.environ.get("MUTATE_ONLY")
+    if only:
+        chosen = [entry for entry in MUTATIONS if mutation_parts(entry)[0] == only]
+        if not chosen:
+            print("ERROR no mutation named: %s" % only)
+            return 1
+
     work = tempfile.mkdtemp(prefix="mutate_guard_")
     # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
     # subprocess, and it does a plain `import guard` (never GUARD_UNDER_TEST: a mutation of the
@@ -4049,11 +4312,14 @@ def main() -> int:
     # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
     # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The ruling and
     # decision copies read their own tree/lint instead (above). A guard copy carries its own lint folder (run_mutant).
-    tracked_tree.copy_tracked(work, "lint", root=os.path.dirname(HERE))
+    # The override copies also read ../janitor (the simulator refusal, which fails open without it) and ../skills.
+    tracked_tree.copy_tracked(work, "lint", "janitor", "skills", root=os.path.dirname(HERE))
+    lay_out_guard_reads(work)  # the override copies' ../merge, ../actions and ../bin
 
     try:
         return mutate_shared.run_mutants(
-            MUTATIONS, lambda entry: run_mutant(sources, work, entry))
+            chosen, lambda entry: run_mutant(sources, work, entry),
+            controls=run_controls(sources, work, chosen), control_of=lambda entry: mutation_parts(entry)[3])
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
