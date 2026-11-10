@@ -322,11 +322,15 @@ def undrafted_pr_create(segment: str) -> bool:
 # The page is rebuilt only at merge. The commit is refused when the page it would hold differs from
 # HEAD's page, the base tip's page AND origin/<base>'s page: a merge of the base into the lane brings
 # the base's page, so it passes. The base is `resolve_default_base`, read at its TIP. A merge that brought
-# a page the base has since moved past also passes: the page equals MERGE_HEAD's page by exact blob id,
-# and MERGE_HEAD is on origin/<base>'s first-parent line (`rev-list --first-parent`), so a branch merged
-# into the base is no pass. Those reads run only on the path that would refuse, and a failed read is refused.
-# A rebuilt page, a page of a merge of any commit off that line, and a page taken after the merge state
-# is gone are refused.
+# a page the base has since moved past also passes: the page equals MERGE_HEAD's page by exact blob id, and
+# one of two holds. MERGE_HEAD is on origin/<base>'s first-parent line (`rev-list --first-parent`), so a
+# branch merged into the base is no pass. Or the merge base of HEAD and MERGE_HEAD is no ancestor of
+# origin/<base> (`merge-base --is-ancestor` exits 1): the lane is stacked on a branch main has not merged,
+# and MERGE_HEAD is that branch moved on. A lane cut from main has its merge base on main, so it gets no
+# pass from the second. Those reads run only on the path that would refuse, and a failed read is refused,
+# an is-ancestor exit other than 0 or 1 included.
+# A rebuilt page, a page of a merge of any other commit, and a page taken after the merge state is gone
+# are refused.
 # The hook runs BEFORE the shell chain, so `commit -a` (a tracked page), `commit <page>` and a `git add`
 # that reaches the page earlier in the same command read the working tree, and any other commit reads
 # the index. A commit that names paths (`--`, --only) holds only those paths. A non-git segment whose
@@ -453,14 +457,22 @@ def _runs_generator(segment):
 
 
 def _merge_head_page(top, base):
-    """The blob id of the page at MERGE_HEAD when a merge is in progress and MERGE_HEAD is a commit on
-    origin/<base>'s first-parent line (a past base tip), else ''. A failed or short read gives ''."""
+    """The blob id of the page at MERGE_HEAD when a merge is in progress and one of two holds, else ''.
+    (1) The merge base of HEAD and MERGE_HEAD is no ancestor of origin/<base>: the lane is stacked on a
+    branch that main has not merged, and MERGE_HEAD is that branch moved on. (2) MERGE_HEAD is a commit on
+    origin/<base>'s first-parent line (a past base tip). A failed or short read gives '', and so does a
+    merge-base read with no answer or an is-ancestor exit other than 0 or 1."""
     # One read gives MERGE_HEAD's commit and its page: it fails when no merge is in progress.
     done = _git(top, "rev-parse", "MERGE_HEAD", "MERGE_HEAD:" + RECORDS_PAGE)
     ids = done.stdout.split() if done is not None and done.returncode == 0 else []
     if len(ids) != 2:
         return ""
     origin = base if base.startswith("origin/") else "origin/" + base
+    meet = _git(top, "merge-base", "HEAD", "MERGE_HEAD")
+    if meet is not None and meet.returncode == 0 and meet.stdout.strip():
+        seen = _git(top, "merge-base", "--is-ancestor", meet.stdout.split()[0], origin)
+        if seen is not None and seen.returncode == 1:   # 1 is "not an ancestor"; 0 is one, other is a failure
+            return ids[1]
     line = _git(top, "rev-list", "--first-parent", origin)   # one id per base tip, newest first
     return ids[1] if line is not None and line.returncode == 0 and ids[0] in line.stdout.split() else ""
 
@@ -483,7 +495,7 @@ def _commit_page_id(top, working):
 
 def records_page_hit(stripped: str, cwd: str) -> str:
     """Return the commit when it would hold a records page that is none of HEAD's, the base tip's,
-    origin/<base>'s and MERGE_HEAD's (MERGE_HEAD on origin/<base>'s first-parent line), else ''. Each segment is judged from its own command word."""
+    origin/<base>'s and MERGE_HEAD's (`_merge_head_page` says when MERGE_HEAD's page counts), else ''. Each segment is judged from its own command word."""
     staged = generated = False   # an earlier `git add` reaches the page / an earlier segment rewrites it
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
