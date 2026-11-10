@@ -1890,6 +1890,15 @@ class UnreadStale(FolderCase):
         rc, out = self.run_unread()
         self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "a receipt with only filed cleared the answer: " + out)
 
+    # Deliberate: a receipt read at or after the answer clears it, whatever older receipts for the same answer sit beside it.
+    # Pins the code as it stands: the older receipt is neither an unknown nor a block.
+    def test_a_receipt_read_before_the_answer_beside_one_read_after_it_clears_it_by_design(self):
+        self.store(items=[item_entry("colour-pick", "open")], answers=[pick_answer_entry("colour-pick", EARLY)],
+                   receipts=[receipt_entry("colour-pick", read="2026-11-05T02:00:00Z"), receipt_entry("colour-pick", read="2026-11-05T13:00:00Z")])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]),
+                         "a receipt read before the answer, beside one read after it, kept the answer unread: " + out)
+
     def test_with_no_wake_every_answer_with_no_receipt_read_back_is_listed(self):
         items = [item_entry("recent", "open", n=1, owner="ops"), item_entry("old", "open", n=2, owner="ops"), item_entry("read", "open", n=3, owner="ops")]
         answers = [pick_answer_entry("recent", "2026-11-05T13:09:00Z"), pick_answer_entry("old", EARLY), pick_answer_entry("read", EARLY)]
@@ -1964,6 +1973,14 @@ class UnreadStale(FolderCase):
         rc, out = self.run_unread(codes=(0, 1, 2))
         self.assert_unknown(rc, out, "colour-pick")
         self.assert_no_listed_line(out, "an answer with an unreadable at was listed")
+
+    def test_a_listed_answer_beside_an_answer_with_an_unreadable_at_prints_both_lines_and_exits_2(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops"), item_entry("bad-time", "open")],
+                   answers=[pick_answer_entry("colour-pick", EARLY), pick_answer_entry("bad-time", "not-a-time")])
+        rc, out = self.run_unread(codes=(2,))
+        self.assert_unknown(rc, out, "bad-time")
+        self.assertEqual([line for line in output_lines(out) if line.startswith("answer-unread")], [unread_line("colour-pick", 143, "ops", EARLY)],
+                         "the listed answer was not printed beside the unknown line: " + out)
 
     def test_an_answer_with_no_at_is_unknown_and_names_its_id(self):
         self.store(items=[item_entry("colour-pick", "open")], answers=[without_at(pick_answer_entry("colour-pick", EARLY))])
