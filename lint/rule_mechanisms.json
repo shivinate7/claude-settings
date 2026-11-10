@@ -44,12 +44,6 @@
         "reason": "No hook reads the owner's request and judges which shape (solo, one lane or coordinator) fits it, or checks that the session said its pick in one line first."
       }
     },
-    "roles-solo-builds-short-edit-list": {
-      "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Nothing counts the edits in a request or sees whether parts could run in parallel, so no check can tell a solo job from a one-lane or coordinator job."
-      }
-    },
     "roles-solo-reviews-logic-diffs-only": {
       "mechanism": {
         "kind": "unmechanized",
