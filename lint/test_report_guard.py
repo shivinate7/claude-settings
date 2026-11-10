@@ -2652,6 +2652,22 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                                      assistant_text(self.reply(self.PICK))], repo=keyed),
                           "a send to the transcript's writer was refused when the layout key names another id")
 
+    def test_qm_layout_writer_red_meta_read_naming_no_writer_blocks(self):
+        # Catches: a meta/page read that names no writer read as no read, so the layout key stands in for it and a
+        # same-turn send to the key id passes. Any meta/page get in the transcript keeps the layout key out.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        page_json = json.dumps({"url": self.PAGE, "title": "Waiting page"})
+        reads = (("collection", self.call("ArtifactData", {"action": "get", "collection": "meta", "doc_id": "page",
+                                                           "url": self.PAGE}, result=page_json)),
+                 ("path", self.call("ArtifactData", {"action": "get", "path": "meta/page", "url": self.PAGE},
+                                    result=page_json)))
+        for label, read in reads:
+            for field, send in (("session_id", self.send(session_id=self.WRITER)), ("to", self.send(to=self.WRITER))):
+                with self.subTest(read=label, field=field):
+                    out = self.stop([human("decide"), *read, *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                    self.assert_blocked(out, "Pick guard", "the page writer is not known to this session")
+
     def test_qm_layout_writer_lane_send_to_the_key_id_is_refused(self):
         # Catches: a lane reading the layout key, so a send to the key's writer passes where a lane's own chat never reaches the owner.
         keyed = self.make_repo("keyed_key", writer=self.WRITER)
