@@ -51,6 +51,23 @@ from html.parser import HTMLParser
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+# The install's hooks/ folder. lint/ and skills/ sit beside it (decision install-hooks-whole). A stamped copy of
+# this file sits in hooks/guard.d/<id>/, where HERE misses both, so guard.py passes its own folder in through
+# use_hooks_home. install_path is the one home of the lookup.
+HOOKS_HOME = HERE
+
+
+def use_hooks_home(home):
+    """Set the install's hooks/ folder, from which install_path finds lint/ and skills/."""
+    global HOOKS_HOME
+    HOOKS_HOME = home
+
+
+def install_path(*parts):
+    """A path under the install root, the folder that holds hooks/, lint/ and skills/."""
+    return os.path.join(HOOKS_HOME, "..", *parts)
+
+
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 from own_session import _CREATED_ID as SESSION_ID  # noqa: E402  the one home of the session id shape
 from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  the one home of the gh logins
@@ -1053,7 +1070,7 @@ def _git_root_of(cwd):
 
 def _layout():
     """lint/layout.py, the one home of the layout and the mockup home."""
-    lint = os.path.join(HERE, "..", "lint")
+    lint = install_path("lint")
     if lint not in sys.path:
         sys.path.append(lint)
     import layout
@@ -1152,14 +1169,15 @@ def _judged_fragment(field):
     return field in ("context", "options") or str(field).startswith("options.")
 
 
-def judged_item_writes(writes):
+def judged_item_writes(writes, cwd=""):
     """The writes of a page item that the model review reads. A set or update is read as
     {"op", "doc_id", "data"} when it is not closed and either writes a decision (an update with no kind is
     read, as decision_form_hit cannot see the stored kind) that carries `options` or `context`, or writes a
     task that carries `context`, `steps` or `options`. A task is kind task, or any write that carries
     `steps`, since steps are task-only. A str_replace on `context` or `options` (a subfield too) is
     read as {"op", "doc_id", "field", "new_str"}: its new_str alone, never old_str, because the rest of the
-    item is unseen."""
+    item is unseen. A write that names a `file_path` is read from it, a relative path against `cwd` (the
+    payload's cwd, as page_item_hit reads it), so the review sees the data the guard judged."""
     judged = []
     for op, entry in writes:
         if op == "str_replace":
@@ -1167,7 +1185,7 @@ def judged_item_writes(writes):
                 judged.append({"op": op, "doc_id": entry.get("doc_id"), "field": entry.get("field"),
                                "new_str": entry["new_str"]})
             continue
-        data = _write_data(entry)
+        data = _write_data(entry, cwd)
         if op not in ("set", "update") or not isinstance(data, dict) or data.get("status") == "closed":
             continue
         if data.get("kind") == "task" or data.get("steps"):
@@ -1312,7 +1330,7 @@ def rework_off_page_hit(data) -> str:
 # item names only top-level fields that the page's own block lists, <script type="application/json"
 # id="itemFields">. That block is the one list: this code reads it and holds no copy.
 ITEM_FIELDS_SEAM = "GUARD_ITEM_FIELDS_PAGE"
-ITEM_FIELDS_PAGE = os.path.join(HERE, "..", "skills", "waiting-page", "page.html")
+ITEM_FIELDS_PAGE_PARTS = ("skills", "waiting-page", "page.html")
 ITEM_FIELD_REASON = ("The waiting page draws only the top-level item fields that its itemFields block "
                      "lists (skills/waiting-page/page.html). Draw the field on the page and add it to "
                      "that block, or leave it out of the write. An update may remove a stored field "
@@ -1354,7 +1372,7 @@ def item_field_hit(op, entry, data) -> str:
     """The matched text when this write of a waiting item names a top-level field outside the page's
     itemFields block. An update may remove a field with {"__delete__": true}. A str_replace names its
     field in `field`. A page with no readable block, or an empty one, reads as unknown, and the write passes."""
-    fields = _item_fields(os.environ.get(ITEM_FIELDS_SEAM) or ITEM_FIELDS_PAGE)
+    fields = _item_fields(os.environ.get(ITEM_FIELDS_SEAM) or install_path(*ITEM_FIELDS_PAGE_PARTS))
     if fields is None:
         return ""
     if op == "str_replace":
@@ -1801,7 +1819,7 @@ def _option_keys(reply) -> list:
     """(key, question line, option text) for each option line of the reply's Input Needed item. The question line
     is the last non-option line with a `?` before the option, else the item's first line. The option text is the
     line after its key. Both are lowercased with spaces folded."""
-    lint = os.path.join(HERE, "..", "lint")
+    lint = install_path("lint")
     if lint not in sys.path:
         sys.path.append(lint)
     from report_guard import input_needed_section  # the one reader of the Input Needed item

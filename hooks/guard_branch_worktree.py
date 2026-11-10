@@ -6,7 +6,8 @@ Other files reach these names through `guard`.
 import shlex
 
 from guard_core import (
-    branch_is_empty, resolve_default_base,
+    basename, branch_is_empty, clone_worktrees, git_calls, long_flag_abbrev, path_is_inside,
+    resolve_default_base,
 )
 
 
@@ -109,6 +110,148 @@ WORKTREE_PRUNE_ASK_REASON = (
     "session. "
     "The click in this prompt is the grant."
 )
+
+# Two worktrees never hold one branch. Git 2.43 refuses a plain `checkout x` of a branch another
+# worktree holds, but lets `checkout -B x` and `switch -C x` re-point it with no warning, and a
+# commit in either tree then moves the branch under the other tree. The forms this rule reads:
+#   `checkout -B <name>`, `switch -C <name>` (also `--force-create`): refused when another worktree holds <name>.
+#   `worktree add -f|--force`: refused when another worktree holds the branch the add would take.
+#   `checkout|switch --ignore-other-worktrees`: refused with any branch, so no list is read.
+# Any other call, a plain `checkout x` and an unforced add included, is git's own refusal to make.
+# The list is read once, only for a refused form; a read that fails refuses.
+TWO_WORKTREES_REFUSE_REASON = (
+    "Rule (shared trees): another worktree of this clone holds this branch, or the call turns off "
+    "git's check that no two worktrees hold one branch. A commit in either tree then moves the "
+    "branch under the other tree, whose files stay at the old commit, and a commit there reverts "
+    "the other tree's work with a diff that looks like a normal edit. "
+    "Remedy: in your own worktree, run `git -C <own worktree> checkout --detach origin/<branch>`, "
+    "commit there, then `git -C <own worktree> push origin HEAD:<branch>`. Name the worktree with "
+    "-C, because a shell's cwd can reset to another checkout. To read the other tree, use "
+    "`git -C <dir>`. "
+    "(decision two-worktrees-one-branch, two worktrees never hold one branch)"
+)
+
+
+def _ref_name(name: str) -> str:
+    """A branch name as `refs/heads/` writes it, for a commit-ish that may spell the full or short ref."""
+    for prefix in ("refs/heads/", "heads/"):
+        if name.startswith(prefix):
+            return name[len(prefix):]
+    return name
+
+
+def two_worktrees_form(subcommand: str, args):
+    """Return (ignore, names) for a call this rule reads, else None.
+
+    `ignore` is True when the call carries `--ignore-other-worktrees`. `names` are the branch names
+    the call would take: a `-B`/`-C` value, or the branch a forced `worktree add` checks out. A
+    call that is none of the forms, or a forced add that takes no branch, returns None.
+    """
+    if subcommand in ("checkout", "switch"):
+        reset, create = ("C", "c") if subcommand == "switch" else ("B", "b")
+        ignore = False
+        names = []
+        take = skip = False
+        for arg in args:
+            if arg == "--":
+                break
+            if take:
+                names.append(arg)
+                take = False
+            elif skip:
+                skip = False
+            elif arg.startswith("--"):
+                if long_flag_abbrev(arg, "--ignore-other-worktrees", "--ignore-o"):
+                    ignore = True
+                elif subcommand == "switch" and long_flag_abbrev(arg, "--force-create", "--force-c"):
+                    if "=" in arg:
+                        names.append(arg.split("=", 1)[1])
+                    else:
+                        take = True
+            elif arg.startswith("-") and arg != "-":
+                # a short cluster: the first branch-name option ends it, its value is the rest or the next word
+                for offset, char in enumerate(arg[1:], start=2):
+                    if char in (reset, create):
+                        value = arg[offset:]
+                        if char == reset and value:
+                            names.append(value)
+                        elif char == reset:
+                            take = True
+                        else:
+                            skip = not value
+                        break
+        return (ignore, names) if ignore or names else None
+    if subcommand == "worktree" and args[:1] == ["add"]:
+        force = detach = skip = take = False
+        taken = []
+        plain = []
+        for index, arg in enumerate(args[1:], start=1):
+            if take:
+                taken.append(arg)
+                take = False
+            elif skip:
+                skip = False
+            elif arg == "--":
+                plain.extend(args[index + 1:])
+                break
+            elif arg.startswith("--"):
+                force = force or long_flag_abbrev(arg, "--force", "--f")
+                detach = detach or long_flag_abbrev(arg, "--detach", "--d")
+                skip = arg == "--reason"
+            elif arg.startswith("-") and arg != "-":
+                for offset, char in enumerate(arg[1:], start=2):
+                    if char == "f":
+                        force = True
+                    elif char == "d":
+                        detach = True
+                    elif char in "bB":
+                        if arg[offset:]:
+                            taken.append(arg[offset:])
+                        else:
+                            take = True
+                        break
+            else:
+                plain.append(arg)
+        if not force:
+            return None
+        if taken:
+            names = taken
+        elif detach:
+            return None
+        elif len(plain) >= 2:
+            names = [_ref_name(plain[1])]
+        elif plain:
+            names = [basename(plain[0].rstrip("/\\"))]
+        else:
+            return None
+        return False, names
+    return None
+
+
+def two_worktrees_hit(segment: str, root: str) -> str:
+    """Return the matched text when one segment is a refused form (see TWO_WORKTREES_REFUSE_REASON), else ''.
+
+    ROOT is the tree the call runs in. Only a worktree other than ROOT's own counts as a holder, so
+    the holder's own `checkout -B x` passes. The worktree whose root is the deepest one holding ROOT
+    is the own tree, since a linked worktree can sit inside the primary checkout.
+    """
+    for subcommand, args in git_calls(segment):
+        form = two_worktrees_form(subcommand, args)
+        if form is None:
+            continue
+        ignore, names = form
+        matched = " ".join(["git", subcommand] + list(args)).strip()
+        if ignore:
+            return matched
+        trees = clone_worktrees(root)
+        if trees is None:
+            return matched   # a failed read refuses; [] is no clone at all, where git refuses the call itself
+        own = max((tree for tree, _ref in trees if path_is_inside(root, tree)), key=len, default=None)
+        held = {ref for tree, ref in trees if ref and tree != own}
+        if any("refs/heads/" + name in held for name in names):
+            return matched
+    return ""
+
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
 # ids across the modules it loads. In the repo it stays a comment, which counts as a match.

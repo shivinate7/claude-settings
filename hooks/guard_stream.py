@@ -10,10 +10,11 @@ import shlex
 
 from guard_core import (
     DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
-    bare_words, command_indexes, inline_script, inner_commands, is_powershell, resolve_command,
-    segment_tokens, split_segments,
+    bare_words, command_indexes, inline_script, inner_commands, is_powershell,
+    resolve_command, git_calls, segment_dirs, segment_tokens, split_segments,
 )
 from guard_env import _substitutions
+from merge_options import MERGE_OPTIONS
 
 
 # ------------------------------------------------------------------ a stream that never ends
@@ -102,18 +103,76 @@ def narrating_stage(segment: str) -> str:
 
 # The interpreter flags that take the next word as their value, so `python -W ignore run.py` skips `ignore`.
 INTERPRETER_VALUE_FLAGS = ("-W", "-X")
+# A redirect word the shell strips before the interpreter runs: `2>&1`, `2>/dev/null`, `>file`, `>>file`,
+# `<file`, `&>file`. Group 1 is what follows the operator, empty for a bare `>` or `2>`, whose target is
+# the next word.
+REDIRECT_WORD = re.compile(r"^(?:\d*|&)(?:>>|<<<|<<|>&|<&|>|<|&>)(.*)$")
+
+
+def _redirect_width(tokens, at: int) -> int:
+    """How many words the redirect at `at` takes (1 for `2>&1`, 2 for a bare `>` and its target), 0 when
+    the word at `at` is no redirect."""
+    redirect = REDIRECT_WORD.match(tokens[at])
+    if not redirect:
+        return 0
+    return 1 if redirect.group(1) else 2
+
+
+def _skip_redirects(tokens, at: int) -> int:
+    """The index of the first word from `at` on that is no redirect word. A redirect before the command
+    (`2>/dev/null python3 lint/x.py`) is stripped by the shell, so the command is the word after it."""
+    while at < len(tokens) and (width := _redirect_width(tokens, at)):
+        at += width
+    return at
+
+
+def _flag_module(tokens, at: int):
+    """What the interpreter flag at `at` (`-m`, `-Im`, `-Wignore`, `-uc`) does with the rest of the word.
+    Returns (module, next_at): module is the `-m` operand, `""` for `-c` (code, no script), None for a
+    flag that names neither. A value flag (-W, -X) takes the rest of its word, else the next word."""
+    flag = tokens[at]
+    if flag.startswith("--"):
+        return None, at + 1
+    for pos, char in enumerate(flag[1:], 1):
+        rest = flag[pos + 1:]
+        if char == "c":
+            return "", at + 1
+        if char == "m":
+            if rest:
+                return rest, at + 1
+            return (tokens[at + 1] if at + 1 < len(tokens) else ""), at + 2
+        if "-" + char in INTERPRETER_VALUE_FLAGS:
+            return None, at + (1 if rest else 2)
+    return None, at + 1
 
 
 def _script_operand(tokens, index: int) -> str:
-    """The script an interpreter at `index` runs: its first word that is no flag. '' for `-m <module>`
-    and `-c <code>`, which run no script, so what follows them is an argument of theirs."""
+    """The script an interpreter at `index` runs: its first word that is no flag and no redirect. A
+    `-m <module>` runs the module's file, so `-m lint.ste_lint` reads as `lint/ste_lint.py` and the
+    roster and lint tails judge it as they judge the path. '' for `-c <code>`, which runs no script."""
     at = index + 1
-    while at < len(tokens) and tokens[at].startswith("-"):
-        flag = tokens[at]
-        if flag in ("-m", "-c"):
-            return ""
-        at += 2 if flag in INTERPRETER_VALUE_FLAGS else 1
-    return _whole_word(tokens, at) if at < len(tokens) else ""
+    while at < len(tokens):
+        width = _redirect_width(tokens, at)
+        if width:
+            at += width
+        elif tokens[at].startswith("-"):
+            module, at = _flag_module(tokens, at)
+            if module is not None:
+                return module.replace(".", "/") + ".py" if module else ""
+        else:
+            return _whole_word(tokens, at)
+    return ""
+
+
+def _script_run(tokens, index: int) -> str:
+    """The script the command at `index` runs, else ''. An interpreter runs its script operand
+    (`_script_operand`). A `.py` command word is the script itself, which is how `uv run lint/x.py` runs
+    it. The one reader of both spellings, for `_roster_word`, `check_stage` and `lint_stage`."""
+    word = basename(tokens[index])
+    script = _script_operand(tokens, index) if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")) else ""
+    if not script and word.endswith(".py"):
+        script = tokens[index]
+    return script
 
 
 def _whole_word(tokens, at: int) -> str:
@@ -135,18 +194,16 @@ def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
     """The roster spelling the command at `index` runs (`merge`, `merge.cmd`, or a script run through
     a runner, `python merge.py`), else ''. The one reader of NARRATING_COMMANDS and
     NARRATING_SCRIPT_TAILS. A word carrying a script path counts, so `python3.11` and `uv run python`
-    both match. `interpreter_only` keeps the word to an interpreter (SCRIPT_INTERPRETER) and the path
-    to its script operand: the check rule needs it, so `grep -n x merge/merge.py` and
+    both match. `interpreter_only` keeps the word to a command that runs a script (`_script_run`) and the
+    path to that script: the check rule needs it, so `grep -n x merge/merge.py` and
     `python3 -m pytest -k merge/merge.py` are no run of the script."""
     word = basename(tokens[index])
     if word in NARRATING_COMMANDS:
         return word
     if interpreter_only:
-        script = _script_operand(tokens, index) if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")) else ""
-        if not script and word.endswith(".py"):
-            script = tokens[index]  # `uv run merge/merge.py`: uv runs the script, so it is the command word
+        script = _script_run(tokens, index)
         if script.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
-            return word + " " + basename(script)
+            return word if script == tokens[index] else word + " " + basename(script)
         return ""
     for token in tokens[index:]:
         if token.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
@@ -156,8 +213,12 @@ def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
 
 def narrated_tail_hit(stripped: str) -> str:
     """Return the matched text when a narrating stage reaches `tail`/`head`, directly or through a
-    `tee` or other filters. Same pipeline walk as `check_tail_hit`."""
-    return _walk_pipelines(stripped, lambda segment: narrating_stage(segment))
+    `tee` or other filters. Same pipeline walk as `check_tail_hit`, one stage reader apart."""
+    for stages in _pipelines(stripped):
+        hit = _pipeline_hit(stages, False, lambda segment, _background: narrating_stage(segment))
+        if hit:
+            return hit
+    return ""
 
 
 NARRATED_TAIL_REASON = (
@@ -203,6 +264,7 @@ def _skip_uv_run(tokens, index: int) -> int:
     """The index of the command `uv [flags] run [flags] ...` starts, read through `resolve_command`
     again, else `index`. `uv` is no entry of COMMAND_WRAPPERS: adding it would move every rule that
     reads the command word, and only the check rule needs it."""
+    index = _skip_redirects(tokens, index)
     while index < len(tokens) and basename(tokens[index]) == "uv":
         run = index + 1
         while run < len(tokens) and tokens[run].startswith("-"):
@@ -215,8 +277,26 @@ def _skip_uv_run(tokens, index: int) -> int:
         at = resolve_command(tokens[start:])
         if at is None:
             break
-        index = start + at
+        index = _skip_redirects(tokens, start + at)
     return index
+
+
+def _merge_flag(tokens, flag: str) -> bool:
+    """True when a token is the merge tool's option `flag` or an argparse prefix that names it alone.
+    argparse takes an exact name first, else a prefix that matches one option (`--lane` is `--lane-lint`).
+    A prefix that matches two or more is an error and runs nothing, so it is no flag (`--l`). The option
+    names are MERGE_OPTIONS, the list the merge parser is checked against. argparse splits `--name=value`
+    at the first `=` before it matches, so `--lane=7` names --lane-lint as `--lane 7` does."""
+    for token in tokens:
+        if token.startswith("--"):
+            token = token.split("=", 1)[0]
+        if len(token) > 2 and token.startswith("--") and token not in MERGE_OPTIONS:
+            named = [name for name in MERGE_OPTIONS if name.startswith(token)]
+            if named == [flag]:
+                return True
+        elif token == flag:
+            return True
+    return False
 
 
 def check_stage(segment: str, background: bool) -> str:
@@ -229,23 +309,108 @@ def check_stage(segment: str, background: bool) -> str:
     if index is None:
         return ""
     index = _skip_uv_run(tokens, index)
+    if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word
+        return ""
     if basename(tokens[index]) in CHECK_COMMANDS:
         return basename(tokens[index]) if background else ""
-    if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and _script_operand(
-            tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
+    if _script_run(tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
         return CHECK_COMMANDS[0] if background else ""
-    if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
+    if "--confirm" in tokens or not any(_merge_flag(tokens, flag) for flag in CHECK_FLAGS):
         return ""
     return _roster_word(tokens, index, interpreter_only=True)
 
 
-def _pipeline_hit(stages, find_stage) -> str:
-    """The matched text when a stage that `find_stage` names in one pipeline's stages reaches
+LINT_SCRIPT = re.compile(r"(?:^|/)lint/[^/]+\.py$")
+
+
+CD_COMMANDS = ("cd", "pushd", "chdir", "set-location", "sl")
+
+
+def _enters_lint_dir(segment: str, in_lint: bool) -> bool:
+    """Whether the working directory is `lint/` after `segment`, given `in_lint` before it. A `cd` to a
+    path that ends in `lint` enters it; a `cd` anywhere else leaves it; any other segment keeps it."""
+    tokens = segment_tokens(segment)
+    index = resolve_command(tokens) if tokens else None
+    if index is None or basename(tokens[index]).lower() not in CD_COMMANDS:
+        return in_lint
+    targets = [word for word in tokens[index + 1:] if not word.startswith("-")]
+    path = targets[0].replace("\\", "/").rstrip("/") if targets else ""
+    return basename(path) == "lint"
+
+
+LINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "lint")
+
+
+def _is_lint_file(name: str, folder=None) -> bool:
+    """Whether `name` is a file in the lint folder the call has entered. `folder` is that folder, read
+    from the call's own cwd and its `cd`. A copy install has no lint/ beside its guard, and another repo
+    has its own lint scripts. So the guard's own folder is wrong for both. LINT_DIR, the lint/ of the
+    checkout this guard runs from, is read only when `folder` is None: the cwd is unknown, or a `cd`
+    went to a folder that does not exist. No list of lint scripts exists (LINT_SCRIPT is a path
+    pattern), so the folder is the one home. Under `cd lint`, a bare name that is no file there
+    (`-m pytest` reads as `pytest.py`) runs no lint script."""
+    return os.path.isfile(os.path.join(folder or LINT_DIR, name))
+
+
+def lint_stage(segment: str, background: bool, in_lint: bool = False, folder=None) -> str:
+    """`lint` when one segment runs a script under `lint/`, through an interpreter, as `-m lint.<name>`,
+    or as the `.py` command word (`uv run lint/x.py`), else ''. With `in_lint` (an earlier `cd lint` in
+    the same command), a script named by its basename is under `lint/` too (`./ste_lint.py`) when it is
+    a file in `folder`, the folder the segment runs in (see _is_lint_file). The `background` argument
+    keeps the signature of check_stage, the other stage reader."""
+    tokens = segment_tokens(segment)
+    index = resolve_command(tokens) if tokens else None
+    if index is None:
+        return ""
+    index = _skip_uv_run(tokens, index)
+    if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word
+        return ""
+    script = _script_run(tokens, index).replace("\\", "/").lstrip("(")   # `(./x.py` opens a subshell
+    if in_lint and script and "/" not in script.removeprefix("./") and _is_lint_file(
+            script.removeprefix("./"), folder):
+        script = "lint/" + script.removeprefix("./")
+    if LINT_SCRIPT.search(script):
+        return "lint"
+    return ""
+
+
+SUBSTITUTION_SLOT = re.compile(r"(?<![\w.-])x(?![\w.-])|`x`")
+
+
+def _flat(pipelines):
+    """The segments of `pipelines` in order, and the `ends` that segment_dirs reads. Only a pipe
+    end matters to it here (a pipe part's `cd` moves nothing), so each pipeline ends in `;`."""
+    segments, ends = [], []
+    for stages in pipelines:
+        for place, segment in enumerate(stages):
+            segments.append(segment)
+            ends.append("|" if place < len(stages) - 1 else ";")
+    return segments, ends
+
+
+def _inherited_in_lint(pipelines, cwd: str = ""):
+    """Whether a command substitution inside the outer text `pipelines` runs with `lint/` as its working
+    directory, and the folder it runs in (None when unknown). `_substitutions` leaves each substitution's
+    place in the outer text as `x`, so a segment holding that slot, reached after a `cd lint`, hands
+    `lint/` to every substitution. Which slot a text fills is not tracked, so one slot after `cd lint`
+    counts for all (the reading that refuses more)."""
+    segments, ends = _flat(pipelines)
+    in_lint = False
+    for segment, folder in zip(segments, segment_dirs(segments, cwd, ends)):
+        if in_lint and SUBSTITUTION_SLOT.search(segment):
+            return True, folder
+        in_lint = _enters_lint_dir(segment, in_lint)
+    return False, None
+
+
+def _pipeline_hit(stages, background: bool, stage_of=check_stage, any_later: bool = False) -> str:
+    """The matched text when a stage that `stage_of` names, in one pipeline's stages, reaches
     `tail`/`head`. A `tee` between them does not end the reach, since the filter after it still cuts
-    what the agent reads. A `tee` with no `tail` or `head` after it is not a hit. The one walk for the
-    narrated rule and the check rule."""
+    what the agent reads. A `tee` with no `tail` or `head` after it is not a hit. With `any_later`, any
+    later command counts: a pipeline's exit is its last stage's, so `grep`, `tee` and `wc` mask the
+    exit of the stage before them as `tail` does (the lint-then-commit gate reads the exit, not the cut)."""
     for first, segment in enumerate(stages):
-        stage = find_stage(segment)
+        stage = stage_of(segment, background)
         if not stage:
             continue
         for later in stages[first + 1:]:
@@ -253,32 +418,78 @@ def _pipeline_hit(stages, find_stage) -> str:
             at = resolve_command(tokens) if tokens else None
             if at is None:
                 continue
+            at = _skip_redirects(tokens, at)
+            if at >= len(tokens):
+                continue
             word = basename(tokens[at])
-            if word in TRUNCATING_FILTERS:
+            if any_later or word in TRUNCATING_FILTERS:
                 return stage + " | " + word
     return ""
 
 
-def _walk_pipelines(stripped: str, find_stage) -> str:
-    """Split a call into pipelines (a pipeline ends at any separator other than `|`) and return the
-    first `_pipeline_hit`."""
+def _commits_or_pushes(segment: str) -> bool:
+    """True when one segment runs a commit or a push, read by the one reader of git calls."""
+    return any(verb in ("commit", "push") for verb, _args in git_calls(segment))
+
+
+def _pipelines(text: str):
+    """One command text as its pipelines, each a list of stage segments. A pipeline ends at any
+    separator other than `|`."""
     ends = []
-    segments = split_segments(stripped, ends)
+    segments = split_segments(text, ends)
+    pipelines = []
     stages = []
     for segment, end in zip(segments, ends):
         stages.append(segment)
         if end != "|":
-            hit = _pipeline_hit(stages, find_stage)
+            pipelines.append(stages)
+            stages = []
+    pipelines.append(stages)
+    return pipelines
+
+
+def check_tail_hit(stripped: str, background: bool, cwd: str = "") -> str:
+    """The matched text when a call pipes a named check into `tail`/`head`, directly or through other
+    filters. Each command substitution is its own text, read through the one reader in guard_env as
+    `verdict_pipe_hit` reads it, so a pipe inside `$(...)` counts. A lint script piped into any later
+    command counts only when a later segment of the call runs a commit or a push: the pipeline's exit is
+    the last stage's, so a red lint hides, and the commit or push runs on it (incident, lane
+    windows-tests-for-touched-files). Order across texts is not tracked: a lint inside a substitution
+    counts when any other text of the call runs a commit or a push, and so does an outer lint when a
+    substitution after it runs one (`lint | tail -2 && out=$(git commit ...)`). Under `cd lint`, a bare
+    script name is looked up in the folder its pipeline runs in. That folder is read from `cwd`, the
+    call's own, and each `cd` before it. A pipe part's `cd` moves nothing, so all stages of a pipeline
+    share the folder of its first stage. With no cwd, the guard's own lint/ is read (see _is_lint_file)."""
+    texts, too_deep = _substitutions(stripped, powershell=is_powershell(stripped))
+    if too_deep:   # the env layer refuses a nest this deep; read the command as it stands
+        texts = [(stripped, False)]
+    texts = [_pipelines(text) for text, _in_message in texts]
+    for pipelines in texts:
+        for stages in pipelines:
+            hit = _pipeline_hit(stages, background)
             if hit:
                 return hit
-            stages = []
-    return _pipeline_hit(stages, find_stage)
-
-
-def check_tail_hit(stripped: str, background: bool) -> str:
-    """The matched text when a call pipes a named check into `tail`/`head`, directly or through other
-    filters."""
-    return _walk_pipelines(stripped, lambda segment: check_stage(segment, background))
+    inherited, slot_folder = _inherited_in_lint(texts[-1], cwd) if len(texts) > 1 else (False, None)
+    for number, pipelines in enumerate(texts):
+        inner = number < len(texts) - 1
+        in_lint = inherited and inner
+        segments, ends = _flat(pipelines)
+        folders = list(segment_dirs(segments, slot_folder if inner else cwd, ends))
+        first = 0
+        for at, stages in enumerate(pipelines):
+            folder = folders[first] if stages else None
+            first += len(stages)
+            hit = _pipeline_hit(stages, background,
+                                lambda segment, bg: lint_stage(segment, bg, in_lint, folder), any_later=True)
+            for segment in stages:
+                in_lint = _enters_lint_dir(segment, in_lint)
+            if not hit:
+                continue
+            others = texts[:number] + texts[number + 1:]
+            after = list(pipelines[at + 1:]) + [stages for text in others for stages in text]
+            if any(_commits_or_pushes(segment) for later in after for segment in later):
+                return hit + " then a commit or push"
+    return ""
 
 
 CHECK_TAIL_REASON = (
