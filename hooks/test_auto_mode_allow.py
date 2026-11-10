@@ -104,7 +104,8 @@ MERGE_GO_SCOPE = (("sender tag cs-build:coordinator", "`cs-build:coordinator` ma
                   ("named PR", "for a named PR"))
 # Each act the Relayed Grant entry's "Never covers" sentence must name (decision relayed-grant-read-from-page).
 # One settings change is covered only when its label names the file and entry, so a settings change without
-# that naming stays refused, and so do the entry's own change, hooks, env, and another autoMode.allow entry.
+# that naming stays refused, and so do the entry's own change, hooks, env, and an autoMode.allow entry the label
+# does not name.
 RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page comment", "a page comment"),
                    ("lastAnswer", "lastAnswer"), ("reply", "reply"),
                    ("answer for another item", "an answer for another item"), ("choice none", "choice none"),
@@ -116,7 +117,8 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
                     "a settings change whose label does not name the file and entry"),
                    ("Relayed Grant entry itself", "a change to the Relayed Grant entry itself"),
                    ("a change to hooks", "a change to hooks"), ("a change to env", r"a change to env\b"),
-                   ("a change to another autoMode.allow entry", r"a change to another autoMode\.allow entry"),
+                   ("an autoMode.allow entry the label does not name",
+                    r"an autoMode\.allow entry the label does not name"),
                    ("no counted line", "no `counted` line in this session"))
 # Each term the Relayed Grant entry's Covers text names for its one settings change.
 RELAYED_SETTINGS_COVERS = (("one settings change", "one settings change"),
