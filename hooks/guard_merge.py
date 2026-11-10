@@ -109,9 +109,10 @@ MERGE_READ_TIMEOUT = 25
 MERGE_TOOL_REL = os.path.join("merge", "merge.py")
 
 
-# `gh api` flags that take a value (the next token is data, never the endpoint).
-GH_API_VALUE_FLAGS = {"-H", "--header", "-f", "--raw-field", "-F", "--field", "-q", "--jq", "-t", "--template",
-                      "--input", "--hostname", "--cache", "-p", "--preview"}
+# `gh api` flags that take a value (the next token is data, never the endpoint). Not GH_API_VALUE_FLAGS below: the cloud
+# reader checks value flags before field flags, so its set must omit `-f`; this one needs the field flags to find the endpoint.
+API_MERGE_VALUE_FLAGS = {"-H", "--header", "-f", "--raw-field", "-F", "--field", "-q", "--jq", "-t", "--template",
+                           "--input", "--hostname", "--cache", "-p", "--preview"}
 # gh fills `{owner}/{repo}` from the checkout's remote, so that placeholder names the repo gh resolves, as no path repo does.
 GH_API_PLACEHOLDER_REPO = "{owner}/{repo}"
 # A shell variable (`$PR`, `${PR}`) may stand for the number, the whole repo, or one part of it. Its value is not known here, so
@@ -147,7 +148,7 @@ def api_merge_call_of(rest):
             index += 1
         elif arg.startswith("--repo="):
             repo = arg[len("--repo="):]
-        elif arg in GH_API_VALUE_FLAGS:
+        elif arg in API_MERGE_VALUE_FLAGS:
             index += 1
         elif arg.startswith("-"):
             continue
