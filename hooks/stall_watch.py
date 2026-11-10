@@ -519,11 +519,12 @@ AGENT_REMEDY = "Stop it, then resume it by name, or send a fresh reviewer the pr
 def agent_transcripts(session, agent, output):
     """The paths of a background agent's transcript, in the order to try: beside the session file
     (<dir>/<stem>/subagents/agent-<id>.jsonl), then the launch's outputFile. An id with a separator
-    has no path beside the session."""
+    has no path beside the session. Called from the guard (guard.brief_path_of), so it never raises: a
+    value that is not a str names no path."""
     paths = []
-    if AGENT_ID.match(agent):
+    if isinstance(agent, str) and isinstance(session, str) and AGENT_ID.match(agent):
         paths.append(own_session.agent_transcript_path(session, agent))
-    if output and output not in paths:
+    if isinstance(output, str) and output and output not in paths:
         paths.append(output)
     return paths
 
