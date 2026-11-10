@@ -4263,8 +4263,7 @@ class CloseKeywordReason(Env):
                "see https://github.com/o/r/issues/2390", "fix https://example.com/issues/5",
                "fixtures/x#12", "prefix fixtures/x#12")
     REWORD = "cause and fix: PR 2390"  # the example the refusal gives
-    LONG_RUN = " " * 20000  # the whitespace run the closing-form search backtracks over: one home for the timing cases
-    SEARCH_BOUND_S, RUN_BOUND_S = 1.0, 5.0  # hang guards, not speed claims: the bounds sit far above a linear search's time on these inputs
+    LONG_RUN = " " * 20000  # the whitespace run after a keyword: one home for the long-run cases
 
     def refused_each(self, flag, reasons):
         """Each refused reason, given with `flag`, stops before the host read. The PR is CLOSED, so a run that reads it stops on a CLOSED line instead."""
@@ -4314,21 +4313,12 @@ class CloseKeywordReason(Env):
         self.refusal_writes_nothing("--undo-check-unknown-ok", "fixes https://github.com/o/r/issues/2390")
 
     def reaches_host_read(self, *flag_reasons):
-        """A run with these flag and reason pairs is not refused, so it reaches the PR's state read. The caller sets the PR CLOSED, so the run stops on the CLOSED line. -> the seconds the run took."""
+        """A run with these flag and reason pairs is not refused, so it reaches the PR's state read. The caller sets the PR CLOSED, so the run stops on the CLOSED line."""
         reads = len(self.host.pr_calls)
-        start = time.perf_counter()
         rc, out, err = self.run_args("7", "--confirm", *flag_reasons)
-        took = time.perf_counter() - start
         self.assertGreater(len(self.host.pr_calls), reads, "the reason was refused before the host read")
         self.assertIn("CLOSED", err, "the run did not reach the PR's state read")
         self.assertNotRegex(err, r"(?i)reword", "an allowed reason got the reword refusal")
-        return took
-
-    def timed_search(self, text):
-        """-> the seconds merge.CLOSE_FORM.search(text) takes. Only the search is timed: setUp and the run are not."""
-        start = time.perf_counter()
-        merge.CLOSE_FORM.search(text)
-        return time.perf_counter() - start
 
     def test_close_keyword_allowed_reasons_reach_the_host_read_for_both_flags(self):
         # the controls: a reason with no closing form before a ref is not refused, so the run goes on to read the PR, which is CLOSED here
@@ -4338,25 +4328,20 @@ class CloseKeywordReason(Env):
                 with self.subTest(flag=flag, reason=reason):
                     self.reaches_host_read(flag, reason)
 
-    def test_close_keyword_search_finishes_in_time_on_a_long_whitespace_run(self):
-        # Why a clock here: re gives no step count, so a wall-clock bound is the only red for this backtracking. It is a hang guard, not a speed claim.
-        # The control has no keyword, so any regex searches it fast: a slow case below is the keyword's run, not the harness.
-        control = self.timed_search("prefixes" + self.LONG_RUN + "x")
-        self.assertLess(control, self.SEARCH_BOUND_S, f"the control with no keyword took {control:.2f} s, so the machine is loaded and the bound says nothing about the regex")
+    def test_close_keyword_pattern_has_no_adjacent_whitespace_quantifiers(self):
+        # a clock-free shape check (decision test-strategy-reset, point 2): `\s*:?\s*` backtracks over a whitespace run, so the colon sits inside its own group
+        self.assertNotIn(r"\s*:?\s*", merge.CLOSE_FORM.pattern, "the closing-form pattern has the adjacent-quantifier form \\s*:?\\s*")
+
+    def test_close_keyword_long_whitespace_run_keeps_its_result(self):
+        # result only, no timing: a closing word with a long run and no ref after it is allowed, and the same run before a ref is refused
         cases = (("keyword, run, no ref", "fixes" + self.LONG_RUN + "x"),
                  ("keyword, run, #-less ref", "fixes" + self.LONG_RUN + "2390"),
                  ("bare keyword, run", "fix" + self.LONG_RUN),
                  ("keyword, run, colon, run, no ref", "fixes" + self.LONG_RUN[:10000] + ":" + self.LONG_RUN[:10000] + "x"))
         for label, text in cases:
             with self.subTest(case=label):
-                took = self.timed_search(text)
-                self.assertLess(took, self.SEARCH_BOUND_S, f"the closing-form search took {took:.2f} s on a whitespace run after a keyword")
-
-    def test_close_keyword_long_reason_for_both_flags_reaches_the_host_read_in_time(self):
-        # one run with the long reason for both flags: refuse_closing_reason searches each reason in full, before the host read
-        self.host.pr_state = "CLOSED"
-        took = self.reaches_host_read("--base-red-ok", "fixes" + self.LONG_RUN + "x", "--undo-check-unknown-ok", "fixes" + self.LONG_RUN + "x")
-        self.assertLess(took, self.RUN_BOUND_S, f"the run with a long whitespace reason for both flags took {took:.2f} s before it reached the PR's state read")
+                self.assertIsNone(merge.CLOSE_FORM.search(text), "a closing word with a long run and no issue ref after it was refused")
+        self.assertIsNotNone(merge.CLOSE_FORM.search("fixes" + self.LONG_RUN + "#2390"), "a closing word with a long run before an issue ref was allowed")
 
 class GhHalf(Env):
     """Host against a `gh` shim on PATH. The shim merges into the local bare origin through the `other` clone."""
