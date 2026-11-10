@@ -42,7 +42,7 @@ MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG) + _HAND_BACK_TAGS + 
 NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teammate-message")
                       for end in "> \t\n\r") + ("[SYSTEM NOTIFICATION",)
 
-# The label of an integration pull request: the merge ledger and the ready guard read it (`merge --lane-lint <pr> --integration` adds it).
+# The label of an integration pull request: `merge --reviewed` reads it as a batch run. No tool sets it yet.
 BATCH_LABEL = "batch"
 
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries this marker
