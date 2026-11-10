@@ -25299,6 +25299,72 @@ add("brief-destructive-git: the brief's own allow paragraphs, as a test-author b
     tool="Agent", prompt=BRIEF_ALLOW_PARAGRAPHS, subagent_type="test-author")
 add("brief-destructive-git: an empty brief is allowed", "allow",
     tool="Agent", prompt="", subagent_type="builder", model="sonnet")
+# Windows diagnostic for the two scratch-path brief cases above, which fail on Windows only (CI run 42610317325, shards 2
+# and 3). It prints the values the brief reader reads for the single-quoted backslash path, beside the forward-slash form,
+# and fails on Windows so the values reach the job log. On Linux it is a SKIP row. Diagnostic only: asserts no behaviour.
+BRIEF_SCRATCH_DIAG_LABEL = "brief-destructive-git: DIAG Windows scratch-path values (diagnostic, Windows only)"
+
+
+def brief_scratch_diag_lines():
+    """The BRIEF-DIAG lines: each value the brief reader computes for the scratch path, with repr()."""
+    import tempfile
+    import guard
+    import guard_shared_tree
+    lines = []
+
+    def show(name, value):
+        lines.append("BRIEF-DIAG %s = %r" % (name, value))
+
+    show("SCRATCH_REPO", SCRATCH_REPO)
+    show("tempfile.gettempdir()", tempfile.gettempdir())
+    show("realpath(gettempdir())", os.path.realpath(tempfile.gettempdir()))
+    for var in ("TMPDIR", "TEMP", "TMP"):
+        show("env " + var, os.environ.get(var))
+    child = subprocess.run([sys.executable, "-c", "import os, tempfile; t = tempfile.gettempdir(); "
+                            "print(repr(t)); print(repr(os.path.realpath(t)))"],
+                           capture_output=True, text=True, timeout=60)
+    show("child gettempdir, realpath", child.stdout.split("\n")[:2])
+    forms = (("backslash", "Try it first: `git -C '" + SCRATCH_REPO + "' reset --hard`."),
+             ("forward", "Try it first: `git -C " + SCRATCH_REPO.replace(os.sep, "/") + " reset --hard`."))
+    for label, prompt in forms:
+        for command, before, covered in guard._brief_commands(prompt):
+            show(label + " command", command)
+            show(label + " covered, before", (covered, before))
+            moved = None
+            for segment in guard.split_segments(command):
+                tokens = guard.segment_tokens(segment)
+                show(label + " segment_tokens", tokens)
+                show(label + " _segment_git_c_target", guard._segment_git_c_target(tokens))
+                target, moved = guard._brief_target(segment, moved)
+                show(label + " _brief_target", target)
+                match = guard.shared_tree_match(segment) if segment.strip() else None
+                show(label + " shared_tree_match", match)
+                if target is not None:
+                    absolute = guard.shell_abs(target, None) or target
+                    show(label + " shell_abs", absolute)
+                    show(label + " realpath(shell_abs)", os.path.realpath(absolute))
+                    show(label + " in_any_session_scratchpad(shell_abs)",
+                         guard_shared_tree.in_any_session_scratchpad(absolute))
+        show(label + " in_any_session_scratchpad(prompt path)",
+             guard_shared_tree.in_any_session_scratchpad(SCRATCH_REPO if label == "backslash"
+                                                         else SCRATCH_REPO.replace(os.sep, "/")))
+        show(label + " brief_destructive_hit", guard.brief_destructive_hit(
+            "Agent", {"prompt": prompt, "subagent_type": "builder", "model": "sonnet"}))
+    return lines
+
+
+def brief_scratch_diag_case():
+    """(ok, note) for run_cases. Windows: prints the BRIEF-DIAG lines, then fails so they reach the job log."""
+    if os.name != "nt":
+        return SKIP, "a Windows diagnostic: it runs on Windows only"
+    for line in brief_scratch_diag_lines():
+        say(line)
+    return False, "diagnostic only: the BRIEF-DIAG lines above are the values"
+
+
+FIXTURELESS_CHECKS.add(brief_scratch_diag_case)  # builds no fixture: it reads the guard modules and one child run
+LOG_CHECKS_EXTRA.append((BRIEF_SCRATCH_DIAG_LABEL, brief_scratch_diag_case))
+
 # Brief-scan cases for these causes: a negation word the scan does not read, a Never heading over bullets, a read-only
 # role, a branch or worktree act, a scratch segment joined to a reset, and an inline triple-backtick span.
 add("brief-destructive-git: builder brief that says `git reset --hard` must not run is allowed", "allow",
