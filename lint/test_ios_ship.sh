@@ -528,8 +528,8 @@ need "build ran" not built
 need "refusal text: $(tail -1 "$out")" grep -q 'TESTFLIGHT FAIL: the tree is not clean' "$out"
 end_case "tf: --export-only still refuses a dirty tree"
 
-# --method: the export plist's method. The accept cases are red on main only because main refuses the flag, so no export runs.
-# The guard cases pass on main and pin the default.
+# --method sets the export plist's method: the accept cases check the plist carries it.
+# The guard cases pin the default (app-store-connect).
 mk_tf "$(apps "$(app A)" "$(app B)")"; tf --export-only --method debugging
 need "rc=$rc: $(tail -1 "$out")" test "$rc" -eq 0
 n=$(grep -c '<key>method</key><string>debugging</string>' "$calls.plist")
