@@ -2627,6 +2627,71 @@ class WaitOnClosedPull(UpkeepFixture):
         self.assert_control_listed(out)
         self.assertNotIn("c-done (#44)", self.listed(out), "a done step that waits on #44 is listed; a done step is not open")
 
+    def test_each_wait_phrase_the_roadmap_writes_is_listed(self):
+        # One step per phrase, each waiting on its own closed unmerged pull (#61 on). Each subtest names one phrase.
+        waits = (("stacked on", "Stacked on #61 for its base."), ("stacks on", "This stacks on #62."),
+                 ("stack on", "Stack on #63 for its base."), ("built on", "Built on #64 and its fix."),
+                 ("waits for", "Waits for #65 to land."), ("wait for", "Wait for #66 to land."),
+                 ("waiting on", "Waiting on #67 to land."), ("lands with", "Lands with #68 in one batch."),
+                 ("after PR", "Ships after PR #69 lands."), ("once PR", "Runs once PR #70 lands."))
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        steps = {}
+        for n, (phrase, note) in enumerate(waits, start=61):
+            sid = "w-" + phrase.replace(" ", "-")
+            self.commit_step(sid, note=note)
+            steps[phrase] = (sid, n)
+        self.publish(landed=[self.closed(41)] + [self.closed(n) for _, n in steps.values()])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        for phrase, (sid, n) in steps.items():
+            with self.subTest(phrase=phrase):
+                self.assertIn("%s (#%d)" % (sid, n), self.listed(out),
+                              "the wait phrase %r on the closed unmerged #%d is not listed" % (phrase, n))
+
+    def test_live_file_with_no_landed_pulls_key_reads_the_row_unknown(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.publish(pulls=[])  # no landedPulls key: the closed #41 is unknown, not known to be absent
+        out = self.out_with_live()
+        count, detail = self.row(out, self.LABEL)
+        self.assertTrue(detail.startswith("unknown ("),
+                        "the row reads %r when the live file has no landedPulls key, not unknown:\n%s" % (detail, out))
+        self.assertEqual(count, 1, "the unknown row counts %d entries, not one:\n%s" % (count, out))
+
+    def test_empty_landed_pulls_list_reads_the_row_none(self):
+        # The control for the unknown case: a present, empty list is a known none.
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.publish(pulls=[], landed=[])
+        out = self.out_with_live()
+        self.assertEqual(self.row(out, self.LABEL), (0, ""), "an empty landedPulls list does not read as none:\n%s" % out)
+
+    def test_open_pull_with_a_closed_row_for_its_number_is_not_listed(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.commit_step("c-open-dup", note="Waits on #42 to land.")
+        self.publish(landed=[self.closed(41), self.closed(42)],
+                     pulls=[{"number": 42, "title": "lane 42", "branch": "lane-42"}])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertNotIn("c-open-dup (#42)", self.listed(out),
+                         "a step that waits on #42, which is open now, is listed as waiting on a closed pull")
+
+    def test_pull_number_with_no_wait_word_is_not_listed(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.commit_step("c-no-word", note="Same area as #45.")
+        self.publish(landed=[self.closed(41), self.closed(45)])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertNotIn("c-no-word (#45)", self.listed(out),
+                         "a note that names #45 with no wait word is listed as waiting on the closed #45")
+
+    def test_history_after_a_closed_pull_is_not_a_wait(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.commit_step("fix-check-chain", note="The fail-record-ancestor-head lane continues here after #46 closed.")
+        self.publish(landed=[self.closed(41), self.closed(46)])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertNotIn("fix-check-chain (#46)", self.listed(out),
+                         "a note that says a lane continued after #46 closed is listed as a wait on #46")
+
 
 class ReadyAndDraftRows(UpkeepFixture):
     """Two upkeep rows (spec part B). `ready todo steps` lists each todo step whose note has the sentence `Ready.`,
