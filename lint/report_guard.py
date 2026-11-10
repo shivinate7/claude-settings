@@ -1636,11 +1636,12 @@ ROUTE_CITE_RE = re.compile(r"\(route\s+([\w.-]+)\)", re.I)
 MEASURED_RE = re.compile(r"\(measured\b([^)]*)\)", re.I)
 MEASURED_OK_RE = re.compile(r"\s+(\d{4}-\d{2}-\d{2}),\s*\S")
 # "blocked until" and "not available until" wait on another act, so they are a dependency, not a capability.
-# The hand-off cite reads the three _clause.CANT_FORMS, the start of the cannot-claim phrases (_clause.CANNOT_FORMS).
+# The hand-off cite reads the three _clause.CANT_FORMS, the start of the cannot-claim phrases (_clause.CANNOT_FORMS), and
+# the two past forms of _clause.COULD_NOT_FORMS, as well as the words refused, rejected, denied and the status 401 or 403.
 CAPABILITY_RE = re.compile(
-    r"\b(?:%s)\b|\brefuse[sd]?\b|\bdenied\b|\bforbidden\b|\bno access\b"
-    % "|".join(_clause.form_pattern(form) for form in _clause.CANT_FORMS)
-    + r"|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b|\bunavailable\b|\b403\b"
+    r"\b(?:%s)\b|\brefuse[sd]?\b|\bdenied\b|\brejected\b|\bforbidden\b|\bno access\b"
+    % "|".join(_clause.form_pattern(form) for form in _clause.CANT_FORMS + _clause.COULD_NOT_FORMS)
+    + r"|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b|\bunavailable\b|\b40[13]\b"
     r"|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)", re.I)
 CHOICE_RE = re.compile(
     r"\byour choice\b|\byour call\b|\bneeds your login\b|\bsign in as you\b|\ba safety rule\b.*?\bstays yours\b"

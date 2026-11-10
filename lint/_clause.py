@@ -1,7 +1,7 @@
 """The clause parser the cannot-claim check reads: sentences, clauses and the lexicons of their grammar.
 
 `lint/report_guard.py` imports this module, so the check has one copy of its sentence and clause boundaries and one home
-for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANT_FORMS, CANNOT_FORMS, CHECK_WORDS,
+for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANT_FORMS, COULD_NOT_FORMS, CANNOT_FORMS, CHECK_WORDS,
 STATE_VERBS, OUTAGE_NOUNS, OUTAGE_VERBS, BACK_PATTERN, STATUS_PATTERN, SPEECH_VERBS, CALL_SUBJECTS) and for the words that
 name the writer (WRITER_BEFORE_RE, FROM_HERE_RE and the lead-ins and subject words that own_subject reads). The module reads text and
 a mask only: no file, no process. Its cost is one regex pass over a sentence and one over each clause, so the work grows
@@ -42,7 +42,10 @@ VERBS = ("is", "are", "was", "were", "has", "have", "had", "does", "do", "did", 
 _PERMISSION_NOUNS = ("permission", "authorization", "authorisation", "authority", "ability")
 # The three forms the hand-off cite reads as a capability (report_guard.CAPABILITY_RE). CANNOT_FORMS starts with them.
 CANT_FORMS = ("can't", "cannot", "unable to")
-CANNOT_FORMS = CANT_FORMS + ("can not", "could not", "couldn't", "no way to", "no way I can",
+# The two past forms the hand-off cite also reads as a capability. They sit in CANNOT_FORMS after "can not", and a form
+# added to CANT_FORMS would widen CANNOT_FORMS, so the cite takes them from this list.
+COULD_NOT_FORMS = ("could not", "couldn't")
+CANNOT_FORMS = CANT_FORMS + ("can not",) + COULD_NOT_FORMS + ("no way to", "no way I can",
                 "no way we can", "not able to", "won't be able to", "will not be able to",
                 "haven't been able to", "hasn't been able to", "have not been able to", "has not been able to",
                 "not allowed to", "not permitted to", "not going to be able to", "not authorized to", "not authorised to",
