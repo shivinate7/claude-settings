@@ -356,8 +356,14 @@ def snapshot(folder):
     return tree
 
 
-def run_cli(machine, *args, input_text=None):
-    """input_text goes to the child's stdin, encoded as UTF-8 (the encoding argument below)."""
+def run_cli(machine, *args, input_text=None, input_bytes=None):
+    """input_text goes to the child's stdin, encoded as UTF-8 (the encoding argument below). input_bytes goes to
+    it unchanged, for a stdin that is not UTF-8; its output comes back decoded as UTF-8."""
+    if input_bytes is not None:
+        raw = subprocess.run([sys.executable, MAIL_CLI, *args], env=machine.env, cwd=machine.checkout,
+                             input=input_bytes, capture_output=True, timeout=60)
+        return subprocess.CompletedProcess(raw.args, raw.returncode, raw.stdout.decode("utf-8", "replace"),
+                                           raw.stderr.decode("utf-8", "replace"))
     return subprocess.run([sys.executable, MAIL_CLI, *args], env=machine.env,
                           cwd=machine.checkout, input=input_text, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=60)
@@ -1047,6 +1053,33 @@ class Cp1252Pipe(MailCase):
                          "mail read under cp1252 of a --body-file message exited %d, not 0: %s"
                          % (read.returncode, combined(read)))
         self.assertIn(BODY, read.stdout, "mail read under cp1252 did not return the body unchanged: %r" % read.stdout)
+
+
+class StdinNotUtf8(MailCase):
+    """`bin/mail send -` reads its body as UTF-8. Stdin that is not UTF-8 must end in "not sent:" with exit 1, never
+    in an uncaught traceback, and must land no message."""
+
+    def test_non_utf8_stdin_exits_1_with_not_sent_line_and_no_traceback(self):
+        store = self.store()
+        sender = self.machine("a", store, session="sess-a")
+        # Strict, so the case reads the same stdin on any host locale. Scope before subject: a valid send first.
+        sender.env["PYTHONIOENCODING"] = "utf-8:strict"
+        control = run_cli(sender, "send", "--to", "cloud/sess-b", "--kind", "request", "--body-file", "-",
+                          input_text=BODY)
+        self.assertEqual(control.returncode, 0,
+                         "control: a valid UTF-8 send from stdin exited %d: %s" % (control.returncode, combined(control)))
+        landed = store.files("mail/cloud/sess-b/")
+        self.assertEqual(len(landed), 1, "control: one valid send should land one message file: %r" % landed)
+        bad = run_cli(sender, "send", "--to", "cloud/sess-b", "--kind", "request", "--body-file", "-",
+                      input_bytes=b"\xff\xfe")
+        self.assertEqual(bad.returncode, 1, "stdin bytes that are not UTF-8 exited %d, not 1: %s"
+                         % (bad.returncode, combined(bad)))
+        self.assertNotIn("Traceback", bad.stderr,
+                         "stdin bytes that are not UTF-8 raised an uncaught traceback: %r" % bad.stderr)
+        self.assertTrue([line for line in bad.stderr.splitlines() if line.startswith("not sent:")],
+                        "stdin bytes that are not UTF-8 printed no 'not sent:' line on stderr: %r" % bad.stderr)
+        self.assertEqual(store.files("mail/cloud/sess-b/"), landed,
+                         "stdin bytes that are not UTF-8 landed a message on the mail ref")
 
 
 class MailboxOff(MailCase):
