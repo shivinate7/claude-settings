@@ -24,7 +24,9 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               the same branch. Only lines that no earlier lane state held count as that commit's work,
               so a restore is no undo. It flags the whole file put back, within one non-blank line,
               to its text before the earlier commit, when that commit changed BLOCK_LINES (6) lines
-              or more in it, on any path; and a net loss of the earlier commit's lines, or a delete,
+              or more in it, on any path, unless that commit only replaced lines (none added net) and the put-back
+              is its parent text exactly, losing only what that commit wrote (a lane that takes its own rewrite
+              of main's lines back); and a net loss of the earlier commit's lines, or a delete,
               on a test path only (hooks/guard.py is_test_rel). A move, a rename, a re-wrap and a
               rewrite stay excused. A rename in the lane is followed: an earlier commit is read at the
               file's name then, and a commit that renamed the file owns only its edits across the
@@ -683,16 +685,26 @@ def distance(x, y):
     return max(sum((x - y).values()), sum((y - x).values()))
 
 
+def rewrote_in_place(theirs):
+    """True when every hunk of a commit (o, n) replaces lines with no more lines: the commit added no line that stands on its own,
+    so putting its parent text back loses a rewrite, not work."""
+    return bool(theirs) and all(o and n and len(n) <= len(o) for o, n in theirs)
+
+
 def put_back(cwd, old, new, e, path, dst, theirs, test, prior):
     """True when old->new puts the file back to its text before the earlier commit e (the lane undo read), whatever old holds: the
     result is within one line of e's parent text (the file's name there is `prior`), nearer to it than old was, and e changed
-    BLOCK_LINES or more lines in the file. A text that was never there (e made the file), or a delete, counts on a test path only."""
+    BLOCK_LINES or more lines in the file. A text that was never there (e made the file), or a delete, counts on a test path only.
+    Not when e only rewrote lines in place (`rewrote_in_place`) and the result is e's parent text exactly, with nothing lost that
+    e did not itself write: the lane took its own rewrite of main's lines back, and no line the lane or main added is gone."""
     if not e.parent or sum(len(o) + len(n) for o, n in theirs) < BLOCK_LINES:
         return False  # a file one or two lines were changed in, and changed back, is an edit, not a dropped block
     want, got, before = (text_counts(cwd, e.parent, prior), text_counts(cwd, new, dst or path), text_counts(cwd, old, path))
     if not test and not (want and got):
         return False
     d = distance(got, want)
+    if d == 0 and rewrote_in_place(theirs) and not (before - got) - collections.Counter(l for _, n in theirs for l in n):
+        return False  # e only replaced lines, and this puts e's parent text back exactly, losing only e's own replacements: it takes its own rewrite back
     return d <= 1 and d < distance(before, want)
 
 
