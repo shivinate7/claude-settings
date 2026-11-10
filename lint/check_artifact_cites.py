@@ -134,13 +134,22 @@ def ref_step_files(root, ref):
     return found
 
 
+def registry_ids(root):
+    """The set of registered ids, or None when the checkout at `root` holds no registry file (a worktree on the record
+    branch does not hold the untracked one). LayoutError when the file cannot be read."""
+    if not layout.has_extras(root):
+        return None
+    return {entry["id"] for entry in layout.artifacts(root)}
+
+
 def pushed_step_findings(root, ref):
     """[(step path, what)] for each find in the steps at the revision `ref` (a pushed head), judged against the registry
-    of the working tree at `root`: the one test `check` applies to the record branch. A registry that cannot be read
-    still judges each bare link, since no registry makes one safe; with no bare link found, Unknown. Unknown too when
-    the revision cannot be read, never an empty list."""
+    of the working tree at `root`: the one test `check` applies to the record branch. With no registry file, each bare
+    link is judged and no cite: an empty registry would call every cite unregistered, and a caller reads
+    `registry_ids` for the note. A registry that cannot be read still judges each bare link, since no registry makes
+    one safe; with no bare link found, Unknown. Unknown too when the revision cannot be read, never an empty list."""
     try:
-        known = {entry["id"] for entry in layout.artifacts(root)}
+        known = registry_ids(root)
         unread = None
     except layout.LayoutError as err:
         known, unread = None, "the artifacts registry cannot be read: %s" % err
