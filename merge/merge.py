@@ -42,6 +42,16 @@
                           Cost: the gh calls of one --reviewed per root; when the base has a done PR, plus the CI reads of each ready PR on
                           the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base; no
                           new process, file or timer.
+                          After the batch line, three kinds of line for the batch runner, which closes and reopens; the tool posts and closes nothing:
+                            close as replaced: OWNER/NAME #N by #R   open R's body holds `Replaces #N` and N is another open PR (lowest R wins)
+                            close as carried: OWNER/NAME #A by #B    A is done and another open PR B on A's base holds A's head (lowest B; two PRs
+                                                                     with one head close only the higher number). If a compare fails, the line is
+                                                                     `close as carried unknown (REASON)` and the run exits 1.
+                            reopen: OWNER/NAME #N (replacer #R dropped)               N is closed with a `Replaced by #R` or `Carried by #R`
+                            reopen: OWNER/NAME #N (replacer #R no longer names it)    comment, R is closed unmerged, or open and its body lost `Replaces #N`
+                          A PR on a close line is left off the batch line. Reads added: the same comment list and compares as above, so none for the
+                          close lines; the reopen lines read pulls/N for each closed PR with such a comment, and pulls/R when R is not open, so two
+                          at most per candidate. A failed reopen read prints `reopen unknown (REASON)` and exits 1. No process, file or timer.
   merge --touches [--run RUN_ID|URL] [--case TEXT ...] [--file PATH ...]
                           one line per open PR that touches a named file (a changed file of that path) or holds a named case in a `+` line of its
                           patch: `#N HEADREF SHA9 draft|ready: file PATH; case TEXT`. With --run, the run's failing log lines name the cases
@@ -1112,21 +1122,18 @@ class Host:
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
+    def issue_comment_rows(self, since):
+        """-> the repo's issue comments updated since `since`, oldest first: one list read. A failed read is a Stop. The one home of the comment read:
+        issue_comments, and the closing notes of a --reviewed run (closing_notes), each take their part of the rows."""
+        return self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"})
+
     def issue_comments(self, since):
-        """-> (records, lints): one list read of the repo's issue comments updated since `since`. The number comes from the comment's issue_url.
+        """-> (records, lints): one list read of the repo's issue comments updated since `since` (issue_comment_rows), split by split_comments.
         records is {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: a body counts only when the review record
         marker is its whole first line. A timestamp the read did not give is None.
         lints is {PR number: [lane-lint comment bodies, oldest first]}: the lint marker is the whole first line and the author is the repo's owner.
         A failed read is a Stop. The one home of the comment read: review_records, review_comments and the lane-lint check each take their part."""
-        records, lints = {}, {}
-        for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
-            body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
-            first = body.splitlines()[:1]
-            if m and first == [REVIEW_MARKER]:
-                records.setdefault(int(m.group(1)), []).append((body, c.get("created_at"), c.get("updated_at")))
-            elif m and first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
-                lints.setdefault(int(m.group(1)), []).append(body)
-        return records, lints
+        return split_comments(self.issue_comment_rows(since))
 
     def review_records(self, since):
         """-> {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: the records half of issue_comments."""
@@ -4055,10 +4062,97 @@ def lint_check(h, n, info, root, cfgrel):
 REVIEW_BATCH_OPEN = "open batch now: "  # the batch line of a --root block when no ready pull request on the base has CI running
 REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when one has
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
+CLOSE_REPLACED = "close as replaced: "  # a block line: an open pull request that an open one names with `Replaces #N`
+CLOSE_CARRIED = "close as carried: "  # ... and an open done one whose head another open pull request on its base holds
+CLOSE_CARRIED_UNKNOWN = "close as carried unknown "  # ... and when the compare that decides it could not run: the reason follows, in brackets
+REOPEN = "reopen: "  # ... and a closed pull request whose replacer or carrier was dropped
+REOPEN_UNKNOWN = "reopen unknown "  # ... and when a read for a reopen line stopped: the reason follows, in brackets
+REPLACES = re.compile(r"\bReplaces #(\d+)")  # \b: Replaces starts a word, so `Unreplaces #N` names nothing; Closes and Fixes never match
+CLOSING_NOTE = re.compile(r"^(Replaced|Carried) by #(\d+)\b", re.M)  # the comment the batch runner posts when it closes a pull request
+
+def split_comments(rows):
+    """-> (records, lints) from issue comment rows, oldest first: see Host.issue_comments. The number comes from the comment's issue_url."""
+    records, lints = {}, {}
+    for c in rows:
+        body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
+        first = body.splitlines()[:1]
+        if m and first == [REVIEW_MARKER]:
+            records.setdefault(int(m.group(1)), []).append((body, c.get("created_at"), c.get("updated_at")))
+        elif m and first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
+            lints.setdefault(int(m.group(1)), []).append(body)
+    return records, lints
+
+def closing_notes(rows):
+    """-> {PR number: (kind, number of the replacer or carrier)} from issue comment rows, oldest first so the newest note of a pull request wins.
+    kind is Replaced or Carried. A note on itself counts for nothing."""
+    found = {}
+    for c in rows:
+        m = CLOSING_NOTE.search(c.get("body") or "")
+        n = re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
+        if m and n and int(n.group(1)) != int(m.group(2)):
+            found[int(n.group(1))] = (m.group(1), int(m.group(2)))
+    return found
+
+def replaced_closes(pulls):
+    """-> {N: R}: each open pull request N that an open pull request R names with `Replaces #N`, R the lowest-numbered such. Reads only the open
+    list, so it costs nothing; a pull request never replaces itself, and a number that is not open names nothing."""
+    open_numbers = {d["number"] for d in pulls}
+    found = {}
+    for d in sorted(pulls, key=lambda d: d["number"]):
+        for m in REPLACES.finditer(d.get("body") or ""):
+            n = int(m.group(1))
+            if n != d["number"] and n in open_numbers:
+                found.setdefault(n, d["number"])
+    return found
+
+def carried_closes(h, heads, nums):
+    """-> {A: B}: each pull request A of `nums` (done, on the base) with the lowest-numbered other open pull request B on the base whose head holds
+    A's head (Host.holds_head, a Stop on a failed read). `heads` is {number: head sha} of the open pull requests on the base. Two pull requests with
+    one head hold each other, so the lower number is the holder and the higher one closes; that needs no compare read. This is the one place the
+    batch line and the carried close read "held", so a PR on one is off the other."""
+    found = {}
+    for a in nums:
+        for b in sorted(heads):
+            if b != a and (b < a if heads[b] == heads[a] else h.holds_head(heads[a], heads[b])):
+                found[a] = b
+                break
+    return found
+
+def pull_state(h, n):
+    """-> open, closed or merged for pull request n, or None when n names no pull request (an issue: HTTP 404). One read, pulls/<n>.
+    Any other failed read is a Stop."""
+    c, out = h.api(f"pulls/{n}")
+    if c and not is_net(c, out) and re.search(r"\bHTTP 404\b", out):
+        return None
+    try:
+        if c:
+            raise ValueError(out)
+        d = json.loads(out)
+        return "merged" if d.get("merged") else d["state"]
+    except (ValueError, KeyError, TypeError) as e:
+        raise Stop(f"cannot read pull request #{n}: {e} {UNKNOWN_CITE}")
+
+def reopen_lines(h, pulls, notes):
+    """-> the `reopen:` lines for the closing notes `notes` ({N: (kind, R)}), ascending by N. A note counts only for an N that is not open and reads
+    closed and unmerged (pull_state). Its replacer R reads from the open list when R is open: a Replaced note whose R's body no longer holds
+    `Replaces #N` reopens N, and a Carried note with R open does not. A closed, unmerged R reopens N; a merged one does not. Cost: pulls/N for each
+    candidate and pulls/R when R is not open, so two reads at most per candidate, none for an open R. A failed read raises Stop."""
+    open_by = {d["number"]: d for d in pulls}
+    out = []
+    for n in sorted(notes):
+        kind, r = notes[n]
+        if n in open_by or pull_state(h, n) != "closed":
+            continue
+        if r in open_by:
+            if kind == "Replaced" and n not in {int(m.group(1)) for m in REPLACES.finditer(open_by[r].get("body") or "")}:
+                out.append(f"{REOPEN}{h.repo} #{n} (replacer #{r} no longer names it)")
+        elif pull_state(h, r) == "closed":
+            out.append(f"{REOPEN}{h.repo} #{n} (replacer #{r} dropped)")
+    return out
 
 def reviewed_read(h):
-    """-> (lines, done, pulls): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base) pair for
-    each pull request whose newest record reads done; and the open pull request rows. Two list reads (the open pull requests, then the
+    """-> (lines, done, pulls, notes): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base) pair for
+    each pull request whose newest record reads done; the open pull request rows; and the closing notes (`closing_notes`) of the same comment read. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
     the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
@@ -4067,9 +4161,10 @@ def reviewed_read(h):
     main = h.base
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
-        return ["no open pull requests."], [], pulls
-    rows, lints = h.issue_comments(min(d["created_at"] for d in pulls))
-    records = {n: [r[0] for r in rs] for n, rs in rows.items()}  # reviewed_read needs the bodies only
+        return ["no open pull requests."], [], pulls, {}
+    rows = h.issue_comment_rows(min(d["created_at"] for d in pulls))
+    stamped, lints = split_comments(rows)
+    records = {n: [r[0] for r in rs] for n, rs in stamped.items()}  # reviewed_read needs the bodies only
     lines, bare, done = [], [], []
     for d in sorted(pulls, key=lambda d: d["number"]):
         n, sha, bodies = d["number"], d["head"]["sha"], records.get(d["number"])
@@ -4087,7 +4182,7 @@ def reviewed_read(h):
                 state, why = LINT_NOT_READY[lint][0], f"{LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`"
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
-    return lines + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls
+    return lines + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls, closing_notes(rows)
 
 def reviewed_lines(h):
     """-> the lines of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo). `--root` runs this once per root, so the
@@ -4095,29 +4190,47 @@ def reviewed_lines(h):
     return reviewed_read(h)[0]
 
 def reviewed_block(h):
-    """-> (lines, ok) of one `--root` block: `repo OWNER/NAME:`, that repo's reviewed lines, then at most one batch line. The batch line names the
-    done pull requests on the host's base, ascending, except one whose head another open pull request on that base holds (Host.holds_head, drafts
-    included: the batch would merge it twice), one whose head the base already holds (ahead or identical: nothing is left to merge) and one that
-    is ready with CI running (Host.ready_busy). `open batch now` when no ready pull request on that base has CI running, else `build next batch on
-    the running head`. No pull request left, no batch line. A Stop in a read for the batch line keeps the reviewed lines, prints
-    `batch line unknown (reason)` in place of the batch line, and ok is False; a Stop in reviewed_read raises. Extra cost over reviewed_read:
-    only when a done pull request exists on the base, the branch protection read and each ready pull request's check runs, statuses and workflow
-    runs, then one compare per done pull request and other open pull request on the base, and one compare per done pull request against the base."""
-    lines, done, pulls = reviewed_read(h)
-    out = [f"repo {h.repo}:", *lines]
-    nums = sorted(n for n, base in done if base == h.base)
-    if not nums:
-        return out, True
-    try:
-        busy = h.ready_busy(pulls, h.base)
-        heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == h.base}
-        nums = [n for n in nums if n not in busy and not any(h.holds_head(heads[n], sha) for m, sha in heads.items() if m != n)
-                and not h.holds_head(heads[n], h.base)]
-    except Stop as e:
-        return out + [f"{REVIEW_BATCH_UNKNOWN}({' '.join(str(e).split())})"], False
+    """-> (lines, ok) of one `--root` block: `repo OWNER/NAME:`, that repo's reviewed lines, at most one batch line, then the close and reopen lines.
+    The batch line names the done pull requests on the host's base, ascending, except one that another open pull request names as its replacer
+    (replaced_closes), one whose head another open pull request on that base holds (carried_closes, drafts included: the batch would merge it
+    twice), one whose head the base already holds (ahead or identical: nothing is left to merge) and one that is ready with CI running
+    (Host.ready_busy). `open batch now` when no ready pull request on that base has CI running, else `build next batch on the running head`.
+    No pull request left, no batch line. The tool posts and closes nothing: the batch runner closes each pull request on a close line.
+    A Stop in a read for the batch line keeps the reviewed lines, prints `batch line unknown (reason)` in place of the batch line, and ok is False;
+    a Stop in the compares that decide a carried close also prints `close as carried unknown (reason)`; a Stop in a reopen read prints
+    `reopen unknown (reason)`; a Stop in reviewed_read raises. Extra cost over reviewed_read: only when a done pull request exists on the base, the
+    branch protection read and each ready pull request's check runs, statuses and workflow runs, then one compare per done pull request and other
+    open pull request on the base, and one compare per done pull request against the base. The close lines read nothing more. The reopen lines
+    read pulls/N for each closed pull request with a closing note, and pulls/R when its replacer R is not open."""
+    lines, done, pulls, notes = reviewed_read(h)
+    out, ok, tail = [f"repo {h.repo}:", *lines], True, []
+    if not pulls:
+        return out, ok
+    replaced = replaced_closes(pulls)
+    nums = sorted(n for n, base in done if base == h.base and n not in replaced)
+    carried, batch = {}, []
     if nums:
-        out.append(f"{REVIEW_BATCH_BUILD if busy else REVIEW_BATCH_OPEN}{h.repo} " + " ".join(f"#{n}" for n in nums))
-    return out, True
+        heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == h.base}
+        try:
+            carried = carried_closes(h, heads, nums)
+        except Stop as e:
+            why = " ".join(str(e).split())
+            batch, tail, ok = [f"{REVIEW_BATCH_UNKNOWN}({why})"], [f"{CLOSE_CARRIED_UNKNOWN}({why})"], False
+        else:
+            try:
+                busy = h.ready_busy(pulls, h.base)
+                left = [n for n in nums if n not in busy and n not in carried and not h.holds_head(heads[n], h.base)]
+                if left:
+                    batch = [f"{REVIEW_BATCH_BUILD if busy else REVIEW_BATCH_OPEN}{h.repo} " + " ".join(f"#{n}" for n in left)]
+            except Stop as e:
+                batch, ok = [f"{REVIEW_BATCH_UNKNOWN}({' '.join(str(e).split())})"], False
+    try:
+        reopen = reopen_lines(h, pulls, notes)
+    except Stop as e:
+        reopen, ok = [f"{REOPEN_UNKNOWN}({' '.join(str(e).split())})"], False
+    closes = [f"{CLOSE_REPLACED}{h.repo} #{n} by #{r}" for n, r in sorted(replaced.items())]
+    closes += [f"{CLOSE_CARRIED}{h.repo} #{n} by #{b}" for n, b in sorted(carried.items())]
+    return out + batch + closes + tail + reopen, ok
 
 LOG_PREFIX = re.compile(r"^﻿?(?:\d{4}-\d\d-\d\dT[\d:.]+Z\s+)?(?:\x1b\[[0-9;]*m)*")  # a log line's timestamp and colour codes, before its text
 FAILING_LINE = re.compile(r"(?:FAILED|FAIL|ERROR)\b[:\s]*(.*)")
@@ -4240,7 +4353,8 @@ def reviewed_roots(roots, hosts, config):
     lines with `batch line unknown (reason)` (reviewed_block), and ok is False; the other roots print in full. The notices a root's config read
     says are held with its block and follow it, so nothing prints until every root is read. Cost: reviewed_block's per root: the gh calls of one
     --reviewed, plus, when the base has a done pull request, the CI reads of each ready pull request on the base, one compare per done pull
-    request and other open pull request on the base, and one compare per done pull request against the base; no new process, file or timer."""
+    request and other open pull request on the base, and one compare per done pull request against the base, plus the reopen reads of reviewed_block
+    (at most two per closed pull request with a closing note); no new process, file or timer."""
     lines, ok = [], True
     for r in roots:
         config_says, read_says = io.StringIO(), io.StringIO()  # two buffers: the config read, then the GitHub reads (a rate-limit wait says so)
