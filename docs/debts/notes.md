@@ -1844,3 +1844,4 @@
 - launch-cloud-mirror-marker-reads-stderr: merge/launch.py `git()` joins stderr to stdout, so a git warning on `config --get claude-settings.cloudMirror` hides the marker and the mirror is fast-forwarded. install.sh and hooks/session_start.sh read stdout only.
 - launch-cloud-mirror-hides-other-reason: a marked mirror that is also dirty or off main prints only "cloud mirror" in launch.py's left-as-is line.
 - launch-cloud-mirror-test-gaps: no case pins a dirty marked mirror or a non-literal true spelling (`yes`, `1`); the code matches install.sh's literal `true`.
+- test-temp-root-mismatch: `lint/test_sim_test.sh` line 62 puts its run folder under `claude-settings-tests`, while `lint/_test_temp.py` `TEMP_ROOT`, the one home, uses `claude-settings-test-temp`, so a repo has two temp roots. `lint/test_duo_fold.sh` follows the sim-test form. Decision: test-temp-standard.
