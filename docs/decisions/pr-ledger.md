@@ -107,9 +107,9 @@ Per rule `outcomes-mechanize-rules`:
   - the open-PR list, and the repo's comments since the oldest open PR (one list each);
   - one `issues/<n>/events` list for each PR that reaches the hold rule with the `batch` label, or with a hold label and a valid `Waits on:` line;
   - when a batch line exists, one page (50) of main's runs. A run's jobs are read only when that run did not succeed, plus, for each candidate run it examines, its jobs and, unless the red already stands, its workflow file.
-  - Not built: for each open PR whose newest record is stale, the clean-merge survival check reads the commits from the record's Head to the live head, and runs one local `git merge-tree --write-tree` per merge commit. The read count is not measured. The merge-tree run is a process start, with no gh call and no file.
+  - for each open PR whose newest record is stale, the clean-merge survival check's reads (decision `pr-review-record`, the cost): one `gh` commit read per commit walked, plus one compare per merge commit, local `git` starts, and at most one `git fetch origin` a run. The merge-tree writes objects to the object store.
   - The count per run is not measured yet.
-- Reads per lane Stop (part 2): none unless the final report claims a round PASS. Then two `gh api` reads per claimed PR: the PR's head and its comments.
+- Reads per lane Stop (part 2): none unless the final report claims a round PASS. Then two `gh api` reads per claimed PR: the PR's head and its comments. A stale newest record adds the survival check's reads, the same as above.
 - Tests to write with the build, one per red: no review record; stale head; batch over its limit; hold with no item.
 
 ## Open
