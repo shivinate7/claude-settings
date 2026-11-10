@@ -2135,7 +2135,8 @@ def _find_type_d_handed(starts, here: str, expression, low: int, high, runners: 
     a pruned folder, so it may hand over more than find prints. A glob that could name an env file, or a tree
     past ENV_WALK_LIMIT entries, falls back to the start folder. Behind xargs with no `-r`, the search runs on
     `here` when find prints nothing, so `here` is walked unless the walk picked a folder that find surely
-    prints: with no `-prune` that could hide it, and from a start that is no link.
+    prints: with no `-prune` that could hide it, and from a start that is no link. Behind xargs, a picked name
+    with a blank, a quote or a backslash, which xargs cuts or reads, gives the answer of any other form.
 
     Any other form hands over the start folders whole. Behind xargs it also walks `here`: an action such as
     `-printf` may print a folder outside the start folders, and an empty print runs the search on `here`. With
@@ -2195,6 +2196,9 @@ def _find_type_d_handed(starts, here: str, expression, low: int, high, runners: 
                 break
             if stop is not None and level + 1 >= stop:
                 dirs[:] = []
+        # xargs without -0 cuts a name at a blank and reads quotes and backslashes, so the search gets other paths.
+        if not runners and any(re.search(r"[\s'\"\\]", start + path[len(folder):]) for path in picked):
+            return "", True, [folder for folder, _ in folders]
         handed += [folder] if past_cap else picked
         # A link given as a start is no folder to find without -L or -H, so it may print nothing.
         sure = sure or (not past_cap and bool(picked) and not os.path.islink(folder.rstrip("/")))
