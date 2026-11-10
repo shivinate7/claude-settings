@@ -2529,9 +2529,10 @@ def merge_tree(root: str, ours: str, theirs: str):
 
 def merge_route_paths(conflicts):
     """The paths a test-author owns in a merge that left `conflicts` (decision builders-cannot-edit-tests).
-    The route needs a test path among the conflicts, and covers product paths only: a workflow, test
-    config or manifest keeps its own content check (`role_offences`), so it is no product path."""
-    if not any(is_test_rel(path) for path in conflicts):
+    The route needs a test path or a mutation test (`AUTHOR_MUTATION_TESTS`) among the conflicts, and covers
+    product paths only: a workflow, test config or manifest keeps its own content check (`role_offences`),
+    so it is no product path."""
+    if not any(is_test_rel(path) or is_mutation_test_rel(path) for path in conflicts):
         return []
     return [path for path in conflicts if not (is_workflow_rel(path) or author_path_ok(path))]
 

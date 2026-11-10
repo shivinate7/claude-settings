@@ -23178,19 +23178,20 @@ def _put_commit(where, files, message):
     _must(where, *IDENT, "commit", "-q", "-m", message)
 
 
-def _mixed_mid_merge(w):
-    """Cut at main. The lane changes the test file and src/app.py. Main changes the same lines in both (a conflict
-    in each) and src/clean.py, which the lane never touches (a clean merge). Main is merged in and the merge is
-    left in progress: MERGE_HEAD is set, and the two conflicts are unmerged."""
+def _mixed_mid_merge(w, rel=TEST_A):
+    """Cut at main. The lane changes `rel` (the test file by default) and src/app.py. Main changes the same lines in
+    both (a conflict in each) and src/clean.py, which the lane never touches (a clean merge). Main is merged in and
+    the merge is left in progress: MERGE_HEAD is set, and the two conflicts are unmerged. `rel` may name a mutation
+    test or a near-miss name instead: only the path differs."""
     main = w + "-main"
-    _test_author_lane(w, TEST_A, LANE_TEXT, more=(("src/app.py", "x = 6\n"),))
+    _test_author_lane(w, rel, LANE_TEXT, more=(("src/app.py", "x = 6\n"),))
     _must(w, "reset", "-q", "--hard", "lane")
-    _put_commit(main, [(TEST_A, BASE_FILES[TEST_A] + "# main's newer case\n"), ("src/app.py", "x = 9\n"),
+    _put_commit(main, [(rel, BASE_FILES[TEST_A] + "# main's newer case\n"), ("src/app.py", "x = 9\n"),
                        ("src/clean.py", "z = 1\n")], "main moves")
     merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
     if merged.returncode == 0:
         sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
-    _require_conflict(w, TEST_A)
+    _require_conflict(w, rel)
     _require_conflict(w, "src/app.py")
     with open(os.path.join(w, "src/clean.py"), encoding="utf-8") as handle:
         clean = handle.read()
@@ -23374,6 +23375,56 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that reso
 add("test-author: Edit of a workflow that changes a non-test step in a mixed merge is refused", "deny", rule=TA,
     tool="Edit", file_path=os.path.join(CI_MID, CI), old_string=CI_LINT,
     new_string=CI_LINT.replace("ste_lint.py", "other_lint.py"), carries=("builder", "Report"), **AUTH_CI)
+
+# ---- the merge route for a mutation test (decision builders-cannot-edit-tests, "Merge route"). A mutation test is test
+# code only a test-author edits, so a merge that conflicts one of the three (AUTHOR_MUTATION_TESTS) gives its
+# test-author the conflicted product paths, as a conflicted test file does. Each fixture is `_mixed_mid_merge` with the
+# mutation test as its conflicted path: src/app.py conflicts beside it, and src/clean.py merges clean.
+MUT_GUARD, MUT_SHARED, MUT_SWEEP = "hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"
+MUT_FILES = {**MIXED_FILES, MUT_GUARD: BASE_FILES[TEST_A], MUT_SHARED: BASE_FILES[TEST_A], MUT_SWEEP: BASE_FILES[TEST_A]}
+MUT_GUARD_MID = diff_repo("ta-mut-guard-mid", lambda w: _mixed_mid_merge(w, MUT_GUARD), files=MUT_FILES)
+MUT_SHARED_MID = diff_repo("ta-mut-shared-mid", lambda w: _mixed_mid_merge(w, MUT_SHARED), files=MUT_FILES)
+MUT_SWEEP_MID = diff_repo("ta-mut-sweep-mid", lambda w: _mixed_mid_merge(w, MUT_SWEEP), files=MUT_FILES)
+# Near misses: a name that looks like a mutation test but is product code, so the route stays shut for it. A fix that
+# matches the prefix (`mutate_*.py`) or the basename alone (MUTATION_TEST_NAMES) would open it.
+NEAR_A, NEAR_B = "hooks/mutate_x.py", "src/mutate_guard.py"
+NEAR_FILES = {**MIXED_FILES, NEAR_A: BASE_FILES[TEST_A], NEAR_B: BASE_FILES[TEST_A]}
+NEAR_A_MID = diff_repo("ta-near-a-mid", lambda w: _mixed_mid_merge(w, NEAR_A), files=NEAR_FILES)
+NEAR_B_MID = diff_repo("ta-near-b-mid", lambda w: _mixed_mid_merge(w, NEAR_B), files=NEAR_FILES)
+
+AUTH_MUT_GUARD = dict(agent_id="auth1", agent_type="test-author", cwd=MUT_GUARD_MID)
+AUTH_MUT_SHARED = dict(agent_id="auth1", agent_type="test-author", cwd=MUT_SHARED_MID)
+AUTH_MUT_SWEEP = dict(agent_id="auth1", agent_type="test-author", cwd=MUT_SWEEP_MID)
+AUTH_NEAR_A = dict(agent_id="auth1", agent_type="test-author", cwd=NEAR_A_MID)
+AUTH_NEAR_B = dict(agent_id="auth1", agent_type="test-author", cwd=NEAR_B_MID)
+BLD_MUT_GUARD = dict(agent_id="bld1", agent_type="builder", cwd=MUT_GUARD_MID)
+# (i) Case 1's form, in a merge that also conflicts a mutation test. No test path is conflicted here, so the route is
+# shut and the Edit is refused on main (red). Each of the three mutation tests is its own merge.
+add("test-author: Edit of a product file its merge conflicts, beside a conflicted hooks/mutate_guard.py, is allowed",
+    "allow", tool="Edit", file_path=os.path.join(MUT_GUARD_MID, "src/app.py"), new_string="x = 7\n", **AUTH_MUT_GUARD)
+add("test-author: Edit of a product file its merge conflicts, beside a conflicted hooks/mutate_shared.py, is allowed",
+    "allow", tool="Edit", file_path=os.path.join(MUT_SHARED_MID, "src/app.py"), new_string="x = 7\n", **AUTH_MUT_SHARED)
+add("test-author: Edit of a product file its merge conflicts, beside a conflicted janitor/mutate_sweep.py, is allowed",
+    "allow", tool="Edit", file_path=os.path.join(MUT_SWEEP_MID, "src/app.py"), new_string="x = 7\n", **AUTH_MUT_SWEEP)
+# (ii) A merge that conflicts only product files: the near-miss name is product code, so no test path and no mutation
+# test is conflicted. Refused on main, and must stay refused. Case 9 pins the plain product-only merge.
+add("test-author: Edit of a product file its merge conflicts, beside a conflicted hooks/mutate_x.py, is refused", "deny",
+    rule=TA, tool="Edit", file_path=os.path.join(NEAR_A_MID, "src/app.py"), new_string="x = 7\n",
+    carries=("builder", "Report"), **AUTH_NEAR_A)
+add("test-author: Edit of a product file its merge conflicts, beside a conflicted src/mutate_guard.py, is refused", "deny",
+    rule=TA, tool="Edit", file_path=os.path.join(NEAR_B_MID, "src/app.py"), new_string="x = 7\n",
+    carries=("builder", "Report"), **AUTH_NEAR_B)
+# (iii) In the mutate_guard merge: a builder's Edit of the conflicted mutation test is refused (builder-test-edit), and
+# its Edit of the conflicted product file is allowed, as main allows it today.
+add("builder-test: Edit of hooks/mutate_guard.py in a merge that conflicts it is refused", "deny", rule=BT, tool="Edit",
+    file_path=os.path.join(MUT_GUARD_MID, MUT_GUARD), new_string="x = 2\n", carries=("test-author", "Report"),
+    **BLD_MUT_GUARD)
+add("builder-test: Edit of the conflicted src/app.py in a merge that conflicts hooks/mutate_guard.py is allowed", "allow",
+    tool="Edit", file_path=os.path.join(MUT_GUARD_MID, "src/app.py"), new_string="x = 2\n", **BLD_MUT_GUARD)
+# (iv) In the same merge, a product path that merged clean stays refused for the test-author.
+add("test-author: Edit of a product file the merge merged clean, beside a conflicted hooks/mutate_guard.py, is refused",
+    "deny", rule=TA, tool="Edit", file_path=os.path.join(MUT_GUARD_MID, "src/clean.py"), new_string="z = 2\n",
+    carries=("builder", "Report"), **AUTH_MUT_GUARD)
 
 
 def refused_push_and_stop_case(label):
