@@ -34338,11 +34338,16 @@ cs("coordinator_echo_gh_pr_merge_allowed", "allow", tool="Bash", command='echo "
    env_path=GREEN_ON, silent=True)
 cs("batch_runner_merge_confirm_unchanged", "allow", role="batch-runner", tool="Bash",
    command="python3 bin/merge 4321 --confirm", cwd=NOGIT, env_path=GREEN_ON, silent=True)
-# Unchanged: a session with no role file keeps the bare-merge ask that main gives (rule bare-merge, section 5c).
-add("coordinator-scope: solo_gh_pr_merge_still_asks, a session with no role file asks for a bare merge in a repo with a merge block",
+# A session with no role file is no coordinator, so coordinator-scope never refuses its merge. In a cloud session the
+# gh-write-cloud rule refuses a gh pr merge before the bare-merge ask is reached. Outside a cloud session the ask holds.
+add("coordinator-scope: solo_gh_pr_merge_cloud_refused, a session with no role file is refused for a bare merge in a cloud session by gh-write-cloud, not by coordinator-scope",
+    "deny", GH_WRITE_RULE, tool="Bash", command="gh pr merge 4321 --squash", cwd=STAMPREPO, session=CS_PAYLOAD_SID,
+    config=CS_CONFIG["none"], lacks=("4321", CS_RULE), env_path=GREEN_ON)
+CASES[-1]["env"] = dict(CS_REMOTE)
+add("coordinator-scope: solo_gh_pr_merge_still_asks, a session with no role file asks for a bare merge in a repo with a merge block outside a cloud session",
     "ask", BARE_MERGE, tool="Bash", command="gh pr merge 4321 --squash", cwd=STAMPREPO, session=CS_PAYLOAD_SID,
     config=CS_CONFIG["none"], carries=BARE_SAYS, env_path=GREEN_ON)
-CASES[-1]["env"] = dict(CS_REMOTE)
+CASES[-1]["env"] = dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None)
 
 # Merge spellings a coordinator is refused, read by the shared reader (merge_call_of, merge_confirm_of): a repo flag before `pr`,
 # and a subshell. `--disable-auto` turns auto-merge off and merges nothing, so it passes. The host's enable tool is refused for a
@@ -34358,8 +34363,14 @@ cs("coordinator_merge_confirm_cd_subshell_denied", "deny", tool="Bash", command=
    env_path=GREEN_ON, lacks=("4321",))
 cs("coordinator_gh_pr_merge_subshell_denied", "deny", tool="Bash", command="(gh pr merge 4321 --squash)", cwd=NOGIT,
    env_path=GREEN_ON, lacks=("4321",))
-cs("coordinator_gh_pr_merge_disable_auto_allowed", "allow", tool="Bash", command="gh pr merge 4321 --disable-auto", cwd=NOGIT,
-   env_path=GREEN_ON, silent=True)
+# In a cloud session gh-write-cloud refuses every gh pr merge, `--disable-auto` included. coordinator-scope does not refuse it, so
+# the reason names no coordinator-scope. Outside a cloud session the same call passes, silently.
+add("coordinator-scope: coordinator_gh_pr_merge_disable_auto_cloud_refused, a coordinator's gh pr merge --disable-auto in a cloud session is refused by gh-write-cloud, not by coordinator-scope",
+    "deny", GH_WRITE_RULE, tool="Bash", command="gh pr merge 4321 --disable-auto", cwd=NOGIT, session=CS_PAYLOAD_SID,
+    config=CS_CONFIG["coordinator"], lacks=("4321", CS_RULE), env_path=GREEN_ON)
+CASES[-1]["env"] = dict(CS_REMOTE)
+cs("coordinator_gh_pr_merge_disable_auto_allowed", "allow", env=dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None), tool="Bash",
+   command="gh pr merge 4321 --disable-auto", cwd=NOGIT, env_path=GREEN_ON, silent=True)
 cs("coordinator_enable_pr_auto_merge_denied", "deny", tool=CS_MCP_ENABLE_TOOL, owner="acme", repo="widgets", pullNumber=4321,
    cwd=NOGIT, env_path=GREEN_ON, lacks=("4321",))
 
@@ -34656,16 +34667,27 @@ def cs_opens_of(config, tool, tool_input, cwd, env=None, agent_id=None, transcri
 
 
 def cs_rule_opens(config, tool, tool_input, cwd, env=None, agent_id=None, transcript=None):
-    """(decision, reason, every open, the opens only the rule makes) of one call."""
+    """(decision, reason, every open, the opens only the rule makes) of one call. Each open of the call's control (the same
+    call with CLAUDE_CODE_REMOTE "false") pays for one open of the call, so a read that main also makes is not the rule's,
+    and a second read of the same path is."""
     env = dict(CS_REMOTE if env is None else env)
     got, reason, opened = cs_opens_of(config, tool, tool_input, cwd, env, agent_id, transcript)
     _, _, off = cs_opens_of(config, tool, tool_input, cwd, dict(env, CLAUDE_CODE_REMOTE="false"), agent_id, transcript)
-    return got, reason, opened, [path for path in dict.fromkeys(opened) if path not in off]
+    spare = list(off)
+    rule_only = []
+    for path in opened:
+        if path in spare:
+            spare.remove(path)
+        else:
+            rule_only.append(path)
+    return got, reason, opened, rule_only
 
 
 def cs_cost_check(config_role, tool, tool_input, cwd, env=None, agent_id=None):
-    """A check that the call is allowed, and that the rule opened no layout and no config CLAUDE.md, and nothing but the
-    role file, which it opened at most once."""
+    """A check that the call is allowed, that the rule opened no layout and no config CLAUDE.md, and nothing but the role
+    file, which it opened at most once. The layout is judged on the whole call. The config CLAUDE.md is judged on the rule's
+    own opens (rule_opens): the pointer rule (guard_pointer.pointer_checkout) reads it on every Write-family call, and the
+    control run makes that read too, so only a second read by the rule shows."""
     def check():
         config = CS_CONFIG[config_role]
         got, reason, opened, rule_opens = cs_rule_opens(config, tool, tool_input, cwd, env, agent_id)
@@ -34676,11 +34698,11 @@ def cs_cost_check(config_role, tool, tool_input, cwd, env=None, agent_id=None):
         problems = []
         if [path for path in opened if slash(path).endswith("lint/layout.json")]:
             problems.append("it opened lint/layout.json")
-        if pointer in opened:
-            problems.append("it opened the config folder's CLAUDE.md")
+        if pointer in rule_opens:
+            problems.append("the rule opened the config folder's CLAUDE.md")
         if opened.count(role) > 1:
             problems.append("it opened the role file %d times" % opened.count(role))
-        named = [os.path.basename(path) for path in rule_opens if path != role]
+        named = [os.path.basename(path) for path in rule_opens if path not in (role, pointer)]
         if named:
             problems.append("the rule opened %s besides the role file" % named)
         return not problems, "; ".join(problems) or "no layout, no config CLAUDE.md, the role file at most once"
