@@ -106,6 +106,13 @@ line, its home and the short reply; Mark read removes it; nothing is deleted.
 - Both go into page.html's `itemFields` block, which the guard (rule `item-field-rendered`) reads too.
 - `asks/<id>`: no new field. `dismissed` exists.
 - Page constant: the ship time for asks (point 5).
+- A session changes a closed item only with `update`, never `set`, as for asks. A `set` drops `closed` and `dismissed`, and the item
+  then counts as read and leaves: the item 480 incident again. The path is real: item 480's `reply` was rewritten after it closed.
+- A Mark read on an open item (lane or filed) changes the item's version. The pinned close of step 2 then conflicts. The session
+  re-reads and retries the close; it never drops it.
+- Order of landing: `closed` and `dismissed` are in `itemFields` on main before any session writes them, or the guard refuses the close.
+- A check the design needs: a close with no `closed` time breaks it. The writer's read of closed items (the `kept-answer:` lines of
+  "Keep the page on main's code" step 2) can flag a closed item with no `closed` time that changed after the ship time.
 
 ## 8. Critique pass (impeccable, single context; no sub-agent tool, no snapshot)
 
@@ -114,6 +121,8 @@ line, its home and the short reply; Mark read removes it; nothing is deleted.
   Marked read line keeps `.btn.alt`, as today's Restore.
 - Note, not fixed: a filing-pending card (green ground, full card) is now the loudest thing in Answered, though it needs nothing from the
   owner. It is today's card, outside this step.
+- Question for the owner: should a filing-pending answer fold to a line too (no Mark read until it is filed), so the section is
+  all lines? Not drawn.
 - Detector: no finding. It reads the page markup only, not the screen the script draws, so its clean result proves little.
 
 ## Checked
