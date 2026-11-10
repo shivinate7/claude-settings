@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-10T20:12:00Z",
+  "context": "Goal: the retrospective spends its next round on the problem that costs you most.\nProblem (goal): the retrospective session found four problems in how work runs here and can study one at a time; which one matters most is your call.\nBased on (read): the retrospective session's counts at 14:09 CST: 746 open steps, 563 triage outbox notes, 15 recorded false alarms on the report guard and 6 on the frozen-path guard.\nBased on (read): your words at 14:07 CST in the retrospective session had no record until triage filed them at 14:10 CST.\nDeparts from: main (no retrospective topic is chosen) \u2014 adds one topic for the retrospective session's next round.\nMeanwhile: the retrospective session waits; other work goes on. Answer in chat to the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ), or here.",
+  "home": "retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "kind": "decision",
+  "n": 497,
+  "options": [
+    {
+      "gain": "A ruling you give in chat cannot sit unrecorded with no one noticing.",
+      "how": "Rulings that never land: no check confirms that a chat ruling reached its record. Example: his \"no time limit on the Retire check\" ruling has no record.",
+      "key": "a",
+      "label": "Rulings that never land (Recommended)",
+      "lose": "The other three wait a round."
+    },
+    {
+      "gain": "You learn how much of the work serves this repo's own tools instead of your other repos.",
+      "how": "About 89% of the 746 open steps work on this repo's own machinery: merge, review and lint. This is an inference from the step titles.",
+      "key": "b",
+      "label": "Steps on this repo's own machinery",
+      "lose": "The figure is an inference from titles, so the round starts by measuring it."
+    },
+    {
+      "gain": "Notes either reach a reader or stop being written.",
+      "how": "The triage outbox: 563 notes, about 6% acted on. Stop writing to it, or give it a named reader.",
+      "key": "c",
+      "label": "The triage outbox",
+      "lose": "Lost notes stay lost until this round runs."
+    },
+    {
+      "gain": "Guards that refuse good work get fixed or removed.",
+      "how": "Guards with recorded false alarms: the report guard has 15, the frozen-path guard 6.",
+      "key": "d",
+      "label": "Guards with false alarms",
+      "lose": "The false alarms go on until this round runs."
+    }
+  ],
+  "owner": "retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "ref": "coordinator 14:09 CST Nov 10, from the retrospective session",
+  "repo": "shivinate7/claude-settings",
+  "short": "Next retrospective topic?",
+  "status": "open",
+  "title": "Question: which retrospective topic next?",
+  "why": "A ruling that never reaches its record is lost work you already did, and today's Retire ruling is a live example."
+}

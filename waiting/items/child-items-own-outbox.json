@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-10T17:07:00Z",
+  "context": "Goal: every unrouted item from the coordinator's transcript check reaches the triage that can act on it.\nProblem (rule): writing in another repo is your call, and the writing session reaches only claude-settings, so it needs push access added for q_max, banchi, degen, home and mailaudit.\nBased on (read): skill project-ops says a note for another repo goes in that repo's outbox on its record branch, in git, so its triage sees it under whichever account runs it.\nBased on (read): the child items now sit in claude-settings' own outbox (roadmap/outbox/triage.md), which no child triage reads.\nDeparts from: main (child items unread in claude-settings' outbox) \u2014 moves each to its own repo's outbox.\nMeanwhile: the coordinator keeps releasing lanes that fix work on main; nothing else waits on this.",
+  "home": "skill project-ops (outbox on each repo's record branch)",
+  "kind": "decision",
+  "lane": "coordinator-transcript-reconcile",
+  "n": 489,
+  "options": [
+    {
+      "gain": "Each repo's triage finds its items at its next wake.",
+      "how": "The session gets push access to the 5 repos and commits one outbox note in each.",
+      "key": "a",
+      "label": "Yes, add push access and write one note per repo",
+      "lose": "This session gets push access to 5 more repos, one note commit each."
+    },
+    {
+      "gain": "No extra access.",
+      "how": "The items stay until each repo's triage next talks to the coordinator.",
+      "key": "b",
+      "label": "Leave them for now",
+      "lose": "The items stay unseen for an unknown time."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "coordinator transcript reconcile, 10:25 CST Nov 10",
+  "reply": "Your answer in chat, 11:07 CST Nov 10 (relayed by the coordinator 11:10 CST): yes. The coordinator writes each child repo's items into that repo's own outbox. Closed by triage 11:10 CST.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Child items into their own outboxes?",
+  "status": "closed",
+  "title": "Should each child repo's unrouted items be written into that repo's own outbox?",
+  "why": "Each repo's triage reads only its own outbox, so this is the only way the items reach it soon."
+}

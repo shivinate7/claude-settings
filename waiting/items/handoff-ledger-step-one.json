@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-10T18:41:00Z",
+  "context": "Goal: the 211 archived session handoffs stop piling up, and every open item in them gets one home (your words at 11:22 CST: let the handoffs pile in until the collector's archive work is finished; it has finished now).\nProblem (cannot undo): the cull drops handoffs from the ledger and changes 135 roadmap steps marked doing, so it needs your word first.\nBased on (read): the collector archived 256 sessions, and 211 of them left a handoff on the archive branch for today's handoffs; 135 roadmap steps marked doing still point at those handoffs.\nDeparts from: main (each archived session's handoff is its own file, and no list joins them) \u2014 a script culls the handoffs whose work is merged or done, then Haiku agents merge each group into one line per open item, in one ledger file on the collector branch; the original files stay.\nMeanwhile: the coordinator waits; nothing starts before your yes.",
+  "home": "coordinator plan (collector follow-up)",
+  "kind": "decision",
+  "n": 494,
+  "options": [
+    {
+      "gain": "One ledger lists every open item from the archived sessions, so nothing in them is lost and the 135 doing steps can be sorted.",
+      "how": "A script culls the handoffs whose work is merged or done; Haiku agents merge each group into one line per open item, in one ledger file on the collector branch; the originals are kept.",
+      "key": "a",
+      "label": "Yes, go as planned",
+      "lose": "A Haiku merge can word an item less exactly than its handoff did; the originals stay for a check."
+    },
+    {
+      "gain": "The cleanup runs the way you want it.",
+      "how": "Write what to change in the note; the coordinator re-plans.",
+      "key": "b",
+      "label": "Change the plan",
+      "lose": "It waits until you say what to change."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "coordinator 12:40 CST Nov 10",
+  "replied": "2026-11-10T18:46:00Z",
+  "reply": "You answered this in chat before it reached the page (12:37 CST, relayed by the coordinator at 12:48 CST): \"Do a haiku workflow at xhigh effort\". Step one is running in the coordinator's session: a Haiku Explore workflow at xhigh effort with 21 readers. Your later open-PR sort answer (12:44 CST, \"pass 2 should be a haiku workflow, and pass 3 can be a sonnet reviewer on the close verdicts\") also needs no page item. The coordinator runs pass 1, a script, now, and brings you one close list to approve.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Handoff ledger, step one?",
+  "status": "closed",
+  "title": "Go for step one of the handoff cleanup: cull the handoffs whose work landed, then merge the rest into one ledger?",
+  "why": "It keeps every original, so a wrong merge can be checked against its source, and it ends with one list to work from."
+}

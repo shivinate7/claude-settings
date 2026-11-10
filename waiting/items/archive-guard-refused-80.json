@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-10T17:13:00Z",
+  "context": "Goal: every idle session hands off and is archived, losing no work (owner, 09:18 CST Nov 10).\nProblem (rule): the archive guard refuses a session with an open PR or a pushed branch ahead of main, and your 10:49 CST override ran out at 11:04 CST.\nBased on (measured): collector head 57c1fb7: the second ask got 157 replies and 83 handoffs; 3 were archived, 11 refused and 69 not yet tried.\nBased on (read): an archive keeps the PR, the branch and the transcript, and an archived session can be brought back.\nDeparts from: main (80 sessions live with handoffs stored) \u2014 archived, with their PRs left as drafts.\nMeanwhile: the collector waits on these 80; the 11 still silent go to Haiku readers at 11:30 CST.",
+  "home": "collector branch archive/session-handoffs-2026-11-10 (head 57c1fb7)",
+  "kind": "decision",
+  "lane": "freeze-handoffs",
+  "links": [
+    {
+      "label": "Collector session (type the override here)",
+      "url": "https://claude.ai/code/session_013NEJL1Hcti7GiUGQLGoLNs"
+    }
+  ],
+  "n": 491,
+  "options": [
+    {
+      "gain": "Your session list holds only live work.",
+      "how": "Type `override 15m` in the collector session (link below); it archives the 80.",
+      "key": "a",
+      "label": "Override again, archive the 80",
+      "lose": "Nothing that is not stored."
+    },
+    {
+      "gain": "No override.",
+      "how": "Do nothing.",
+      "key": "b",
+      "label": "Leave the 80 live",
+      "lose": "80 idle sessions stay in your list."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB); collector session_013NEJL1Hcti7GiUGQLGoLNs acts",
+  "pick": "a",
+  "ref": "collector branch archive/session-handoffs-2026-11-10",
+  "reply": "Done. You typed an override in the collector; every session that handed off is archived except 3 waiting on a pick or still running. 419 handoffs are stored on branch archive/session-handoffs-2026-11-10. (Coordinator 11:21 CST; closed by triage.)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Override to archive 80 more?",
+  "status": "closed",
+  "title": "The collector has 80 more stored handoffs whose archive the guard refuses. Type override 15m in the collector again?",
+  "why": "Each of the 80 has its handoff stored, and an archived session can be brought back."
+}

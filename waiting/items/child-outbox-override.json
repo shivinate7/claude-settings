@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-10T17:10:00Z",
+  "context": "Goal: the unrouted items from the transcript check reach the repo that can act on them (your chat, 11:07 CST: \"add it their boxes ... if it does then do it\").\nProblem (rule): guard roadmap-one-writer refuses any write to another repo's record branch from a session that is not that repo's triage, even to its own outbox file, and only your override passes it.\nBased on (measured): the outboxes of q_max, banchi, degen, home and mailaudit hold only README.md, and no commit shows a triage reading one, so delivery is unproven (coordinator, 11:12 CST).\nBased on (read): skill project-ops says each session writes its own outbox file and triage reads the folder at each wake.\nDeparts from: main (the items sit in claude-settings' outbox) \u2014 puts one file in each repo's outbox.\nMeanwhile: the coordinator keeps releasing lanes that fix work on main.",
+  "home": "item 489 (child items into their own outboxes); skill project-ops outbox",
+  "kind": "decision",
+  "lane": "coordinator-transcript-reconcile",
+  "links": [
+    {
+      "label": "Coordinator session (type the override here)",
+      "url": "https://claude.ai/code/session_013NEJL2hB1pLZPDpzas7VgB"
+    }
+  ],
+  "n": 490,
+  "options": [
+    {
+      "gain": "The items sit where each triage is told to look.",
+      "how": "Type `override` in the coordinator session (link below); it pushes one outbox file per repo.",
+      "key": "a",
+      "label": "Override once, push the 5 files",
+      "lose": "Delivery stays unproven until a triage reads one."
+    },
+    {
+      "gain": "No override.",
+      "how": "Leave them in claude-settings' outbox and send them through the session mailbox once the fix for the mailbox losing sent messages lands.",
+      "key": "b",
+      "label": "Send them by mailbox later",
+      "lose": "They wait for that fix."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "guard roadmap-one-writer; skill project-ops outbox README",
+  "reply": "Done. You typed override at 11:11 CST; the five outbox files are pushed (q_max 0051c14, banchi 9d7ba1e, degen 2e9afff, home 2bbe917, mailaudit 40d07f9). (Coordinator 11:15 CST; closed by triage.)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Override to fill child outboxes?",
+  "status": "closed",
+  "title": "Allow one push past the record-branch guard, so each child repo's items land in its outbox?",
+  "why": "It follows your 11:07 CST yes at once, and the guard's refusal of an own outbox file may be a false alarm (a filed note says the guard may wrongly block a session's own outbox file)."
+}

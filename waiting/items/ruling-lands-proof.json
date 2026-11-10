@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-10T20:15:00Z",
+  "context": "Goal: what you rule reaches its record, fast.\nProblem (rule): owner rulings sent to triage mostly never reach main, and the inbox check passes as soon as a session names a home file that exists.\nBased on (measured): 16 of the 563 notes in roadmap/outbox/triage.md carry an owner ruling with a time. 14 of those 16 have no match on main by slug search.\nBased on (read): hooks/ruling_home.py checks only that the home path exists on some branch, not that the ruling is in it.\nDeparts from: main (decision owner-feedback-inbox: a ruling item needs only a home path that exists) \u2014 the item needs proof the ruling landed.\nMeanwhile: the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ) asks you in chat too and reads your answer; other work goes on.",
+  "home": "decision owner-feedback-inbox; retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "kind": "decision",
+  "n": 498,
+  "options": [
+    {
+      "gain": "Rulings reach their record the same day, with no outbox hop.",
+      "how": "Write at once. The session that hears a ruling opens a docs PR to the record in the same turn, and the inbox item cites that PR.",
+      "key": "a",
+      "label": "Write at once (Recommended)",
+      "lose": "More small docs PRs in the batch queue, each with one review round."
+    },
+    {
+      "gain": "Fewer PRs.",
+      "how": "Ledger plus check. Triage files rulings as today, but the item stays open until the record on main holds the ruling's time, and triage's status read lists the open ones.",
+      "key": "b",
+      "label": "Ledger plus check",
+      "lose": "Rulings still wait in triage's queue."
+    },
+    {
+      "gain": "No change.",
+      "how": "Keep today's flow.",
+      "key": "c",
+      "label": "Keep today's flow",
+      "lose": "Rulings keep getting lost."
+    }
+  ],
+  "owner": "retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "ref": "retrospective session 14:09 CST Nov 10",
+  "repo": "shivinate7/claude-settings",
+  "short": "How should a ruling prove it landed?",
+  "status": "open",
+  "title": "How should an owner ruling prove it reached its record?",
+  "why": "It moves each ruling to its record in the turn it is heard, so no queue can lose it."
+}

@@ -1,0 +1,7 @@
+{
+  "at": "2026-11-10T17:59:28.522Z",
+  "choice": "a",
+  "item": "page-feedback-outbox-route",
+  "n": 493,
+  "note": "eventually session mailbox though -- you should find there already is a lot in the repo's outboxes for the claude-settings triage though. propose a plan to aggregate all of those findings so that the outbox clears from the other repos, and then let me know later how you'd want that mechanized\n"
+}

@@ -1,0 +1,12 @@
+{
+  "title": "One clean glossary of roles (coordinator, agent, session, lane, arbiter, triage) that reads and acts the same on local and cloud",
+  "phase": "now",
+  "status": "todo",
+  "order": 1019,
+  "owner": "triage",
+  "why": "The owner's first retrospective concern: the role words differ or clash between cloud and local sessions, and his environment should not change how things are set up or act.",
+  "note": "Owner 14:17 CST Nov 10, in the retrospective session (relayed 14:18 CST), his words: \"my first / number one concern is the roles of coordinator/agents/sessions/lanes/arbiter/triage/etc and how the differ / align on cloud sessions vs local sessions I want a clean glossary of terminology that feels intuitive, doesn't conflict, and results in the same setup/concepts if i'm on local or on cloud (my environment shouldn't cause things to be/act differently)\". Extends decision lanes-start-as-agents (a lane is a session, local and cloud alike; owner Nov 4). Under discussion in the retrospective session; its plan (plans/restart-plan.md) sets the order. Not ready for a lane.",
+  "updatedAt": "2026-11-10T14:22:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}

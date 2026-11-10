@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-10T19:20:00Z",
+  "context": "Goal: each new lane session starts work from its brief with no pause, at the effort you want.\nProblem (rule): two records say you ruled lane effort medium on 2026-10-30 15:11 CDT, and you said at 13:17 CST you never ruled it; the fixed start prompt and the guard that holds it were a coordinator build, so the records need your word to change.\nBased on (read): the guard that pins a lane's start lets the tool that starts a session open a lane only when the first prompt is exactly \"/effort medium\".\nBased on (measured): at 13:12 CST, three lanes got the same brief as a message; two acted and one paused for a grant.\nDeparts from: main (a lane's first prompt is exactly \"/effort medium\", and the brief follows as a message) \u2014 the lane starts with its effort set by the tool that starts a session and the whole brief as its first prompt, and the fixed-prompt guard goes.\nMeanwhile: the coordinator holds the step that makes a lane's brief cite your grant; other lanes go on.",
+  "home": "decisions agent-model-cap (The lane effort pin) and session-tiers (Lane session effort); step lane-brief-cites-grant",
+  "kind": "decision",
+  "n": 495,
+  "options": [
+    {
+      "gain": "A lane starts work from its brief at once, and its effort stays fixed at medium.",
+      "how": "Lanes start with the whole brief as the first prompt and effort medium set at the start; the fixed-prompt guard goes.",
+      "key": "a",
+      "label": "Brief as first prompt, keep medium effort (Recommended if you want a fixed effort)",
+      "lose": "A lane that needs more effort for hard work still runs at medium."
+    },
+    {
+      "gain": "A lane starts work from its brief at once, and its effort fits its role.",
+      "how": "Lanes start with the whole brief as the first prompt; effort follows the table of model and effort per agent role; the fixed-prompt guard goes.",
+      "key": "b",
+      "label": "Brief as first prompt, effort by role",
+      "lose": "Lane effort can vary, so cost per lane is less even."
+    },
+    {
+      "gain": "Nothing changes now.",
+      "how": "Lanes keep the exact \"/effort medium\" first prompt; the brief stays a message; the records keep citing you.",
+      "key": "c",
+      "label": "Keep today's fixed start prompt",
+      "lose": "Lanes can still pause on a brief that arrives as a peer message, and the records cite a ruling you say you never made."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "coordinator 13:24 CST Nov 10",
+  "replied": "2026-11-10T19:25:00Z",
+  "reply": "You answered this in chat at 13:19 CST, before it reached the page (relayed by the coordinator at 13:20 and 13:22 CST): \"B is good\". That was the coordinator's letter b, which is option a here: a lane starts with the whole brief as its first prompt, opening with a Grant line, and effort medium set at the start; the fixed-prompt guard goes. Triage builds it now, failing tests first, and the two records drop the 2026-10-30 cite and cite your 13:19 CST words. (Triage, 13:25 CST.)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Lane effort and start prompt?",
+  "status": "closed",
+  "title": "How should a new lane session start: with its effort set and its whole brief as the first prompt, or with today's fixed start prompt?",
+  "why": "Today a lane's first prompt must be exactly \"/effort medium\", so its brief arrives later as a message from another session; one lane paused on that at 13:12 CST as \"peer message, no grant\"."
+}

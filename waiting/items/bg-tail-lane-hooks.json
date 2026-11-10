@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-10T19:55:00Z",
+  "context": "Goal: two fixes to the guard rule that refuses a check piped into tail or head land, with no agent going around the guard to do it.\nProblem (rule): the lane working on those fixes installed its guard before your ruling that a main merge with conflicts in both test files and product files goes to one test-author, so its guard lets no agent commit that merge on #2156 (the rule also reads a command that ends in a glued &); either that lane changes its own guard mid-run or a new lane does the work, and both need your word.\nBased on (read): the coordinator says the lane's guard is older than that merge ruling, so it still refuses a test-author's edit to a product file.\nBased on (read): for the merge on #2015 (the rule also refuses any filter after a lane check run), the lane's brief had a test-author copy product files with a shell command, which went around the guard's refusal of file edits.\nDeparts from: main (a lane runs on the guard it installed at start) \u2014 a) a fresh lane session finishes #2156 with #2015 on today's guard; b) the running lane re-installs its guard from main mid-run.\nMeanwhile: the coordinator holds #2156 and #2015; other lanes go on.",
+  "home": "coordinator lane plan (the lane for the tail and head rule); step bg-tail-loses-verdict",
+  "kind": "decision",
+  "n": 496,
+  "options": [
+    {
+      "gain": "The merge runs under today's guard from the first call, and the lane that went around the guard stops.",
+      "how": "The coordinator starts one fresh lane session, which installs today's guard at start, and it finishes #2156 with #2015; the old lane ends.",
+      "key": "a",
+      "label": "Fresh lane session (Recommended)",
+      "lose": "One more session starts during the freeze on new sessions, and the new lane re-reads the work."
+    },
+    {
+      "gain": "No new session starts, and the lane keeps what it knows.",
+      "how": "The running lane re-installs its guard from main and then commits the merge.",
+      "key": "b",
+      "label": "Re-install the guard in the running lane",
+      "lose": "A session changes its own guard mid-run, so its work runs under two rule sets."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "coordinator 13:48 CST Nov 10",
+  "replied": "2026-11-10T20:06:00Z",
+  "reply": "You picked a at 14:04 CST: a fresh lane session finishes #2156 with #2015 on today's guard, and the old lane ends. Triage sent your pick to the coordinator at 14:06 CST, and the coordinator starts that lane. (Triage, 14:06 CST.)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Tail rule lane: fresh session or re-install?",
+  "status": "closed",
+  "title": "How should the two fixes #2156 and #2015 finish: in a fresh lane session, or after the running lane re-installs its guard?",
+  "why": "A fresh session runs on today's guard from its first call, and nothing changes a guard mid-run."
+}
