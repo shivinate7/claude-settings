@@ -3119,6 +3119,11 @@ MUTATIONS = [
      '    return clause\n\n\ndef _claim_clause',
      '    return None\n\n\ndef _claim_clause',
      "guard", 'brief-claim: test-author brief where main refuses all three today'),
+    # The Mac merge op is an ArtifactData update (shared_names._MAC_OPS). As a set it would replace the item with a bare rank.
+    ('mac db_write: the merge op maps to set, so a merge of a rank is judged as a set of a bare rank',
+     '_MAC_OPS = {"merge": "update"}',
+     '_MAC_OPS = {"merge": "set"}',
+     "guard", "mac db_write: a merge of a rank onto today's item is allowed"),
 ]
 
 
