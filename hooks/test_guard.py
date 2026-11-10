@@ -18001,6 +18001,12 @@ SHELL_TEST_WRITES = (
     ("sed -e w command on line 1 writes tests/a.py, no -i, on src/x.py", "sed -e '1w tests/a.py' src/x.py"),
     ("sed -n w command after an address writes tests/a.py, no -i, on src/x.py",
      "sed -n '/x/w tests/a.py' src/x.py"),
+    # A loop copies each test to a destination that a variable or a substitution builds. Main refuses
+    # such a copy, so the test in the source is refused too.
+    ("for loop over tests/*.py, cp of \"$f\" to /tmp/backup/$f",
+     "for f in tests/*.py; do cp \"$f\" \"/tmp/backup/$f\"; done"),
+    ("for loop over tests/*.py, cp of $f to /tmp/bak_$(basename $f)",
+     "for f in tests/*.py; do cp $f /tmp/bak_$(basename $f); done"),
 )
 for _name, _command in SHELL_TEST_WRITES:
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
@@ -18133,12 +18139,6 @@ SHELL_TEST_ALLOWS = (
      "n=$(grep -c \"def test\" tests/*.py | tail -1); sed -i \"s/N/$n/\" README.md"),
     ("variable from wc -l of tests/a.py, sed -i on src/app.py",
      "x=$(wc -l tests/a.py); sed -i \"s/N/$x/\" src/app.py"),
-    # A loop copies each test out to a destination outside tests. The test is read, and nothing in
-    # tests is written.
-    ("for loop over tests/*.py, cp of \"$f\" to /tmp/backup/$f",
-     "for f in tests/*.py; do cp \"$f\" \"/tmp/backup/$f\"; done"),
-    ("for loop over tests/*.py, cp of $f to /tmp/bak_$(basename $f)",
-     "for f in tests/*.py; do cp $f /tmp/bak_$(basename $f); done"),
     # A whole substitution that reads tests is a read when it is the cp source: quoted, in backticks,
     # or as a process substitution.
     ("cp of a quoted find over tests into /tmp/x/", "cp \"$(find tests -name a.py)\" /tmp/x/"),
