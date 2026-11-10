@@ -453,6 +453,11 @@ ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 SHELL_SCRIPT_EXT = (".sh", ".ps1", ".py", ".bat", ".cmd")
 # A run verb in the step text before a span, back to the last sentence break.
 SPAN_RUN_VERB = re.compile(_RUN_VERB + r"(?:(?![.;!?](?:\s|$)).)*$", re.I | re.S)
+# An edit verb in the step text before a span, back to the last sentence break: the span is a line the owner
+# finds or replaces, so it is quoted text, not a command to run. A run verb in the same sentence wins (see
+# command_in_item_hit), and a fence is never quoted.
+SPAN_EDIT_VERB = re.compile(r"\b(?:find|locate|replace|swap|search\s+for|look\s+for|edit|delete|remove)\b"
+                            r"(?:(?![.;!?](?:\s|$)).)*$", re.I | re.S)
 EFFECT_TEXT = re.compile(r"\b(?:Gain|Lose):.*?(?=\b(?:Gain|Lose):|$)", re.I | re.S)
 CHAT_URL = re.compile(r"https://[^\s)>\]\"']+", re.I)
 
@@ -636,11 +641,14 @@ def _chain_command(word, args) -> bool:
             or (args >= 1 and bool(CHAIN_COMMAND.fullmatch(word))))
 
 
-def _shell_line(span, run) -> bool:
+def _shell_line(span, run, quoted=False) -> bool:
     """True when a segment of this code span runs a shell line (see SHELL_PROGRAMS). `run` is as for
     _relative_run. The segments, their prefixes and their command words come from guard_core, the one
     quote-aware shell reader, so a quote or a comment opener in text hides no command. A line that
-    starts with `|` (a table row) or `//` is text and is left out."""
+    starts with `|` (a table row) or `//` is text and is left out. `quoted` is True when the step finds or
+    replaces the span as a line of a file: the span-flag clause (a path or word with a flag) then reads it
+    as text, so `scripts/guard-shell.py --hook` quoted for an edit is no command. A listed program, a
+    cmdlet and a chain stay shell lines."""
     import guard_core   # loads only for a step that holds a code span
     kept = [line for line in span.splitlines() if not line.strip().startswith(("|", "//"))]
     segments = guard_core.split_segments(guard_core.PosixScript("\n".join(kept)))
@@ -666,7 +674,8 @@ def _shell_line(span, run) -> bool:
         elif chained and _chain_command(word, len(words) - 1):
             return True
         elif len(words) >= 2 and (word in SHELL_PROGRAMS
-                                  or (CHAIN_COMMAND.fullmatch(word) and SPAN_FLAG.match(words[1]))):
+                                  or (CHAIN_COMMAND.fullmatch(word) and not quoted
+                                      and SPAN_FLAG.match(words[1]))):
             return True
     return False
 
@@ -714,9 +723,11 @@ def command_in_item_hit(data) -> str:
     if COMMAND_IN_FILE.search(joined) or (has_file and COMMAND_ITS.search(joined)) \
             or (has_file and not has_command and COMMAND_VERB.search(joined)):
         return "steps send the owner to a file for a command"
-    if any(_shell_line(body, fenced or bool(SPAN_RUN_VERB.search(text[:start])))
-           for text in texts for start, body, fenced in _code_spans(text)):
-        return "step holds a shell line"
+    for text in texts:
+        for start, body, fenced in _code_spans(text):
+            run = fenced or bool(SPAN_RUN_VERB.search(text[:start]))
+            if _shell_line(body, run, quoted=not run and bool(SPAN_EDIT_VERB.search(text[:start]))):
+                return "step holds a shell line"
     return ""
 
 
