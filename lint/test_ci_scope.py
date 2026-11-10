@@ -9,7 +9,7 @@ scratch tree with a copy of mod-tests.sh and run it there; they need node on PAT
 Output names pinned (the `scope` job re-exports them as job outputs):
   JOB_FLAGS  one per check job except the lint job `checks`: checks_windows, checks_windows_merge,
              checks_windows_rest, checks_macos, shell_macos, pointer_windows
-  STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot turns on the whole checks-shoot job)
+  STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot turns on the checks-shoot and checks-waiting-page jobs)
 
 Run with:  python3 lint/test_ci_scope.py -v
 """
@@ -387,8 +387,9 @@ class Scope(unittest.TestCase):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"code", "shoot"})
         self.assertFlags(run(["lint/test_verdict.py"], existing=["lint/test_verdict.py"]), want_false=["shoot"])
 
-    # checks-guard and checks-shoot both install actions/playwright-setup, and checks-guard gates on checks_guard
-    # alone (checks.yml). An edit to the action must set checks_guard directly, with `shoot` for checks-shoot.
+    # actions/playwright-setup has four callers (checks.yml): checks-guard and checks-guard-2 gate on checks_guard
+    # alone, and checks-shoot and checks-waiting-page gate on shoot alone. An edit to the action must set
+    # checks_guard directly, with `shoot` for the two shoot jobs.
     # Named failure: the action arm sets code and shoot only, so checks-guard skips its install and guard suite.
     def test_playwright_action_edit_turns_on_the_checks_guard_job(self):
         p = "actions/playwright-setup/action.yml"
@@ -415,7 +416,7 @@ class Scope(unittest.TestCase):
         self.assertEqual(got["checks_guard"], "true", f"checks_guard: {got}")
 
     # pin.sh is the install script checks-guard runs from actions/playwright-setup. Named failure: an edit that
-    # starts checks-shoot alone leaves the checks-guard install on the old script.
+    # starts the shoot jobs and no checks-guard job leaves the checks-guard install on the old script.
     def test_playwright_pin_script_edit_turns_on_the_checks_guard_job(self):
         p = "actions/playwright-setup/pin.sh"
         got = run([p], existing=[p])
@@ -423,8 +424,8 @@ class Scope(unittest.TestCase):
         self.assertIn("checks_guard", got, got)
         self.assertEqual(got["checks_guard"], "true", f"checks_guard: {got}")
 
-    # A .md edit under the action is docs, so neither job starts. Named failure: without the *.md carve-out, the
-    # action arm starts checks-shoot and checks-guard for a README edit.
+    # A .md edit under the action is docs, so no caller starts. Named failure: without the *.md carve-out, the
+    # action arm starts the two shoot jobs and the two checks-guard jobs for a README edit.
     def test_playwright_readme_edit_turns_on_no_job(self):
         p = "actions/playwright-setup/README.md"
         got = run([p], existing=[p])
