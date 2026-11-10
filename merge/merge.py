@@ -56,10 +56,10 @@
                           CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock, merges
                           and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
                           measured once on one PR head), one worktree.
-                          A head whose branch is an integration branch (`batch-` and a number alone, INTEGRATION_BRANCH) gets the batch checks instead: each
+                          A head whose branch is an integration branch (`batch-`, a number and an optional letter suffix, INTEGRATION_BRANCH) gets the batch checks instead: each
                           closed debt's Retire check (a timeout prints its `Retire-run:` cite and goes on), a rebuilt records page, then
                           the whole checks job and the Windows slice, each run up to 3600 s (BATCH_SECONDS; a timeout is never lifted by
-                          --lint-unknown-ok). A lane slug that starts `batch-` with no digit, a sha and any other ref take the lint route.
+                          --lint-unknown-ok). A lane slug that starts `batch-` but has more than a number and letters (batch-73-fix, batch-red-fixes), a sha and any other ref take the lint route.
                           Each run prints one line naming its route and why. A failing CI step is run again on origin/<base>: it
                           is named, and does not stop the lint only when each failing unittest case of the head also fails on main;
                           a case main lacks, or no case name read on either side, stops it. An unknown CI step that is unknown on main too
@@ -2788,7 +2788,7 @@ def ci_job_run(wt, *args, notes=None, seconds=LINT_SECONDS, every=False):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-INTEGRATION_BRANCH = re.compile(r"^batch-\d+$")  # an integration branch is `batch-` and a number; a lane slug such as batch-red-fixes is a lane and lints (decision lanes-run-no-full-ci-job)
+INTEGRATION_BRANCH = re.compile(r"^batch-\d+[a-z]*$")  # an integration branch is `batch-`, a number and an optional letter suffix (batch-73c); a lane slug such as batch-red-fixes is a lane and lints (decision lanes-run-no-full-ci-job)
 WINDOWS_SLICE = ("checks-windows-guard", "Guard fixture suite (Windows slice)")  # job and CI step of the Windows slice a batch head also runs; the CI step is named by its text in checks.yml, which the lane-lint tests read
 
 def ref_branch(target):
@@ -2932,9 +2932,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
         branch = ref_branch(target)
         tmp, wt = add_worktree(root, head)
     batch = bool(INTEGRATION_BRANCH.match(branch))
-    why = ("branch " + branch + " is an integration branch (`batch-` and a number)" if batch else
+    why = ("branch " + branch + " is an integration branch (`batch-`, a number and an optional letter suffix)" if batch else
            target + " is a sha, which names no branch" if not branch else
-           "branch " + branch + " is not an integration branch (`batch-` and a number)")
+           "branch " + branch + " is not an integration branch (`batch-`, a number and an optional letter suffix)")
     say(f"merge: {'batch' if batch else 'lint'} route: {why}, so the lane lint runs the {'batch checks' if batch else 'lint'}.")
     excused = []
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
