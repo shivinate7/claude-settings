@@ -691,8 +691,14 @@ UI_BUNDLE = "bundle.ui-testing"
 # (`iPad Pro (12.9-inch)`), unless it closes a `$(` opened in the same quote.
 COMMAND_MARKS = {";", "|", "&", "$(", "(", ")", "`"}
 PULL_REQUEST = re.compile(r"^\s*(on:\s*\[?[^\n]*\bpull_request\b|pull_request\s*:)", re.M)
-XCODEBUILD_TEST_RE = re.compile(r"\bxcodebuild\b[^\n|;&]*\s(test|test-without-building)(?![-\w.])")
-NO_DIAGNOSE = re.compile(r"(?<![\w-])-collect-test-diagnostics\s+never(?![-\w.])")
+PRINTERS = {"echo", "printf"}  # a command that prints its words and runs none of them
+STEP_NAME = re.compile(r"^\s*(-\s+)?name\s*:")  # a workflow step's name is text, as in `- name: xcodebuild test (slow)`
+MAKE_VAR = re.compile(r"^(?:(?:export|override)\s+)*([A-Za-z_][\w.-]*)\s*(::=|:=|\?=|\+=|=)\s*(.*)$")
+MAKE_CONTINUATION = re.compile(r"\\\n[ \t]*")
+MAKE_RESOLVE_PASSES = 8  # caps a chain of variables, and a variable that names itself
+MAKE_REF = re.compile(r"\$[({]([A-Za-z_][\w.-]*)[)}]")
+MAKE_COMMENT = re.compile(r"(?<!\\)#.*")  # Make cuts a `#` comment from an assignment; `\#` is a literal `#`
+MAKE_RECIPE_PREFIXES = "@-+"  # a recipe line may open with these: silent, ignore errors, always run
 DEV_TEAM = re.compile(r"\bDEVELOPMENT_TEAM\s*[:=]\s*[\"']?[A-Z0-9]")
 
 
@@ -751,19 +757,84 @@ def shell_words(line):
 
 def xcodebuild_runs(text):
     """The arguments of each `xcodebuild` command in `text` (comments already cut), one list per command. A command
-    ends at a COMMAND_MARKS mark or the line end."""
+    ends at a COMMAND_MARKS mark or the line end. A `$(` or a backtick opens an inner command and keeps the outer group
+    aside, restored at the close, so an action after a substitution in an argument stays in the run. A Make recipe
+    prefix (`@`, `-`, `+`) is no part of the name."""
     runs = []
+
+    def end(group):
+        names = [w.lstrip(MAKE_RECIPE_PREFIXES).rsplit("/", 1)[-1] for w in group]
+        if "xcodebuild" in names and not PRINTERS & set(names[:names.index("xcodebuild")]):
+            runs.append(group[names.index("xcodebuild") + 1:])
+
     for line in text.splitlines():
-        group = []
-        for word in shell_words(line) + [";"]:
-            if word in COMMAND_MARKS:
-                names = [w.rsplit("/", 1)[-1] for w in group]
-                if "xcodebuild" in names:
-                    runs.append(group[names.index("xcodebuild") + 1:])
+        group, outer = [], []  # `outer`: (opener, the group set aside at it), innermost last
+        for word in [] if STEP_NAME.match(line) else shell_words(line):
+            if word in ("$(", "(") or (word == "`" and not (outer and outer[-1][0] == "`")):
+                outer.append((word, group))
+                group = []
+            elif word in (")", "`"):
+                end(group)
+                opener, held = outer.pop() if outer else (None, [])
+                group = held if opener in ("$(", "`") else []
+            elif word in COMMAND_MARKS:
+                end(group)
                 group = []
             else:
                 group.append(word)
+        end(group)
+        for _opener, held in reversed(outer):  # a substitution left open at the line end
+            end(held)
     return runs
+
+
+def resolve_make_refs(text, values, unset):
+    """`text` with each `$(NAME)` or `${NAME}` replaced by its value in `values`, to a fixed point capped at
+    MAKE_RESOLVE_PASSES. A name not in `values` gives `unset(match)`."""
+    for _ in range(MAKE_RESOLVE_PASSES):
+        resolved = MAKE_REF.sub(lambda m: values.get(m.group(1), unset(m)), text)
+        if resolved == text:
+            break
+        text = resolved
+    return text
+
+
+def expand_make_vars(text):
+    """`text` of a Makefile with each `$(NAME)` or `${NAME}` that the Makefile sets replaced by its value, so a flag
+    passed through a variable reads as the flag. Make's rules hold: a later `=`, `:=` or `::=` replaces, `+=` appends,
+    `?=` applies only when the variable is unset, a backslash-continued line is one line, a `#` comment ends the value,
+    and an `export` or `override` prefix is read. `:=` and `::=` make a simple variable: its value expands at
+    assignment, against the values set so far, and a `+=` on it expands the appended text at once. A chain of
+    variables resolves to a fixed point, capped so a variable that names itself ends. Not read: a target-specific
+    `target: VAR = value`, a `define` block, `$(VAR:a=b)` substitution, and a value from the environment."""
+    values, simple = {}, set()
+    for line in MAKE_CONTINUATION.sub(" ", text).splitlines():
+        match = MAKE_VAR.match(line)
+        if not match:
+            continue
+        name, op, value = match.groups()
+        value = MAKE_COMMENT.sub("", value).replace("\\#", "#").strip()
+        if op == "?=" and name in values:
+            continue
+        if op in (":=", "::=") or op == "+=" and name in simple:
+            value = resolve_make_refs(value, values, lambda m: "")  # Make reads an unset variable as empty
+        if op in (":=", "::="):
+            simple.add(name)
+        elif op != "+=":
+            simple.discard(name)
+        if op == "+=" and name in values:
+            value = (values[name] + " " + value).strip()
+        values[name] = value
+    return resolve_make_refs(text, values, lambda m: m.group(0))
+
+
+def lacks_diagnostics(text):
+    """True when an `xcodebuild test` run in `text` (comments cut) has no `-collect-test-diagnostics never` pair."""
+    for run in xcodebuild_runs(text):
+        pairs = list(zip(run, run[1:]))
+        if TEST_ACTIONS & set(run) and ("-collect-test-diagnostics", "never") not in pairs:
+            return True
+    return False
 
 
 def compiles_app(text):
@@ -900,8 +971,8 @@ def probe_ios(root):
          "%s runs UI tests; they run once per batch on the Mac, through sim-test" % ", ".join(slow) if slow else "no UI suite in CI")
     # Each run of xcodebuild test, split at `&&`, `;` and `|`, needs the flag itself. sim-test adds its own.
     diag = [f for f in files if f == "Makefile" or f.endswith(".sh") or WORKFLOW.search(f)
-            if any(XCODEBUILD_TEST_RE.search(run) and not NO_DIAGNOSE.search(run)
-                   for line in uncommented(read(root, f) or "") for run in re.split(r"[;&|]+", line))]
+            if lacks_diagnostics("\n".join(uncommented(
+                expand_make_vars(read(root, f) or "") if f == "Makefile" else read(root, f) or "")))]
     item("test diagnostics", "gap" if diag else "pass",
          "%s runs xcodebuild test without -collect-test-diagnostics never" % ", ".join(diag) if diag
          else "every xcodebuild test run sets -collect-test-diagnostics never")
