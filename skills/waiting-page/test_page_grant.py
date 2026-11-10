@@ -274,6 +274,14 @@ class NotCounted(Base):
         fetched = self.fetch(items={ITEM_ID: item()}, answers=None)
         self.assertNotCounted(self.check(self.repo(), fetched), "no saved answer")
 
+    def test_open_item_with_lane_and_last_answer_and_no_answers_folder_not_counted(self):
+        """The item's `lastAnswer` is the page's copy of an answer, not the answers record: rule 2 counts only the fetched answers
+        document. So an open item with `lane` and `lastAnswer` and no saved answer is not counted. Green on the old code too; the
+        page's sink of such an item must not change the grant reader."""
+        last = {"choice": "a", "note": "", "at": AT}
+        fetched = self.fetch(items={ITEM_ID: item(lane="owner-word-relay", lastAnswer=last)}, answers=None)
+        self.assertNotCounted(self.check(self.repo(), fetched), "no saved answer")
+
     def test_answers_folder_holds_no_document(self):
         fetched = self.fetch(items={ITEM_ID: item()}, answers={})
         self.assertNotCounted(self.check(self.repo(), fetched), "answers folder is empty")

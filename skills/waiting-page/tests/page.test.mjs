@@ -2495,6 +2495,39 @@ test("answered-sink: a Change on an open item with a lane and a last answer keep
   assert.equal(await c.locator(".opts").isVisible(), true, "the options did not open under Change");
 });
 
+// The negatives: each state the lane sink must not move. Each passes on the old commit as well, so they carry no red run.
+// Each reads the open tier first (the scope), then the item (the subject).
+test("answered-sink: an open item with a lane and no last answer stays in its tier", async (t) => {
+  const it = mk("lane-no-ans", 1, { added: at(5), lane: "ci-done-comment" }), other = mk("lane-no-ans-next", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other] }); if (!page) return;
+  assert.equal(await sectionOf(page, other), "tier-calm", `No. ${other.n} is not in its tier`);
+  assert.equal(await sectionOf(page, it), "tier-calm", `No. ${it.n} left its tier`);
+  assert.equal(await page.locator("#tier-answered").count(), 0, "the page draws an Answered section with nothing answered");
+});
+
+test("answered-sink: an open item with a last answer and no lane stays in its tier", async (t) => {
+  const it = mk("ans-no-lane", 1, { added: at(5), lastAnswer: LANE_ANS }), other = mk("ans-no-lane-next", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other] }); if (!page) return;
+  assert.equal(await sectionOf(page, other), "tier-calm", `No. ${other.n} is not in its tier`);
+  assert.equal(await sectionOf(page, it), "tier-calm", `No. ${it.n} left its tier`);
+  assert.equal(await page.locator("#tier-answered").count(), 0, "the page draws an Answered section with nothing answered");
+});
+
+test("answered-sink: a closed item with a lane and a last answer is not on the page and draws no Answered section", async (t) => {
+  const other = mk("closed-next", 1, { added: NEW_ADDED }), gone = mk("lane-closed", 2, { status: "closed", added: at(5), lane: "ci-done-comment", lastAnswer: LANE_ANS });
+  const page = await open(t, { items: [other, gone] }); if (!page) return;
+  assert.deepEqual(await sectionIds(page), ["tier-calm"], "the page draws a section for a closed item");
+  assert.equal(await page.locator('[id^="item-"]').count(), 1, "a closed item is drawn as a card");
+  assert.equal(await card(page, gone).count(), 0, `closed No. ${gone.n} is drawn`);
+});
+
+test("answered-sink: an arbiter ruling with a lane and a last answer stays in Arbiter rulings", async (t) => {
+  const ruling = mk("ruling-lane", 901, { status: "closed", arbiter: true, home: "D-901", pick: "a", why: "The arbiter ruled Red.", ruled: "2026-10-30T17:40:00Z", lane: "ci-done-comment", lastAnswer: LANE_ANS });
+  const page = await open(t, { items: [DECISION, ruling] }); if (!page) return;
+  assert.deepEqual(await sectionIds(page), ["tier-calm", "tier-ruled"], "the page does not draw the open tier and Arbiter rulings alone");
+  assert.equal(await sectionOf(page, ruling), "tier-ruled", `ruling No. ${ruling.n} is not in Arbiter rulings`);
+});
+
 // Case 5 (regression, #1345): a reply that arrives on a card sunk at load opens its fold in place. No card moves.
 test("answered-sink: a reply that arrives on a card sunk at load opens its fold in place, and no card moves", async (t) => {
   const it = mk("live-reply", 1, { added: at(5) }), other = mk("live-open", 2, { added: NEW_ADDED });
