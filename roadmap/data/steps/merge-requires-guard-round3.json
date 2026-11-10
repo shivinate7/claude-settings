@@ -1,11 +1,11 @@
 {
   "title": "The merge tool requires round 3 on a guard change; delete-only changes are exempt",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 267.6,
   "owner": "coordinator",
   "why": "Follow-up of step review-rounds-rework.",
-  "note": "Named by lane review-rounds-rework in PR #1552 (coordinator, 16:33 CST Nov 7). Done check: a guard change merged without a round-3 record is refused; a delete-only change passes.",
-  "updatedAt": "2026-11-07T16:34:00-06:00",
+  "note": "Named by lane review-rounds-rework in PR #1552 (coordinator, 16:33 CST Nov 7). Done check: a guard change merged without a round-3 record is refused; a delete-only change passes. Done: merge.py review_state on main owes round 3 and net value for a guard change, delete-only exempt (ce354b907, a07450f70, 77fe1339a) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96,  CST Nov 10).",
+  "updatedAt": "2026-11-10T06:03:00-06:00",
   "lane": "session_013NEJL2hBkMAyffTo9CdawZ"
 }

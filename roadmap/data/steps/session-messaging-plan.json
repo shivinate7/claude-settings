@@ -1,10 +1,10 @@
 {
   "title": "Plan, then build, messages to and from sessions, in a form that carries over to any harness",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 103.358,
   "why": "The owner wants messaging done first, in a form that survives a move to a new harness or a custom build.",
-  "note": "Nov 6 14:50 CST (triage audit): status to doing; open PR #1326.\nOwner ask ask-mw5b3m9hl0 (12:27 CST), replying to the harness research on ask-mw58ykeqal. A full plan, then the build. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane session_013NEJL4F7fFtXaQnEzxbLmh at 03:46-03:49 CST Nov 10.",
-  "updatedAt": "2026-11-10T03:49:00-06:00",
+  "note": "Nov 6 14:50 CST (triage audit): status to doing; open PR #1326.\nOwner ask ask-mw5b3m9hl0 (12:27 CST), replying to the harness research on ask-mw58ykeqal. A full plan, then the build. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane session_013NEJL4F7fFtXaQnEzxbLmh at 03:46-03:49 CST Nov 10. Done: PR #1326 merged 2026-11-08; docs/decisions/session-messages.md on main (464038b34, 2e928151c) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96,  CST Nov 10).",
+  "updatedAt": "2026-11-10T06:03:00-06:00",
   "lane": "session_013NEJL4F7fFtXaQnEzxbLmh"
 }
