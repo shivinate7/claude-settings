@@ -3,7 +3,7 @@
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
 the history.
-Last rewrite: 2026-11-10 16:03 CST.
+Last rewrite: 2026-11-10 16:11 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -28,9 +28,10 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
    5. Lane lint runs once per lane; batch CI fails fast (ruling R4).
    6. One cull of guards with recorded wrong refusals (ruling R5).
    7. One model table that every spawn, guard and check reads (ruling R8).
-   8. One rounds record; round 3 only for a guard or check change that failed a round (ruling R9).
+   8. One rounds record; round 3 and the net-value test per owner pick 471 a (ruling R9).
    9. A hook refusal asks for a short correction, never the whole reply again (ruling R10).
    10. One catalog of every hook and setting, with where each runs, linked from the page (ruling R11).
+   11. One override route, read from the owner's own words, with a receipt (ruling R12).
 4. **Make the roadmap and triage mechanical** (direction D1, open; ruling R6).
 5. **Express pass for prose** (ruling R7). It can move before stage 2 so this plan's PR uses it.
 6. **Resume lanes** under the new flow. Then the rest of the queue.
@@ -109,7 +110,10 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   if it passed earlier and was so confused to see that it was occuring"; "agreed A -- can look into the
   sonnet noise thing later". Fold the 15+ rounds rulings into one record. Round 1 runs on item 359 a's
   model (Sonnet for a guard or check change, the role's model otherwise). Fixes are verified per G5. Round
-  3 with the net-value test runs only for a guard or check change that failed a round. Evidence: round 3
+  3 follows owner pick 471 a (2026-11-09 23:39 CST, step review-state-guard-needs-round-3) as it stands: a
+  guard or check change that passes round 1 is done; only one fixed under a fix check waits for round 3;
+  the net-value test is only for an unclear case that cannot finish by the end of the rounds (the
+  2026-10-15 "still unfinished" valve in hold-unsafe-after-round-3). Evidence: round 3
   found a failure 0 of 14+ times after a clean round 2; the net-value hold caught 6 real holes. Deferred:
   Sonnet round 1 for every logic change (Haiku round 1 fails 79% vs 38%; noise share unknown).
   Home: decision hold-unsafe-after-round-3; CLAUDE.md roles-review-cap-three and
@@ -120,6 +124,7 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   again". guard-remedy-not-to-owner:177 already says "post only the corrected lines ... Never send the
   report again", but no refusal text says it. Each Stop-hook refusal ends with that line.
   Home: decision guard-remedy-not-to-owner.
+
 - **R11. One catalog of every hook and setting.** Owner 16:00 CST Nov 10: "A -- but also i kinda meant how
   when questions reach triage, do the pre tool question use stuff run on it just like it would when
   uqestions used to come in line in the chats?". docs/catalog.md (lint/hook_catalog.py) lists all 36
@@ -130,6 +135,16 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   disableAllHooks is unwatched; H5 no rm shim on Windows; H6 decision watch desktop-only.
   Page questions: ArtifactData writes run the same question form (guard.py) and judge (call_judge.py,
   past rulings included) as the chat box. Home: decision hook-catalog-page.
+
+- **R12. One override route, with a receipt.** Owner 16:10 CST Nov 10: "yes this statement of opus 4h etc
+  also feels super arbitrary i dont want to do such rigid word grants moreso like if i say send a swarm of
+  opus agents that just works too yanno? A is good though but it should be override <anytime> or override
+  not just override and override 4h". One route reads the owner's own typed words for overrides and Opus
+  asks alike, judged and fail closed; agent or pasted text never grants. Fast path, no model call:
+  `override` (one act) or `override` with any length (15, 15m, 90 minutes, 2 hours, 4h). Any other
+  wording is judged. Every grant prints one receipt line the owner sees (what it lifts, one act or until
+  when); today a grant prints nothing. A refusal no override can lift says so. Home: decision
+  owner-override, rewritten in place.
 
 - **G1. Who acts.** Owner 14:23 CST Nov 10: "the who is good, but i can make a grant or ruling, so can
   arbiter (marked as such, and a tier below)". Three kinds of actor: the owner, a session, an agent.
