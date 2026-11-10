@@ -1,11 +1,11 @@
 {
   "title": "The roadmap build counts a step live when its lane field names a live session",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 972,
   "owner": "coordinator",
   "why": "A lane often works a second step whose lane field names it, while its cs-step tag names its first step. The build then reads the second step as stalled and the page goes red on live work.",
-  "note": "Measured  CST Nov 10, triage live build: 19 of 104 stalled steps have a live lane (working, blocked or review ready) whose cs-step tag names another step: relayed-yes-names-head, notes-fix-large-3, commit-msg-path-false-alarm, rule-audit-branch-scope, env-child-followups, ste-push-segment-top-c-then-cd, git-after-cd-chain-followups, silent-undo-cli-ignores-pr-body, guard-checkout-path-restore, ste-push-subshell-cd-push-target, guard-split-git-word, pe-guard-false-alarms, notes-union-unretire, resume-guard-subagent-sends, resume-guard-workflow-agents, guard-browser-once, decision-count-reader, frozen-path-mutant-install, builder-model-pin. Fix, pick one: the build also reads the step's lane field against the sessions list; or the coordinator adds a cs-step tag per step a lane takes. The second breaks 'one step per lane' (skill roadmap, Lane and grants).",
-  "updatedAt": "2026-11-10T05:57:00-06:00",
-  "lane": null
+  "note": "Measured  CST Nov 10, triage live build: 19 of 104 stalled steps have a live lane (working, blocked or review ready) whose cs-step tag names another step: relayed-yes-names-head, notes-fix-large-3, commit-msg-path-false-alarm, rule-audit-branch-scope, env-child-followups, ste-push-segment-top-c-then-cd, git-after-cd-chain-followups, silent-undo-cli-ignores-pr-body, guard-checkout-path-restore, ste-push-subshell-cd-push-target, guard-split-git-word, pe-guard-false-alarms, notes-union-unretire, resume-guard-subagent-sends, resume-guard-workflow-agents, guard-browser-once, decision-count-reader, frozen-path-mutant-install, builder-model-pin. Fix, pick one: the build also reads the step's lane field against the sessions list; or the coordinator adds a cs-step tag per step a lane takes. The second breaks 'one step per lane' (skill roadmap, Lane and grants). Doing 05:59 CST Nov 10 in lane session_013NEJKzDXZ6E5hL4PUShA7C (coordinator). Coordinator's pick (process only, 05:59 CST Nov 10): a live lane counts for every step its cs-step tag names, and for the step its lane branch or PR names.",
+  "updatedAt": "2026-11-10T06:00:00-06:00",
+  "lane": "session_013NEJKzDXZ6E5hL4PUShA7C"
 }
