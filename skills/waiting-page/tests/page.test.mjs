@@ -1866,6 +1866,33 @@ test("a withdraw leaves an answer that changed since the page read it", async (t
   assert.deepEqual((await page.evaluate(() => window.__log)).filter((l) => l[0] === "delete"), []);
 });
 
+// A Withdraw on this visit of a card kept by an answers row and waiting on its lane (answered-sink). Withdraw deletes the row, and the card
+// must not redraw as sent: it is open again, with no Sent pill. The scope (the Blocking and Answered rows) is read before the card.
+// The placement and the counts are as the brief sets them; the lane's design note says a same-visit Withdraw stays in Answered.
+const railCount = (page, k) => page.evaluate((key) => { const a = document.querySelector(`#rail a.ov-head[href="#tier-${key}"] .ct`); return a ? Number(a.textContent.trim()) : 0; }, k);
+test("answered-sink: a Withdraw on a kept-answer lane card, on this visit, draws it open with no Sent pill, and counts it back in Blocking", async (t) => {
+  const it = mk("lane-wd", 1, { holds: "Blocks the release.", added: at(5), lane: "ci-done-comment", lastAnswer: { choice: "a", note: "", at: ANSWERED_AT } });
+  const held = mk("lane-wd-held", 2, { holds: "Blocks the build.", added: NEW_ADDED });
+  const page = await open(t, { items: [it, held], answers: answerOf(it, "a") }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section at load`);
+  const holdsBefore = await railCount(page, "holds"), answeredBefore = await railCount(page, "answered");
+  const c = card(page, it);
+  await c.getByRole("button", { name: "Change", exact: true }).click();
+  await choose(page, it, "a"); // empties the pick: Send withdraws the saved answer
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer", `No. ${it.n} does not offer Withdraw once its pick is emptied`);
+  await send(page);
+  await page.waitForFunction((id) => !(id in window.__answers()), it.id);
+  const holdsAfter = await railCount(page, "holds"), answeredAfter = await railCount(page, "answered");
+  const where = await sectionOf(page, it);
+  const pills = await c.locator(".top .ans").allTextContents();
+  const chip = await page.locator("#c-" + it.id).getAttribute("aria-label");
+  assert.deepEqual(pills, [], `No. ${it.n} is drawn with a Sent pill after its withdraw: ${JSON.stringify(pills)}`);
+  assert.doesNotMatch(chip, /answered/, `No. ${it.n}'s chip still reads as answered after its withdraw: ${JSON.stringify(chip)}`);
+  assert.equal(where, "tier-holds", `No. ${it.n} is not back in Blocking after its withdraw (in ${where})`);
+  assert.equal(holdsAfter, holdsBefore + 1, `the Blocking count did not go up by one after the withdraw`);
+  assert.equal(answeredAfter, answeredBefore - 1, `the Answered count did not go down by one after the withdraw`);
+});
+
 test("a note typed on an item whose pick stands sends the stood pick plus the note", async (t) => {
   const it = mk("stand-note", 7, { stands: true });
   const page = await open(t, { items: [it] }); if (!page) return;
@@ -2526,6 +2553,15 @@ test("answered-sink: an arbiter ruling with a lane and a last answer stays in Ar
   const page = await open(t, { items: [DECISION, ruling] }); if (!page) return;
   assert.deepEqual(await sectionIds(page), ["tier-calm", "tier-ruled"], "the page does not draw the open tier and Arbiter rulings alone");
   assert.equal(await sectionOf(page, ruling), "tier-ruled", `ruling No. ${ruling.n} is not in Arbiter rulings`);
+});
+
+// The chip of an item answered by its lane names the lane, as the card's pill and the rail's words do.
+test("answered-sink: the rail chip of an open item answered by its lane reads 'answered, waits on lane <slug>'", async (t) => {
+  const it = mk("lane-chip", 1, { added: at(5), lane: "ci-done-comment", lastAnswer: LANE_ANS }), other = mk("lane-chip-next", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other] }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  assert.equal(await page.locator("#c-" + it.id).count(), 1, `No. ${it.n} has no rail chip`);
+  assert.equal(await page.locator("#c-" + it.id).getAttribute("aria-label"), "No. " + it.n + ", " + it.title + ", answered, waits on lane ci-done-comment", `the chip of No. ${it.n} does not say it waits on the lane`);
 });
 
 // Case 5 (regression, #1345): a reply that arrives on a card sunk at load opens its fold in place. No card moves.
