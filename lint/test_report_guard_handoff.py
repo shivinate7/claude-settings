@@ -116,6 +116,12 @@ WIDENED_LINES = (
     "Why yours: I couldn’t push from here, since the trailer needs the owner.",
     "Why yours: the push was rejected, since the trailer needs the owner.",
     "Why yours: the remote returned 401, since the trailer needs the owner.",
+    # The reject forms, one per line: "rejects", "reject" and "rejecting" are red on the old commit. "being rejected"
+    # holds "rejected", which the old commit already reads, so it is refused there too: a control, not a red.
+    "Why yours: the remote rejects the push, since the trailer needs the owner.",
+    "Why yours: the remote may reject the push, since the trailer needs the owner.",
+    "Why yours: the remote is rejecting the push, since the trailer needs the owner.",
+    "Why yours: the push is being rejected, since the trailer needs the owner.",
 )
 # A choice reason that holds a widened word. The choice phrase exempts the line, so each passes on main too.
 CHOICE_NEW_LINES = (

@@ -443,6 +443,12 @@ CAP_COULDNT = "Why yours: I couldn't push the delete from here"
 CAP_COULDNT_CURLY = "Why yours: I couldn’t push the delete from here"
 CAP_REJECTED = "Why yours: the remote rejected the delete"
 CAP_401 = "Why yours: the remote returned 401 to the delete"
+# The reject forms: "reject", "rejects" and "rejecting" are red on the old commit; "being rejected" holds "rejected", which
+# the old commit already reads.
+CAP_REJECT = "Why yours: the remote may reject the delete"
+CAP_REJECTS = "Why yours: the remote rejects the delete"
+CAP_REJECTING = "Why yours: the remote is rejecting the delete"
+CAP_REJECTED_BEING = "Why yours: the delete is being rejected"
 STEPS = ["Open Terminal"]
 BACKTICK_TOOL = "mcp__claude-code-remote__archive_session"
 # The rows the cases cite. The first three are on the local surface the cases pin; r-cloud-only is on the cloud one.
@@ -557,6 +563,17 @@ def case_task_why_cited_reds():
         why_guard("a str_replace that adds an uncited 401 capability line is refused", "str_replace",
                   {"collection": "items", "doc_id": DOC, "field": "context", "old_str": TASK_WHY,
                    "new_str": CAP_401 + "."}, (WHY_RULE, None))
+        why_guard("a reject capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECT + ".")), (WHY_RULE, None))
+        why_guard("a rejects capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTS + ".")), (WHY_RULE, None))
+        why_guard("a rejecting capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTING + ".")), (WHY_RULE, None))
+        why_guard("a being-rejected capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTED_BEING + ".")), (WHY_RULE, None))
+        why_guard("a str_replace that adds an uncited rejects capability line is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": TASK_WHY,
+                   "new_str": CAP_REJECTS + "."}, (WHY_RULE, None))
     with local_rows(rows_at("why-rows-empty.json", [])):
         why_guard("a cite of an id in an empty rows file is refused", "set",
                   entry_of(task_item(STEPS, context=CAP + " (route r-refused).")), (WHY_RULE, None))
