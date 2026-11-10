@@ -435,3 +435,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - ilaam-landed-pull-todo (#2225): a body-named landed pull lands a todo step (skills/roadmap/build.py).
 - ilaam-idle-lanes-silent (#2225): a passing `verdict merge --idle-lanes` prints no log, so the hold release is unread (lint/report_guard.py).
 - ilaam-cite-audit-concat (#2225): hold_reason returns `"" + runner` so the rule audit resolves it, which drops the runner branch from the cite audit. Honest fix: exempt that branch by name, or teach _Reasons.alts that `"" + x` reads as x.
+- (debt) batch-drop-relint-docs-wrong (#2382 lane-lint-runs-comment-check, coordinator 02:16 CST Nov 10): skills/ci-hygiene SKILL.md and decision batch-freeze-lane-set say a batch drop re-lints nothing; that is wrong.
+- (debt) lint-unknown-ok-no-comment (#2382): `merge --lint-unknown-ok` posts no PR comment.
