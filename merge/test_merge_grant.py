@@ -214,6 +214,44 @@ class ReviewGrantRules(unittest.TestCase):
                 self.assertEqual(state, "done", f"a granted fourth round with a fix PASS reads {state!r}: {why!r}")
                 self.assert_names_round_four(why)
 
+class ReviewGrantFinalRound(unittest.TestCase):
+    """With a Grant line, round 4 is the final round. A round-3 FAIL does not hold when a granted round 4 follows it, and a round-4 FAIL or
+    PARTIAL holds. A fix check FAIL holds by the round it counts as, read against the final round. The no-grant case is the control."""
+
+    def test_a_round_four_fail_or_partial_holds_with_a_grant(self):
+        # round 4 is the final round, so its own FAIL or PARTIAL holds. The round-3 shape passes, so the hold can only come from round 4.
+        for shape, earlier in (("round 3 passes", tm.REVIEW_PASSED_THREE), ("round 3 fails", tm.REVIEW_FAILED_THREE)):
+            for verdict in ("FAIL", "PARTIAL"):
+                with self.subTest(shape=shape, verdict=verdict):
+                    rounds = earlier + (f"Round 4: reviewer, opus, {verdict}",)
+                    rec = tm.parse_text(self, tm.record_text(rounds=rounds, grant=(f"Grant: {REVIEW_GRANT}",)))
+                    state, why = tm.review_fn(self, "review_state")(rec, tm.REVIEW_HEAD)
+                    self.assertEqual(state, "held", f"a round 4 {verdict} with a Grant reads {state!r}: {why!r}")
+                    self.assertIn("round 4", why, f"the hold does not name round 4: {why!r}")
+
+    def test_a_fix_fail_counting_round_three_with_a_grant_does_not_hold(self):
+        # A Grant record always reaches round 4, so no parsed record has a fix FAIL that counts as round 3. The grant is set on a parsed
+        # record with two failed rounds, as fix_state sets the fix line: the fix FAIL counts as round 3, and round 4 is still to come.
+        rec = tm.parse_text(self, tm.record_text(rounds=tm.REVIEW_FAILED_THREE[:2], fix=(tm.fix_check_line(verdict="FAIL"),)))
+        rec["grant"] = REVIEW_GRANT
+        state, why = tm.review_fn(self, "review_state")(rec, tm.REVIEW_HEAD)
+        self.assertEqual(state, "open", f"a fix FAIL that counts as round 3, with a Grant, reads {state!r}: {why!r}")
+        self.assertIn("round 3", why, f"the open why does not name the round the fix FAIL counts as: {why!r}")
+
+    def test_a_fix_fail_counting_round_four_with_a_grant_holds(self):
+        # the control: round 3 passes, so the fix FAIL, counting as round 4, is the only thing that holds the change
+        rec = tm.parse_text(self, tm.record_text(rounds=tm.REVIEW_PASSED_THREE, fix=(tm.fix_check_line(verdict="FAIL"),)))
+        rec["grant"] = REVIEW_GRANT
+        state, why = tm.review_fn(self, "review_state")(rec, tm.REVIEW_HEAD)
+        self.assertEqual(state, "held", f"a fix FAIL that counts as round 4, with a Grant, reads {state!r}: {why!r}")
+
+    def test_a_round_three_fail_still_holds_with_no_grant(self):
+        # the control: with no Grant line round 3 is the final round, and its FAIL holds with the why that names round 3
+        rec = tm.parse_text(self, tm.record_text(rounds=tm.REVIEW_FAILED_THREE))
+        state, why = tm.review_fn(self, "review_state")(rec, tm.REVIEW_HEAD)
+        self.assertEqual(state, "held", f"a round 3 FAIL with no Grant reads {state!r}: {why!r}")
+        self.assertEqual(why, tm.REVIEW_HELD_WHY, "the why of a round 3 hold with no Grant changed")
+
 class ReviewGrantFlag(tm.ReviewEnv):
     """`--grant TEXT` goes with --review-record and lets a fourth round in: the one round past the usual limit. Its text is `#<pr>, <cite>`,
     and its PR must be the positional PR. Every refusal sits beside the good value, which must exit 0, so a parser that never learned the
