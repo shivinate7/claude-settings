@@ -969,7 +969,7 @@ class NotRunLines(Job):
 
 RV = '''import os
 
-TRIES = 1000000  # a deadlock guard counted in polls, never in seconds: a wait that cannot end exits 9 after this many
+TRIES = 1000000  # a deadlock guard counted in polls, never in seconds: 1,000,000 polls take 1.7 s here, a python step starts in 0.03 s (measured 2026-11-10)
 
 
 def arrive(name):
@@ -977,11 +977,12 @@ def arrive(name):
 
 
 def wait_for(*names):
-    """True once every named file exists. A count, not a clock: the budget is poll work, the same kind of CPU work a
-    step's own start takes, so the two scale together on a slower runner."""
+    """True once every named file exists. A count, not a clock. Each poll yields the CPU, so a partner step still gets it."""
+    yield_cpu = getattr(os, "sched_yield", lambda: None)
     for _ in range(TRIES):
         if all(os.path.exists(n) for n in names):
             return True
+        yield_cpu()
     return all(os.path.exists(n) for n in names)
 
 
@@ -1024,8 +1025,9 @@ class ParallelLint(Job):
     """--lint runs its lint steps at once, up to a worker count: CI_JOB_LINT_WORKERS when that is a positive int, else
     min(os.cpu_count(), 4), at least 1 (the cpu cases patch os.cpu_count). Steps prove they overlap by rendezvous on
     marker files, never by a clock: a wait that cannot end gives up after a count of polls and exits 9. A cap is proved
-    by steps that all wait for each other: with fewer workers than steps, the rendezvous cannot complete, so one of them
-    reads FAIL. Verdict lines, the summary and each step's log lines keep workflow order. An install step is a barrier.
+    by a last step that may start only after a worker has finished: it checks for a done marker first, so it reads FAIL
+    when every step ran at once or when they ran one at a time. Verdict lines, the summary and each step's log lines keep
+    workflow order. An install step is a barrier.
     Plain runs, --step and --plan stay serial."""
 
     INSTALL_WAITS = ("i=0\nwhile [ ! -e l3-checked ] && [ $i -lt 300000 ]; do i=$((i+1)); done\n"
@@ -1061,11 +1063,18 @@ class ParallelLint(Job):
         self.assertEqual(rc, 0, out)
 
     def check_cap(self, names, **kw):
-        """Every step waits for every other. With fewer workers than steps, the last one cannot start until a slot frees,
-        and the first to finish reads FAIL: at least one step reads FAIL."""
-        rc, lines, out = self.run_lint(*self.rendezvous_steps(names), **kw)
-        self.assertIn("FAIL", by_step(lines).values(),
-                      "all %d steps passed their rendezvous: they all ran at once\n%s" % (len(names), out))
+        """The last name may start only once a worker has finished. The others meet each other, then wait a bound for the
+        last name to arrive, then write done. So the last name finds a done marker only if a slot freed: every step passes
+        under the cap. Run all at once, it finds none and reads FAIL. Run one at a time, the first meet times out."""
+        group, last = names[:-1], names[-1]
+        steps = [self.lint(g, meet(g, *[m for m in group if m != g]) + "rv.wait_for('arrived-%s')\n" % last + done(g))
+                 for g in group]
+        freed = " or ".join("os.path.exists('done-%s')" % g for g in group)
+        steps.append(self.lint(last, "if not (%s):\n    rv.say('no worker had finished when %s started: the cap did not hold')\n"
+                                     "    sys.exit(1)\n" % (freed, last) + meet(last, *group) + done(last)))
+        rc, lines, out = self.run_lint(*steps, **kw)
+        self.assertEqual(list(by_step(lines).items()), [(n, "PASS") for n in names], out)
+        self.assertEqual(rc, 0, out)
 
     def fresh_run(self):
         """Removes the last run's files, so a second run in one case starts with no marker of the first."""
