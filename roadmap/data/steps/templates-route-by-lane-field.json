@@ -1,7 +1,7 @@
 {
   "title": "The templates route a lane by the step's lane field, not a cs-step tag per step",
   "phase": "now",
-  "status": "ready",
+  "status": "blocked",
   "order": 974,
   "owner": "coordinator",
   "lane": null,
