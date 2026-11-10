@@ -16090,6 +16090,35 @@ sh("frozen shell: r2 cov, a multi-line commit message before a real write, denie
 sh("frozen shell: r2 cov, a /* and an apostrophe in a commit message before a real write, denies [r2 cov]",
    VCS + " commit -m \"don't /* stop\" && cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 
+# gh-comment-body. A quoted `>` in the body of a gh pr comment, gh issue comment or gh pr review is text, not
+# a redirect: the body names a path and writes nothing. Main reads these calls as plain shell, so each form
+# reds on the frozen-path rule. The controls pin what stays refused: a redirect or a substitution that
+# runs in the body still reaches the rule that reads it.
+for _gh_lead, _gh_label in (("gh pr comment 1", "gh pr comment"), ("gh issue comment 1", "gh issue comment"),
+                            ("gh pr review 1 --comment", "gh pr review")):
+    for _gh_flag, _gh_form in (("--body", '--body "a > %s"'), ("-b", '-b "a > %s"'),
+                               ("glued --body=", '--body="a > %s"')):
+        sh("frozen data: gh-comment-body, %s with a %s quoted > onto the config settings, allows [gh-comment-body red]"
+           % (_gh_label, _gh_flag), _gh_lead + " " + _gh_form % CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen data: gh-comment-body, gh pr edit body with a quoted > onto the config settings, allows [gh-comment-body control]",
+   "gh pr edit 1 --body \"a > " + CFG_SETTINGS + "\"", "allow", cwd=NOGIT)
+sh("frozen data: gh-comment-body, a redirect onto the config settings from a gh pr comment body, denies [gh-comment-body control]",
+   "gh pr comment 1 --body hi > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: gh-comment-body, a gh pr comment redirect inside bash -c onto the config settings, denies [gh-comment-body control]",
+   "bash -c \"gh pr comment 1 --body hi > " + CFG_SETTINGS + "\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: gh-comment-body, a gh pr comment body that is only a $(echo) redirect onto the config settings, denies [gh-comment-body control]",
+   "gh pr comment 1 --body \"$(echo hi > " + CFG_SETTINGS + ")\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: gh-comment-body, a gh pr comment body that is only a backtick redirect onto the config settings, denies [gh-comment-body control]",
+   "gh pr comment 1 --body \"`echo hi > " + CFG_SETTINGS + "`\"", "deny", "frozen-path", cwd=NOGIT)
+sh("env: gh-comment-body, a gh pr comment body that is only a $(cat) of the env file, denies [gh-comment-body control]",
+   "gh pr comment 1 --body \"$(cat " + ENV + ")\"", "deny", "env-file", cwd=NOGIT)
+sh("env: gh-comment-body, a gh pr comment body that is only a backtick cat of the env file, denies [gh-comment-body control]",
+   "gh pr comment 1 --body \"`cat " + ENV + "`\"", "deny", "env-file", cwd=NOGIT)
+sh("frozen shell: gh-comment-body, an apostrophe and /* in a gh pr comment body before a real write, denies [gh-comment-body control]",
+   "gh pr comment 1 --body \"don't /* stop\" && cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: gh-comment-body, a multi-line gh pr comment body with a # before a real write, denies [gh-comment-body control]",
+   "gh pr comment 1 --body \"line one\n# two\" ; cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+
 # A program piped into python that reads its program from stdin
 # runs as code, so a frozen write inside it must deny, as `python -` does. The /dev/stdin, /dev/fd/0,
 # /proc/self/fd/0 and CON forms name the same stdin (_STDIN_FILES).
@@ -17274,6 +17303,24 @@ sh("builder join: a temp folder from mkdtemp() joined inline to tests is allowed
 sh("builder join: a TemporaryDirectory held in a variable, joined through .name to tests is allowed",
    '''python3 -c "import os, tempfile; td = tempfile.TemporaryDirectory(); open(os.path.join(td.name, 'tests', 'test_x.py'), 'w')"''',
    "allow", **B)
+
+# gh-comment-body. A quoted `>` in the body of a gh comment or review is text, not a redirect. Main's builder
+# rule reads it as a redirect onto a test file, so each form reds. The controls: a path no test covers is
+# allowed, and a redirect onto a test file that runs in the body is still refused.
+for _gh_lead, _gh_label in (("gh pr comment 1", "gh pr comment"), ("gh issue comment 1", "gh issue comment"),
+                            ("gh pr review 1 --comment", "gh pr review")):
+    for _gh_flag, _gh_form in (("--body", '--body "a > %s"'), ("-b", '-b "a > %s"'),
+                               ("glued --body=", '--body="a > %s"')):
+        sh("builder-test: gh-comment-body, %s with a %s quoted > onto a test file, allows [gh-comment-body red]"
+           % (_gh_label, _gh_flag), _gh_lead + " " + _gh_form % "src/test_app.py", "allow", **B)
+sh("builder-test: gh-comment-body, a gh pr comment body with a quoted > onto a non-test path, allows [gh-comment-body control]",
+   'gh pr comment 1 --body "a > src/x"', "allow", **B)
+sh("builder-test: gh-comment-body, a redirect onto a test file from a gh pr comment body, denies [gh-comment-body control]",
+   "gh pr comment 1 --body hi > src/test_app.py", "deny", rule=BT, **B)
+sh("builder-test: gh-comment-body, a gh pr comment redirect inside bash -c onto a test file, denies [gh-comment-body control]",
+   "bash -c \"gh pr comment 1 --body hi > src/test_app.py\"", "deny", rule=BT, **B)
+sh("builder-test: gh-comment-body, a gh pr comment body that is only a $(echo) redirect onto a test file, denies [gh-comment-body control]",
+   "gh pr comment 1 --body \"$(echo hi > src/test_app.py)\"", "deny", rule=BT, **B)
 
 # ---- a script file a builder runs by name (debt script-file-runs-test-write)
 # A shell call that runs a python or node file by name is judged by the writes that file's body makes,
