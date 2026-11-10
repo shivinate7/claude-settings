@@ -2657,7 +2657,9 @@ def refusal_reason(tools, hold=""):
     names = ", ".join("`%s`" % tool for tool in tools)
     return (held + " " if held else "") + owner_line(
         "Refusal guard (decision refusals-reach-the-owner)",
-        "the auto-mode classifier refused %s this session, and the reply does not raise it with the owner" % names)
+        "the auto-mode classifier refused %s this session, and the reply does not raise it with the owner. "
+        "A refused tool clears only when the reply names it in backticks under Input Needed, "
+        "or writes \"`<tool_name>`: refusal was right\"" % names)
 
 
 def _marker_path(hook):
