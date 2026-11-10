@@ -388,10 +388,10 @@ class IdleLanesFromRawFiles(unittest.TestCase):
                          "a complete page list is not read as whole (exit %d): stderr %r" % (code, err))
 
     def test_a_sessions_and_items_pair_last_written_over_an_hour_ago_reads_unknown(self):
-        # Lane ruling 4 (11:25 CST, process-only): readAt is the older file's mtime, so a pair last written long ago is stale.
+        # readAt is the older file's mtime, so a pair last written long ago is stale.
         # It reads unknown: exit 1 and no lane line. The fixed old time is far past the 60-minute bound at any run date.
         # Restoring the mtimes to now lists session_a again, so the staleness is the only thing that changed.
-        old = 1700000000  # 2023-11-14 UTC
+        old = 1700000000  # a fixed Unix time, far in the past
         self.write_sessions(raw_page(self.rows, more=False))
         for path in (self.sessions, self.items):
             os.utime(path, (old, old))
@@ -436,9 +436,9 @@ class IdleLanesFromRawFiles(unittest.TestCase):
         self.assertIn("unknown (", err, "an items last page with a next_cursor gave no unknown reason: %r" % (err,))
 
     def test_a_fresh_sessions_file_does_not_rescue_an_items_file_older_than_an_hour(self):
-        # Lane ruling 4 (11:25 CST, process-only): readAt is the older of the two files' mtimes. A sessions file written now
+        # readAt is the older of the two files' mtimes. A sessions file written now
         # does not make a stale items file fresh, so the read is unknown. Restoring the items mtime lists session_a again.
-        old = 1700000000  # 2023-11-14 UTC, far past the 60-minute bound at any run date
+        old = 1700000000  # a fixed Unix time, far past the 60-minute bound at any run date
         self.write_sessions(raw_page(self.rows, more=False))
         os.utime(self.items, (old, old))
         code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
