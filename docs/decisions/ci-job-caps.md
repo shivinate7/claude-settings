@@ -4,6 +4,20 @@
 
 Owner, 2026-11-01 18:44 CST: each owner repo raises its job caps generously, as a stopgap, until its time-pinned tests are gone. The owner named the CI fix step that ends the stopgap; it reads as decision `test-strategy-reset` (tests prove outcomes and never fail on runner speed). This repo's caps, with their measured runs, are in the table below.
 
+Owner, 2026-11-10 12:11 CST, to triage: "i thought i'd already established to coordinator that all time related tests need to be deprecating (that's prob alrdy recorded) but also to generously raise time limits in the interim so that tests dont fail off time".
+
+So the stopgap covers local tool caps too, not only CI job caps:
+
+- The merge tool's lane lint bound, `LINT_SECONDS` in `merge/merge.py`: 1200 s to 3600 s.
+- The Retire check's bound per suite, `TIMEOUT` in `lint/check_debt_retire.py`: 600 s to 1800 s.
+- The Python floor check's bound, `TIMEOUT` in `lint/check_python_floor.py`: 300 s to 900 s.
+- The two mutation-run caps, `timeout` in `hooks/mutate_guard.py` and `janitor/mutate_sweep.py`: 1200 s to 3600 s.
+- Other local time limits, such as the other lint checks', fall under the same stopgap.
+
+Why: local caps ran out on lane lint for PRs 2268, 2164 and 2276, and the Retire checks refused PR 2551 at merge.
+
+The stopgap, CI and local, still ends with roadmap step `time-pinned-tests-go` (time-pinned tests are gone).
+
 Owner, 2026-10-27, roadmap step c95 (the cap rule):
 
 - A full CI run is red only when something is broken, never because a job ran out of time.
