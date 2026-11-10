@@ -7,7 +7,7 @@ import re
 import shlex
 
 from guard_core import (
-    basename, command_indexes, inner_commands, segment_tokens, split_segments, walk_quotes,
+    basename, command_indexes, inner_commands, is_powershell, segment_tokens, split_segments, walk_quotes,
 )
 from guard_env import substitution_commands
 
@@ -18,7 +18,10 @@ from guard_env import substitution_commands
 # prints them puts the secret in its transcript. Three acts print them:
 #   - `ps` with an args column: `ps aux`, `ps -ef`, `ps -f`, `ps -o args|command|cmd`.
 #   - `pgrep` with `-a`, or with `-l` and `-f` together.
-#   - a read of `/proc/<pid>/cmdline`: `cat` of the file, or any command fed it with `<`.
+#   - `ps -x` (BSD: no terminal, full arguments), `pstree -a`, `top -c`.
+#   - a read of `/proc/<pid>/cmdline`: any command that takes the file as an argument, or is fed it
+#     with `<`, except one that only names or measures it (`NOT_READERS`).
+#   - PowerShell and `wmic`: a `Win32_Process` or `Get-Process` read that selects `CommandLine`.
 # A pid, a name, a parent id and a start time stay allowed (`ps -o pid,comm`, `pgrep -l x`).
 #
 # Judged per command word, read from the shell's own segments, so quoted text, a comment and a
@@ -27,10 +30,8 @@ from guard_env import substitution_commands
 # the one home of that unwrapping.
 #
 # ACCEPTED LIMITS: `ps` and `pgrep` flags are read as procps reads them, so a `ps` of another
-# family (BSD, busybox) may read a flag differently. A `ps` whose format comes from the
-# environment (`PS_FORMAT`) is not read. `/proc/<pid>/environ`, `head`, `strings` or `xargs -a` on
-# a cmdline file, and a script that reads the file, are not covered. `ps -aux` is read as the BSD
-# `aux`, which it prints as.
+# family (busybox) may read a flag differently. `ps -aux` is read as the BSD `aux`, which it
+# prints as. What is still unread is listed in the ruling, under "Not read".
 
 PROCESS_ARGS_REASON = (
     "this prints other processes' full arguments, and an argument can hold a secret, such as an "
@@ -50,14 +51,24 @@ PS_VALUE_LONG = {
     "--sort", "--pid", "--ppid", "--sid", "--tty", "--user", "--User", "--group", "--Group", "--cols",
     "--columns", "--lines", "--rows", "--width", "--quick-pid", "--format",
 }
+PSTREE_VALUE_SHORT = "CHN"
+TOP_VALUE_SHORT = "dEenopUuw"
 PGREP_VALUE_SHORT = "dFgGJPstuUr"
 PGREP_VALUE_LONG = {"--delimiter", "--pidfile", "--pgroup", "--group", "--parent", "--session",
                     "--terminal", "--euid", "--uid", "--runstates", "--ns", "--nslist", "--signal"}
 
-CMDLINE_PATH = re.compile(r"^/proc/([^/]+)/cmdline$")
+CMDLINE_PATH = re.compile(r"^/proc/([^/]+)(?:/task/[^/]+)?/cmdline$")
 # A path that reads no other process: the shell's own pid, and `self`.
 OWN_PROCESS = {"self", "thread-self", "$$"}
-CMDLINE_READERS = {"cat", "tac"}
+# Commands that take a cmdline path and print no content from it: text, names, sizes, tests. Every
+# other command word that takes the path is a reader. `xargs` is never exempt: it feeds the file on.
+NOT_READERS = {"echo", "printf", "ls", "stat", "test", "[", "[[", "wc", "file", "readlink", "realpath",
+               "basename", "dirname", "find", "cd"}
+# PowerShell reads of the process table. `Win32_Process` goes with the CIM and WMI readers; the
+# process cmdlets stand alone. `ps` is Get-Process only under PowerShell's reading.
+PS_CIM_READERS = {"get-ciminstance", "gcim", "get-wmiobject", "gwmi"}
+PS_PROCESS_READERS = {"get-process", "gps", "ps"}
+PS_PART_SPLIT = re.compile(r"[,.(){}|;@]")
 REDIRECT_TARGET_OPEN = " \t"
 
 
@@ -67,9 +78,9 @@ def _field_names(value: str):
 
 def _ps_prints_args(args) -> bool:
     """True when the arguments of a `ps` ask for a column of full arguments. An explicit format
-    (`-o`) decides alone. Without one, `-f` or `-F`, or a BSD operand (`aux`, `ax`, a pid list),
-    prints them."""
-    fields, full, bsd_operand, skip = [], False, False, False
+    (`-o`) decides alone. Without one, `-f` or `-F`, the BSD `x` flag, or a BSD operand (`aux`, `ax`,
+    a pid list), prints them."""
+    fields, full, bsd_operand, bsd_x, skip = [], False, False, False, False
     args = list(args)
     if args:
         args[-1] = args[-1].rstrip(")")   # a subshell's closing paren glued to the last word
@@ -95,6 +106,8 @@ def _ps_prints_args(args) -> bool:
         for at, letter in enumerate(cluster):
             if letter in "fF":
                 full = True
+            if letter == "x":
+                bsd_x = True   # BSD `x`: the processes with no terminal, listed with full arguments
             if letter not in PS_VALUE_SHORT:
                 continue
             value = cluster[at + 1:].lstrip("=")
@@ -107,7 +120,7 @@ def _ps_prints_args(args) -> bool:
             break
     if fields:
         return any(field in PS_ARGS_FIELDS for field in fields)
-    return full or bsd_operand
+    return full or bsd_operand or bsd_x
 
 
 def _pgrep_prints_args(args) -> bool:
@@ -137,6 +150,30 @@ def _pgrep_prints_args(args) -> bool:
     return list_full or (list_name and match_full)
 
 
+def _cluster_has(args, letter: str, value_short: str, long_flag: str) -> bool:
+    """True when `pstree` or `top` is given an option: `letter` in a short cluster, read up to the
+    first option that takes a value (`top -bn1` is `b`, `n` and the value `1`), or `long_flag`."""
+    skip = False
+    for arg in args:
+        if skip:
+            skip = False
+            continue
+        if arg.startswith("--"):
+            if long_flag and arg.partition("=")[0] == long_flag:
+                return True
+            continue
+        if not arg.startswith("-") or arg == "-":
+            continue
+        cluster = arg[1:].rstrip(")")
+        for at, char in enumerate(cluster):
+            if char == letter:
+                return True
+            if char in value_short:
+                skip = not cluster[at + 1:]
+                break
+    return False
+
+
 def _cmdline_word(word: str) -> bool:
     """True when `word` is `/proc/<pid>/cmdline` of another process: a number, a glob or a variable."""
     found = CMDLINE_PATH.match(word)
@@ -144,6 +181,58 @@ def _cmdline_word(word: str) -> bool:
         return False
     middle = found.group(1)
     return bool(re.fullmatch(r"[0-9]+", middle) or re.search(r"[*?\[]", middle) or middle.startswith("$"))
+
+
+def _cmdline_read(tokens) -> str:
+    """The cmdline path a segment hands to a command that reads it, else ''. A segment whose every
+    command word only names or measures the file passes, unless `xargs` feeds the file on."""
+    paths = [word for word in tokens[1:] if _cmdline_word(word)]
+    if not paths:
+        return ""
+    tools = [basename(tokens[at]) for at in command_indexes(tokens)]
+    if tools and all(tool in NOT_READERS for tool in tools) and "xargs" not in map(basename, tokens):
+        return ""
+    return (tools[0] + " " if tools else "") + paths[0]
+
+
+def _parts(token: str):
+    """The lower-case names inside one token: `Name,CommandLine` and `$_.CommandLine` split into words.
+    A quoted sentence stays one part, so a filter that only mentions a property is no selection."""
+    return [part.strip().lower() for part in PS_PART_SPLIT.split(token)]
+
+
+def _wmic_reads_command_line(args) -> bool:
+    """True for `wmic process ... get ...commandline`: the process alias and a CommandLine word."""
+    parts = [part for arg in args for part in _parts(arg)]
+    return "process" in parts and "commandline" in parts
+
+
+def _powershell_hit(text: str) -> str:
+    """The matched text when PowerShell text reads a process's `CommandLine`: a pipeline (segments
+    joined by `|`) that starts from a process reader and names the property, however it selects it.
+    `Get-CimInstance Win32_Process | Select CommandLine`, `(Get-WmiObject Win32_Process).CommandLine`
+    and `Get-Process | Select Name,CommandLine` all match. A pid-and-name selection and text pass."""
+    if not is_powershell(text):
+        return ""
+    ends = []
+    segments = split_segments(text, ends)
+    if len(ends) != len(segments):
+        ends = [""] * len(segments)
+    pipeline, parts, sources = [], [], set()
+    for segment, end in zip(segments, ends):
+        tokens = segment_tokens(segment) if segment.strip() else None
+        for at in command_indexes(tokens) if tokens else ():
+            sources.add(basename(tokens[at]))
+        for token in tokens or ():
+            parts += _parts(token)
+        pipeline.append(segment.strip())
+        if end == "|":
+            continue
+        reads_table = sources & PS_PROCESS_READERS or (sources & PS_CIM_READERS and "win32_process" in parts)
+        if reads_table and "commandline" in parts:
+            return " | ".join(pipeline)
+        pipeline, parts, sources = [], [], set()
+    return ""
 
 
 def _redirect_sources(segment: str):
@@ -184,26 +273,39 @@ def _segment_hit(segment: str) -> str:
             return "ps " + " ".join(args)
         if tool == "pgrep" and _pgrep_prints_args(args):
             return "pgrep " + " ".join(args)
-        if tool in CMDLINE_READERS:
-            for word in args:
-                if _cmdline_word(word):
-                    return tool + " " + word
+        if tool == "pstree" and _cluster_has(args, "a", PSTREE_VALUE_SHORT, "--arguments"):
+            return "pstree " + " ".join(args)
+        if tool == "top" and _cluster_has(args, "c", TOP_VALUE_SHORT, ""):
+            return "top " + " ".join(args)
+        if tool in ("wmic", "wmic.exe") and _wmic_reads_command_line(args):
+            return "wmic " + " ".join(args)
+    matched = _cmdline_read(tokens)
+    if matched:
+        return matched
     for text in inner_commands(tokens):
-        for part in split_segments(text):
-            matched = _segment_hit(part)
-            if matched:
-                return matched
+        matched = _text_hit(text)
+        if matched:
+            return matched
     return ""
+
+
+def _text_hit(text: str) -> str:
+    """The matched text when one command text prints process arguments: judged per segment, then as
+    PowerShell pipelines."""
+    for segment in split_segments(text):
+        matched = _segment_hit(segment)
+        if matched:
+            return matched
+    return _powershell_hit(text)
 
 
 def process_args_hit(raw: str, stripped: str) -> str:
     """Return the matched text when the command prints other processes' full arguments, else ''.
     Reads the command and each substitution in it as commands of their own (`substitution_commands`)."""
     for text in [stripped, *substitution_commands(raw, stripped)]:
-        for segment in split_segments(text):
-            matched = _segment_hit(segment)
-            if matched:
-                return matched
+        matched = _text_hit(text)
+        if matched:
+            return matched
     return ""
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the

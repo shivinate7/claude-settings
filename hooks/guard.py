@@ -115,8 +115,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   env-file             deny. Any read or write of an environment file.
   process-args         deny. A command that prints other processes' full arguments, which can hold a
                        secret: `ps` with an args column (`aux`, `-ef`, `-f`, `-o args|command|cmd`),
-                       `pgrep -a` or `-l` with `-f`, and `cat` or a `<` redirect of
-                       `/proc/<pid|glob|$var>/cmdline`. Pid and name forms pass. Read from the parsed
+                       `ps -x`, `pgrep -a` or `-l` with `-f`, `pstree -a`, `top -c`, a command or `<`
+                       redirect that reads `/proc/<pid|glob|$var>/cmdline`, and a PowerShell or `wmic`
+                       read that selects `CommandLine`. Pid and name forms pass. Read from the parsed
                        command words, also inside wrappers, `bash -c` and `$(...)`, so quoted text and a
                        heredoc body pass. (process-args-guard)
   merge-checks         deny. A merge while the head has a check pending or red, while another
