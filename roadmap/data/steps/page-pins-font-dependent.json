@@ -5,6 +5,6 @@
   "order": 940,
   "owner": "coordinator",
   "why": "Coordinator 19:48 CST Nov 9: the waiting-page narrow-width pins pass 1922 of 1922 on the runner's local box and fail on CI, because they depend on system fonts. Runner 8 dropped #2347, #2383, #2423, #2429 and #2466 from batch 70; it rebuilds as batch-70c.",
-  "note": "The fix of today's pins is the lane on #2347 (coordinator; session id given only as …zjkypc). This step is the guard that stops the next pixel pin from depending on fonts. Related: shoot-job-cap, capped-job-hides-red, c78 (one shared browser-test setup). Filed 19:42 CST Nov 9 from the coordinator.",
-  "updatedAt": "2026-11-09T19:42:00-06:00"
+  "note": "The fix of today's pins is the lane on #2347 (coordinator; session id given only as …zjkypc). This step is the guard that stops the next pixel pin from depending on fonts. Related: shoot-job-cap, capped-job-hides-red, c78 (one shared browser-test setup). Filed 19:42 CST Nov 9 from the coordinator. The #2347 fix lane is session_013NEJKzjkypcToggneCjJN8; the #2466 follow-on lane is session_013NEJL3WMfUf8CyoxsgvqVr (coordinator 19:46 CST Nov 9).",
+  "updatedAt": "2026-11-09T19:44:00-06:00"
 }
