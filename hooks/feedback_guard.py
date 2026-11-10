@@ -83,6 +83,17 @@ a turn end in these cases:
     (GRANT_ROOT_HOMES), if some branch tracks it. A lone short message counts. Risk kind: named
     incident. F47 (an all-repos grant left in chat) and F31 (a grant homed to the handoff), same
     audit. Cost: two regexes on text already in memory;
+  - page-form-to-template (roadmap step page-feedback-to-template; ruling c164: a waiting-page comment is never
+    answered with a thread reply, the item is rewritten). In the claude-settings repo (layout.repo_name equals
+    shared_names.SETTINGS_REPO) and in the page writer's session (the transcript's newest meta/page get names the
+    hook's session id: _transcript.page_writer_id), a block that starts with the "[Artifact comment sent to
+    Claude]" banner, whose `Artifact:` url passes layout.is_waiting_page_url, and whose quoted wake is not a Saved
+    wake with no note in parentheses after `Items:`, needs one item line of two forms: `[task] -> step:<slug>`
+    whose step file at origin/<record branch> holds shared_names.TEMPLATE_DIR, or `[note] -> not-page-form`. The
+    remedy names both. Risk kind: likely risk. Incident: owner, Nov 10 09:13 CST (every page feedback goes into the
+    shared template). Cost: one regex per block plus the transcript read the guard already makes, and one
+    cat-file per step home, inside the Stop process. No process, timer or file. A repo, layout or git read that
+    fails passes the block;
   - inbox-close-needs-home. A closed note needs a home that is a file some branch tracks,
     `step:<slug>` (roadmap/data/steps/<slug>.json, resolved by ruling_home.value_resolves), `page:<n>`
     or `not-a-grant`. `noted` and `process-only` are not one. An item is closed by `[closed]` as a
@@ -152,7 +163,7 @@ import local_time  # noqa: E402  the one home of the inbox paths
 import override  # noqa: E402  the one home of the roadmap record ref and folder
 import ruling_home  # noqa: E402  the one home of "a branch's tree holds this file"
 import precompact_handoff  # noqa: E402  the one home of the handoff path
-from shared_names import MACHINE_TAGS  # noqa: E402  the one home of the machine notice tags
+from shared_names import MACHINE_TAGS, SETTINGS_REPO, TEMPLATE_DIR  # noqa: E402  the one home of the machine notice tags, the repo, and the template dir
 from guard_core import SHELL_TOOLS  # noqa: E402  the one home of the shell tool names (Bash, PowerShell)
 
 ITEM = re.compile(r"- (fb-\S+)(?:\s+(.*))?$")
@@ -386,6 +397,7 @@ class Homes:
         self._tops = None  # the repo tops of worked_in and cwd, read once per Stop
         self._filed = None  # (numbers or None, branch, folder), read once per Stop
         self._top = None  # (the cwd's repo top or None,), read once per Stop
+        self._templated = {}  # (branch, slug) -> whether the step file holds TEMPLATE_DIR, read once per Stop
 
     def _root(self, where):
         run = ruling_home._run_git(where, ["rev-parse", "--show-toplevel"])
@@ -509,6 +521,31 @@ class Homes:
     def _closed_reason(item_id):
         return ("%s [note] is closed with no home: a closed note needs a tracked file, `step:<slug>` naming a"
                 " step file that some branch holds, `page:<n>` or `not-a-grant`" % item_id)
+
+    def step_names_template(self, root, branch, slug):
+        """True when the step file `slug` at origin/<branch> holds TEMPLATE_DIR. False when it holds none, or
+        no such file is on that ref. One cat-file per step, asked once."""
+        key = (branch, slug)
+        if key not in self._templated:
+            run = ruling_home._run_git(root, ["cat-file", "-p", "refs/remotes/origin/%s:%s" % (branch, STEP_PATH % slug)])
+            self._templated[key] = run.returncode == 0 and TEMPLATE_DIR in run.stdout
+        return self._templated[key]
+
+    def page_form_scope(self, url):
+        """(root, branch) when the cwd is the claude-settings repo and `url` is its waiting page; else None. The
+        layout or git failing stands the rule down: None."""
+        try:
+            import layout
+        except ImportError:
+            return None
+        try:
+            root = self._cwd_root()
+            if root is None or layout.repo_name(root) != SETTINGS_REPO.lower() or not layout.is_waiting_page_url(
+                    root, url):
+                return None
+            return root, layout.record_branch(root)
+        except (layout.LayoutError, ruling_home._GitFailure):
+            return None
 
     def has_waiting_page(self):
         """(found, why): `found` is true when the repo of the session's folder names a waiting page
@@ -653,6 +690,11 @@ class Pages:
                 if text is not None:
                     self.owners.append((i, norm(text)))
         return not self.unread
+
+    def is_writer(self, session_id):
+        """True when the transcript's newest meta/page get names `session_id` as the page writer. False when it
+        names another, none, or the transcript cannot be read: the writer is not known, so the session is not it."""
+        return bool(session_id) and self._load() and _transcript.page_writer_id(self.records) == session_id
 
     def stand_down(self, label, why):
         self.skip.setdefault(label, [])
@@ -871,7 +913,44 @@ def grant_problem(b, text, items):
     return "the message at %s (%s) holds a grant word and has no home for it: add %s" % (b["stamp"], head, GRANT_HOMES)
 
 
-def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
+PAGE_BANNER = re.compile(r"\[Artifact comment sent to Claude\]\s*\nArtifact:[ \t]*(\S+)")  # a block's start, and its page
+PAGE_QUOTE = re.compile(r"^=== BEGIN ARTIFACT COMMENT (\S+) ===\n(.*?)\n=== END ARTIFACT COMMENT \1 ===", re.M | re.S)
+SAVED_WAKE = "Saved on the waiting page"
+NOT_PAGE_FORM = "not-page-form"  # the home of a [note] that says its comment is not page form
+
+
+def page_form_problem(text, items, homes, pages, session):
+    """The reason text, or None (rule page-form-to-template, in the docstring above). The cheap gates run first: the
+    banner regex, then the repo and page of the cwd, then the transcript for the page writer, then one cat-file per
+    step home."""
+    banner = PAGE_BANNER.match(text)
+    if banner is None or homes is None or pages is None:
+        return None
+    quote = PAGE_QUOTE.search(text)
+    wake = "\n".join(re.sub(r"^> ?", "", ln) for ln in quote.group(2).split("\n")) if quote else ""
+    if wake.startswith(SAVED_WAKE) and "(" not in wake.partition("Items:")[2]:
+        return None  # a plain save: no owner words to route
+    scope = homes.page_form_scope(banner.group(1))
+    if scope is None or not pages.is_writer(session):
+        return None
+    try:
+        for it in items:
+            if it is None or not it[2]:
+                continue
+            if it[1].startswith("[note]") and home_word(it[1]) == NOT_PAGE_FORM:
+                return None
+            step = step_home(it[1]) if it[1].startswith("[task]") else None
+            if step and homes.step_names_template(scope[0], scope[1], step.group(1)):
+                return None
+    except ruling_home._GitFailure:
+        return None
+    return ("this is a waiting-page comment, and a page comment is never answered with a thread reply (ruling c164):"
+            " the item is rewritten into the shared template, %s. Add `[task] -> step:<slug>` for a step whose file"
+            " on origin/%s names %s, or `[note] -> %s` when the comment is not page form (rule page-form-to-template)"
+            % (TEMPLATE_DIR, scope[1], TEMPLATE_DIR, NOT_PAGE_FORM))
+
+
+def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", session=None):
     out, seen = [], {}
     for n, b in enumerate(blocks):
         text = norm(b["text"])
@@ -880,7 +959,8 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
             out.append(no_items_problem(b, inbox, homes.homes_line() if homes is not None else ""))
         grant = is_grant(text)
         for found in (answer_problem(b, text, seen[text], homes, pages),
-                      grant_problem(b, text, [item(ln) for ln in b["items"]])):
+                      grant_problem(b, text, [item(ln) for ln in b["items"]]),
+                      page_form_problem(text, [item(ln) for ln in b["items"]], homes, pages, session)):
             if found:
                 out.append(found)
         for ln in b["items"]:
@@ -1347,7 +1427,7 @@ def inbox_stop(hook):
             except OSError:
                 handoff = ""
             pages = Pages(hook.get("transcript_path"))
-            found = problems(blocks, handoff, homes, burst, pages, inbox)
+            found = problems(blocks, handoff, homes, burst, pages, inbox, hook.get("session_id"))
             reasons = found + flags
             notes = ([FAIL_OPEN % homes.skip] if homes.skip else []) + ([note] if note else []) + (
                 [FAIL_OPEN_SENDS % (label, "; ".join(why)) for label, why in sorted(
