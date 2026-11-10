@@ -436,6 +436,19 @@ def case_batch():
 
 WHY_RULE = "task-why-cited"
 CAP = "Why yours: the cloud proxy refused the delete (403)"  # a capability reason: "refused" and "403"
+# Capability reasons with the widened words, one word each, so a red names its word alone. The rule reads each word as a
+# capability word, as it reads "refused" and "403" above.
+CAP_COULD_NOT = "Why yours: I could not push the delete from here"
+CAP_COULDNT = "Why yours: I couldn't push the delete from here"
+CAP_COULDNT_CURLY = "Why yours: I couldn’t push the delete from here"
+CAP_REJECTED = "Why yours: the remote rejected the delete"
+CAP_401 = "Why yours: the remote returned 401 to the delete"
+# The reject forms: "reject", "rejects" and "rejecting" are red on the old commit; "being rejected" holds "rejected", which
+# the old commit already reads.
+CAP_REJECT = "Why yours: the remote may reject the delete"
+CAP_REJECTS = "Why yours: the remote rejects the delete"
+CAP_REJECTING = "Why yours: the remote is rejecting the delete"
+CAP_REJECTED_BEING = "Why yours: the delete is being rejected"
 STEPS = ["Open Terminal"]
 BACKTICK_TOOL = "mcp__claude-code-remote__archive_session"
 # The rows the cases cite. The first three are on the local surface the cases pin; r-cloud-only is on the cloud one.
@@ -536,6 +549,31 @@ def case_task_why_cited_reds():
         why_guard("a plain edit that adds a works-row cite is refused", "str_replace",
                   {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Run the proxy check.",
                    "new_str": "Run the proxy check (route r-works)."}, (WHY_RULE, None))
+        # The widened words: a capability line with no cite is refused, as "refused" and "403" are.
+        why_guard("a could-not capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_COULD_NOT + ".")), (WHY_RULE, None))
+        why_guard("a couldn't capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_COULDNT + ".")), (WHY_RULE, None))
+        why_guard("a curly-apostrophe couldn't capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_COULDNT_CURLY + ".")), (WHY_RULE, None))
+        why_guard("a rejected capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTED + ".")), (WHY_RULE, None))
+        why_guard("a 401 capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_401 + ".")), (WHY_RULE, None))
+        why_guard("a str_replace that adds an uncited 401 capability line is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": TASK_WHY,
+                   "new_str": CAP_401 + "."}, (WHY_RULE, None))
+        why_guard("a reject capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECT + ".")), (WHY_RULE, None))
+        why_guard("a rejects capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTS + ".")), (WHY_RULE, None))
+        why_guard("a rejecting capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTING + ".")), (WHY_RULE, None))
+        why_guard("a being-rejected capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTED_BEING + ".")), (WHY_RULE, None))
+        why_guard("a str_replace that adds an uncited rejects capability line is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": TASK_WHY,
+                   "new_str": CAP_REJECTS + "."}, (WHY_RULE, None))
     with local_rows(rows_at("why-rows-empty.json", [])):
         why_guard("a cite of an id in an empty rows file is refused", "set",
                   entry_of(task_item(STEPS, context=CAP + " (route r-refused).")), (WHY_RULE, None))
@@ -578,6 +616,20 @@ def case_task_why_cited_greens():
                   entry_of(task_item(STEPS, context="The cloud proxy refused the delete (403).\n" + TASK_WHY)), None)
         why_guard("a decision item with an uncited capability line passes, since the rule judges tasks", "set",
                   entry_of(page_item(tail="\n" + CAP + ".")), None)
+        # Controls for the widened words: a dated measured cite or a refused-row cite backs the line, a choice phrase
+        # keeps the act, and 401 inside a longer number is no status.
+        why_guard("a rejected capability line with a dated measured cite passes", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTED + " (measured 2026-11-06, check_red_run exited 1).")),
+                  None)
+        why_guard("a 401 capability line with a refused-row cite passes", "set",
+                  entry_of(task_item(STEPS, context=CAP_401 + " (route r-refused).")), None)
+        why_guard("a could-not capability line with a refused-row cite passes", "set",
+                  entry_of(task_item(STEPS, context=CAP_COULD_NOT + " (route r-refused).")), None)
+        why_guard("a choice line with a widened word passes, since the owner keeps the act", "set",
+                  entry_of(task_item(STEPS, context="Why yours: it is your call, and I couldn't decide for you.")),
+                  None)
+        why_guard("a 4012 near miss passes, since 401 inside a longer number is no status", "set",
+                  entry_of(task_item(STEPS, context="Why yours: the lane on build 4012 needs the owner.")), None)
     with local_rows(rows_at("why-rows-cloud.json", [WHY_ROWS[3]])):
         why_guard("a row only on another surface passes", "set",
                   entry_of(task_item(STEPS, context=CAP + " (route r-cloud-only).")), None)
