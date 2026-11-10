@@ -1842,3 +1842,5 @@
 - launch-cloud-mirror-marker-reads-stderr: merge/launch.py `git()` joins stderr to stdout, so a git warning on `config --get claude-settings.cloudMirror` hides the marker and the mirror is fast-forwarded. install.sh and hooks/session_start.sh read stdout only.
 - launch-cloud-mirror-hides-other-reason: a marked mirror that is also dirty or off main prints only "cloud mirror" in launch.py's left-as-is line.
 - launch-cloud-mirror-test-gaps: no case pins a dirty marked mirror or a non-literal true spelling (`yes`, `1`); the code matches install.sh's literal `true`.
+- release-check-verdict-grep-allowed: `merge --release-check ... | grep "^#N "` is not refused by hooks/guard_stream.py CHECK_FLAGS (only tail and head are), so a cut verdict line reads as silence through grep.
+- release-check-equals-form-allowed: `merge --release-check=5 6 | tail` is not matched by the exact-token test in hooks/guard_stream.py CHECK_FLAGS, since it is the first check flag that takes a value. Claude rarely types the equals form.

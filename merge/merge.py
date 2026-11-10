@@ -35,12 +35,14 @@
                           Cost: the gh calls of one --reviewed per root; when the base has a done PR, plus the CI reads of each ready PR on
                           the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base; no
                           new process, file or timer.
-  merge --release-check N [N ...] [--lint N:PASS|UNKNOWN-AT-CAP|FAIL ...]
+  merge --release-check N [N ...] [--lint N@SHA:PASS|UNKNOWN-AT-CAP|FAIL ...]
                           the checks before a batch runner gets a PR, one line per N in the order given: `#N PASS`, or `#N FAIL: ` and the
                           reasons joined by `; `. A check that cannot run is a reason (`unknown (...)`), so no PR is ever left without a line,
                           and a missing line is never a pass. Exit 0 only when every line is PASS. Each PR must be open; its newest review
                           record must be done at the live head (as --reviewed reads it) and unedited (created_at equals updated_at); its
-                          --lint verdict must be PASS or UNKNOWN-AT-CAP (none given is a FAIL); `git merge-tree` of its head into the base tip
+                          --lint verdict (SHA is a full lowercase 40-hex head; a bare N:VERDICT, a short or upper-case SHA, or two for one N
+                          is a usage error, exit 2) must be PASS or UNKNOWN-AT-CAP for the live head (none given, or a SHA that is not the
+                          live head, is a FAIL; a PASS on UNKNOWN-AT-CAP reads `#N PASS (lint unknown at cap)`); `git merge-tree` of its head into the base tip
                           must be clean; and a PR on a base other than the default branch needs the open PR whose head is that base in the same
                           call, and that PR must pass. Takes no lock and no merge role, merges and pushes nothing; any session may run it.
                           Cost: one `pulls/N` read per PR and one read of the repo's comments since the oldest PR (every page), one fetch per
@@ -3571,6 +3573,7 @@ def reviewed_roots(roots, hosts, config):
 
 RELEASE_LINT_VERDICTS = ("PASS", "FAIL", "UNKNOWN-AT-CAP")  # the verdicts of `bin/ci-job checks --lint` a lane reports
 RELEASE_LINT_OK = ("PASS", "UNKNOWN-AT-CAP")  # an unknown at the lint cap is no defect found
+RELEASE_LINT_UNKNOWN_NOTE = " (lint unknown at cap)"  # the suffix of a PASS line whose lint is UNKNOWN-AT-CAP
 
 def unknown_reason(e):
     return f"unknown ({' '.join(str(e).split())})"
@@ -3603,9 +3606,10 @@ def merge_reason(root, n, base, head, fetched):
 
 def release_check(root, h, numbers, lints, root_why=None):
     """-> (lines, ok) of `merge --release-check`: one line per number in `numbers`, in order: `#N PASS`, or `#N FAIL: ` and the reasons joined by
-    `; `. A check that cannot run is a reason (`unknown (...)`), and every number gets a line, so a missing line cannot read as a pass. `lints` maps
-    a number to the lint verdict the caller reports. The checks: the pull request is open; its newest review record is done at the live head
-    (review_state, as `--reviewed` reads it); that record is unedited (created_at equals updated_at); the lint verdict is PASS or UNKNOWN-AT-CAP;
+    `; `; a PASS whose lint is UNKNOWN-AT-CAP reads `#N PASS (lint unknown at cap)`. A check that cannot run is a reason (`unknown (...)`), and every
+    number gets a line, so a missing line cannot read as a pass. `lints` maps a number to the (sha, verdict) of the lint the caller reports. The checks:
+    the pull request is open; its newest review record is done at the live head
+    (review_state, as `--reviewed` reads it); that record is unedited (created_at equals updated_at); the lint ran on the live head and its verdict is PASS or UNKNOWN-AT-CAP;
     the merge with the base tip is clean; and a base that is not the default branch is the head of a pull request in the call that passes.
     `root_why` says why the checkout root could not be read; then no check runs, and each number's one reason is that unknown.
     Cost: one `pulls/N` read per number and one list read of the repo's comments since the oldest of them (every page), one fetch per distinct
@@ -3652,8 +3656,10 @@ def release_check(root, h, numbers, lints, root_why=None):
                     out.append("the newest review record was edited after it was posted")
         if lints.get(n) is None:
             out.append("no lint verdict was given")
-        elif lints[n] not in RELEASE_LINT_OK:
-            out.append(f"lint {lints[n]}")
+        elif lints[n][0] != i["head"]:
+            out.append(f"the lint ran on {lints[n][0][:9]}, not the live head {i['head'][:9]}")
+        elif lints[n][1] not in RELEASE_LINT_OK:
+            out.append(f"lint {lints[n][1]}")
         try:
             clash = merge_reason(root, n, i["base"], i["head"], fetched)
         except (OSError, subprocess.TimeoutExpired) as e:
@@ -3679,7 +3685,8 @@ def release_check(root, h, numbers, lints, root_why=None):
         return out
 
     verdicts = [(n, reasons(n)) for n in numbers]
-    return [f"#{n} FAIL: {'; '.join(why)}" if why else f"#{n} PASS" for n, why in verdicts], not any(why for _, why in verdicts)
+    return [f"#{n} FAIL: {'; '.join(why)}" if why else f"#{n} PASS" + (RELEASE_LINT_UNKNOWN_NOTE if lints[n][1] == "UNKNOWN-AT-CAP" else "")
+            for n, why in verdicts], not any(why for _, why in verdicts)
 
 def pr_arg(text):
     """argparse type of a --release-check number: digits only."""
@@ -3688,11 +3695,12 @@ def pr_arg(text):
     return int(text)
 
 def lint_arg(text):
-    """argparse type of --lint: N:VERDICT -> (N, VERDICT), the verdict one of RELEASE_LINT_VERDICTS exactly."""
-    m = re.fullmatch(r"(\d+):(" + "|".join(RELEASE_LINT_VERDICTS) + ")", text, re.ASCII)
+    """argparse type of --lint: N@SHA:VERDICT -> (N, SHA, VERDICT). SHA is the full lowercase 40-hex head the lint ran on, and the verdict is one of
+    RELEASE_LINT_VERDICTS exactly. A verdict bound to no head is refused."""
+    m = re.fullmatch(rf"(\d+)@({REVIEW_SHA}):({'|'.join(RELEASE_LINT_VERDICTS)})", text, re.ASCII)
     if not m:
-        raise argparse.ArgumentTypeError(f"{text!r} is not N:VERDICT, with VERDICT one of {', '.join(RELEASE_LINT_VERDICTS)}")
-    return int(m.group(1)), m.group(2)
+        raise argparse.ArgumentTypeError(f"{text!r} is not N@SHA:VERDICT, with SHA a full lowercase 40-hex commit sha (the head the lint ran on) and VERDICT one of {', '.join(RELEASE_LINT_VERDICTS)}")
+    return int(m.group(1)), m.group(2), m.group(3)
 
 def head_arg(text):
     """argparse type of --head: a full lowercase 40-hex sha, the one the review read."""
@@ -3819,7 +3827,7 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
     p.add_argument("--release-check", nargs="+", action="extend", type=pr_arg, metavar="N", help="one line per pull request: PASS, or FAIL and the reasons (open, review record done at the live head and unedited, lint verdict, clean merge, stack); a missing line is a FAIL; takes no lock, merges nothing")
-    p.add_argument("--lint", action="append", type=lint_arg, default=[], metavar="N:VERDICT", help="with --release-check: the lint verdict of pull request N (PASS, FAIL or UNKNOWN-AT-CAP); a number with none FAILs")
+    p.add_argument("--lint", action="append", type=lint_arg, default=[], metavar="N@SHA:VERDICT", help="with --release-check: the lint verdict of pull request N on head SHA (full lowercase 40-hex; PASS, FAIL or UNKNOWN-AT-CAP); a SHA that is not the live head FAILs, and a number with none FAILs")
     p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
     p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it. With --confirm: the 40-hex head a relayed yes named; a moved head is refused before anything is claimed")
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
@@ -3837,8 +3845,8 @@ def main(argv, host=None, lock=None, hosts=None):
         if (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint
                 or a.idle_lanes or a.root or a.live is not None):
             p.error("--release-check stands alone; only --lint goes with it")
-        for n, _ in a.lint:
-            if [m for m, _ in a.lint].count(n) > 1:
+        for n, _, _ in a.lint:
+            if [m for m, _, _ in a.lint].count(n) > 1:
                 p.error(f"--lint gives pull request #{n} more than one verdict")
     if a.live is not None and not a.idle_lanes:
         p.error("--live goes with --idle-lanes")
@@ -3896,7 +3904,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 root_why = "not in a git checkout" if c else None
             except (OSError, subprocess.TimeoutExpired) as e:  # OSError: git is missing
                 root, root_why = None, e
-            lines, ok = release_check(root, host or Host(), a.release_check, dict(a.lint), root_why)  # before the role check and any lock: it reads, merges and pushes nothing
+            lines, ok = release_check(root, host or Host(), a.release_check, {n: (sha, v) for n, sha, v in a.lint}, root_why)  # before the role check and any lock: it reads, merges and pushes nothing
             say(*lines)
             return 0 if ok else 1
         if a.role is not None:
