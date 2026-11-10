@@ -366,3 +366,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - asmc-debt-text-wrong (#2442): debt review-record-model-not-served says review_state reads any posted Haiku record as done; a fix check already reads open, and only round 2 or 3 stays open. Fix its text.
 - asmc-pinned-test-flips (#2442): the debt's pinned test (a posted round 2 Haiku record still parses) flips when the debt retires.
 - asmc-fixflag-pins-not-red (#2442): two new ReviewFixFlag tests pass on main (pins, not red-first).
+- rrs-design-branch-untested (#2326 review-record-stack round 3, coordinator 01:24 CST Nov 10): no test for the design branch in uncleared_round; a merge.py mutant survived.
+- rrs-chain-base-no-sonnet (#2326): no Sonnet check on the chain base. The coordinator calls it the same gap as a known note; no matching outbox line found by grep (sonnet + chain/base), so filed here to fold when found.
+- rrs-report-guard-review-state (#2326): report_guard.py reads review_state alone.
