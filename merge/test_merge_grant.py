@@ -301,6 +301,52 @@ class ReviewGrantFlag(tm.ReviewEnv):
                 out, _err = self.assert_usage_error(*self.granted("--grant", grant_text(cite=f"item 396 a, owner, {date}")))
                 self.assertNotIn(tm.REVIEW_MARKER, out)
 
+    def fix_check_host(self, earlier):
+        """The pull request at the live head, with one earlier record `earlier` (its whole text) on the fix base REVIEW_OLD_HEAD."""
+        return self.record_host(tm.review_comment(1, 7, earlier), head=self.head())
+
+    def fix_check_argv(self, verdict, rounds=FOUR, grant=None):
+        """The argv of a fix check on the live head after `rounds`: the fix base REVIEW_OLD_HEAD, the fix check's model, `verdict`, and the grant when given."""
+        return self.granted("--fix-check", f"{tm.REVIEW_OLD_HEAD}:reviewer:{tm.merge.REVIEW_FIX_GUARD_MODEL}:{verdict}",
+                            *(("--grant", grant) if grant else ()), rounds=rounds)
+
+    def run_fix_check(self, *argv, host):
+        """-> (rc, out, err) of merge with argv on `host`. An exception that escapes merge.main fails the case by name, since a process would exit 1 on it."""
+        try:
+            return self.run_args(*argv, host=host)
+        except Exception as e:
+            self.fail(f"merge raised {type(e).__name__} on a fix check, not a record or a refusal: {e}")
+
+    def test_a_granted_round_four_pass_then_a_fix_check_pass_with_grant_prints_the_record(self):
+        # the fix check rebuilds the round-4 body, and that body must carry the grant too, or parse_review reads it as no record
+        host = self.fix_check_host(tm.record_text(head=tm.REVIEW_OLD_HEAD, rounds=round_four_text("PASS"), grant=(f"Grant: {REVIEW_GRANT}",)))
+        rc, out, err = self.run_fix_check(*self.fix_check_argv("PASS", grant=REVIEW_GRANT), host=host)
+        self.assertEqual(rc, 0, "merge refused a granted round-4 fix check PASS:\n" + out + err)
+        body = tm.posted_body(self, out)
+        self.assertIn(f"Grant: {REVIEW_GRANT}", body.splitlines(), "the printed record has no Grant line:\n" + body)
+        self.assertEqual(tm.parse_text(self, body).get("fix"), tm.REVIEW_FIX_PASS, "the printed record has no PASS fix check line:\n" + body)
+
+    def test_a_granted_round_four_then_a_fix_check_fail_prints_the_record_or_refuses_cleanly(self):
+        host = self.fix_check_host(tm.record_text(head=tm.REVIEW_OLD_HEAD, rounds=round_four_text("PASS"), grant=(f"Grant: {REVIEW_GRANT}",)))
+        rc, out, err = self.run_fix_check(*self.fix_check_argv("FAIL", grant=REVIEW_GRANT), host=host)
+        self.assertNotIn("Traceback", err, "a granted round-4 fix check FAIL printed a traceback:\n" + err)
+        self.assertIn(rc, (0, 2), f"a granted round-4 fix check FAIL exited {rc}, neither a record nor a refusal:\n" + out + err)
+        if rc == 0:
+            body = tm.posted_body(self, out)
+            self.assertIn(f"Grant: {REVIEW_GRANT}", body.splitlines(), "the printed record has no Grant line:\n" + body)
+            self.assertEqual(tm.parse_text(self, body).get("fix"), tm.REVIEW_FIX_FAIL, "the printed record has no FAIL fix check line:\n" + body)
+        else:
+            self.assertNotIn(tm.REVIEW_MARKER, out, "a refused fix check still printed a record")
+
+    def test_an_ungranted_round_three_fix_check_pass_still_prints_the_record(self):
+        # control: no grant and a final round 3. It passes on the old code too, so a red run shows only the granted cases
+        host = self.fix_check_host(tm.record_text(head=tm.REVIEW_OLD_HEAD, rounds=tm.REVIEW_PASSED_THREE))
+        rc, out, err = self.run_fix_check(*self.fix_check_argv("PASS", rounds=(*self.THREE[:4], "--round", "3:reviewer:opus:PASS")), host=host)
+        self.assertEqual(rc, 0, "merge refused an ungranted round-3 fix check PASS:\n" + out + err)
+        body = tm.posted_body(self, out)
+        self.assertEqual(tm.parse_text(self, body).get("fix"), tm.REVIEW_FIX_PASS, "the printed record has no PASS fix check line:\n" + body)
+        self.assertFalse([l for l in body.splitlines() if l.startswith("Grant:")], "an ungranted record prints a Grant line:\n" + body)
+
 
 
 if __name__ == "__main__":
