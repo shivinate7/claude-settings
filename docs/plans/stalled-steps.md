@@ -3,7 +3,7 @@
 Goal (owner, 2026-11-06 11:39 CST): a step's shown state is true by construction. A `doing` or
 `active` step with no live lane and no open PR shows STALLED until it gets a disposition.
 
-## build.py (skills/roadmap/build.py; do not touch `live_work`)
+## build.py (skills/roadmap/build.py; `live_work` also returns `liveSessionIds`, for a step's `lane` field)
 
 - Split `unlaned` (~:1020) into a structured core `laneless(open_, marks, work)` returning
   `(why, [(id, fix)])`, fix = "todo" or the landed marks. Keep the feel-fix skip and the liveness
