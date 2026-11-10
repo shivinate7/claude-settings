@@ -12290,9 +12290,11 @@ class PullsHost(merge.Host):
     `compare/<base>...<head>`, is keyed ("main", head sha) in the same map. `compare_error` answers every compare read;
     `base_compare_error` answers only the base branch's read. `files` are the changed files of the pull requests (`pulls/<n>/files`, one page
     per 100), and `files_error` fails that read. `changed_files` is the count `pulls/<n>` reports (None: the length of `files`). `repo` is the
-    OWNER/NAME the host names its repo by (Host.repo): the header of a `--reviewed --root` block reads it."""
+    OWNER/NAME the host names its repo by (Host.repo): the header of a `--reviewed --root` block reads it. `commits` maps a commit sha to its
+    parent shas: `gh` answers `commits/<sha>` with them, and a sha not listed is a 404, as GitHub answers an unknown commit."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
-                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, files=None, files_error=None, changed_files=None, repo=None):
+                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, files=None, files_error=None, changed_files=None, repo=None,
+                 commits=None):
         super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore, repo=repo)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
@@ -12307,6 +12309,7 @@ class PullsHost(merge.Host):
         if count_gh:  # the branch protection names the required checks, as a real repo does
             self.required, self.protection = "protection", list(required)
         self.compare_reads = []  # (first operand, second operand) of each compare read
+        self.commits = dict(commits or {})  # sha -> its parent shas, the commit read's answer
 
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
@@ -12331,6 +12334,12 @@ class PullsHost(merge.Host):
             if self.compare_error or (is_base and self.base_compare_error):
                 return self.compare_error or self.base_compare_error
             return 0, json.dumps({"status": self.compares.get(m.groups(), "diverged")})
+        m = re.search(r"/commits/([0-9a-f]{40})$", route)
+        if m:
+            sha = m.group(1)
+            if sha not in self.commits:
+                return 1, "gh: Not Found (HTTP 404)"
+            return 0, json.dumps({"sha": sha, "parents": [{"sha": p} for p in self.commits[sha]]})
         raise AssertionError("unexpected gh call: " + " ".join(args))
 
     def pull_reply(self, n):
@@ -13825,10 +13834,10 @@ class ReviewEnv(Env):
         """The review flags, with --head set to the live head of the feature branch, then `extra`."""
         return (*REVIEW_FLAGS, "--head", self.head(), *extra)
 
-    def record_host(self, *comments, head=REVIEW_HEAD, files=None):
+    def record_host(self, *comments, head=REVIEW_HEAD, files=None, **reads):
         """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first, and the files given
-        (default: one non-guard file)."""
-        return PullsHost([batch_pull(7, head)], {}, comments=comments, files=files)
+        (default: one non-guard file). `reads` are PullsHost's other scripted reads, such as commits and compares."""
+        return PullsHost([batch_pull(7, head)], {}, comments=comments, files=files, **reads)
 
 class ReviewArgs(ReviewEnv):
     """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
@@ -14013,7 +14022,9 @@ class ReviewFixBase(ReviewEnv):
     def test_a_newest_earlier_record_with_a_fix_line_refuses_its_head_as_the_base(self):
         # the head already has its fix check, so a second fix check from it would be a fix after a fix
         fixed = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.EARLIER_HEAD),))
-        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(review_comment(1, 7, fixed)))
+        # the new head is a plain commit on that fixed head, so the refusal stays the same once the head's parents are read
+        host = self.record_host(review_comment(1, 7, fixed), commits={REVIEW_HEAD: [REVIEW_OLD_HEAD]})
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
         self.assert_refused(rc, out, err)
 
     def test_no_earlier_record_on_the_pull_request_refuses_the_fix_check(self):
@@ -14045,6 +14056,59 @@ class ReviewFixBase(ReviewEnv):
         malformed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus"))
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
         self.assert_refused(rc, out, err)
+
+class ReviewFixAfterMainMerge(ReviewEnv):
+    """A fix check after a merge of main (decision pr-review-record). The newest earlier record holds a fix check, so the rule of ReviewFixBase
+    refuses every fix check from its head. A lane that merges main into the fixed head has a new head: a merge commit whose first parent is that
+    head and whose second parent is on main. Only that shape gets a fix check. A plain commit on the head, or a merge with a commit off main, is
+    refused. The parents come from the commit read and the on-main test from the compare read, both scripted by PullsHost."""
+
+    PRE_FIX_HEAD = "1e" * 20  # the head the newest record's fix diff started from
+    MAIN_TIP = "3f" * 20  # a commit on main, the second parent of the merge
+    SIDE = "7c" * 20  # a commit that is not on main
+    ON_MAIN = {(MAIN_TIP, "main"): "ahead", ("main", MAIN_TIP): "behind"}  # the compares that say MAIN_TIP is on main
+    OFF_MAIN = {(SIDE, "main"): "diverged", ("main", SIDE): "diverged"}
+
+    def newest_record(self):
+        """The newest earlier record: its head is the fixed head, and its fix check line starts from PRE_FIX_HEAD."""
+        return review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.PRE_FIX_HEAD),)))
+
+    def fixed_host(self, parents, compares):
+        """The pull request at REVIEW_HEAD, whose commit has `parents`, with the newest record and the compares given."""
+        return self.record_host(self.newest_record(), commits={REVIEW_HEAD: parents}, compares=compares)
+
+    def fix_from_fixed_head(self, host):
+        """--review-record of the live head, with a fix check from the newest record's head."""
+        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS,
+                             "--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
+
+    def test_a_fix_check_after_a_merge_of_main_is_accepted_and_reads_done(self):
+        rc, out, err = self.fix_from_fixed_head(self.fixed_host([REVIEW_OLD_HEAD, self.MAIN_TIP], self.ON_MAIN))
+        self.assertEqual(rc, 0, "a fix check after a merge of main into the fixed head was refused:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertEqual(parse_text(self, body)["head"], REVIEW_HEAD, "the printed record names the wrong head")
+        self.assertEqual(parse_text(self, body)["fix"], REVIEW_FIX_PASS, "the printed record lacks the fix check")
+        listed = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=[self.newest_record(), review_comment(2, 7, body)])
+        rc, out, err = self.run_args("--reviewed", host=listed)
+        self.assertEqual(rc, 0, "merge --reviewed refused the listing:\n" + out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "merge --reviewed does not read the new fix record as done")
+
+    def test_b_a_fix_check_after_a_plain_commit_on_the_fixed_head_is_refused(self):
+        host = self.fixed_host([REVIEW_OLD_HEAD], {})
+        self.assertEqual(host.commits[REVIEW_HEAD], [REVIEW_OLD_HEAD], "the fixture's head is not one plain commit on the fixed head")
+        rc, out, err = self.fix_from_fixed_head(host)
+        self.assertEqual(rc, 2, "a fix check after a plain commit on the fixed head was not refused:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_c_a_fix_check_after_a_merge_of_a_commit_off_main_is_refused(self):
+        host = self.fixed_host([REVIEW_OLD_HEAD, self.SIDE], self.OFF_MAIN)
+        self.assertEqual(host.commits[REVIEW_HEAD], [REVIEW_OLD_HEAD, self.SIDE], "the fixture's head is not a merge of the fixed head and the side commit")
+        self.assertEqual(host.compares.get((self.SIDE, "main")), "diverged", "the fixture's second parent is on main")
+        rc, out, err = self.fix_from_fixed_head(host)
+        self.assertEqual(rc, 2, "a fix check after a merge of a commit off main was not refused:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+        self.assertNotIn("Traceback", err)
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
