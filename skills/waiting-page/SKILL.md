@@ -27,6 +27,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 
 ## The database
 
+Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `answered`) from `~/.claude/bin/now-central --iso`, never from memory.
+
 - `items/<id>`: one per waiting item. The database key and the `id` field must be the same
   string. The page keys on the database key, and warns on an item whose `id` field is missing or
   different. Fields: `id`, `n` (a stable number the owner answers by),
