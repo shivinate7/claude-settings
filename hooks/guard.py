@@ -1790,7 +1790,7 @@ def disables_tests(new_lines, old_lines) -> bool:
 BUILDER_TEST_REASON = (
     "A builder does not change tests or test config. Report the needed test change in your "
     "report. The orchestrator assigns it to a test-author."
-    " A merge conflict in a test file takes the same route."
+    " A merge conflict in a test file or a mutation test takes the same route."
     " (decision builders-cannot-edit-tests, a builder never changes a test or test config)"
 )
 AUTHOR_SCOPE_REASON = (
@@ -2644,7 +2644,7 @@ def builder_diff_reason() -> str:
         BUILDER_TEST_REASON + " The guard refuses a test change you made, at commit, push and stop. "
         "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
         "you added. If a commit of yours holds the change, stop and report it. "
-        "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
+        "If a merge is in progress and the refusal is about a conflict in a test file or a mutation test, run `git merge --abort` "
         "and report it, so the orchestrator hands the whole merge to a test-author. "
         "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
     )
