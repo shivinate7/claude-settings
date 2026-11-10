@@ -87,29 +87,29 @@ session_013NEJKzUe9U19voH62VbCNA	09:48 CST	09:51 CST	handoff-B	archive: refused:
 session_013NEJKzVTWMbokJ3KFanBBC	09:48 CST	09:48 CST	handoff-B	archive: refused: a lane branch is ahead of default with no covering PR (hook lane-closes-after-records)
 session_013NEJKzVgPmUsPHuYf3Ptxy	09:48 CST	09:49 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
 session_013NEJKzVtYoetutgUL9DkfZ	09:48 CST	09:48 CST	KEEP
-session_013NEJKzWDQFGYf8UFfU8Rve	09:48 CST	09:48 CST	handoff-B
-session_013NEJKzXJPDWrSRe3i1fGJd	09:48 CST	09:48 CST	handoff-B
+session_013NEJKzWDQFGYf8UFfU8Rve	09:48 CST	09:48 CST	handoff-B	archive: archived
+session_013NEJKzXJPDWrSRe3i1fGJd	09:48 CST	09:48 CST	handoff-B	archive: not tried: session active again (status requires_action, connected); left alone
 session_013NEJKzXmA85KHJfwprwzBb	09:48 CST	09:49 CST	KEEP
 session_013NEJKzXneQD9Ua2o3ww8hJ	09:48 CST	09:49 CST	KEEP
-session_013NEJKzXyKNARtJsbz3Q1R2	09:48 CST	09:48 CST	handoff-B
+session_013NEJKzXyKNARtJsbz3Q1R2	09:48 CST	09:48 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
 session_013NEJKzYhDtNPLcEdeVFEVe	09:48 CST	09:48 CST	KEEP (moved from handoff-B; coordinator 09:57 CST, PR released)
 session_013NEJKzZtu1sv8D47NpC3yx	09:48 CST	09:49 CST	KEEP
 session_013NEJKza26i1MbAYrau5Aye	09:48 CST	09:49 CST	KEEP
-session_013NEJKza5KBoiFbNuiDDxQn	09:48 CST	09:49 CST	handoff-B
-session_013NEJKzacZeiWBs4yJ82HvC	09:48 CST	09:49 CST	handoff-B
-session_013NEJKzanUvmhhL9K3XCNgT	09:48 CST	09:48 CST	handoff-B
+session_013NEJKza5KBoiFbNuiDDxQn	09:48 CST	09:49 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
+session_013NEJKzacZeiWBs4yJ82HvC	09:48 CST	09:49 CST	handoff-B	archive: refused: a lane branch is ahead of default with no covering PR (hook lane-closes-after-records)
+session_013NEJKzanUvmhhL9K3XCNgT	09:48 CST	09:48 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
 session_013NEJKzayeNCJa4csSCBG7k	09:48 CST	09:49 CST	KEEP
 session_013NEJKzbDHRpreufhWY48Vb	09:48 CST	09:49 CST	KEEP
 session_013NEJKzbfZGapcF3iSufHh1	09:50 CST	09:49 CST	KEEP
-session_013NEJKzc39M5wFtru1uU5u4	09:50 CST	09:50 CST	handoff-B
+session_013NEJKzc39M5wFtru1uU5u4	09:50 CST	09:50 CST	handoff-B	archive: archived
 session_013NEJKzeYTAqv5GuuSXY1ru	09:50 CST	09:49 CST	KEEP
-session_013NEJKzfKKumSC9zYS7gonr	09:50 CST	09:49 CST	handoff-B
+session_013NEJKzfKKumSC9zYS7gonr	09:50 CST	09:49 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
 session_013NEJKzfcSeBe5Ym9pCtxHn	09:50 CST	09:50 CST	KEEP
-session_013NEJKzhQbKBYLydFg93MHt	09:50 CST	09:49 CST	handoff-B
+session_013NEJKzhQbKBYLydFg93MHt	09:50 CST	09:49 CST	handoff-B	archive: archived
 session_013NEJKzhVo8BrXKn2ZpYnYx	09:50 CST	09:50 CST	KEEP
 session_013NEJKziVLcE1RT5jq36KVX	09:50 CST	09:50 CST	KEEP
 session_013NEJKzjZ5GyfuZwVjJyTQL	09:50 CST	09:50 CST	KEEP
-session_013NEJKzjkypcToggneCjJN8	09:50 CST	09:50 CST	handoff-B
+session_013NEJKzjkypcToggneCjJN8	09:50 CST	09:50 CST	handoff-B	archive: archived
 session_013NEJKzk1MsAcMP53yRaVu1	09:50 CST	09:50 CST	KEEP
 session_013NEJKzmHFbqZ9QC2TAupBc	09:50 CST	09:50 CST	handoff-B
 session_013NEJKznZeoFs9GZiN7syv9	09:50 CST	09:50 CST	handoff-B
