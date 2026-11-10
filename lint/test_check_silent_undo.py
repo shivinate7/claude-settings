@@ -1051,6 +1051,37 @@ class LaneUndo(unittest.TestCase):
         self.assertEqual(r.sh("show", b + ":tests/card.txt"), "assert card renders the title and footer")  # scope: the one line B holds
         self.assertEqual(r.verdict(), [])
 
+    def test_a_lane_that_rewrites_three_test_lines_and_then_puts_them_back_is_green(self):
+        r = self.r
+        main = "".join("card test line %d checks the title\n" % i for i in range(1, 4))
+        marked = "".join("card test line %d checks the title  # reviewed\n" % i for i in range(1, 4))
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds three card test lines", tests__card_txt=main)
+        r.push()
+        r.sh("checkout", "-q", "-B", "lane", "origin/main")  # the lane starts from the main that holds the file
+        a = r.commit("A: mark the three card test lines as reviewed", tests__card_txt=marked)
+        b = r.commit("B: take the review marks out again", tests__card_txt=main)
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit, and it rewrites A's three lines
+        self.assertEqual(r.sh("rev-parse", b + ":tests/card.txt"), r.sh("rev-parse", "origin/main:tests/card.txt"))  # scope: B puts main's blob back, byte for byte
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_lane_that_merges_main_then_drops_the_main_line_it_took_is_red(self):
+        r = self.r
+        a = r.commit("A: add a test case", tests__card_txt=self.CASE)
+        r.sh("checkout", "-q", "main")
+        note = r.commit("main adds a note", app_txt=self.CARD + "main note\n")
+        r.push()
+        r.sh("checkout", "-q", "lane")
+        r.sh("merge", "-q", "--no-edit", "main")  # the lane takes main's note; the lane itself never added it
+        m = r.sh("rev-parse", "HEAD")
+        c = r.commit("C: drop the main note", app_txt=self.CARD)
+        self.assertEqual(self.lane(), [a, m, c])  # scope: A, the merge of main, then C, which drops the note
+        self.assertIn("main note", r.sh("show", "origin/main:app.txt"))  # scope: main holds the note
+        self.assertNotIn("main note", r.sh("show", "HEAD:app.txt"))  # scope: head lacks it
+        got = r.verdict()
+        self.assertTrue(any("app.txt" in p and note[:9] in p for p in got),
+                        "no FAIL names app.txt and main's note commit %s: %r" % (note[:9], got))
+
 
 class IntegrationBase(unittest.TestCase):
     """This repo merges through integration branches. A PR based on `integ` is checked against
