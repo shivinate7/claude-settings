@@ -15157,6 +15157,42 @@ unexpected(method + " " + rel)
                 self.assertRegex(list_line(self, out, 5), r" done: ")  # the done line is printed before the batch lines are judged
                 self.assertEqual(batch_lines_of(lines), [], out)
 
+    def test_plain_reviewed_prints_no_batch_line_through_the_cli(self):
+        # The CLI with no --root prints the ledger, which has no batch line of its own. A done pull request reads `batch`. The control is the
+        # ledger line of pull request 5, so the absence below cannot pass on a read that printed nothing. The ledger reads no check run: the
+        # ready pull request 6 with its CI running changes nothing here, and stays in the case as the running batch.
+        for running_batch in (False, True):
+            with self.subTest(running=running_batch):
+                pulls, rows = [batch_pull(5, hex_head("5"))], {hex_head("5"): green()}
+                comments = [record_of(5, hex_head("5"))]
+                if running_batch:
+                    pulls.append(batch_pull(6, hex_head("6")))
+                    rows[hex_head("6")] = running()
+                    comments.append(record_of(6, hex_head("6")))
+                host = root_host("o/alpha", pulls=pulls, comments=comments, check_rows=rows, now=LEDGER_NOW)
+                rc, out, err = self.run_args("--reviewed", host=host)
+                self.assertEqual(rc, 0, "two done pull requests read no red, so the ledger exits 0:\n" + out + err)
+                self.assertRegex(list_line(self, out, 5), r"^#5 feat5 batch \d+h$", out)
+                for prefix in BATCH_LINE_STARTS:
+                    self.assertNotIn(prefix, out + err, f"the no-root ledger printed a --root batch line that starts {prefix!r}:\n" + out)
+
+    def test_the_root_line_names_the_ci_of_each_head(self):
+        # reviewed_read names each pull request's head CI from its check rows: green, pending (a run still going, or no run yet), red, and a
+        # draft, which has no run to read. Each pull request has an open record, so no batch line is in play.
+        heads = {n: hex_head(str(n)) for n in (5, 6, 7, 8, 9)}
+        pulls = [batch_pull(5, heads[5]), batch_pull(6, heads[6]), batch_pull(7, heads[7]), batch_pull(8, heads[8], draft=True),
+                 batch_pull(9, heads[9])]
+        rows = {heads[5]: green(), heads[6]: running(), heads[7]: [batch_run("checks", "completed", "failure")]}  # 9 has no check run yet
+        comments = [record_of(n, heads[n], rounds=OPEN_ROUNDS) for n in heads]
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=comments, check_rows=rows)}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        red = f"; CI red: checks: fail {BATCH_LINK}"  # a red run names its check and its link
+        for n, tail in ((5, "; CI green"), (6, "; CI pending: checks"), (7, red), (8, "; CI draft, no run"), (9, "; CI pending: checks")):
+            with self.subTest(pr=n):
+                self.assertEqual(len(pr_lines(block, n)), 1, f"want one line for #{n}:\n" + out)
+                self.assertTrue(pr_lines(block, n)[0].endswith(tail), f"the line of #{n} does not end with {tail!r}:\n" + out)
 
     def test_a_done_pr_held_by_an_open_pr_head_is_not_named(self):
         # #9's head holds #5's head: the compare of head 5 with head 9 reads ahead or identical, as holds_head reads it. #5 is not named.
