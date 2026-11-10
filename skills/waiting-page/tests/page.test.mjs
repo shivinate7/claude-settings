@@ -3109,32 +3109,32 @@ for (const scheme of SCHEMES) {
   });
 }
 
-// Controls at 1440, 820, 390 and 360 wide, pinned from the page as it draws now so the fix keeps them. Each row's box is [left, right, height] of the folded
+// Controls at 1440, 820, 390 and 360 wide, measured from main's page in the served font, so the fix keeps them. Each row's box is [left, right, height] of the folded
 // row's li; the row and press are [right, top offset from the li, height] and [left, right, top offset, height]. A box that moves fails by
 // name. The Ask box presses are [Add left, Add right, Send left, Send right]. Tolerance is 1 px.
 const PINS = {
   1440: {
-    dismiss: { li: [424, 1284, 50], row: [1151, 1, 48], press: [1155, 1275, 3, 44] },
-    restore: { li: [424, 1284, 50], row: [1147, 1, 48], press: [1151, 1275, 3, 44] },
-    wait: { li: [424, 1284, 128], row: [1283, 1, 48], press: [1173, 1267, 14, 22] },
+    dismiss: { li: [424, 1284, 50], row: [1159, 1, 48], press: [1163, 1275, 3, 44] },
+    restore: { li: [424, 1284, 50], row: [1154, 1, 48], press: [1158, 1275, 3, 44] },
+    wait: { li: [424, 1284, 128], row: [1283, 1, 48], press: [1181, 1267, 14, 22] },
   },
   820: {
-    dismiss: { li: [16, 804, 50], row: [671, 1, 48], press: [675, 795, 3, 44] },
-    restore: { li: [16, 804, 50], row: [667, 1, 48], press: [671, 795, 3, 44] },
-    wait: { li: [16, 804, 128], row: [803, 1, 48], press: [693, 787, 14, 22] },
+    dismiss: { li: [16, 804, 50], row: [679, 1, 48], press: [683, 795, 3, 44] },
+    restore: { li: [16, 804, 50], row: [674, 1, 48], press: [678, 795, 3, 44] },
+    wait: { li: [16, 804, 128], row: [803, 1, 48], press: [701, 787, 14, 22] },
   },
   390: {
-    dismiss: { li: [16, 374, 115], row: [241, 1, 113], press: [245, 365, 35, 44] },
-    restore: { li: [16, 374, 115], row: [237, 1, 113], press: [241, 365, 36, 44] },
-    wait: { li: [16, 374, 218], row: [373, 1, 113], press: [263, 357, 46, 23] },
+    dismiss: { li: [16, 374, 93], row: [249, 1, 91], press: [253, 365, 25, 44] },
+    restore: { li: [16, 374, 93], row: [244, 1, 91], press: [248, 365, 25, 44] },
+    wait: { li: [16, 374, 196], row: [373, 1, 91], press: [271, 357, 35, 22] },
   },
   360: {
-    dismiss: { li: [16, 344, 115], row: [211, 1, 113], press: [215, 335, 36, 44] },
-    restore: { li: [16, 344, 115], row: [207, 1, 113], press: [211, 335, 35, 44] },
-    wait: { li: [16, 344, 218], row: [343, 1, 113], press: [233, 327, 47, 22] },
+    dismiss: { li: [16, 344, 93], row: [219, 1, 91], press: [223, 335, 25, 44] },
+    restore: { li: [16, 344, 93], row: [214, 1, 91], press: [218, 335, 25, 44] },
+    wait: { li: [16, 344, 196], row: [343, 1, 91], press: [241, 327, 35, 22] },
   },
 };
-const PIN_ASK = { 1440: [1005, 1117, 1129, 1267], 820: [525, 637, 649, 787], 390: [33, 144, 219, 357], 360: [33, 144, 189, 327] };
+const PIN_ASK = { 1440: [1012, 1123, 1135, 1267], 820: [532, 643, 655, 787], 390: [33, 143, 225, 357], 360: [33, 143, 195, 327] };
 const near = (got, pin) => got.length === pin.length && got.every((v, i) => Math.abs(v - pin[i]) <= 1);
 for (const width of [1440, 820, 390, 360]) for (const kind of PRESS_KINDS) for (const scheme of SCHEMES) {
   test(`press rows, ${scheme}: at ${width} wide the ${kind} row and its press keep their boxes`, async (t) => {
@@ -3194,7 +3194,7 @@ const replyGeo = (page, root) => page.evaluate((k) => {
   return { rx: rel(rx), rs: rel(rs), hint: rel(document.getElementById("rh-" + k)) };
 }, root);
 // Close and Send reply at the default text, in px from the form's top-left corner: [left, right, top, bottom]. Tolerance is 1 px.
-const REPLY_PINS = { 360: { rx: [13, 79, 241, 289], rs: [164, 281, 241, 289] }, 390: { rx: [13, 79, 241, 289], rs: [194, 311, 241, 289] } };
+const REPLY_PINS = { 360: { rx: [13, 75, 241, 289], rs: [169, 281, 241, 289] }, 390: { rx: [13, 75, 241, 289], rs: [199, 311, 241, 289] } };
 for (const width of [360, 390]) for (const scheme of SCHEMES) {
   test(`press rows, ${scheme}: at ${width} wide the reply form's Close and Send reply keep their boxes`, async (t) => {
     const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: RPL_NEW, viewport: { width, height: 800 }, scheme }); if (!page) return;
