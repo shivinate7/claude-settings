@@ -1,5 +1,5 @@
 """build.py refuses a tree with git conflict markers (step c72); the pre-commit hook refuses an over-cap
-note (step c138). Run: python roadmap/test_build.py"""
+note (step c138) and a staged step that waits on a bare #N with no blockedBy step slug. Run: python roadmap/test_build.py"""
 import contextlib
 import io
 import json
@@ -151,9 +151,12 @@ class NoteCapHook(unittest.TestCase):
             self.fail(f"git {' '.join(args)}: {r.stdout}{r.stderr}")
         return r
 
-    def step(self, sid, n, status="open", where=None):
+    def step(self, sid, n, status="open", where=None, **fields):
+        """Write a step with a note of n words, then apply field overrides (title, why, note, blockedBy)."""
         path = (where or self.repo) / "roadmap" / "data" / "steps" / f"{sid}.json"
-        path.write_text(json.dumps(dict(STEP, status=status, note=words(n))), encoding="utf-8")
+        d = dict(STEP, status=status, note=words(n))
+        d.update(fields)
+        path.write_text(json.dumps(d), encoding="utf-8")
 
     def commit(self, msg="m", *extra, cwd=None):
         return self.git("commit", "-q", "-m", msg, *extra, cwd=cwd, check=False)
@@ -309,6 +312,61 @@ class NoteCapHook(unittest.TestCase):
         self.step("", 300)
         self.git("add", "-A")
         self.assert_refused(self.commit(), ".json (300 words)")
+
+    WAIT_PHRASES = ("after", "waits on", "wait on", "waiting for", "blocked on", "once", "until", "when")
+
+    def test_wait_on_bare_pr_number_in_note_is_refused(self):
+        self.step("placed-note", 0, status="todo", note="The fix waits on #2557 to merge.", blockedBy=[])
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "placed-note")
+
+    def test_wait_on_bare_pr_number_in_title_is_refused(self):
+        self.step("placed-title", 0, status="todo", title="Runs after #2557", blockedBy=[])
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "placed-title")
+
+    def test_wait_on_bare_pr_number_in_why_is_refused(self):
+        self.step("placed-why", 0, status="todo", why="Blocked on #2557 for the owner.", blockedBy=[])
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "placed-why")
+
+    def test_each_wait_phrase_with_a_bare_pr_number_is_refused(self):
+        for phrase in self.WAIT_PHRASES:
+            self.step("matcher-" + phrase.replace(" ", "-"), 0, status="todo",
+                      note=f"The work {phrase} #2557 lands.", blockedBy=[])
+        self.git("add", "-A")
+        r = self.commit()
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        for phrase in self.WAIT_PHRASES:
+            self.assertIn("matcher-" + phrase.replace(" ", "-"), r.stdout + r.stderr)
+
+    def test_wait_on_a_step_slug_passes(self):
+        self.step("placed-slug", 0, status="todo", note="The fix waits on #2557 to merge.", blockedBy=["some-slug"])
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+
+    def test_pr_number_with_no_wait_word_passes(self):
+        self.step("placed-ref", 0, status="todo", note="See #2557 for the fix.", blockedBy=[])
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+
+    def test_wait_word_with_no_pr_number_passes(self):
+        self.step("placed-owner", 0, status="todo", note="Waiting for the owner's word.", blockedBy=[])
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+
+    def test_done_step_with_a_wait_passes(self):
+        self.step("placed-done", 0, status="done", note="The fix waits on #2557 to merge.", blockedBy=[])
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+
+    def test_untouched_wait_step_does_not_block_another_commit(self):
+        self.step("placed-old", 0, status="todo", note="The fix waits on #2557 to merge.", blockedBy=[])
+        self.git("add", "-A")
+        self.assert_passed(self.commit("seed", "--no-verify"))
+        (self.repo / "README.md").write_text("x\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
 
     def path_with(self, *tools):
         bin_ = pathlib.Path(self.tmp.name) / ("bin-" + "-".join(tools))
