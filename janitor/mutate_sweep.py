@@ -1537,7 +1537,7 @@ def run_suite(suite_path: str, config_dir: str, only=None):
     env["CLAUDE_CONFIG_DIR"] = config_dir
     result = _nowindow.run(
         # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
-        [sys.executable, suite_path] + (["-k", only] if only else []), capture_output=True, text=True, env=env, timeout=3600,  # interim, owner 12:11 CST Nov 10; ends with step time-pinned-tests-go
+        [sys.executable, suite_path] + (["-k", only] if only else []), capture_output=True, text=True, env=env, timeout=3600,  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
     )
     lines = (result.stdout + result.stderr).splitlines()
     red = [line for line in lines if "FAIL" in line]
