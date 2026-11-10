@@ -22409,6 +22409,24 @@ add("port question: a batch with today's item among the sets is denied", "deny",
 add("port question: a batch of good sets is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="batch",
     writes=[{"op": "set", "collection": "items", "doc_id": "suspense-cards", "data": PQ_GOOD}])
+
+# Roadmap step artifact-guard-matcher-names. A Mac session calls mcp__claude-artifacts__db_write, whose input is
+# `ops` of {op, path, data}. Each case here has an ArtifactData twin above or beside it, judged the same way. The
+# Mac artifact field is not named in item 440, so the refused cases run with no artifact key at all: with no
+# recognised id the write is judged as a waiting-page write, never the lighter another-page path (decision of the
+# coordinator, 04:54 CST Nov 10). The one with `url` names the page the ArtifactData twin names.
+MAC_DB_WRITE = "mcp__claude-artifacts__db_write"
+PQ_MAC_TODAY = [{"op": "set", "path": "items/suspense-cards", "data": pq_item()}]
+PQ_MAC_GOOD = [{"op": "set", "path": "items/suspense-cards", "data": PQ_GOOD}]
+add("mac db_write: a set of today's item with no artifact id is denied", "deny", "port-question",
+    tool=MAC_DB_WRITE, cwd=PQ_REPO, ops=PQ_MAC_TODAY)
+add("mac db_write: a set of today's item that names the waiting page is denied", "deny", "port-question",
+    tool=MAC_DB_WRITE, cwd=PQ_REPO, url=PQ_URL, ops=PQ_MAC_TODAY)
+add("mac db_write: a set of good items on the waiting page is allowed", "allow",
+    tool=MAC_DB_WRITE, cwd=PQ_REPO, url=PQ_URL, ops=PQ_MAC_GOOD)
+add("mac db_write: a merge of a rank onto today's item is allowed", "allow",
+    tool=MAC_DB_WRITE, cwd=PQ_REPO, url=PQ_URL,
+    ops=[{"op": "merge", "path": "items/suspense-cards", "data": {"rank": 3}}])
 os.makedirs(os.path.join(ROOT, "pq"), exist_ok=True)
 PQ_FILE_BAD = os.path.join(ROOT, "pq", "bad.json")
 PQ_FILE_GOOD = os.path.join(ROOT, "pq", "good.json")
