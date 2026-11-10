@@ -513,3 +513,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - local-checks-sh-timeout-child (#2536 PR body, coordinator  CST Nov 10): on a timeout, `sh` kills only its direct child, so a grandchild process can live on.
 - local-checks-deleted-source-pass (same source): a deleted source file whose test is left reads PASS.
 - local-checks-per-os-table-unread (same source): the per-OS table is not read.
+- (debt) capability-word-item-401 (#2532 capability-verbs-widen, coordinator  CST Nov 10): after #2532, "item 401" and "PR #401" read as capability words and are refused, the same class as the 403 debt. The page has items in the 400s, so normal reports can hit it. Promote to a step on the first refusal of a real report.
