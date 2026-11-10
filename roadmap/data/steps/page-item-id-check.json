@@ -1,10 +1,10 @@
 {
-  "title": "Every page reader takes an item's id from its doc key",
-  "phase": "now",
-  "status": "doing",
-  "order": 103.371,
-  "why": "Owner comment 13:44 CST Nov 6 on item 289: \"how do you still incorrectly build artifacts with this long known bug\". Triage wrote 11 items by set with no id in their data; 5 older items had none either. The page shows a missing-id notice on each. Owner 13:44 CST in chat: \"u make this mistake all the time how have we not mechanically fixed this\".",
-  "note": "13:45 CST: lane page-item-id-check (session_013NEJKzzZDgvR1V3J7cTEZ6) holds it. It fixes the cause: every reader takes the id from the doc key, so data.id stops mattering. A write guard is the fallback only if a reader cannot see the key.\nToday only the page detects it: page.html shows a warning on the card (tests page.test.mjs 'an item stored with no id field ...'). Nothing refuses the write, so every writer repeats it. Fixed in data 13:46 CST (16 items given their id). Fix the cause: the guard that checks page item writes (rule page-item-design's hook) refuses a set or update that leaves items/<doc> with no data.id equal to the doc id. Red first on a set with no id. Option to weigh in the brief: the page and readers treat the doc key as the id, so no id field is needed at all. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1338.",
-  "updatedAt": "2026-11-10T03:45:00-06:00",
-  "lane": "open PR #1338"
+ "title": "Every page reader takes an item's id from its doc key",
+ "phase": "now",
+ "status": "doing",
+ "order": 103.371,
+ "why": "Owner comment 13:44 CST Nov 6 on item 289: \"how do you still incorrectly build artifacts with this long known bug\". Triage wrote 11 items by set with no id in their data; 5 older items had none either. The page shows a missing-id notice on each. Owner 13:44 CST in chat: \"u make this mistake all the time how have we not mechanically fixed this\".",
+ "note": "13:45 CST: lane page-item-id-check (session_013NEJKzzZDgvR1V3J7cTEZ6) holds it. It fixes the cause: every reader takes the id from the doc key, so data.id stops mattering. A write guard is the fallback only if a reader cannot see the key.\nToday only the page detects it: page.html shows a warning on the card (tests page.test.mjs 'an item stored with no id field ...'). Nothing refuses the write, so every writer repeats it. Fixed in data 13:46 CST (16 items given their id). Fix the cause: the guard that checks page item writes (rule page-item-design's hook) refuses a set or update that leaves items/<doc> with no data.id equal to the doc id. Red first on a set with no id. Option to weigh in the brief: the page and readers treat the doc key as the id, so no id field is needed at all. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1338. Grant: \"A\" to item 503 id-fix-freeze-exception, owner 2026-11-10 16:15 CST. Merge-main builder started 16:17 CST by triage; then fresh review, then runner 8's next batch.",
+ "updatedAt": "2026-11-10T16:19:00-06:00",
+ "lane": "open PR #1338"
 }

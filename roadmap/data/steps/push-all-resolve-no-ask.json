@@ -1,0 +1,12 @@
+{
+ "title": "A push of every branch never asks: the guard refuses it when it would update main or master on the remote, else allows it",
+ "phase": "now",
+ "status": "todo",
+ "order": 1029,
+ "owner": "triage",
+ "why": "Owner 16:08 CST Nov 10 (item 502, in chat, relayed by the coordinator): \"I either want it approved or declined whichever is correct. I know for a fact I dont want to be asked.\"",
+ "note": "Applies to --all and --branches pushes from every checkout. Builds on #2465 (agent-checkout refusal) once it lands on main. Rewrite record plain-push-asks in place: its 'asks' for --all/--branches is replaced (owner 2026-11-10 16:08 CST).",
+ "updatedAt": "2026-11-10T16:19:00-06:00",
+ "lane": "",
+ "blockedBy": []
+}
