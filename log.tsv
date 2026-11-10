@@ -51,20 +51,20 @@ session_013NEJKz8JXQTvhuGYo4UJpi	09:46 CST	09:47 CST	KEEP
 session_013NEJKz9HoqeRzdjbw9Fnga	09:46 CST	09:47 CST	handoff-B	archive: archived
 session_013NEJKz9f8KxCfb9zS1HSNV	09:46 CST	09:47 CST	KEEP
 session_013NEJKzBfRycskE32T2Pj9F	09:46 CST	09:46 CST	KEEP
-session_013NEJKzCN6jU5Pj5pSZe2Wy	09:46 CST	09:47 CST	handoff-B
-session_013NEJKzCSKTt9Mrr6n9GKiR	09:46 CST	09:46 CST	handoff-B
-session_013NEJKzCcVJYhu39C4BXuSP	09:46 CST	09:46 CST	handoff-B
-session_013NEJKzDBTjFbhzwzV96i8v	09:46 CST	09:47 CST	handoff-B
-session_013NEJKzDXZ6E5hL4PUShA7C	09:46 CST	09:46 CST	handoff-B
-session_013NEJKzEeXJNdTNedKPwtGc	09:46 CST	09:47 CST	handoff-B
-session_013NEJKzFnj7mworq4H2kygK	09:46 CST	09:47 CST	handoff-B
+session_013NEJKzCN6jU5Pj5pSZe2Wy	09:46 CST	09:47 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
+session_013NEJKzCSKTt9Mrr6n9GKiR	09:46 CST	09:46 CST	handoff-B	archive: archived
+session_013NEJKzCcVJYhu39C4BXuSP	09:46 CST	09:46 CST	handoff-B	archive: archived
+session_013NEJKzDBTjFbhzwzV96i8v	09:46 CST	09:47 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
+session_013NEJKzDXZ6E5hL4PUShA7C	09:46 CST	09:46 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
+session_013NEJKzEeXJNdTNedKPwtGc	09:46 CST	09:47 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
+session_013NEJKzFnj7mworq4H2kygK	09:46 CST	09:47 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
 session_013NEJKzGm25T6yUwjjibfGN	09:46 CST	09:47 CST	KEEP
-session_013NEJKzHURrN9PNYKYoXWNg	09:46 CST	09:47 CST	handoff-B
+session_013NEJKzHURrN9PNYKYoXWNg	09:46 CST	09:47 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
 session_013NEJKzHdMUT3sLtNCaxGEf	09:46 CST	09:47 CST	KEEP
 session_013NEJKzHfqng3CH3MhVZhgo	09:46 CST	09:47 CST	KEEP
 session_013NEJKzJ8sWrQskj5XRB52E	09:46 CST	09:47 CST	KEEP
-session_013NEJKzJ9NM4S4A4u3afRoi	09:47 CST	09:47 CST	handoff-B
-session_013NEJKzJDLMd4ijoisYSN9Y	09:47 CST	09:47 CST	handoff-B
+session_013NEJKzJ9NM4S4A4u3afRoi	09:47 CST	09:47 CST	handoff-B	archive: refused: gh could not read open PRs (hook lane-closes-after-records); retry
+session_013NEJKzJDLMd4ijoisYSN9Y	09:47 CST	09:47 CST	handoff-B	archive: archived
 session_013NEJKzJF4Kh97883YXFunk	09:47 CST	09:47 CST	KEEP
 session_013NEJKzJF4PJoASnkH4btJj	09:47 CST	09:47 CST	KEEP
 session_013NEJKzJNm3bZgR7SadQNrU	09:47 CST	09:48 CST	KEEP
