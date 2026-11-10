@@ -6,7 +6,9 @@
 A decision, a debt or a roadmap step cites a claude.ai artifact as `artifact:<id>`, and the id must be
 in the registry (the "artifacts" key of the extras file, read by lint/layout.py artifacts()). A bare
 claude.ai/artifact or claude.ai/code/artifact link is red, even for a registered page, and even inside a
-code fence: a fence does not make a link safe. Briefs, handoffs and other folders are not read.
+code fence: a fence does not make a link safe. Briefs, handoffs and other folders are not read. A checkout with no
+registry file (a worktree on the record branch) judges each bare link and no cite: no cite is judged against an
+empty registry.
 
 Each case builds a temp repo: the record files on its working tree, and the record branch (roadmap by
 default) as one commit that holds the steps. It runs the real script with --root and reads its exit code
@@ -79,6 +81,21 @@ class CiteTests(unittest.TestCase):
 
     def decision(self, text):
         self.put("docs/decisions/x.md", text)
+
+    def drop_registry(self):
+        """The option of a checkout with no registry file: a worktree on the record branch does not hold the untracked
+        .claude/layout-extras.json of the main checkout."""
+        path = os.path.join(self.root, *EXTRAS.split("/"))
+        os.remove(path)
+        self.assertFalse(os.path.exists(path), "the fixture kept its registry file")
+
+    def pushed(self, ref):
+        """pushed_step_findings for `ref`. A read that raises Unknown fails the case with its reason."""
+        checker = load_script()
+        try:
+            return checker.pushed_step_findings(self.root, ref)
+        except checker.Unknown as err:
+            self.fail("pushed_step_findings read %s as unknown: %s" % (ref, err))
 
     def steps(self, files, origin=False, branch="roadmap"):
         """The record branch: one commit on `branch` (roadmap by default) whose roadmap/data/steps holds each {name: text}.
@@ -212,6 +229,32 @@ class CiteTests(unittest.TestCase):
         code, out = self.run_check()
         self.assertEqual(code, 1, "an unreadable registry passed. Output:\n" + out)
         self.assertTrue(self.flagged(out), "an unreadable registry printed no FAIL line. Output:\n" + out)
+
+    def test_no_registry_file_a_pushed_bare_link_is_still_listed(self):
+        self.drop_registry()
+        self.steps({"c1.json": json.dumps({"title": "Step", "note": "See " + URL + "."})}, branch="steps-link")
+        found = self.pushed("steps-link")
+        self.assertEqual([rel for rel, _ in found], ["roadmap/data/steps/c1.json"],
+                         "with no registry file, a pushed head's bare link was not listed. Found: %r" % (found,))
+
+    def test_no_registry_file_a_pushed_cite_is_not_judged(self):
+        self.drop_registry()
+        self.steps({"c1.json": json.dumps({"title": "Step", "ask": "artifact:" + REGISTERED})}, branch="steps-cite")
+        self.assertEqual(self.pushed("steps-cite"), [],
+                         "with no registry file, an artifact:<id> cite in a pushed step was judged as unregistered")
+
+    def test_no_registry_file_a_pushed_bare_link_with_a_cite_lists_only_the_link(self):
+        self.drop_registry()
+        self.steps({"c1.json": json.dumps({"title": "Step", "ask": "artifact:" + REGISTERED, "note": "See " + URL + "."})},
+                   branch="steps-both")
+        found = self.pushed("steps-both")
+        self.assertEqual(len(found), 1, "with no registry file, the cite beside the bare link was listed too. Found: %r" % (found,))
+        self.assertIn("bare artifact link", found[0][1], "with no registry file, the one find is not the bare link: %r" % (found,))
+
+    def test_registry_file_present_a_pushed_cite_of_a_registered_page_is_clean(self):
+        self.assertTrue(os.path.isfile(os.path.join(self.root, *EXTRAS.split("/"))), "scope: the registry file is absent")
+        self.steps({"c1.json": json.dumps({"title": "Step", "ask": "artifact:" + REGISTERED})}, branch="steps-reg")
+        self.assertEqual(self.pushed("steps-reg"), [], "a pushed cite of a registered page was listed")
 
 
 if __name__ == "__main__":

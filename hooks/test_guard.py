@@ -815,6 +815,11 @@ RECFORK = os.path.join(ROOT, "recfork")
 # roadmap-artifact-cites fixture. ARTREC has one branch per roadmap step shape (see _artcite_build_branches). Its
 # `roadmap` holds the bare-link step, its origin/roadmap the cites-only one, and HEAD sits on the bare-link branch.
 ARTREC = os.path.join(ROOT, "artrec")
+# Two linked worktrees of ARTREC, made by _artcite_build_branches. ARTCLEAN sits on the cites-only branch, a clean head
+# with the registry. ARTNOREG is detached at the base commit, before the registry, so it holds no registry file: the
+# checkout a worktree on the record branch is.
+ARTCLEAN = os.path.join(ROOT, "artclean")
+ARTNOREG = os.path.join(ROOT, "artnoreg")
 
 # WTMAIN is the primary checkout of its own small repository. Every linked worktree below is a
 # real one, because the rule reads `git worktree list --porcelain` and `git status --porcelain`
@@ -2716,7 +2721,7 @@ lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDET
               PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHOWNREF,
               PUSHLOCAL, PUSHLOCALSTRAY, PUSHLOCALMAIN, PUSHSSH, PUSHNOREMOTE,
               PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX,
-              PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG, ARTREC],
+              PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG, ARTREC, ARTCLEAN, ARTNOREG],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -13436,6 +13441,8 @@ ARTCITE_STEPS = {
     "steps-fence": ("c1.json", json.dumps({"note": "```\n" + ARTCITE_BARE + "\n```"})),
     "steps-span": ("c1.json", json.dumps({"note": "see `" + ARTCITE_CODE + "` here"})),
     "steps-code": ("c1.json", json.dumps({"note": ARTCITE_CODE})),
+    # A bare link and a cite in one step: with no registry file, only the link is judged.
+    "steps-mixed": ("c1.json", json.dumps({"title": "Step", "ask": ARTCITE_CITE, "note": "See " + ARTCITE_BARE + "."})),
     # The link escaped as \u0068 in the JSON text: the checker reads the string it parses to, never the raw bytes.
     "steps-escaped": ("c1.json", '{"note": "\\u0068ttps://claude.ai/artifact/%s"}\n' % ARTCITE_ID),
     "steps-scan-bare": ("c1.json", json.dumps({"title": "/* open", "note": "```\n// it's # here\n" + ARTCITE_BARE
@@ -13451,11 +13458,11 @@ FULL_LAST = "roadmap/data/steps/s%04d.json" % FULL_STEPS
 FULL_LAST_BARE = json.dumps({"title": "Step %d" % FULL_STEPS, "note": ARTCITE_BARE}) + "\n"
 
 
-def artcite_refuse(name, command, cwd=ARTREC, transcript=TRIAGE_TRANSCRIPT):
+def artcite_refuse(name, command, cwd=ARTREC, transcript=TRIAGE_TRANSCRIPT, extra_lacks=()):
     """A triage push the guard refuses under roadmap-artifact-cites. The reason carries the cite form and names no
-    push and no link."""
+    push and no link. `extra_lacks` names more text the reason must not carry."""
     sh("roadmap-artifact-cites: " + name, command, "deny", rule=ARTCITE_RULE, carries=ARTCITE_CARRIES,
-       lacks=ARTCITE_LACKS, transcript=transcript, env=ROLE_ENV, cwd=cwd)
+       lacks=ARTCITE_LACKS + tuple(extra_lacks), transcript=transcript, env=ROLE_ENV, cwd=cwd)
 
 
 def artcite_allow(name, command, cwd=ARTREC, transcript=TRIAGE_TRANSCRIPT):
@@ -13510,6 +13517,19 @@ def _artcite_build_branches():
                  % (len(listed.stdout.split()), FULL_STEPS))
     if run_vcs(ARTREC, "ls-tree", "-r", "--name-only", "main", "--", "roadmap/data/steps").stdout.strip():
         sys.exit("fixture setup failed in build_fixtures: main must hold no roadmap step (the empty state)")
+    # The two linked worktrees. ARTCLEAN is on the cites-only branch, with the registry. ARTNOREG is detached at
+    # origin/main, the base commit before the registry commit, so it holds no registry file. Both are read back.
+    if run_vcs(ARTREC, "worktree", "add", "-q", ARTCLEAN, "steps-cites").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: ARTREC cannot add the worktree ARTCLEAN")
+    if run_vcs(ARTREC, "worktree", "add", "-q", "--detach", ARTNOREG, "refs/remotes/origin/main").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: ARTREC cannot add the worktree ARTNOREG")
+    if not os.path.isfile(os.path.join(ARTCLEAN, *ARTCITE_EXTRAS_PATH.split("/"))):
+        sys.exit("fixture setup failed in build_fixtures: ARTCLEAN holds no registry file")
+    if os.path.exists(os.path.join(ARTNOREG, *ARTCITE_EXTRAS_PATH.split("/"))):
+        sys.exit("fixture setup failed in build_fixtures: ARTNOREG holds a registry file")
+    with open(os.path.join(ARTCLEAN, "roadmap", "data", "steps", "c1.json"), encoding="utf-8") as handle:
+        if handle.read() != ARTCITE_STEPS["steps-cites"][1]:
+            sys.exit("fixture setup failed in build_fixtures: ARTCLEAN is not on the cites-only step")
 
 
 def _artcite_config(tag):
@@ -13531,10 +13551,23 @@ def _artcite_rule_rows(folder):
     return [row for row in rows if len(row) > 3 and row[3] == ARTCITE_RULE]
 
 
-def _artcite_case(command, config=None, env_path=None):
-    """The decide() case of one Bash call from ARTREC, made by the triage session."""
-    return {"raw": None, "tool": "Bash", "cwd": ARTREC, "session": None, "env_path": env_path, "config": config,
+def _artcite_case(command, config=None, env_path=None, cwd=ARTREC):
+    """The decide() case of one Bash call from `cwd` (ARTREC by default), made by the triage session."""
+    return {"raw": None, "tool": "Bash", "cwd": cwd, "session": None, "env_path": env_path, "config": config,
             "agent_id": None, "tool_input": {"command": command}, "transcript": TRIAGE_TRANSCRIPT, "env": ROLE_ENV}
+
+
+def artcite_noted_case(tag, command, cwd=ARTREC, env_path=None, want="allow"):
+    """One triage push whose pushed head the guard cannot read. The rule writes one noted line that says unknown. `want`
+    "allow" needs the decision allow. "not-deny" also takes an ask, which is not a deny. A deny fails either way."""
+    config = _artcite_config(tag)
+    got, reason = decide(_artcite_case(command, config=config, env_path=env_path, cwd=cwd))
+    if got == "deny" or (want == "allow" and got != "allow"):
+        return False, "%s was %s, want %s: %s" % (command, got, want, reason[:90])
+    noted = [row for row in _artcite_rule_rows(config) if row[2] == "noted" and len(row) > 4 and "unknown" in row[4]]
+    if not noted:
+        return False, "no noted %s line says unknown for %s" % (ARTCITE_RULE, command)
+    return True, "%s: decision %s, with one noted %s line that says unknown" % (command, got, ARTCITE_RULE)
 
 
 def artcite_unknown_head_case():
@@ -13542,14 +13575,7 @@ def artcite_unknown_head_case():
     read, while the triage proof and the destination need no git. So the push reaches the new read, and only it fails."""
     materialize(ARTREC)
     os.makedirs(NOGIT_PATH, exist_ok=True)
-    config = _artcite_config("artcite-unknown")
-    got, reason = decide(_artcite_case(VCS + " push origin steps-bare:roadmap", config=config, env_path=NOGIT_PATH))
-    if got != "allow":
-        return False, "a head the guard cannot read was %s, want allow: %s" % (got, reason[:90])
-    noted = [row for row in _artcite_rule_rows(config) if row[2] == "noted" and len(row) > 4 and "unknown" in row[4]]
-    if not noted:
-        return False, "no noted %s line says unknown" % ARTCITE_RULE
-    return True, "allowed, with one noted %s line that says unknown" % ARTCITE_RULE
+    return artcite_noted_case("artcite-unknown", VCS + " push origin steps-bare:roadmap", env_path=NOGIT_PATH)
 
 
 def artcite_clean_log_case():
@@ -13599,6 +13625,61 @@ def artcite_spawn_case():
     return True, "a push to another branch and a dry run read no roadmap step"
 
 
+def _artcite_record_ref_scope():
+    """Scope before subject (P7): an all-branch or mirror push sends the local record ref, so ARTREC must hold it. ''
+    when it does, else the reason it does not."""
+    if run_vcs(ARTREC, "rev-parse", "-q", "--verify", "refs/heads/roadmap").returncode != 0:
+        return "scope: ARTREC has no local roadmap ref, so the push would send none"
+    return ""
+
+
+def artcite_noreg_cites_case():
+    """Finding 1, the false alarm: a checkout with no registry file (a worktree on the record branch) read every cite as
+    unregistered and denied a clean triage push. The cite is not judged, so a head with only cites is allowed, with one
+    noted unknown line."""
+    return artcite_noted_case("artcite-noreg-cites", VCS + " push origin steps-cites:roadmap", cwd=ARTNOREG)
+
+
+def artcite_push_all_case():
+    """Finding 2, the silent pass: `--all` names no ref, so its source is None and the rule wrote no line. A push of every
+    branch sends the record branch, so it is noted unknown and never denied."""
+    scope = _artcite_record_ref_scope()
+    if scope:
+        return False, scope
+    return artcite_noted_case("artcite-push-all", VCS + " push --all origin", want="not-deny")
+
+
+def artcite_push_mirror_case():
+    """Finding 2, the silent pass: `--mirror` names no ref, as `--all` does. It is noted unknown and never denied. The
+    push is also asked on, and an ask is not a deny."""
+    scope = _artcite_record_ref_scope()
+    if scope:
+        return False, scope
+    return artcite_noted_case("artcite-push-mirror", VCS + " push --mirror origin", want="not-deny")
+
+
+def artcite_feat_bare_head_case():
+    """Finding 3, the deny: a non-literal source (`$FEAT`) maps to HEAD, so the bare link in HEAD (steps-bare) denies a
+    push whose source the guard cannot read. The source is unknown: noted, and never denied."""
+    return artcite_noted_case("artcite-feat-bare", VCS + " push origin $FEAT:roadmap", want="not-deny")
+
+
+def artcite_feat_clean_head_case():
+    """Finding 3, the silent pass: `$FEAT` maps to HEAD on a clean head (ARTCLEAN), so the push passes with no line. The
+    source is unknown: noted, and never denied."""
+    return artcite_noted_case("artcite-feat-clean", VCS + " push origin $FEAT:roadmap", cwd=ARTCLEAN, want="not-deny")
+
+
+def artcite_cmd_clean_head_case():
+    """Finding 3, the silent pass: a `$(cmd)` source maps to HEAD on a clean head (ARTCLEAN). Noted, never denied."""
+    return artcite_noted_case("artcite-cmd-clean", VCS + " push origin $(cmd):roadmap", cwd=ARTCLEAN, want="not-deny")
+
+
+def artcite_glob_clean_head_case():
+    """Finding 3, the silent pass: a glob source (`feat*`) maps to HEAD on a clean head (ARTCLEAN). Noted, never denied."""
+    return artcite_noted_case("artcite-glob-clean", VCS + " push origin feat*:roadmap", cwd=ARTCLEAN, want="not-deny")
+
+
 # A triage push that sends a bare link in a step is refused, whichever form names the pushed head.
 artcite_refuse("a triage push of the bare-link branch by name is refused", VCS + " push origin steps-bare:roadmap")
 artcite_refuse("a triage push of the local roadmap ref, which holds a bare link, is refused", VCS + " push origin roadmap")
@@ -13633,6 +13714,15 @@ artcite_allow("a push to roadmap named in single quotes is text", "echo '" + VCS
 sh("roadmap-artifact-cites: a lane's push of a bare link is refused by roadmap-one-writer, not by this rule",
    VCS + " push origin steps-bare:roadmap", "deny", rule=RECORD_RULE, lacks=RECORD_LACKS + (ARTCITE_RULE,),
    transcript=LANE_TRANSCRIPT, env=ROLE_ENV, cwd=ARTREC)
+# Finding 1: a checkout with no registry file. A bare link is still refused, and the refusal names no cite it never judged.
+artcite_refuse("a bare link in a head with no registry file is still refused", VCS + " push origin steps-bare:roadmap",
+               cwd=ARTNOREG)
+artcite_refuse("a bare link in a head with no registry file is refused, and the refusal names no unregistered cite",
+               VCS + " push origin steps-mixed:roadmap", cwd=ARTNOREG, extra_lacks=("not in the artifacts registry",))
+# Finding 3's controls: a literal source is still judged by its own ref, and HEAD:roadmap from a clean head is clean.
+artcite_refuse("a literal bare-link branch is refused from a clean head", VCS + " push origin steps-bare:roadmap",
+               cwd=ARTCLEAN)
+artcite_allow("HEAD:roadmap from a clean head is allowed silently", VCS + " push origin HEAD:roadmap", cwd=ARTCLEAN)
 FAMILY = "merge"  # the family the cases after this section have always run in
 
 
@@ -29916,6 +30006,18 @@ LOG_CHECKS = (
      artcite_unknown_head_case),
     ("roadmap-artifact-cites: a readable clean head writes no noted line", artcite_clean_log_case),
     ("roadmap-artifact-cites: a push to another branch and a dry run read no roadmap step", artcite_spawn_case),
+    ("roadmap-artifact-cites: a head with no registry file and only cites is allowed and noted unknown",
+     artcite_noreg_cites_case),
+    ("roadmap-artifact-cites: a push of every branch is noted unknown and never denied", artcite_push_all_case),
+    ("roadmap-artifact-cites: a mirror push is noted unknown and never denied", artcite_push_mirror_case),
+    ("roadmap-artifact-cites: a $FEAT source is noted unknown and never denied, though HEAD holds a bare link",
+     artcite_feat_bare_head_case),
+    ("roadmap-artifact-cites: a $FEAT source from a clean head is noted unknown, not allowed silently",
+     artcite_feat_clean_head_case),
+    ("roadmap-artifact-cites: a $(cmd) source from a clean head is noted unknown, not allowed silently",
+     artcite_cmd_clean_head_case),
+    ("roadmap-artifact-cites: a feat* glob source from a clean head is noted unknown, not allowed silently",
+     artcite_glob_clean_head_case),
     ("conflict-markers: the cost probe judges a clean commit as no hit, under a stand-in git (the control)",
      cmk_cost_control_case),
     ("conflict-markers: git add -A && git commit -m x spawns one rev-parse, one diff --check and one ls-files",
@@ -38461,6 +38563,13 @@ LOG_RULE_FAMILY = (
     ("roadmap-artifact-cites: a head the guard cannot read", "roadmap-artifact-cites"),
     ("roadmap-artifact-cites: a readable clean head", "roadmap-artifact-cites"),
     ("roadmap-artifact-cites: a push to another branch", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a head with no registry file", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a push of every branch", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a mirror push", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a $FEAT source is noted unknown and never denied", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a $FEAT source from a clean head", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a $(cmd) source", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a feat* glob source", "roadmap-artifact-cites"),
     ("log: one line per refusal", "frozen"),
     ("log: the refused file is named", "frozen"),
     ("log: a project config edit", "frozen"),
