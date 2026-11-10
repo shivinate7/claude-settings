@@ -15807,7 +15807,7 @@ cmk_allow("two commits, the first adding a triplet and the second removing it, t
 # red-run-trailer-on-test-commits). The range is the one the conflict-markers push check reads: the
 # destination's remote-tracking tip, else the source's upstream, else the default base, up to the named
 # source ref. A test commit a lane takes from main is not the lane's, so the lane's own commits are judged
-# and main's are not. A merge, a deletion-only commit, a commit before the check landed in HEAD's tree and
+# and main's are not. A merge, a deletion-only commit, a commit whose parent tree lacks the check and
 # a range git cannot read all pass. A malformed trailer is no trailer.
 #
 # Each fixture is a checkout beside a bare remote (`_cmk_pushed`). Basenames start with `rr-`, so no
@@ -15839,7 +15839,7 @@ RR_CLEANREF = os.path.join(RRROOT, "rr-cleanref")      # HEAD holds an untrailer
 RR_NOBASE = os.path.join(RRROOT, "rr-nobase")          # no remote, no tracking ref, no upstream, no default base
 RR_DELETE = os.path.join(RRROOT, "rr-delete")          # a commit that only deletes test lines and a test file
 RR_SIX = os.path.join(RRROOT, "rr-six")                # six test files added in one commit, none with a trailer
-RR_ROLLOLD = os.path.join(RRROOT, "rr-rollold")        # a test commit before the check landed, then the check lands
+RR_ROLLOLD = os.path.join(RRROOT, "rr-rollold")        # a test commit whose parent lacks the check, then the commit that adds the check
 RR_ROLLNEW = os.path.join(RRROOT, "rr-rollnew")        # the check is on main, then an untrailered test commit
 RR_NODEFAULT = os.path.join(RRROOT, "rr-nodefault")    # a trunk the default base cannot name, merged into a lane
 RR_TAG = os.path.join(RRROOT, "rr-tag")                # a tag on an untrailered test commit
@@ -16118,7 +16118,7 @@ def _build_red_run():
     must(RR_SIX, _rr_added(RR_SIX, "HEAD~1", "HEAD") == 6 * len(RR_TEST_TEXT.splitlines()),
          "six test files added in the commit")
 
-    # Rollout. The check lands in HEAD's tree in the second commit, so the first commit's parent lacks it.
+    # The commit after the test commit adds the check, so the test commit's parent lacks it.
     _cmk_pushed(RR_ROLLOLD, {"a.txt": "base\n"})
     commit(RR_ROLLOLD, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
     commit(RR_ROLLOLD, {RR_CHECK_REL: "# the check\n"}, "land the check")
@@ -16320,7 +16320,7 @@ rr_refuse("a test commit with Red-run: none (fixture re-pointed), no colon after
 # Full size: six test files in one commit, none with a trailer. The commit names more paths than the judge lists.
 rr_refuse("a commit that adds six test files, none with a trailer", VCS + " push", RR_SIX)
 
-# Rollout: a test commit whose parent tree lacks the check is not judged. One whose parent holds it is.
+# A test commit whose parent tree lacks the check is not judged. One whose parent holds it is.
 rr_allow("a test commit made before the check landed, then the commit that lands the check", VCS + " push",
          RR_ROLLOLD)
 rr_refuse("a test commit made after the check landed, with no trailer", VCS + " push", RR_ROLLNEW)
@@ -16430,8 +16430,7 @@ rr_refuse("a lane whose earlier commits carry trailers, then a comment-only rewo
 # gives the spawns (see record_push_cost_case).
 RR_COST_LABEL = ("red-run: a lone commit with no push in its call makes the git spawns pinned before red-run, "
                  "and no git diff --cached --numstat")
-# rev-parse 3: main's _repo_of reads a commit's top folder once, where the branch read it twice (measured on main's
-# guard, 624dcc188). The count is main's; the red-run check adds no git spawn for a lone commit.
+# rev-parse 3: _repo_of reads a commit's top folder once. The red-run check adds no git spawn for a lone commit.
 RR_COST_SPAWNS = {"diff": 1, "ls-tree": 3, "rev-parse": 3, "symbolic-ref": 1}
 
 
