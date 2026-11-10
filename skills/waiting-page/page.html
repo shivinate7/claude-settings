@@ -3048,13 +3048,17 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state,
       if (!po && wrap.parentElement && window.ResizeObserver) { po = new ResizeObserver(fit); po.observe(wrap.parentElement); }
       if (wrap.parentElement) {
         // The width and height come from the column. bh is the declared height until the mockup reports its own, so the first paint is the height it settles to.
-        sizer.style.width = pw + "px"; sizer.style.height = Math.ceil(bh * sc) + "px"; sizer.style.aspectRatio = ""; sizer.style.marginBottom = "";
-        wrap.style.width = pw + 2 + g + "px"; wrap.style.aspectRatio = ""; wrap.style.maxHeight = "";
+        sizer.style.width = pw + "px"; sizer.style.height = Math.ceil(bh * sc) + "px"; sizer.style.aspectRatio = ""; sizer.style.marginBottom = ""; sizer.style.maxWidth = "";
+        wrap.style.width = pw + 2 + g + "px"; wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.maxWidth = "";
         wrap.style.height = (scroll ? maxH : Math.ceil(bh * sc)) + "px";
       } else {
-        // Not placed yet, so the column is unknown. The sizer takes the column's width inside the border and the picture's aspect by CSS. Its margin takes back the 2px of border, so the box is as high as the placed one (the border-box height ceil(bh * sc)). The placement fits it again.
+        // Not placed yet, so the column is unknown and only CSS can size the box. The sizer takes the column's width inside the border, at most maxScale x the picture's width, and the picture's aspect. Its margin takes back the 2px of border, so the box is as high as the placed one (the border-box height ceil(bh * sc)).
+        // A picture taller than a FIT_W x PHONE_H phone picture scrolls at any column that fits it whole above maxH, so its box is capped at maxH. That is exact except for a picture whose aspect is within 1px of the phone's, where it is as high as the whole picture. The placement then fits the box again.
         sizer.style.width = ""; sizer.style.height = ""; sizer.style.aspectRatio = bw + " / " + bh; sizer.style.marginBottom = "-2px";
-        wrap.style.width = ""; wrap.style.height = ""; wrap.style.maxHeight = ""; wrap.style.aspectRatio = "";
+        sizer.style.maxWidth = bw * (maxScale || 1) + "px";
+        wrap.style.width = ""; wrap.style.height = ""; wrap.style.aspectRatio = "";
+        wrap.style.maxWidth = Math.ceil(bw * (maxScale || 1)) + 2 + "px";
+        wrap.style.maxHeight = bh * FIT_W > bw * PHONE_H ? maxH + "px" : "";
       }
     }
     f.style.height = ht + "px";
