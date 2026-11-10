@@ -1,0 +1,12 @@
+{
+  "title": "A merge from main after a fix check can still get a review record",
+  "phase": "now",
+  "status": "todo",
+  "order": 1010,
+  "owner": "triage",
+  "why": "merge --review-record refuses --fix-check when the newest earlier record already has a Fix check line, so a lane that merges main after its fix pass (PR #1186, head e304a0033) cannot record the merge's fix check.",
+  "note": "Filed by triage 13:00 CST Nov 10. Refusal text: 'the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line' (decision pr-review-record). Done when a merge-from-main fix check records against the prior record's head, with a test red on main.",
+  "updatedAt": "2026-11-10T13:01:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
