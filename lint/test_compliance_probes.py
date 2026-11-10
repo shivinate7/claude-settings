@@ -377,6 +377,10 @@ class Ios(unittest.TestCase):
         body = "".join("\t%s\n" % line for line in recipe.split("\n"))
         return self.edit(self.gold(), "Makefile", "phone:\n", "ui-run:\n" + body + "\nphone:\n")
 
+    def flagged(self, definitions, recipe="xcodebuild test -scheme X $(FLAGS)"):
+        """The gold with `recipe` as the ui-run recipe, and `definitions` (Makefile lines) above the phone target."""
+        return self.edit(self.make_run(recipe), "Makefile", "phone:\n", definitions + "\nphone:\n")
+
     def diag_pass(self, repo):
         code, out = repo.run("ios")
         self.assertEqual(code, 0, out)
@@ -464,6 +468,14 @@ class Ios(unittest.TestCase):
             with self.subTest(run=run):
                 self.red(self.make_run(run), self.diag_gap("Makefile"))
 
+    def test_a_recipe_prefix_does_not_hide_an_xcodebuild_test_run(self):
+        # `@` silences a recipe line and `-` ignores its exit code. Neither hides the run from the probe.
+        self.assertEqual(self.grade(self.make_run("xcodebuild test -scheme X"), "test diagnostics"), "gap", "scope: the run is read")
+        for run in ("@xcodebuild test -scheme X", "-xcodebuild test -scheme X"):
+            with self.subTest(run=run):
+                self.assertEqual(self.grade(self.make_run(run), "test diagnostics"), "gap",
+                                 "a recipe prefix hides the run, so its missing flag is not read")
+
     def test_a_hash_inside_quotes_does_not_cut_the_flag(self):
         for run in ('xcodebuild test -scheme "a #b" -collect-test-diagnostics never',
                     "xcodebuild test -scheme 'a #b' -collect-test-diagnostics never",
@@ -479,6 +491,113 @@ class Ios(unittest.TestCase):
         self.red(repo, self.diag_gap("Makefile", script))  # one line, the files in tracked order
         self.diag_pass(self.gold().write("docs/testing.md", "Run `xcodebuild test -scheme Tally` by hand.\n"))  # prose is no run
 
+    def test_a_flag_in_a_make_variable_is_no_gap(self):
+        # The recipe passes the flag through `$(FLAGS)`, and the Makefile sets FLAGS to it: the run does carry the flag.
+        self.diag_pass(self.flagged("FLAGS = -collect-test-diagnostics never\n"))
+
+    # Each case below reads the run's grade. The first line is the scope: with the variable unset, the run is read and
+    # carries no flag, so the grade is gap. Without it, a run that is not read would grade pass and the case would pass for nothing.
+    def test_a_later_equals_replaces_the_make_variable(self):
+        first = "FLAGS = -collect-test-diagnostics never\n"
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged(first), "test diagnostics"), "pass", "control: the first value holds the flag")
+        self.assertEqual(self.grade(self.flagged(first + "FLAGS = -quiet\n"), "test diagnostics"), "gap",
+                         "a later = replaces the value, so the run gets -quiet and no diagnostics flag")
+
+    def test_a_question_equals_applies_only_when_the_variable_is_unset(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS ?= -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "control: FLAGS is unset, so ?= sets it")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -quiet\nFLAGS ?= -collect-test-diagnostics never\n"), "test diagnostics"),
+                         "gap", "?= does nothing once FLAGS is set to -quiet")
+
+    def test_a_plus_equals_appends_to_the_make_variable(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -quiet\nFLAGS += -collect-test-diagnostics never\n"), "test diagnostics"),
+                         "pass", "+= appends the flag after -quiet")
+
+    def test_a_backslash_continued_make_value_is_read_whole(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -quiet \\\n\t-collect-test-diagnostics never\n"), "test diagnostics"),
+                         "pass", "the continuation line is part of FLAGS, so the run carries the flag")
+
+    def test_a_three_level_make_chain_resolves(self):
+        recipe = "xcodebuild test -scheme X $(DIAG_A)"
+        self.assertEqual(self.grade(self.flagged("", recipe), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("DIAG_A = -collect-test-diagnostics never\n", recipe), "test diagnostics"),
+                         "pass", "control: one level")
+        self.assertEqual(self.grade(self.flagged("DIAG_A = $(DIAG_B)\nDIAG_B = $(DIAG_C)\nDIAG_C = -collect-test-diagnostics never\n",
+                                                 recipe), "test diagnostics"), "pass",
+                         "A = $(B), B = $(C), C = the flag: the run carries the flag through three levels")
+
+    def test_an_export_make_assignment_is_read(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("export FLAGS = -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "export FLAGS = is an assignment, so the run carries the flag")
+
+    def test_an_override_make_assignment_is_read(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("override FLAGS = -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "override FLAGS = is an assignment, so the run carries the flag")
+
+    def test_a_double_colon_make_assignment_is_read(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS ::= -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "FLAGS ::= is an assignment, so the run carries the flag")
+
+    def test_a_colon_equals_expands_the_make_variable_at_assignment(self):
+        # `:=` expands $(FLAGS) when it is read, so FLAGS keeps the flag and -quiet joins it. The run carries the flag.
+        recipe = "xcodebuild test $(FLAGS)"
+        self.assertEqual(self.grade(self.flagged("", recipe), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never\n", recipe), "test diagnostics"), "pass",
+                         "control: one level")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never\nFLAGS := $(FLAGS) -quiet\n", recipe),
+                                    "test diagnostics"), "pass",
+                         "the := value holds the flag, so the -quiet append keeps it")
+
+    def test_a_lone_quote_in_a_make_comment_is_no_gap(self):
+        # The apostrophe is text in a comment: it opens no string, so the flag before the comment still counts.
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never # the team's flag\n"), "test diagnostics"),
+                         "pass", "the flag before a comment that holds a lone quote still counts")
+
+    def test_a_make_comment_is_cut_from_a_variable_value(self):
+        # Make cuts `# x` from F's value, so F is `-quiet` and the run's own flag after $(F) is not in the comment.
+        recipe = "xcodebuild test $(F) -collect-test-diagnostics never"
+        self.assertEqual(self.grade(self.flagged("F = -quiet # x\n", "xcodebuild test $(F)"), "test diagnostics"), "gap",
+                         "scope: the run is read, and no diagnostics flag is in it")
+        self.assertEqual(self.grade(self.flagged("F = -quiet\n", recipe), "test diagnostics"), "pass",
+                         "control: no comment, so $(F) expands and the run keeps its flag")
+        self.assertEqual(self.grade(self.flagged("F = -quiet # x\n", recipe), "test diagnostics"), "pass",
+                         "the comment ends at F's value, so the run keeps its own diagnostics flag")
+
+    def test_a_quoted_hash_in_a_recipe_beside_a_make_variable_is_no_gap(self):
+        recipe = 'xcodebuild test -scheme "a #b" $(FLAGS)'
+        self.assertEqual(self.grade(self.flagged("", recipe), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never\n", recipe), "test diagnostics"), "pass",
+                         "a # inside quotes in the recipe is text, so the variable's flag still counts")
+
+    def test_a_quoted_never_is_no_gap(self):
+        # The shell reads `"never"` and `'never'` as `never`, so the run does carry the flag.
+        for run in ('xcodebuild test -scheme X -collect-test-diagnostics "never"',
+                    "xcodebuild test -scheme X -collect-test-diagnostics 'never'"):
+            with self.subTest(run=run):
+                self.diag_pass(self.make_run(run))
+
+    def test_a_step_name_naming_xcodebuild_test_is_no_test_run(self):
+        # A step's name is text: no xcodebuild test runs in this step, so neither item may read it as one.
+        repo = self.edit(self.gold(), self.FLOW, "run: make app-build",
+                         "run: make app-build\n      - name: xcodebuild test (slow tests)\n        run: echo done")
+        self.diag_pass(repo)
+        self.assertEqual(self.grade(repo, "slow tests"), "pass")
+
+    def test_an_echo_naming_xcodebuild_test_is_no_test_run(self):
+        # An echo prints text: `xcodebuild test` inside its quotes runs nothing, so neither item may read it as a run.
+        repo = self.edit(self.gold(), self.FLOW, "run: make app-build",
+                         'run: make app-build\n      - run: echo "xcodebuild test -scheme Tally"')
+        self.diag_pass(repo)
+        self.assertEqual(self.grade(repo, "slow tests"), "pass")
+
     def test_workflow_runs_are_read(self):
         flow = ".github/workflows/ios.yml"
         run = "xcodebuild test -project native/Tally.xcodeproj -scheme Tally"
@@ -490,6 +609,106 @@ class Ios(unittest.TestCase):
                 _, out = self.edit(self.gold(), flow, "run: make app-build", step).run("ios")  # slow tests is a gap here, by design
                 self.assertIn(self.DIAG_PASS, out)
                 self.assertNotIn("test diagnostics: gap", out)
+
+    # A command substitution in a quoted argument, `$(...)` or a backtick, is a command the shell runs in place. The shell
+    # reads the argument on past it, so the flag after it is in the run. Each scope line reads the same run with no flag.
+    SUBSTITUTIONS = ("$(cat id)", "`cat id`")
+
+    def substituted(self, sub, flag=" -collect-test-diagnostics never"):
+        return 'xcodebuild test -destination "id=%s"%s' % (sub, flag)
+
+    def test_a_substitution_in_a_makefile_recipe_keeps_the_flag(self):
+        self.diag_pass(self.make_run('xcodebuild test -destination "id=abc" -collect-test-diagnostics never'))  # control: no substitution
+        for sub in self.SUBSTITUTIONS:
+            with self.subTest(sub=sub):
+                self.assertEqual(self.grade(self.make_run(self.substituted(sub, "")), "test diagnostics"), "gap",
+                                 "scope: with no flag the run is read, and it gaps")
+                self.assertEqual(self.grade(self.make_run(self.substituted(sub)), "test diagnostics"), "pass",
+                                 "the flag after the substitution is in the run")
+
+    def test_an_unset_make_variable_in_a_recipe_keeps_the_flag(self):
+        # Make expands an unset `$(NAME)` to nothing, so the shell never sees a `$(`: the flag after it is in the run.
+        self.assertEqual(self.grade(self.flagged("", "xcodebuild test $(XCX_EXTRA)"), "test diagnostics"), "gap",
+                         "scope: with no flag the run is read, and it gaps")
+        self.assertEqual(self.grade(self.flagged("XCX_EXTRA = -collect-test-diagnostics never\n", "xcodebuild test $(XCX_EXTRA)"),
+                                    "test diagnostics"), "pass", "control: a variable that holds the flag passes")
+        self.assertEqual(self.grade(self.flagged("", "xcodebuild test $(XCX_EXTRA) -collect-test-diagnostics never"), "test diagnostics"),
+                         "pass", "the flag after an unset variable is in the run")
+
+    def test_a_substitution_in_a_shell_script_keeps_the_flag(self):
+        script = "tools/run-tests.sh"
+        self.diag_pass(self.gold().write(script, "#!/bin/sh\n%s\n" % self.substituted("abc")))  # control: no substitution
+        for sub in self.SUBSTITUTIONS:
+            with self.subTest(sub=sub):
+                repo = self.gold().write(script, "#!/bin/sh\n%s\n" % self.substituted(sub, ""))
+                self.assertEqual(self.grade(repo, "test diagnostics"), "gap", "scope: with no flag the run is read, and it gaps")
+                repo = self.gold().write(script, "#!/bin/sh\n%s\n" % self.substituted(sub))
+                self.assertEqual(self.grade(repo, "test diagnostics"), "pass", "the flag after the substitution is in the run")
+
+    def test_a_substitution_in_a_workflow_step_keeps_the_flag(self):
+        # control: no substitution. The step's UI-test run gaps its own item, so only this item is read.
+        self.assertEqual(self.grade(self.step(self.gold(), self.substituted("abc")), "test diagnostics"), "pass", "control: no substitution")
+        for sub in self.SUBSTITUTIONS:
+            with self.subTest(sub=sub):
+                self.assertEqual(self.grade(self.step(self.gold(), self.substituted(sub, "")), "test diagnostics"), "gap",
+                                 "scope: with no flag the run is read, and it gaps")
+                self.assertEqual(self.grade(self.step(self.gold(), self.substituted(sub)), "test diagnostics"), "pass",
+                                 "the flag after the substitution is in the run")
+
+    def test_a_lone_apostrophe_before_a_substitution_run_keeps_the_flag(self):
+        # `echo it's` opens no string, so the run after it is read whole.
+        for sub in self.SUBSTITUTIONS:
+            with self.subTest(sub=sub):
+                self.assertEqual(self.grade(self.step(self.gold(), "echo it's; " + self.substituted(sub, "")), "test diagnostics"), "gap",
+                                 "scope: with no flag the run is read, and it gaps")
+                self.assertEqual(self.grade(self.step(self.gold(), "echo it's; " + self.substituted(sub)), "test diagnostics"), "pass",
+                                 "the flag after the substitution is in the run")
+
+    def test_a_comment_opener_and_a_continuation_keep_the_flag_in_a_workflow_step(self):
+        # A `#` inside the quotes is text. A `\` continuation joins the flag's line to the run, so the flag still counts.
+        pairs = (
+            ('xcodebuild test -destination "name=iPhone #1,id=$(cat id)" -scheme X',
+             'xcodebuild test -destination "name=iPhone #1,id=$(cat id)" -collect-test-diagnostics never'),
+            ('|\n          xcodebuild test -destination "id=$(cat id)" \\\n            -scheme X',
+             '|\n          xcodebuild test -destination "id=$(cat id)" \\\n            -collect-test-diagnostics never'))
+        for scope, subject in pairs:
+            with self.subTest(command=subject):
+                self.assertEqual(self.grade(self.step(self.gold(), scope), "test diagnostics"), "gap",
+                                 "scope: with no flag the run is read, and it gaps")
+                self.assertEqual(self.grade(self.step(self.gold(), subject), "test diagnostics"), "pass",
+                                 "the flag after the substitution is in the run")
+
+    # `${XCB:-xcodebuild}` is xcodebuild when XCB is unset, so `test` is its action and the run needs the flag.
+    def test_a_parameter_default_naming_xcodebuild_gaps_in_a_shell_script(self):
+        script = "tools/run-tests.sh"
+        self.assertEqual(self.grade(self.gold().write(script, "#!/bin/sh\nxcodebuild test -scheme X\n"), "test diagnostics"), "gap",
+                         "scope: a plain xcodebuild test gaps, so the run is read")
+        self.assertEqual(self.grade(self.gold().write(script, "#!/bin/sh\n${XCB:-xcodebuild} test -scheme X\n"), "test diagnostics"), "gap",
+                         "the default names xcodebuild, so its test run with no flag gaps")
+
+    def test_a_parameter_default_naming_xcodebuild_gaps_in_a_workflow_step(self):
+        self.assertEqual(self.grade(self.step(self.gold(), "xcodebuild test -scheme X"), "test diagnostics"), "gap",
+                         "scope: a plain xcodebuild test gaps, so the run is read")
+        self.assertEqual(self.grade(self.step(self.gold(), "${XCB:-xcodebuild} test -scheme X"), "test diagnostics"), "gap",
+                         "the default names xcodebuild, so its test run with no flag gaps")
+        self.assertEqual(self.grade(self.step(self.gold(), "${XCB:-xcodebuild} test -scheme X -collect-test-diagnostics never"),
+                                    "test diagnostics"), "pass", "with the flag, the same run passes")
+
+    def test_a_parameter_default_naming_xcodebuild_gaps_in_a_makefile_recipe(self):
+        # Make reads `${...}` itself, so a recipe writes `$${...}` to hand the shell `${XCB:-xcodebuild}`.
+        self.assertEqual(self.grade(self.make_run("xcodebuild test -scheme X"), "test diagnostics"), "gap",
+                         "scope: a plain xcodebuild test gaps, so the run is read")
+        self.assertEqual(self.grade(self.make_run("$${XCB:-xcodebuild} test -scheme X"), "test diagnostics"), "gap",
+                         "the default names xcodebuild, so its test run with no flag gaps")
+
+    def test_a_recipe_prefix_on_a_parameter_default_naming_xcodebuild_gaps_in_a_makefile_recipe(self):
+        # Make strips a recipe line's `@`, `-` or `+` before the shell reads it, so a prefix is no part of the command's name.
+        for prefix in ("@", "-", "+"):
+            with self.subTest(prefix=prefix):
+                self.assertEqual(self.grade(self.make_run(prefix + "xcodebuild test -scheme X"), "test diagnostics"), "gap",
+                                 "scope: a prefixed plain xcodebuild test gaps, so the run is read")
+                self.assertEqual(self.grade(self.make_run(prefix + "$${XCB:-xcodebuild} test -scheme X"), "test diagnostics"), "gap",
+                                 "the default names xcodebuild behind the prefix, so its test run with no flag gaps")
 
     def test_account_ids_in_the_repo_are_red(self):
         repo = self.edit(self.gold(), "tools/ios-ship.json", '"repo_url"', '"team_id": "FAKE000000",\n  "repo_url"')
@@ -2208,7 +2427,7 @@ class Restates(unittest.TestCase):
 
 
 class RestatesFixtures(unittest.TestCase):
-    """Green controls: the record text the restates cases read is there, in the shape they need. They pass on main."""
+    """Controls: the record text the restates cases read is there, in the shape they need."""
 
     def test_the_records_are_the_checkouts_decisions_folder(self):
         self.assertTrue(os.path.isdir(RECORDS), RECORDS)
@@ -2228,6 +2447,35 @@ class RestatesFixtures(unittest.TestCase):
 
     def test_another_record_holds_a_time_the_grant_record_lacks(self):
         self.assertNotIn(other_time(), record(GRANT))
+
+
+class XcodebuildRuns(unittest.TestCase):
+    """The argument list of each xcodebuild run, read by xcodebuild_runs. A command substitution or a backtick in an
+    argument ends the run group there, so the action that follows it is lost from the run."""
+
+    @staticmethod
+    def runs(text):
+        import compliance_probes
+        return compliance_probes.xcodebuild_runs(text)
+
+    def test_a_plain_run_keeps_its_action(self):  # green control: no substitution, so the action is kept
+        runs = self.runs("xcodebuild -scheme App -derivedDataPath /tmp/derived test")
+        self.assertEqual(len(runs), 1, runs)
+        self.assertIn("test", runs[0], runs)
+
+    def test_an_action_after_a_substitution_or_backticks_in_an_argument_stays_in_the_run(self):
+        for line in ('xcodebuild -scheme App -derivedDataPath "$(mktemp -d)" test',
+                     "xcodebuild -scheme App -derivedDataPath $(mktemp -d) test",
+                     'xcodebuild -scheme App -derivedDataPath "`mktemp -d`" test'):
+            with self.subTest(line=line):
+                runs = self.runs(line)
+                self.assertEqual(len(runs), 1, runs)  # the scope first: one xcodebuild command
+                self.assertIn("test", runs[0], runs)  # then its action: the run keeps `test` after the substitution
+
+    def test_a_lone_double_quote_in_an_argument_keeps_the_action_in_the_run(self):  # green control: passes on the old code too
+        runs = self.runs('xcodebuild -scheme App -derivedDataPath "x test')
+        self.assertEqual(len(runs), 1, runs)  # the scope first: one xcodebuild command
+        self.assertIn("test", runs[0], runs)  # then its action: an unclosed quote is text, and `test` stays in the run
 
 
 def tearDownModule():

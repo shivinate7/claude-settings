@@ -32,6 +32,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import report_guard  # noqa: E402  pending_refusals, the Stop-side settle of the refusals file
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
+import own_session  # noqa: E402  agent_transcript_dir, the one home of the agent folder (hooks/own_session.py)
 
 RUN_FOLDER = _test_temp.run_folder()
 SID = "rg-sid-1"
@@ -85,6 +87,12 @@ class SettleTests(unittest.TestCase):
         prev = os.environ.get("CLAUDE_CONFIG_DIR")
         os.environ["CLAUDE_CONFIG_DIR"] = self.cfg
         self.addCleanup(restore_config_dir, prev)
+
+    def fresh_config(self):
+        """A config folder of its own for the next subtest. The raised-refusals file lives in the config folder, so
+        an earlier subtest's raised row would drop this subtest's identical row."""
+        self.cfg = tempfile.mkdtemp(dir=self.scratch)
+        os.environ["CLAUDE_CONFIG_DIR"] = self.cfg
 
     def refusals_file(self):
         return os.path.join(self.cfg, "state", "refusals", SID + ".jsonl")
@@ -201,11 +209,13 @@ class SettleTests(unittest.TestCase):
 
     def test_b7_a_built_in_tool_needs_its_backticked_name(self):
         with self.subTest("backticked"):
+            self.fresh_config()
             self.check_scope([BASH])
             left = self.settle(reply("Done", "`Bash` refusal was right; the call stays refused."))
             self.assertEqual(left, [], "the backticked name of Bash with the phrase, outside Input Needed, "
                                        "did not clear the row")
         with self.subTest("bare word"):
+            self.fresh_config()
             self.check_scope([BASH])
             left = self.settle(reply("Done", "Bash output was empty; the refusal was right."))
             self.assertEqual(left, [BASH], "a bare Bash, an English word, cleared the row")
@@ -225,6 +235,7 @@ class SettleTests(unittest.TestCase):
         )
         for label, tools, line, expect in cases:
             with self.subTest(label):
+                self.fresh_config()
                 self.check_scope(tools)
                 left = self.settle(reply("Done", line))
                 self.assertEqual(left, expect, "%s cleared a row the direct form does not clear" % label)
@@ -348,6 +359,27 @@ class SettleTests(unittest.TestCase):
         missing = os.path.join(self.scratch, "no-such-transcript.jsonl")
         left = self.settle(NEUTRAL, missing)
         self.assertEqual(left, [INTERRUPT], "an agent_id row with an unreadable transcript still blocked the Stop")
+
+    # ---- tool_use_sources reads the agent folder that hooks/own_session.py names (rule agent-transcript-path-one-home)
+
+    def test_r12_tool_use_sources_reads_the_agent_folder_beside_the_transcript(self):
+        transcript = self.transcript([HUMAN, tool_use("toolu_orch_r12", INTERRUPT)])
+        self.agent_file(transcript, "agent-r12", [tool_use("toolu_agent_r12", CREATE, sidechain=True)])
+        sources = report_guard.tool_use_sources(transcript)
+        self.assertIsNotNone(sources, "scope: the transcript was not read")
+        agent, orchestrator = sources
+        self.assertIn("toolu_agent_r12", agent, "tool_use_sources does not read the agent file beside the transcript")
+        self.assertIn("toolu_orch_r12", orchestrator, "tool_use_sources does not read the main transcript's calls")
+
+    def test_r13_tool_use_sources_reads_the_home_folder(self):
+        self.assertTrue(hasattr(own_session, "agent_transcript_dir"),
+                        "own_session has no agent_transcript_dir: the one home of the agent folder is not built")
+        transcript = self.transcript([HUMAN, tool_use("toolu_orch_r13", INTERRUPT)])
+        folder = own_session.agent_transcript_dir(transcript)
+        self.write_jsonl(os.path.join(folder, "agent-r13.jsonl"), [tool_use("toolu_agent_r13", CREATE, sidechain=True)])
+        sources = report_guard.tool_use_sources(transcript)
+        self.assertIsNotNone(sources, "scope: the transcript was not read")
+        self.assertIn("toolu_agent_r13", sources[0], "tool_use_sources reads a folder other than the home's")
 
 
 if __name__ == "__main__":

@@ -6,10 +6,12 @@ session_start.sh` with the session payload on stdin. Stdlib only. Exit 0 on PASS
 
     python hooks/test_session_start.py
 """
+import hashlib
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -53,15 +55,15 @@ def merge_role_sentence(line):
     return line[0 if start < 0 else start + 2:len(line) if end < 0 else end + 1]
 
 
-def sh_exe():
-    """Git's own sh.exe on Windows, by full path. A bare `sh` can resolve to the WSL stub."""
+def sh_exe(name="sh"):
+    """Git's own sh.exe (or bash.exe, with name="bash") on Windows, by full path. A bare name can resolve to the WSL stub."""
     if os.name != "nt":
-        return shutil.which("sh") or "sh"
+        return shutil.which(name) or name
     for var in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
-        candidate = os.path.join(os.environ.get(var) or "", "Git", "bin", "sh.exe")
+        candidate = os.path.join(os.environ.get(var) or "", "Git", "bin", name + ".exe")
         if os.path.isfile(candidate):
             return candidate
-    sys.exit("fixture setup failed: Git sh.exe not found")
+    sys.exit("fixture setup failed: Git %s.exe not found" % name)
 
 
 def vcs(where, *args):
@@ -94,6 +96,11 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         vcs(self.primary, "commit", "-q", "-m", "first")
         self.made = 0
 
+    def put(self, path, text):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+
     def add_agent_worktrees(self, count):
         for _ in range(count):
             self.made += 1
@@ -101,7 +108,7 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             vcs(self.primary, "worktree", "add", "-q", "--detach", "--no-checkout", path, "HEAD")
 
     def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
-                 remote_session_id=None):
+                 remote_session_id=None, path_dir=None, trace_file=None):
         """The hook's stdout lines. Its stderr lands in self.last_stderr.
 
         remote: the CLAUDE_CODE_REMOTE value, or None to unset it as a non-cloud runner does.
@@ -109,6 +116,8 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         session_cwd: the session's cwd, in the payload and as the process cwd; None means the primary checkout.
         source: the payload's "source" (startup, resume, ...), or None to send none.
         compact: send the payload with no spaces after its separators, the way the hook's sed must also read it.
+        path_dir: a folder put first on PATH, such as a git shim's folder, or None for the runner's own PATH.
+        trace_file: a file git appends its own trace to (GIT_TRACE), or None for no trace.
         """
         where = self.primary if session_cwd is None else session_cwd
         # Forward slashes: the hook reads "cwd" with sed, and a doubled backslash is not a path.
@@ -117,6 +126,10 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             body["source"] = source
         payload = json.dumps(body, separators=(",", ":") if compact else None)
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.config, CLAUDE_SETTINGS_FETCH_TIMEOUT=fetch_timeout)
+        if path_dir is not None:
+            env["PATH"] = path_dir + os.pathsep + env.get("PATH", "")
+        if trace_file is not None:
+            env["GIT_TRACE"] = trace_file.replace("\\", "/")
         # The test runner may itself be a cloud session, so each run sets the variable it means.
         env.pop("CLAUDE_CODE_REMOTE", None)
         env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
@@ -662,11 +675,6 @@ class SessionStartWaitingPageTests(SessionStartAgentWorktreeNoticeTests):
         self.put(os.path.join(self.config, "CLAUDE.md"), "@%s/CLAUDE.md\n" % self.pointer.replace("\\", "/"))
         self.waiting_extras(self.primary)
 
-    def put(self, path, text):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as handle:
-            handle.write(text)
-
     def waiting_extras(self, checkout):
         """The checkout's extras file names the waiting page, as lint/layout.py reads it."""
         self.put(os.path.join(checkout, ".claude", "layout-extras.json"),
@@ -718,6 +726,919 @@ class SessionStartWaitingPageTests(SessionStartAgentWorktreeNoticeTests):
         hits = self.waiting_lines(self.run_checked(session_cwd=linked))
         self.assertEqual(len(hits), 1, "expected one waiting page line from the linked worktree, got %r" % hits)
         self.assertIn("behind", hits[0], "the waiting page line does not say behind: %r" % hits[0])
+
+
+# The standing-grant check (rule grants-read-from-main). The hook compares the committed blobs of CLAUDE.md and
+# .claude/CLAUDE.md at HEAD with origin/main's, and prints the lines these tests pin. The texts are stand-ins: the
+# hook compares blob shas and never reads the words.
+GRANT_FILES = ("CLAUDE.md", ".claude/CLAUDE.md")
+GRANT_STALE = "# stale grants: the acts an old checkout held\n"
+GRANT_FRESH = "# fresh grants: the acts origin/main holds\n"
+GRANT_STALE_DOT = "# stale copy under .claude\n"
+GRANT_FRESH_DOT = "# fresh copy under .claude\n"
+GRANT_WORD = re.compile(r"standing grant")
+GRANT_UNKNOWN = re.compile(r"^checkout .+: standing grant check unknown, neither origin/main nor origin/HEAD "
+                           r"could be read$")
+GIT_STARTS_LOG = "git-starts.log"
+GIT_TRACE_LOG = "git-trace.log"
+
+
+def grant_text(tag, count):
+    """A grant file of `count` lines: the full-size state."""
+    return "".join("%s grant line %d\n" % (tag, number) for number in range(count))
+
+
+def differ_line(rel, ref):
+    """The one line a grant file prints when it differs from `ref`. Group 1 is the ref's short sha."""
+    return re.compile(r"^checkout .+: %s differs from %s at ([0-9a-f]{7,40}); read the standing grants with git show "
+                      r"%s:%s$" % (re.escape(rel), re.escape(ref), re.escape(ref), re.escape(rel)))
+
+
+def names_the_grant_check(argv):
+    """True when a git start is one the grant check makes: it names a grant file, an origin ref, or a stdin read.
+    The hook's own default-branch read (symbolic-ref, which names origin/HEAD) runs before the check, so it is not
+    counted."""
+    if argv.split()[0] == "symbolic-ref":
+        return False
+    return any(part in argv for part in ("CLAUDE.md", "origin", "--batch", "--stdin"))
+
+
+class GitFixtureMixin:
+    """Fixture helpers for a checkout with a local origin: refs, grant files, the hook run, the git starts the run
+    makes (read from a PATH shim's log), and the checkout's file snapshot. The grant and fetch classes share them."""
+
+    # Fixture helpers. Every ref and commit lives in self.primary, the checkout the hook reads.
+
+    def head_sha(self):
+        return vcs(self.primary, "rev-parse", "HEAD").stdout.strip()
+
+    def resolve(self, rev):
+        """The sha `rev` names, or None when it does not resolve."""
+        answer = subprocess.run([VCS, "-C", self.primary, "rev-parse", "-q", "--verify", rev],
+                                capture_output=True, text=True, timeout=60)
+        return answer.stdout.strip() if answer.returncode == 0 else None
+
+    def blob(self, rev, rel):
+        """The blob sha of `rel` at `rev`, or None when the path is absent there."""
+        return self.resolve("%s:%s" % (rev, rel))
+
+    def set_grants(self, claude_md, dot_claude_md):
+        """Writes each grant file in the primary checkout and stages it past .gitignore. None removes the file."""
+        for rel, text in zip(GRANT_FILES, (claude_md, dot_claude_md)):
+            path = os.path.join(self.primary, *rel.split("/"))
+            if text is None:
+                if os.path.exists(path):
+                    os.remove(path)
+                vcs(self.primary, "rm", "-q", "--cached", "--ignore-unmatch", "--", rel)
+            else:
+                self.put(path, text)
+                vcs(self.primary, "add", "-f", "--", rel)
+
+    def commit(self, message):
+        vcs(self.primary, "commit", "-q", "--allow-empty", "-m", message)
+
+    def tip_with(self, claude_md, dot_claude_md):
+        """The sha of a commit on top of HEAD that holds these grant files and a changed f.txt. It is made on a side
+        branch, so HEAD and the checkout end where they began."""
+        side = "grants-side-tip"
+        vcs(self.primary, "checkout", "-q", "-b", side)
+        try:
+            self.put(os.path.join(self.primary, "f.txt"), "tip\n")
+            vcs(self.primary, "add", "--", "f.txt")
+            self.set_grants(claude_md, dot_claude_md)
+            self.commit("grants at the tip")
+            return self.head_sha()
+        finally:
+            vcs(self.primary, "checkout", "-q", "main")
+            vcs(self.primary, "branch", "-q", "-D", side)
+
+    def point_origin_main(self, sha):
+        vcs(self.primary, "update-ref", "refs/remotes/origin/main", sha)
+
+    def point_origin_head_at(self, sha):
+        """origin/HEAD names origin/trunk, which sits at `sha`. origin/main is left as it was."""
+        vcs(self.primary, "update-ref", "refs/remotes/origin/trunk", sha)
+        vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+
+    def run_checked(self, session_cwd=None, path_dir=None, fetch_timeout="30", trace_file=None):
+        """The hook's lines, after a control: the hook ran and printed its checkout line."""
+        lines = self.run_hook(session_cwd=session_cwd, path_dir=path_dir, fetch_timeout=fetch_timeout,
+                              trace_file=trace_file)
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "the hook printed no checkout line: %r" % lines)
+        return lines
+
+    @staticmethod
+    def grant_lines_of(lines):
+        return [line for line in lines if GRANT_WORD.search(line)]
+
+    def assert_one_differ_line(self, lines, rel, ref, tip):
+        """Exactly one grant line: the line for `rel` against `ref`, whose short sha is a prefix of `tip`."""
+        grant = self.grant_lines_of(lines)
+        self.assertEqual(len(grant), 1, "want one grant line for %s, got %r" % (rel, grant))
+        found = differ_line(rel, ref).match(grant[0])
+        self.assertIsNotNone(found, "the grant line is not the %s line against %s: %r" % (rel, ref, grant[0]))
+        self.assertTrue(tip.startswith(found.group(1)),
+                        "the line's sha %s is not a prefix of %s, the tip of %s: %r"
+                        % (found.group(1), tip, ref, grant[0]))
+
+    def make_git_shim(self):
+        """A folder whose `git` appends its arguments to git-starts.log under the run root, then runs the real git."""
+        real = shutil.which("git")
+        folder = os.path.join(self.root, "shim")
+        os.makedirs(folder)
+        log = os.path.join(self.root, GIT_STARTS_LOG)
+        script = os.path.join(folder, "git")
+        with open(script, "w", encoding="utf-8") as handle:
+            handle.write("#!/bin/sh\nprintf '%%s\\n' \"$*\" >> \"%s\"\nexec \"%s\" \"$@\"\n" % (log, real))
+        os.chmod(script, 0o755)
+        return folder
+
+    def run_logged(self, session_cwd=None):
+        """The hook's lines, and each git start it made, read back from the log of the shim on its PATH."""
+        if getattr(self, "shim_folder", None) is None:
+            self.shim_folder = self.make_git_shim()
+        log = os.path.join(self.root, GIT_STARTS_LOG)
+        if os.path.exists(log):
+            os.remove(log)
+        lines = self.run_checked(session_cwd=session_cwd, path_dir=self.shim_folder)
+        starts = []
+        if os.path.exists(log):
+            with open(log, encoding="utf-8") as handle:
+                starts = [entry.strip() for entry in handle if entry.strip()]
+        return lines, starts
+
+    def run_traced(self, session_cwd=None, fetch_timeout="30"):
+        """The hook's lines, and each git start the run made, read from git's own trace (GIT_TRACE). A PATH shim does not
+        run on every platform; git writes its trace itself, the same way everywhere. Each start is git's argv without
+        the leading `git`, so the fetch checks read it as they read a shim's log."""
+        trace = os.path.join(self.root, GIT_TRACE_LOG)
+        if os.path.exists(trace):
+            os.remove(trace)
+        lines = self.run_checked(session_cwd=session_cwd, fetch_timeout=fetch_timeout, trace_file=trace)
+        starts = []
+        if os.path.exists(trace):
+            with open(trace, encoding="utf-8") as handle:
+                for entry in handle:
+                    if "built-in: git " in entry:
+                        starts.append(entry.split("built-in: git ", 1)[1].strip())
+        return lines, starts
+
+    def assert_grant_check_is_cheap(self):
+        """The grant check starts at most two git processes that name a grant or origin, and no git fetch runs.
+        The notice is asserted first, so the count is taken on a run that made the check."""
+        lines, starts = self.run_logged()
+        self.assertTrue(self.grant_lines_of(lines), "no grant line, so the check did not run: %r" % lines)
+        named = [start for start in starts if names_the_grant_check(start)]
+        self.assertLessEqual(len(named), 2, "the grant check starts %d git processes, want at most 2; all git starts: %r"
+                             % (len(named), starts))
+        fetches = [start for start in starts if start.split()[0] == "fetch"]
+        self.assertEqual(fetches, [], "the hook starts git fetch: %r" % fetches)
+
+    def snapshot(self):
+        """Each file under the primary checkout, .git included, as (size, mtime_ns, sha-256), keyed by its path.
+        .git/index is left out: git status rewrites its stat cache on its own while an entry is racy (written in the
+        same second as the file), which is git's bookkeeping, not a write the grant check makes."""
+        found = {}
+        for dirpath, _dirs, names in os.walk(self.primary):
+            for name in names:
+                path = os.path.join(dirpath, name)
+                rel = os.path.relpath(path, self.primary)
+                if rel == os.path.join(".git", "index"):
+                    continue
+                with open(path, "rb") as handle:
+                    body = handle.read()
+                info = os.stat(path)
+                found[rel] = (info.st_size, info.st_mtime_ns, hashlib.sha256(body).hexdigest())
+        return found
+
+
+class SessionStartGrantsFromMainTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTests):
+    """Rule grants-read-from-main. A session that cites a standing grant reads it from origin/main. The hook prints one
+    line per grant file whose HEAD blob differs from origin/main's, or that sits on one side only. origin/HEAD's target
+    stands in when origin/main is absent. One unknown line prints when neither ref can be read. Otherwise silent.
+    Incident: a coordinator read the grants from a stale checkout."""
+
+    # The 51-worktree case builds 51 worktrees; this class does not repeat it.
+    test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
+
+    def setUp(self):
+        super().setUp()
+        # HEAD starts on the stale grants, as the incident's checkout did. No origin ref exists until a test makes one.
+        self.set_grants(GRANT_STALE, GRANT_STALE_DOT)
+        self.commit("stale grants")
+        self.shim_folder = None
+
+    # Blob comparison. A grant file that differs, or sits on one side only, prints its line.
+
+    def test_equal_blobs_on_a_newer_commit_print_no_grant_line(self):
+        # Control: origin/main is a newer commit whose grant blobs equal HEAD's, so only a blob compare stays silent.
+        origin = self.tip_with(GRANT_STALE, GRANT_STALE_DOT)
+        self.point_origin_main(origin)
+        self.assertNotEqual(self.head_sha(), origin, "scope: origin/main is HEAD itself")
+        for rel in GRANT_FILES:
+            self.assertIsNotNone(self.blob("HEAD", rel), "scope: HEAD has no %s" % rel)
+            self.assertEqual(self.blob("HEAD", rel), self.blob("origin/main", rel), "scope: %s differs" % rel)
+        self.assertEqual(self.grant_lines_of(self.run_checked()), [], "a grant line printed for equal blobs")
+
+    def test_a_stale_root_claude_md_prints_one_line_naming_it(self):
+        self.point_origin_main(self.tip_with(GRANT_FRESH, GRANT_STALE_DOT))
+        self.assertNotEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/main", "CLAUDE.md"),
+                            "scope: the root CLAUDE.md does not differ")
+        self.assertEqual(self.blob("HEAD", ".claude/CLAUDE.md"), self.blob("origin/main", ".claude/CLAUDE.md"),
+                         "scope: the .claude copy differs")
+        self.assert_one_differ_line(self.run_checked(), "CLAUDE.md", "origin/main", self.resolve("origin/main"))
+
+    def test_a_stale_dot_claude_md_prints_one_line_naming_it(self):
+        self.point_origin_main(self.tip_with(GRANT_STALE, GRANT_FRESH_DOT))
+        self.assertNotEqual(self.blob("HEAD", ".claude/CLAUDE.md"), self.blob("origin/main", ".claude/CLAUDE.md"),
+                            "scope: the .claude copy does not differ")
+        self.assertEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/main", "CLAUDE.md"),
+                         "scope: the root CLAUDE.md differs")
+        self.assert_one_differ_line(self.run_checked(), ".claude/CLAUDE.md", "origin/main", self.resolve("origin/main"))
+
+    def test_both_files_differing_at_full_size_print_one_line_each(self):
+        big = grant_text("stale", 2000)
+        self.set_grants(big, big)
+        self.commit("full-size grants")
+        fresh = grant_text("fresh", 2000)
+        self.point_origin_main(self.tip_with(fresh, fresh))
+        for rel in GRANT_FILES:
+            self.assertNotEqual(self.blob("HEAD", rel), self.blob("origin/main", rel), "scope: %s does not differ" % rel)
+        grant = self.grant_lines_of(self.run_checked())
+        self.assertEqual(len(grant), 2, "want one grant line per file, got %r" % grant)
+        for rel in GRANT_FILES:
+            matched = [line for line in grant if differ_line(rel, "origin/main").match(line)]
+            self.assertEqual(len(matched), 1, "want one line for %s, got %r" % (rel, grant))
+
+    def test_a_root_claude_md_missing_on_origin_main_prints_its_line(self):
+        self.point_origin_main(self.tip_with(None, GRANT_STALE_DOT))
+        self.assertIsNotNone(self.blob("HEAD", "CLAUDE.md"), "scope: HEAD has no CLAUDE.md")
+        self.assertIsNone(self.blob("origin/main", "CLAUDE.md"), "scope: origin/main still has CLAUDE.md")
+        self.assert_one_differ_line(self.run_checked(), "CLAUDE.md", "origin/main", self.resolve("origin/main"))
+
+    def test_a_root_claude_md_missing_at_head_prints_its_line(self):
+        self.set_grants(None, GRANT_STALE_DOT)
+        self.commit("no root grants")
+        self.point_origin_main(self.tip_with(GRANT_FRESH, GRANT_STALE_DOT))
+        self.assertIsNone(self.blob("HEAD", "CLAUDE.md"), "scope: HEAD still has CLAUDE.md")
+        self.assertIsNotNone(self.blob("origin/main", "CLAUDE.md"), "scope: origin/main has no CLAUDE.md")
+        self.assert_one_differ_line(self.run_checked(), "CLAUDE.md", "origin/main", self.resolve("origin/main"))
+
+    def test_neither_file_on_either_side_prints_no_grant_line(self):
+        self.set_grants(None, None)
+        self.commit("no grants")
+        self.point_origin_main(self.tip_with(None, None))
+        self.assertIsNotNone(self.resolve("origin/main"), "scope: origin/main does not resolve")
+        for rel in GRANT_FILES:
+            self.assertIsNone(self.blob("HEAD", rel), "scope: HEAD has %s" % rel)
+            self.assertIsNone(self.blob("origin/main", rel), "scope: origin/main has %s" % rel)
+        self.assertEqual(self.grant_lines_of(self.run_checked()), [], "a grant line printed with neither file present")
+
+    def test_uncommitted_grant_edits_print_no_grant_line(self):
+        self.point_origin_main(self.head_sha())
+        self.put(os.path.join(self.primary, "CLAUDE.md"), GRANT_FRESH)
+        with open(os.path.join(self.primary, "CLAUDE.md"), encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), GRANT_FRESH, "scope: the working copy was not edited")
+        self.assertEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/main", "CLAUDE.md"),
+                         "scope: the committed CLAUDE.md differs")
+        self.assertEqual(self.grant_lines_of(self.run_checked()), [], "a grant line printed for an uncommitted edit")
+
+    # Refs. The ref the check reads, origin/main or origin/HEAD's target, and what it says when neither reads.
+
+    def test_no_origin_main_and_no_origin_head_prints_one_unknown_line(self):
+        # A grant file at HEAD is something to cite, and no ref is there to read it against: the one unknown case.
+        self.assertIsNone(self.resolve("origin/main"), "scope: origin/main resolves")
+        self.assertIsNone(self.resolve("origin/HEAD"), "scope: origin/HEAD resolves")
+        self.assertTrue(any(self.blob("HEAD", rel) for rel in GRANT_FILES), "scope: HEAD holds no grant file")
+        grant = self.grant_lines_of(self.run_checked())
+        self.assertEqual(len(grant), 1, "want one unknown line, got %r" % grant)
+        self.assertRegex(grant[0], GRANT_UNKNOWN, "the line is not the unknown line: %r" % grant[0])
+
+    def test_no_grant_file_at_head_and_no_origin_ref_prints_no_grant_line(self):
+        # Control: nothing to cite and no ref to read it against, so the check stays silent rather than unknown.
+        self.set_grants(None, None)
+        self.commit("no grants")
+        self.assertIsNone(self.resolve("origin/main"), "scope: origin/main resolves")
+        self.assertIsNone(self.resolve("origin/HEAD"), "scope: origin/HEAD resolves")
+        for rel in GRANT_FILES:
+            self.assertIsNone(self.blob("HEAD", rel), "scope: HEAD has %s" % rel)
+        self.assertEqual(self.grant_lines_of(self.run_checked()), [],
+                         "an unknown line printed with no grant file at HEAD")
+
+    def test_origin_head_target_is_read_when_origin_main_is_absent(self):
+        trunk = self.tip_with(GRANT_FRESH, GRANT_STALE_DOT)
+        self.point_origin_head_at(trunk)
+        self.assertIsNone(self.resolve("origin/main"), "scope: origin/main resolves")
+        self.assertEqual(self.resolve("origin/HEAD"), trunk, "scope: origin/HEAD is not the trunk tip")
+        self.assertNotEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/HEAD", "CLAUDE.md"),
+                            "scope: CLAUDE.md does not differ from the trunk tip")
+        self.assert_one_differ_line(self.run_checked(), "CLAUDE.md", "origin/trunk", trunk)
+
+    def test_origin_main_is_read_before_origin_head(self):
+        main = self.tip_with(GRANT_FRESH, GRANT_STALE_DOT)
+        self.point_origin_main(main)
+        self.point_origin_head_at(self.head_sha())
+        self.assertEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/HEAD", "CLAUDE.md"),
+                         "scope: origin/HEAD's CLAUDE.md differs from HEAD")
+        self.assertNotEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/main", "CLAUDE.md"),
+                            "scope: origin/main's CLAUDE.md does not differ")
+        self.assert_one_differ_line(self.run_checked(), "CLAUDE.md", "origin/main", main)
+
+    def test_origin_head_alone_prints_no_grant_line_while_origin_main_matches(self):
+        self.point_origin_main(self.head_sha())
+        self.point_origin_head_at(self.tip_with(GRANT_FRESH, GRANT_FRESH_DOT))
+        self.assertNotEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/HEAD", "CLAUDE.md"),
+                            "scope: origin/HEAD's CLAUDE.md does not differ")
+        for rel in GRANT_FILES:
+            self.assertEqual(self.blob("HEAD", rel), self.blob("origin/main", rel), "scope: origin/main's %s differs" % rel)
+        self.assertEqual(self.grant_lines_of(self.run_checked()), [],
+                         "origin/HEAD's target was read while origin/main matched")
+
+    # Where the check runs, and the line's sha.
+
+    def test_a_session_in_a_subfolder_reads_the_toplevel_grants(self):
+        self.point_origin_main(self.tip_with(GRANT_FRESH, GRANT_STALE_DOT))
+        sub = os.path.join(self.primary, "sub")
+        os.makedirs(sub)
+        self.assert_one_differ_line(self.run_checked(session_cwd=sub), "CLAUDE.md", "origin/main",
+                                    self.resolve("origin/main"))
+
+    def test_a_linked_worktree_session_compares_its_own_head(self):
+        self.point_origin_main(self.tip_with(GRANT_FRESH, GRANT_STALE_DOT))
+        linked = os.path.join(self.primary, ".claude", "worktrees", "agent-grants")
+        vcs(self.primary, "worktree", "add", "-q", "--detach", linked, "HEAD")
+        self.assertEqual(vcs(linked, "rev-parse", "HEAD").stdout.strip(), self.head_sha(),
+                         "scope: the linked worktree is not at HEAD")
+        self.assert_one_differ_line(self.run_checked(session_cwd=linked), "CLAUDE.md", "origin/main",
+                                    self.resolve("origin/main"))
+
+    # Cost: at most two git starts for the check, no fetch, no file written. Each cost case first asserts its
+    # grant line, so a run that never made the check cannot pass on a low count.
+
+    @unittest.skipIf(os.name == "nt", "the git shim is a POSIX sh script")
+    def test_the_grant_check_starts_at_most_two_git_processes_when_origin_main_differs(self):
+        self.point_origin_main(self.tip_with(GRANT_FRESH, GRANT_STALE_DOT))
+        self.assert_grant_check_is_cheap()
+
+    @unittest.skipIf(os.name == "nt", "the git shim is a POSIX sh script")
+    def test_the_grant_check_starts_at_most_two_git_processes_when_only_origin_head_is_readable(self):
+        self.point_origin_head_at(self.tip_with(GRANT_FRESH, GRANT_STALE_DOT))
+        self.assert_grant_check_is_cheap()
+
+    @unittest.skipIf(os.name == "nt", "the git shim is a POSIX sh script")
+    def test_the_grant_check_starts_at_most_two_git_processes_when_no_origin_ref_is_readable(self):
+        self.assert_grant_check_is_cheap()
+
+    def test_the_grant_check_writes_no_file_in_the_checkout_or_git_dir(self):
+        self.point_origin_main(self.tip_with(GRANT_FRESH, GRANT_STALE_DOT))
+        before = self.snapshot()
+        lines = self.run_checked()
+        after = self.snapshot()
+        self.assertTrue(self.grant_lines_of(lines), "no grant line, so the check did not run: %r" % lines)
+        changed = sorted(name for name in set(before) | set(after) if before.get(name) != after.get(name))
+        self.assertEqual(changed, [], "the hook wrote or changed files: %r" % changed)
+
+
+# The fetch half of rule grants-read-from-main. A refresh that fails leaves its grant line marked unrefreshed; the
+# local main line counts behind and ahead against origin/main; a refresh that did not run says so.
+REFRESH_FAILED = re.compile(r"^checkout .+: the origin fetch did not run, so origin refs may be stale; freshness unknown$")
+UNREFRESHED = re.compile(r"^checkout .+: CLAUDE\.md differs from origin/main at ([0-9a-f]{7,40}); read the standing "
+                         r"grants with git show origin/main:CLAUDE\.md; origin/main is unrefreshed$")
+LOCAL_MAIN = re.compile(r"^checkout .+: local main is (\d+) commits? behind origin/main(?: and (\d+) commits? ahead)?$")
+DEFAULT_BEHIND = re.compile(r"^checkout .+: main is (\d+) commits behind origin/main; pull before you read it$")
+
+
+class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTests):
+    """Rule grants-read-from-main, fetch half. The session start refreshes origin with one `git fetch --prune origin` on
+    any branch, before the grants compare. A refresh that fails says so. Local main is compared with origin/main and
+    never moved. Prune drops only remote-tracking refs. Incident: a lane read a stale origin/main, so two stale copies
+    of main were compared."""
+
+    # The 51-worktree case builds 51 worktrees; this class does not repeat it.
+    test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
+
+    def setUp(self):
+        super().setUp()
+        self.origin_repo = os.path.join(self.root, "origin.git")
+        vcs(self.root, "init", "-q", "--bare", "-b", "main", "origin.git")
+        vcs(self.primary, "remote", "add", "origin", self.origin_repo)
+        self.set_grants(GRANT_STALE, GRANT_STALE_DOT)
+        self.commit("stale grants")
+        vcs(self.primary, "push", "-q", "origin", "main")
+
+    def advance_origin_main(self, commits=1):
+        """Another clone pushes `commits` commits to origin's main; the first carries fresh grants. The primary checkout
+        does not fetch them. Returns the new tip's sha."""
+        other = os.path.join(self.root, "other")
+        vcs(self.root, "clone", "-q", self.origin_repo, other)
+        self.put(os.path.join(other, "CLAUDE.md"), GRANT_FRESH)
+        self.put(os.path.join(other, ".claude", "CLAUDE.md"), GRANT_STALE_DOT)
+        vcs(other, "add", "-f", "--", "CLAUDE.md", ".claude/CLAUDE.md")
+        vcs(other, "commit", "-q", "-m", "fresh grants at origin")
+        for number in range(2, commits + 1):
+            vcs(other, "commit", "-q", "--allow-empty", "-m", "origin commit %d" % number)
+        vcs(other, "push", "-q", "origin", "HEAD:main")
+        return vcs(other, "rev-parse", "HEAD").stdout.strip()
+
+    def checkout_lane(self):
+        vcs(self.primary, "checkout", "-q", "-b", "lane-x")
+
+    @staticmethod
+    def fetch_starts(starts):
+        return [start for start in starts if start.split()[0] == "fetch"]
+
+    def assert_one_prune_fetch(self, starts):
+        """Exactly one git fetch, and it is `fetch --prune origin`: prune, origin last, no refspec."""
+        fetches = self.fetch_starts(starts)
+        self.assertEqual(len(fetches), 1, "want one git fetch at session start, got %r" % starts)
+        tokens = fetches[0].split()
+        self.assertEqual(tokens[-1], "origin", "the fetch does not name origin last: %r" % fetches[0])
+        self.assertIn("--prune", tokens, "the fetch does not prune: %r" % fetches[0])
+        self.assertEqual(set(tokens[1:-1]) - {"--prune", "--quiet", "-q"}, set(),
+                         "the fetch names a refspec: %r" % fetches[0])
+
+    def assert_local_main_line(self, lines, behind, ahead):
+        found = [line for line in lines if LOCAL_MAIN.match(line)]
+        self.assertEqual(len(found), 1, "want one local main line, got %r" % lines)
+        match = LOCAL_MAIN.match(found[0])
+        self.assertEqual(match.group(1), behind, "the behind count is wrong: %r" % found[0])
+        self.assertEqual(match.group(2), ahead, "the ahead count is wrong: %r" % found[0])
+
+    # The refresh, on any branch and in any checkout.
+
+    def test_a_lane_branch_fetches_origin_before_the_grants_compare(self):
+        fresh = self.advance_origin_main()
+        self.checkout_lane()
+        self.assertNotEqual(self.resolve("origin/main"), fresh, "scope: origin/main is already fresh")
+        self.assertEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/main", "CLAUDE.md"),
+                         "scope: the lane's CLAUDE.md differs before the refresh")
+        lines = self.run_checked()
+        self.assert_one_differ_line(lines, "CLAUDE.md", "origin/main", fresh)
+
+    def test_a_lane_branch_runs_one_prune_fetch_of_origin(self):
+        self.advance_origin_main()
+        self.checkout_lane()
+        _, starts = self.run_traced()
+        self.assert_one_prune_fetch(starts)
+
+    def test_a_detached_head_fetches_origin_before_the_grants_compare(self):
+        fresh = self.advance_origin_main()
+        vcs(self.primary, "checkout", "-q", "--detach")
+        self.assertNotEqual(self.resolve("origin/main"), fresh, "scope: origin/main is already fresh")
+        self.assertEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/main", "CLAUDE.md"),
+                         "scope: the detached CLAUDE.md differs before the refresh")
+        lines = self.run_checked()
+        self.assert_one_differ_line(lines, "CLAUDE.md", "origin/main", fresh)
+
+    def test_a_detached_head_runs_one_prune_fetch_of_origin(self):
+        self.advance_origin_main()
+        vcs(self.primary, "checkout", "-q", "--detach")
+        _, starts = self.run_traced()
+        self.assert_one_prune_fetch(starts)
+
+    def test_the_refresh_is_one_fetch_of_all_of_origin(self):
+        self.checkout_lane()
+        _, starts = self.run_traced()
+        self.assert_one_prune_fetch(starts)
+
+    def test_the_claude_settings_clone_refreshes_with_one_fetch_of_all_of_origin(self):
+        # The checkout is the claude-settings clone: its own freshness check and the session's refresh are one fetch.
+        self.put(os.path.join(self.config, "CLAUDE.md"), "@%s/CLAUDE.md\n" % self.primary.replace("\\", "/"))
+        self.assertEqual(vcs(self.primary, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip(), "main",
+                         "scope: the clone is not on main")
+        _, starts = self.run_traced()
+        self.assert_one_prune_fetch(starts)
+
+    def test_the_default_branch_refreshes_with_one_fetch_of_all_of_origin(self):
+        vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        self.assertEqual(self.resolve("origin/HEAD"), self.resolve("origin/main"),
+                         "scope: origin/HEAD does not name origin/main")
+        _, starts = self.run_traced()
+        self.assert_one_prune_fetch(starts)
+
+    def test_no_origin_remote_starts_no_fetch_and_prints_no_refresh_line(self):
+        vcs(self.primary, "remote", "remove", "origin")
+        self.assertEqual(vcs(self.primary, "remote").stdout.strip(), "", "scope: a remote is still configured")
+        lines, starts = self.run_traced()
+        self.assertEqual(self.fetch_starts(starts), [], "a fetch ran with no origin: %r" % starts)
+        self.assertEqual([line for line in lines if REFRESH_FAILED.match(line)], [],
+                         "a refresh line printed with no origin: %r" % lines)
+
+    # A refresh that fails: one line says so, and the grant line it leaves is marked unrefreshed.
+
+    def stage_a_lane_grant_against_a_missing_origin(self):
+        """A lane whose CLAUDE.md differs from origin/main, with origin set to a path that does not exist. Returns
+        origin/main's tip, which the grant line must not name once the refresh fails."""
+        self.checkout_lane()
+        self.set_grants(GRANT_FRESH, GRANT_STALE_DOT)
+        self.commit("lane grants")
+        stale = self.resolve("origin/main")
+        self.assertNotEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/main", "CLAUDE.md"),
+                            "scope: the lane's CLAUDE.md does not differ")
+        vcs(self.primary, "remote", "set-url", "origin", os.path.join(self.root, "missing.git"))
+        return stale
+
+    def test_a_failed_fetch_is_one_refresh_attempt(self):
+        self.stage_a_lane_grant_against_a_missing_origin()
+        _, starts = self.run_traced()
+        self.assertEqual(len(self.fetch_starts(starts)), 1, "want one refresh attempt, got %r" % starts)
+
+    def test_a_failed_fetch_prints_one_refresh_line_and_marks_the_grant_line_unrefreshed(self):
+        stale = self.stage_a_lane_grant_against_a_missing_origin()
+        lines = self.run_checked()
+        refresh = [line for line in lines if REFRESH_FAILED.match(line)]
+        self.assertEqual(len(refresh), 1, "want one refresh line, got %r" % lines)
+        grant = self.grant_lines_of(lines)
+        self.assertEqual(len(grant), 1, "want one grant line, got %r" % grant)
+        found = UNREFRESHED.match(grant[0])
+        self.assertIsNotNone(found, "the grant line is not marked unrefreshed: %r" % grant[0])
+        self.assertTrue(stale.startswith(found.group(1)), "the line's sha is not origin/main's old tip: %r" % grant[0])
+
+    def test_a_grant_line_after_a_good_refresh_is_not_marked_unrefreshed(self):
+        self.checkout_lane()
+        self.set_grants(GRANT_FRESH, GRANT_STALE_DOT)
+        self.commit("lane grants")
+        stale = self.resolve("origin/main")
+        lines = self.run_checked()
+        self.assert_one_differ_line(lines, "CLAUDE.md", "origin/main", stale)
+
+    # Local main: counted against origin/main, never moved.
+
+    def test_local_main_behind_origin_main_prints_the_behind_count_and_moves_nothing(self):
+        self.advance_origin_main()
+        self.checkout_lane()
+        main_before = self.resolve("refs/heads/main")
+        self.assertEqual(main_before, self.resolve("origin/main"), "scope: local main is not at the stale origin/main")
+        lines = self.run_checked()
+        self.assertEqual(self.resolve("refs/heads/main"), main_before, "the session start moved local main")
+        self.assert_local_main_line(lines, "1", None)
+
+    def test_local_main_ahead_of_origin_main_prints_the_ahead_count(self):
+        self.commit("local only")
+        self.checkout_lane()
+        main_before = self.resolve("refs/heads/main")
+        self.assertNotEqual(main_before, self.resolve("origin/main"), "scope: local main equals origin/main")
+        lines = self.run_checked()
+        self.assertEqual(self.resolve("refs/heads/main"), main_before, "the session start moved local main")
+        self.assert_local_main_line(lines, "0", "1")
+
+    def test_local_main_diverged_from_origin_main_prints_both_counts(self):
+        self.commit("local only")
+        self.advance_origin_main()
+        self.checkout_lane()
+        main_before = self.resolve("refs/heads/main")
+        lines = self.run_checked()
+        self.assertEqual(self.resolve("refs/heads/main"), main_before, "the session start moved local main")
+        self.assert_local_main_line(lines, "1", "1")
+
+    def test_local_main_equal_to_origin_main_prints_no_local_main_line(self):
+        self.checkout_lane()
+        self.assertEqual(self.resolve("refs/heads/main"), self.resolve("origin/main"),
+                         "scope: local main differs from origin/main")
+        lines = self.run_checked()
+        self.assertEqual([line for line in lines if LOCAL_MAIN.match(line)], [],
+                         "a local main line printed for equal refs: %r" % lines)
+
+    def test_no_local_main_prints_no_local_main_line(self):
+        self.advance_origin_main()
+        self.checkout_lane()
+        vcs(self.primary, "branch", "-q", "-D", "main")
+        self.assertIsNone(self.resolve("refs/heads/main"), "scope: local main still exists")
+        self.assertIsNotNone(self.resolve("origin/main"), "scope: origin/main is gone")
+        lines = self.run_checked()
+        self.assertEqual([line for line in lines if LOCAL_MAIN.match(line)], [],
+                         "a local main line printed with no local main: %r" % lines)
+
+    def test_a_default_branch_behind_origin_prints_the_pull_line_and_no_local_main_line(self):
+        self.advance_origin_main(commits=2)
+        vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        main_before = self.resolve("refs/heads/main")
+        self.assertEqual(vcs(self.primary, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip(), "main",
+                         "scope: the primary checkout is not on main")
+        self.assertEqual(self.resolve("origin/HEAD"), main_before, "scope: origin/HEAD does not name the stale origin/main")
+        lines = self.run_checked()
+        behind = [found.group(1) for found in map(DEFAULT_BEHIND.match, lines) if found]
+        self.assertEqual(behind, ["2"], "want one pull line saying main is 2 commits behind origin/main, got %r" % lines)
+        self.assertEqual([line for line in lines if LOCAL_MAIN.match(line)], [],
+                         "a local main line printed beside the pull line for the same branch: %r" % lines)
+        self.assertEqual(self.resolve("refs/heads/main"), main_before, "the session start moved local main")
+
+    # The watchdog: when the fetch returns first, the hook's TERM must end the watchdog's sleep.
+
+    def make_fetch_stall_shim(self, witness):
+        """A folder whose `git fetch` waits, up to 10 seconds, until a `sleep 7` process runs, writes that process's pid
+        to `witness`, and returns 0 at once. The fetch returns first, so the hook's TERM is what must end the sleep.
+        Every other git call runs the real git."""
+        real = shutil.which("git")
+        folder = os.path.join(self.root, "stall-shim")
+        os.makedirs(folder)
+        script = os.path.join(folder, "git")
+        lines = [
+            "#!/bin/sh",
+            'if [ "$1" = fetch ]; then',
+            "  i=0",
+            "  while [ $i -lt 200 ]; do",
+            "    found=$(ps -eo pid=,args= | awk '$2 == \"sleep\" && $3 == \"7\" && NF == 3 { print $1 }')",
+            '    if [ -n "$found" ]; then printf \'%s\\n\' "$found" > "' + witness + '"; exit 0; fi',
+            "    i=$((i + 1))",
+            "    sleep 0.05",
+            "  done",
+            "  exit 0",
+            "fi",
+            'exec "' + real + '" "$@"',
+        ]
+        with open(script, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+        os.chmod(script, 0o755)
+        return folder
+
+    @staticmethod
+    def sleep_seven_pids():
+        """The pids of the processes whose command line is exactly `sleep 7`, as ps lists them now."""
+        answer = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True, text=True, timeout=60)
+        return [fields[0] for fields in (line.split() for line in answer.stdout.splitlines())
+                if fields[1:] == ["sleep", "7"]]
+
+    @unittest.skipIf(os.name == "nt", "the reap check reads POSIX ps and the sh git stub, which Windows does not run")
+    def test_the_watchdog_sleep_is_gone_when_the_fetch_returns_first(self):
+        witness = os.path.join(self.root, "sleep-seen")
+        folder = self.make_fetch_stall_shim(witness)
+        self.run_checked(path_dir=folder, fetch_timeout="7")
+        self.assertTrue(os.path.exists(witness),
+                        "scope: the watchdog's sleep 7 never ran while the fetch held, so the case proves nothing")
+        with open(witness, encoding="utf-8") as handle:
+            pids = handle.read().split()
+        self.assertTrue(pids, "scope: the witness names no pid")
+        self.addCleanup(self.stop_sleeps, pids)
+        left = sorted(set(pids) & set(self.sleep_seven_pids()))
+        self.assertEqual(left, [], "the watchdog's sleep 7 is still running after the hook returned: pid %r" % left)
+
+    @staticmethod
+    def stop_sleeps(pids):
+        """Ends any of the given pids that still run `sleep 7`, so a red run leaves no sleep behind."""
+        for pid in sorted(set(pids) & set(SessionStartFetchTests.sleep_seven_pids())):
+            os.kill(int(pid), signal.SIGTERM)
+
+    # Prune: only remote-tracking refs go.
+
+    def test_prune_drops_a_deleted_branch_s_remote_ref_and_keeps_the_local_branch(self):
+        vcs(self.primary, "branch", "-q", "feature")
+        vcs(self.primary, "push", "-q", "origin", "feature")
+        vcs(self.origin_repo, "branch", "-q", "-D", "feature")
+        self.checkout_lane()
+        self.assertIsNotNone(self.resolve("origin/feature"), "scope: origin/feature is not set")
+        self.assertIsNotNone(self.resolve("refs/heads/feature"), "scope: local feature is not set")
+        self.run_checked()
+        self.assertIsNone(self.resolve("origin/feature"), "the deleted branch's remote ref survived the refresh")
+        self.assertIsNotNone(self.resolve("refs/heads/feature"), "the refresh removed the local branch")
+
+    # Cost: the refresh writes only git's own refs, objects and FETCH_HEAD; the hook is wired at session start only.
+
+    def test_the_refresh_writes_only_git_s_own_refs_objects_and_fetch_head(self):
+        fresh = self.advance_origin_main()
+        self.checkout_lane()
+        before = self.snapshot()
+        self.run_checked()
+        after = self.snapshot()
+        self.assertEqual(self.resolve("origin/main"), fresh, "scope: the refresh did not run")
+        changed = sorted(name.replace(os.sep, "/") for name in set(before) | set(after)
+                         if before.get(name) != after.get(name))
+        allowed = (".git/FETCH_HEAD", ".git/packed-refs", ".git/refs/", ".git/objects/", ".git/logs/refs/remotes/")
+        stray = [name for name in changed if not name.startswith(allowed)]
+        self.assertEqual(stray, [], "the refresh wrote files other than git's refs, objects and FETCH_HEAD: %r" % stray)
+
+    def test_session_start_is_wired_to_session_start_only(self):
+        with open(os.path.join(HERE, "..", "settings.json"), encoding="utf-8") as handle:
+            hooks = json.load(handle)["hooks"]
+
+        def commands(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if key == "command" and isinstance(value, str):
+                        yield value
+                    else:
+                        yield from commands(value)
+            elif isinstance(node, list):
+                for value in node:
+                    yield from commands(value)
+
+        def wired(event):
+            return [text for text in commands(hooks.get(event, [])) if "session_start" in text]
+
+        self.assertTrue(wired("SessionStart"), "scope: SessionStart runs no session_start hook")
+        for event in ("UserPromptSubmit", "PreToolUse"):
+            self.assertEqual(wired(event), [], "session_start is wired to %s" % event)
+
+
+# The platform's Stop-hook script, trimmed to what the stop-push cases need. The anchor line and the two lines around it
+# are verbatim from the platform text (~/.claude/stop-hook-git-check.sh, lines 172-175); the rest is cut.
+PLATFORM_ANCHOR = '  unpushed=$(git rev-list "$upstream..HEAD" --count 2>/dev/null) || unpushed=0'
+PLATFORM_TEXT = """#!/bin/bash
+
+input=$(cat)
+
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  exit 0
+fi
+
+if [[ -z "$(git remote)" ]]; then
+  exit 0
+fi
+
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "There are uncommitted changes in the repository. Please commit and push these changes to the remote branch." >&2
+  exit 2
+fi
+
+untracked_files=$(git ls-files --others --exclude-standard)
+if [[ -n "$untracked_files" ]]; then
+  echo "There are untracked files in the repository. Please commit and push these changes to the remote branch." >&2
+  exit 2
+fi
+
+current_branch=$(git branch --show-current)
+if [[ -n "$current_branch" ]]; then
+  if git rev-parse "origin/$current_branch" >/dev/null 2>&1; then
+    upstream="origin/$current_branch"
+  else
+    upstream="origin/HEAD"
+  fi
+
+  unpushed=$(git rev-list "$upstream..HEAD" --count 2>/dev/null) || unpushed=0
+  if [[ "$unpushed" -gt 0 ]]; then
+    if [[ "$upstream" == "origin/$current_branch" ]]; then
+      echo "There are $unpushed unpushed commit(s) on branch '$current_branch'. Please push these changes to the remote repository." >&2
+    else
+      echo "Branch '$current_branch' has $unpushed unpushed commit(s) and no remote branch. Please push these changes to the remote repository." >&2
+    fi
+    exit 2
+  fi
+fi
+
+exit 0
+"""
+STOP_MARKER = "# claude-settings: skip-merged"  # the marker the patch leaves; the platform script holds it once
+STOP_CITATION = "owner, page item 464 b, 2026-11-09 13:09 CST"  # the ruling the patch cites
+
+
+def full_size_text():
+    """The trimmed text with 150 comment lines after the shebang, about the size of the platform's own script."""
+    filler = "".join("# filler line %03d: the platform script carries its own comment block here\n" % number
+                     for number in range(150))
+    return PLATFORM_TEXT.replace("#!/bin/bash\n", "#!/bin/bash\n" + filler, 1)
+
+
+class SessionStartStopHookPatchTests(SessionStartAgentWorktreeNoticeTests):
+    """The session-start hook patches the platform Stop-hook script once, so its unpushed-commits check skips a
+    branch already merged into origin/main. Real git repos, the hook run as the harness runs it. The platform
+    script is a fixture file in the config folder, never the live one."""
+
+    def setUp(self):
+        super().setUp()
+        self.platform = os.path.join(self.config, "stop-hook-git-check.sh")
+
+    def write_platform(self, text):
+        with open(self.platform, "wb") as handle:
+            handle.write(text.encode("utf-8"))
+        os.chmod(self.platform, 0o755)
+
+    def read_platform(self):
+        with open(self.platform, "rb") as handle:
+            return handle.read()
+
+    def commit_file(self, where, name, text, message):
+        self.put(os.path.join(where, name), text)
+        vcs(where, "add", "--", name)
+        vcs(where, "commit", "-q", "-m", message)
+        return vcs(where, "rev-parse", "HEAD").stdout.strip()
+
+    def make_work(self, local_commit=False):
+        """A clone whose origin/main holds the feature commit, with origin/HEAD stale at the base commit and no
+        origin/feat. The branch `feat` is checked out at that feature commit, which origin/main contains. Returns the
+        clone's path."""
+        seed = os.path.join(self.root, "seed")
+        origin = os.path.join(self.root, "origin.git")
+        work = os.path.join(self.root, "work")
+        vcs(self.root, "init", "-q", "-b", "main", seed)
+        base = self.commit_file(seed, "f.txt", "base\n", "base")
+        feature = self.commit_file(seed, "g.txt", "feature\n", "feature work")
+        self.commit_file(seed, "h.txt", "main moves on\n", "main moves on")
+        vcs(self.root, "clone", "-q", "--bare", seed, origin)
+        vcs(self.root, "clone", "-q", origin, work)
+        vcs(work, "update-ref", "--no-deref", "refs/remotes/origin/HEAD", base)
+        vcs(work, "checkout", "-q", "-b", "feat", feature)
+        if local_commit:
+            self.commit_file(work, "k.txt", "local work\n", "local work")
+        return work
+
+    def run_stop(self, work):
+        """The platform script's exit code and stderr, run as the harness runs it: bash, the payload on stdin, in the clone."""
+        answer = subprocess.run([sh_exe("bash"), self.platform], input="{}", capture_output=True, text=True,
+                                cwd=work, timeout=120)
+        return answer.returncode, answer.stderr
+
+    def test_patch_adds_one_block_after_the_anchor(self):
+        """One hook run puts one block right after the anchor: the is-ancestor line, the marker, the citation. The lines
+        above and below keep their order, and the file keeps its mode."""
+        for label, text in (("trimmed", PLATFORM_TEXT), ("full-size", full_size_text())):
+            with self.subTest(text=label):
+                self.write_platform(text)
+                self.run_hook()
+                self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+                patched = self.read_platform().decode("utf-8")
+                count = patched.count(STOP_MARKER)
+                self.assertEqual(count, 1, "one hook run leaves the skip-merged marker %d times in the platform script, want 1"
+                                 % count)
+                old, new = text.splitlines(), patched.splitlines()
+                at = old.index(PLATFORM_ANCHOR)
+                grown = len(new) - len(old)
+                self.assertEqual(new[:at + 1], old[:at + 1], "the lines above the anchor changed")
+                self.assertEqual(new[at + 1 + grown:], old[at + 1:], "the lines below the inserted block changed")
+                block = new[at + 1:at + 1 + grown]
+                ancestor = [line for line in block
+                            if "unpushed=0" in line and "merge-base --is-ancestor HEAD origin/main" in line]
+                self.assertEqual(len(ancestor), 1, "the block holds %d lines that set unpushed=0 on the is-ancestor check, "
+                                 "want 1: %r" % (len(ancestor), block))
+                self.assertTrue(any(STOP_MARKER in line for line in block), "the block holds no marker line: %r" % block)
+                self.assertTrue(any(STOP_CITATION in line for line in block),
+                                "the block does not cite the owner ruling: %r" % block)
+                if os.name != "nt":
+                    self.assertEqual(os.stat(self.platform).st_mode & 0o777, 0o755,
+                                     "the patch changed the platform script's mode")
+
+    def test_second_run_inserts_nothing(self):
+        """Idempotent: the first run leaves one marker, and a second run leaves the bytes it found."""
+        self.write_platform(PLATFORM_TEXT)
+        self.run_hook()
+        self.assertEqual(self.last_stderr, "", "the first run wrote to stderr: %r" % self.last_stderr)
+        first = self.read_platform()
+        count = first.decode("utf-8").count(STOP_MARKER)
+        self.assertEqual(count, 1, "one hook run leaves the skip-merged marker %d times, want 1" % count)
+        self.run_hook()
+        self.assertEqual(self.last_stderr, "", "the second run wrote to stderr: %r" % self.last_stderr)
+        self.assertEqual(self.read_platform(), first, "a second hook run changed the platform script")
+
+    def test_merged_branch_without_a_remote_branch_exits_zero_after_the_patch(self):
+        """A branch whose head origin/main contains, with no origin/feat: the patched check exits 0, not 2."""
+        work = self.make_work()
+        self.write_platform(PLATFORM_TEXT)
+        rc, err = self.run_stop(work)
+        # Control: the unpatched text names the merged branch as unpushed, so this fixture reaches the defect.
+        self.assertEqual(rc, 2, "control: the unpatched check exits %d for the merged branch, want 2" % rc)
+        self.assertIn("has 1 unpushed commit(s) and no remote branch", err,
+                      "control: the unpatched check gave another message: %r" % err)
+        self.run_hook()
+        rc, err = self.run_stop(work)
+        self.assertEqual(rc, 0, "after the hook ran, the check exits %d for a branch merged into origin/main, want 0: %r"
+                         % (rc, err))
+        self.assertEqual(err, "", "after the hook ran, the check still names a merged branch: %r" % err)
+
+    def test_branch_with_a_real_unpushed_commit_still_exits_two_after_the_patch(self):
+        """A branch with a commit origin/main lacks: the patch is applied, and the check still exits 2 with its nudge."""
+        work = self.make_work(local_commit=True)
+        self.write_platform(PLATFORM_TEXT)
+        self.run_hook()
+        count = self.read_platform().decode("utf-8").count(STOP_MARKER)
+        self.assertEqual(count, 1, "the patch is not applied, so the skip-merged marker count is %d, want 1" % count)
+        rc, err = self.run_stop(work)
+        self.assertEqual(rc, 2, "a branch with a real unpushed commit exits %d after the patch, want 2" % rc)
+        self.assertIn("has 2 unpushed commit(s) and no remote branch", err,
+                      "the check did not print its unpushed nudge: %r" % err)
+
+    def test_changed_platform_text_is_left_alone_and_one_line_says_so(self):
+        """The anchor changed or doubled, or the file is empty: the file stays byte-identical, and the hook prints one
+        line saying the patch was not applied because the platform text changed."""
+        self.assertEqual(PLATFORM_TEXT.count(PLATFORM_ANCHOR), 1,
+                         "fixture setup failed: the anchor is not once in the trimmed text")
+        baseline = self.run_hook()  # no platform file yet, so these are the baseline lines
+        self.assertTrue(any(line.startswith("checkout ") for line in baseline),
+                        "the hook printed no checkout line: %r" % baseline)
+        variants = (
+            ("anchor token changed", PLATFORM_TEXT.replace("--count ", "--number ", 1)),
+            ("anchor twice", PLATFORM_TEXT.replace(PLATFORM_ANCHOR + "\n", PLATFORM_ANCHOR + "\n" + PLATFORM_ANCHOR + "\n", 1)),
+            ("empty file", ""),
+        )
+        for label, text in variants:
+            with self.subTest(variant=label):
+                self.write_platform(text)
+                before = self.read_platform()
+                lines = self.run_hook()
+                self.assertEqual(self.read_platform(), before, "the hook changed the platform script (%s)" % label)
+                extra = [line for line in lines if line not in baseline]
+                self.assertEqual(len(extra), 1, "want one line saying the patch was not applied (%s), got %r" % (label, extra))
+                self.assertIn("not applied", extra[0], "the line does not say the patch was not applied: %r" % extra[0])
+                self.assertIn("changed", extra[0], "the line does not say the platform text changed: %r" % extra[0])
+                self.assertEqual(self.last_stderr, "", "the hook wrote to stderr (%s): %r" % (label, self.last_stderr))
+
+    def test_control_missing_platform_file_stays_silent(self):
+        """Control: with no platform file the hook writes nothing, prints nothing about the
+        patch and exits 0. It guards the new step's silence."""
+        lines = self.run_hook()
+        self.assertFalse(os.path.exists(self.platform), "the hook created the platform script")
+        noise = [line for line in lines if STOP_MARKER in line or "not applied" in line or "stop-hook" in line]
+        self.assertEqual(noise, [], "the hook printed about a missing platform script: %r" % noise)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
 
 
 if __name__ == "__main__":

@@ -16,7 +16,9 @@ extras file holds the artifacts registry (lint/layout.py `artifacts()`). --pick 
 or `a+c` for a multi item; the page's choice must equal it exactly. A decision is never counted without it.
 
 Verdict, one line on stdout, then exit:
-  counted item=ID n=N choice=C at=T [note=JSON]  exit 0. Choice of a multi item: keys joined by `+`.
+  counted item=ID n=N choice=C at=T label=L [note=JSON]  exit 0. Choice of a multi item: keys joined by `+`.
+                                                 L is the picked option's label as one JSON string, a JSON list of
+                                                 labels for a multi item, or null for an overturn. It names the act.
   not counted: REASON                            exit 1. REASON names the failed rule.
   unknown: REASON                                exit 2. No readable registry or waiting-page entry, a fetched file that is
                                                  not one JSON object, or a crash.
@@ -63,7 +65,7 @@ CHECK_FLAGS = (("--root", "<repo>", "repo root of the page (holds the extras fil
                ("--pick", "<key>", "the pick a peer relayed: a key, or a+c for several"))
 COMMAND = " ".join(["python3 ~/.claude/skills/waiting-page/page_grant.py"] +
                    ["%s %s" % (flag, value) for flag, value, _ in CHECK_FLAGS])
-COUNTED_LINE = "counted item=<id>"
+COUNTED_LINE = "counted item=<id> n=<n> choice=<key> at=<time> label=<label>"
 STAMP, USED = ".stamp", ".stamp.used"
 
 
@@ -199,6 +201,18 @@ def choice_of(item, answer):
     raise not_counted("choice %s is not an option key" % json.dumps(choice))
 
 
+def label_of(item, answer, choice):
+    """The label the counted line prints: the picked option's label, a list of them for a multi item, None for an overturn.
+    json.dumps keeps it on one line and escapes quotes and newlines, so a label cannot forge a token on the line."""
+    if choice == "overturn":
+        return None
+    labels = {opt["key"]: opt.get("label") for opt in item.get("options") or []
+              if isinstance(opt, dict) and isinstance(opt.get("key"), str)}
+    if item.get("multi") is True:
+        return [labels.get(key) for key in answer["choice"]]
+    return labels.get(choice)
+
+
 def judge(args):
     """The counted line, or a Verdict raised."""
     folder, made = use_stamp(args.fetched)
@@ -241,7 +255,8 @@ def judge(args):
         raise not_counted("no --pick: a decision is counted only against the pick the peer relayed")
     if choice != args.pick:
         raise not_counted("page pick is %s, not %s" % (choice, args.pick))
-    line = COUNTED_LINE.replace("<id>", args.item) + " n=%d choice=%s at=%s" % (n, choice, answer["at"])
+    line = (COUNTED_LINE.replace("<id>", args.item).replace("<n>", str(n)).replace("<key>", choice)
+            .replace("<time>", answer["at"]).replace("<label>", json.dumps(label_of(item, answer, choice))))
     note = answer.get("note")
     if note:
         line += " note=" + json.dumps(note)

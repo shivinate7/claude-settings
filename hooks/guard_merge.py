@@ -7,18 +7,20 @@ import fnmatch
 import json
 import os
 import re
+from datetime import datetime, timedelta, timezone
 
 from guard_core import (
-    _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
-    git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    SHELL_TOOLS, WRITE_TOOLS, _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
+    dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    strip_heredoc_bodies,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, DATA_TOOL, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    push_destinations, push_refspecs, push_target, push_text,
+    push_calls, push_destinations, push_refspecs, push_target,
 )
 
 
@@ -69,9 +71,10 @@ def gh_call_of(segment: str):
     """Return the tokens after `gh` when the segment's COMMAND WORD is gh, else None.
 
     A repo flag before the verb (`gh -R o/r pr merge`) is valid gh and hid the verb from every
-    caller, which read the first two words. The flag moves to the end: gh reads `-R` after the
-    verb the same, and the callers that look for the repo (merge_call_of, ci_wake) already read
-    it there.
+    caller, which read the first two words. The same flag right after the group word
+    (`gh pr -R o/r comment`) hid the subcommand the same way. The flag moves to the end: gh
+    reads `-R` after the verb the same, and the callers that look for the repo (merge_call_of,
+    ci_wake) already read it there.
     """
     tokens = segment_tokens(segment)
     if not tokens:
@@ -85,12 +88,16 @@ def gh_call_of(segment: str):
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):
         return None
-    rest, root = tokens[index + 1:], []
-    while rest and _gh_root_repo_flag(rest, 0):
-        taken = _gh_root_repo_flag(rest, 0)
-        root += rest[:taken]
-        rest = rest[taken:]
-    return rest + root
+    rest, root, group = tokens[index + 1:], [], []
+    for _ in (0, 1):   # before the group word, then right after it
+        while rest and _gh_root_repo_flag(rest, 0):
+            taken = _gh_root_repo_flag(rest, 0)
+            root += rest[:taken]
+            rest = rest[taken:]
+        if group or not rest:
+            break
+        group, rest = rest[:1], rest[1:]
+    return group + rest + root
 
 
 # ---- a merge made outside the merge tool
@@ -126,11 +133,12 @@ def merge_call_of(segment: str):
     while index < len(args):
         arg = args[index]
         index += 1
-        if arg in ("-R", "--repo"):
+        taken = _gh_root_repo_flag(args, index - 1)
+        if taken == 2:
             repo = args[index] if index < len(args) else ""
             index += 1
-        elif arg.startswith("--repo="):
-            repo = arg[len("--repo="):]
+        elif taken:   # `--repo=o/r`, `-Ro/r`; pflag drops the '=' of a shorthand (`-R=o/r`)
+            repo = arg[len("--repo="):] if arg.startswith("--repo=") else arg[2:].removeprefix("=")
         elif arg in MERGE_VALUE_FLAGS:
             index += 1
         elif arg.startswith("-"):
@@ -316,11 +324,92 @@ def undrafted_pr_create(segment: str) -> bool:
     return not draft
 
 
+# ---- a gh write in a cloud session (rule gh-write-cloud)
+#
+# The GitHub MCP tools and the merge tool write there; a `gh` write is refused. Judged per segment from the
+# command word, so quoted text and heredoc bodies never fire. The caller applies it only when is_cloud().
+GH_WRITE_CLOUD_REASON = (
+    "Rule (GitHub): in a cloud session a pull request write, an issue write and an API write made with gh are "
+    "refused. A GitHub write goes through the GitHub MCP tools, and the merge tool merges. "
+    "Remedy: open a draft PR with mcp__github__create_pull_request, comment with mcp__github__add_issue_comment, "
+    "edit or close with mcp__github__update_pull_request or mcp__github__issue_write, review with "
+    "mcp__github__pull_request_review_write, and merge with `merge <pr> --confirm`. "
+    "(rule gh-write-cloud, a GitHub write in a cloud session goes through the MCP tools)"
+)
+GH_WRITE_VERBS = {"pr": ("create", "merge", "comment", "edit", "close", "review", "ready"),
+                  "issue": ("create", "comment", "edit", "close")}
+GH_API_WRITE_METHODS = ("POST", "PATCH", "PUT", "DELETE")
+# `gh api` flags whose next token is data, never a flag.
+GH_API_VALUE_FLAGS = {"-H", "--header", "-q", "--jq", "-t", "--template", "--cache", "-p", "--preview",
+                      "--hostname", "-R", "--repo"}
+
+
+def _gh_api_write(args) -> str:
+    """The label of a `gh api` call that writes, else "". The last method flag wins, as gh reads it; an
+    explicit method alone decides, and with none a field or input flag makes it a POST."""
+    method, fields, index = "", False, 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg in ("-X", "--method"):
+            method = (args[index] if index < len(args) else "").upper()
+            index += 1
+        elif arg.startswith("--method="):
+            method = arg[len("--method="):].upper()
+        elif arg.startswith("-X") and not arg.startswith("--"):
+            method = arg[2:].lstrip("=").upper()
+        elif arg in GH_API_VALUE_FLAGS:
+            index += 1
+        elif arg in ("-h", "--help"):
+            return ""   # help writes nothing
+        elif arg.startswith(("-f", "-F")) and not arg.startswith("--") or arg in ("--field", "--raw-field", "--input") \
+                or arg.startswith(("--field=", "--raw-field=", "--input=")):
+            fields = True
+    if method:
+        return "api " + method if method in GH_API_WRITE_METHODS else ""
+    return "api with fields" if fields else ""
+
+
+def gh_write_of(segment: str) -> str:
+    """The label of a gh write in the segment (or in a `sh -c` script it holds), else "": gh pr create,
+    merge, comment, edit, close, review or ready; gh issue create, comment, edit or close; gh api with
+    a write method, or with a field or input flag and no method."""
+    tokens = segment_tokens(segment) or []
+    script = inline_script(tokens) if tokens else ""
+    if script:
+        for part in split_segments(script):
+            label = gh_write_of(part) if part.strip() else ""
+            if label:
+                return label
+        return ""
+    rest = gh_call_of(segment)
+    if not rest or "-h" in rest or "--help" in rest:
+        return ""
+    if rest[0] == "api":
+        return _gh_api_write(rest[1:])
+    if len(rest) > 1 and rest[1] in GH_WRITE_VERBS.get(rest[0], ()):
+        return rest[0] + " " + rest[1]
+    return ""
+
+
 # ---- a lane commit of the generated records page (decision records-index-at-merge)
 #
 # The page is rebuilt only at merge. The commit is refused when the page it would hold differs from
 # HEAD's page, the base tip's page AND origin/<base>'s page: a merge of the base into the lane brings
-# the base's page, so it passes. The base is `resolve_default_base`, read at its TIP.
+# the base's page, so it passes. The base is `resolve_default_base`, read at its TIP. A merge that brought
+# a page the base has since moved past also passes: the page equals MERGE_HEAD's page by exact blob id, and
+# one of two holds. MERGE_HEAD is on origin/<base>'s first-parent line (`rev-list --first-parent`), so a
+# branch merged into the base is no pass. Or some best merge base of HEAD and MERGE_HEAD (`merge-base --all`,
+# more than one after a criss-cross merge) is no ancestor of origin/<base> (`merge-base --is-ancestor` exits
+# 1): the lane is stacked on a branch main has not merged, and MERGE_HEAD is that branch moved on. A lane cut
+# from main has every best base on main, so it gets no pass from the second. Those reads run only on the path
+# that would refuse. A failed merge-base read, or an is-ancestor exit other than 0 or 1, gives no stacked
+# pass for that base and falls through to the first-parent test, which refuses unless MERGE_HEAD is on the
+# base's first-parent line. A failed rev-parse or rev-list read refuses. The stacked clause cannot tell the
+# lane's base from a sibling lane that shares its unmerged history: a sibling's page passes the same way,
+# and the merge tool rebuilds the page before ready.
+# A rebuilt page, a page of a merge of any other commit, and a page taken after the merge state is gone
+# are refused.
 # The hook runs BEFORE the shell chain, so `commit -a` (a tracked page), `commit <page>` and a `git add`
 # that reaches the page earlier in the same command read the working tree, and any other commit reads
 # the index. A commit that names paths (`--`, --only) holds only those paths. A non-git segment whose
@@ -446,6 +535,28 @@ def _runs_generator(segment):
     return word == _GENERATOR and not _GENERATOR_READS & set(rest)
 
 
+def _merge_head_page(top, base):
+    """The blob id of the page at MERGE_HEAD when a merge is in progress and one of two holds, else ''.
+    (1) Some best merge base of HEAD and MERGE_HEAD is no ancestor of origin/<base>: the lane is stacked on
+    a branch that main has not merged, and MERGE_HEAD is that branch moved on. (2) MERGE_HEAD is a commit on
+    origin/<base>'s first-parent line (a past base tip). A merge-base read with no answer, or an
+    is-ancestor exit other than 0 or 1, gives no stacked pass for that base and falls through to (2). A
+    failed rev-parse or rev-list read gives ''."""
+    # One read gives MERGE_HEAD's commit and its page: it fails when no merge is in progress.
+    done = _git(top, "rev-parse", "MERGE_HEAD", "MERGE_HEAD:" + RECORDS_PAGE)
+    ids = done.stdout.split() if done is not None and done.returncode == 0 else []
+    if len(ids) != 2:
+        return ""
+    origin = base if base.startswith("origin/") else "origin/" + base
+    meet = _git(top, "merge-base", "--all", "HEAD", "MERGE_HEAD")
+    for best in meet.stdout.split() if meet is not None and meet.returncode == 0 else []:
+        seen = _git(top, "merge-base", "--is-ancestor", best, origin)
+        if seen is not None and seen.returncode == 1:   # 1 is "not an ancestor"; 0 is one, other is a failure
+            return ids[1]
+    line = _git(top, "rev-list", "--first-parent", origin)   # one id per base tip, newest first
+    return ids[1] if line is not None and line.returncode == 0 and ids[0] in line.stdout.split() else ""
+
+
 def _commit_page_id(top, working):
     """The blob id of the page the commit will hold: the working tree's (as `git add` would store
     it) or the index's. '' for no page, None for a failed read or an unmerged page."""
@@ -463,8 +574,8 @@ def _commit_page_id(top, working):
 
 
 def records_page_hit(stripped: str, cwd: str) -> str:
-    """Return the commit when it would hold a records page that is none of HEAD's, the base tip's
-    and origin/<base>'s, else ''. Each segment is judged from its own command word."""
+    """Return the commit when it would hold a records page that is none of HEAD's, the base tip's,
+    origin/<base>'s and MERGE_HEAD's (`_merge_head_page` says when MERGE_HEAD's page counts), else ''. Each segment is judged from its own command word."""
     staged = generated = False   # an earlier `git add` reaches the page / an earlier segment rewrites it
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
@@ -501,7 +612,8 @@ def records_page_hit(stripped: str, cwd: str) -> str:
             return "git commit " + RECORDS_PAGE
         page_id = _commit_page_id(top, working)
         if page_id is not None and page_id not in (head_id, base_id, origin_id):
-            return "git commit " + RECORDS_PAGE
+            if not page_id or page_id != _merge_head_page(top, base):
+                return "git commit " + RECORDS_PAGE
     return ""
 
 
@@ -725,15 +837,29 @@ def _unresolved(specs):
     return any(set(spec) & set("$`()") for spec in specs)
 
 
+def _repo_of(repos, where):
+    """`(top folder, has HEAD)` of the checkout at `where`, or None when it is not one. One
+    `git rev-parse --show-toplevel --verify -q HEAD`, kept in `repos` by `where`: git prints the top
+    folder, then HEAD when it resolves, and exits 1 only for a missing HEAD."""
+    if where not in repos:
+        done = _git(where, "rev-parse", "--show-toplevel", "--verify", "-q", "HEAD") if where and os.path.isdir(where) else None
+        lines = done.stdout.splitlines() if done is not None and done.returncode in (0, 1) else []
+        repos[where] = (os.path.normpath(lines[0].strip()), done.returncode == 0) if lines and lines[0].strip() else None
+    return repos[where]
+
+
 def conflict_markers_hit(stripped: str, cwd: str):
     """Return `(kind, file)` for the first commit or push that would carry all three conflict markers
     in one file, else `('', '')`. The kind is `commit`, `push`, or `chain` (a push after a commit the
     guard could not judge; the file is then `git push`). Each segment is judged from its own command
     word."""
-    whole_tops, add_specs = set(), []   # tops an earlier add stages whole / (where, top, specs) of earlier adds
+    pending = []                        # earlier adds no commit has taken: (where, None) stages whole, (where, specs) names paths
+    repos = {}                          # where -> (top, has_head), one `git rev-parse` each until the next commit
     readable = True                     # every segment so far is one that cannot change the tree
     blind_commit = blind_triplet = conflict_step = False   # a commit after a blind step / that covers a triplet / a conflict step ran
-    for segment in split_segments(stripped):
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number, segment in enumerate(segments):
         if not segment.strip():
             continue
         call = git_call_of(segment)
@@ -750,24 +876,37 @@ def conflict_markers_hit(stripped: str, cwd: str):
             conflict_step = conflict_step or (call is not None and _makes_conflict(call))
             continue
         c_target = _segment_git_c_target(segment_tokens(segment) or [])
-        root = command_root(stripped, cwd)
-        where = _absolute(c_target, root) if c_target is not None else root
-        done = _git(where, "rev-parse", "--show-toplevel") if where and os.path.isdir(where) else None
-        if done is None or done.returncode != 0 or not done.stdout.strip():
-            continue
-        top = os.path.normpath(done.stdout.strip())
-        if call[0] == "add":
+        where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)   # this segment's own folder
+        if c_target is not None:
+            where = _absolute(c_target, where or "")
+            where = where if os.path.isabs(where) else None
+        tree = GIT_WORK_TREE_RE.search(segment)
+        if tree and where:
+            where = _absolute(tree.group(2), where)
+        if call[0] == "add":   # an add reads nothing here: a commit that takes it reads its top folder
             whole, specs = _add_shape(call[1])
             if whole or _unresolved(specs):
-                whole_tops.add(top)
+                pending.append((where, None))
             elif specs:
-                add_specs.append((where, top, specs))
+                pending.append((where, specs))
             continue
-        wholes, adds = whole_tops, add_specs   # this commit takes the adds so far; the next starts clean
-        whole_tops, add_specs = set(), []
+        repo = _repo_of(repos, where)
+        if repo is None:
+            continue
+        top, has_head = repo
+        taken, pending = pending, []   # this commit takes the adds so far; the next starts clean
+        wholes, adds = set(), []   # tops an add stages whole / (where, top, specs) of adds that name paths
+        for add_where, add_paths in taken:
+            add_repo = _repo_of(repos, add_where)
+            if add_repo is None:
+                continue
+            if add_paths is None:
+                wholes.add(add_repo[0])
+            else:
+                adds.append((add_where, add_repo[0], add_paths))
+        repos.clear()   # a commit moves HEAD: the next segment reads afresh
         all_flag, specs = _commit_shape(call[1]) if call[0] == "commit" else (False, [])
-        head = _git(top, "rev-parse", "--verify", "-q", "HEAD")   # no HEAD: `git diff` would read an empty tree
-        if head is None or head.returncode != 0:
+        if not has_head:   # no HEAD: `git diff` would read an empty tree
             continue
         if specs:
             found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
@@ -798,7 +937,7 @@ def conflict_markers_hit(stripped: str, cwd: str):
 
 # ---- merge --role: the tier is read from this session's own get_session record
 ROLE_TIERS = ("batch-runner",)
-ROLE_TAG_PREFIX = "cs-build:"
+ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
     "If this session is the batch runner: run get_session (no argument) alone in its own "
@@ -895,18 +1034,43 @@ def _own_tier_proved(transcript: str, tier: str) -> bool:
     return False
 
 
+def _open_substitutions(text: str) -> int:
+    """How many `$(` spans in `text` are still open at its end. Inside a span, a `(` opens and a `)` closes."""
+    depth = index = 0
+    while index < len(text):
+        if text.startswith("$(", index):
+            depth, index = depth + 1, index + 2
+            continue
+        if depth and text[index] in "()":
+            depth += 1 if text[index] == "(" else -1
+        index += 1
+    return depth
+
+
 def _command_words(args):
     """`args` up to the end of their command. The segment splitter cuts at `&&`, `||`, `;`, `|` and a
     newline, but not at `(`, `)` or a lone `&`. A `)` glued to a word closes the subshell the command
-    sits in, and a glued `&` sends it to the background: either ends that word and the command."""
+    sits in, and a glued `&` sends it to the background: either ends that word and the command.
+    A `)` that closes a `$(` does neither. The words of a `$( )` span join into one word, whose text
+    is unknown until the shell runs it, so `$(printf origin) main` keeps its `main`."""
     words = []
+    span = ""
     for arg in args:
+        arg = span + " " + arg if span else arg
         word = arg.rstrip(")&")
+        tail = arg[len(word):]
+        opened, closes = _open_substitutions(word), len(tail) - len(tail.lstrip(")"))
+        span = arg if opened > closes else ""
+        if span:
+            continue
+        word = arg[:len(word) + opened]
         if word != arg:
             if word:
                 words.append(word)
             break
         words.append(arg)
+    if span:
+        words.append(span)
     return words
 
 
@@ -915,7 +1079,7 @@ def _push_calls(segment: str, script: str, cwd: str):
     segment hands on (`bash -c`, `sh -lc`, `eval`, `ssh`): the one reader of those wrappers is inner_commands.
     `script` is the text the segment came from, which push_target reads for a leading `cd`. A script
     runs in the folder its segment's own `cd` or `git -C` names."""
-    for subcommand, args in git_calls(push_text(segment)):
+    for subcommand, args in push_calls(segment, script):
         if subcommand == "push":
             where, overrides = push_target(segment, script, cwd)
             yield _command_words(args), where, overrides
@@ -923,9 +1087,14 @@ def _push_calls(segment: str, script: str, cwd: str):
     inner = inner_commands(tokens) if tokens else []
     if inner:
         inner_cwd = push_target(segment, script, cwd)[0] or cwd
+        from guard_env import substitution_commands   # imported late: a family reads only the families before it
         for text in inner:
-            for part in split_segments(text):
-                yield from _push_calls(part, text, inner_cwd)
+            # The shell reads the wrapped script as it reads a command: a heredoc body is data, and
+            # each `$( )` or backtick text runs as a command of its own (judge_shell does the same).
+            stripped = strip_heredoc_bodies(text)
+            for each in (stripped, *substitution_commands(text, stripped)):
+                for part in split_segments(each):
+                    yield from _push_calls(part, each, inner_cwd)
 
 
 def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
@@ -982,7 +1151,7 @@ ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
 ARCHIVE_LANE_TAG = LANE_TAG
 ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = "cs-step:", "cs-repo:"
 ARCHIVE_NO_RECORD_REASON = (
-    "this session's transcript holds no get_session record of the target, so the guard cannot tell whether "
+    "this session's or this agent's transcript holds no get_session record of the target, so the guard cannot tell whether "
     "the target is a lane with records still to land. Run get_session on the target alone, in its own turn, "
     "then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
@@ -998,64 +1167,286 @@ ARCHIVE_READ_REASON = (
     "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "
     "records have landed. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
+ARCHIVE_NO_PR_REASON = (
+    "a branch of the lane is ahead of its repo's default branch and has no pull request that covers it, so closing "
+    "the lane now strands that work. Either open a pull request for that branch and hand it to the batch runner, or "
+    "push an archive copy of it under archive/, then retry. "
+    "(decision session-tiers, a lane closes only after its records pull request has landed)"
+)
+ARCHIVE_BRANCH_READ_REASON = (
+    "the lane's branches or their pull requests could not be read, so the guard cannot tell whether any work of "
+    "the lane is stranded. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
+)
+ARCHIVE_STRANDED_MATCH = "archive of a lane with a branch that has no pull request"
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+# A source URL on github.com (https, ssh or scp form, an optional www., any case, an optional path after owner/name): `repo`
+# is its owner/name, and is None when the host is github.com but the rest is no owner/name. Another host does not match.
+_SOURCE_REPO = re.compile(
+    r"(?:[A-Za-z][A-Za-z0-9+.-]*://)?(?:[^@/]+@)?(?:www\.)?github\.com(?=[/:]|\Z)"
+    r"(?:[/:](?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?(?:/.*)?\Z)?",
+    re.IGNORECASE,
+)
+_AHEAD = ("ahead", "diverged")
+_CONTAINED = ("behind", "identical")  # a compare of base...head where the head is already in the base
+
+
+def _read_json(host, rel: str, what: str):
+    """The parsed JSON of one REST read of `host`; a failed read or a reply that is not JSON raises RuntimeError."""
+    code, out = host.api(rel)
+    try:
+        if code:
+            raise ValueError(out)
+        return json.loads(out)
+    except ValueError as e:
+        raise RuntimeError("the " + what + " read failed: " + str(e))
+
+
+def _compare_status(module, host, base: str, head: str, missing_ok: bool = False):
+    """The status of GitHub's compare of base...head (the one read behind the draft, the ahead and the containment
+    tests). With `missing_ok`, a 404 means the head is not in that repo and gives None. Any other failed read raises."""
+    code, out = host.api("compare/" + base + "..." + head)
+    if code and missing_ok and not module.is_net(code, out) and re.search(r"\bHTTP 404\b", out):
+        return None
+    try:
+        if code:
+            raise ValueError(out)
+        return str(json.loads(out)["status"])
+    except (ValueError, KeyError, TypeError) as e:
+        raise RuntimeError("the compare read failed: " + str(e))
 
 
 def _head_landed(module, repo: str, row) -> bool:
     """True when the head commit of the pull request `row` is already in the repo's default branch: the row's
     base is that branch (base.repo.default_branch, so a draft stacked on another branch is not released), and
-    GitHub's compare of default...sha reads behind or identical. A failed read raises, and archive_hit refuses on it."""
+    GitHub's compare of default...sha reads behind or identical. A failed read raises, and archive_hit refuses on it.
+    The caller holds the one shared deadline over this read (a nested shared_deadline would reset it)."""
     base, sha = str(row["base"]["ref"]), str(row["head"]["sha"])
     if base != str(row["base"]["repo"]["default_branch"]):
         return False
-    with module.shared_deadline(MERGE_READ_TIMEOUT):
-        code, out = module.Host(repo=repo).api("compare/" + base + "..." + sha)
-    try:
-        if code:
-            raise ValueError(out)
-        return json.loads(out)["status"] in ("behind", "identical")
-    except (ValueError, KeyError, TypeError) as e:
-        raise RuntimeError("the compare read failed: " + str(e))
+    return _compare_status(module, module.Host(repo=repo), base, sha) in _CONTAINED
 
 
-def archive_hit(tool: str, tool_input, transcript: str):
+def _branch_repos(ccr, tag_repos):
+    """The repos a lane's branches may live in: its cs-repo tags, the github repos of
+    session_context.sources[].git_repository.url, and each current_branches key that names owner/repo, in first-seen
+    order. Shape drift raises: a sources field that is present but not a list, and a github.com URL that does not
+    parse as owner/name. A URL on another host is skipped."""
+    found = list(tag_repos)
+    sources = (ccr.get("session_context") or {}).get("sources")
+    if sources is not None and not isinstance(sources, list):
+        raise RuntimeError("sources is not a list")
+    named = []
+    for source in sources or []:
+        repo = source.get("git_repository") if isinstance(source, dict) else None
+        url = repo.get("url") if isinstance(repo, dict) else None
+        match = _SOURCE_REPO.match(url) if isinstance(url, str) else None
+        if not match:
+            continue
+        if not match.group("repo"):
+            raise RuntimeError("a github.com source URL is no owner/name")
+        named.append(match.group("repo"))
+    meta = ccr.get("external_metadata")
+    keys = meta.get("current_branches") if isinstance(meta, dict) else None
+    named += [k for k in keys if isinstance(k, str) and _REPO_NAME.fullmatch(k)] if isinstance(keys, dict) else []
+    return found + [r for r in dict.fromkeys(named) if r not in found]
+
+
+def _on_lane_form(ref: str, slugs) -> bool:
+    """True when `ref` is a head form of a slug (lane_head_refs) or a `-*` variant of one, such as `lane/<slug>-r2`."""
+    return any(ref == form or ref.startswith(form + "-") for slug in slugs for form in lane_head_refs(slug))
+
+
+def _is_merged(row) -> bool:
+    """True when the pull request row is merged: its `merged` flag, or `merged_at` (what a list read carries)."""
+    return row.get("merged") is True or bool(row.get("merged_at"))
+
+
+def _is_open(rows) -> bool:
+    return any(row["state"] == "open" for row in rows)
+
+
+def _covered(module, host, branch: str, tip, rows, pool) -> bool:
+    """True when a pull request or an archive copy holds the work of `branch`, whose pull requests in every state are
+    `rows` and whose tip is `tip` (read from the branch when None, once no open pull request covers it). An open pull
+    request covers. A merged one covers when its head is the tip. A closed unmerged one covers only when the tip is
+    contained in the head of an open or merged pull request (compare of that head...tip reads behind or identical).
+    Those heads come from `pool`, the rows already read: the repo's open list rows on a lane head form and the rows
+    of every other branch of the lane that was read. A merged pull request on a head no read reached is not seen,
+    so that case refuses. Last, an archive copy covers when the tip is contained in it (compare of copy...tip reads
+    behind or identical). The copies are those listed at git/matching-refs/heads/archive/<branch> that are named
+    exactly `archive/<branch>` or `archive/<branch>-<digits>`; any other listed name does not count, and an empty
+    listing means no copy, so the branch is not covered. This adds one tip read when the caller had none, one compare
+    per head to test, one copy listing and one compare per counted copy, all on the refusal path."""
+    if _is_open(rows):
+        return True
+    if tip is None:
+        tip = str(_read_json(host, "branches/" + branch, "branch")["commit"]["sha"])
+    if any(str(row["head"]["sha"]) == tip for row in rows if _is_merged(row)):
+        return True
+    if any(row["state"] == "closed" and not _is_merged(row) for row in rows):
+        heads = [str(row["head"]["sha"]) for row in [*rows, *pool] if row["state"] == "open" or _is_merged(row)]
+        if any(sha == tip or _compare_status(module, host, sha, tip) in _CONTAINED for sha in dict.fromkeys(heads)):
+            return True
+    copy_name = re.compile(re.escape("archive/" + branch) + r"(-[0-9]+)?")
+    for ref in host.pages("git/matching-refs/heads/archive/" + branch):
+        name = str(ref["ref"])[len("refs/heads/"):]
+        if copy_name.fullmatch(name) and _compare_status(module, host, name, tip, missing_ok=True) in _CONTAINED:
+            return True
+    return False
+
+
+def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:
+    """True when a branch of the lane is ahead of its repo's default branch (compare status ahead or diverged) and no
+    pull request covers it (_covered). The branches are the non-null values of each record's
+    external_metadata.current_branches, and, in each repo, the branches under a slug form (`<slug>`, `lane/<slug>`,
+    and their `-*` variants) that the records do not name, read from git/matching-refs/heads/<form>. A record with no
+    branch field, an empty list or map, or only null values names none. A branch field that is not a map, and a
+    value that is neither null nor a string, are shapes the read does not know, so they raise. A 404 on the compare
+    means the branch is not in that repo, so it is skipped in that repo. Any other failed read raises, and
+    archive_hit refuses on it. The caller holds one shared deadline over all the reads here (a nested
+    shared_deadline would reset it). `open_rows` is each repo's open pull request list, already read. Every pull
+    request read of a repo is judged together, so a replacement on another branch of the lane is in hand."""
+    branches, repos = [], list(tag_repos)
+    for ccr in ccrs:
+        meta = ccr.get("external_metadata")
+        named = meta.get("current_branches") if isinstance(meta, dict) else None
+        if named is None or named == []:
+            named = {}
+        if not isinstance(named, dict):
+            raise RuntimeError("current_branches is not a map")
+        if any(b is not None and not isinstance(b, str) for b in named.values()):
+            raise RuntimeError("a current_branches value is not a string")
+        branches += [b for b in named.values() if b]
+        repos += [r for r in _branch_repos(ccr, tag_repos) if r not in repos]
+    branches = list(dict.fromkeys(branches))
+    defaults = {}
+    for repo in repos:
+        host = module.Host(repo=repo)
+        owner = repo.split("/")[0]
+        pool = [row for row in open_rows.get(repo, []) if _on_lane_form(str(row["head"]["ref"]), slugs)]
+        pending = []  # (branch, tip or None, rows) of each branch ahead of the default: judged once every row is read
+
+        def ahead(branch):
+            """True when `branch` is not the default or an archive copy, and its compare with the default reads ahead."""
+            if repo not in defaults:
+                defaults[repo] = str(_read_json(host, "", "repo")["default_branch"])
+            if branch.startswith("archive/") or branch == defaults[repo]:
+                return False
+            return _compare_status(module, host, defaults[repo], branch, missing_ok=True) in _AHEAD
+
+        for branch in branches:
+            if ahead(branch):
+                rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + branch})
+                pool += rows
+                pending.append((branch, None, rows))
+        seen = set(branches)
+        for slug in slugs:
+            for form in lane_head_refs(slug):
+                for ref in host.pages("git/matching-refs/heads/" + form):
+                    name = str(ref["ref"])[len("refs/heads/"):]
+                    if name in seen or not _on_lane_form(name, [slug]):
+                        continue
+                    seen.add(name)
+                    # The branch exists (the refs read just listed it), so an open pull request covers it before any
+                    # default-branch read; its tip is on the row already in hand.
+                    rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + name})
+                    pool += rows
+                    if not _is_open(rows) and ahead(name):
+                        pending.append((name, str(ref["object"]["sha"]), rows))
+        if any(not _covered(module, host, branch, tip, rows, pool) for branch, tip, rows in pending):
+            return True
+    return False
+
+
+def _archive_transcripts(transcript: str, agent_id):
+    """The transcripts that hold the record of an archive's target: the main transcript and, for an agent's call
+    (agent_id already checked by the caller), the agent's own. The one home of that choice."""
+    return [transcript] + ([own_session.agent_transcript_path(transcript, agent_id)] if agent_id else [])
+
+
+def _archive_records(transcript: str, target, agent_id):
+    """The `ccr` of the target's newest get_session record in each transcript of _archive_transcripts, None where one
+    holds none. Each transcript is read once, and the tags and the branch read both come from that read. An agent file
+    that does not exist holds no record; one that exists and cannot be read as a file (a folder, no read access)
+    raises, because own_session_ccr reads it as no record. cost: one transcript read per transcript, no file written,
+    no gh call."""
+    ccrs = []
+    for path in _archive_transcripts(transcript, agent_id):
+        ccr = own_session.own_session_ccr(path, target)
+        if ccr is None and os.path.lexists(path) and not (os.path.isfile(path) and os.access(path, os.R_OK)):
+            raise OSError("the transcript is not a readable file: " + path)
+        ccrs.append(ccr)
+    return ccrs
+
+
+def _archive_tags(ccrs):
+    """The tags that decide an archive, or None when no record of the target exists. A record with the lane tag decides:
+    its tags, or the two records' tags joined when both are lanes. Else the first record decides."""
+    records = [c["tags"] for c in ccrs if isinstance(c, dict) and isinstance(c.get("tags"), list)]
+    lanes = [tags for tags in records if ARCHIVE_LANE_TAG in tags]
+    if lanes:
+        return [tag for tags in lanes for tag in tags]
+    return records[0] if records else None
+
+
+def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
     """Return (matched, reason) when this archive call must be refused, else None. A target whose newest
-    get_session record in this session's transcript has no cs-build:lane tag passes. A lane is refused
-    while any open pull request of its cs-repo has a head ref in lane_head_refs of its cs-step slug, except an open draft whose
-    head commit is already in its base (compare: behind or identical). Fails closed:
-    any error in the reads is a refusal, because the guard-wide crash path fails open."""
+    get_session record in this session's transcript, or for an agent's call (`agent_id`, checked by the caller
+    against guard.AGENT_ID) in the agent's own transcript too, has no cs-build:lane tag passes. A lane in either
+    record is a lane. A lane is refused while any open pull request of its cs-repo has a head ref in
+    lane_head_refs of its cs-step slug, except an open draft whose head commit is already in its base (compare:
+    behind or identical). A lane is also refused while a branch of it (the records' current_branches, and the
+    repos' branches under its slug forms) is ahead of the repo's default branch with no covering pull request
+    (_stranded_branch). Fails closed: any error in the reads is a refusal, because the guard-wide crash path fails
+    open. A failed open-list read (the list and the draft compares) and a failed branch read each refuse with their
+    own reason. All the gh reads share one MERGE_READ_TIMEOUT."""
     if tool != ARCHIVE_TOOL:
         return None
     target = tool_input.get("session_id") if isinstance(tool_input, dict) else None
-    try:  # cost: one transcript read per archive call
-        tags = _own_get_session_tags(transcript, target) if transcript and isinstance(target, str) and target else None
+    try:  # cost: one read of each transcript per archive call (two for an agent's call), for the tags and the branches
+        ccrs = _archive_records(transcript, target, agent_id) if transcript and isinstance(target, str) and target else []
     except Exception:
-        tags = None
+        ccrs = []
+    tags = _archive_tags(ccrs)
     if tags is None:
         return "archive with no record of the target", ARCHIVE_NO_RECORD_REASON
     if ARCHIVE_LANE_TAG not in tags:
         return None
     slugs = [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]
     repos = [str(t)[len(ARCHIVE_REPO_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_REPO_PREFIX)]
-    slugs, repos = [x for x in slugs if x], [x for x in repos if x]
+    slugs, repos = list(dict.fromkeys(x for x in slugs if x)), list(dict.fromkeys(x for x in repos if x))
     if not slugs or not repos or not all(_REPO_NAME.fullmatch(r) for r in repos):
         return "archive of a lane with no step or repo tag", ARCHIVE_TAGS_REASON
-    try:  # cost: one paged gh REST read per cs-repo tag (one in practice), through the merge tool's page reader
+    lanes = [c for c in ccrs if isinstance(c, dict) and isinstance(c.get("tags"), list) and ARCHIVE_LANE_TAG in c["tags"]]
+    reading_branches = False  # picks the reason a failed read refuses with
+    try:  # cost, all under one shared MERGE_READ_TIMEOUT: one paged gh REST read per cs-repo tag (one in practice), through
+        # the merge tool's page reader; one compare read per open draft of the lane; per repo, one matching-refs read per
+        # slug form (a paged read); and, for each branch the records name, one repo read per repo, one compare read per
+        # repo x branch, and one pulls read per branch that is ahead. A branch under a slug form adds one pulls read, and
+        # one compare read when no open pull request covers it. A branch with a pull request adds one tip read, and a
+        # closed unmerged one adds one compare read per distinct open or merged head among the rows already read.
         module = merge_module()
         if module is None:
             raise RuntimeError("the merge tool could not be loaded")
-        for repo in repos:
-            with module.shared_deadline(MERGE_READ_TIMEOUT):
-                rows = module.Host(repo=repo).pages("pulls", fields={"state": "open"})
-            for row in rows:
-                ref = str(row["head"]["ref"])
-                slug = next((s for s in slugs if ref in lane_head_refs(s)), None)
-                if slug and row.get("draft") is True and _head_landed(module, repo, row):
-                    continue
-                if slug:
-                    return "archive of lane " + slug + " with open pull request " + str(row.get("number", "?")), ARCHIVE_OPEN_REASON
+        open_rows = {}
+        with module.shared_deadline(MERGE_READ_TIMEOUT):
+            for repo in repos:
+                rows = open_rows[repo] = module.Host(repo=repo).pages("pulls", fields={"state": "open"})
+                for row in rows:
+                    ref = str(row["head"]["ref"])
+                    slug = next((s for s in slugs if ref in lane_head_refs(s)), None)
+                    if slug and row.get("draft") is True and _head_landed(module, repo, row):
+                        continue
+                    if slug:
+                        return "archive of lane " + slug + " with open pull request " + str(row.get("number", "?")), ARCHIVE_OPEN_REASON
+            reading_branches = True
+            stranded = _stranded_branch(module, lanes, repos, slugs, open_rows)
     except (Exception, SystemExit):
+        if reading_branches:
+            return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON
         return "archive with an unreadable pull request list", ARCHIVE_READ_REASON
+    if stranded:
+        return ARCHIVE_STRANDED_MATCH, ARCHIVE_NO_PR_REASON
     return None
 
 
@@ -1126,6 +1517,404 @@ def brief_hit(tool: str, tool_input, transcript: str):
     steps = [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]
     if step not in steps:
         return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON
+    return None
+
+
+# ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
+STAMP_LIMIT_MINUTES = 1  # a header stamp this far ahead of the clock passes; one more minute ahead is refused
+STAMP_QUOTE_MINUTES = 60  # an undated stamp more than this far ahead reads as a quote from an earlier day, and passes
+# A header is a label of 1 to 4 words, then `,` or `:` or a dash spaced on both sides, an optional date, then
+# `H:MM` or `HH:MM`, an optional `:SS`, and `CST` or `CDT` in any case. Anything may follow.
+_STAMP_HEADER = re.compile(
+    _MARKDOWN_LEAD + r"[^\s,:]+(?:\s+[^\s,:]+){0,3}(?:[,:]|\s[-\u2014\u2013])\s*"
+    r"(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?"
+    r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::\d{2})?\s+(?P<zone>CST|CDT)\b", re.IGNORECASE)
+_STAMP_OFFSET_HOURS = {"CST": -6, "CDT": -5}
+STAMP_REASON = (
+    "this message's header stamp is wrong for the clock: {why}. "
+    "The time is {now}: re-stamp your own header with that time, then send it again. If the first line quotes "
+    "someone else's time in header form, open the message with your own label first. "
+    "If the first line names a future time, such as a deadline or an ETA, move it off the first line. "
+    "(decision local-time-central, sessions speak times in US Central)"
+)
+STAMP_AHEAD_WHY = "it is {off} minutes ahead, and the limit is " + str(STAMP_LIMIT_MINUTES)
+STAMP_ZONE_WHY = "it says {zone}, and the clock's zone now is {name}"
+
+
+def _minutes_ahead(then, now) -> int:
+    """Whole minutes an instant is ahead of the clock: negative when it is behind. Both are cut to the minute
+    first, so the header stamp and an ISO instant compare one way (rule message-time-matches-clock)."""
+    return int((then.replace(second=0, microsecond=0) - now.replace(second=0, microsecond=0)).total_seconds() // 60)
+
+
+def stamp_hit(tool: str, tool_input):
+    """Return (matched, reason) when this send_message opens with a header stamp that is wrong for the clock, else
+    None. Only the first non-blank line is read, and only its header stamp. Wrong means one of three things. The
+    zone name is not the clock's own (local_time's DST rule names the current zone), whatever the minutes. A dated
+    stamp is more than STAMP_LIMIT_MINUTES ahead, compared as an instant with its zone's offset, with no upper limit.
+    An undated stamp is between STAMP_LIMIT_MINUTES (exclusive) and STAMP_QUOTE_MINUTES (inclusive) ahead, as a
+    signed minute-of-day offset modulo 1440 in [-720, 720). An undated stamp further ahead is read as a quote from
+    an earlier day and passes, as does any stamp behind the clock.
+    The clock is local_time.clock(), and the reason's time comes from local_time.central_hhmm: one home of the
+    clock and its DST rule. Cost: one clock read, no transcript, no file, no process. Fails open: the stamp is
+    advice about a time, so a missing clock module or an impossible date lets the message through."""
+    if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
+        return None
+    message = tool_input.get("message")
+    first = next((ln.strip() for ln in message.splitlines() if ln.strip()), "") if isinstance(message, str) else ""
+    found = _STAMP_HEADER.match(first)
+    if not found:
+        return None
+    try:
+        import local_time
+        now = local_time.clock().replace(second=0, microsecond=0)  # whole minutes: both forms compare one way
+        clock_zone = local_time.central_hhmm(now).split()[1]
+        stamp_zone = found.group("zone").upper()
+        hour, minute = int(found.group("hour")), int(found.group("minute"))
+        if hour > 23 or minute > 59:
+            return None
+        if stamp_zone != clock_zone:
+            why = STAMP_ZONE_WHY.format(zone=stamp_zone, name=clock_zone)
+        else:
+            zone = timezone(timedelta(hours=_STAMP_OFFSET_HOURS[stamp_zone]))
+            if found.group("date"):
+                stamped = datetime.fromisoformat(found.group("date")).replace(hour=hour, minute=minute, tzinfo=zone)
+                off = _minutes_ahead(stamped, now)
+                late = off > STAMP_LIMIT_MINUTES
+            else:
+                there = now.astimezone(zone)
+                off = (hour * 60 + minute - (there.hour * 60 + there.minute) + 720) % 1440 - 720
+                late = STAMP_LIMIT_MINUTES < off <= STAMP_QUOTE_MINUTES
+            if not late:
+                return None
+            why = STAMP_AHEAD_WHY.format(off=off)
+        return "header stamp " + found.group(0).strip(), STAMP_REASON.format(why=why, now=local_time.central_hhmm(now))
+    except (ImportError, ValueError, OverflowError):
+        return None
+
+
+# Written values: an ISO instant with an offset, in three places (rule message-time-matches-clock). The Bash scan
+# reads the command as text, not as tokens: a quote-aware reader skips a literal inside a quoted string or after
+# a lone apostrophe, which is where an incident's literal sat. It reads the key `updatedAt`, bare or quoted, with
+# an optional `]` after it. Then `:`, `=` or jq's `|=`, then a single- or double-quoted value, closed by the
+# same quote. It skips `==`, `!=` and `>`.
+_ISO_INSTANT = r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})"
+_ISO_FULL = re.compile(_ISO_INSTANT)
+_UPDATED_AT = re.compile(r"""updatedAt\\?["']?\]?\s*(?:\|=|:|=(?!=))\s*\\?(["'])""" + _ISO_INSTANT + r"\\?\1")
+# A str_replace of `added` may carry only the time part of the value, such as `T20:24:00Z`.
+_TIME_FRAGMENT = re.compile(r"T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})")
+_STEP_FILE = re.compile(r"(?:^|/)roadmap/data/steps/[^/]+\.json$")
+WRITTEN_ITEMS = "items"  # the ArtifactData collection whose `added` is judged
+WRITTEN_REASON = (
+    "this written time ({what}) is {off} minutes ahead of the clock, and the limit is " + str(STAMP_LIMIT_MINUTES) + ". "
+    "The time is {now}, which is {central} and {utc}: write that time, then run the call again. "
+    "(decision local-time-central, sessions speak times in US Central)"
+)
+
+
+def _offset(zone):
+    """The timezone of an ISO offset, `Z` or `[+-]HH[:]MM`. Raises ValueError for an impossible offset."""
+    if zone == "Z":
+        return timezone.utc
+    digits = zone[1:].replace(":", "")
+    return timezone(timedelta(hours=int(digits[:2]), minutes=int(digits[2:])) * (-1 if zone[0] == "-" else 1))
+
+
+def _instant(found):
+    """The aware datetime of an _ISO_INSTANT match, or None for an impossible date or offset."""
+    year, month, day, hour, minute, zone = found.groups()
+    try:
+        return datetime(int(year), int(month), int(day), int(hour), int(minute), tzinfo=_offset(zone))
+    except ValueError:
+        return None
+
+
+def _fragment_ahead(found, now):
+    """Minutes a _TIME_FRAGMENT match is ahead of `now`, or None for an impossible time or offset. The guard reads
+    no page, so the date the fragment lands on is unknown. It takes the day that puts the time nearest the clock,
+    a signed offset in [-720, 720) as an undated header stamp has. So a behind fragment passes, and yesterday's
+    late time does not read as almost a day ahead after UTC midnight. It is not refused outright, because a value
+    behind the clock passes."""
+    hour, minute, zone = int(found.group(1)), int(found.group(2)), found.group(3)
+    if hour > 23 or minute > 59:
+        return None
+    try:
+        there = now.astimezone(_offset(zone))
+    except ValueError:
+        return None
+    return (hour * 60 + minute - (there.hour * 60 + there.minute) + 720) % 1440 - 720
+
+
+def _document_added(entry, cwd):
+    """The `added` string of one ArtifactData write's document, or None. The document is the inline `data` (a dict,
+    or a JSON string), else the local JSON file named by `file_path`, read against `cwd` when the path is relative:
+    the one file read this rule costs, made only for a write to collection items with no inline data. A file that
+    does not read or parse holds nothing to judge."""
+    data = entry.get("data")
+    path = entry.get("file_path")
+    try:
+        if data is None and isinstance(path, str) and path:
+            with open(os.path.join(cwd, path) if cwd else path, encoding="utf-8") as handle:
+                data = json.load(handle)
+        elif isinstance(data, str):
+            data = json.loads(data)
+    except (OSError, ValueError):
+        return None
+    added = data.get("added") if isinstance(data, dict) else None
+    return added.strip() if isinstance(added, str) else None
+
+
+def _written_texts(tool: str, tool_input: dict, cwd: str = ""):
+    """The text of each written value this call carries that holds an ISO instant or time fragment to judge: an
+    `added` alone, each offset instant in a step edit's new text, or each literal `updatedAt` in a step's content
+    or a command."""
+    if tool == DATA_TOOL:
+        action = tool_input.get("action")
+        writes = [(w.get("op") or w.get("action"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)] \
+            if action == "batch" else [(action, tool_input)]
+        for op, entry in writes:
+            if entry.get("collection") != WRITTEN_ITEMS:
+                continue
+            if op == "str_replace":  # the new text of the `added` field is the value the document ends with
+                new = entry.get("new_str")
+                added = new.strip() if entry.get("field") == "added" and isinstance(new, str) else None
+            else:
+                added = _document_added(entry, cwd) if op in ("set", "update") else None
+            if added:
+                yield "added " + added, added
+        return
+    if tool in WRITE_TOOLS:
+        paths = [v.replace("\\", "/") for k in ("file_path", "path") if isinstance(v := tool_input.get(k), str)]
+        if any(_STEP_FILE.search(p) for p in paths):
+            content = tool_input.get("content")
+            if isinstance(content, str) and "updatedAt" in content:
+                for found in _UPDATED_AT.finditer(content):
+                    yield found.group(0), found.group(0)
+            # An edit can replace the value alone, with no key in its new text. Every time a step holds is past
+            # by nature (createdAt, updatedAt), so each offset instant an edit writes is judged.
+            news = [tool_input.get("new_string")]
+            news += [e.get("new_string") for e in tool_input.get("edits") or [] if isinstance(e, dict)]
+            for new in news:
+                if isinstance(new, str):
+                    for found in _ISO_FULL.finditer(new):
+                        yield found.group(0), found.group(0)
+        return
+    command = tool_input.get("command")
+    if tool in SHELL_TOOLS and isinstance(command, str) and "updatedAt" in command:
+        # Only the last literal is judged: the new value comes last in `s/old/new/`, `.replace(old, new)` and an
+        # assignment, so a repair that rewrites an ahead value to the right time passes.
+        last = None
+        for last in _UPDATED_AT.finditer(command):
+            pass
+        if last:
+            yield last.group(0), last.group(0)
+
+
+def written_time_hit(tool: str, tool_input, cwd: str = ""):
+    """Return (matched, reason) when a written ISO instant is more than STAMP_LIMIT_MINUTES ahead of the clock,
+    else None. A value behind the clock passes: a kept old value is always behind. Judged: `added` in an
+    ArtifactData set, update or batch write to collection items (the document inline or through `file_path`), and
+    the new text of a str_replace on `added`, a whole instant or a time fragment such as `T20:24:00Z`. In a
+    roadmap/data/steps/<name>.json file: `updatedAt` in a Write, and each instant in an Edit's or MultiEdit's new
+    text. In a shell command: the last literal `updatedAt` key with a single- or double-quoted value. Only a value
+    with an offset is read. Cost: one clock read, and only when a judged value is present; one local file read,
+    only for an items write that carries `file_path` and no inline data; no transcript or process. Fails open, like stamp_hit."""
+    if not isinstance(tool_input, dict):
+        return None
+    judged = []
+    for what, text in _written_texts(tool, tool_input, cwd):
+        found = _ISO_FULL.search(text)
+        if found:
+            then = _instant(found)
+            if then:
+                judged.append((what, then))
+        elif fragment := _TIME_FRAGMENT.fullmatch(text):
+            judged.append((what, fragment))
+    if not judged:
+        return None
+    try:
+        import local_time
+        now = local_time.clock().replace(second=0, microsecond=0)
+        for what, then in judged:
+            off = _minutes_ahead(then, now) if isinstance(then, datetime) else _fragment_ahead(then, now)
+            if off is not None and off > STAMP_LIMIT_MINUTES:
+                return what, WRITTEN_REASON.format(
+                    what=what, off=off, now=local_time.central_hhmm(now), central=local_time.central_iso(now, seconds=False),
+                    utc=now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"))
+    except (ImportError, ValueError, OverflowError):
+        return None
+
+# ------------------------------------------------------------------ hook-bypass
+#
+# A git commit, merge or push that points git's hooks elsewhere or skips them. Read off the parsed tokens
+# of a segment whose COMMAND WORD is git, so a quoted mention, a commit message value and a heredoc body
+# are never read. The forms: `-c core.hooksPath=...` before the verb, `--no-verify` on commit, merge or
+# push, `-n` on commit alone (on push it is --dry-run, on merge --no-stat), the key set in the environment
+# through GIT_CONFIG_KEY_<n> or GIT_CONFIG_PARAMETERS, and a `git config` write of the key followed by a
+# commit, merge or push anywhere later in the command. A shell, `eval`, `env -S` or runner text is read by
+# the same walk (inner_commands); words an `echo` pipes to `xargs git` count as the call's last words. The
+# key is read without case, as git reads it. Known limits: `--config-env`, and an environment set in one
+# segment and used in another. hooks/mutate_shared.py sets the key inside Python, which no segment shows.
+HOOK_BYPASS_REASON = (
+    "Rule (Git): {what}. Git hooks are the checks that run before a commit, merge or push lands, and a "
+    "call that points them elsewhere lets a defect through unseen. "
+    "Remedy: run the {verb} with the repo's own hooks on. If a hook fails wrongly, fix the hook, or "
+    "report the hook to the owner. "
+    "(decision commit-hook-bypass-refused, a hook skip or redirect is refused)"
+)
+_HOOKS_KEY = "core.hookspath"
+_HOOK_VERBS = ("commit", "merge", "push")
+_HOOK_VALUE_LETTERS = {"commit": _COMMIT_VALUE_LETTERS, "merge": "mFsX", "push": "o"}   # short flags that take a value
+_HOOK_VALUE_FLAGS = {
+    "commit": _COMMIT_VALUE_FLAGS,
+    "merge": {"--strategy", "--strategy-option", "--message", "--file", "--into-name"},
+    "push": {"--repo", "--receive-pack", "--exec", "--push-option"},
+}
+_HOOKS_PARAMETER = re.compile(r"(?:^|['\s])core\.hookspath(?:['=\s]|$)", re.IGNORECASE)
+_CONFIG_READ_FLAGS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--unset", "--unset-all", "--list", "-l",
+                      "--edit", "-e", "--remove-section", "--rename-section"}
+_CONFIG_VALUE_FLAGS = {"-f", "--file", "--blob", "--type", "--default", "-t"}
+
+
+def _env_hooks_path(assignments) -> bool:
+    """True when the `NAME=value` words name core.hooksPath through GIT_CONFIG_PARAMETERS or a
+    GIT_CONFIG_KEY_n whose value is that key."""
+    for word in assignments:
+        name, _, value = word.partition("=")
+        if name == "GIT_CONFIG_PARAMETERS" and _HOOKS_PARAMETER.search(value):
+            return True
+        if name.startswith("GIT_CONFIG_KEY_") and value.lower() == _HOOKS_KEY:
+            return True
+    return False
+
+
+def _verb_bypass_flag(verb: str, args) -> str:
+    """The flag in a commit, merge or push argument list that skips the hooks, else ''. A flag's value
+    is skipped, so `-m "-n"` and `-mn` name a message; `--` ends the flags."""
+    letters, value_flags = _HOOK_VALUE_LETTERS[verb], _HOOK_VALUE_FLAGS[verb]
+    skip = False
+    for arg in args:
+        if skip:
+            skip = False
+            continue
+        if arg == "--":
+            return ""
+        if arg.startswith("--"):
+            if arg.split("=", 1)[0] in value_flags:
+                skip = "=" not in arg
+            elif len(arg.split("=", 1)[0]) >= len("--no-v") and "--no-verify".startswith(arg.split("=", 1)[0]):
+                return "--no-verify"
+            continue
+        if arg.startswith("-") and len(arg) > 1:
+            for at, letter in enumerate(arg[1:], 1):
+                if letter in letters or letter in "uS":   # the rest of the cluster is the value
+                    skip = letter in letters and at == len(arg) - 1
+                    break
+                if letter == "n" and verb == "commit":
+                    return "-n"
+    return ""
+
+
+def _config_writes_hooks_path(args) -> bool:
+    """True when the arguments of `git config` set core.hooksPath: the key is the first word that is no flag
+    and no flag's value, and a value word follows it. A read, `--get`, `--unset` and a list write nothing."""
+    words, skip = [], False
+    for arg in args:
+        if skip:
+            skip = False
+        elif arg in _CONFIG_READ_FLAGS:
+            return False
+        elif arg in _CONFIG_VALUE_FLAGS:
+            skip = True
+        elif not arg.startswith("-"):
+            words.append(arg)
+    if words[:1] == ["set"]:   # `git config set <key> <value>`
+        words = words[1:]
+    return len(words) >= 2 and words[0].lower() == _HOOKS_KEY
+
+
+def _fed_words(tokens, index: int, fed: str):
+    """The words an `echo` or `printf` in the pipe's previous segment hands `xargs`, when the git word at
+    `index` runs under xargs: xargs puts them after the call's own words. Else []."""
+    if not fed or not any(basename(word) == "xargs" for word in tokens[:index]):
+        return []
+    feeder = segment_tokens(fed)
+    at = resolve_command(feeder) if feeder else None
+    if at is None or basename(feeder[at]) not in ("echo", "printf"):
+        return []
+    return [word for word in feeder[at + 1:] if word not in ("-n", "-e", "-E")]
+
+
+def _segment_events(segment: str, fed: str = ""):
+    """The hook-relevant act of one segment whose command word is git, as a tuple: ("bypass", matched, verb,
+    what), ("config", matched) for a core.hooksPath write, ("run", verb) for a commit, merge or push that
+    skips nothing, else (). A segment shlex cannot parse judges nothing (the fail-open stance)."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ()
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) not in ("git", "git.exe"):
+        return ()
+    cursor = _git_subcommand_index(tokens, index)
+    if cursor >= len(tokens):
+        return ()
+    verb = tokens[cursor]
+    if verb == "config":
+        if _config_writes_hooks_path(tokens[cursor + 1:]):
+            return ("config", " ".join(tokens[index:cursor + 1]) + " " + _HOOKS_KEY)
+        return ()
+    if verb not in _HOOK_VERBS:
+        return ()
+    matched = " ".join(tokens[index:cursor + 1])
+    options = tokens[index + 1:cursor]
+    for at, word in enumerate(options):
+        if word == "-c" and at + 1 < len(options) and options[at + 1].partition("=")[0].lower() == _HOOKS_KEY:
+            return ("bypass", matched, verb, "this " + verb + " points git's hooks at another folder (core.hooksPath on the command)")
+    if _env_hooks_path(tokens[:index]):
+        return ("bypass", matched, verb, "this " + verb + " points git's hooks at another folder (core.hooksPath in the environment)")
+    flag = _verb_bypass_flag(verb, tokens[cursor + 1:] + _fed_words(tokens, index, fed))
+    if flag:
+        return ("bypass", matched + " " + flag, verb, "this " + verb + " skips the git hooks (" + flag + ")")
+    return ("run", verb)
+
+
+def _hook_events(text: str):
+    """The events of a command text in order: each segment's own, then the texts it hands on (`bash -c`, `sh -lc`,
+    `eval`, `env -S`, runners: inner_commands is the one reader), each judged as a command with its heredoc
+    bodies dropped and its `$( )` texts as commands of their own."""
+    ends = []
+    segments = split_segments(text, ends)
+    for number, segment in enumerate(segments):
+        if not segment.strip():
+            continue
+        fed = segments[number - 1] if number and number - 1 < len(ends) and ends[number - 1] == "|" else ""
+        event = _segment_events(segment, fed)
+        if event:
+            yield event
+        tokens = segment_tokens(segment)
+        if tokens:
+            from guard_env import substitution_commands   # imported late: a family reads only the families before it
+            for inner in inner_commands(tokens):
+                stripped = strip_heredoc_bodies(inner)
+                for each in (stripped, *substitution_commands(inner, stripped)):
+                    yield from _hook_events(each)
+
+
+def hook_bypass_hit(texts):
+    """Return (matched text, verb, what) for the first call in `texts` (the command and its `$( )` texts) that
+    skips or redirects the git hooks, else None. A `git config` write of core.hooksPath counts when a commit,
+    merge or push runs after it, anywhere later in the command. A lone write is allowed on purpose: setting a
+    repo's own hooks path is a normal setup step. A later commit in another call passes, a known limit
+    (decision commit-hook-bypass-refused)."""
+    for text in texts:
+        written = ""
+        for event in _hook_events(text):
+            if event[0] == "bypass":
+                return event[1], event[2], event[3]
+            if event[0] == "config":
+                written = event[1]
+            elif written:
+                return written, event[1], "this " + event[1] + " runs after core.hooksPath is written, so git's hooks point at another folder"
     return None
 
 

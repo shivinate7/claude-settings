@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""CLI tests for the scope detector (.github/scripts/ci-scope.sh).
+"""CLI tests for the scope detector (.github/scripts/ci-scope.sh) and the mod test runner (.github/scripts/mod-tests.sh).
 
-Each case builds a scratch git repo, commits a base, commits the changed paths, runs the script
+Each scope case builds a scratch git repo, commits a base, commits the changed paths, runs the script
 with EVENT and BASE_SHA set, and reads the name=value lines it wrote to $GITHUB_OUTPUT.
-CI_SCOPE overrides the script path (for a successor). Needs bash on PATH.
+CI_SCOPE overrides the script path (for a successor). Needs bash on PATH. The mod runner cases build a
+scratch tree with a copy of mod-tests.sh and run it there; they need node on PATH.
 
 Output names pinned (the `scope` job re-exports them as job outputs):
   JOB_FLAGS  one per check job except the lint job `checks`: checks_windows, checks_windows_merge,
              checks_windows_rest, checks_macos, shell_macos, pointer_windows
-  STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot turns on the whole checks-shoot job)
+  STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot turns on the checks-shoot and checks-waiting-page jobs)
 
 Run with:  python3 lint/test_ci_scope.py -v
 """
+import ast
 import os
 import shutil
 import subprocess
@@ -22,6 +24,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  copies the script under test into a scratch tree; rm_tree removes the run folder
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
@@ -103,6 +108,60 @@ class DerivedFlags(unittest.TestCase):
     def test_unreadable_diff_turns_the_derived_flags_on(self):
         self.check(run(["hooks/guard.py"], base="0" * 40))
         self.assertEqual(run(["hooks/guard.py"], base="0" * 40)["checks_guard"], "true")
+
+
+# The export suite (skills/waiting-page/test_export_page.py) runs in checks-shoot, which runs only on `shoot`. The walk below
+# lists the repo files the suite reaches. Each of them must set `shoot` alone.
+EXPORT_SUITE = "skills/waiting-page/test_export_page.py"
+# The four folders the suite's modules put on sys.path. A bare module name resolves to a file in one of them, and any other
+# name (a stdlib module, a function) resolves to nothing, so the walk counts repo files only.
+EXPORT_SUITE_DIRS = ("skills/waiting-page", "lint", "hooks", "janitor")
+# Run or read by the suite, never imported, so the walk cannot reach them. lint/layout.json is read at run time by
+# lint/layout.py artifacts(), which the export calls.
+EXPORT_SUITE_FILES = ("skills/waiting-page/check_designs.mjs", "skills/waiting-page/page.html", "lint/layout.json")
+
+
+def imported_names(tree):
+    """Each module name the tree imports, at any depth: `import a.b`; `from a import b` (`a`, and `a.b` in case `b` is a
+    module); a string literal given to importlib.import_module or __import__."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            yield from (alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            yield node.module
+            yield from (node.module + "." + alias.name for alias in node.names)
+        elif isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Constant) \
+                and isinstance(node.args[0].value, str):
+            fn = node.func
+            if (isinstance(fn, ast.Name) and fn.id == "__import__") or \
+                    (isinstance(fn, ast.Attribute) and fn.attr == "import_module"
+                     and isinstance(fn.value, ast.Name) and fn.value.id == "importlib"):
+                yield node.args[0].value
+
+
+def repo_module(root, name):
+    """The repo file a module name stands for in EXPORT_SUITE_DIRS, or None: a/b.py, or a/b/__init__.py for a package."""
+    rel = name.replace(".", "/")
+    for folder in EXPORT_SUITE_DIRS:
+        for cand in ("%s/%s.py" % (folder, rel), "%s/%s/__init__.py" % (folder, rel)):
+            if os.path.isfile(os.path.join(root, cand)):
+                return cand
+    return None
+
+
+def export_suite_files():
+    """-> the repo files the export suite reaches, sorted: its import closure from its own file, plus EXPORT_SUITE_FILES."""
+    root = os.path.realpath(os.path.join(HERE, ".."))
+    found, todo = {EXPORT_SUITE}, [EXPORT_SUITE]
+    while todo:
+        with open(os.path.join(root, todo.pop()), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        for name in imported_names(tree):
+            hit = repo_module(root, name)
+            if hit and hit not in found:
+                found.add(hit)
+                todo.append(hit)
+    return sorted(found | set(EXPORT_SUITE_FILES))
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
@@ -222,6 +281,14 @@ class Scope(unittest.TestCase):
         self.assertEqual(reader, self.true_set(run(["lint/_transcript.py"])))
         self.assertTrue({"checks_windows_rest", "checks_macos", "code", "guard"} <= reader, reader)
 
+    # lint/_clause.py: report_guard.py imports it, and test_clause.py is its suite. It sits in the hooks/* arm of ci-scope.sh,
+    # so an edit turns on that arm's jobs and no merge job (only the transcript reader and guard_log_report.py reach that one).
+    # An edit, not a new file: a new file under lint/ also turns on the landed-dir jobs, which is another arm's rule.
+    def test_clause_parser_change_selects_the_jobs_the_arm_names(self):
+        self.assertEqual(self.true_set(run(["lint/_clause.py"], existing=["lint/_clause.py"])),
+                         {"checks_windows_rest", "checks_macos", "code", "guard", "shoot"},
+                         "lint/_clause.py must select the hooks/* arm's jobs and no merge job")
+
     # Guard family: hooks/guard_<anything>.py is split out of hooks/guard.py. Each sibling must set
     # exactly the flags guard.py sets, as a new file and as an edit. Today the generic hooks/* rule
     # gives a new sibling no sweep flag, and an edited one no Windows or shell job.
@@ -302,13 +369,17 @@ class Scope(unittest.TestCase):
     # Each arm that turns `mods` on starts both mod jobs, as a new file and as an edit. An edit leaves every
     # other job flag off, so the set is exact. A new file under lint/ or skills/ is in a landed dir, which adds
     # shell_macos and guard by its own rule, so a new file is checked for the jobs it must not start.
-    MOD_ARMS = ["mods/zz-new/a.mjs", "lint/test_scanner_traps.mjs", "skills/plain-english-map/README.md"]
+    # `.gitignore` is an arm too: skills/plain-english-map/tests/typescript-home.test.mjs reads it, so a .gitignore-only
+    # pull request must run the CI step. It keeps `code`, which its lint suites read.
+    MOD_ARMS = ["mods/zz-new/a.mjs", "lint/test_scanner_traps.mjs", "skills/plain-english-map/README.md", ".gitignore"]
 
     def test_each_mods_arm_starts_the_windows_and_macos_jobs(self):
         for p in self.MOD_ARMS:
             with self.subTest(path=p, edit=True):
-                want = {"mods", "checks_windows", "checks_macos"} | ({"code"} if p.startswith("lint/") else set())
-                self.assertEqual(self.true_set(run([p], existing=[p])), want)
+                code_arm = p.startswith("lint/") or p == ".gitignore"
+                want = {"mods", "checks_windows", "checks_macos"} | ({"code"} if code_arm else set())
+                self.assertEqual(self.true_set(run([p], existing=[p])), want,
+                                 msg=f"{p}: the mods arm must start the CI step and both mod jobs, and keep code")
             with self.subTest(path=p, edit=False):
                 self.assertFlags(run([p]), want_true=["mods"] + self.MOD_JOBS,
                                  want_false=["checks_windows_merge", "checks_windows_rest", "pointer_windows"])
@@ -361,6 +432,13 @@ class Scope(unittest.TestCase):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
+    # bin/duo-fold and its suite run in the shell-macos job only, like bin/sim-test (bash 3.2 on macOS).
+    # Named failure: without the arm, bin/duo-fold turns every flag on, and the suite turns on `code` alone.
+    def test_duo_fold_edit_turns_on_only_the_macos_shell_job(self):
+        for p in ("bin/duo-fold", "lint/test_duo_fold.sh"):
+            with self.subTest(path=p):
+                self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
+
     # bin/shoot's suite installs a browser, so its own paths and the browser installers turn `shoot` on. An edit sets
     # `code` and `shoot` and no other flag in true_set (checks_guard is outside ALL; the cases below pin it).
     # An unrelated code change leaves `shoot` off.
@@ -371,8 +449,45 @@ class Scope(unittest.TestCase):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"code", "shoot"})
         self.assertFlags(run(["lint/test_verdict.py"], existing=["lint/test_verdict.py"]), want_false=["shoot"])
 
-    # checks-guard and checks-shoot both install actions/playwright-setup, and checks-guard gates on checks_guard
-    # alone (checks.yml). An edit to the action must set checks_guard directly, with `shoot` for checks-shoot.
+    # The waiting page export suite (skills/waiting-page/test_export_page.py) runs in checks-shoot, which runs only on `shoot`.
+    # It reads these four paths: hooks/question_form.py and hooks/_nowindow.py (through page_check.py), lint/_test_temp.py
+    # (its run folder), and SKILL.md (the steps it reads). Named failure: a PR that changes only one of them leaves `shoot`
+    # off, so the suite is skipped.
+    def test_waiting_page_export_suite_paths_turn_on_shoot(self):
+        for p in ("hooks/question_form.py", "hooks/_nowindow.py", "lint/_test_temp.py", "skills/waiting-page/SKILL.md"):
+            with self.subTest(path=p):
+                self.assertFlags(run([p], existing=[p]), want_true=["shoot"])
+
+    # Control: the same paths keep the flags they set today, and a sibling in the same arm keeps `shoot` off.
+    # Named failure: a fix that moves a path into a new arm, or widens an arm, drops a flag or turns `shoot` on for a sibling.
+    def test_waiting_page_export_paths_keep_their_flags_and_their_siblings_keep_shoot_off(self):
+        for p, flags in (("hooks/question_form.py", ["code", "guard"]), ("hooks/_nowindow.py", ["code", "guard"]),
+                         ("lint/_test_temp.py", ["code"])):
+            with self.subTest(path=p):
+                self.assertFlags(run([p], existing=[p]), want_true=flags)
+        for p in ("hooks/mutate_shared.py", "hooks/config_watch.py"):
+            with self.subTest(path=p):
+                self.assertFlags(run([p], existing=[p]), want_false=["shoot"])
+
+    # Named failure: a file the suite reaches sets `shoot` off, so a pull request that changes only that file skips the suite.
+    # The scope asserts come first. Named failure: a walk that reaches too little passes every file below and proves nothing.
+    def test_every_file_the_export_suite_reaches_sets_shoot_alone(self):
+        reached = export_suite_files()
+        for want in ("skills/waiting-page/export_page.py", "skills/waiting-page/page_check.py", "lint/_test_temp.py",
+                     "hooks/_nowindow.py", "janitor/sweep.py") + EXPORT_SUITE_FILES:
+            self.assertIn(want, reached, "the export suite's walk does not reach %s" % want)
+        # The sibling control above pins these two with `shoot` off, so the walk must not reach them.
+        for not_want in ("hooks/mutate_shared.py", "hooks/config_watch.py"):
+            self.assertNotIn(not_want, reached,
+                             "the export suite's walk reaches %s, which the sibling control pins off" % not_want)
+        missing = [p for p in reached if run([p], existing=[p]).get("shoot") != "true"]
+        if missing:
+            self.fail("shoot stays off when a pull request changes only one of these export suite files, "
+                      "so the suite is skipped:\n  " + "\n  ".join(missing))
+
+    # actions/playwright-setup has four callers (checks.yml): checks-guard and checks-guard-2 gate on checks_guard
+    # alone, and checks-shoot and checks-waiting-page gate on shoot alone. An edit to the action must set
+    # checks_guard directly, with `shoot` for the two shoot jobs.
     # Named failure: the action arm sets code and shoot only, so checks-guard skips its install and guard suite.
     def test_playwright_action_edit_turns_on_the_checks_guard_job(self):
         p = "actions/playwright-setup/action.yml"
@@ -399,7 +514,7 @@ class Scope(unittest.TestCase):
         self.assertEqual(got["checks_guard"], "true", f"checks_guard: {got}")
 
     # pin.sh is the install script checks-guard runs from actions/playwright-setup. Named failure: an edit that
-    # starts checks-shoot alone leaves the checks-guard install on the old script.
+    # starts the shoot jobs and no checks-guard job leaves the checks-guard install on the old script.
     def test_playwright_pin_script_edit_turns_on_the_checks_guard_job(self):
         p = "actions/playwright-setup/pin.sh"
         got = run([p], existing=[p])
@@ -407,14 +522,100 @@ class Scope(unittest.TestCase):
         self.assertIn("checks_guard", got, got)
         self.assertEqual(got["checks_guard"], "true", f"checks_guard: {got}")
 
-    # A .md edit under the action is docs, so neither job starts. Named failure: without the *.md carve-out, the
-    # action arm starts checks-shoot and checks-guard for a README edit.
+    # A .md edit under the action is docs, so no caller starts. Named failure: without the *.md carve-out, the
+    # action arm starts the two shoot jobs and the two checks-guard jobs for a README edit.
     def test_playwright_readme_edit_turns_on_no_job(self):
         p = "actions/playwright-setup/README.md"
         got = run([p], existing=[p])
         self.assertFlags(got, want_false=["code", "shoot"])
         self.assertIn("checks_guard", got, got)
         self.assertEqual(got["checks_guard"], "false", f"checks_guard: {got}")
+
+
+# The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
+# root, so each case runs a copy of it inside a scratch tree under the run folder.
+@unittest.skipUnless(BASH, "bash not on PATH")
+class ModTestsRunsEveryCheck(unittest.TestCase):
+    SENTINEL = "zz-mod-check-ran"
+    # Candidate names for the passing test file. find lists by the filesystem's directory order, which depends on
+    # the names, so a case tries these until one lists check.mjs where it needs it.
+    TEST_NAMES = ["plain-diff.test.mjs"] + [f"{c}.test.mjs" for c in "abcdefghijklmnop"]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.run_dir = _test_temp.run_folder()
+
+    @classmethod
+    def tearDownClass(cls):
+        tracked_tree.rm_tree(cls.run_dir)
+
+    def setUp(self):
+        # In CI a missing node is a red run, never a skip: the mod phase cannot run without it.
+        if shutil.which("node") is None:
+            if os.environ.get("CI"):
+                self.fail("node is not on PATH in CI, so the mod phase cannot run")
+            self.skipTest("node not on PATH")
+
+    @staticmethod
+    def node_script(exit_code, say=None):
+        """A node file that prints `say` to stderr, then exits with `exit_code`."""
+        printed = f"console.error({say!r});\n" if say else ""
+        return printed + f"process.exit({exit_code});\n"
+
+    def make_tree(self, name, test=None, check=None, test_name="plain-diff.test.mjs"):
+        """A scratch tree: mod-tests.sh, one mod test file (passing by default), and mods/plain-diff/check.mjs if `check` is given."""
+        tree = os.path.join(self.run_dir, name)
+        tracked_tree.copy_tracked(tree, ".github/scripts")
+        plain = os.path.join(tree, "mods", "plain-diff")
+        os.makedirs(plain)
+        with open(os.path.join(plain, test_name), "w") as f:
+            f.write(test or self.node_script(0))
+        if check is not None:
+            with open(os.path.join(plain, "check.mjs"), "w") as f:
+                f.write(check)
+        return tree
+
+    def run_phase(self, tree):
+        """The mods phase of the copied script, run from `tree`, which holds every file the phase can see."""
+        return subprocess.run([BASH, os.path.join(tree, ".github", "scripts", "mod-tests.sh"), "mods"],
+                              cwd=tree, capture_output=True, text=True)
+
+    def listing(self, tree):
+        """The .mjs files under mods/ in the order find lists them. The mod phase lists a subset of these in the same order."""
+        r = subprocess.run(["find", "mods", "-type", "f", "-name", "*.mjs"], cwd=tree, capture_output=True, text=True, check=True)
+        return r.stdout.split()
+
+    def tree_listing_check(self, name, check_last):
+        """A scratch tree with one passing test file and the red check, listed last (check_last) or first."""
+        for i, test_name in enumerate(self.TEST_NAMES):
+            tree = self.make_tree(f"{name}-{i}", check=self.node_script(1, self.SENTINEL), test_name=test_name)
+            listed = self.listing(tree)
+            if len(listed) == 2 and listed[-1].endswith("check.mjs") == check_last:
+                return tree
+        self.fail(f"no candidate test name lists check.mjs {'last' if check_last else 'first'} on this filesystem")
+
+    # Scope first: the phase ran at all. The asserts after it say what the phase did with the check file. Both orders run,
+    # because a phase that takes only the last file's exit code hides a red check listed before a passing file.
+    def test_a_red_check_script_fails_the_mod_phase_in_either_order(self):
+        for check_last in (True, False):
+            with self.subTest(check_last=check_last):
+                r = self.run_phase(self.tree_listing_check(f"red-check-{check_last}", check_last))
+                self.assertIn("mod tests:", r.stdout, "the mod phase printed no count line, so it did not run")
+                # Named failure: check.mjs never runs, because the phase globs *.test.mjs only.
+                self.assertIn(self.SENTINEL, r.stdout + r.stderr, "mods/plain-diff/check.mjs did not run: the mod phase skips it")
+                self.assertNotEqual(r.returncode, 0, "mods/plain-diff/check.mjs failed, and the mod phase still exited 0")
+
+    # Green control: a passing check file leaves the phase green, so the fix cannot turn it red.
+    def test_a_green_check_script_leaves_the_mod_phase_green(self):
+        r = self.run_phase(self.make_tree("green-check", check=self.node_script(0, self.SENTINEL)))
+        self.assertIn("mod tests:", r.stdout, "the mod phase printed no count line, so it did not run")
+        self.assertEqual(r.returncode, 0, f"a passing mods/plain-diff/check.mjs turned the mod phase red:\n{r.stdout}{r.stderr}")
+
+    # Green control: a red *.test.mjs already fails the phase.
+    def test_a_red_test_file_fails_the_mod_phase(self):
+        r = self.run_phase(self.make_tree("red-test", test=self.node_script(1)))
+        self.assertIn("mod tests:", r.stdout, "the mod phase printed no count line, so it did not run")
+        self.assertNotEqual(r.returncode, 0, "a red *.test.mjs passed the mod phase")
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")

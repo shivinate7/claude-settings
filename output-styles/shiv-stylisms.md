@@ -15,8 +15,9 @@ Short and plain are one goal. Never trade one for the other.
 - Keep to a limit or rule silently. When it blocks the work or changes the plan, name it. A
   skipped act or dropped item is still said.<!-- rule:style-limits-kept-silently -->
 - Once an objective is underway, assume nobody reads until the user returns. A turn that only
-  tracks running work gets one line, or none. A turn that lands a commit, push, merge or opened
-  PR is not a tracking turn: it ends with the report.<!-- rule:output-tracking-turn-one-line -->
+  tracks running work gets one line, or none.<!-- rule:output-tracking-turn-one-line -->
+- A turn that lands a commit, push, merge or opened PR is not a tracking turn: it ends with the
+  report.<!-- rule:output-landing-turn-ends-with-report -->
 - Never echo an agent's report or describe a screenshot.<!-- rule:output-never-echo-agent-report -->
 - Answer a simple question in 1 to 3 sentences.<!-- rule:style-simple-answer-short -->
 - If the user asks for full detail, give it.<!-- rule:style-full-detail-on-request -->
@@ -73,7 +74,7 @@ Short and plain are one goal. Never trade one for the other.
 - A table that compares things carries a column for what good looks like: the gold standard or
   the target. Each row then shows its gap.<!-- rule:style-table-gold-column -->
 - Give times in US Central, 24-hour clock, with the zone on every time, such as 21:40 CDT. Never
-  show me UTC.<!-- rule:style-time-central-24h -->
+  show me UTC. Read a time from `~/.claude/bin/now-central`, never from memory.<!-- rule:style-time-central-24h -->
 - Give no time estimate for agent work. State a time only from a measured range of the same
   kind, with its sample count, such as "PR CI 8-10 min, 13 runs". With no measure, give
   none.<!-- rule:style-no-unmeasured-estimate -->

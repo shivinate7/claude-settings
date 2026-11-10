@@ -11,6 +11,19 @@ from typing import Optional
 # The project's own settings files, with the leading slash the guard matches a path suffix on.
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 
+# The one home of the claude-code-remote server name (rule agent-no-remote-tools). The guard imports it by name;
+# lint/check_agent_models.py reads it from the guard.
+REMOTE_SERVER = "mcp__claude-code-remote"
+# The claude-code-remote tools that start, message, tag or archive sessions, set scheduled tasks or attach repos
+# and computers. An agent never calls one; the session that spawned it does. settings.json's guard matcher
+# must name each (lint/test_settings_matcher.py reads this tuple).
+REMOTE_OUTWARD_TOOLS = tuple(REMOTE_SERVER + "__" + short for short in (
+    "create_session", "send_message", "archive_session", "unarchive_session", "interrupt_session",
+    "set_session_tags", "set_session_title", "create_trigger", "update_trigger", "delete_trigger",
+    "fire_trigger", "send_later", "watch_url", "unwatch_url", "subscribe_pr_activity",
+    "unsubscribe_pr_activity", "add_repo", "register_repo_root", "confirm_repository_trust",
+    "request_computer_folder"))
+
 # A prompt that starts with one of these is a notice from a tool or an agent, never the owner.
 TASK_NOTIFICATION_TAG = "<task-notification>"
 # An agent hand-back (CLI 2.1.316 text), bare or after a frame line: the plain one or the
@@ -32,12 +45,15 @@ NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teamm
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries this marker
 # (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
 EXPLORE_AUDIT_MARKER = "Audit:"
+# A reviewer may run Sonnet, above its Haiku row, when its brief's first non-blank line starts with this marker: the brief is a fix check.
+FIX_CHECK_MARKER = "Fix check"
 
 # THE BRIEF MARKER TABLE (rules agent-role-model, roles-third-round-steps-up; decision agent-model-cap). One row per
 # marker: (kind, regex text, position). guard.marker_hits is the one scanner that reads it. Cost: a pure scan of the
 # brief text, no I/O, no process, no file. Its position decides where the row reads:
 #   "line-start": every line of the brief that starts with the marker, case-insensitive, leading blanks allowed.
-#   "first-line": the brief's first non-blank line only, case-sensitive, with any text ahead of the marker.
+#   "first-line": the brief's first non-blank line only, case-sensitive; a row says whether text may stand ahead of the marker
+#     (the round and audit rows allow it, the fix check row does not).
 # The two positions differ because the owner ruled them apart: a role word or markup ahead of `Round N of 3` on the
 # first line still counts, but lowercase prose must not. A group 1 in a row is the marker's number n; a row with none
 # has no n.
@@ -54,12 +70,18 @@ BRIEF_MARKERS = (
     ("round", r"^(?![ \t]*(?i:(?:round|try)[ \t]+\d[ \t]+of[ \t]+3\b))(?:(?!\b" + _ANY_ROUND_SHAPE + r").)*?\bRound" + _N_OF_3,
      "first-line"),
     ("audit", r"\b" + re.escape(EXPLORE_AUDIT_MARKER), "first-line"),
+    # The fix check marker must open the first line (blanks allowed): text ahead of it, as in "New lane after Fix check FAIL", does not count.
+    ("fixcheck", r"^[ \t]*" + re.escape(FIX_CHECK_MARKER) + r"\b", "first-line"),
 )
 
 # The owner's two gh logins on his computer. A gh command handed to him switches to the default first;
 # the fallback serves only a repo the default cannot reach (decision act-in-place, rule gh-login-switch).
 GH_DEFAULT_LOGIN = "shivinate7"
 GH_FALLBACK_LOGIN = "ssemwal-cdc"
+# The repo that holds the shared waiting-page template, and the folder of it (rule page-form-to-template: a page
+# comment is rewritten into the template, never answered by a thread reply). The one home of both strings.
+SETTINGS_REPO = GH_DEFAULT_LOGIN + "/claude-settings"
+TEMPLATE_DIR = "skills/waiting-page"
 
 # The tags a session carries (decision session-tiers, Tier tags). The roadmap build reads them from live sessions and
 # the guard's rule lane-repo-tag checks them on a lane `create_session`, so both name the same strings.
@@ -104,6 +126,15 @@ def refusals_path(session_id: object) -> Optional[str]:
     if not isinstance(session_id, str) or not re.fullmatch(r"[\w.-]+", session_id) or session_id.startswith("."):
         return None
     return os.path.join(config_dir(), STATE_DIR_NAME, "refusals", session_id + ".jsonl")
+
+
+def raised_refusals_path(session_id: object) -> Optional[str]:
+    """The file of (tool_name, reason) pairs a session's replies have already raised with the owner, so the same
+    tool refused again for the same reason does not block again, or None for an id that is not a plain name.
+    Written and read by lint/report_guard.py, beside the refusals file."""
+    if not isinstance(session_id, str) or not re.fullmatch(r"[\w.-]+", session_id) or session_id.startswith("."):
+        return None
+    return os.path.join(config_dir(), STATE_DIR_NAME, "refusals-raised", session_id + ".json")
 
 
 def route_flags_path(session_id: object) -> Optional[str]:

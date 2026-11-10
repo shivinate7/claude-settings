@@ -270,6 +270,14 @@ class Scaffold(TempDest):
         flat = " ".join(tree(SKILL)["templates/brief.md"].split())
         self.assertIn("tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`", flat)
 
+    def test_brief_says_where_lane_lint_runs(self):
+        files = tree(SKILL)
+        self.assertIn("templates/brief.md", files)  # the scope first: a missing brief fails here, once
+        flat = " ".join(files["templates/brief.md"].split())
+        self.assertIn("Run `merge --lane-lint` from the main checkout, never from a session or agent "
+                      "isolated in a worktree: Claude Code's worktree check can refuse it there.", flat,
+                      "templates/brief.md does not say where lane lint runs")
+
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")
         for rel, text in tree(self.dest).items():
@@ -392,6 +400,22 @@ class HandoffCheck(TempDest):
                       f"none, see {PAGE}"):
             with self.subTest(items=items):
                 self.assertEqual(problems(handoff_text(items, [PAGE])), [])
+
+    def test_a_count_in_parentheses_beside_the_url_is_no_id(self):
+        # "(3 open)" counts the open items; it copies no id. A real id beside the URL is still caught.
+        self.assertEqual(problems(handoff_text(ITEMS, [PAGE])), [])
+        found = problems(handoff_text(f"{ITEMS} #123", [PAGE]))
+        self.assertEqual(len(found), 1, found)
+        self.assertRegex(found[0], r"(?i)\bids?\b")
+        self.assertEqual(problems(handoff_text(f"{ITEMS} (3 open)", [PAGE])), [])
+
+    def test_ids_written_inside_a_count_in_parentheses_are_still_caught(self):
+        # The count is no id, but an id written inside the parentheses is: each one still gives the one problem.
+        for items in (f"{ITEMS} (3 open: 12, 13)", f"{ITEMS} (2 open: #34)", f"{ITEMS} (3 open, ids 12 14)"):
+            with self.subTest(items=items):
+                found = problems(handoff_text(items, [PAGE]))
+                self.assertEqual(len(found), 1, found)
+                self.assertRegex(found[0], r"ids?")
 
     def test_a_placeholder_url_is_no_items_home(self):
         for items in BAD_WATCHES:

@@ -63,7 +63,7 @@ class T(unittest.TestCase):
         self.assertNotIn("noisy", r.stdout)
 
     def test_fail_line_excerpt_and_exit_code(self):
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             log = os.path.join(d, "v.log")
             r = run("import sys\nprint('one')\nprint('FAIL boom')\nprint('err', file=sys.stderr)\nsys.exit(7)", log)
             self.assertEqual(r.returncode, 7)
@@ -82,7 +82,7 @@ class T(unittest.TestCase):
         self.assertEqual(body[-1], "l99")
 
     def test_reused_log_is_not_truncated(self):
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             log = os.path.join(d, "v.log")
             run("print('first-run')", log)
             run("print('second-run')", log)
@@ -98,7 +98,7 @@ class T(unittest.TestCase):
 
     def test_heartbeat_while_slow(self):
         """A long, quiet run must not draw a false stall alarm (Tools that are quiet by design), so check for at least one beat, never an exact count (decision stall-watch)."""
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             log = os.path.join(d, "v.log")
             r = run("import time\ntime.sleep(3.5)\nprint('done')", log, {"VERDICT_HEARTBEAT": "1"})
             self.assertEqual(r.returncode, 0)
@@ -156,7 +156,7 @@ class T(unittest.TestCase):
 
     def test_slow_fail_heartbeats_then_same_excerpt(self):
         """A long, quiet run must not draw a false stall alarm (Tools that are quiet by design), so check for at least one beat, never an exact count (decision stall-watch)."""
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             log = os.path.join(d, "v.log")
             r = run("import sys, time\nprint('one')\ntime.sleep(2.5)\nprint('FAIL boom')\nprint('err', file=sys.stderr)\nsys.exit(7)", log, {"VERDICT_HEARTBEAT": "1"})
             self.assertEqual(r.returncode, 7)
@@ -171,7 +171,7 @@ class T(unittest.TestCase):
 
     def test_heartbeat_never_carries_command_output(self):
         """A long, quiet run must not draw a false stall alarm (Tools that are quiet by design), so check for at least one beat, never an exact count (decision stall-watch)."""
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             log = os.path.join(d, "v.log")
             r = run("import time\nprint('SECRET-OUT-7731', flush=True)\ntime.sleep(2.5)\nprint('SECRET-OUT-7731 again')", log, {"VERDICT_HEARTBEAT": "1"})
             self.assertEqual(r.returncode, 0)
@@ -184,7 +184,7 @@ class T(unittest.TestCase):
     def test_bad_heartbeat_value_still_runs_the_command(self):
         code = "import sys, time\nprint('MARK-RAN', flush=True)\ntime.sleep(2)\nsys.exit(7)"
         for val in ["abc", "0", "-1", "1e-9", "0.001", "inf", "nan"]:
-            with self.subTest(VERDICT_HEARTBEAT=val), tempfile.TemporaryDirectory() as d:
+            with self.subTest(VERDICT_HEARTBEAT=val), tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
                 log = os.path.join(d, "v.log")
                 r = run(code, log, {"VERDICT_HEARTBEAT": val}, timeout=30)
                 self.assertEqual(r.returncode, 7, (r.stdout[:300], r.stderr[-300:]))
@@ -194,7 +194,7 @@ class T(unittest.TestCase):
 
     @unittest.skipIf(os.name == "nt", "POSIX shell pipe and signals")
     def test_broken_pipe_does_not_orphan_child(self):
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             log = os.path.join(d, "v.log")
             pidfile = os.path.join(d, "child.pid")
             script = os.path.join(d, "fx.py")
@@ -240,7 +240,7 @@ class T(unittest.TestCase):
             "TEST FAILED without ** markers": "print('test_retry TEST FAILED handled, passed')",
         }
         for name, code in cases.items():
-            with self.subTest(name), tempfile.TemporaryDirectory() as d:
+            with self.subTest(name), tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
                 r = run(code, os.path.join(d, "v.log"))
                 self.assertEqual(r.returncode, 0, r.stdout)
                 self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
@@ -317,7 +317,7 @@ class T(unittest.TestCase):
 
     @unittest.skipIf(os.name == "nt", "Windows blocks deleting a file verdict holds open; the child exits 1 first")
     def test_child_deleting_log_is_fail_log_unreadable(self):
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             log = os.path.join(d, "v.log")
             r = run("import os\nos.remove(os.environ['VERDICT_LOG'])", log)
             self.assertNotEqual(r.returncode, 0, r.stdout)
@@ -331,7 +331,7 @@ class T(unittest.TestCase):
         code = ("import os\n"
                 "print('** TEST FAILED **', flush=True)\n"
                 "open(os.environ['VERDICT_LOG'], 'w').close()")
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             r = run(code, os.path.join(d, "v.log"))
             self.assertNotEqual(r.returncode, 0, r.stdout)
             first = r.stdout.splitlines()[0] if r.stdout else ""
@@ -344,7 +344,7 @@ class T(unittest.TestCase):
                 "print('** TEST FAILED **', flush=True)\n"
                 "open(os.environ['VERDICT_LOG'], 'w').close()\n"
                 "sys.exit(7)")
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             r = run(code, os.path.join(d, "v.log"))
             self.assertEqual(r.returncode, 7, r.stdout)
             first = r.stdout.splitlines()[0] if r.stdout else ""
@@ -355,7 +355,7 @@ class T(unittest.TestCase):
     def _fail_with_child_bytes(self, expr):
         # The child writes raw bytes itself: its own print() of a non-cp1252 character would fail first.
         # PYTHONUTF8 and PYTHONIOENCODING are removed so verdict meets the machine's default encoding.
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             script = os.path.join(d, "fx.py")
             with open(script, "w", encoding="ascii") as f:
                 f.write("import sys\nsys.stdout.buffer.write(%s)\nsys.stdout.flush()\nsys.exit(7)\n" % expr)
@@ -395,7 +395,7 @@ class T(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "bin/verdict.cmd is the Windows launcher: it runs on Windows only (checks-windows-rest)")
     def test_cmd_launcher_fail_keeps_rc_and_log(self):
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             log = os.path.join(d, "v.log")
             r = run("print('FAIL boom')\nraise SystemExit(7)", log, launcher=CMD, timeout=60)
             self.assertEqual(r.returncode, 7, (r.stdout[:300], r.stderr[-300:]))
@@ -425,9 +425,25 @@ def plant(folder, name, age_days, header=True):
     os.utime(p, (t, t))
     return p
 
+class StdinPassesThrough(unittest.TestCase):
+    """A piped stdin reaches the command on every OS: `printf x | verdict cmd` feeds cmd. On Windows only a console
+    stdin becomes an empty one, inside hooks/_nowindow.py: a no-window child cannot use an inherited console stdin."""
+
+    def test_a_piped_stdin_reaches_the_command(self):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            script = os.path.join(d, "reads.py")
+            with open(script, "w") as f:
+                f.write("import sys\nsys.exit(0 if sys.stdin.read() == 'piped\\n' else 3)\n")
+            r = subprocess.run([sys.executable, V, sys.executable, script], input="piped\n",
+                               capture_output=True, text=True, timeout=60,
+                               env={k: v for k, v in os.environ.items() if k != "VERDICT_LOG"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+
 class Prune(unittest.TestCase):
     def setUp(self):
-        self.sb = tempfile.TemporaryDirectory()
+        self.sb = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.extra = tmp_env(self.sb.name)
         self.folder = log_folder(self.extra)
         os.makedirs(self.folder, exist_ok=True)
@@ -448,7 +464,7 @@ class Prune(unittest.TestCase):
         self.assertEqual(os.path.dirname(os.path.normcase(own)), os.path.normcase(self.folder))
 
     def test_old_log_in_callers_verdict_log_folder_stays(self):
-        with tempfile.TemporaryDirectory() as caller:
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as caller:
             audit = plant(caller, "verdict-audit-q4.log", 19)
             r = run("print('x')", os.path.join(caller, "mine.log"), self.extra, timeout=60)
             self.assertEqual(r.returncode, 0, r.stdout)
@@ -478,7 +494,7 @@ class Prune(unittest.TestCase):
         self.assertTrue(os.path.isdir(d) and os.path.exists(inner))
 
     def test_symlink_named_like_a_log_leaves_target(self):
-        with tempfile.TemporaryDirectory() as out:
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as out:
             target = plant(out, "target.txt", 30)
             link = os.path.join(self.folder, "verdict-link.log")
             try: os.symlink(target, link)
@@ -488,7 +504,7 @@ class Prune(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "junctions are Windows only")
     def test_junction_named_like_a_log_leaves_target(self):
-        with tempfile.TemporaryDirectory() as out:
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as out:
             target = plant(out, "target.txt", 30)
             jn = os.path.join(self.folder, "verdict-junc.log")
             m = subprocess.run(["cmd", "/c", "mklink", "/J", jn, out], capture_output=True, text=True)
@@ -512,7 +528,7 @@ class Prune(unittest.TestCase):
 class MissingVerdictLine(unittest.TestCase):
     """The verdict line is the contract: a run that dies in setup must still print FAIL."""
     def test_unwritable_verdict_log_prints_fail_line(self):
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             r = run("print('x')", os.path.join(d, "no-such-dir", "v.log"), timeout=60)
         self.assertNotEqual(r.returncode, 0)
         self.assertTrue(any(l.startswith("FAIL ") for l in r.stdout.splitlines()), (r.stdout, r.stderr[-300:]))
@@ -635,6 +651,35 @@ class Skips(unittest.TestCase):
 
     def test_marker_lines_with_no_summary_are_counted(self):
         self.assert_skip(self.check(printing("PASS first\nSKIP second: no keychain\nSKIPPED third\nPASS fourth\n")), 2)
+
+    def test_colon_marker_lines_with_no_summary_are_counted(self):
+        """`SKIP: <case>` is a skip line, as `SKIP <case>` is. A suite that prints only colon lines reads SKIP, not PASS."""
+        self.assert_skip(self.check(printing("PASS first\nSKIP: second case\nSKIP: third case\nPASS fourth\n")), 2)
+
+    def test_colon_summary_line_is_not_counted_on_top_of_its_cases(self):
+        """A summary `SKIP: N check(s)` after N colon case lines adds no skip: the run skipped N, not N + 1."""
+        self.assert_skip(self.check(printing("SKIP: a: no display\nSKIP: b: no display\nSKIP: 2 check(s) not run, none failed\n")), 2)
+
+    def test_space_marker_lines_and_colon_summary_count_once(self):
+        """The shape a suite prints as one run: `SKIP <case> :: detail` lines and a `SKIP: N check(s)` summary (the
+        send-message suite). Green on the old code: it pins that the summary is not counted again."""
+        self.assert_skip(self.check(printing("SKIP a :: x\nSKIP b\nSKIP: 2 check(s) not run, none failed\n")), 2)
+
+    def test_colon_skip_line_with_a_number_counts_as_one(self):
+        """`SKIP: <case>` counts even when the case name starts with a digit, as `SKIP: 404 page not built` does."""
+        self.assert_skip(self.check(printing("PASS first\nSKIP: 404 page not built\nPASS second\n")), 1)
+
+    def test_colon_summary_with_a_count_adds_nothing(self):
+        """A summary `SKIP: 3 checks` after three colon case lines adds no skip: the run skipped three, not four."""
+        self.assert_skip(self.check(printing("SKIP: a: no display\nSKIP: b: no display\nSKIP: c: no display\nSKIP: 3 checks\n")), 3)
+
+    def test_colon_skip_line_naming_a_checkout_count_counts_as_one(self):
+        """`SKIP: 12 checkout cases not run` is one skip: a case line, not a summary, though it starts with a count."""
+        self.assert_skip(self.check(printing("PASS first\nSKIP: 12 checkout cases not run\nPASS second\n")), 1)
+
+    def test_colon_skip_line_naming_checksums_counts_as_one(self):
+        """`SKIP: 7 checksums unavailable` is one skip: "checksums" starts with the word "check", and it is a case line."""
+        self.assert_skip(self.check(printing("PASS first\nSKIP: 7 checksums unavailable\nPASS second\n")), 1)
 
     def test_a_summary_in_the_chunk_overlap_counts_once(self):
         """bin/verdict reads 1 MiB chunks that overlap by 256 bytes, so a summary in the overlap is read twice."""

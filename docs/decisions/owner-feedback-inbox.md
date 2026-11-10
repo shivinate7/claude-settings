@@ -50,11 +50,14 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   message, with its items, to that repo's triage session (tags `cs-build:triage` and
   `cs-repo:<owner>/<name>`), or to its coordinator when no triage lives. Feedback about the
   session's own repo keeps the ruling and task homes.
+  The page writer rewrites each waiting-page comment wake in claude-settings into the shared template, and never answers it in a thread (owner, 2026-11-10 09:13 CST: every page feedback goes into the shared template mechanically; ruling c164: rewrite the item, never a thread reply). The wake's inbox block needs a `task` item with home `step:<slug>` (a step whose file on the record branch names the template) or a `note` item with home `not-page-form`; the Stop guard's page-form rule (`page-form-to-template`) checks it.
   A message with a grant word (approval, approve, approved, grant, granted, authorize, authorized,
   authorised, go ahead, go-ahead, "permission to", "permissions to"; whole words, any case) and an act
   or scope word (merge, push, delete, deploy, release, publish, always, standing, "from now on", and
-  all, any or every right before repo, repos, PR, PRs, branch or branches), fenced text left out, needs one of three homes: a
-  `ruling` item whose home passes, an open `page` item with its send, or a `note` item `-> not-a-grant`.
+  all, any or every right before repo, repos, PR, PRs, branch or branches), fenced text left out, needs one of four
+  homes: a `ruling` item whose home passes, an open `page` item with its send, a `note` item `-> not-a-grant`, or an
+  open `note` item `-> once:<act>` for a one-shot approval. A once: home is barred when the message holds a standing
+  word (the guard's STANDING list, such as "whenever", "going forward", "each time", "until withdrawn", "any open").
   A grant's ruling home may also be `settings.json` or `.claude/CLAUDE.md` at the repo root, if some
   branch tracks it. A plain ruling there still blocks. A lone short message counts. Risk kind: named
   incident. F47 (an all-repos grant left in chat) and F31 (a grant homed to the handoff), in the

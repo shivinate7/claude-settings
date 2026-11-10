@@ -21,7 +21,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `skills/` | The shipped skills, one folder each. |
 | `output-styles/` | The `shiv-stylisms` output style. |
 | `docs/design/` | The house UX rules. |
-| `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`, and `ci-job`, which runs every step of one workflow job here and prints one verdict per step. Also `ios-ship`, the shared tool that ships iOS apps from the Mac (see "Shipping iOS apps"), `sim-test`, which runs `xcodebuild test` on one phone simulator, and `sim-lease`, the queue and lease it takes first (see "Simulator tests"), and `shoot`, which takes one screenshot per route, width and theme from a repo's `.claude/shoot.json` and prints one verdict line. |
+| `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`, and `ci-job`, which runs every step of one workflow job here and prints one verdict per step. Also `ios-ship`, the shared tool that ships iOS apps from the Mac (see "Shipping iOS apps"), `sim-test`, which runs `xcodebuild test` on one phone simulator, and `sim-lease`, the queue and lease it takes first (see "Simulator tests"), `duo-fold`, which folds the iPhone Duo and reads the angle back, and `shoot`, which takes one screenshot per route, width and theme from a repo's `.claude/shoot.json` and prints one verdict line. |
 | `janitor/` | The machine-wide sweep for orphaned worktrees, branches, and listeners. See `janitor/GUIDE.md`. |
 | `merge/` | The code of the `merge` command. It runs from the clone, and nothing installs a copy. `bin/merge` starts it. |
 | `actions/` | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`, `playwright-setup`). Callers pin them by commit SHA. |
@@ -145,6 +145,14 @@ merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MO
                         Posts nothing: the lane posts it as a PR comment.
 merge --reviewed        one line per open PR that has a review record comment: its state (bad when the newest does not parse) and live CI.
                         Then the PRs with no record.
+merge --reviewed --root DIR [--root DIR ...]
+                        the same list for each repo checkout DIR, one block each, then one batch line per repo:
+                        `open batch now: OWNER/NAME #a`, or `build next batch on the running head: ...`. A failed root prints unknown.
+merge --release-check N [N ...] [--lint N@SHA:PASS|UNKNOWN-AT-CAP|FAIL ...]
+                        one line per PR before it goes to a batch: `#N PASS`, or `#N FAIL: reasons`. Checks: open, review record done at the
+                        live head and unedited, lint verdict given for the live head (SHA a full lowercase 40-hex; a PASS on UNKNOWN-AT-CAP
+                        reads `#N PASS (lint unknown at cap)`) and not FAIL, clean merge with the base, and a stacked base's PR in the call
+                        and passing. A check that cannot run is a FAIL, so a missing line is never a pass. Exit 0 only when all PASS.
 merge --dev ...         run the checkout's own tree, not origin main
 ```
 
@@ -262,10 +270,12 @@ in all three is refused, and the refusal names both files and the variable. The 
 The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 2): use `--app` and
 `tools/ios-ship.json`.
 
-* `ios-ship testflight [CONFIG] [--app NAME]... [--export-only]` archives each app as Release and uploads it to TestFlight.
+* `ios-ship testflight [CONFIG] [--app NAME]... [--export-only [--method debugging|release-testing]]` archives each app as Release and uploads it to TestFlight.
   It refuses unless the tree is clean and HEAD is `origin/main`, just fetched. All apps share one build number. It
   stops at the first app that fails, and prints one verdict line. `--export-only` skips the main check, exports the
   `.ipa` files to a folder it prints, and deletes the `.ipa` of each app that has `copy_in`.
+  `--method` sets the export method: `debugging` for a development `.ipa`, `release-testing` for a release `.ipa` for registered devices. The default is
+  `app-store-connect`. It is refused without `--export-only`.
 * `ios-ship install [CONFIG] [--app NAME]... [--no-install] [--debug] [--force]` builds each app in its own clone under
   `~/Library/Application Support/ios-adblock-reinstall` and installs it on the phone. One app's failure does not stop
   the others. Exit 75 means that the phone was not reachable. `--no-install` stops after a build for generic iOS.

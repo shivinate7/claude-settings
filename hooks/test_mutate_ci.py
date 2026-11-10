@@ -26,11 +26,15 @@ The modes, as the builder implements them. This file is their interface.
   no list prints an `UNKNOWN` line and exits 1. A REF with no list file checks nothing against it. An entry on REF's list with no `id` reads UNKNOWN. A base entry whose fields differ on the head, compared as parsed objects,
   reads `CHANGED <id>` and exits 1, unless a commit in `REF..HEAD` has a `Known-defect-changed: <id>` trailer. A
   `Known-defect-removed` trailer does not count for it.
-- `--tests-for PATH`. It prints the REPORT_TARGETS suites for PATH when listed, and nothing else. Else it prints each
-  tracked `test_<stem>.py` and `test_<stem>_*.py` beside PATH. A .py PATH also gets each tracked `test_*.py` in the
-  repository that loads the module `<stem>`: an `import`, an `importlib.import_module` or `__import__` call, or a file
-  loader (`spec_from_file_location`, `SourceFileLoader`, `runpy.run_path`) whose path names `<stem>.py`. The loads are
-  found with `ast`, never a grep. A tracked test that fails to parse is skipped.
+- `--tests-for PATH`. It prints the REPORT_TARGETS suites for PATH when listed, and nothing else. A path with a row in
+  GUARD_MODULE_FAMILIES prints its `hooks/test_guard.py::<family>` lines plus the walk's suites below, except the whole
+  `hooks/test_guard.py`, once each, sorted. Else it prints each tracked `test_<stem>.py` and `test_<stem>_*.py` beside
+  PATH. A .py PATH also gets each tracked `test_*.py` in the repository that loads the module `<stem>`: an `import`, an
+  `importlib.import_module` or `__import__` call, or a file loader (`spec_from_file_location`, `SourceFileLoader`,
+  `runpy.run_path`) whose path names `<stem>.py`. The loads are
+  found with `ast`, never a grep. A path that a function takes as a parameter counts too: a call of a function defined in
+  the same file counts when its argument for that parameter, by position or by keyword, names `<stem>.py`. Calls through
+  an attribute, such as `json.load`, are not followed. A tracked test that fails to parse is skipped.
 
 Each mode is dispatched from main() in hooks/mutate_guard.py and has an entry point beside `report_main` and
 `replay_main`: `changed_main`, `known_defects_main`, `tests_for_main`. A case checks for its entry point first and
@@ -47,6 +51,8 @@ that module's own run global. The sweep of old run folders is proven once, in ho
 
 Process checks use os.killpg and so run on POSIX only, as the CI step does (ubuntu-latest).
 """
+import ast
+import fnmatch
 import json
 import os
 import re
@@ -1216,7 +1222,7 @@ class RealListTests(unittest.TestCase):
 
 
 class ReplayChangedOnlyTests(unittest.TestCase):
-    """The old replay, unchanged: a changed suite only. These pass on main and pin the opt-in boundary."""
+    """The replay runs a changed suite only. These cases pin that opt-in boundary."""
 
     def test_a_product_only_pull_request_never_runs_the_unchanged_suite_on_its_mutants(self):
         repo, sha = replayed({"calc.py": CALC_MUL_PRODUCT})
@@ -1232,10 +1238,80 @@ class ReplayChangedOnlyTests(unittest.TestCase):
         self.assertEqual(row["killed"], row["made"], "the changed suite pins mul: every mutant dies")
 
 
+# `--changed` on a select that lists `path::family`: the family suite runs with GUARD_FAMILY set, from its file `path`. The
+# change adds mul to calc.py, so the mutants of the change are mul's. SELECTED's select script names one suite per fixture.
+CALC_ADD_ONLY = "def add(a, b):\n    return a + b\n"
+MUL_ADDED = "\n\ndef mul(a, b):\n    return a * b\n"
+FAMILY_CHECK = ("import os\nimport sys\n\nfrom calc import mul\n\n"
+                "if os.environ.get('GUARD_FAMILY') == 'kill' and mul(2, 3) != 6:\n"
+                "    print('FAIL: mul(2, 3) is not 6 under the kill family')\n"
+                "    sys.exit(1)\n"
+                "print('ok')\n")
+PLAIN_CHECK = ("import sys\n\nfrom calc import mul\n\n"
+               "if mul(2, 3) != 6:\n"
+               "    print('FAIL: mul(2, 3) is not 6')\n"
+               "    sys.exit(1)\n"
+               "print('ok')\n")
+FAMILY_SELECT = "import sys\nif sys.argv[1] == 'calc.py':\n    print('test_kill.py::kill')\n"
+PLAIN_SELECT = "import sys\nif sys.argv[1] == 'calc.py':\n    print('test_plain.py')\n"
+
+
+def family_repo(select_text, suite_name, suite_text):
+    """main holds add, the select script and one suite. The feat branch adds mul to calc.py."""
+    repo = new_repo()
+    put(repo, {"calc.py": CALC_ADD_ONLY, "select_for.py": select_text, suite_name: suite_text})
+    commit(repo, "Base: add, the select script and its suite")
+    topic(repo, "feat", {"calc.py": CALC_ADD_ONLY + MUL_ADDED}, "Add mul")
+    return repo
+
+
+class FamilySuiteChangedTests(unittest.TestCase):
+    """`--changed` on a select that lists `path::family`. The family suite runs with its family set, so it kills the mutants
+    of the change. A plain suite line kills them too: the control that the plain path is unchanged."""
+
+    def mul_mutants(self, repo):
+        """How many mutants the change makes on mul's return line."""
+        text = show(repo, "feat", "calc.py")
+        mul_line = text.split("\n").index("    return a * b") + 1
+        want = mutants_on(text, [mul_line])
+        self.assertGreater(want, 0, "the fixture needs a mutant on mul's return")
+        return want
+
+    def test_the_family_suite_runs_under_its_family_and_kills_the_change_mutants(self):
+        repo = family_repo(FAMILY_SELECT, "test_kill.py", FAMILY_CHECK)
+        want = self.mul_mutants(repo)
+        code, out, err = changed_run(repo, SELECTED)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        killed, _ran, _percent = share_of(out)
+        self.assertEqual(killed, want, "test_kill.py::kill must run under GUARD_FAMILY=kill and kill mul's mutants, "
+                                       "got %d of %d" % (killed, want))
+
+    def test_a_plain_suite_line_kills_the_same_change_mutants(self):
+        repo = family_repo(PLAIN_SELECT, "test_plain.py", PLAIN_CHECK)
+        want = self.mul_mutants(repo)
+        code, out, err = changed_run(repo, SELECTED)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        killed, _ran, _percent = share_of(out)
+        self.assertEqual(killed, want, "a plain suite line kills mul's mutants with no family set, got %d of %d"
+                         % (killed, want))
+
+
 # The --tests-for fixture: one product module, the suites beside it, and one tracked file per form that loads it or only
 # mentions it. Each dict maps a path to its text. A load is printed; a mention, a parse failure, a non-test file, an
 # untracked file and a different module name are not.
 SPEC_HEADER = "import importlib.util\nimport os\n\nHERE = os.path.dirname(os.path.abspath(__file__))\n"
+# A loader function whose path is its `path` parameter and whose module name is its `name` parameter, in either order.
+LOADER_BODY = ("    spec = importlib.util.spec_from_file_location(name, path)\n"
+               "    module = importlib.util.module_from_spec(spec)\n"
+               "    spec.loader.exec_module(module)\n"
+               "    return module\n")
+
+
+def wrapper_suite(def_line, tail):
+    """A suite text: the header, one loader function under `def_line`, then `tail`."""
+    return SPEC_HEADER + "\n\n" + def_line + "\n" + LOADER_BODY + "\n" + tail
+
+
 TESTS_FOR_PRODUCT = {
     "pkg/widget.py": "VALUE = 1\n",
     "pkg/lonely.py": "VALUE = 2\n",
@@ -1266,6 +1342,14 @@ TESTS_FOR_LOADS = {
         + 'SPEC = importlib.util.spec_from_file_location("x_under_test", location=os.path.join(HERE, "widget.py"))\n',
     "tests/test_form_spec_in_function.py": SPEC_HEADER
         + 'def load():\n    path = os.path.join(HERE, "widget.py")\n    spec = importlib.util.spec_from_file_location("x_under_test", path)\n',
+    "tests/test_form_wrapper_first.py": wrapper_suite(
+        "def load_file_module(path, name):",
+        'WIDGET = os.path.join(HERE, "widget.py")\n\n\ndef read_value():\n'
+        '    return load_file_module(WIDGET, "x_under_test").VALUE\n'),
+    "tests/test_form_wrapper_second.py": wrapper_suite(
+        "def load(name, path):", 'WIDGET = load("x_under_test", os.path.join(HERE, "widget.py"))\n'),
+    "tests/test_form_wrapper_keyword.py": wrapper_suite(
+        "def load(name, path):", 'WIDGET = load(name="x_under_test", path=os.path.join(HERE, "widget.py"))\n'),
     "tests/test_form_lone_quote.py": "# don't mind this note\nimport widget\n",
     "other/sub/test_form_deep.py": "import widget\n",
 }
@@ -1283,6 +1367,27 @@ TESTS_FOR_MENTIONS = {
         + 'OTHER = os.path.join(HERE, "other_module.py")\nSPEC = importlib.util.spec_from_file_location("widget.py", OTHER)\n',
     "tests/test_no_other_basename.py": SPEC_HEADER
         + 'SPEC = importlib.util.spec_from_file_location("x_under_test", os.path.join(HERE, "old_widget.py"))\n',
+    # The loader is called, but never with widget.py: the path parameter is fed another module.
+    "tests/test_no_wrapper_other.py": wrapper_suite(
+        "def load_file_module(path, name):",
+        'OTHER = load_file_module(os.path.join(HERE, "other_module.py"), "x_under_test")\n'),
+    # "widget.py" reaches the module-name slot, not the path. A path-only read of the call would print this file.
+    "tests/test_no_wrapper_name_slot.py": wrapper_suite(
+        "def load(path, name):", 'OTHER = load(os.path.join(HERE, "other_module.py"), "widget.py")\n'),
+    # A path with no .py suffix does not name the module, as bin/sim-lease does not name a .py file.
+    "tests/test_no_wrapper_bare_name.py": wrapper_suite(
+        "def load(path, name):", 'BARE = load(os.path.join(HERE, "widget"), "x_under_test")\n'),
+    # json.load is an attribute call, not a load of the module. The loader in this file is called with another module.
+    "tests/test_no_json_load.py": "import json\n" + wrapper_suite(
+        "def load(path, name):",
+        'DATA = json.load(open(os.path.join(HERE, "widget.py"), encoding="utf-8"))\n'
+        'OTHER = load(os.path.join(HERE, "other_module.py"), "x_under_test")\n'),
+    # Two functions share the parameter name `path`. Only the loader is called with another module, so only a
+    # per-function read keeps widget.py out of the loader's path.
+    "tests/test_no_shared_param_name.py": SPEC_HEADER
+        + "\n\ndef describe(path):\n    return os.path.basename(path)\n\n\ndef load(path, name):\n" + LOADER_BODY
+        + '\nNAME = describe(os.path.join(HERE, "widget.py"))\n'
+        + 'OTHER = load(os.path.join(HERE, "other_module.py"), "x_under_test")\n',
     "tests/test_no_prefix.py": "import widget_extra\n",
     "tests/test_broken.py": "import widget\ndef broken(:\n",
     "tests/helper.py": "import widget\n",
@@ -1346,20 +1451,27 @@ class TestsForTests(unittest.TestCase):
 
     def test_each_load_form_prints_its_file(self):
         repo = tests_for_fixture()
-        self.assertIn("pkg/widget.py", git(repo, "ls-files").split("\n"), "the fixture: the product module is tracked")
+        tracked = git(repo, "ls-files").split("\n")
+        self.assertIn("pkg/widget.py", tracked, "the fixture: the product module is tracked")
         code, out, err = run_cli(["--tests-for", "pkg/widget.py"], cwd=repo)
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
         printed = set(out.splitlines())
         for name in sorted(TESTS_FOR_LOADS):
             with self.subTest(form=name):
+                self.assertIn(name, tracked, "the fixture: %s is tracked, so it can load widget" % name)
                 self.assertIn(name, printed, "%s loads widget, so --tests-for pkg/widget.py must print it" % name)
 
     def test_each_mention_that_is_not_a_load_prints_nothing(self):
         repo = tests_for_fixture()
+        tracked = git(repo, "ls-files").split("\n")
         code, out, err = run_cli(["--tests-for", "pkg/widget.py"], cwd=repo)
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
         printed = set(out.splitlines())
-        for name in sorted(set(TESTS_FOR_MENTIONS) | set(UNTRACKED)):
+        for name in sorted(TESTS_FOR_MENTIONS):
+            with self.subTest(file=name):
+                self.assertIn(name, tracked, "the fixture: %s is tracked, so the read reaches it" % name)
+                self.assertNotIn(name, printed, "%s does not load widget, so --tests-for must not print it" % name)
+        for name in sorted(UNTRACKED):
             with self.subTest(file=name):
                 self.assertNotIn(name, printed, "%s does not load widget, so --tests-for must not print it" % name)
 
@@ -1413,7 +1525,7 @@ class TestsForTests(unittest.TestCase):
             with self.subTest(extra=name):
                 self.assertRegex(show(REPO, "HEAD", name), r"\bguard\b", "%s is printed but names no guard" % name)
 
-    def test_a_load_bound_inside_a_function_prints_its_suite_for_guard_rm_var(self):
+    def test_a_load_bound_inside_a_function_is_the_rm_var_family_line_for_guard_rm_var(self):
         target = "hooks/guard_rm_var.py"
         self.assertNotIn(target, dict(mutate_guard.REPORT_TARGETS), "the fixture: %s must be unlisted" % target)
         loader = "hooks/test_guard.py"
@@ -1421,8 +1533,447 @@ class TestsForTests(unittest.TestCase):
                          "the fixture: %s binds the guard_rm_var path inside a function" % loader)
         code, out, err = run_cli(["--tests-for", target])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        self.assertIn(loader, out.splitlines(),
-                      "%s loads guard_rm_var inside a function, so --tests-for %s must print it" % (loader, target))
+        self.assertEqual(out.splitlines(), ["%s::rm-var" % loader],
+                         "guard_rm_var's only walk suite is the whole %s, which is dropped: its rm-var family line "
+                         "stands in for it" % loader)
+
+    def test_the_real_suites_that_load_a_module_through_a_parameter_are_printed(self):
+        """Each suite passes the module's path to a function of its own, which loads it by that parameter. The call text is
+        the scope: it is asserted first, so the print is asserted on a suite known to reach the load."""
+        cases = (
+            ("hooks/guard.py", "hooks/test_call_judge.py", "load_file_module(GUARD, "),
+            ("hooks/guard.py", "lint/test_layout.py", 'load("guard_under_test", os.path.join(REPO, "hooks", "guard.py"))'),
+            ("lint/ste_lint.py", "lint/test_layout.py", 'load("ste_lint_under_test", os.path.join(LINT, "ste_lint.py"))'),
+        )
+        printed = {}
+        for target in sorted({target for target, _, _ in cases}):
+            code, out, err = run_cli(["--tests-for", target])
+            self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+            printed[target] = set(out.splitlines())
+        for target, suite, call in cases:
+            with self.subTest(suite=suite, target=target):
+                self.assertIn(call, show(REPO, "HEAD", suite), "the fixture: %s calls its loader with %s" % (suite, target))
+                self.assertIn(suite, printed[target],
+                              "%s loads %s through a parameter, so --tests-for %s must print it" % (suite, target, target))
+
+
+# GUARD_MODULE_FAMILIES (hooks/mutate_guard.py) gives a guard module its family suites, hooks/test_guard.py::<family>,
+# and the import walk's suites come with them. WALK_SUITES holds those walk suites for each row: the walk of the tracked
+# tree with the row left out, minus the whole hooks/test_guard.py. A row with no entry fails by name. A name these cases
+# read from mutate_guard has a default, so a case fails on the row it lacks, not on a missing name.
+WALK_SUITES = {
+    "hooks/guard_kill.py": ["hooks/test_checks_never_raise.py"],
+    "hooks/guard_env.py": ["janitor/test_session_end_sweep.py"],
+    "hooks/guard_frozen.py": ["hooks/test_shared_names.py"],
+    "hooks/guard_pointer.py": [],
+    "hooks/guard_rm_var.py": [],
+    "hooks/guard_shared_tree.py": ["hooks/test_checks_never_raise.py"],
+    "hooks/guard_stream.py": [],
+    "hooks/guard_push_delete.py": ["hooks/test_auto_mode_allow.py"],
+    "hooks/guard_branch_worktree.py": ["hooks/test_auto_mode_allow.py"],
+    "hooks/guard_merge.py": ["lint/test_hook_catalog.py"],
+    "hooks/guard_mask_script.py": [],
+    "hooks/guard_argv.py": [],
+}
+
+
+def guard_table():
+    """GUARD_MODULE_FAMILIES. A missing table reads as no rows."""
+    return getattr(mutate_guard, "GUARD_MODULE_FAMILIES", None) or {}
+
+
+def guard_exempt():
+    """GUARD_MODULE_EXEMPT: each module shared by every family, with the reason it has no row."""
+    return getattr(mutate_guard, "GUARD_MODULE_EXEMPT", None) or {}
+
+
+def guard_family_names():
+    """The keys of FAMILIES in hooks/test_guard.py, read from its source by ast. The file runs its cases on import, so it is
+    never imported here."""
+    with open(os.path.join(HERE, "test_guard.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "FAMILIES"
+                                                for target in node.targets):
+            return set(ast.literal_eval(node.value))
+    raise AssertionError("hooks/test_guard.py has no FAMILIES dict")
+
+
+def guard_modules_on_disk(folder):
+    """Each hooks/guard_*.py under `folder`, read from the folder itself, so a new file is listed with no list to update."""
+    return sorted("hooks/" + name for name in os.listdir(os.path.join(folder, "hooks"))
+                  if fnmatch.fnmatchcase(name, "guard_*.py"))
+
+
+def unlisted_guard_modules(folder, table, exempt):
+    """The check. Each guard module under `folder` that has no row in `table`, is not REPORT_GOLD's file, and has no exemption
+    in `exempt` with a non-empty reason. An exemption with a blank reason is no exemption, so the check never skips silently."""
+    gold = mutate_guard.REPORT_GOLD[0]
+    reasoned = {path for path, reason in exempt.items() if isinstance(reason, str) and reason.strip()}
+    return [path for path in guard_modules_on_disk(folder)
+            if path not in table and path != gold and path not in reasoned]
+
+
+class GuardModuleFamilyTests(unittest.TestCase):
+    """GUARD_MODULE_FAMILIES. Each hooks/guard_*.py on disk has a row, is REPORT_GOLD's file, or is exempt with a reason."""
+
+    def test_every_guard_module_on_disk_has_a_row_or_is_gold_or_exempt(self):
+        missing = unlisted_guard_modules(REPO, guard_table(), guard_exempt())
+        self.assertEqual(missing, [], "each hooks/guard_*.py needs a row in GUARD_MODULE_FAMILIES, or a reason in "
+                                      "GUARD_MODULE_EXEMPT")
+
+    def test_a_new_guard_module_with_no_row_fails_the_check_and_no_other_does(self):
+        folder = fresh()
+        put(folder, {path: "" for path in guard_modules_on_disk(REPO)})
+        table, exempt = guard_table(), guard_exempt()
+        self.assertEqual(unlisted_guard_modules(folder, table, exempt), [],
+                         "the fixture of the real guard modules flags nothing: each one needs its row or its exemption")
+        put(folder, {"hooks/guard_zzz_new.py": ""})
+        self.assertEqual(unlisted_guard_modules(folder, table, exempt), ["hooks/guard_zzz_new.py"],
+                         "a new guard module with no row fails the check, and no other module does")
+
+    def test_an_exemption_with_a_blank_reason_is_no_exemption(self):
+        folder = fresh()
+        put(folder, {"hooks/guard_core.py": "", "hooks/guard_kill.py": ""})
+        flagged = unlisted_guard_modules(folder, {"hooks/guard_kill.py": ["kill"]}, {"hooks/guard_core.py": " "})
+        self.assertEqual(flagged, ["hooks/guard_core.py"], "an exemption with a blank reason is no exemption")
+
+    def test_guard_core_is_exempt_with_a_reason_and_has_no_row(self):
+        reason = guard_exempt().get("hooks/guard_core.py")
+        self.assertIsInstance(reason, str, "guard_core.py is shared by every family: GUARD_MODULE_EXEMPT must name it "
+                                           "with a reason")
+        self.assertTrue(reason.strip(), "guard_core.py's exemption has a blank reason")
+        self.assertNotIn("hooks/guard_core.py", guard_table(), "guard_core.py is exempt, not a family row")
+
+    def test_every_row_is_a_non_empty_list(self):
+        table = guard_table()
+        self.assertIn("hooks/guard_kill.py", table, "GUARD_MODULE_FAMILIES has no row for hooks/guard_kill.py")
+        for module, families in sorted(table.items()):
+            with self.subTest(module=module):
+                self.assertIsInstance(families, list, "%s: a row is a list of families" % module)
+                self.assertTrue(families, "%s has an empty row: --tests-for would print nothing for it" % module)
+
+    def test_every_family_a_row_names_is_a_key_of_test_guard_families(self):
+        table = guard_table()
+        self.assertIn("hooks/guard_kill.py", table, "GUARD_MODULE_FAMILIES has no row for hooks/guard_kill.py")
+        named = {family for families in table.values() for family in families}
+        self.assertEqual(sorted(named - guard_family_names()), [],
+                         "a row names a family that hooks/test_guard.py does not have")
+
+    def test_tests_for_guard_kill_prints_its_family_lines_and_its_import_walk_suite(self):
+        code, out, err = run_cli(["--tests-for", "hooks/guard_kill.py"])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertEqual(out.splitlines(), ["hooks/test_checks_never_raise.py", "hooks/test_guard.py::git-env",
+                                            "hooks/test_guard.py::kill"],
+                         "guard_kill.py's suites are the git-env and kill family lines, plus the import walk's "
+                         "test_checks_never_raise.py, which reaches the kill checks the families miss, sorted")
+
+    def test_tests_for_guard_env_prints_its_family_lines_and_its_import_walk_suite(self):
+        code, out, err = run_cli(["--tests-for", "hooks/guard_env.py"])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertEqual(out.splitlines(), ["hooks/test_guard.py::env", "hooks/test_guard.py::git-env",
+                                            "janitor/test_session_end_sweep.py"],
+                         "guard_env.py's suites are the env and git-env family lines, plus the import walk's "
+                         "janitor/test_session_end_sweep.py, sorted")
+
+    def test_every_table_module_prints_its_family_lines_and_its_walk_suites(self):
+        table = guard_table()
+        self.assertIn("hooks/guard_kill.py", table, "GUARD_MODULE_FAMILIES has no row for hooks/guard_kill.py")
+        for module, families in sorted(table.items()):
+            with self.subTest(module=module):
+                self.assertIn(module, WALK_SUITES, "%s has a row but no WALK_SUITES entry: name its import-walk suites"
+                              % module)
+                code, out, err = run_cli(["--tests-for", module])
+                self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+                expected = {"hooks/test_guard.py::%s" % family for family in families} | set(WALK_SUITES[module])
+                self.assertEqual(out.splitlines(), sorted(expected),
+                                 "%s prints its family lines and its import-walk suites, each once, sorted" % module)
+
+    def test_no_table_module_prints_the_whole_test_guard_file(self):
+        """The whole file takes minutes per mutant, so a table module's family lines stand in for it, never the file."""
+        table = guard_table()
+        self.assertIn("hooks/guard_kill.py", table, "GUARD_MODULE_FAMILIES has no row for hooks/guard_kill.py")
+        for module in sorted(table):
+            with self.subTest(module=module):
+                code, out, err = run_cli(["--tests-for", module])
+                self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+                self.assertNotIn("hooks/test_guard.py", out.splitlines(),
+                                 "%s prints the whole hooks/test_guard.py, which takes minutes per mutant" % module)
+
+    def test_a_suite_that_loads_a_table_module_inside_a_function_is_kept(self):
+        """lint/test_hook_catalog.py imports guard_merge inside a test method, so the import walk finds it only
+        through a function-bound load. The union keeps it beside the family line. The scope is asserted first, then
+        the print."""
+        target, suite = "hooks/guard_merge.py", "lint/test_hook_catalog.py"
+        self.assertIn(target, guard_table(), "the fixture: %s keeps its GUARD_MODULE_FAMILIES row" % target)
+        tree = ast.parse(show(REPO, "HEAD", suite))
+        module_level = [node for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "guard_merge"]
+        self.assertEqual(module_level, [], "the fixture: %s has no module-level import of guard_merge" % suite)
+        in_def = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                  and any(isinstance(inner, ast.ImportFrom) and inner.module == "guard_merge"
+                          for inner in ast.walk(node))]
+        self.assertTrue(in_def, "the fixture: %s imports guard_merge inside a def" % suite)
+        code, out, err = run_cli(["--tests-for", target])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertEqual(out.splitlines(), sorted(["hooks/test_guard.py::merge", suite]),
+                         "%s loads guard_merge only inside a def, so the import walk finds it through a function-bound "
+                         "load, and the union keeps it beside the merge family line" % suite)
+
+    def test_guard_wsl_is_report_gold_and_no_row_and_no_report_target(self):
+        gold = mutate_guard.REPORT_GOLD[0]
+        self.assertEqual(gold, "hooks/guard_wsl.py", "the fixture: REPORT_GOLD scores guard_wsl.py")
+        self.assertNotIn(gold, guard_table(), "REPORT_GOLD's file is scored once, against the whole test_guard.py")
+        self.assertFalse(set(guard_table()) & set(dict(mutate_guard.REPORT_TARGETS)),
+                         "a table module is no REPORT_TARGETS row, so the report does not score it twice")
+
+
+# The `_loads_module` table, called directly. Each row is a form's name and a Python text, read with the stem `widget`.
+# A text is the shared header, then the form's own lines. A text that does not parse reads False too, so each row
+# asserts that it parses before it asserts False.
+def loads_source(*lines):
+    """Python text: the shared header, then each line."""
+    return SPEC_HEADER + "\n" + "\n".join(lines) + "\n"
+
+
+def kwargs_copy_source(local):
+    """A `**kwargs` loader that copies the keyword `path` into the local `local`, then loads the local. The call passes
+    `path=` by keyword, so only the local's name decides whether the loader follows the copy."""
+    return loads_source(
+        "def load(**kwargs):",
+        '    %s = kwargs["path"]' % local,
+        '    return importlib.util.spec_from_file_location(kwargs["name"], %s)' % local,
+        "",
+        "",
+        'MODULE = load(name="x_under_test", path=os.path.join(HERE, "widget.py"))',
+    )
+
+
+FOLLOWED_FORMS = (
+    ("a positional argument", TESTS_FOR_LOADS["tests/test_form_wrapper_second.py"]),
+    ("a keyword argument", TESTS_FOR_LOADS["tests/test_form_wrapper_keyword.py"]),
+    ("a bound name", TESTS_FOR_LOADS["tests/test_form_spec_named.py"]),
+    ("a **kwargs loader that copies the keyword into a local of the same name", kwargs_copy_source("path")),
+)
+UNFOLLOWED_FORMS = (
+    ("an imported loader", loads_source(
+        "from loaders import load_widget",
+        "",
+        'MODULE = load_widget("x_under_test", os.path.join(HERE, "widget.py"))',
+    )),
+    ("a wrapper called through another wrapper", loads_source(
+        "def inner(path, name):",
+        "    return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "",
+        "def outer(path, name):",
+        "    return inner(path, name)",
+        "",
+        "",
+        'WIDGET = outer(os.path.join(HERE, "widget.py"), "x_under_test")',
+    )),
+    ("an attribute call, obj.load(...)", loads_source(
+        "class Loader:",
+        "    def load(self, name, path):",
+        "        return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "",
+        "LOADER = Loader()",
+        'MODULE = LOADER.load("x_under_test", os.path.join(HERE, "widget.py"))',
+    )),
+    ("a self call, self.load(...)", loads_source(
+        "class Loader:",
+        "    def load(self, name, path):",
+        "        return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "    def run(self):",
+        '        return self.load("x_under_test", os.path.join(HERE, "widget.py"))',
+    )),
+    ("a default literal, path=WIDGET", loads_source(
+        'WIDGET = os.path.join(HERE, "widget.py")',
+        "",
+        "",
+        "def load(name, path=WIDGET):",
+        "    return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "",
+        'MODULE = load("x_under_test")',
+    )),
+    ("a lambda loader", loads_source(
+        "load = lambda name, path: importlib.util.spec_from_file_location(name, path)",
+        'MODULE = load("x_under_test", os.path.join(HERE, "widget.py"))',
+    )),
+    ("a bare alias, helper = load", loads_source(
+        "def load(name, path):",
+        "    return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "",
+        "helper = load",
+        'MODULE = helper("x_under_test", os.path.join(HERE, "widget.py"))',
+    )),
+    ("a loader that takes *args", loads_source(
+        "def load(*args):",
+        "    return importlib.util.spec_from_file_location(args[0], args[1])",
+        "",
+        "",
+        'MODULE = load("x_under_test", os.path.join(HERE, "widget.py"))',
+    )),
+    ("a loader that takes **kwargs, read inline", loads_source(
+        "def load(**kwargs):",
+        '    return importlib.util.spec_from_file_location(kwargs["name"], kwargs["path"])',
+        "",
+        "",
+        'MODULE = load(name="x_under_test", path=os.path.join(HERE, "widget.py"))',
+    )),
+    ("a **kwargs loader that copies the keyword into a differently named local", kwargs_copy_source("p")),
+    ("a call that spreads the path in, *names", loads_source(
+        "def load(name, path):",
+        "    return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "",
+        'NAMES = ["x_under_test"]',
+        'MODULE = load(*NAMES, os.path.join(HERE, "widget.py"))',
+    )),
+    ("a call that spreads a dict, **{...}", loads_source(
+        "def load(name, path):",
+        "    return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "",
+        'MODULE = load("x_under_test", **{"path": os.path.join(HERE, "widget.py")})',
+    )),
+    ("a for target", loads_source(
+        'for path in [os.path.join(HERE, "widget.py")]:',
+        '    MODULE = importlib.util.spec_from_file_location("x_under_test", path)',
+    )),
+    ("a comprehension target", loads_source(
+        "MODULES = [",
+        '    importlib.util.spec_from_file_location("x_under_test", path)',
+        '    for path in [os.path.join(HERE, "widget.py")]',
+        "]",
+    )),
+    ("a tuple unpacking", loads_source(
+        'PATH, MODE = os.path.join(HERE, "widget.py"), "r"',
+        'MODULE = importlib.util.spec_from_file_location("x_under_test", PATH)',
+    )),
+    ("an augmented assignment", loads_source(
+        'PATH = os.path.join(HERE, "widget")',
+        'PATH += ".py"',
+        'MODULE = importlib.util.spec_from_file_location("x_under_test", PATH)',
+    )),
+    ("a with ... as target", loads_source(
+        "import contextlib",
+        "",
+        'with contextlib.nullcontext(os.path.join(HERE, "widget.py")) as PATH:',
+        '    MODULE = importlib.util.spec_from_file_location("x_under_test", PATH)',
+    )),
+    ("an attribute store, self.path = ...", loads_source(
+        "class Holder:",
+        "    def __init__(self):",
+        '        self.path = os.path.join(HERE, "widget.py")',
+        "",
+        "    def run(self):",
+        '        return importlib.util.spec_from_file_location("x_under_test", self.path)',
+    )),
+    ("a class constructor that takes the path", loads_source(
+        "class Loader:",
+        "    def __init__(self, path):",
+        '        self.module = importlib.util.spec_from_file_location("x_under_test", path)',
+        "",
+        "",
+        'LOADER = Loader(os.path.join(HERE, "widget.py"))',
+    )),
+    ("functools.partial", loads_source(
+        "import functools",
+        "",
+        "",
+        "def load(name, path):",
+        "    return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "",
+        'LOAD_WIDGET = functools.partial(load, "x_under_test", os.path.join(HERE, "widget.py"))',
+    )),
+    ("map", loads_source(
+        "def load(path):",
+        '    return importlib.util.spec_from_file_location("x_under_test", path)',
+        "",
+        "",
+        'MODULES = list(map(load, [os.path.join(HERE, "widget.py")]))',
+    )),
+    ("a walrus binding", loads_source(
+        'if (PATH := os.path.join(HERE, "widget.py")):',
+        '    MODULE = importlib.util.spec_from_file_location("x_under_test", PATH)',
+    )),
+    ("a split literal", loads_source(
+        'MODULE = importlib.util.spec_from_file_location("x_under_test", os.path.join(HERE, "widget" + ".py"))',
+    )),
+)
+
+
+def shift_source(call):
+    """The method-shift fixture: a module-level `load` that returns a basename, and `Reader.load`, whose second parameter
+    is the path. Only `call` differs between the subject and its control."""
+    return loads_source(
+        "def load(name, path):",
+        "    return os.path.basename(path)",
+        "",
+        "",
+        "class Reader:",
+        "    def load(self, path):",
+        '        return importlib.util.spec_from_file_location("x_under_test", path)',
+        "",
+        call,
+    )
+
+
+class LoadsModuleTests(unittest.TestCase):
+    """`_loads_module(text, stem)` in hooks/mutate_guard.py, called directly. The followed forms read True. The unfollowed
+    forms its docstring names read False. A text that fails to parse also reads False, so each row asserts it parses."""
+
+    def assert_parses(self, name, text):
+        try:
+            ast.parse(text)
+        except SyntaxError as error:
+            self.fail("%s does not parse, so its False proves nothing: %s" % (name, error))
+
+    def test_a_followed_form_reads_as_a_load(self):
+        for name, text in FOLLOWED_FORMS:
+            with self.subTest(form=name):
+                self.assert_parses(name, text)
+                self.assertTrue(mutate_guard._loads_module(text, "widget"),
+                                "%s loads widget.py, so _loads_module reads True" % name)
+
+    def test_an_unfollowed_form_reads_as_not_a_load(self):
+        for name, text in UNFOLLOWED_FORMS:
+            with self.subTest(form=name):
+                self.assert_parses(name, text)
+                self.assertFalse(mutate_guard._loads_module(text, "widget"),
+                                 "%s is not followed, so _loads_module reads False" % name)
+
+    def test_an_empty_text_reads_as_not_a_load(self):
+        self.assertFalse(mutate_guard._loads_module("", "widget"), "an empty text loads nothing")
+
+    def test_a_positional_bare_call_feeds_a_same_named_method_and_reads_true(self):
+        # A known false selection, pinned as the docstring states it. The bare call `load("x", "widget.py")` also feeds
+        # `Reader.load`, since every def of that name takes the call, and its second parameter is the path. The control
+        # passes another module, so the True comes from the bare call's literal and not from the method's own text.
+        control = shift_source('LOADED = load("x", "other_module.py")')
+        subject = shift_source('LOADED = load("x", "widget.py")')
+        self.assert_parses("the control", control)
+        self.assertFalse(mutate_guard._loads_module(control, "widget"),
+                         "the control passes another module, so _loads_module reads False")
+        self.assert_parses("the subject", subject)
+        self.assertTrue(mutate_guard._loads_module(subject, "widget"),
+                        "the known false selection: the bare call feeds Reader.load, so _loads_module reads True")
+
+    def test_a_keyword_bare_call_feeds_the_same_method_and_reads_true(self):
+        # The docstring's own example, `load(path=X)`: the keyword feeds the method's path as well.
+        control = shift_source('LOADED = load(path="other_module.py")')
+        subject = shift_source('LOADED = load(path="widget.py")')
+        self.assert_parses("the control", control)
+        self.assertFalse(mutate_guard._loads_module(control, "widget"),
+                         "the control passes another module, so _loads_module reads False")
+        self.assert_parses("the subject", subject)
+        self.assertTrue(mutate_guard._loads_module(subject, "widget"),
+                        "the known false selection: the keyword call feeds Reader.load, so _loads_module reads True")
 
 
 if __name__ == "__main__":

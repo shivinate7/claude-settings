@@ -47,6 +47,7 @@ class RouteFixture(trg.SameTurnWriter):
     LANE_ID = trg.QuestionReachesPageTests.LANE_ID
     PICK = trg.QuestionReachesPageTests.PICK
     QUESTION = trg.QuestionReachesPageTests.QUESTION
+    NO_KEY = trg.QuestionReachesPageTests.NO_KEY  # make_repo's writer default; the same object, so the identity test holds
 
     setUp = trg.QuestionReachesPageTests.setUp
     make_repo = trg.QuestionReachesPageTests.make_repo
@@ -70,7 +71,7 @@ class RouteTests(RouteFixture, unittest.TestCase):
                         peer_msg("got it", from_session=self.PARENT),
                         peer_msg("one more pick?", from_session=self.PARENT),
                         assistant_text(self.reply(self.QUESTION)))
-        self.assert_blocked(out, "Lane pick guard", "@parent")
+        self.assert_blocked(out, "Lane pick guard", "its parent")
 
     def test_rt_red_owner_message_after_the_writer_ack_starts_a_turn(self):
         # Catches: the same skip on the page writer's ack. Its second message is skipped as an ack too.
