@@ -1902,8 +1902,8 @@ class SessionEndScopeTests(unittest.TestCase):
                          "the session-end run scanned loose processes %d time(s)" % seen["loose"])
 
     def test_the_session_end_run_reads_the_machine_pid_list_once(self):
-        """Cost: one machine pid-list read per session end (the dead-rooted read). The old run
-        reads it twice, once more for the loose-process scan."""
+        """Cost: one machine pid-list read per session end (the dead-rooted read). The flag skips
+        the loose-process scan, so the run reads the list once."""
         seen = sweep_over_fixture(self.fx, session_end=True)
         self.assertEqual(seen["pid_reads"], 1,
                          "the session-end run read the machine pid list %d times" % seen["pid_reads"])
@@ -1925,8 +1925,7 @@ class SessionEndScopeTests(unittest.TestCase):
         self.assertEqual(seen["pid_reads"], 2)
 
     def test_main_accepts_the_session_end_flag_in_full_mode(self):
-        """Flag parsing only: `main` takes --session-end with a root and runs the full mode. Old
-        code rejects the flag at argparse, which is the one red a main-level case can give."""
+        """Flag parsing only: `main` takes --session-end with a root, sets `args.session_end`, and runs the full mode."""
         seen = {}
 
         def fake_roots(args, roots, restore_log_path, mode):
