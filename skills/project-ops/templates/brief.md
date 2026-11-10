@@ -36,6 +36,8 @@ among them, and no full suite. A red lane does not hand off.
 
 A fix round is a fresh isolated spawn from the branch head (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
 
+The test-author and the builder each get their own isolated worktree (decision `lanes-start-in-tool-worktrees`; rule `parallelism-each-own-checkout`: each agent in its own checkout). They never share one worktree. A test commit lands on the lane branch before the builder starts. The builder's worktree then starts from that branch head. The builder never cherry-picks, amends or rewrites a test commit, because the builder-diff guard then reads that commit as the builder's own and refuses the builder's next commit. The builder reports the test change it needs, and the lane gives that change to a test-author. The guard is right (decision `builders-cannot-edit-tests`: builders cannot edit tests).
+
 ## Report
 
 Read each time you write from `~/.claude/bin/now-central`, never from memory.
