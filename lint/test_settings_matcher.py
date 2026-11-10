@@ -110,6 +110,13 @@ class Matcher(unittest.TestCase):
         self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                         "no guard matcher covers %s: %r" % (tool, matchers))
 
+    def test_guard_matcher_covers_mcp_update_pull_request(self):
+        # Rule records-page-ready refuses marking a pull request ready by MCP update_pull_request draft:false, so a guard matcher must see that call.
+        matchers = guard_matchers()
+        tool = "mcp__github__update_pull_request"
+        self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                        "no guard matcher covers %s: %r" % (tool, matchers))
+
     def test_guard_matcher_covers_sendmessage(self):
         # Rule sendmessage-session-id refuses a SendMessage that names a cloud session, so a guard matcher must see it.
         matchers = guard_matchers()
