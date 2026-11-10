@@ -1,0 +1,12 @@
+{
+  "title": "Recover the 5 degen scan strings that raised false alarms, so a red case can be written",
+  "phase": "build",
+  "status": "ready",
+  "order": 969,
+  "owner": null,
+  "why": "Leftover from step artifact-lane (#2520), coordinator 05:39 CST Nov 10. The artifact scan raised 5 false alarms on degen strings, and a red case needs the real strings.",
+  "note": "Needs a degen session or a session on the owner's Mac, where the degen strings live. Also for the Degen coordinator: the degen copy move from the same lane is a degen-repo item.",
+  "lane": null,
+  "blockedBy": [],
+  "updatedAt": "2026-11-10T05:39:00-06:00"
+}
