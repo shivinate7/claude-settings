@@ -19,6 +19,8 @@ Not read (each is a known gap, not a ruling):
 - `/proc/<pid>/environ`, and a `PS_FORMAT` environment variable.
 - `pkill`, and a script that reads `cmdline` itself (`python` or `perl` run from a file).
 - A leading redirect before the command (`2>/dev/null ps aux`), `$(which ps)`, `busybox ps`, and `subprocess` calls in a script.
+- A cmdline path built from a variable (`cd /proc/1 && cat cmdline`, `for p in /proc/[0-9]*; do cat $p/cmdline; done`), and `ls /proc/*/cmdline | xargs cat`.
+- A known false alarm: a PowerShell `Where-Object { $_.CommandLine -like ... }` that selects only ids is refused. The safe form is a quoted `-Filter "CommandLine like ..."`.
 - PowerShell that selects all properties (`Select *`, `Format-List *`), a `-Query` that selects `CommandLine`, `wmic process list full`, and a `CommandLine` read through a variable set on an earlier line.
 
 Reason: on 2026-11-09 19:59 CST a session printed a Tailscale auth key with `ps` and `pgrep -a`. An argument can hold a secret, and a leaked secret cannot be undone.
