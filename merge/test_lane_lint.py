@@ -21,6 +21,7 @@ sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no te
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
 import merge  # noqa: E402
+import check_debt_retire  # noqa: E402  the debt lint that a closed debt's Retire check runs through (lint/check_debt_retire.py)
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
@@ -1503,6 +1504,211 @@ class BatchLintFlags(tm.Env):
         lines = pass_lines(text)
         self.assertEqual(len(lines), 1, text)
         self.assertIn(PUSH_ONLY, lines[0], text)
+
+
+BATCH_LANE = "batch-full-checks"  # a batch branch: its name starts `batch-`, so the lane lint runs the batch checks
+BATCH_DEBT = "batch-retire-debt"  # a batch whose head closes a debt (the fixture of tm.DebtRetire)
+FULL_PASS = [("PASS", "record slugs"), ("PASS", "comment narration")]  # the batch's full checks job, green
+FULL_FAIL = [("PASS", "record slugs"), ("FAIL", "shard suite")]
+FULL_UNKNOWN = [("PASS", "record slugs"), ("unknown", "shard suite")]
+# A stub ci-job that answers by where it runs: `where` is "head" on the batch's head and "base" on origin/main (a re-run in a
+# temp tree). It answers by the job asked: lint, the Windows slice (checks-windows-guard), or the full job. --step names
+# filter the rows, and a name the job lacks is unknown, as ci-job reads it. Exit 1 on a FAIL, 2 on an unknown, else 0.
+ROUTED_STUB = '''import json, os, subprocess, sys
+LOG, PLAN, STEP_LOG = __LOG__, __PLAN__, __STEP_LOG__
+def git(*args):
+    return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
+head = git("rev-parse", "HEAD")
+where = "base" if head == git("rev-parse", "origin/main") else "head"
+argv = sys.argv[1:]
+kind = "windows" if "checks-windows-guard" in argv else ("lint" if "--lint" in argv else "full")
+rows = list(PLAN[where].get(kind, []))
+names = [argv[i + 1] for i in range(len(argv) - 1) if argv[i] == "--step"]
+if names:
+    have = [name for _state, name in rows]
+    rows = [row for row in rows if row[1] in names] + [("unknown", name) for name in names if name not in have]
+detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
+with open(LOG, "a", encoding="utf-8") as f:
+    print(json.dumps({"argv": argv, "cwd": os.getcwd(), "head": head, "detached": detached}), file=f)
+if "--plan" in argv:
+    for _state, name in rows:
+        print("would run " + name)
+    sys.exit(0)
+lines = ["%-15s %s: %s" % (state, name, "stub step") for state, name in rows]
+print("\\n".join(lines))
+if any(state == "FAIL" for state, _name in rows):
+    with open(STEP_LOG, "w", encoding="utf-8") as f:
+        f.write("\\n".join(lines) + "\\n")
+    print("log=" + STEP_LOG)
+    sys.exit(1)
+sys.exit(2 if any(state == "unknown" for state, _name in rows) else 0)
+'''
+
+
+def windows_slice_name():
+    """The name of checks-windows-guard's Windows slice step, read from checks.yml: the step a batch's lane lint adds."""
+    with open(CHECKS_YML, encoding="utf-8") as f:
+        block = job_block(f.read(), "checks-windows-guard")
+    found = [name for name in (step_key(st, "name") or "" for st in step_blocks(block)) if "Windows slice" in name]
+    if len(found) != 1:
+        raise AssertionError("checks-windows-guard should hold one Windows slice step, found %s" % found)
+    return found[0]
+
+
+class BatchLane(LaneFixture):
+    """`merge --lane-lint <batch>`: a branch whose name starts `batch-` runs the whole checks job and the Windows slice of
+    checks-windows-guard, after the records page is rebuilt in its tree. A FAIL or UNKNOWN that main has too is named and
+    does not stop the lint; one that only the head has stops it. A closed debt whose Retire check times out prints its cite
+    and the lint goes on; one whose Retire check fails stops it."""
+
+    def setUp(self):
+        super().setUp()
+        self.windows_name = windows_slice_name()
+        rebuild = unittest.mock.patch.object(merge, "rebuild_records", new=self.fake_rebuild)
+        rebuild.start()
+        self.addCleanup(rebuild.stop)
+
+    def fake_rebuild(self, wt):
+        """merge.rebuild_records, faked: it logs the tree it was given into the stub's log, so a case reads the order of the run.
+        The line carries an argv, as a ci-job run does, so lint_calls reads it as a run: a rebuild where none belongs fails there."""
+        with open(self.log, "a", encoding="utf-8") as f:
+            print(json.dumps({"argv": ["<rebuild>"], "cwd": wt, "rebuild": True}), file=f)
+        return False
+
+    def use_routed_ci_job(self, head_full, base_full=FULL_PASS):
+        """merge.CI_JOB becomes ROUTED_STUB: `head_full` answers the full job on the batch head, `base_full` on origin/main.
+        The lint and the Windows slice pass on both."""
+        windows = [("PASS", self.windows_name)]
+        plan = {"head": {"full": head_full, "lint": PASSING, "windows": windows},
+                "base": {"full": base_full, "lint": PASSING, "windows": windows}}
+        text = ROUTED_STUB.replace("__LOG__", repr(self.log)).replace("__PLAN__", repr(plan)).replace("__STEP_LOG__", repr(self.step_log))
+        tm.put(self.stub, text)
+        patch = unittest.mock.patch.object(merge, "CI_JOB", self.stub)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def push_branch_of(self, name):
+        """Push origin's feat to a branch called `name`, so the lane lint reads a head under that name."""
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        tm.sh(self.other, "git", "push", "-q", "origin", "origin/feat:refs/heads/" + name)
+
+    def log_entries(self):
+        """Every line the stub and the fake rebuild logged, oldest first: ci-job runs as {argv, cwd, head}, rebuilds as {rebuild}."""
+        if not os.path.exists(self.log):
+            return []
+        with open(self.log, encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
+
+    def ci_runs(self):
+        return [e for e in self.log_entries() if "argv" in e and "--plan" not in e["argv"] and not e.get("rebuild")]
+
+    def full_runs(self):
+        return [r for r in self.ci_runs() if r["argv"][:1] == ["checks"] and "--lint" not in r["argv"]]
+
+    def windows_runs(self):
+        return [r for r in self.ci_runs() if "checks-windows-guard" in r["argv"] and self.windows_name in r["argv"]]
+
+    def rebuilds(self):
+        return [e for e in self.log_entries() if e.get("rebuild")]
+
+    def budgets_of(self, spy):
+        """The timeouts merge.sh was given for each ci-job run that the spy saw."""
+        return [c.kwargs.get("timeout") for c in spy.call_args_list
+                if c.args and isinstance(c.args[0], list) and len(c.args[0]) > 1 and c.args[0][1] == self.stub]
+
+    def test_a_batch_head_runs_the_full_checks_job_and_the_windows_slice(self):
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_PASS)
+        rc, out = self.run_lane("--lane-lint", BATCH_LANE)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.full_runs(), "a batch head ran no full checks job; its runs were %s\n%s" % ([r["argv"] for r in self.ci_runs()], out))
+        self.assertTrue(self.windows_runs(), "a batch head ran no Windows slice (%s) of checks-windows-guard\n%s" % (self.windows_name, out))
+
+    def test_a_batch_head_has_its_records_page_rebuilt_before_its_checks_run(self):
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_PASS)
+        rc, out = self.run_lane("--lane-lint", BATCH_LANE)
+        self.assertEqual(rc, 0, out)
+        entries = self.log_entries()
+        checks = [i for i, e in enumerate(entries) if e.get("argv", [None])[0] == "checks"]
+        self.assertTrue(checks, "the batch head ran no checks job, so no order can be read\n" + out)
+        self.assertTrue(self.rebuilds(), "the batch lane never rebuilt the records page\n" + out)
+        rebuild = next(i for i, e in enumerate(entries) if e.get("rebuild"))
+        self.assertLess(rebuild, checks[0], "the checks job ran before the records page was rebuilt\n" + out)
+        self.assertEqual(os.path.realpath(entries[rebuild]["cwd"]), os.path.realpath(entries[checks[0]]["cwd"]),
+                         "the records rebuild and the checks job read different trees\n" + out)
+
+    def test_a_batch_head_runs_its_ci_job_on_the_batch_time_budget(self):
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_PASS)
+        real = merge.sh
+        with unittest.mock.patch.object(merge, "sh", wraps=real) as spy:
+            rc, out = self.run_lane("--lane-lint", BATCH_LANE)
+        self.assertEqual(rc, 0, out)
+        budgets = self.budgets_of(spy)
+        self.assertTrue(budgets, "no ci-job run went through merge.sh, so no budget was read\n" + out)
+        self.assertEqual(set(budgets), {3600}, "a batch head's ci-job runs got the budgets %s; want 3600 s, the batch budget" % sorted(set(budgets)))
+
+    def test_a_non_batch_head_runs_its_lint_only_on_the_lint_budget_and_rebuilds_nothing(self):  # the control
+        self.use_routed_ci_job(FULL_PASS)
+        real = merge.sh
+        with unittest.mock.patch.object(merge, "sh", wraps=real) as spy:
+            rc, out = self.lint_run("--lane-lint", "feat")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.windows_runs(), [], "a non-batch head ran the Windows slice\n" + out)
+        self.assertEqual(self.rebuilds(), [], "a non-batch head rebuilt the records page\n" + out)
+        self.assertEqual(set(self.budgets_of(spy)), {merge.LINT_SECONDS}, "a non-batch head's lint left the lint budget\n" + out)
+
+    def test_a_fail_that_main_also_has_is_named_red_on_main_too_and_does_not_stop(self):
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_FAIL, base_full=FULL_FAIL)
+        rc, out = self.run_lane("--lane-lint", BATCH_LANE)
+        self.assertEqual(rc, 0, "a FAIL that main also has stopped the batch lint\n" + out)
+        self.assertTrue(any("shard suite" in line and "red on main too" in line for line in out.splitlines()),
+                        "the FAIL that main also has is not named 'red on main too'\n" + out)
+
+    def test_an_unknown_that_main_also_has_is_named_unknown_on_main_too_and_does_not_stop(self):
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_UNKNOWN, base_full=FULL_UNKNOWN)
+        rc, out = self.run_lane("--lane-lint", BATCH_LANE)
+        self.assertEqual(rc, 0, "an unknown that main also has stopped the batch lint\n" + out)
+        self.assertTrue(any("shard suite" in line and "unknown on main too" in line for line in out.splitlines()),
+                        "the unknown that main also has is not named 'unknown on main too'\n" + out)
+
+    def test_a_fail_only_the_batch_head_has_stops_the_batch_lint(self):
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_FAIL, base_full=FULL_PASS)
+        rc, out = self.run_lane("--lane-lint", BATCH_LANE)
+        self.assertEqual(rc, 1, "a FAIL only the batch head has did not stop the batch lint\n" + out)
+        self.assertTrue(any(line.startswith("FAIL") and "shard suite" in line for line in out.splitlines()), out)
+        self.assertEqual(pass_lines(out), [], out)
+
+    def test_an_unknown_only_the_batch_head_has_stops_and_never_reads_as_a_pass(self):
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_UNKNOWN, base_full=FULL_PASS)
+        rc, out = self.run_lane("--lane-lint", BATCH_LANE)
+        self.assertEqual(rc, 1, "an unknown only the batch head has did not stop the batch lint\n" + out)
+        self.assertEqual(pass_lines(out), [], out)
+
+    def test_a_closed_debt_whose_retire_check_times_out_prints_the_retire_run_cite_and_the_lint_goes_on(self):
+        tm.DebtRetire.pr_on_debt(self, 0)
+        self.push_branch_of(BATCH_DEBT)
+        self.use_routed_ci_job(FULL_PASS)
+        timed_out = ("unknown", "tests/test_retire_target.py ran past 600 s")
+        with unittest.mock.patch.object(check_debt_retire, "run_span", return_value=timed_out):
+            rc, out = self.run_lane("--lane-lint", BATCH_DEBT)
+        self.assertEqual(rc, 0, "a Retire check that timed out stopped the batch lint\n" + out)
+        self.assertTrue(any("Retire-run" in line and "retire-target" in line for line in out.splitlines()),
+                        "the timed-out Retire check printed no Retire-run cite line for retire-target\n" + out)
+        self.assertTrue(self.full_runs(), "the lint stopped before the checks job ran\n" + out)
+
+    def test_a_closed_debt_whose_retire_check_is_red_stops_the_batch_lint(self):
+        tm.DebtRetire.pr_on_debt(self, 1)
+        self.push_branch_of(BATCH_DEBT)
+        self.use_routed_ci_job(FULL_PASS)
+        rc, out = self.run_lane("--lane-lint", BATCH_DEBT)
+        self.assertEqual(rc, 1, "a closed debt whose Retire check is red did not stop the batch lint\n" + out)
+        self.assertIn("retire-target [red]", out, "the red Retire check is not named\n" + out)
 
 
 class ReadyChecks(CiJobStub, tm.RecordsEnv):

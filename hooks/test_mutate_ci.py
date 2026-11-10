@@ -52,7 +52,9 @@ that module's own run global. The sweep of old run folders is proven once, in ho
 Process checks use os.killpg and so run on POSIX only, as the CI step does (ubuntu-latest).
 """
 import ast
+import contextlib
 import fnmatch
+import io
 import json
 import os
 import re
@@ -60,7 +62,9 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import unittest
+import unittest.mock
 import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -73,6 +77,7 @@ import mutate_guard  # noqa: E402  REPORT_TARGETS, and the mode entry points onc
 import mutate_shared  # noqa: E402
 from test_mutate_js import git, unique_line  # noqa: E402  the one home of these helpers
 from test_mutate_replay import commit, pull_request, put, topic  # noqa: E402  the one home of the fixture writers
+from workflow_steps import job_block, run_body, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
 PY = sys.executable
 CLI_LIMIT = 300  # seconds a mode run may take before its case fails
@@ -1974,6 +1979,59 @@ class LoadsModuleTests(unittest.TestCase):
         self.assert_parses("the subject", subject)
         self.assertTrue(mutate_guard._loads_module(subject, "widget"),
                         "the known false selection: the keyword call feeds Reader.load, so _loads_module reads True")
+
+
+CHECKS_WORKFLOW = os.path.join(REPO, ".github", "workflows", "checks.yml")
+MUTANT_LINE = re.compile(r"^(KILLED|SURVIVED|WRONG CAUSE|SKIPPED|UNKNOWN) ", re.M)  # mutate_shared.run_mutants' verdict lines
+
+
+class AnchorsMode(unittest.TestCase):
+    """`--anchors`: main's anchor pre-check alone. It checks every mutation's anchor, required name and path, then stops:
+    no control, no suite and no mutant runs. The run is in-process with the campaign's two entry points faked, so a case
+    counts their calls and never runs them. The stale probe is a mutation whose anchor no guard module holds."""
+
+    def anchors_run(self, entries=None):
+        """-> (exit code, stdout, calls of the campaign's run_mutants) for `mutate_guard.py --anchors` on the real sources.
+        `entries`, when given, replaces MUTATIONS for the run."""
+        mutants = unittest.mock.patch.object(mutate_guard.mutate_shared, "run_mutants", return_value=0)
+        controls = unittest.mock.patch.object(mutate_guard, "run_controls", return_value=[])
+        out = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(sys, "argv", ["mutate_guard.py", "--anchors"]))
+            stack.enter_context(unittest.mock.patch.object(tempfile, "tempdir", RUN))  # main's work tree, in this run's folder
+            if entries is not None:
+                stack.enter_context(unittest.mock.patch.object(mutate_guard, "MUTATIONS", entries))
+            ran = stack.enter_context(mutants)
+            stack.enter_context(controls)
+            stack.enter_context(contextlib.redirect_stdout(out))
+            code = mutate_guard.main()
+        return code, out.getvalue(), ran.call_count
+
+    def test_a_clean_tree_starts_no_mutant_campaign_and_exits_0_with_no_mutant_line(self):
+        code, out, ran = self.anchors_run()
+        self.assertEqual(ran, 0, "--anchors started the mutant campaign (run_mutants ran %d time(s)) after its anchors passed" % ran)
+        self.assertEqual(code, 0, out)
+        self.assertFalse(MUTANT_LINE.search(out), "a mutant verdict line printed on a clean tree: " + out)
+
+    def test_one_stale_anchor_exits_1_names_it_and_starts_no_campaign(self):
+        probe = ("stale anchor probe", "no such text in any guard module", "x", "guard", "probe")
+        code, out, ran = self.anchors_run(list(mutate_guard.MUTATIONS) + [probe])
+        self.assertEqual(code, 1, out)
+        self.assertIn("stale anchor probe", out, "the stale anchor is not named: " + out)
+        self.assertEqual(ran, 0, "--anchors started the mutant campaign (run_mutants ran %d time(s)) past a stale anchor" % ran)
+
+
+class AnchorsCheckStep(unittest.TestCase):
+    """checks.yml's checks job runs the anchor check in guard scope, so a full checks job catches a stale anchor before a
+    batch's ready run does."""
+
+    def test_the_checks_job_runs_the_anchor_check_once_in_guard_scope(self):
+        with open(CHECKS_WORKFLOW, encoding="utf-8") as f:
+            block = job_block(f.read(), "checks")
+        self.assertIsNotNone(block, "checks.yml has no checks job")
+        runs = [st for st in step_blocks(block) if "hooks/mutate_guard.py --anchors" in (run_body(st) or "")]
+        self.assertEqual(len(runs), 1, "the checks job runs the anchor check in %d steps, want 1" % len(runs))
+        self.assertIn("needs.scope.outputs.guard", step_key(runs[0], "if") or "", "the anchor check's if: does not read the guard scope")
 
 
 if __name__ == "__main__":

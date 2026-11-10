@@ -505,6 +505,31 @@ class PinNoteEnv(Job):
         self.assertEqual(seen, "<unset>", "a step that is not ste-lint saw the pin note variable: " + out)
 
 
+def seen_line(name):
+    """A run line that writes the value of `name` to seen.txt, `<unset>` when it is not set."""
+    return "printf '%s' \"${" + name + "-<unset>}\" > seen.txt"
+
+
+class RunnerMarkers(Job):
+    """A GitHub runner has no Claude Code session markers, so ci-job strips them from each step's env, as it strips GH_TOKEN
+    and GITHUB_TOKEN. The step writes the value it sees to seen.txt."""
+
+    def test_claude_code_remote_does_not_reach_a_step(self):
+        verdicts, seen, out = self.seen_after(step("seen", seen_line("CLAUDE_CODE_REMOTE")), env={"CLAUDE_CODE_REMOTE": "true"})
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(seen, "<unset>", "a step saw CLAUDE_CODE_REMOTE, which a runner never sets: " + out)
+
+    def test_claude_code_remote_session_id_does_not_reach_a_step(self):
+        verdicts, seen, out = self.seen_after(step("seen", seen_line("CLAUDE_CODE_REMOTE_SESSION_ID")),
+                                              env={"CLAUDE_CODE_REMOTE_SESSION_ID": "session_probe"})
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(seen, "<unset>", "a step saw CLAUDE_CODE_REMOTE_SESSION_ID, which a runner never sets: " + out)
+
+    def test_an_ordinary_variable_still_reaches_a_step(self):  # the control: the strip names only the markers
+        verdicts, seen, out = self.seen_after(step("seen", seen_line("CI_JOB_PROBE_KEPT")), env={"CI_JOB_PROBE_KEPT": "kept"})
+        self.assertEqual((verdicts, seen), (["PASS"], "kept"), out)
+
+
 def mapped(parent, body):
     """One `      - ` step whose `parent:` block (`with` or `env`) holds `body`, raw, as YAML writes it."""
     return "      - name: s\n        %s:\n%s\n" % (parent, body)
