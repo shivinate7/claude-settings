@@ -814,8 +814,9 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .stack .sn { font: 600 13px/44px var(--mono); color: var(--muted); text-align: end; }
 .stack .stext { margin: 0; min-width: 0; padding-block: 10px; white-space: pre-line; overflow-wrap: anywhere; }
 .stack .stext.sedit { padding-block: 0; }
-.stack .sacts { display: flex; gap: 4px; justify-content: flex-end; }
-.stack .sacts .btn { min-height: 44px; }
+/* Wraps, so in a column too narrow for Edit and Remove side by side the second press drops under the first, inside its card. */
+.stack .sacts { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.stack .sacts .btn { min-height: 44px; min-inline-size: 0; max-inline-size: 100%; white-space: normal; }
 .stack .sstate { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding-inline: 10px; font-size: 14px; color: var(--muted); white-space: nowrap; }
 .stack .sstate.ok { color: var(--good); font-weight: 600; }
 .stack textarea, .askform textarea.copybox { width: 100%; min-height: 66px; resize: vertical; padding: 8px 12px; border: 1.5px solid var(--acc); border-radius: var(--r); background: var(--surface); font: inherit; color: var(--ink); }
