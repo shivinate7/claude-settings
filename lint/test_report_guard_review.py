@@ -118,6 +118,8 @@ def not_found():
 
 pull = re.fullmatch(r"(?:repos/[^/]+/[^/]+/)?pulls/(\d+)", path)
 issue = re.fullmatch(r"(?:repos/[^/]+/[^/]+/)?issues/(\d+)/comments", path)
+commit = re.fullmatch(r"(?:repos/[^/]+/[^/]+/)?commits/([0-9a-f]{40})", path)
+compare = re.fullmatch(r"(?:repos/[^/]+/[^/]+/)?compare/(.+)", path)
 if pull:
     if state["fail_pulls"]:
         fail(state["fail_pulls"])
@@ -150,6 +152,14 @@ elif issue:
         print(json.dumps([c for p in chosen for c in p]))
     else:
         print(json.dumps(chosen[0]))
+elif commit:
+    sha = commit.group(1)
+    if sha not in state["commits"]:
+        not_found()
+    spec = state["commits"][sha]
+    print(json.dumps({"sha": sha, "parents": [{"sha": p} for p in spec["parents"]], "commit": {"tree": {"sha": spec["tree"]}}}))
+elif compare:
+    print(json.dumps({"status": state["compares"].get(compare.group(1), "diverged")}))
 else:
     not_found()
 '''
@@ -218,13 +228,15 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertIsNotNone(shutil.which("gh", path=self.gh_dir), "the stand-in gh is not on its own PATH")
         self.serve()
 
-    def serve(self, comments=(), fail_pulls=None, fail_comments=None, prs=None):
+    def serve(self, comments=(), fail_pulls=None, fail_comments=None, prs=None, commits=None, compares=None):
         """The stand-in's answers: each PR's live head and its comments, oldest first, and any read to break.
-        `prs` maps a PR number to {"head": sha, "comments": [bodies]}; without it, PR 12 has `comments`."""
+        `prs` maps a PR number to {"head": sha, "comments": [bodies]}; without it, PR 12 has `comments`. `commits` maps a sha to
+        {"parents": [shas], "tree": sha}, the commit read's answer; `compares` maps "<head>...<base>" to the status compare gives."""
         if prs is None:
             prs = {PR: {"head": LIVE, "comments": list(comments)}}
         state = {"prs": {str(n): {"head": p["head"], "comments": list(p["comments"])} for n, p in prs.items()},
-                 "count_file": self.count, "fail_pulls": fail_pulls, "fail_comments": fail_comments}
+                 "count_file": self.count, "fail_pulls": fail_pulls, "fail_comments": fail_comments,
+                 "commits": dict(commits or {}), "compares": dict(compares or {})}
         with open(os.path.join(self.gh_dir, "state.json"), "w", encoding="utf-8") as handle:
             json.dump(state, handle)
 
@@ -602,6 +614,76 @@ class ReviewRecordTests(unittest.TestCase):
         out = self.stop(self.lane_turn(report(CLAIM)))
         self.assert_two_rest_reads()
         self.assertIsNone(out, out)
+
+    # Clean merges of main keep a record (decision pr-review-record). The check reads the merge through merge/merge.py.
+
+    def git_in_repo(self, *args):
+        """Run git in this run's repo, with a fixed identity. -> its stdout, stripped. A failed command fails the case."""
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+        run = subprocess.run(["git", "-C", self.repo, "-c", "commit.gpgsign=false", *args], capture_output=True, text=True, env=env)
+        self.assertEqual(run.returncode, 0, "git %s failed: %s" % (" ".join(args), run.stderr))
+        return run.stdout.strip()
+
+    def commit_file(self, path, text, message):
+        """Write `path` in this run's repo and commit it. -> the new commit's sha. A commit during a merge completes that merge."""
+        with open(os.path.join(self.repo, path), "w", encoding="utf-8") as handle:
+            handle.write(text)
+        self.git_in_repo("add", path)
+        self.git_in_repo("commit", "-q", "-m", message)
+        return self.git_in_repo("rev-parse", "HEAD")
+
+    def clean_merge_repo(self, edited=False):
+        """Commits in this run's repo: `old`, the reviewed head, and `main`, a commit on a branch off the same root. `live` merges the two: git's own
+        clean merge, or with one file more when `edited`. -> the shas by name, with `commits` and `compares` in the form serve() takes."""
+        root = self.commit_file("root.txt", "root\n", "root")
+        self.git_in_repo("checkout", "-q", "-b", "feat")
+        old = self.commit_file("a.txt", "a\n", "reviewed head")
+        self.git_in_repo("checkout", "-q", "-b", "side", root)
+        main = self.commit_file("b.txt", "b\n", "main")
+        self.git_in_repo("checkout", "-q", "feat")
+        if edited:
+            self.git_in_repo("merge", "-q", "--no-ff", "--no-commit", "side")
+            live = self.commit_file("x.txt", "x\n", "merge of main, with one edit")
+        else:
+            self.git_in_repo("merge", "-q", "--no-ff", "--no-edit", "side")
+            live = self.git_in_repo("rev-parse", "HEAD")
+        commits = {}
+        for sha in (root, old, main, live):
+            parents = self.git_in_repo("rev-list", "--parents", "-n", "1", sha).split()[1:]
+            commits[sha] = {"parents": parents, "tree": self.git_in_repo("rev-parse", sha + "^{tree}")}
+        git_tree = subprocess.run(["git", "-C", self.repo, "merge-tree", "--write-tree", old, main], capture_output=True, text=True).stdout.split()[:1]
+        if edited:
+            self.assertNotEqual(git_tree, [commits[live]["tree"]], "fixture: the edited merge has git's clean merge tree")
+        else:
+            self.assertEqual(git_tree, [commits[live]["tree"]], "fixture: git's merge of old and main is not the live merge's tree")
+        return {"old": old, "main": main, "live": live, "commits": commits, "compares": {f"{main}...main": "ahead"}}
+
+    def serve_merge(self, merged):
+        """The stand-in serves pull request 12 at the merge's live head, with a record for its reviewed head, and the merge's commits and compares."""
+        self.serve(prs={PR: {"head": merged["live"], "comments": [record(head=merged["old"])]}}, commits=merged["commits"],
+                   compares=merged["compares"])
+
+    def test_clean_main_merge_after_the_reviewed_head_does_not_block(self):
+        # Catches: a clean merge of main after the reviewed head read stale, so a PASS claim on its PR is refused.
+        self.serve_merge(self.clean_merge_repo())
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assertIsNone(out, "a clean merge of main after the reviewed head blocked the PASS claim: %r" % (out,))
+
+    def test_edited_merge_of_main_after_the_reviewed_head_still_blocks(self):
+        # Control: the same merge with one file more than git's clean merge reads stale, so the claim is still refused.
+        self.serve_merge(self.clean_merge_repo(edited=True))
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_blocked(out)
+        self.assertIn("PR #12", out["reason"], out)
+
+    def test_a_clean_merge_read_is_one_commit_read_and_one_compare(self):
+        # Catches: the check reading a clean merge with more routes than its PR reads, its commit read and its compare, or with fewer.
+        merged = self.clean_merge_repo()
+        self.serve_merge(merged)
+        self.stop(self.lane_turn(report(CLAIM)))
+        routes = sorted(a.split("?", 1)[0].split("/", 3)[3] for argv in self.gh_calls() for a in argv if a.startswith("repos/"))
+        expected = sorted([f"pulls/{PR}", f"issues/{PR}/comments", f"commits/{merged['live']}", f"compare/{merged['main']}...main"])
+        self.assertEqual(routes, expected, "the check read %r, not the two PR reads, one commit read and one compare" % (routes,))
 
     # Controls: no block, and no read, where the check does not apply.
 
