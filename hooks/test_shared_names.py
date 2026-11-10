@@ -609,6 +609,22 @@ def case_normalize_db_write_one_op_is_still_a_batch():
             out.get("action"), len(out.get("writes") or [])))
 
 
+def case_normalize_db_write_one_dict_op_is_one_write():
+    # Review finding F3: a Mac db_write whose `ops` is one dict, not a list, is read as no writes, so no judge sees it.
+    # The same op as a list is the control: the dict form must give the list form's writes.
+    op = {"op": "set", "path": "items/it-5", "data": {"kind": "decision"}}
+    listed, note = _expect_normalised(MAC_PREFIX + "db_write", {"ops": [dict(op)]}, "ArtifactData")
+    if listed is None:
+        return False, note
+    out, note = _expect_normalised(MAC_PREFIX + "db_write", {"ops": dict(op)}, "ArtifactData")
+    if out is None:
+        return False, note
+    want, rows = _writes_of(listed), _writes_of(out)
+    return out.get("action") == "batch" and rows == want, (
+        "ops as one dict gives action %r and writes %r, want batch with the list form's writes %r" % (
+            out.get("action"), rows, want))
+
+
 def case_normalize_db_get_splits_the_path():
     out, note = _expect_normalised(MAC_PREFIX + "db_get", {"path": "answers/ans-4"}, "ArtifactData")
     if out is None:
@@ -703,6 +719,8 @@ MAC_CASES = [
      case_normalize_db_write_splits_every_collection),
     ("(t) a db_write with one op is still an ArtifactData batch",
      case_normalize_db_write_one_op_is_still_a_batch),
+    ("(t2) a db_write whose ops is one dict gives the same writes as the one-op list",
+     case_normalize_db_write_one_dict_op_is_one_write),
     ("(u) a db_get path splits into a get of its collection and doc_id",
      case_normalize_db_get_splits_the_path),
     ("(v) a db_str_replace takes its item and field as a str_replace",

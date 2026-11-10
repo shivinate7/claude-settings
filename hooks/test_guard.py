@@ -25208,6 +25208,15 @@ add("option letter keys: a batch with one item keyed e2, a and c is denied", "de
 add("option letter keys: a batch of keyed items is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="batch", writes=[ol_write(ol_item()), ol_write(ol_item(multi=True, pick=["a", "c"]))])
 
+# Roadmap step artifact-guard-matcher-names, review finding F3. A Mac db_write whose `ops` is one dict, not a list, is
+# read as no writes, so no judge sees the item. The same one op as a list is the control; the dict is the red.
+add("mac db_write: ops as a list keyed none on the waiting page is denied", "deny", "option-letter-keys",
+    tool=MAC_DB_WRITE, cwd=PQ_REPO, url=PQ_URL,
+    ops=[{"op": "set", "path": "items/" + OL_DOC, "data": ol_item(options=ol_keyed("none", "b", "c"))}])
+add("mac db_write: ops as one dict keyed none on the waiting page is denied", "deny", "option-letter-keys",
+    tool=MAC_DB_WRITE, cwd=PQ_REPO, url=PQ_URL,
+    ops={"op": "set", "path": "items/" + OL_DOC, "data": ol_item(options=ol_keyed("none", "b", "c"))})
+
 # An option's label that opens with a letter tag must name the key's letter. Incident, Nov 1 16:12 CST: options
 # keyed a, b, c, d carried the labels B, D, A and C, so the owner's answer letter was ambiguous. A letter with no
 # tag shape, such as "A rail", is ordinary text and is not judged.
