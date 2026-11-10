@@ -24,6 +24,9 @@ its own root, the folder beside its hooks/.
 The fifth part pins the clean-layout control: a target's mutants count as kills only after one filtered run
 (one required case fragment of its own mutations) of the unmutated layout passes. A red control reads each mutant UNKNOWN, never KILLED. The control
 runs inside the MUTATE_JOBS cap, and a control that raises reads its mutants UNKNOWN too.
+
+The sixth part pins the family suites: a suite named `path::family` runs the file `path` with GUARD_FAMILY=family in
+its env, and the file part is what the profile's `tests` regex and the isfile check read.
 """
 import contextlib
 import io
@@ -904,6 +907,86 @@ class ErrorBlockReportTests(unittest.TestCase):
                         "a FAIL line must still print under saw:, saw %r" % self.saw(lines))
         self.assertFalse(any(line.startswith("saw: ERROR:") for line in self.saw(lines)),
                          "a FAIL-only red printed an ERROR line under saw:, saw %r" % self.saw(lines))
+
+
+# The family suites of hooks/test_guard.py: a suite named `path::family` is the file `path`, run with GUARD_FAMILY=family.
+# FAMILY_SUITE prints FAIL only under family x. WIDGET_FAMILY_SUITE imports widget outside that branch, so a broken copy of
+# widget.py fails it at the import, which marks the file as loaded.
+FAMILY_SUITE = ("import os\nimport sys\n\n"
+                "if os.environ.get('GUARD_FAMILY') == 'x':\n"
+                "    print('FAIL: GUARD_FAMILY is x')\n"
+                "    sys.exit(1)\n"
+                "print('ok')\n")
+WIDGET_FAMILY_SUITE = ("import os\nimport sys\n\n"
+                       "sys.path.insert(0, os.getcwd())\n"
+                       "from widget import value\n\n"
+                       "if os.environ.get('GUARD_FAMILY') == 'x' and value() != 1:\n"
+                       "    print('FAIL: value() is not 1 under family x')\n"
+                       "    sys.exit(1)\n"
+                       "print('ok')\n")
+
+
+def make_files(root, files):
+    """write_files, with each file's folder made first."""
+    for rel in files:
+        os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
+    write_files(root, files)
+
+
+class FamilySuiteEngineTests(unittest.TestCase):
+    """A suite named `path::family` is the file `path`, run with GUARD_FAMILY=family in its env. The profile's `tests`
+    regex and the isfile check read the part before `::`. A plain suite runs with GUARD_FAMILY unset. The cases that run a
+    family suite are red on the engine without the family split; the plain cases are its green control."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        self.folder = os.path.join(self.run, "folder")
+        make_files(self.folder, {"suites/test_fam.py": FAMILY_SUITE})
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("GUARD_FAMILY", None)
+
+    def test_a_family_suite_runs_with_guard_family_set_in_its_env(self):
+        kind, _seconds = mutate_shared.run_suite_file(self.folder, "suites/test_fam.py::x", 60)
+        self.assertEqual(kind, "assert",
+                         "suites/test_fam.py::x runs with GUARD_FAMILY=x, so its FAIL line reads red, got %r" % kind)
+
+    def test_a_plain_suite_runs_with_guard_family_unset(self):
+        kind, _seconds = mutate_shared.run_suite_file(self.folder, "suites/test_fam.py", 60)
+        self.assertEqual(kind, "pass", "a plain suite sets no GUARD_FAMILY, so the same file reads green, got %r" % kind)
+
+    def test_score_target_reads_a_family_suite_by_its_path_and_kills_under_its_family(self):
+        root = os.path.join(self.run, "root")
+        make_files(root, {"widget.py": "def value():\n    return 1\n", "suites/test_fam.py": WIDGET_FAMILY_SUITE})
+        row = mutate_shared.score_target(root, "widget.py", ["suites/test_fam.py::x"], limit=10, jobs=1)
+        self.assertEqual(row["status"], "OK", "a family suite whose file exists is usable: %s" % row["reason"])
+        self.assertEqual(row["unusable"], {}, "the file part of a family suite is read, so none is unusable")
+        self.assertGreater(row["killers"]["suites/test_fam.py::x"], 0,
+                           "the family suite kills mutants under GUARD_FAMILY=x")
+
+    def test_score_target_marks_a_family_suite_whose_file_is_missing_as_missing(self):
+        root = os.path.join(self.run, "root")
+        make_files(root, {"widget.py": "def value():\n    return 1\n"})
+        row = mutate_shared.score_target(root, "widget.py", ["suites/none.py::x"], limit=10, jobs=1)
+        self.assertEqual(row["unusable"], {"suites/none.py::x": "missing"},
+                         "the file part is checked: suites/none.py is missing")
+
+    def test_select_lists_a_family_line_whose_file_matches_the_tests_regex(self):
+        dest = os.path.join(self.run, "dest")
+        make_files(dest, {"select.py": "print('suites/test_fam.py::x')\n", "suites/test_fam.py": FAMILY_SUITE})
+        profile = {"tests": r"(^|/)test_[^/]*\.py$", "select": [sys.executable, "select.py", "{path}"]}
+        names, note = mutate_shared._select_suites(profile, dest, "widget.py", None, 60)
+        self.assertEqual(names, ["suites/test_fam.py::x"],
+                         "the regex reads the file part of a family line, so it is a suite: %s" % note)
+
+    def test_select_drops_a_family_line_whose_file_is_missing(self):
+        dest = os.path.join(self.run, "dest")
+        make_files(dest, {"select.py": "print('suites/test_gone.py::x')\n"})
+        profile = {"tests": r"(^|/)test_[^/]*\.py$", "select": [sys.executable, "select.py", "{path}"]}
+        names, note = mutate_shared._select_suites(profile, dest, "widget.py", None, 60)
+        self.assertEqual(names, [], "a family line whose file is missing is no suite: %s" % note)
 
 
 if __name__ == "__main__":
