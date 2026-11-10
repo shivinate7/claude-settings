@@ -1645,7 +1645,7 @@ jobs:
         run: python merge/test_merge.py
 
   # The janitor sweep suites, moved out of checks-windows-rest (decision ci-job-caps). Fixture suite 8.2 min slowest,
-  # mutation test 10.9 min slowest (push only), so 19.6 min with setup. Cap 40 min = 2x.
+  # mutation test 10.9 min slowest (push only), so 19.6 min with setup. Cap 75 min = 3.8x.
   checks-windows-sweep:
     runs-on: windows-latest
     needs: scope
