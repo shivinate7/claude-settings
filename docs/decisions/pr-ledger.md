@@ -12,7 +12,7 @@ Owner, 2026-11-07 12:22 CST, in chat to the coordinator. Quote:
 
 Coordinator, 2026-11-07 12:33 CST: the proposal is accepted as written (the owner asked to solve it; it can be undone).
 
-The intake rule rests on owner ruling 113 a (waiting-page item 113 a, 2026-11-01 04:26 CST, decision `pr-review-record`, a PR carries its review record on the PR): no merge message; the batch runner finds reviewed, green PRs itself. The coordinator's ruling:
+The intake rule rests on owner ruling 113 a (waiting-page item 113 a, 2026-11-01 04:26 CST, decision `pr-review-record` (a pull request carries its review record), a PR carries its review record on the PR): no merge message; the batch runner finds reviewed, green PRs itself. The coordinator's ruling:
 
 - Intake is record-only. A PR joins a batch only through its review record.
 - The batch runner batches from the review record, not from a message.
@@ -47,7 +47,7 @@ Failure points, each with its evidence:
 - **F1. Lanes ended without the review record.** `merge --reviewed` at 12:27 CST found a review record on 3 of 67 open PRs: #919 (a review record for an old head), #1042 (lane `coordinator-acts`) and #1353 (a lane that waited on a forward). Six of eight sampled lanes sent PASS by message only: #1371, #1314, #1325, #1337, #1349 and #1363. #1371 has 0 comments. Nothing stops a lane from ending `review_ready` without its review record.
 - **F2. The batch runner's queue was private.** It came from messages and lived only in batch runner 8's context (the runner's session label). Its heads went stale. #1371 was queued at commit 6086dc37 (the queued head). Its live head is commit 2d13d2bc. Its round 3 PASS covers the old head.
 - **F3. A whole-queue hold had no age.** Waiting-page item 330 b (main red on a flaky test) held every merge from about 05:00 CST. PRs that change a guard or check went one per batch. No PR showed the hold.
-- **F4. Trackers count presence as progress.** Decision `stalled-steps` counted an open PR as a live lane. `skills/roadmap/build.py` counted any non-archived session as live. After 3a, a completed or failed lane holds no step, and a `review_ready` lane still hides its draft from the over-12-hour draft row. Related: roadmap step `triage-stale-ready-report` and #1082 (roadmap build upkeep).
+- **F4. Trackers count presence as progress.** Decision `stalled-steps` (a doing step with no live lane) counted an open PR as a live lane. `skills/roadmap/build.py` counted any non-archived session as live. After 3a, a completed or failed lane holds no step, and a `review_ready` lane still hides its draft from the over-12-hour draft row. Related: roadmap step `triage-stale-ready-report` and #1082 (roadmap build upkeep).
 - **F5. Lanes cannot find the batch runner.** The `list_sessions` tags filter returns "not currently available". Hand-offs routed through the coordinator. #1353 waited on that forward.
 - **F6. Stacked or dirty PRs have no next act.** #1042 has a done review record. It is stacked on #919 and dirty (it cannot merge cleanly). It sits in no queue.
 

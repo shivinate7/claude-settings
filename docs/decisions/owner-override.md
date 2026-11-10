@@ -8,7 +8,7 @@ Owner words, 2026-10-18 CDT:
 
 - 15:27: `one act pass and time mode so if i just say override it's then but override <time> is length of pass`. A bare `override` is a one-act override. `override <time>` is a timed override of that length.
 - 15:27: use the override to force through the removal of unrecognized worktrees and the stop of runaway processes.
-- 15:30: the test cases also cover a worktree or branch that is in use or unpushed, `git checkout <path>`, and the stash help flag. A WSL node case is dropped, because `wsl-allow-list` already allows it.
+- 15:30: the test cases also cover a worktree or branch that is in use or unpushed, `git checkout <path>`, and the stash help flag. A WSL node case is dropped, because `wsl-allow-list` (WSL runs only fixed test commands) already allows it.
 - 15:34: a timed override reaches the agents the session starts. A one-act override does not.
 - 15:34: `why cap it let me say`. A timed override has no cap. The owner picks the length.
 - 15:34: an act that a typed override lets through is not a safety hole under `roles-review-cap-three` (a change gets three review rounds).
@@ -75,10 +75,10 @@ Orchestrator's call, not an owner grant: the required unit, the role list, and t
 
 ## Outside every override
 
-- Owner, 2026-10-18 15:34 CDT: a write to a frozen path, and a command that sets a git location variable (`git-env-set-refused`, a git-env-set command is refused).
-- Owner, 2026-10-18 16:00 CDT, `Never pass them`: a kill of pid 0, 1 or -1 (`a-kill-by-pid-needs-an-owned-pid`, a kill by pid needs an owned pid).
+- Owner, 2026-10-18 15:34 CDT: a write to a frozen path, and a command that sets a git location variable (`git-env-set-refused` (commands that set git location variables are refused), a git-env-set command is refused).
+- Owner, 2026-10-18 16:00 CDT, `Never pass them`: a kill of pid 0, 1 or -1 (`a-kill-by-pid-needs-an-owned-pid` (a kill by pid needs a session-owned pid), a kill by pid needs an owned pid).
 - Owner, 2026-10-18 16:25 CDT: the role and model guards (the settings-write ask of `agent-model-cap`, `agent-model-floor`, the no-model refusal of `agent-role-model` (its above-row refusal is liftable, owner, 2026-11-01 17:25 CST, item 127, pick a), `roles-third-round-steps-up`, `builder-test-edit` and the other role guards).
-- Owner, 2026-10-18 18:37 CDT, `Never lift it`: `worktree-home`, the guard that keeps an agent inside its own worktree (`an-agent-outside-its-home-tree-must-stop`, an agent outside its home tree must stop).
+- Owner, 2026-10-18 18:37 CDT, `Never lift it`: `worktree-home`, the guard that keeps an agent inside its own worktree (`an-agent-outside-its-home-tree-must-stop` (an agent outside its home tree must stop), an agent outside its home tree must stop).
 - Orchestrator's call, because no override check can reach them: the missing-module refusal in `hooks/guard.py`, the `bin/rm` shim and the `bin/merge` shim. The shims run inside the command, after the guard, and the failed guard cannot check the acts above. Each of these refusals says that no override lifts it.
 - Step c85: the Agent spawn judge and the AskUserQuestion reviewer (`hooks/call_judge.py`) and the prose judge (`hooks/prose_judge.py`) refuse through `refuse()`, so an override lifts them. The `pkill` and `killall` deny entries left `settings.json`, because `hooks/guard_kill.py` refuses both through `refuse()`. An Explore spawn on a model that is neither Sonnet nor Opus is the Explore row of `agent-model-cap`, a model guard, so no override lifts it.
 - Known limit: a call that two sibling hooks both refuse spends a one-act override on the first refusal. A timed override lifts both.

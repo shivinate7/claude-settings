@@ -16,9 +16,9 @@
   check reports it as UNKNOWN only after the other reads finish. The merge tool refuses an UNKNOWN that
   carries a finding, and the reason flag cannot lift it (step notes-union-batch-revival).
 - **Revived note.** A note the branch deleted is back at head, because a union merge of main put it back
-  (decision `notes-merge-union`). The check replays the branch's own commits and counts copies per note.
+  (decision `notes-merge-union` (notes files merge by union)). The check replays the branch's own commits and counts copies per note.
   A note is its slug, or its whole line when it has no slug form. A rebase leaves no merge, so it is not read
-  (debt `silent-undo-rebase-no-merge`).
+  (debt `silent-undo-rebase-no-merge` (rebase reviving a deleted note is not caught)).
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
@@ -26,7 +26,7 @@ nothing. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so th
 reason. No switch turns the check off.
 
 A deleted debt file has a second escape: a `Retire-run: <slug> -- <run URL>` in the PR body's last paragraph
-that the debt-close check accepts (decision `debt-close-runs-retire`). It excuses only that debt's path, never
+that the debt-close check accepts (decision `debt-close-runs-retire` (a debt close runs its Retire check)). It excuses only that debt's path, never
 another file, and only a whole delete, not a rename out of `docs/debts/`. Merge tool only: the CLI and CI pass
 no PR body, as with a `Drops-lines` line in the body; CI's way out is a `Drops-lines` commit trailer. With no
 run reader, or a read that fails, the finding stays. Cost: it runs only in the merge tool, when the scan has a

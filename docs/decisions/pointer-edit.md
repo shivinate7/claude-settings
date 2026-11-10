@@ -16,13 +16,13 @@ machine runs its hooks, lint and agents out of it, so an edit there is live for 
     outside the pointer; an unreadable or missing pointer; Read and Grep. Artifact and ArtifactData are not
     writes and pass.
   - A shell write is not judged.
-- **Liftability.** An owner override (the `owner-override` decision, the owner's typed override) lifts a direct
+- **Liftability.** An owner override (the `owner-override` (owner override lets refused or asked acts through) decision, the owner's typed override) lifts a direct
   pointer path while the pointer is a plain checkout. Two cases lift nothing:
   - The pointer is the live pinned checkout or the main mirror. `is_frozen` then covers every file in it, and
     the `frozen-path` rule (refuses writes to frozen files and checkouts) already refuses them. The
     `never_lifted` list reads `is_frozen`, so no override lifts them.
   - A config-dir spelling that resolves into a frozen directory. The same reason applies.
-- **Value.** Reviewer round 3 judged the net safety value small and positive (the `hold-unsafe-after-round-3`
+- **Value.** Reviewer round 3 judged the net safety value small and positive (the `hold-unsafe-after-round-3` (holds guard changes whose net value is negative)
   decision, the net-value test).
   - Safety holes closed: a session whose cwd is in the pointer checkout; a session in another repo, or with no
     checkout, writing a pointer path; a non-isolated agent writing a pointer path.

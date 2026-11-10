@@ -2,7 +2,7 @@
 
 ## The ruling
 
-`/safe-stop` is a command of the session-board mod (`session-board-mod-limits`, session-board keeps small records).
+`/safe-stop` is a command of the session-board mod (`session-board-mod-limits` (session-board records hold names and counts), session-board keeps small records).
 
 - `/safe-stop` refuses non-user origins by a refusal list in `hooks/lib.mjs`. Other origins run, including `unclassified`.
 - It asks the installed handoff hook for its path functions. A run makes the handoff folder. A plan makes none.

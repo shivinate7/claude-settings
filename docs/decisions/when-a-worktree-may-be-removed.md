@@ -4,7 +4,7 @@
 
 Four idle limits. 30 min: agent-end reap. 1 h: unattended `--confirm`, a merged tree. 4 h: session-end agent rule. 24 h: unattended `--confirm`, a pushed tree that is not merged. Pushed is enough (HEAD need not be merged) for the agent-end reap and the `agent-*` rule only. A dirty tree is never reaped.
 
-Five routes remove a worktree. One is the unattended `--confirm` run. One is a test-author's `git worktree remove` of its own red-run checkout, once that checkout is clean and detached at a pushed commit; the guard refuses the remove of a dirty one. Two remove a tree under `.claude/worktrees/agent-*` without both of its conditions: the agent-end reap and the session-end sweep's agent rule. No route runs a remover a repo supplies (decisions `the-janitor-is-one-machine-wide-sweep` and `uniform-over-variants`, owner 2026-10-27 12:51 CDT). The merge tool also removes the worktree that holds the branch it merged (owner, 2026-10-25, step c44). It calls the sweep's `--fast` judgment with `--attended` for that one tree, so there is no idle wait. The tree goes when it is clean and its HEAD is in the merged head. No lock, session or process may hold it, and it may not be the caller's cwd. A failed read keeps the tree, except one process whose cwd cannot be read: it is out of scope, not inside.
+Five routes remove a worktree. One is the unattended `--confirm` run. One is a test-author's `git worktree remove` of its own red-run checkout, once that checkout is clean and detached at a pushed commit; the guard refuses the remove of a dirty one. Two remove a tree under `.claude/worktrees/agent-*` without both of its conditions: the agent-end reap and the session-end sweep's agent rule. No route runs a remover a repo supplies (decisions `the-janitor-is-one-machine-wide-sweep` (one machine-wide sweep deletes spent branches and worktrees) and `uniform-over-variants` (repos match one shared format, no variants), owner 2026-10-27 12:51 CDT). The merge tool also removes the worktree that holds the branch it merged (owner, 2026-10-25, step c44). It calls the sweep's `--fast` judgment with `--attended` for that one tree, so there is no idle wait. The tree goes when it is clean and its HEAD is in the merged head. No lock, session or process may hold it, and it may not be the caller's cwd. A failed read keeps the tree, except one process whose cwd cannot be read: it is out of scope, not inside.
 
 ### Idle limits, side by side
 
@@ -38,10 +38,10 @@ Reason: the dirty trees in this clone are live work. Most `q_max` leftovers come
 
 Owner ruling, 2026-10-01: every `--confirm` run, the daily job and SessionEnd included, needs both of these to remove a worktree:
 
-- Merged, or pushed and idle 24 hours. Merged means HEAD holds no commit that the default branch lacks. The test is the redundancy test of `a-branch-is-redundant-by-patch-not-by-ancestry`, by ancestry or by patch, read in the worktree. A pushed tree has every commit on a remote branch that the remote lists now (`git ls-remote`, after the run's fetch, see Safe work). A listed head that the clone lacks is dropped: it cannot hold a commit of the tree. It is removed once it is idle 24 hours, merged or not (owner ruling, 2026-10-09), because the remote keeps every commit. A remote that cannot be read keeps the tree. Git-ignored files, a local secrets file too, are removed with the tree (owner ruling, 2026-10-09).
+- Merged, or pushed and idle 24 hours. Merged means HEAD holds no commit that the default branch lacks. The test is the redundancy test of `a-branch-is-redundant-by-patch-not-by-ancestry` (a branch is redundant by patch, not ancestry), by ancestry or by patch, read in the worktree. A pushed tree has every commit on a remote branch that the remote lists now (`git ls-remote`, after the run's fetch, see Safe work). A listed head that the clone lacks is dropped: it cannot hold a commit of the tree. It is removed once it is idle 24 hours, merged or not (owner ruling, 2026-10-09), because the remote keeps every commit. A remote that cannot be read keeps the tree. Git-ignored files, a local secrets file too, are removed with the tree (owner ruling, 2026-10-09).
 - Idle 1 hour.
 
-The worktree must also be clean and fully pushed. No live session and no process may be inside. An unreadable process is judged by `unattended-sweep-stops-proven-orphans`. The lock must be gone, or its host process must be gone.
+The worktree must also be clean and fully pushed. No live session and no process may be inside. An unreadable process is judged by `unattended-sweep-stops-proven-orphans` (unattended sweep stops proven orphans). The lock must be gone, or its host process must be gone.
 
 Strict is the default. A job that an older installer wrote passes no flag, so it is strict at once, with no reinstall. A person who wants the old rules passes `--attended`. The launchd plist, the Task Scheduler task and the SessionEnd hook never pass it. The agent-end reap takes no flag.
 
@@ -51,16 +51,16 @@ Reason: pushed proves that a copy exists. It does not prove that the work is don
 
 Owner rulings, 2026-10-15 and 2026-10-16 (including the 30 min wait, 00:47 CDT).
 
-At each SubagentStop, the reaper (`janitor/agent_end_reap.py`) removes each finished agent's worktree that is idle 30 min or more. The ending agent's own worktree is not removed at its own end. It waits the same idle limit as the others, and so do its build folders (`build-dirs-reaped-at-agent-end`). A later agent end, or the session-end sweep, removes it. Reason: the hook cannot remove the tree its own shells stand in, so a tree is removed only from a later hook, whose cwd is in another tree. The wait also keeps follow-ups working: a message to a finished agent resumes it in its own worktree, and a removed worktree makes the agent stop (`an-agent-outside-its-home-tree-must-stop`).
+At each SubagentStop, the reaper (`janitor/agent_end_reap.py`) removes each finished agent's worktree that is idle 30 min or more. The ending agent's own worktree is not removed at its own end. It waits the same idle limit as the others, and so do its build folders (`build-dirs-reaped-at-agent-end` (build folders are reaped at agent end)). A later agent end, or the session-end sweep, removes it. Reason: the hook cannot remove the tree its own shells stand in, so a tree is removed only from a later hook, whose cwd is in another tree. The wait also keeps follow-ups working: a message to a finished agent resumes it in its own worktree, and a removed worktree makes the agent stop (`an-agent-outside-its-home-tree-must-stop` (an agent outside its home tree must stop)).
 
-Owner ruling, 2026-10-15 19:43 CDT: remove the tree even when it holds git-ignored files, such as build output, packages or `.env.local`. The same ruling wants the agent's own shells stopped first. That half is the debt `finished-agent-shells-keep-tree`.
+Owner ruling, 2026-10-15 19:43 CDT: remove the tree even when it holds git-ignored files, such as build output, packages or `.env.local`. The same ruling wants the agent's own shells stopped first. That half is the debt `finished-agent-shells-keep-tree` (a finished agent's shells keep its tree).
 
 A worktree is removed only when all of these hold. A read that cannot tell keeps it.
 
 - It is idle 30 min or more.
 - It is clean: no uncommitted and no untracked file.
 - It is pushed and unlocked.
-- No live session uses it (read 2 of the reaper, `agent-end-reap-stops-what-a-finished-agent-left`), and no process has a cwd inside it.
+- No live session uses it (read 2 of the reaper, `agent-end-reap-stops-what-a-finished-agent-left` (agent-end reap stops what a finished agent left)), and no process has a cwd inside it.
 
 Session start warns when more than 50 agent worktrees exist. An agent leaves its worktree clean, and a later agent end removes it once its commits are pushed. The builder agent definition says so. The test-author commits and pushes to the branch its brief names, and cleans and removes its red-run checkout itself.
 

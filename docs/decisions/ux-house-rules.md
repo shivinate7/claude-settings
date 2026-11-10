@@ -56,7 +56,7 @@ WCAG level, is not taken on by choice (owner, 2026-11-01 12:23 CST, by triage).
   exist.
 - `docs/design` is in `landed-dirs.txt` and in `CONFIG_FROZEN_DIRS` in `hooks/guard_frozen.py`.
 - A house rule states only the house difference.
-- The third-party sets keep their parts (`design-skills`):
+- The third-party sets keep their parts (`design-skills` (three third-party skills apply to screen repos)):
   - Vercel web-interface-guidelines: web mechanics (labels, focus, forms, touch, copy case).
   - impeccable: critique and polish (error text, empty-state next step, undo before a confirm, one noun
     for one concept).

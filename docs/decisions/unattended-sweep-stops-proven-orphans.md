@@ -10,7 +10,7 @@
 
 The signal is SIGTERM on Linux and macOS, and `TerminateProcess` on Windows. Both go by pid, never by a name or a pattern. The sweep never sends a second, stronger signal on its own.
 
-**No arm flag, every checkout.** Owner, 2026-09-24: the two unattended runs (the SessionEnd hook and the scheduled job) may stop a proven orphan with no separate arm flag, in every checkout. The agent-end reap (`agent-end-reap-stops-what-a-finished-agent-left`) is a third unattended path, with its own reads. A primary checkout gets no exemption. The three reads above are the whole check. Reason: a stopped process cannot come back, but a reaped branch keeps a tombstone and a kept worktree stays whole.
+**No arm flag, every checkout.** Owner, 2026-09-24: the two unattended runs (the SessionEnd hook and the scheduled job) may stop a proven orphan with no separate arm flag, in every checkout. The agent-end reap (`agent-end-reap-stops-what-a-finished-agent-left` (agent-end reap stops what a finished agent left)) is a third unattended path, with its own reads. A primary checkout gets no exemption. The three reads above are the whole check. Reason: a stopped process cannot come back, but a reaped branch keeps a tombstone and a kept worktree stays whole.
 
 **A process this sweep cannot read is out of scope.** It is counted. It is never acted on, and never a reason to keep something else. A single process whose cwd cannot be read never stops a worktree removal. Only the WHOLE pid enumeration failing means keep-everything. Reason: on a real machine many processes belong to another account, so keeping on any one of them would refuse to reap anything. Measured on a Windows machine: 272 of 580 running processes answered None to the cwd read.
 

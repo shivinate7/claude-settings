@@ -2,7 +2,7 @@
 
 ## The ruling
 
-An item write whose picture the page would refuse, or would draw as a thin strip, is refused at write, with the page's own sentence. The owner never sees it (decision `questions-go-to-owner`, skill `waiting-page`, "Add a design").
+An item write whose picture the page would refuse, or would draw as a thin strip, is refused at write, with the page's own sentence. The owner never sees it (decision `questions-go-to-owner` (a session brings each question to the owner), skill `waiting-page`, "Add a design").
 
 - Guard rule `page-item-design` (`hooks/guard.py`, `page_design_hit`) judges an `ArtifactData` write of this repo's waiting page. It judges a `set`, or an `update` that carries both `options` and `designs`, when its data carries a picture: a `designs` list, or an option with `design` (`question_form.design_writes`, the one home of "carries a picture"). A write with no picture never starts node.
 - It runs `skills/waiting-page/check_designs.mjs --page <file> --item <json>` once per judged item, through `_run_check_designs`, the one seam that starts node.

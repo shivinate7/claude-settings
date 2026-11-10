@@ -26,7 +26,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   2026-10-18 15:15 CDT).
 - The report tells the session to ask the owner to stop the job. After the report, the job is not a child
   of the session. The guard refuses a stop of a process outside the session, unless the owner's override
-  covers it (`owner-override`, the owner's typed override).
+  covers it (`owner-override` (owner override lets refused or asked acts through), the owner's typed override).
 - The one allowed wait on a stranded job is `wait-pid <pid> [--timeout SECS]` (`bin/wait-pid`). Incident,
   2026-10-31: a stall left a lane with its job's pid, and the guards refused a `kill -0` loop, a `/proc`
   poll and `tail --pid`. Those loops stay refused; the remedies of the `waiter` and `live-stream` rules
@@ -125,13 +125,13 @@ transcript's end for each agent that is quiet and not yet listed. No new process
 `A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` counts both.
 Limits: a session that is idle with no Stop sees nothing until its next Stop. A TaskStop or a terminal
 notice (completed, failed, killed or stopped) closes an agent id for the whole transcript. So an agent
-stopped or finished, then resumed under the same id, is never listed again (debt `agent-resume-reads-closed`,
+stopped or finished, then resumed under the same id, is never listed again (debt `agent-resume-reads-closed` (a resumed agent that closed is never listed),
 an agent resumed after it closed). An agent stuck inside one tool call is never listed: an open call has no
 age cap. A model turn longer than the age would list a busy agent. Measured on 5 local agent transcripts
 (559 records, 2026-11-07): the longest gap between records was 206 s, under the 300 s age.
 
 The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open
-(`guard-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
+(`guard-hooks-fail-closed` (guard hooks block when they fail)). It reuses the transcript parsing of the PreToolUse path, so that parsing has
 one home (`building-one-home-per-capability`).
 
 - Age: the default is 300 seconds, a builder's choice, checked only by the gap measure in the limits above. `STALL_WATCH_QUIET` sets another

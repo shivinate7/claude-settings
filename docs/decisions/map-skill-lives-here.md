@@ -22,7 +22,7 @@ The install links it whole into `~/.claude/skills/plain-english-map`.
   skill (owner, 2026-10-28 02:40 CDT, roadmap step c146 "The map says how the code fits together,
   in checked prose, in every repo", waiting-page item 29, pick a: "fix map-skill-lives-here.md, no
   pinned copies"). This is the uniform ruling: topic t18 (one home, then variants), decision
-  `uniform-over-variants`. A repo changes to match the shared skill, and the skill grows no second form.
+  `uniform-over-variants` (repos match one shared format, no variants). A repo changes to match the shared skill, and the skill grows no second form.
 - A host may bind its own readers. With none bound, the AI calls tab is empty.
 - The skill's tests live in `skills/plain-english-map/tests/`, with a small fixture
   repository. The `checks` workflow runs them after `npm ci`.

@@ -4,7 +4,7 @@
 
 The report guard (`lint/report_guard.py`) checks each landed turn's reply. A sentence may say a decision was rewritten (rewritten, rewrote, rewrites, rewrite of) for a ruling. The guard refuses it when that decision's record was last committed before the ruling. The record then has not moved, so the sentence is false.
 
-Named incident F119, landed 2026-11-01. Sessions said decision `ci-job-caps` was rewritten for the owner's 2026-11-01 18:44 CST ruling. Main showed the record last touched on Oct 28.
+Named incident F119, landed 2026-11-01. Sessions said decision `ci-job-caps` (CI job caps keep slowest runs under 80%) was rewritten for the owner's 2026-11-01 18:44 CST ruling. Main showed the record last touched on Oct 28.
 
 - A cited id is a word next to the rewrite word that names a file in the decisions folder of the checkout. The folder comes from `layout`. No "decision" word is needed.
 - Next to the rewrite word means right before it ("decisions X and Y were rewritten") or right after it ("rewrote decision X"). An id after under, by, per, following or see is not checked.

@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Every republish of a waiting page is main's `skills/waiting-page/page.html` with the live `designData` and roadmap blocks kept, never the live page's own code (decision `questions-go-to-owner`, skill `waiting-page`, "Keep the page on main's code"). A session that publishes from an older file puts old page code on the page the owner reads. The guard now refuses that publish, and a stamp lets the next session start say when the page is behind.
+Every republish of a waiting page is main's `skills/waiting-page/page.html` with the live `designData` and roadmap blocks kept, never the live page's own code (decision `questions-go-to-owner` (a session brings each question to the owner), skill `waiting-page`, "Keep the page on main's code"). A session that publishes from an older file puts old page code on the page the owner reads. The guard now refuses that publish, and a stamp lets the next session start say when the page is behind.
 
 - Guard rule `page-stale` (`hooks/guard.py`, `page_stale_hit`) judges an `Artifact` call that publishes this repo's waiting page.
   - It judges only a call with no `action` or `action` publish, no `asset: true`, a `file_path`, and a `url` with the same artifact id as `layout.waiting_page` of the cwd's repo (`layout.is_waiting_page_url`, called by `question_form.waiting_page_root`; the `/artifact/` and `/code/artifact/` forms, a trailing slash and a query compare equal; a bare `.../artifact/` names no page). Any other call, a read, a list, an asset upload or a publish of another page, leaves before it loads `stale_pages`.

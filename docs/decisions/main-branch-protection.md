@@ -19,7 +19,7 @@ protection. GitHub's branch protection setting is the owner's to change.
   step.
 - A draft PR runs no CI: `scope` skips on a draft, and every other job skips with it.
 - A merge needs a pull request and no approval.
-- `strict` is false: GitHub merges a PR that lacks main's newest commit. The `merge` tool refuses it (`merge-needs-current-base`, a merge needs a green run on the current base).
+- `strict` is false: GitHub merges a PR that lacks main's newest commit. The `merge` tool refuses it (`merge-needs-current-base` (merges need a green run on current base), a merge needs a green run on the current base).
 - Admins are included (`enforce_admins`), so the rule binds the owner.
 - A new repo's protection from project-ops `protect.py` sets `strict` false, `enforce_admins` true, no review rule, no restrictions.
 - Force pushes and branch deletion are blocked. The repo has no rulesets.
@@ -31,7 +31,7 @@ protection. GitHub's branch protection setting is the owner's to change.
   The protection holds one check, `all-jobs-passed`, with `strict` false. The protection pins app id
   15368 (GitHub Actions) (read 2026-11-03 19:19 CST: `checks` [{all-jobs-passed, 15368}]). `protect.py` sends `contexts` only, so it does not pin an app id. Whether a contexts-only PATCH keeps that pin is unmeasured. The write needs the
   shivinate7 login: `ssemwal-cdc` has push, not admin. A handed block opens with `gh auth switch -u shivinate7`
-  (decision `act-in-place`). A cloud session acts as `shivinate7` with admin, but the auto-mode classifier
+  (decision `act-in-place` (the owner acts where he reads)). A cloud session acts as `shivinate7` with admin, but the auto-mode classifier
   refused the direct PATCH as a CI bypass, so the owner runs the switch. Whether it refuses `protect.py --confirm` is unmeasured.
   The owner switched it on 2026-10-31 at 14:52 CDT (waiting-page item 101) with a direct call, not protect.py; the coordinator's read-back showed the one check and strict false.
 - Before every merge, read the checks yourself and refuse on red. The `merge` tool reads its checks

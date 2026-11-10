@@ -5,7 +5,7 @@
 The session-board mod (`mods/session-board`, commands `/board` and `/safe-stop`) gives one view of all
 sessions and a safe stopping point, with no typing of "status?" into each one. Reason: each record is
 small. It holds names and counts, no prompt and no file content. `/safe-stop` is in
-`safe-stop-queues-one-prompt`.
+`safe-stop-queues-one-prompt` (/safe-stop queues one prompt to park work).
 
 Update-ready holds only when all five conditions hold (the owner's definition):
 
@@ -33,7 +33,7 @@ Privacy:
 - The recent list holds the tool name, plus a file name for file tools only. A Bash command and an MCP
   tool give the tool name only.
 - A name that looks secret shows as "(secret file)". The rule copies the plain-diff secret filter
-  (`plain-diff-mod-limits`).
+  (`plain-diff-mod-limits` (plain-diff sends diffs only past secret filter)).
 - The mod shows no cost figure. The figure from `$.session.usage()` was unreliable.
 
 Safety of the session: every host call sits in a try and a failure logs one line prefixed
@@ -42,7 +42,7 @@ its work. An ask clears when its tool call returns. A git read that began before
 
 ## The question-box check
 
-session-board holds one guard: rule `question-box-while-work` refuses AskUserQuestion while this session's own work runs, or once it has started another session (`questions-go-to-owner`, questions go to the owner). Every other hook in the mod observes only.
+session-board holds one guard: rule `question-box-while-work` refuses AskUserQuestion while this session's own work runs, or once it has started another session (`questions-go-to-owner` (a session brings each question to the owner)). Every other hook in the mod observes only.
 
 - **Agents.** The host's agent list, read once per box. A pending, running or waiting agent counts. The asking loop does not count itself.
 - **Background tasks.** A background command or workflow counts. A Bash call whose result names a background task adds it, and a Workflow call adds its task. Its task notice removes it. A TaskStop call removes its task too (see "A missed notice" below). A missed notice holds the box until Claude runs TaskStop on that id or the session ends. A monitor does not count: it watches for as long as the session lives.

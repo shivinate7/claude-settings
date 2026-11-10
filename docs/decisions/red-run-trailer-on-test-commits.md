@@ -11,7 +11,7 @@
 5. Rollout: when the tree at HEAD holds `lint/check_red_run.py`, a commit whose parent tree has no such file is not judged. The commits from before the check landed stay as they are. The check reads this with `git ls-tree HEAD`, never from disk. In a repo whose HEAD has no such file, each non-merge, non-revert commit in the range is judged.
 6. The check reads the repo it runs in: the current directory, or the folder `--root <dir>` names. It imports `is_test_rel` from its own install (`../hooks/guard.py` beside the script), never from the repo it reads. Other repos get the check from the installed copy at `~/.claude/lint/check_red_run.py` now. Their CI runs it later, through a separate lane. This repo's CI step stays as it is.
 7. A commit whose message has git's `This reverts commit <sha>.` line is not judged. Its lines were judged once already, when the commit it reverts landed.
-8. A range git cannot read, or a run with no base, prints UNKNOWN and exits 2. It never exits 0, locally or in CI. This differs from the shape in `ci-unknown-is-red`, where an unknown read exits 0 locally and non-zero only when env `CI` is set.
+8. A range git cannot read, or a run with no base, prints UNKNOWN and exits 2. It never exits 0, locally or in CI. This differs from the shape in `ci-unknown-is-red` (in CI, an unknown read is red), where an unknown read exits 0 locally and non-zero only when env `CI` is set.
 
 Why: the plan found 17 red runs recorded for 29 test changes (`docs/plans/test-ci-standard.md`, standard S5, step 2). A test that was never seen red on the old code may not be able to fail. `agents/test-author.md` names the trailer as the record of the run.
 

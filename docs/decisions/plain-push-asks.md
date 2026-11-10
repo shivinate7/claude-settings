@@ -3,7 +3,7 @@
 ## The ruling
 
 Three kinds of push that are not forced ask. Approving the prompt lets one push through; it is not a grant.
-The owner's typed override lets each through (`owner-override`). Owner rulings, Cockpit, 2026-11-03 22:23 CST, for the first two; the third has its source below.
+The owner's typed override lets each through (`owner-override` (owner override lets refused or asked acts through)). Owner rulings, Cockpit, 2026-11-03 22:23 CST, for the first two; the third has its source below.
 
 | Push | Outcome | Rule id |
 |---|---|---|

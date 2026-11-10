@@ -15,11 +15,11 @@ Outcome protected: the owner's screen stays still while hooks and tools run.
 
 ## Safety holes, named
 
-- (a) `bin/verdict`, `bin/ste-changed` and `merge/launch.py` import the helper with no fallback. A copy-mode install that lands `bin/` before `hooks/` makes them fail loudly. Debt: `nowindow-bin-no-fallback`.
-- (b) A fallback logs nothing, so the popups return unseen. No test loads the fallback sites with the helper removed. Debt: `nowindow-fallback-silent`.
-- (c) Under the flag, Ctrl-C under `verdict` may leave orphan grandchildren. Unmeasured. Debt: `nowindow-ctrl-c-orphans`.
-- (d) A git terminal credential prompt in `merge/merge.py` `sh()` would hang. Git Credential Manager's window is not affected. Unmeasured. Debt: `nowindow-git-prompt-hangs`.
-- (e) The scan covers `subprocess` and Node `child_process` only. It does not read `os.system` or `os.popen`, and product code has none today. Debt: `nowindow-scan-misses-os-system`.
+- (a) `bin/verdict`, `bin/ste-changed` and `merge/launch.py` import the helper with no fallback. A copy-mode install that lands `bin/` before `hooks/` makes them fail loudly. Debt: `nowindow-bin-no-fallback` (bin tools import the no-window helper bare).
+- (b) A fallback logs nothing, so the popups return unseen. No test loads the fallback sites with the helper removed. Debt: `nowindow-fallback-silent` (the no-window fallback is silent).
+- (c) Under the flag, Ctrl-C under `verdict` may leave orphan grandchildren. Unmeasured. Debt: `nowindow-ctrl-c-orphans` (ctrl-c under verdict may orphan grandchildren).
+- (d) A git terminal credential prompt in `merge/merge.py` `sh()` would hang. Git Credential Manager's window is not affected. Unmeasured. Debt: `nowindow-git-prompt-hangs` (a git terminal prompt hangs with no window).
+- (e) The scan covers `subprocess` and Node `child_process` only. It does not read `os.system` or `os.popen`, and product code has none today. Debt: `nowindow-scan-misses-os-system` (the no-window scan misses os.system).
 
 Kind: process
 Home: hooks/_nowindow.py

@@ -46,7 +46,7 @@ carries no such label. The code raises the exception named in each item.
   released-commit push fails too.
 
 Why: a claim, a check wait and a merge must not race another run on the same base. The claim runs under
-the lock (`records-index-at-merge`, the records index rebuilt at merge time).
+the lock (`records-index-at-merge` (one records index page, rebuilt before ready), the records index rebuilt at merge time).
 
 Known gaps, all in `docs/debts/notes.md`:
 
@@ -60,7 +60,7 @@ Known gaps, all in `docs/debts/notes.md`:
 
 Risk: likely risk (`building-guard-needs-incident`: a guard or check needs a mistake Claude has made or is
 likely to make in normal work). Two runs on one base would race, and batches often run while another batch merges
-(`merge-needs-current-base`). Landed 2026-09-30, the first merge lock in `merge/merge.py`.
+(`merge-needs-current-base` (merges need a green run on current base)). Landed 2026-09-30, the first merge lock in `merge/merge.py`.
 
 Kind: process
 Home: merge/merge.py

@@ -13,7 +13,7 @@ Incident: on 2026-11-01, from 19:19 to 21:34 CST, the merge grant was rewritten 
 
 ## Not mechanized
 
-No check counts the 30 minutes. At each wake, the session reads the time of the owner's last ruling on the question. No timer counts (`questions-go-to-owner`).
+No check counts the 30 minutes. At each wake, the session reads the time of the owner's last ruling on the question. No timer counts (`questions-go-to-owner` (a session brings each question to the owner)).
 
 Kind: process
 Home: docs/decisions/rulings-land-once-per-sitting.md

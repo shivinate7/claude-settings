@@ -29,7 +29,7 @@ branch, a merge grant for one act, a personal preference. `lint/ruling_census.py
   scratchpad: each ruling in it moves to its decision or a debt's Ruling section.
 - No standing `records/<session>` branch for the orchestrator's records, until a measure shows the
   cost of a record is the cause.
-- `docs/debts/` is the one home for deferred work, one file per item (owner, 2026-10-17 23:46 CDT). The question reviewer hook judges the box alone and does not read `docs/debts/` (`question-reviewer-agent-hook`, one Opus agent hook on each question).
+- `docs/debts/` is the one home for deferred work, one file per item (owner, 2026-10-17 23:46 CDT). The question reviewer hook judges the box alone and does not read `docs/debts/` (`question-reviewer-agent-hook` (code, then an Opus call, reviews each question), one Opus agent hook on each question).
 - Auto-memory stays on, as short-term notes. When a fact or ruling has a tracked home on main,
   delete its memory file and its `MEMORY.md` line (`rule:building-memory-is-short-term`).
 

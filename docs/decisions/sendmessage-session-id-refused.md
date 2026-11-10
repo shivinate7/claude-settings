@@ -9,7 +9,7 @@ Rule `sendmessage-session-id` in `hooks/guard.py` refuses a `SendMessage` call w
 - A hit: `tool_name` is `SendMessage` and `to` is a string that starts `session_`. The match is on the start of the value, so a name with `session_` mid-name passes.
 - Passes: an agent name, `@parent`, an empty, missing or non-string `to`, and the `mcp__claude-code-remote__send_message` tool, whatever its `session_id`.
 - Steer: the reason names `mcp__claude-code-remote__send_message` and its `session_id` argument, the sure route.
-- An owner override lifts it (`owner-override`). A form that only an attacker would write is not read (`guard-guards-mistakes-only`).
+- An owner override lifts it (`owner-override` (owner override lets refused or asked acts through)). A form that only an attacker would write is not read (`guard-guards-mistakes-only` (guards stop mistakes, not attacker forms)).
 - Matcher: `settings.json` adds `SendMessage` to the guard's PreToolUse matcher. The separate `SendMessage` matcher for the state judge is unchanged.
 - Cost, per `SendMessage` call: one guard process start, from the PreToolUse matcher. The rule is a string prefix test. The new matcher also runs the guard's other per-call rules on each `SendMessage`. Measured 2026-11-08 in a temporary clone, with a spy on process starts and file writes:
   - A session's own call: no other process start. It reads its lane record, `.git/session-homes/<session_id>` in the primary checkout, and checks for its re-read flag. It writes that record only when it is missing or names another lane (`session_home_keep` in `hooks/guard.py`), so about once per lane. After compaction, `unread_handoff` in `hooks/reread_check.py` refuses the call until the session reads its handoff.

@@ -5,7 +5,7 @@
 Roadmap step c97, filed 2026-10-27; step c150, 2026-10-28: a batch merges only after a green run that holds for the current main.
 
 - The merge tool refuses a head that does not hold the base tip. The refusal names the fix: merge the base into the branch, push, and run again. It also says why the green run cannot stand.
-- The green run stands with no lint or suite run only when every commit on main since the merge base has the merge base's tree. The merge commit of the batch it was built on has that tree too. Then the merge of the head and the tip is the head's tree. This is the next batch after that merge commit (decision `no-merge-during-batch-ci`: no merge while a batch's CI runs). A main that changed a path and changed it back does not stand: a pull_request run tested the merge with the path in.
+- The green run stands with no lint or suite run only when every commit on main since the merge base has the merge base's tree. The merge commit of the batch it was built on has that tree too. Then the merge of the head and the tip is the head's tree. This is the next batch after that merge commit (decision `no-merge-during-batch-ci` (batches wait for their own CI): no merge while a batch's CI runs). A main that changed a path and changed it back does not stand: a pull_request run tested the merge with the path in.
 - A small move is the one exception: the green run stands when all of these hold, and any read that fails refuses.
   - The paths main changed since the merge base share no path with the batch's paths. The records page is the one exception, because the generator proves it on the merge.
   - The head and the base tip merge cleanly.
@@ -20,7 +20,7 @@ Roadmap step c97, filed 2026-10-27; step c150, 2026-10-28: a batch merges only a
 - A heal merge commit holds the base tip, so it passes. Its own checks wait before the merge.
 - The preview prints a `base:` line that says whether the head holds the base tip, is a small move, or is BEHIND.
 
-Why: branch protection on `main` has `strict` false (`main-branch-protection`, main branch protection). GitHub reports BEHIND only when `strict` is on, so the tool's BEHIND refusal never fired. A batch could merge with a green run that never tested the main it lands on. A docs merge to main cannot change a code job, but it can break a cross-file lint, so the lints run on the merge.
+Why: branch protection on `main` has `strict` false (`main-branch-protection` (main requires one check, all-jobs-passed), main branch protection). GitHub reports BEHIND only when `strict` is on, so the tool's BEHIND refusal never fired. A batch could merge with a green run that never tested the main it lands on. A docs merge to main cannot change a code job, but it can break a cross-file lint, so the lints run on the merge.
 
 Cost of a small move check: only when the head lacks the base tip, at most three times per merge. Each check starts about 10 git processes, one ci-scope run, two ci-job runs (a plan, and the lints at two processes per step, about 50 steps, about 4 minutes) and one process per hit suite. A records-only move (a new record and the page) hits 10 suites. merge/test_merge.py is one: it reads the whole repo, so every move hits it, and it takes about 8 minutes. The suites take about 9 minutes in all, inside their 1200 s budget, and the check about 13 minutes (estimated 2026-10-28 from one run to the lints and the timed suites). It writes one temp file, and keeps one ci-job log only on a failure. The lock is extended to cover each lint run.
 
