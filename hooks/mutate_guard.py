@@ -2782,8 +2782,8 @@ MUTATIONS = [
     # worktree-strands-agents (hooks/guard.py worktree_strand_hit, hooks/stall_watch.py open_agents): one mutant per
     # edge the `worktree-strands-agents:` cases pin.
     ("worktree-strands-agents: the refusal arm is never taken, so every EnterWorktree is allowed",
-     "    if stranded:\n",
-     "    if False:\n",
+     "    stranded = worktree_strand_hit(payload, tool, trust_transcript)\n    if stranded:\n",
+     "    stranded = worktree_strand_hit(payload, tool, trust_transcript)\n    if False:\n",
      "guard", "worktree-strands-agents: one background agent with no notice refuses"),
     ("worktree-strands-agents: an agent's own call is judged too",
      'or payload.get("agent_id"):\n        return None\n    if not isinstance(transcript, str)',
