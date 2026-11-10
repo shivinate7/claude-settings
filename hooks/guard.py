@@ -5605,11 +5605,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # sessions and writes records. Its own write goes only to a record home, its own scratchpad, or a path in no
 # repository. A record home is a layout kind of COORDINATOR_KINDS, at the path lint/layout.py gives for THAT
 # repo (`candidates`: the repo's legacy-repos path, then the layout path), or a record-branch folder of a
-# checkout that stands on the record branch (record_branch_of, with RECORD_DATA in it). The record-branch folders are
-# RECORD_FOLDERS plus the waiting page's copy, which the coordinator writes when no triage runs (decision
-# session-tiers, "Where triage runs"; decision waiting-data-in-repo): the `waiting-data` kind at the path
-# lint/layout.py gives, and layout.ARTIFACT_EXPORT, the folder of each other artifact's export. In a checkout of
-# main those folders stay product paths.
+# checkout that stands on the record branch (record_branch_of, with RECORD_DATA in it).
 # The rule acts only on a call with no agent, in a cloud session (CLAUDE_CODE_REMOTE true), whose own tags
 # carry cs-build:coordinator: guard_merge.own_tier_tagged reads the tags of the newest get_session record of the
 # session's own id (override.remote_session_id, the environment's, never the payload's) in its transcript, plus each
@@ -5643,10 +5639,8 @@ COORDINATOR_SCOPE_REASON = (
 # apart the same way. Not imported from there: that module is a builder script, and the guard must not load it per call.
 RECORD_DATA = "roadmap/data"
 RECORD_FOLDERS = ("roadmap", "briefs", "handoffs")
-RECORD_PAGE_KIND = "waiting-data"   # the layout kind of the waiting page's copy on the record branch
 _COORDINATOR_PATHS = {}
 _RECORD_CHECKOUTS = {}
-_RECORD_FOLDER_PATHS = {}
 _COORDINATOR_LAYOUT = []
 
 
@@ -5694,30 +5688,6 @@ def coordinator_paths(root: str):
     return found
 
 
-def coordinator_record_folders(root: str):
-    """The record-branch folders of the repo at `root`, lower case with no edge slash: RECORD_FOLDERS, the
-    RECORD_PAGE_KIND paths `layout.candidates` gives, and `layout.ARTIFACT_EXPORT`. Only RECORD_FOLDERS when no
-    layout is readable."""
-    if root in _RECORD_FOLDER_PATHS:
-        return _RECORD_FOLDER_PATHS[root]
-    found = list(RECORD_FOLDERS)
-    home = coordinator_layout()
-    try:
-        try:
-            spelled = list(home.candidates(root, RECORD_PAGE_KIND))
-        except Exception:
-            spelled = [home.layout()["kinds"][RECORD_PAGE_KIND]["path"]]
-        spelled.append(home.ARTIFACT_EXPORT)
-        for path in spelled:
-            path = norm(path).strip("/").lower()
-            if path and path not in found:
-                found.append(path)
-    except Exception:
-        found = list(RECORD_FOLDERS)
-    _RECORD_FOLDER_PATHS[root] = found
-    return found
-
-
 def coordinator_record_checkout(root: str) -> bool:
     """True when the checkout at `root` stands on the record branch and holds its data folder. The folder is
     looked for first, so a checkout without it starts no git process."""
@@ -5732,7 +5702,7 @@ def coordinator_record_checkout(root: str) -> bool:
 
 def coordinator_rel_ok(rel: str, root: str) -> bool:
     """True when a path relative to the repo at `root` is a record home: a kind's file, a file inside a kind's
-    folder, or a path inside a record-branch folder of a checkout on the record branch. The case is folded, because the folder
+    folder, or a record-branch folder of a checkout on the record branch. The case is folded, because the folder
     is one folder on a case-insensitive disk."""
     parts = [part for part in norm(rel).lower().split("/") if part]
     if ".." in parts:
@@ -5741,8 +5711,7 @@ def coordinator_rel_ok(rel: str, root: str) -> bool:
     if any(joined == path or (not is_file and joined.startswith(path + "/"))
            for path, is_file in coordinator_paths(root)):
         return True
-    return (len(parts) > 1 and any(joined.startswith(folder + "/") for folder in coordinator_record_folders(root))
-            and coordinator_record_checkout(root))
+    return len(parts) > 1 and parts[0] in RECORD_FOLDERS and coordinator_record_checkout(root)
 
 
 def coordinator_path_outside(target: str, where: str, session_id: str) -> bool:

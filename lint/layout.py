@@ -268,7 +268,6 @@ def is_waiting_page_url(root, url):
 
 ARTIFACTS = "artifacts"  # the extras key: the registry, a list of {id, url, role, account, collections, export}
 WAITING_ROLE = "waiting-page"  # the role of the registry entry that is the repo's waiting page
-ARTIFACT_EXPORT = "artifacts"  # the record-branch folder that holds `<id>/`, each other artifact's export
 ARTIFACT_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")  # a slug of 32 characters or fewer, as a record slug is (git-slug-then-claim-number)
 ROLE = re.compile(r"[a-z0-9][a-z0-9-]*")
 COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
@@ -333,7 +332,7 @@ def _registry(root, found, where):
                 raise LayoutError("%s: %s (id %s) export is not a path" % (where, label, entry_id))
             target = _safe(target, "%s: %s (id %s) export" % (where, label, entry_id)).strip("/")
         else:
-            target = path(root, "waiting-data") if role == WAITING_ROLE else ARTIFACT_EXPORT + "/" + entry_id
+            target = path(root, "waiting-data") if role == WAITING_ROLE else "artifacts/" + entry_id
         out.append(dict(item, collections=list(names), export=target))
     if sum(1 for e in out if e["role"] == WAITING_ROLE) > 1:
         raise LayoutError("%s: %s holds more than one entry with the role %s" % (where, ARTIFACTS, WAITING_ROLE))
