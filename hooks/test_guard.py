@@ -20828,6 +20828,30 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that reso
 add("test-author: Edit of a product file its merge conflicts beside another product file is refused, with no test "
     "path conflicted", "deny", rule=TA, tool="Edit", file_path=os.path.join(PAIR_MID, GM), new_string="x = 7\n",
     carries=("builder", "Report"), **AUTH_PAIR)
+# The mutation test is written and staged first, so the index's only unmerged path is hooks/guard.py. The guard reads
+# the conflicts that git's merge-tree gives, staged or not, so the mutation test still opens the route for guard.py.
+GUARD_REL = "hooks/guard.py"
+MUT_GUARD_FILES = {**MIXED_FILES, GUARD_REL: "x = 1\n", MG: "x = 1\n"}
+
+
+def _mutation_staged_mid_merge(w):
+    """`_product_mid_merge` for the mutation test and hooks/guard.py, with the mutation test written and staged.
+    The scope is checked before any case runs: hooks/guard.py is the one unmerged path left in the index."""
+    _product_mid_merge(w, (MG, GUARD_REL))
+    write(os.path.join(w, MG), "x = 7\n")
+    _must(w, "add", MG)
+    unmerged = sorted(run_vcs(w, "diff", "--name-only", "--diff-filter=U").stdout.split())
+    if unmerged != [GUARD_REL]:
+        sys.exit("fixture setup failed: after staging %r the unmerged paths in %r are %r, not [%r]"
+                 % (MG, w, unmerged, GUARD_REL))
+    _require_conflict(w, GUARD_REL)
+
+
+MUT_GUARD_MID = diff_repo("ta-mut-guard-staged", _mutation_staged_mid_merge, files=MUT_GUARD_FILES)
+AUTH_MUT_GUARD = dict(agent_id="auth1", agent_type="test-author", cwd=MUT_GUARD_MID)
+add("test-author: Edit of hooks/guard.py is allowed when its merge conflicts beside a mutation test that is already "
+    "staged", "allow", tool="Edit", file_path=os.path.join(MUT_GUARD_MID, GUARD_REL), new_string="x = 7\n",
+    **AUTH_MUT_GUARD)
 
 
 def refused_push_and_stop_case(label):
