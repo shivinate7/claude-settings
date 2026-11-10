@@ -418,3 +418,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - pcap-missing-check-fails-open (lane page-check-at-publish, #1367 and #2009, coordinator 01:48 CST Nov 10): the guard's _run_check_designs fails open when page_check.py is missing (partial install only).
 - pcap-republish-hold-stale (same lane): the waiting-page SKILL.md republish hold can be stale when the live page lags.
 - pcap-budget-no-override (same lane): the 60 s check budget has no override.
+- ompr-subshell-push (#2366 octopus-merge-push-refused round 3, coordinator 01:53 CST Nov 10): a push inside `( )` passes; the decision's Not read list omits it.
+- ompr-remotes-unpinned (#2366): no test pins `--remotes=<remote>`; a mutant that always reads all remotes passes octopus-push.
