@@ -64,6 +64,9 @@ Both options keep owner item 448 a: when narrow, the press drops under the text,
   `max(66px, 3 * 1.55em)`.
 - Remove: the row and Dismissed-line parts of both 520 px media blocks, the whole `@container askl (width < 20.375em)` block, and
   the Ask box's 16.5em block.
+- Tests: the PR's "Dismissed line's glyph sits on the middle of its first text line" cases (`DROP_STACKED`) go red where the line
+  takes two lines (280, and 360 at text 200%). Re-point them to "the glyph sits on the middle of the text block, as main draws
+  it", under item 1's grant. No test or page code reads the row button's children by position, so `.fbody` breaks none.
 
 ## 3. Parked lines
 
