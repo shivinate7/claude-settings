@@ -15,6 +15,35 @@ The settings.json default needs the owner's typed words.
 Owner asks ask-mw5b3m9hl0 (2026-11-06 12:27 CST) and ask-mw5a0ekdlv (11:56 CST). Roadmap steps
 session-messaging-plan and peer-message-turn-cap.
 
+## One route (owner, 2026-11-10 09:33 CST)
+
+Ruling: every message between sessions goes through the git mailbox, cloud to cloud included.
+Cloud `send_message` stays only as a short "check your mail" doorbell, so an idle session wakes.
+The mailbox is read at turn start, so it cannot wake anyone.
+The design is device-neutral: local sessions are addressed `pc/<host>/<owner>-<repo>/<session id>` on any Mac or Windows computer.
+Local-computer checks: measured on a Mac only; Windows unmeasured.
+
+Why:
+
+- A `send_message` that shows "delivered" is not a read.
+- It leaves no copy.
+- It differs from local `SendMessage`.
+- Cloud to the owner's computer is refused (`elevated_session_untrusted_device`).
+
+Wake routes under study. All unmeasured.
+
+- (a) Doorbell: `mail send` also fires a short `send_message`. Works cloud to cloud. Cloud to the owner's computer is refused.
+- (b) One long-lived pull request per session in shivinate7/session-mailbox. Each message is also a
+  comment. The receiver subscribes with `subscribe_pr_activity` (the tool that watches PR activity).
+- (c) A GitHub webhook to a session's `watch_url`. Likely blocked: the signing secret is sealed to the
+  artifact service.
+- Mac or Windows: no known wake route.
+
+Home of the measurement: roadmap step `mailbox-wake-routes` (the wake-route measurement, filed by triage).
+
+State: the code still sends cloud to cloud by `send_message` until a build lands. No build is started.
+The owner froze new lanes at 09:18 CST.
+
 ## The 10-message stop on the Mac
 
 Read from the Claude Code 2.1.319 binary (`/opt/claude-code/bin/claude`, `strings | grep`), 2026-11-06:
@@ -48,7 +77,7 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
 - One convention, plain text, so any harness can carry it. First line of a mailbox message:
   `Msg <id> from <addr> to <addr> kind request|inform|reply re <id or -> try <n>`. The addresses are set
   out under Design. Id: 12 lowercase hex characters (`secrets.token_hex(6)` in `hooks/mail.py`).
-  A cloud `send_message` target is picked by all of its tags, in the forms of
+  The doorbell's cloud `send_message` target is picked by all of its tags, in the forms of
   skills/project-ops/templates/operating-model.md (`cs-repo:<owner>/<name>` plus `cs-build:<tier>` or
   `cs-step:<step id>`).
 - `try` counts push attempts inside one `mail send`. A push race keeps the id and raises `try` by one.
@@ -86,9 +115,9 @@ Mac test (task 294), 2026-11-06 13:57 CST, in the owner's Mac session: the Mac u
 account, so it cannot read a cloud account's artifact. So an artifact mailbox cannot reach the Mac.
 Desktop sessions have no `ArtifactComments` tool. An artifact watch wakes only cloud sessions.
 
-Ruling: git mailbox, read at turn start (owner, page item 153, pick a, 2026-11-06 15:24 CST). Cloud to
-cloud keeps `send_message`. The mailbox serves a sender or receiver on the owner's computers.
-Later additions, not built: a Mac doorbell (option B) and a local relay (option C). Owner note: "i think
+Ruling: every message goes through the git mailbox, read at turn start (owner, page item 153, pick a,
+2026-11-06 15:24 CST; cloud to cloud added 2026-11-10 09:33 CST, see One route above).
+Not built: a doorbell for a local computer (option B) and a local relay (option C). Owner note: "i think
 B and C can still work too though probably."
 Store: answered. Page item 308 (the store), owner pick a, relayed by triage 2026-11-06: a private repo,
 shivinate7/session-mailbox. The owner allowed Cloudflare if it is faster. Lane verdict: git.
@@ -142,8 +171,8 @@ Design:
   prints one message with its body. Without `--addr`, every folder of the session is read. Exit codes
   for all `mail` commands: 0 ok; 1 not sent, not taken, or "mail unknown"; 2 bad use or `MAILBOX_REPO`
   not set.
-- Failure classes: push race (retry); offline Mac (mail waits; "mail unknown"); stale clone (`ls-remote`
-  each turn); auth on the Mac ("mail unknown: auth", no prompt); dead session (exact-address mail stays;
+- Failure classes: push race (retry); offline computer (mail waits; "mail unknown"); stale clone (`ls-remote`
+  each turn); auth on a Mac or Windows PC ("mail unknown: auth", no prompt); dead session (exact-address mail stays;
   repo-address mail goes to the next session in that repo; age shown); a turn with no UserPromptSubmit
   (the skill says to run `mail read` on any peer or task wake); `done/` grows (a note).
 - Risks: how `janitor/sweep.py` treats a `mail` branch that never merges is unknown. The
@@ -165,9 +194,9 @@ Design:
 
 1. Rewrite the record and skill text for this ruling. Add the GLOSSARY row "mailbox". Never "inbox":
    the owner feedback inbox uses that word.
-2. Measure: does UserPromptSubmit fire on task-notification and peer turns, cloud and Mac? Can a cloud
+2. Measure: does UserPromptSubmit fire on task-notification and peer turns, cloud and local computers? Can a cloud
    session push the mail ref through the proxy? Does `ls-remote` work with Mac and Windows auth? Does
-   the hostname match `list_computer_folders` `computer_name`? Can a Mac session call cloud
+   the hostname match `list_computer_folders` `computer_name`? Can a local session on a Mac or Windows PC call cloud
    `send_message`?
    Already measured: cloud UserPromptSubmit fires on task-notification turns. This lane's session,
    Claude Code 2.1.319, 2026-11-06 15:31 CST: the local_time hook line prints on each notification turn.
@@ -184,7 +213,7 @@ Design:
 4. Builder, merged as #1371 (f1488533f): `hooks/mail.py`, `bin/mail`, `bin/mail.cmd` and the
    `hooks/local_time.py` call. The `settings.json` env default stays unset until step 2 measures Mac and
    Windows auth for `ls-remote`.
-5. Skill section rewrite. Check: a two-session trial of 20 messages, cloud to Mac, none lost, none acted
+5. Skill section rewrite. Check: a two-session trial of 20 messages, cloud to a local computer, on a Mac and on a Windows PC, none lost, none acted
    on twice.
 
 ## Owner choices
