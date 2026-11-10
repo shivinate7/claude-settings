@@ -221,6 +221,13 @@
         "test": "merge/test_merge.py::GhHalf.test_red_required_check_reverts_the_claim_and_merges_nothing"
       }
     },
+    "gh-write-cloud": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "gh-write-cloud"
+      },
+      "test": "hooks/test_guard.py::gh-write-cloud: a pull request opened without --draft is refused in a cloud session"
+    },
     "git-ci-wait-checks-in": {
       "mechanism": {
         "kind": "unmechanized",
