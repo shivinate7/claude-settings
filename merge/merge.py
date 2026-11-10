@@ -3652,10 +3652,16 @@ def guard_hits(paths):
     import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the review record needs it
     return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in GUARD_FILES) and not hook_guard.is_test_rel(p))
 
+def is_doc(path):
+    """A doc is a .md under docs/, or the root README.md. Case is ignored and the path is not stripped, so a stray space makes it a non-doc.
+    Why this strict: a file that steers behaviour is a rule, and decision docs-only-prs-skip-review keeps rules out of a docs-only change."""
+    low = path.lower()
+    return low.endswith(".md") and (low.startswith("docs/") or low == "readme.md")
+
 def kind_misfits(kind, files):
-    """-> the sorted paths that break the kind, over (path, status, additions) triples. docs-only: a path not ending .md. delete-only: a path that adds lines or is new (added, renamed, copied)."""
+    """-> the sorted paths that break the kind, over (path, status, additions) triples. docs-only: a path that is not a doc: a .md under docs/, or the root README.md. delete-only: a path that adds lines or is new (added, renamed, copied)."""
     if kind == "docs-only":
-        return sorted(p for p, _, _ in files if not p.endswith(".md"))
+        return sorted(p for p, _, _ in files if not is_doc(p))
     if kind == "delete-only":
         return sorted(p for p, st, add in files if add > 0 or st in ("added", "renamed", "copied"))
     return []
