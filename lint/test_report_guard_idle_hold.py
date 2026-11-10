@@ -440,7 +440,7 @@ class IdleLaneHoldTests(trs.StalledFixture, unittest.TestCase):
                              "Stop with no merge line may add none" % (opens, trs.BASE_OPENS))
 
     # Round 1 review findings. Each case pins one: a merged line that another command prints, a sweep that never swept
-    # or was refused, the order of calls in one message, and the correction tail on a report with its own defect.
+    # or was refused, the order of calls in one message, and a held Stop with no correction tail on a report with its own defect.
 
     def test_idle_r1_merged_line_quoted_by_a_grep_holds_nothing(self):
         # Catches: a merged line that another command prints (a grep of a log) holds the runner as a merge of its own.
@@ -512,15 +512,20 @@ class IdleLaneHoldTests(trs.StalledFixture, unittest.TestCase):
                                 assistant_text(WELL_FORMED)])
         self.released(out)
 
-    def test_idle_r1_held_stop_with_another_defect_keeps_the_correction_tail(self):
-        # Catches: a held Stop whose report has its own defect drops the correction tail, so the defect is never sent back.
+    def test_idle_held_stop_with_another_defect_has_no_correction_tail(self):
+        """A held Stop carries no correction tail, even when its report has a defect of its own.
+
+        Decisions: guard-remedy-not-to-owner (a refusal with no report to correct has no correction tail) and
+        stalled-steps (a held Stop never carries the report's correction tail).
+        """
+        # Catches: a held Stop whose report has its own defect adds the correction tail, so its refusal asks for a resend.
         bad_done = "\n".join(["> **Done** BUILT merge landed", "> **Deviations** none", "> **Input Needed** none",
                               "> **Next** wait"])
         out = self.runner_stop([human("wake"), *self.runner(), *bash_call("git commit -m x", "[main abc1234] x"),
                                 *bash_call(MERGE_CMD, MERGED_64), assistant_text(bad_done)])
         self.held_on_merge(out)
         for tail in CORRECTION_TAILS:
-            self.assertIn(tail, out["reason"], "the report has a defect of its own, but the tail %r is gone" % tail)
+            self.assertNotIn(tail, out["reason"], "the held Stop carries the correction tail %r" % tail)
 
 
 class InstalledCopyHoldTests(trs.StalledFixture, unittest.TestCase):
