@@ -9,7 +9,7 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
 
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
   triage and the batch runner together, as a trio, before any lane session. It holds lane state,
-  writes each lane brief, starts each lane session in roadmap order with the prompt `/effort medium` alone and then sends its brief, and talks with the owner. Before a fix lane for a red CI case, it runs
+  writes each lane brief, starts each lane session in roadmap order with `model` (the lane row's), `source_url` (the repo), the tags `cs-repo`, `cs-build:lane`, `cs-step`, `cs-topic`, and the prompt `/effort medium` alone and then sends its brief, and talks with the owner. Before a fix lane for a red CI case, it runs
   `~/.claude/bin/merge --touches --run <run id>` and reads each open PR named (decision `session-tiers`, "Who starts which session"). On a local session, the load
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
@@ -24,6 +24,8 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   `id`, `session_status` and `tags`. The roadmap build script reads it to list steps in progress with no live lane.
   Each pull row carries `createdAt`, so the roadmap build script can list a stale draft. Each item row carries
   `lane` when the page item has one, so it can list an item whose lane is gone.
+  The file also carries `landedPulls`: each pull request closed in the last 14 days whose base is the default
+  branch, with `number`, `branch`, `head` and `merged`. The build marks a step landed from it when no `Step:` trailer is on main.
   At each publish, triage also disposes each `stalled step:` line the build prints (the build exits 1 on one): a
   step with no live lane and no open PR becomes `todo` or `done`, or gets a `paused` field with who decides; an item
   is re-routed or closed. When triage marks a step `done`, its note gets the line
