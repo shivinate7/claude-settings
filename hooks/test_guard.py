@@ -9634,10 +9634,20 @@ push_case("local origin, HEAD on a branch tracking another name asks stray (cont
           cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
 agent_refused("push: local origin, the agent name alone asks the agent rule (control)",
               VCS + " push origin claude/agent-deadbeef01", cwd=PUSHLOCAL)
-# The same two commands on a network origin still ask push-main: the main refspec decides there.
+# On a network origin, a main refspec before an agent name is refused by the agent rule, not asked as push-main
+# (owner ruling, 2026-11-10). The agent name is in the push, so the refusal holds from any checkout. A main
+# refspec before a lane name still asks push-main, and so does `origin main HEAD`.
 push_case("network origin, main then HEAD asks push-main", "origin main HEAD", "ask", rule=PUSH_MAIN_RULE)
-push_case("network origin, main then the agent name asks push-main", "origin main claude/agent-deadbeef01", "ask",
+push_case("network origin, main then a lane name asks push-main", "origin main HEAD:lane-x", "ask",
           rule=PUSH_MAIN_RULE)
+sh("push: network origin, main then the agent name asks the agent rule",
+   VCS + " push origin main claude/agent-deadbeef01", "deny", PUSH_AGENT_RULE,
+   carries=(PUSH_AGENT_REMEDY,), lacks=PUSH_AGENT_LACKS + ("claude/agent-deadbeef01",))
+sh("push: network origin, main then HEAD:agent-<hex> asks the agent rule",
+   VCS + " push origin main HEAD:agent-deadbeef01", "deny", PUSH_AGENT_RULE,
+   carries=(PUSH_AGENT_REMEDY,), lacks=PUSH_AGENT_LACKS + ("agent-deadbeef01",))
+# A combined push from an agent checkout: --all sends main and the agent's own branch, so the agent rule refuses it.
+agent_refused("push: agent checkout, --all with main asks the agent rule", VCS + " push --all origin", cwd=PUSHAGENT)
 # A `git -c remote.origin.url=` override names the remote's URL for the read, so the local origin is a network one.
 sh("main, a local origin made a network remote by git -c remote.origin.url asks push-main",
    VCS + " -c remote.origin.url=https://example.invalid/r.git push origin main", "ask", PUSH_MAIN_RULE,
