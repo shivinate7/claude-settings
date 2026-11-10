@@ -1,0 +1,12 @@
+{
+  "title": "A background lane-lint run sets a time limit above the lint's own 6000 s wait",
+  "phase": "now",
+  "status": "todo",
+  "order": 990,
+  "owner": "claude-settings",
+  "why": "A lane ran `merge --lane-lint` under the background command's 30-minute default, so the lint, which waits up to 6000 s, was stopped partway and gave no verdict.",
+  "note": "Filed by triage 11:36 CST Nov 10 from lane bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85), its own mistake. Guard: refuse a background lane-lint command that sets no limit above 6000 s. Held by the freeze for a new lane; triage may build it with agents (owner 11:26 CST).",
+  "updatedAt": "2026-11-10T11:28:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
