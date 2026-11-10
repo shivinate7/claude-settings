@@ -84,6 +84,7 @@ import time
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import own_session  # the one home of the agent transcript folder
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
@@ -521,8 +522,7 @@ def agent_transcripts(session, agent, output):
     has no path beside the session."""
     paths = []
     if AGENT_ID.match(agent):
-        stem = os.path.splitext(os.path.basename(session))[0]
-        paths.append(os.path.join(os.path.dirname(session), stem, "subagents", "agent-%s.jsonl" % agent))
+        paths.append(own_session.agent_transcript_path(session, agent))
     if output and output not in paths:
         paths.append(output)
     return paths
