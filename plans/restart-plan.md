@@ -3,7 +3,7 @@
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
 the history.
-Last rewrite: 2026-11-10 15:05 CST.
+Last rewrite: 2026-11-10 15:09 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -15,7 +15,7 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
    its time. It is the first PR after the drain. Open: an express pass for prose (stage 5) would make
    this PR fast; until then it takes the normal docs-only route.
 3. **Change how every lane flows,** before any other lane starts. Each is one lane, in this order:
-   0. One glossary of roles, the same on local and cloud (rulings G1-G12; step
+   0. One glossary of roles, the same on local and cloud (rulings G1-G13; step
       glossary-same-local-cloud). First because every later brief uses its terms.
    1. Checks that can refuse a merge run in CI (ruling R2).
    2. Time limits end hangs only (ruling R3). R2 and R3 together stop a green batch from being
@@ -90,8 +90,7 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   arbiter (marked as such, and a tier below)". Three kinds of actor: the owner, a session, an agent.
   The owner and an arbiter make grants and rulings. An arbiter's is marked as the arbiter's, ranks
   below the owner's, and the owner can overturn it. Today an arbiter makes rulings only
-  (decision session-tiers, Arbiter); this adds grants. Open: whether an arbiter's grants include Opus for
-  agents in its repo (asked 15:05 CST). Home: decision session-tiers, GLOSSARY.md.
+  (decision session-tiers, Arbiter); this adds grants. An arbiter's grants never include Opus (G13). Home: decision session-tiers, GLOSSARY.md.
 - **G2. Session roles, the same on local and cloud: coordinator, triage, batch runner, lane, arbiter.**
   Owner 14:23 CST Nov 10: "coordinator approved", "batch runner yes agreed", "lane yes agreed but solo
   should be able to merge ideally like it can be a one stop shop sometimes", "this collapse feels good".
@@ -150,6 +149,12 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   Any lane builds a short list of edits itself when nothing can run in parallel; otherwise it fans out to
   agents, whoever started it. Merges rules roles-solo-builds-short-edit-list and
   roles-orchestrator-never-builds. Home: CLAUDE.md, decision session-tiers.
+- **G13. The arbiter is a decider only.** Owner 15:08 CST Nov 10: "isn't arbiter just a decider, why
+  would it ever have subagents"; "yes" to the form. It makes rulings in its repo, one tier below the
+  owner. It may start only read-only agents (Explore, refuter) to gather evidence. It builds nothing,
+  starts no lanes, and grants no Opus. The arbiter session itself runs Opus (agent-model-cap:61).
+  Rewrite session-tiers:81 ("a standing session and an orchestrator"). Home: decision session-tiers,
+  GLOSSARY.md.
 
 ## Directions, not yet settled
 
