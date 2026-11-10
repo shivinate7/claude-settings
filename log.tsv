@@ -1,6 +1,6 @@
 session_011DaUc41jAEUmhXE72v4uUb	09:42 CST		sent
-session_011qC7XdGEvViSU9PuJEJ35C	09:42 CST	transcript	handoff-B (read from transcript, no reply)
-session_012oh85uKXAanQ2UciVzBEQN	09:42 CST	transcript	handoff-B (read from transcript, no reply)
+session_011qC7XdGEvViSU9PuJEJ35C	09:42 CST	transcript	handoff-B (read from transcript, no reply)	archive: refused: hook found no get_session record of target after standalone get_session
+session_012oh85uKXAanQ2UciVzBEQN	09:42 CST	transcript	handoff-B (read from transcript, no reply)	archive: refused: hook found no get_session record of target after standalone get_session
 session_013NEJKyggQsYbfxs62CE1mx	09:42 CST	09:42 CST	KEEP
 session_013NEJKygtZewTzZqVEvmyLu	09:42 CST	09:42 CST	KEEP
 session_013NEJKyh5DtXyHyFdAmQUUz	09:42 CST	09:42 CST	KEEP
