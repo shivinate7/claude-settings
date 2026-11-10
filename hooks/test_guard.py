@@ -14381,8 +14381,9 @@ rr_allow("a Plan spawn after a reviewer spawn is not judged", "Agent", RR_PLAN, 
 rr_allow("a missing transcript file is allowed, never refused", "Agent", RR_BUILDER, rr_path("missing"))
 rr_allow("an unreadable transcript (a folder) is allowed, never refused", "Agent", RR_BUILDER, rr_path("unreadable"))
 # The built-in SendMessage is judged like the remote send_message: the same handoff, the same record.
-import _transcript  # noqa: E402  the one home of the send-tool names (lint/_transcript.py SEND_TOOLS)
-RR_BUILTIN_SEND = next(name for name in _transcript.SEND_TOOLS if name != SEND_MESSAGE)
+# Bound under its own name: main's OUTWARD_CALLS loops below rebind a module-level `_transcript`.
+import _transcript as _transcript_home  # noqa: E402  the one home of the send-tool names (lint/_transcript.py SEND_TOOLS)
+RR_BUILTIN_SEND = next(name for name in _transcript_home.SEND_TOOLS if name != SEND_MESSAGE)
 RR_BUILTIN_HANDOFF = {"to": "builder-pr12", "message": "Handoff: PR #12 is ready for the batch."}
 rr_refuse("a built-in SendMessage handoff after a reviewer spawn with no review record is refused",
           RR_BUILTIN_SEND, RR_BUILTIN_HANDOFF, rr_path("reviewer"))
@@ -14477,7 +14478,7 @@ def review_send_matcher_case():
     if not matchers:
         return False, "no PreToolUse entry runs guard.py in settings.json"
     # Every name in SEND_TOOLS is checked, so the built-in SendMessage is not left out of the matcher.
-    for name in _transcript.SEND_TOOLS:
+    for name in _transcript_home.SEND_TOOLS:
         if not any(re.fullmatch(matcher, name) for matcher in matchers):
             return False, "no guard matcher covers %s: %r" % (name, matchers)
     return True, "a guard matcher covers every send tool"
