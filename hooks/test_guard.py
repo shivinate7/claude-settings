@@ -4646,6 +4646,8 @@ TEMP_DIR = None   # back to the system temp for the sections below
 HM_REFUSED_PATH = "hm-text-lane"
 # The call shape every EnterWorktree remedy names. A `path` makes Claude Code ask the owner to approve the worktree.
 ENTER_WORKTREE_SHAPE = "with a `name` and no `path`"
+# An existing checkout needs `path`, not `name`; the approval prompt a `path` triggers is the accepted cost.
+OTHER_CHECKOUT_ENTER_SHAPE = "call the EnterWorktree tool with `path` set to"
 
 
 def hand_made_refusal_text_case():
@@ -27412,6 +27414,38 @@ def worktree_home_cd_into_other_checkout_case():
     return True, "every cd into another checkout is refused, bare or chained, and names no path"
 
 
+def _remedy_problems(label, got, reason):
+    """The other-checkout remedy names OTHER_CHECKOUT_ENTER_SHAPE, and no `cd` or `env -C` route.
+    A verdict other than deny is one problem, and the remedy is not read."""
+    if got != "deny":
+        return ["%s: want deny, got %s (%s)" % (label, got, reason[:120])]
+    problems = []
+    if OTHER_CHECKOUT_ENTER_SHAPE not in reason:
+        problems.append("%s: the remedy does not say %r: %s" % (
+            label, OTHER_CHECKOUT_ENTER_SHAPE, reason[:160]))
+    if "`cd`" in reason:
+        problems.append("%s: the remedy names `cd`: %s" % (label, reason[:160]))
+    if "env -C" in reason:
+        problems.append("%s: the remedy names env -C: %s" % (label, reason[:160]))
+    return problems
+
+
+def worktree_home_other_checkout_remedy_case():
+    """Rule 0, `other-checkout`, the remedy on both refusals: a write into a sibling checkout, and a
+    `cd` into one, each name the EnterWorktree call with `path` set to the checkout, and neither names
+    `cd` or `env -C` as a route. Ruling: coordinator, 2026-11-09 21:18 CST."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcocd")
+    in_b = os.path.join(lane_b, "src", "app.py")
+    problems = []
+    got, reason = _decide_full("Write", lane_a, file_path=in_b, content="x")
+    problems += _remedy_problems("write into a sibling checkout", got, reason)
+    got, reason = _decide_full("Bash", lane_a, command="cd " + slash(lane_b))
+    problems += _remedy_problems("cd into a sibling checkout", got, reason)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the write and the cd refusals name the EnterWorktree call with path, and no cd or env -C route"
+
+
 def worktree_home_cd_parse_forms_case():
     """Rule 0, other-checkout, the `cd` act's parse: a relative climb, a subshell and a PowerShell
     `Set-Location` each move into another checkout, and each is refused."""
@@ -28974,6 +29008,9 @@ LOG_CHECKS = (
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
      worktree_home_cd_into_other_checkout_case),
+    ("worktree-home: the other-checkout refusal names the EnterWorktree call with `path` for a write "
+     "and for a cd, and names neither `cd` nor env -C as a route",
+     worktree_home_other_checkout_remedy_case),
     ("worktree-home: a cd into another checkout is refused when it is a relative climb, a subshell or "
      "a PowerShell Set-Location", worktree_home_cd_parse_forms_case),
     ("worktree-home: an agent's cd into a sibling agent tree, or into a folder that only starts with "
@@ -36900,6 +36937,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: an owner override lifts the cross-checkout", "worktree-home"),
     ("worktree-home: the cross-checkout read costs", "worktree-home"),
     ("worktree-home: a cd into another checkout of the clone is refused", "worktree-home"),
+    ("worktree-home: the other-checkout refusal names the EnterWorktree call", "worktree-home"),
     ("worktree-home: a cd into another checkout is refused when it is a relative climb", "worktree-home"),
     ("worktree-home: an agent's cd into a sibling agent tree", "worktree-home"),
     ("worktree-home: a cd to a checkout's own root", "worktree-home"),
