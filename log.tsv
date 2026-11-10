@@ -209,24 +209,24 @@ session_013NEJL1rJepBiu21f6Rv9jG	09:55 CST	09:54 CST	handoff-B	archive: refused:
 session_013NEJL1s91Kb775BV6ECCxH	09:55 CST	09:54 CST	KEEP
 session_013NEJL1tSPqSx7QonoVwudz	09:55 CST		sent
 session_013NEJL1xdQmJC85BLQucDP9	09:55 CST	09:55 CST	KEEP
-session_013NEJL1yXEvUDdtXJ7QhYRE	09:55 CST	09:54 CST	handoff-B
-session_013NEJL213WYGvCs1ZRhXX4V	09:55 CST	09:55 CST	handoff-B
+session_013NEJL1yXEvUDdtXJ7QhYRE	09:55 CST	09:54 CST	handoff-B	archive: not tried: session active again (status requires_action, connected); left alone
+session_013NEJL213WYGvCs1ZRhXX4V	09:55 CST	09:55 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
 session_013NEJL22VqTY2w3YtemTyH1	09:55 CST	09:57 CST	KEEP
-session_013NEJL22tdtt5hCLt3whgm1	09:55 CST	09:55 CST	handoff-B
-session_013NEJL232Ko7dmr4v3fmrvF	09:55 CST	09:56 CST	handoff-B
+session_013NEJL22tdtt5hCLt3whgm1	09:55 CST	09:55 CST	handoff-B	archive: archived
+session_013NEJL232Ko7dmr4v3fmrvF	09:55 CST	09:56 CST	handoff-B	archive: archived
 session_013NEJL24NSUGQwdDXK4sqrb	09:55 CST	09:57 CST	KEEP
-session_013NEJL25kXsYSFJpzGQnKKe	09:55 CST	09:55 CST	handoff-B
+session_013NEJL25kXsYSFJpzGQnKKe	09:55 CST	09:55 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
 session_013NEJL27ELEZB4SAw7gHmkq	09:55 CST	09:55 CST	KEEP
-session_013NEJL27bB3sjZacDv3K9e4	09:55 CST	09:55 CST	handoff-B
-session_013NEJL27e8puG926YPKVUMf	09:55 CST	09:55 CST	handoff-B
+session_013NEJL27bB3sjZacDv3K9e4	09:55 CST	09:55 CST	handoff-B	archive: refused: a lane branch is ahead of default with no covering PR (hook lane-closes-after-records)
+session_013NEJL27e8puG926YPKVUMf	09:55 CST	09:55 CST	handoff-B	archive: refused: gh could not read lane branches or PRs (hook lane-closes-after-records); retry
 session_013NEJL28sozZFoz9wzHLJGb	09:55 CST	09:55 CST	KEEP
 session_013NEJL294xwrFinHwofhyir	09:55 CST	09:55 CST	KEEP
 session_013NEJL29GcaaeoS7a1SJYA2	09:55 CST	09:55 CST	KEEP
-session_013NEJL29QJZ3US3nyhcFYrg	09:55 CST	09:55 CST	handoff-B
+session_013NEJL29QJZ3US3nyhcFYrg	09:55 CST	09:55 CST	handoff-B	archive: refused: gh could not read open PRs (hook lane-closes-after-records); retry
 session_013NEJL2B1oRJaBTe16wm1VG	09:55 CST	09:55 CST	KEEP
 session_013NEJL2B6FrRWBCF8RWpq8y	09:55 CST	09:55 CST	KEEP
-session_013NEJL2BusqrX6qy1CCAgoH	09:56 CST	09:55 CST	handoff-B
-session_013NEJL2C3ooJFEuJnsQf4yT	09:56 CST	09:55 CST	handoff-B
+session_013NEJL2BusqrX6qy1CCAgoH	09:56 CST	09:55 CST	handoff-B	archive: refused: a lane branch is ahead of default with no covering PR (hook lane-closes-after-records)
+session_013NEJL2C3ooJFEuJnsQf4yT	09:56 CST	09:55 CST	handoff-B	archive: archived
 session_013NEJL2CTcj9UVLR4KHoUN5	09:56 CST	09:56 CST	handoff-B
 session_013NEJL2ChVc4QiMs2icnEB8	09:56 CST	09:56 CST	KEEP
 session_013NEJL2CijYGjSSCcJqnVvv	09:56 CST	09:56 CST	KEEP
