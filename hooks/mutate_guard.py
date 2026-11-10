@@ -3874,7 +3874,7 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
         result = _nowindow.run(
             # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
             [sys.executable, suite], stdout=subprocess.PIPE, stderr=errors, text=True,
-            env=env, timeout=1200,
+            env=env, timeout=3600,  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
         )
         errors.seek(0)
         error_text = errors.read().decode("utf-8", "replace")
