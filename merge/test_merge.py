@@ -14147,6 +14147,67 @@ class ReleaseCheck(ReviewEnv):
             self.assertRegex(self.line_of(lines, n), rf"^#{n} FAIL: unknown \(.+\)$", err)
         self.assertEqual(rc, 1, err)
 
+    def assert_unknown_line_each(self, lines, numbers, err):
+        """One line per distinct number, in order of first appearance, each `#N FAIL: unknown (...)`, and no other line."""
+        want = list(dict.fromkeys(numbers))
+        self.assertEqual(len(lines), len(want), f"want one line for each of {want}, got {len(lines)}:\n" + "\n".join(lines) + "\n" + err)
+        for n, line in zip(want, lines):
+            self.assertRegex(line, rf"^#{n} FAIL: unknown \(.+\)$", err)
+
+    def release_past_sh(self, numbers, stub):
+        """-> (rc, lines, err) of `merge --release-check numbers` with merge.sh patched. `stub(args)` raises, or returns (code, text) for a call
+        it names, and returns None for every other call, which runs the real sh. The pull requests and review records are read before the patch."""
+        head = self.head("feat")
+        pulls = [self.live(n, head=head) for n in dict.fromkeys(numbers)]
+        comments = [self.review(n, head=head) for n in dict.fromkeys(numbers)]
+        real_sh = merge.sh
+
+        def patched(args, *a, **kw):
+            answer = stub(args)
+            return real_sh(args, *a, **kw) if answer is None else answer
+
+        with unittest.mock.patch.object(merge, "sh", side_effect=patched):
+            rc, lines, err, _ = self.release(numbers, pulls=pulls, comments=comments, lint=self.lints(dict.fromkeys(numbers)))
+        return rc, lines, err
+
+    @staticmethod
+    def no_checkout(args):
+        """The stub of a folder that is not a git checkout: `git rev-parse --show-toplevel` fails there, and every other call runs."""
+        if args[:1] == ["git"] and "rev-parse" in args and "--show-toplevel" in args:
+            return 128, "fatal: not a git repository (or any of the parent directories): .git"
+        return None
+
+    def test_outside_a_git_checkout_every_pr_gets_a_fail_unknown_line(self):
+        _, lines, err, _ = self.release([7, 8, 7], lint=self.lints([7, 8]))  # control: in a checkout, one PASS line per distinct number
+        self.assertEqual(lines, ["#7 PASS", "#8 PASS"], err)
+        rc, lines, err = self.release_past_sh([7, 8, 7], self.no_checkout)
+        self.assertEqual(rc, 1, err)
+        self.assert_unknown_line_each(lines, [7, 8, 7], err)
+
+    def test_outside_a_git_checkout_a_full_list_gets_a_fail_unknown_line_each(self):
+        numbers = list(range(25, 0, -1))
+        _, lines, err, _ = self.release(numbers)  # control: the full list passes in a checkout
+        self.assertEqual(lines, [f"#{n} PASS" for n in numbers], err)
+        rc, lines, err = self.release_past_sh(numbers, self.no_checkout)
+        self.assertEqual(rc, 1, err)
+        self.assert_unknown_line_each(lines, numbers, err)
+
+    def test_missing_git_every_pr_gets_a_fail_unknown_line_and_no_traceback(self):
+        _, lines, err, _ = self.release([7, 8, 7], lint=self.lints([7, 8]))  # control: in a checkout, one PASS line per distinct number
+        self.assertEqual(lines, ["#7 PASS", "#8 PASS"], err)
+
+        def no_git(args):
+            if args[:1] == ["git"]:
+                raise FileNotFoundError(2, "No such file or directory", "git")  # subprocess's error when git is not on PATH
+            return None
+
+        try:
+            rc, lines, err = self.release_past_sh([7, 8, 7], no_git)
+        except Exception as e:  # the check raised: no line printed for any pull request
+            self.fail(f"release-check raised {type(e).__name__} instead of a line for each pull request: {e}")
+        self.assertEqual(rc, 1, err)
+        self.assert_unknown_line_each(lines, [7, 8, 7], err)
+
     def test_a_git_fetch_that_times_out_gives_every_pr_a_fail_unknown_line(self):
         self.assert_git_timeout_gives_unknown("fetch")
 
