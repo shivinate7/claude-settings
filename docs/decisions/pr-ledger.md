@@ -59,7 +59,7 @@ Each open PR gets exactly one next act. The tool reads it from GitHub alone. The
 
 - Done review record for the live head: `batch`.
 - Review record open: `lane round n`, n the next round owed. A failed fix check: `lane round 1`.
-- Review record stale, newest record has no Fix check line: fix check. Stale, it has one: new lane at round 1 (decision `pr-review-record`; rule `roles-review-cap-three`).
+- Review record stale, newest record has no Fix check line: fix check. Stale, it has one: fix check when that Fix check PASSed and the live head is a merge of the base into that record's Head, shaped as `--fix-check` accepts it. Otherwise new lane at round 1 (decision `pr-review-record`, its one exception; step `fix-check-after-main-merge`, a fix check after a merge of main; rule `roles-review-cap-three`).
 - Label `held`, `parked` or `replaced`, with a `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line: `waits on` that debt or item.
 - Label `batch` on an integration PR: `batch run`. It counts against the batch limit, aged from the label's last `labeled` event.
 - Based on, or stacked on, #N: blocked on #N.
@@ -104,6 +104,7 @@ Per rule `outcomes-mechanize-rules`:
   - the open-PR list, and the repo's comments since the oldest open PR (one list each);
   - one `issues/<n>/events` list for each PR that reaches the hold rule with the `batch` label, or with a hold label and a valid `Waits on:` line;
   - when a batch line exists, one page (50) of main's runs. A run's jobs are read only when that run did not succeed, plus, for each candidate run it examines, its jobs and, unless the red already stands, its workflow file.
+  - for each open PR whose newest record is stale and holds a PASS Fix check: one `commits/<sha>` read of the live head, and one compare read when that commit has two parents whose first is the record's Head.
   - The count per run is not measured yet.
 - Reads per lane Stop (part 2): none unless the final report claims a round PASS. Then two `gh api` reads per claimed PR: the PR's head and its comments.
 - Tests to write with the build, one per red: no review record; stale head; batch over its limit; hold with no item.
