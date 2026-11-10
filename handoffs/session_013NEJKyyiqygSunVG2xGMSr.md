@@ -1,0 +1,3 @@
+# Lane: batch64-prose-judge-docs (session_013NEJKyyiqygSunVG2xGMSr), received 09:45 CST 2026-11-10, kind KEEP
+
+KEEP: both PRs went to runner 8 (session_013NEJL2vsmyKzJm8jUDt6za) on 2026-11-08 and wait only for its merge. #2127 (head e705791f5) backs the CLAUDE.md CI-wake claims and fixes a glossary line. #2135 (head 787d5103a, merges after #2127) splits the solo-review sentence and names a null or empty lane. All commits are pushed. Both are still open drafts based on main 422cbbdfe, which is far behind main now, so they may need a rebase before batching. If you would rather archive them, the branches are batch64-prose-judge-docs and batch64-prose-followup on origin.

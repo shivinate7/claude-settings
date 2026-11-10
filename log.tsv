@@ -1,59 +1,59 @@
 session_011DaUc41jAEUmhXE72v4uUb	09:42 CST		sent
 session_011qC7XdGEvViSU9PuJEJ35C	09:42 CST		sent
 session_012oh85uKXAanQ2UciVzBEQN	09:42 CST		sent
-session_013NEJKyggQsYbfxs62CE1mx	09:42 CST		sent
-session_013NEJKygtZewTzZqVEvmyLu	09:42 CST		sent
-session_013NEJKyh5DtXyHyFdAmQUUz	09:42 CST		sent
-session_013NEJKyiKdHCgMQbb5n6Rnp	09:42 CST		sent
-session_013NEJKyixLRXW96LSwHDY2h	09:42 CST		sent
-session_013NEJKyjEhPeuaT1HrHD16Y	09:42 CST		sent
-session_013NEJKynEHKFPsDyJTieAUi	09:42 CST		sent
-session_013NEJKynFH16ipe94euH9od	09:42 CST		sent
-session_013NEJKyoXvBfn7q6bpofjYg	09:42 CST		sent
-session_013NEJKyooYBqTh9KkQWNHwe	09:42 CST		sent
+session_013NEJKyggQsYbfxs62CE1mx	09:42 CST	09:42 CST	KEEP
+session_013NEJKygtZewTzZqVEvmyLu	09:42 CST	09:42 CST	KEEP
+session_013NEJKyh5DtXyHyFdAmQUUz	09:42 CST	09:42 CST	KEEP
+session_013NEJKyiKdHCgMQbb5n6Rnp	09:42 CST	09:42 CST	handoff-B
+session_013NEJKyixLRXW96LSwHDY2h	09:42 CST	09:42 CST	handoff-B
+session_013NEJKyjEhPeuaT1HrHD16Y	09:42 CST	09:42 CST	KEEP
+session_013NEJKynEHKFPsDyJTieAUi	09:42 CST	09:43 CST	KEEP
+session_013NEJKynFH16ipe94euH9od	09:42 CST	09:43 CST	handoff-B
+session_013NEJKyoXvBfn7q6bpofjYg	09:42 CST	09:43 CST	KEEP
+session_013NEJKyooYBqTh9KkQWNHwe	09:42 CST	09:43 CST	KEEP
 session_013CpPcA1xXsuDXLdsWU4WYc	09:42 CST		send-failed: elevated_session_untrusted_device (session runs on owner computer; needs owner trust card)
-session_013NEJKyoqH7Pdyv1k1rK8bE	09:43 CST		sent
-session_013NEJKypkpzqdbSUr7rAwAn	09:43 CST		sent
-session_013NEJKypwFEtaJwfYrMpZ5T	09:43 CST		sent
-session_013NEJKyq9tjSV3zNiViAp4E	09:43 CST		sent
-session_013NEJKyqF79t9UigCgm3qjb	09:43 CST		sent
-session_013NEJKyqU19UoQgbHWPzXBz	09:43 CST		sent
-session_013NEJKyrvZKvULem1eZzY1o	09:43 CST		sent
-session_013NEJKys31F9TckFXjRxWER	09:43 CST		sent
-session_013NEJKysbEmRBBB3QEfDm2H	09:43 CST		sent
-session_013NEJKytPs46Qp4KDoqbDvz	09:43 CST		sent
-session_013NEJKyrFd5no3Kf2HBuL79	09:44 CST		sent
-session_013NEJKyuRd6zdQhuiRC27g9	09:44 CST		sent
-session_013NEJKyuyMvkyfa5EDmUpJS	09:44 CST		sent
-session_013NEJKyvCWXz9w73Km3i8RM	09:44 CST		sent
-session_013NEJKywfKL1Vp4zHaUEbot	09:44 CST		sent
-session_013NEJKyxJkZYdX2VVW9dgp2	09:45 CST		sent
-session_013NEJKyxUS8epcpStRJ8CAA	09:45 CST		sent
-session_013NEJKyxaNeXMMuUruLyQ5T	09:45 CST		sent
-session_013NEJKyxnHZUhFjmTh4XbJa	09:45 CST		sent
-session_013NEJKyyiqygSunVG2xGMSr	09:45 CST		sent
-session_013NEJKyzA8bkZSm147VHnke	09:45 CST		sent
-session_013NEJKyzEbN117XUjYmkEjB	09:45 CST		sent
-session_013NEJKyzGL3yZ2cjQt9Jbj9	09:45 CST		sent
-session_013NEJKyzbBcReBkq8QRSuUh	09:45 CST		sent
-session_013NEJKyzg9A9SDZ926jRCSU	09:45 CST		sent
-session_013NEJKz13TfcPPchNJveuuF	09:45 CST		sent
-session_013NEJKz26y1pT4XskPQbQbz	09:45 CST		sent
-session_013NEJKz3J95T7tJBtSYUXZ9	09:45 CST		sent
-session_013NEJKz3Pbvh8FJVoT2ydk8	09:45 CST		sent
-session_013NEJKz49VptC1nSSWVrPN8	09:45 CST		sent
-session_013NEJKz5A22GYG2gprVFFPX	09:45 CST		sent
-session_013NEJKz5DUxWNjsPPXNF5q1	09:45 CST		sent
-session_013NEJKz6tCDukV1yMoiPQ83	09:45 CST		sent
-session_013NEJKz7673bPpSLv4TxyA7	09:45 CST		sent
-session_013NEJKz785dJ3UKyxpvQuZu	09:45 CST		sent
+session_013NEJKyoqH7Pdyv1k1rK8bE	09:43 CST	09:43 CST	KEEP
+session_013NEJKypkpzqdbSUr7rAwAn	09:43 CST	09:44 CST	handoff-B
+session_013NEJKypwFEtaJwfYrMpZ5T	09:43 CST	09:43 CST	handoff-B
+session_013NEJKyq9tjSV3zNiViAp4E	09:43 CST	09:43 CST	handoff-B
+session_013NEJKyqF79t9UigCgm3qjb	09:43 CST	09:43 CST	KEEP
+session_013NEJKyqU19UoQgbHWPzXBz	09:43 CST	09:44 CST	KEEP
+session_013NEJKyrvZKvULem1eZzY1o	09:43 CST	09:44 CST	KEEP
+session_013NEJKys31F9TckFXjRxWER	09:43 CST	09:44 CST	handoff-B
+session_013NEJKysbEmRBBB3QEfDm2H	09:43 CST	09:44 CST	handoff-B
+session_013NEJKytPs46Qp4KDoqbDvz	09:43 CST	09:45 CST	KEEP
+session_013NEJKyrFd5no3Kf2HBuL79	09:44 CST	09:45 CST	handoff-B
+session_013NEJKyuRd6zdQhuiRC27g9	09:44 CST	09:45 CST	handoff-B
+session_013NEJKyuyMvkyfa5EDmUpJS	09:44 CST	09:44 CST	handoff-B
+session_013NEJKyvCWXz9w73Km3i8RM	09:44 CST	09:45 CST	KEEP
+session_013NEJKywfKL1Vp4zHaUEbot	09:44 CST	09:45 CST	KEEP
+session_013NEJKyxJkZYdX2VVW9dgp2	09:45 CST	09:45 CST	handoff-B
+session_013NEJKyxUS8epcpStRJ8CAA	09:45 CST	09:45 CST	handoff-B
+session_013NEJKyxaNeXMMuUruLyQ5T	09:45 CST	09:45 CST	KEEP
+session_013NEJKyxnHZUhFjmTh4XbJa	09:45 CST	09:46 CST	handoff-B
+session_013NEJKyyiqygSunVG2xGMSr	09:45 CST	09:45 CST	KEEP
+session_013NEJKyzA8bkZSm147VHnke	09:45 CST	09:46 CST	KEEP
+session_013NEJKyzEbN117XUjYmkEjB	09:45 CST	09:46 CST	handoff-B
+session_013NEJKyzGL3yZ2cjQt9Jbj9	09:45 CST	09:45 CST	KEEP
+session_013NEJKyzbBcReBkq8QRSuUh	09:45 CST	09:45 CST	handoff-B
+session_013NEJKyzg9A9SDZ926jRCSU	09:45 CST	09:46 CST	KEEP
+session_013NEJKz13TfcPPchNJveuuF	09:45 CST	09:46 CST	handoff-B
+session_013NEJKz26y1pT4XskPQbQbz	09:45 CST	09:46 CST	KEEP
+session_013NEJKz3J95T7tJBtSYUXZ9	09:45 CST	09:46 CST	handoff-B
+session_013NEJKz3Pbvh8FJVoT2ydk8	09:45 CST	09:46 CST	handoff-B
+session_013NEJKz49VptC1nSSWVrPN8	09:45 CST	09:46 CST	KEEP
+session_013NEJKz5A22GYG2gprVFFPX	09:45 CST	09:46 CST	handoff-B
+session_013NEJKz5DUxWNjsPPXNF5q1	09:45 CST	09:46 CST	KEEP
+session_013NEJKz6tCDukV1yMoiPQ83	09:45 CST	09:46 CST	handoff-B
+session_013NEJKz7673bPpSLv4TxyA7	09:45 CST	09:46 CST	KEEP
+session_013NEJKz785dJ3UKyxpvQuZu	09:45 CST	09:46 CST	KEEP
 session_013NEJKz8JXQTvhuGYo4UJpi	09:46 CST		sent
 session_013NEJKz9HoqeRzdjbw9Fnga	09:46 CST		sent
 session_013NEJKz9f8KxCfb9zS1HSNV	09:46 CST		sent
 session_013NEJKzBfRycskE32T2Pj9F	09:46 CST		sent
 session_013NEJKzCN6jU5Pj5pSZe2Wy	09:46 CST		sent
-session_013NEJKzCSKTt9Mrr6n9GKiR	09:46 CST		sent
-session_013NEJKzCcVJYhu39C4BXuSP	09:46 CST		sent
+session_013NEJKzCSKTt9Mrr6n9GKiR	09:46 CST	09:46 CST	handoff-B
+session_013NEJKzCcVJYhu39C4BXuSP	09:46 CST	09:46 CST	handoff-B
 session_013NEJKzDBTjFbhzwzV96i8v	09:46 CST		sent
 session_013NEJKzDXZ6E5hL4PUShA7C	09:46 CST		sent
 session_013NEJKzEeXJNdTNedKPwtGc	09:46 CST		sent
@@ -271,7 +271,7 @@ session_013NEJL2hBkMAyffTo9CdawZ	09:57 CST		sent
 session_013NEJL2hXLvodLuczRGgNHP	09:57 CST		sent
 session_013NEJL2iDXGHZSMmcwaj9bV	09:57 CST		sent
 session_013NEJL2iRRDz4vLswobTwYf	09:57 CST		sent
-session_013NEJL2jTS37z97cavLKVTC	09:57 CST		sent
+session_013NEJL2jTS37z97cavLKVTC	09:57 CST	09:46 CST	handoff-B
 session_013NEJL2k68U41yt5xBhfp93	09:57 CST		sent
 session_013NEJL2mzycmcUKim3G7RkZ	09:57 CST		sent
 session_013NEJL2nvHYs3wA2QnMZfJG	09:59 CST		sent
