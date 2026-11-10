@@ -1139,6 +1139,26 @@ class Stale(unittest.TestCase):
                 self.assertIn("item entry-key-154", lines[0], "the wait line is not labelled by its entry key:\n" + lines[0])
                 self.assertNotIn("item ?", r.stdout, "a wait line names the item ?:\n" + r.stdout)
 
+    def test_a_wait_line_names_the_entry_key_when_the_id_field_differs(self):
+        """The entry key is the item's id, so a wait line names the item by its key when the item's own `id` field names another
+        item. Both shapes: a folder doc, and a list row {"id", "data"}. Both forms: a `waits` item (gh) and a lane item (no gh call).
+        Red on the merged code, which names the item by that field: `item other-id`, not `item entry-key-154`."""
+        current, _ = self.current_and_behind()
+        shapes = (("folder doc", lambda item: self.items_folder([item], keys=["entry-key-154"])),
+                  ("list row", lambda item: self.items_file([{"id": "entry-key-154", "data": item}])))
+        for shape, arg in shapes:
+            for label, make in self.entry_key_forms():
+                with self.subTest(shape=shape, form=label):
+                    env, _ = self.gh_env({RUN_ARGV: RUN_DONE})
+                    item = make()
+                    del item["n"]
+                    item["id"] = "other-id"
+                    r = self.items_run(current, arg(item), env)
+                    self.assert_page_word(r, "current", 0)
+                    lines = r.stdout.splitlines()[1:]
+                    self.assertEqual(len(lines), 1, "want one wait line for the item, got %d:\n%s" % (len(lines), r.stdout + r.stderr))
+                    self.assertIn("item entry-key-154", lines[0], "the wait line is not labelled by its entry key:\n" + lines[0])
+
     # Single-page mode with --answers <file or folder>, with --items: one kept-answer line per answer kept on a closed item.
     # Each do-not-flag case also holds the incident item (item 356), so the run's own incident line shows the answers were
     # read before the negative is checked. An open item, an arbiter ruling and a park answer are legitimate states: never named.
