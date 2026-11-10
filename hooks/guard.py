@@ -309,12 +309,14 @@ Other tools, in `judge` order:
                        whose brief's first non-blank line starts with `Fix check` (up to Sonnet;
                        owner item 444 a) and every Opus spawn pass it. A reviewer's refusal names
                        the round forms, `Fix check`, `Round N of 3 (fix check)` and the role-model
-                       sentence. A fix-check reviewer must name Sonnet, because the agent file's pin
-                       beats the env default; with no model, or on Haiku, it is refused. An unread record
+                       sentence. A fix check must name Sonnet, because the agent file's pin beats the
+                       env default: an Agent or Task reviewer on a fix check with no model is refused
+                       (never lifted), and one on Haiku is refused (the general override lifts it). An unread record
                        passes and is noted as `agent-role-model-unread`. The general override lifts an
                        above-row refusal; no override lifts the no-model refusal. A Workflow
                        `agent()` call is judged as a spawn; one whose model or agentType the scan
                        cannot read is skipped, and an unread brief is judged as an empty brief.
+                       A Workflow agent() with no model is not judged (known limit).
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
                        deny. A spawn below the model floor, or a third round on the wrong model.
@@ -3617,8 +3619,9 @@ ROLE_NO_MODEL_REASON = (
     "(decision agent-model-cap)"
 )
 # A reviewer on a fix check brief that names no model, or names Haiku, is refused: a fix check runs Sonnet, set per spawn.
-# With no model it is refused even with a default model set, because the agent file's pin (haiku) beats the default.
-# Unlike ROLE_NO_MODEL_MATCH, this match is liftable.
+# With no model it is refused even with a default model set, because the agent file's pin (haiku) beats the default;
+# that refusal keeps ROLE_NO_MODEL_MATCH, so no override lifts it. The Haiku refusal uses this match, which the
+# general override lifts.
 ROLE_FIX_CHECK_MATCH = "fix check, role "
 ROLE_FIX_CHECK_REASON = (
     "Rule (configuration): this reviewer spawn is a fix check and does not run on Sonnet: it names no model, or "
@@ -3830,7 +3833,8 @@ def role_model_one(tool_input):
     An above-row refusal is liftable by the general override (decision agent-model-cap); the
     no-model refusal (matched ROLE_NO_MODEL_MATCH...) is not, and never_lifted reads only that one. A reviewer on a
     fix check brief that names no model is refused before the env and pin passes, because the agent file's pin beats
-    the env default; one that names Haiku is refused too. Both refusals (matched ROLE_FIX_CHECK_MATCH...) are liftable."""
+    the env default (matched ROLE_NO_MODEL_MATCH..., never lifted); one that names Haiku is refused too (matched
+    ROLE_FIX_CHECK_MATCH..., liftable)."""
     pointer = pointer_checkout()
     if not pointer:
         return "", "", False  # no pointer checkout: nothing to read, as the pointer rules stand down
@@ -3872,7 +3876,7 @@ def role_model_one(tool_input):
             return ROLE_MODEL_REASON % extra, model, False
         return "", "", False
     if role == "reviewer" and ("fixcheck", None) in marker_hits(tool_input.get("prompt")):
-        return ROLE_FIX_CHECK_REASON % ((ROLE_MODEL_RANK[1],) * 2), ROLE_FIX_CHECK_MATCH + role, False
+        return ROLE_FIX_CHECK_REASON % ((ROLE_MODEL_RANK[1],) * 2), ROLE_NO_MODEL_MATCH + role, False
     if os.environ.get(ROLE_MODEL_ENV, "").strip():
         return "", "", False
     pinned = role_has_model_pin(pointer, role)
