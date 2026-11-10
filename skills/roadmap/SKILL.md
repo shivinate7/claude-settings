@@ -296,6 +296,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   `merge --idle-lanes --live FILE` prints the same list for the batch runner: one line per lane, then
   a summary line. It exits 1, with no summary line, when every entry is unknown;
 - `Step:` trailers that name no step;
+- `open step waits on a closed unmerged PR`: an open step whose title, why or note waits on PR #N. A wait is a phrase in `WAIT_ON_PULL_PHRASES` in `build.py`. The word `PR` may sit before `#N`. A `#N` followed by `closed` or `merged` is history, not a wait. The row lists the step when `landedPulls` has a row for #N with `merged` false. It skips #N when `landedPulls` has a `merged` true row for #N, or when #N is an open pull. A PR closed before the 14-day `landedPulls` window is not seen. Each entry is `<step id> (#N)`. The row reads `unknown (the live file has no landedPulls list)` when the live file has no `landedPulls` key. A live read that is unknown, such as no `--live` file, makes the row unknown too. An empty `landedPulls` list reads none. The fix is to name the step slug it waits on in the step's `blockedBy` list (owner, 2026-11-10 13:10 CST);
 - `done without check`: a `done` step updated on or after the cutoff (`DONE_CHECK_SINCE`, in the build script) that names no Done check. It is also listed when its note, why and ask hold no `Done check green on main:` (any case) with a `#N`, `PR N`, URL or commit hash right after it. Triage's close writes that line, such as `Done check green on main: #1312.` The instruction is in the Triage bullet of the operating model (skill `project-ops`). A `done` step updated before the cutoff is not judged, because the Done check line had not shipped then.
 
 ## Cost
@@ -306,7 +307,7 @@ reads. The stale-step row adds one more `list_sessions` walk inside that publish
 fields per session in the file. The page-ruling row adds one `ArtifactData list items` read (every
 page) to the same publish. The roadmap build script adds no git process, file, timer or log for either row. The
 dated-claim row reads the notes already loaded and adds nothing.
-The red line, the stalled lines, the ready lines and the two stale-ready rows read the live file and steps build.py
+The red line, the stalled lines, the ready lines, the two stale-ready rows and the closed-pull wait row read the live file and steps build.py
 already reads. They add no process, file, timer or log. The publisher's `createdAt` per pull row comes from the
 GitHub list call it already makes.
 The `landedPulls` rows cost the publisher one more GitHub list call (closed pulls) per publish. The build runs at
