@@ -487,7 +487,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            HOOK_BYPASS_REASON, conflict_markers_hit, head_moved_before, hook_bypass_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool, OWED_BRANCH_TOOL, owed_record_hit, owed_record_pr_hit, owed_record_write,
         )
@@ -4359,7 +4359,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
-    for segment in (part for text in texts for part in split_segments(text)):
+    steps = [(segments[:i], segment)
+             for text in texts
+             for segments in [split_segments(text)]
+             for i, segment in enumerate(segments)]
+    for before, segment in steps:
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             verdict = push_verdict(args, where, overrides)
             if verdict == "ask":
@@ -4370,7 +4374,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 record_hit, record_reason = review_record_hit(transcript, lambda: push_destinations(args, where, overrides), where)
                 if record_hit:
                     refuse(tool, "deny", "push-needs-review-record", record_reason, record_hit)
-                owed = owed_record_hit(args, where, overrides, cwd)
+                owed = owed_record_hit(args, where, overrides, cwd, head_moved_before(before))
                 if owed:
                     ask_command("push-owes-review-record", owed[1], owed[0], "push past an unrecorded review")
                 # A non-forced push that writes main or master (rule push-main), an agent-worktree

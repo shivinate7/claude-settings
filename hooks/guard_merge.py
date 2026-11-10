@@ -17,7 +17,7 @@ from guard_core import (
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import BUILD_TAG, LANE_TAG, TOPIC_TAG, config_dir, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
-    pointer_checkout,
+    HEAD_MOVE_SUBCOMMANDS, pointer_checkout,
 )
 from guard_push_delete import (
     push_calls, push_destinations, push_refspecs, push_target,
@@ -815,6 +815,26 @@ def _makes_conflict(call):
     if call[0] == "stash":
         return "pop" in call[1] or "apply" in call[1]
     return call[0] in _CONFLICT_VERBS and not {"--continue", "--abort"} & set(call[1])
+
+
+# The verbs that can move HEAD: checkout and switch (one home, guard_pointer), the commit makers, and the
+# conflict verbs. A checkout of a path moves nothing, and counts: the guard cannot tell.
+_HEAD_MOVERS = HEAD_MOVE_SUBCOMMANDS + ("commit", "revert", "reset") + _CONFLICT_VERBS
+
+
+def _moves_head(call):
+    """True for a git step whose verb is in `_HEAD_MOVERS`, `--continue` and `--abort` too."""
+    return call[0] in _HEAD_MOVERS
+
+
+def head_moved_before(parts):
+    """True when one of `parts` (the shell segments that run before a push, a lone `&` split too) moves HEAD, so
+    the push reads a head the shell call has not reached yet."""
+    for segment in parts:
+        call = git_call_of(segment) if segment.strip() else None
+        if call is not None and _moves_head(call):
+            return True
+    return False
 
 
 def _unresolved(specs):
@@ -1709,12 +1729,13 @@ def _owed_off_tool(where, names):
     return _owed_unread("the repo's stamp.json could not be read") if _stamp_unreadable(where) and _in_repo(where, names) else None
 
 
-def owed_record_hit(args, where, overrides=None, cwd=""):
+def owed_record_hit(args, where, overrides=None, cwd="", moved=False):
     """(matched, reason) when this `git push` moves a branch past a head a reviewer read and nobody recorded, else
     None. The record is satisfied when any comment merge's parse_review accepts holds Head == the reviewed head. An
     entry, a destination, a directory or a config that cannot be read asks owed-record-unread when an entry is this
     repo's, and so does a failed read: the guard-wide crash path fails open, so nothing here passes on an error. A
-    push that names no refspec range (`--all`, `--mirror`, a deletion, tags only) is not read."""
+    push that names no refspec range (`--all`, `--mirror`, a deletion, tags only) is not read. `moved` is True when an earlier step of the same shell call moves HEAD: the source is then
+    new, whatever HEAD reads now."""
     try:
         names = _owed_entries()
     except OSError as e:
@@ -1731,7 +1752,7 @@ def owed_record_hit(args, where, overrides=None, cwd=""):
         if None in dests:
             return _owed_unread("the push's destination could not be read") if _in_repo(where, names) else None
         remote = named[0] or "origin"
-        pairs = [(_plain_source(spec.lstrip("+").partition(":")[0]), dest, remote)
+        pairs = [(None if moved else _plain_source(spec.lstrip("+").partition(":")[0]), dest, remote)
                  for spec, dest in zip(named[1] or [""], dests)]
         return _owed_scan(where, names, pairs, _owed_pr_of_branch)
     except (Exception, SystemExit) as e:
