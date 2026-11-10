@@ -174,7 +174,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        or input flag and no method. Judged per segment from the command word. A read, `gh api` with an
                        explicit GET and the merge tool pass. A local session skips it. An override lifts it.
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
-                       A merge's own page at MERGE_HEAD, on the base's first-parent line, passes.
+                       A merge's own page at MERGE_HEAD passes: MERGE_HEAD is on the base's first-parent
+                       line, or the lane is stacked on a base that main has not merged.
                        (records-index-at-merge)
   conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker
                        line in one file's added lines, read with `git diff --check`: the index, or the working
