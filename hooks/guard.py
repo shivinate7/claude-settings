@@ -338,6 +338,23 @@ Other tools, in `judge` order:
                        An override lifts it. Cost: reads on demand inside this call, one small read of the
                        prompt file and, for an edit, of the handoff; no new log, hook, file or process start.
                        (precompact-handoff, item 14)
+  handoff-checked-stamp
+                       deny. A Write, Edit or MultiEdit to a session handoff (as handoff-sections judges it)
+                       that changes a premise's stamp (the line's text from its last `Checked` or `Re-checked`
+                       word, so a respelled, dropped or new stamp is a change), unless the session's transcript
+                       backs it. A premise is judged by its kind before the write; a new line by its own kind.
+                       Evidence: a successful, read-type, main-session tool_use after the last
+                       `compact_boundary` (none: the whole transcript) whose input holds a token of the
+                       premise's `Source:` (a path, a 7+ hex hash, a backticked command, a record slug); with
+                       no token, any one read-type call. No evidence: a Write or Edit of any file, an Agent
+                       call, a send or PR-write tool, a call that failed, any agent record (isSidechain or
+                       agent_id), and the handoff itself. An unchanged stamp, `Checked never`, a `ruling`
+                       premise and a handoff with no premise lines pass. The reason gives one remedy line per
+                       unbacked premise, naming its token or "any read". No transcript_path, an unreadable
+                       transcript, handoff or prompt, and a failed import allow. An override lifts it. Cost:
+                       reads on demand inside this call, the transcript once and only when a stamp changed,
+                       one more small read of the prompt, and for a Write the handoff on disk; no new log,
+                       hook, file or process start. (precompact-handoff, item 15)
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
@@ -1153,14 +1170,15 @@ def handoff_sections_result(tool, tool_input, target, cwd):
     return before, text
 
 
-def handoff_sections_hit(tool, tool_input, target, cwd):
+def handoff_sections_hit(tool, tool_input, target, cwd, result=False):
     """The required handoff sections a write to a session handoff would drop, as one text, else "". The
     list is the prompt's marker, read by precompact_handoff.missing_sections, which fails open: an unread
     prompt or marker gives none. A Write is refused for any name its text lacks. An Edit or MultiEdit is
     refused only for a name the result lacks and the file holds now: it drops nothing from a handoff that
     already lacked the name. The prompt is read once per call, and both texts are judged against that read.
-    A failed import allows."""
-    result = handoff_sections_result(tool, tool_input, target, cwd)
+    A failed import allows. `result` is handoff_sections_result's value when the caller has it already."""
+    if result is False:
+        result = handoff_sections_result(tool, tool_input, target, cwd)
     if result is None:
         return ""
     try:
@@ -1174,6 +1192,51 @@ def handoff_sections_hit(tool, tool_input, target, cwd):
         already = set(missing_sections(before, names))
         gone = [name for name in gone if name not in already]
     return ", ".join(gone)
+
+
+HANDOFF_STAMP_REASON = (
+    "Rule (handoff-checked-stamp): this write restamps the Checked value of a premise in the session handoff, and "
+    "this session's own transcript holds no check of it since its last compact boundary. A stamp says you checked "
+    "the premise. Remedy: check each premise below, then repeat the call, or write `Checked never` on it.\n%s\n"
+    "(decision precompact-handoff, item 15)"
+)
+
+
+def handoff_stamp_hit(tool, tool_input, target, cwd, transcript, result):
+    """(remedy lines, ids) for the premises that a write to a session handoff restamps with no evidence in the
+    session's transcript, else None. A premise's before kind judges it, a stamp spelled other than `Checked <value>`
+    counts, and only a read-type call that did not fail backs a token (precompact_handoff.backed_premises).
+    `result` is handoff_sections_result's (before, after), None for no handoff. A Write has no before, so the handoff on disk is its before (a missing file holds none). Premise parsing and the
+    transcript scan are precompact_handoff's. The transcript is read once, and only when a stamp changed. Fails open:
+    no transcript_path, an unreadable transcript, handoff or prompt, a prompt with no premises name, a failed import."""
+    if result is None or not isinstance(transcript, str) or not transcript:
+        return None
+    try:
+        import precompact_handoff
+        name = precompact_handoff.premises_section()
+        if not name:
+            return None
+        before, after = result
+        path = os.path.expanduser(target)
+        path = path if os.path.isabs(path) else os.path.join(cwd or "", path)
+        if before is None:
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    before = handle.read()
+            except FileNotFoundError:
+                before = ""
+        need = precompact_handoff.stamp_changes(before, after, name)
+        backed = precompact_handoff.backed_premises(transcript, need, path) if need else None
+    except Exception:
+        return None
+    if backed is None:
+        return None
+    unbacked = [(pid, tokens) for pid, tokens in need if pid not in backed]
+    if not unbacked:
+        return None
+    lines = ["  %s: %s." % (pid, "read or run " + " or ".join(tokens[:3]) if tokens else "any read")
+             for pid, tokens in unbacked]
+    return "\n".join(lines), ", ".join(pid for pid, _tokens in unbacked)
 
 
 OTHER_CHECKOUT_REASON = (
@@ -6073,9 +6136,14 @@ def judge(payload) -> None:
 
         # 7a. A write that leaves a session handoff without a required section (rule handoff-sections).
         # Not in never_lifted: the owner may mean the write.
-        dropped = handoff_sections_hit(tool, tool_input, target, cwd)
+        handoff_result = handoff_sections_result(tool, tool_input, target, cwd)
+        dropped = handoff_sections_hit(tool, tool_input, target, cwd, handoff_result)
         if dropped:
             refuse(tool, "deny", "handoff-sections", HANDOFF_SECTIONS_REASON % dropped, dropped)
+        # 7a'. A write that restamps a premise's Checked value with no evidence (rule handoff-checked-stamp).
+        stamped = handoff_stamp_hit(tool, tool_input, target, cwd, payload.get("transcript_path"), handoff_result)
+        if stamped:
+            refuse(tool, "deny", "handoff-checked-stamp", HANDOFF_STAMP_REASON % stamped[0], stamped[1])
     for target in targets:
         # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
         if is_project_config(target, cwd):
