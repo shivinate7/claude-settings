@@ -11,6 +11,19 @@ from typing import Optional
 # The project's own settings files, with the leading slash the guard matches a path suffix on.
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 
+# The one home of the claude-code-remote server name (rule agent-no-remote-tools). The guard imports it by name;
+# lint/check_agent_models.py reads it from the guard.
+REMOTE_SERVER = "mcp__claude-code-remote"
+# The claude-code-remote tools that start, message, tag or archive sessions, set scheduled tasks or attach repos
+# and computers. An agent never calls one; the session that spawned it does. settings.json's guard matcher
+# must name each (lint/test_settings_matcher.py reads this tuple).
+REMOTE_OUTWARD_TOOLS = tuple(REMOTE_SERVER + "__" + short for short in (
+    "create_session", "send_message", "archive_session", "unarchive_session", "interrupt_session",
+    "set_session_tags", "set_session_title", "create_trigger", "update_trigger", "delete_trigger",
+    "fire_trigger", "send_later", "watch_url", "unwatch_url", "subscribe_pr_activity",
+    "unsubscribe_pr_activity", "add_repo", "register_repo_root", "confirm_repository_trust",
+    "request_computer_folder"))
+
 # A prompt that starts with one of these is a notice from a tool or an agent, never the owner.
 TASK_NOTIFICATION_TAG = "<task-notification>"
 # An agent hand-back (CLI 2.1.316 text), bare or after a frame line: the plain one or the
