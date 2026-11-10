@@ -1028,9 +1028,10 @@ else
   fi
 fi
 
-# ~/.claude/bin on PATH, once, in the rc file of the login shell.
+# ~/.claude/bin on PATH, once, in the rc file of the login shell. Cloud too: a cloud container
+# does not have ~/.claude/bin on PATH, so a printed remedy naming wait-pid or verdict fails with rc 127.
 case "${SHELL:-}" in *zsh) RC="$HOME/.zshrc" ;; *) RC="$HOME/.bashrc" ;; esac
-if [ "$CLOUD" != 1 ] && ! grep -qsF '# claude-settings: ~/.claude/bin on PATH' "$RC"; then
+if ! grep -qsF '# claude-settings: ~/.claude/bin on PATH' "$RC"; then
   printf '\n# claude-settings: ~/.claude/bin on PATH\nexport PATH="$HOME/.claude/bin:$PATH"\n' >> "$RC"
   log "added ~/.claude/bin to PATH in $RC; a new session picks it up"
 fi
