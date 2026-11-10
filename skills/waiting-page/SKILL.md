@@ -679,8 +679,8 @@ ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the wr
 An ask with `re` is a reply to an answer. The writer routes it to the `owner` of `asks/<re>`, the session that gave that answer.
 If that session has ended, the writer takes it. The reply ask is answered like any ask, with steps 1 and 2.
 
-The owner may Mark read an answered thread. That sets `dismissed` on its root ask. The page draws Mark read off while a reply in the
-thread waits, and on only when every record of the thread has its `reply`. The writer never rewrites `dismissed`, and a record with it is routed and answered as any other, with `update`.
+The owner may Mark read a routed ask: its root has a `home` and a `reply`, and no record in the thread waits. That sets `dismissed` on its
+root ask. The page draws Mark read only on a routed ask. An ask with no `home` stays a full card. The writer never rewrites `dismissed`, and a record with it is routed and answered as any other, with `update`.
 
 ## Message another session
 

@@ -6,6 +6,7 @@ Deep links: `#s=page|show|marked|read-lists|back|failed|all-read|today|rail-chip
 `&w=all|390|1280`, `&t=light|dark`, `&lab=off`, `&hide=<state>,...`. Each state is a `data-state` element in `#pics`.
 Sizes: phone 390 and desktop 1280, from the brief. `layout.py devices` prints `unknown` for this repo. Themes: light and dark.
 Options are named by name, never by a letter.
+The mockup is not yet updated: it still draws a "No home named" pill on an ask with no home, and a "Count only" rail. Where it differs, this file is the design.
 
 Rulings: owner pick a on item 480 (09:14 CST Nov 10) with his read-receipt note; his comment on the Answered row (09:13 CST);
 his question "where was this question?" (10:51 CST). The shape is the step's: once routed, an ask or an answered item shows one
@@ -28,13 +29,14 @@ line, its home and the short reply; Mark read removes it; nothing is deleted.
 
 ## 2. What counts as routed, and so shows one line
 
-- Ask thread: the root has `reply` and no record in it waits (`askWaitsIn` false). The line shows `home` when the session wrote one.
-  With no `home`, the pill reads "No home named" on a dashed edge (`#s=page`, the batch ask), so a gap in routing shows.
-- Open answered item: a receipt with `filed` (`rcOf(it).filed`), or `lane` and `lastAnswer` set (the busy-lane path files at once).
-  The home is the item's `home`.
-- Closed item with a `closed` time (point 5): always routed. A ruling (`arbiter: true`) is not a line: it keeps "Arbiter rulings".
+- Ask thread: routed when its root has `reply` and a `home`, and no record in the thread waits (`askRouted`). The line shows the `home`.
+  An ask with no `home` is not routed. It stays a full card: a new answer in full, a seen one behind "Show N older asks" (pick 480 a).
+- Open answered item: routed when it has a receipt with `filed` (`rcOf(it).filed`), and no `waits` and no `lane` (`routedOpen`).
+  An item with a `lane` keeps its card, even when filed. The home is the item's `home`.
+- Closed item with a `closed` time (point 5): always routed, with or without a `home`. A line with no `home` shows the pill
+  "No home named" on a dashed edge, so a gap in an item's routing shows. A ruling (`arbiter: true`) is not a line: it keeps "Arbiter rulings".
 - Everything else keeps today's look: "Filing pending" (No. 214 in `#s=page`: today's folded card with Change, no Mark read), an item
-  answered by its wait (`waits`), an owed item, and an ask or reply that waits.
+  answered by its wait (`waits`), an item on a lane, an owed item, and an ask or reply that waits.
 - The short reply: the first sentence of `reply`, cut at 120 characters ("No." before a number does not end a sentence). A closed item
   with no `reply` shows "No reply. Closed <time>." (No. 201).
 
@@ -60,7 +62,7 @@ line, its home and the short reply; Mark read removes it; nothing is deleted.
 
 - Press Mark read (`#s=marked`): the line becomes today's Dismissed line in its place, reworded: "Marked read. No. 212, Asks leave the
   Ask area" with Mark unread. It stays until the next load, then it is gone (ask-dismiss-notes 3, no count: nothing races a read mark).
-  The section count and the rail count drop by one at once.
+  The section count and the rail's Answered count drop by one at once, and the item's chip leaves the rail.
 - Read lists (`#s=read-lists`): "Show N read items" ends the Answered section; "Show N read asks" ends the Ask list (today's
   dismissed fold, renamed). Each opens its list on a dashed edge, newest mark first, with a quiet Mark unread on each row.
 - A read item comes back as a line when the writer's `replied` is later than its `dismissed` (`#s=back`, No. 209: marked 10:00, a
@@ -79,21 +81,20 @@ line, its home and the short reply; Mark read removes it; nothing is deleted.
   the owner presses Mark read. An item closed before this ships has no `closed` time and counts as read, so none of the 485 old items comes back.
 - Measured: the roadmap branch's `waiting/items/` holds 485 records; items 480 (`ask-phase-out-rule`) and 302 (`zizmor-pin-move`) are
   closed with no close time. So the page cannot tell an old close from a new one today, and a new field is needed.
-- Asks: an answered thread whose newest `answered` is before the ship time counts as read and goes behind "Show N read asks". The page
-  holds the ship time as one constant (for example `READ_FROM`). This replaces today's rule that shows the newest 3 seen answers and
-  hides the rest behind "Show N older asks" (`ASK_SHOWN`): after this, every unread answered ask is one line, and the read ones are in
-  one fold. Departs from: page.html `renderAskList` (`ASK_SHOWN`, "Show N older asks"). Not blocking.
+- Asks: a routed ask (point 2) whose newest `answered` is before the ship time counts as read and goes behind "Show N read asks". The
+  page holds the ship time as one constant, `READ_FROM`. An ask with no `home` is not routed, so this rule does not reach it: it keeps
+  its full card, and a seen one stays behind "Show N older asks" (`ASK_SHOWN`). Departs from: page.html `ASK_SHOWN`, for routed asks
+  only (they leave that fold and show as lines). Not blocking.
 - Section sub, rewritten so it is true (ux-statements-are-true): "Your sent answers, newest first. Each line leaves when you mark it read."
   Today's "Each leaves the page once its session closes it." would be false.
 
 ## 6. The rail's Answered row
 
-- Pick "Count only" (`#s=page`, focus `#rail`): the row is its head, "Answered" and a count of what is still in the section (lines and
-  filing-pending cards), with no chips, like the Ask row. Gain: the rail no longer repeats the section as a wall of chips, the part the
-  owner said "stays here for too long". Loss: no jump to one answered item from the rail.
-- Option "Rail: chips as today" (`#s=rail-chips`): today's chips; a chip leaves when its line is marked read.
+- The rail keeps its chips (`#s=rail-chips`). The Answered row lists one chip per item in the section, and its count is the section's
+  size, closed lines included. A chip leaves when its line is marked read, and the count drops by one with it.
 - Option "Rail: no Answered row" (`#s=rail-none`): the row is gone; the section stays. Gain: the shortest rail. Loss: nothing on the
   rail says answered lines wait.
+- Dropped: "Count only" (the head and a count, with no chips). The rail keeps its chips (coordinator's direction, 2026-11-10 13:29 CST).
 - The Ask row stays as today: it counts asks that wait for an answer.
 
 ## 7. New stored fields (outside this folder, for the builder)
