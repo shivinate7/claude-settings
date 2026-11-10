@@ -1,0 +1,12 @@
+{
+  "title": "A builder cannot restore a mutation-test file from another commit",
+  "phase": "now",
+  "status": "todo",
+  "order": 988,
+  "owner": "claude-settings",
+  "why": "Step builder-edits-mutation-tests is done but does not cover these forms, and #1675 (builders may only add to hooks/mutate_guard.py) closed unmerged.",
+  "note": "Orphan from the coordinator transcript reconcile, 10:26 CST Nov 10 (coordinator 19:56 CST Nov 7): refuse a builder's `git checkout <sha> -- hooks/mutate_*.py`, `git restore --source`, and a directory pathspec that holds a mutation-test path. Check main's guard first; a form main already refuses needs no change. Held by the freeze (owner 09:18 CST Nov 10).",
+  "updatedAt": "2026-11-10T10:26:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
