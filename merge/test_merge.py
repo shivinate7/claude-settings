@@ -9912,15 +9912,16 @@ class ReadyPageState(RecordsEnv):
     is marked ready (decision records-index-at-merge: only the merge tool rebuilds the page, before the branch goes ready).
     -> "current", "stale" or "skip". A read that cannot run raises Stop. Nothing is pushed, claimed or locked.
     The real generator runs here, not the fake of RecordsRebuild, so each page is what lint/hook_catalog.py writes.
-    Skip: the base is not the default branch, the head holds a Record-claim, or the head lacks the base tip.
+    Skip: the base is not the default branch, the head holds a Record-claim, or the head lacks the base tip (a False answer).
+    An unknown answer about the base tip (None) raises Stop, never a skip.
     """
     def setUp(self):
         Env.setUp(self)  # the real generator (merge.RECORDS as merge.py names it), not RecordsEnv's fake
 
-    def ready_state(self, n=7):
+    def ready_state(self, n=7, root=None):
         fn = getattr(merge, "ready_page_state", None)
         self.assertIsNotNone(fn, "merge.ready_page_state is not defined")  # a missing name is a FAIL with a reason, not an ERROR
-        return fn(self.co, n, self.host)
+        return fn(root or self.co, n, self.host)
 
     def cut(self, branch, base, files, msg="records", drop=(), page=False):
         """A new branch on origin, cut from origin/<base>: files are written and the paths in drop removed, in one commit pushed from
@@ -10011,6 +10012,38 @@ class ReadyPageState(RecordsEnv):
         self.assertNotIn("**What.**", self.origin_text("feat-bad", "debts/bad.md"))  # scope: the record has no What, so the generator refuses it
         with self.assertRaises(merge.Stop):
             self.ready_state()
+
+    def test_an_ancestry_read_that_cannot_answer_stops_the_read(self):
+        """A shallow clone holds main's tip and cuts its path to the head, so the ancestry read answers unknown, never False.
+        The read stops, and the ready mark is refused as unknown. A skip would let a stale page through (decision guard-hooks-fail-closed)."""
+        self.cut("feat-behind", "main", {"debts/gap-one.md": DEBT_TEXT})
+        self.main_moves()  # main moves on after the head was cut, so the head lacks the base tip
+        self.host.branch = "feat-behind"
+        sh(self.co, "git", "fetch", "-q", "origin")
+        main_tip = sh(self.co, "git", "rev-parse", "refs/remotes/origin/main")
+        head = sh(self.co, "git", "rev-parse", "refs/remotes/origin/feat-behind")
+        shallow = os.path.join(self.t, "shallow")
+        error = shallow_clone.make(self.bare, shallow, main_tip)  # holds main's tip; the head's commits are fetched below
+        if error:
+            raise RuntimeError("shallow fixture could not be built: " + error)
+        sh(shallow, "git", "fetch", "-q", "origin", "+refs/heads/feat-behind:refs/remotes/origin/feat-behind")
+        tmp, wt = merge.add_worktree(shallow, head)
+        try:  # scope before subject: the read in the worktree that ready_page_state makes is the unknown one
+            facts = shallow_clone.facts(shallow, main_tip, head)
+            self.assertTrue(facts["shallow"] and facts["pin_present"] and facts["ancestor_rc"] == 1,
+                            "scope: the clone does not reach the unknown shape: %r" % (facts,))
+            self.assertEqual(sh(wt, "git", "rev-parse", "--is-shallow-repository"), "true", "scope: the worktree is not shallow")
+            self.assertIsNone(merge.ancestor(wt, "refs/remotes/origin/main", head), "scope: the ancestry read in the worktree is not unknown")
+        finally:
+            merge.drop_worktree(shallow, tmp, wt)
+        try:
+            got = self.ready_state(root=shallow)
+        except merge.Stop as stop:
+            text = str(stop)
+            self.assertNotIn("git fetch", text, "the Stop is a failed fetch, not the unknown ancestry: " + text)
+            self.assertNotIn("cannot make the worktree", text, "the Stop is a failed worktree, not the unknown ancestry: " + text)
+            return
+        self.fail("ready_page_state read an unknown ancestry as %r, want Stop" % (got,))
 
 
 class MergeImport(unittest.TestCase):
