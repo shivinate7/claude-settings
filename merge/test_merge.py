@@ -12450,16 +12450,15 @@ CLOUD_ALLOW_RULES = tuple(f"Bash({shim} * --confirm{tail})" for shim in CLOUD_AL
 # A role rule allows one exact `merge --role <tier>` per tier in merge.MERGE_ROLES. No `*` and no word after the tier, so it cannot
 # pass --confirm or a PR number. The tiers come from decision session-tiers (the session tier design).
 CLOUD_ROLE_RULES = tuple(f"Bash({shim} --role {tier})" for shim in CLOUD_ALLOW_SHIMS for tier in sorted(merge.MERGE_ROLES))
-# Ruling 163 a (owner, the Degen waiting page, item 163 a, 2026-11-08 20:40 CST: "a permission rule in settings is good to add too"). The
-# cloud batch runner's `gh api` closes of Degen pull requests 530 and 518 were refused by auto mode at 20:06 CST. These two rules allow one
-# close of a pull request and one comment from a body file, and no other `gh api` call.
+# The cloud batch runner closes pull requests and comments on them, and auto mode refuses those `gh api` calls with no allow rule (decision
+# auto-mode-owner-acts). These two rules allow one close of a pull request and one comment from a body file, and no other `gh api` call.
 GH_CLOSE_RULE = "Bash(gh api -X PATCH repos/shivinate7/*/pulls/* -f state=closed)"
 GH_COMMENT_RULE = "Bash(gh api -X POST repos/shivinate7/*/issues/*/comments -F body=@*)"
 GH_CLOUD_RULES = (GH_CLOSE_RULE, GH_COMMENT_RULE)
 
 def claude_rule_matches(rule, command):
     """True when the Bash allow `rule` allows `command`, on Claude Code's documented wildcard semantics (the permissions docs, the wildcard
-    patterns section, read 2026-11-08): `*` matches any text, spaces included; the rule must match the whole command; a newline ends a
+    patterns section): `*` matches any text, spaces included; the rule must match the whole command; a newline ends a
     command, so `*` never matches one."""
     assert rule.startswith("Bash(") and rule.endswith(")"), rule
     return re.fullmatch(r"[^\n]*".join(re.escape(part) for part in rule[len("Bash("):-1].split("*")), command) is not None
@@ -12561,7 +12560,7 @@ class CloudAllow(unittest.TestCase):
         self.assertNotIn("Bash(~/.claude/bin/merge --role coordinator)", self.allow())
         self.assertIn("Bash(~/.claude/bin/merge --role batch-runner)", self.allow())
 
-    # ruling 163 a (owner, the Degen waiting page, 2026-11-08 20:40 CST): the two gh rules join the three merge rules
+    # the two gh rules join the three merge rules (decision auto-mode-owner-acts)
     def test_the_rules_file_holds_five_rules_in_all(self):
         self.assertEqual(len(self.allow()), 5, self.allow())
 
