@@ -2064,14 +2064,19 @@ def _find_type_d_bounds_all(expression, runners: bool = False) -> bool:
     return found
 
 
-def _find_runner_name_globs(expression):
+def _find_runner_name_globs(expression, runners: bool = True):
     """The (glob, ignores case) of the `-name` and `-iname` tests that narrow what find hands to its `-exec`
     programs, or None when some alternative that runs one has no such test. A test counts when it stands in the
     alternative itself (no paren), before its runner, with no `!` or `-not` before it. A test after the runner,
     in a group, or negated narrows nothing the guard may rely on. Alternatives are read as in
-    `_find_type_d_bounds_all`; one with no runner hands nothing over."""
+    `_find_type_d_bounds_all`; one with no runner hands nothing over. With `runners` False (the names go to
+    xargs on stdin), every alternative without a `-prune` prints a name, so each needs such a test, before its
+    first print, or the answer is None; a `-prune` alternative gives no glob, since the folders it names are
+    the ones find leaves out of the walk, and the rest of the tree is printed by the other alternatives."""
     globs = []
     for words in _find_alternatives(expression):
+        if not runners and "-prune" in words:
+            continue
         found, level, at, runs = False, 0, 0, False
         while at < len(words) and not runs:
             word = words[at]
@@ -2079,7 +2084,7 @@ def _find_runner_name_globs(expression):
                 level += 1
             elif word == ")":
                 level -= 1
-            elif word in ENV_FIND_RUNNERS:
+            elif word in ENV_FIND_RUNNERS or (not runners and word in ("-print", "-print0")):
                 runs = True
             elif word in ENV_FIND_GLOB_NAME_TESTS and not level and at + 1 < len(words) and not (
                     at > 0 and words[at - 1] in ("!", "-not")):
@@ -2087,21 +2092,25 @@ def _find_runner_name_globs(expression):
                 found = True
                 at += 1
             at += 1
-        if runs and not found:
+        if (runs or not runners) and not found:
             return None
     return globs
 
 
-def _find_type_d_handed(starts, here: str, expression, low: int, high):
+def _find_type_d_handed(starts, here: str, expression, low: int, high, runners: bool = True,
+                        follow: bool = False):
     """The folders a `find` bounded by `-type d` (`_find_type_d_bounds_all`) hands to a search that reads each
     whole, or None for a start word with a variable, whose folders the guard cannot see. A folder below another
     one handed over is read with it. `-mindepth N` of 1 or more hands over no start folder: it hands over the
     folders at depth N below each start, which hold every folder deeper down. With `-name` globs on every
-    alternative that runs a program (`_find_runner_name_globs`), the folders handed over are the ones within
+    alternative that hands a name on (`_find_runner_name_globs`), the folders handed over are the ones within
     the depth limits whose name a glob picks, the start folder included at depth 0. A glob that could name an
     env file, a tree past ENV_WALK_LIMIT entries, and an expression with no glob all fall back to the start
-    folder, or to the folders at depth N."""
-    globs = _find_runner_name_globs(expression)
+    folder, or to the folders at depth N. With `follow` (`-L` or `-follow`), find enters a symlink to a folder
+    as if it were one, and the search reads it whole, so each such link met in the walk is handed over, and its
+    target is walked in turn, wherever the target stands. The depth of a folder below a link counts from the
+    link."""
+    globs = _find_runner_name_globs(expression, runners)
     narrow = bool(globs) and not any(_glob_could_name_env(pattern, fold) for pattern, fold in globs)
 
     def picks(name: str) -> bool:
@@ -2117,22 +2126,36 @@ def _find_type_d_handed(starts, here: str, expression, low: int, high):
             if not os.path.isdir(folder):
                 continue
             base = os.path.basename(start.rstrip("/")) or start
-            # A name glob needs the whole tree down to `high`. Otherwise the walk stops at depth `low`.
-            stop = high if narrow else low
+            # A name glob needs the whole tree down to `high`, and so does a followed link, which the search
+            # does not follow itself. Otherwise the walk stops at depth `low`.
+            stop = high if narrow or follow else low
             picked = [folder] if low == 0 and picks(base) else []
             seen, past_cap = 0, False
-            for top, dirs, files in os.walk(folder):
-                relative = os.path.relpath(top, folder).replace(os.sep, "/")
-                level = 0 if relative == "." else relative.count("/") + 1
-                picked += [os.path.join(top, d) for d in dirs
-                           if level + 1 >= low and (high is None or level + 1 <= high) and picks(d)
-                           and (narrow or level + 1 == low)]
-                seen += len(dirs) + len(files)
-                if seen > ENV_WALK_LIMIT:
-                    past_cap = True
-                    break
-                if stop is not None and level + 1 >= stop:
-                    dirs[:] = []
+            roots, entered = [(folder, 0)], {os.path.realpath(folder)}
+            while roots and not past_cap:
+                root, offset = roots.pop()
+                for top, dirs, files in os.walk(root):
+                    relative = os.path.relpath(top, root).replace(os.sep, "/")
+                    level = offset + (0 if relative == "." else relative.count("/") + 1)
+                    picked += [os.path.join(top, d) for d in dirs
+                               if level + 1 >= low and (high is None or level + 1 <= high) and picks(d)
+                               and (narrow or level + 1 == low)]
+                    if follow:
+                        for d in dirs:
+                            path = os.path.join(top, d)
+                            real = os.path.realpath(path)
+                            if os.path.islink(path) and os.path.isdir(path) and real not in entered:
+                                entered.add(real)
+                                roots.append((path, level + 1))
+                                if not narrow and level + 1 >= low and (high is None or level + 1 <= high) \
+                                        and path not in picked:
+                                    picked.append(path)
+                    seen += len(dirs) + len(files)
+                    if seen > ENV_WALK_LIMIT:
+                        past_cap = True
+                        break
+                    if stop is not None and level + 1 >= stop:
+                        dirs[:] = []
             handed += [folder] if past_cap else picked
     return handed
 
@@ -2406,10 +2429,12 @@ def _feed_source(command: str, rest, here: str, reads_folders: bool = True,
             starts.append((rest[at], bare[at]))
             at += 1
         low, high = _find_depth_limits(bare[at:])
+        # With -L (the last of -H, -L and -P wins) or -follow, find enters each link to a folder.
+        follow = "-follow" in bare[at:] or next((w for w in reversed(bare[:at]) if w in ("-H", "-L", "-P")), "") == "-L"
         if _find_type_d_bounds_all(bare[at:], exec_feed):
             # The search, a `-exec` program or xargs, gets each folder find prints, and a search that reads folders
             # reads each whole. The folders it gets are the ones below the start folders that the tests pick.
-            handed = _find_type_d_handed(starts, here, bare[at:], low, high)
+            handed = _find_type_d_handed(starts, here, bare[at:], low, high, exec_feed, follow)
             if handed is None:
                 return unknown
             # Given no name, xargs runs its search once on `here`.
