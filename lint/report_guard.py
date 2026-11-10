@@ -29,7 +29,7 @@ that record, never in the reason.
 
 On the same landed turns it also blocks (one block, all reasons joined) when a Done item lacks
 BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when the reply holds
-a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder, reviewer,
+a record id or an item number with no short gloss (`speak-cite-id-plus-gloss`), or when a builder, reviewer,
 test-author or record-writer spawned since the last human message goes unnamed in Done, or a
 named "role model" pair matches no spawn of that role (`reports-done-names-models`), or when
 a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
@@ -627,13 +627,17 @@ def done_format_problem(text):
     return ""
 
 
-# speak-cite-id-plus-gloss: a record id is `D<digits>` or `decision <digits>`. A bare `#N` is
+# speak-cite-id-plus-gloss: a record id is `D<digits>`, `decision <digits>`, or a waiting-page item
+# number (`item <n>`, `page item <n>`). `line item <n>` is exempt: it is a PO or budget line, not a page
+# item. A bare `#N` is
 # NOT read as a record id: a Done line must cite PRs as `#N` (reports-done-format), so the two
 # cannot be told apart. Skipped text: fenced code, inline code, URLs, markdown links. An id
 # carries a gloss when 2 or more words follow it after a separator (`D12, short titles`,
 # `D12: ...`, `D12 (..)`), or `D12's two words`, or it sits in parentheses after words
 # (`short titles (D12)`).
-CITE_ID_RE = re.compile(r"(?<![\w/.#:$-])(?:D\d{1,4}|[Dd]ecisions?\s+#?\d{1,4})(?!\w|\.\d|:[A-Z]\d)")
+CITE_ID_RE = re.compile(
+    r"(?<![\w/.#:$-])(?:D\d{1,4}|[Dd]ecisions?\s+#?\d{1,4}"
+    r"|(?<![Ll]ine )(?:[Pp]age\s+)?[Ii]tems?\s+\d{1,4})(?!\w|\.\d|:[A-Z]\d)")
 CITE_SKIP_RE = re.compile(r"```.*?```|`[^`\n]*`|https?://\S+|\[[^\]\n]*\]\([^)\n]*\)", re.S)
 GLOSS_AFTER_RE = re.compile(
     r"""^["')\]]*\s*(?:[,:;(=—–-]|\s-{1,2}\s)\s*\(?[A-Za-z][\w'-]*\s+[\w'-]+"""
