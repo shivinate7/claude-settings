@@ -115,11 +115,11 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 @media (pointer: coarse) { .nchip, .pairchips .nchip { height: 44px; } }
 @media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
 
-.list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
+.list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 30px; min-width: 0; grid-column: 2; }
 @media (max-width: 960px) { .list { grid-column: 1; } }
-.tier { display: grid; gap: 12px; scroll-margin-top: 64px; }
+.tier { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; scroll-margin-top: 64px; }
 .tier > header { display: flex; align-items: center; }
-.tier > header h2 { font: 700 19px/1.25 var(--body); display: flex; align-items: center; gap: 10px; }
+.tier > header h2 { font: 700 19px/1.25 var(--body); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 .tier > header .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
 .empty { color: var(--muted); padding: 20px; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface); overflow-wrap: anywhere; }
 
@@ -778,7 +778,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askrow .slot:empty { display: none; }
 .askrow .btn.askadd { grid-column: 3; }
 .askrow .btn.askgo { grid-column: 4; }
-.askhint { margin: 0; min-height: 44px; display: flex; align-items: center; gap: 8px; font-size: .875rem; color: var(--muted); }
+.askhint { margin: 0; min-height: 44px; display: flex; align-items: center; gap: 8px; font-size: .875rem; color: var(--muted); overflow-wrap: anywhere; }
 .askhint.bad { color: var(--due); font-weight: 600; }
 .btn.askgo, .btn.askadd { min-height: 48px; white-space: nowrap; }
 /* Off, they keep their box and label, marked by a dashed edge as .btn.mv is at an end of the order; the hint beside them says why. */
@@ -913,8 +913,10 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 }
 .reline { margin: 0; font-size: .90625rem; color: var(--muted); overflow-wrap: anywhere; }
 /* The ask list and the Ask box read their own width, in em, so larger text trips the change sooner. A folded row or a Dismissed line
-   with no room for its text beside the press: the press drops under the text, at the text's start. */
-@container askl (width < 19.5em) {
+   with no room for its text beside the press: the press drops under the text, at the text's start. The breakpoint is 8em of text, the
+   row's own 3.6em of padding and glyph, and the widest press a fallback font gives (Restore in DejaVu Sans, 8.6em), so the column
+   never falls under 8em. Served, the narrowest phone row (360 wide, a 20.5em list) stays beside its press. */
+@container askl (width < 20.375em) {
   /* The glyph sits on the title's first line, not on the middle of a three-line block. */
   .frow { grid-template-columns: auto minmax(0, 1fr); padding-block: 8px; align-items: start; }
   .frow > .g { margin-block-start: calc((1.55em - 12px) / 2); }
