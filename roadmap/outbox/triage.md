@@ -524,3 +524,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - thread-pills-to-holds (#2534, designer's offer): the failed and stopped thread pills could move from --due to --holds.
 - live-unknown-strays-zero (#2534): Strays and the "entries skipped" row read 0 when the whole live read is unknown; they should read unknown.
 - notes-953-threads-cite-stale (#2534): docs/debts/notes.md:953 (page-ruling-doc-gaps) still cites "no threads or pulls list".
+- brief-pin-cherry-picks-word (#2538; coordinator  CST Nov 10): dropping only the word "cherry-picks" from the builder rule sentence still passes its pin.
+- brief-pin-test-change-sentence (#2538): the sentence "builder reports the test change it needs..." is pinned by no case.
