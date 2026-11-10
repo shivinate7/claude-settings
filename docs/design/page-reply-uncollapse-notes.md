@@ -13,7 +13,7 @@ Settled by the brief and the coordinator (Nov 6), not options here:
   and `waiting.visit`. The writer sets `replied` only on a `reply` write or a `waits` change, never on `lastAnswer` alone.
 - A roadmap step is new when `updatedAt` is later than the viewer's last visit.
 - A reopened card unfolds in place and never re-sorts on the open page (ux-order-holds-still).
-- A fold locked by a draft keeps its lock (`foldLocked`).
+- A draft, a stood pick or a pending withdraw locks the fold open (`foldLocked`). A saved item never locks.
 - An item the owner still owes never folds. A card folds only once it is answered.
 
 ## 1. An owed card never folds. Owner grant: yes

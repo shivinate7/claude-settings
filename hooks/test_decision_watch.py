@@ -308,7 +308,7 @@ def case_last_human_reader_skips_a_peer_record():
           (idx, stamp) == (0, T0), repr((idx, stamp)))
     check("peer reply: last_human_stamp (shared reader) returns the owner's stamp",
           dw.last_human_stamp(records) == T0, repr(dw.last_human_stamp(records)))
-    # Pin (green before the fix): a later owner line still wins over an earlier peer reply.
+    # Pin: a later owner line still wins over an earlier peer reply.
     later = records + [human_record("thanks, now the next one", t2)]
     check("peer reply: a later owner line is still the last human",
           dw.last_human_index_and_stamp(later) == (4, t2), repr(dw.last_human_index_and_stamp(later)))
@@ -970,6 +970,51 @@ def case_main_prints_the_config_report():
           and "settings.local.json" in message, result.stdout)
     check("main_config_report: no judgment text beside it", dw.FLAG_PREFIX not in message
           and dw.UNKNOWN_PREFIX not in message, result.stdout)
+
+
+# A PowerShell call that writes a project config file, its text holding `\"` before the write. The
+# PowerShell reading finds the write, and the bash reading takes `\"` as an escaped quote and hides
+# it. main() must name the config file, as it does for an Edit above.
+def case_main_powershell_config_report():
+    repo = make_repo("main_powershell_config_report")
+    write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
+    commit_all(repo)
+    command = 'echo "C:\\" ; Set-Content .claude/settings.json x ; echo \\"D"'
+    call = {"type": "tool_use", "name": "PowerShell", "input": {"command": command}}
+    records = [
+        human_record("tune the project settings", T0),
+        assistant_record(tool_use=call),
+        assistant_record(text="done"),
+    ]
+    path = write_transcript(repo, records)
+    result = _run_main({"transcript_path": path, "cwd": repo})
+    check("main_powershell_config_report: exit 0", result.returncode == 0, result.returncode)
+    try:
+        message = json.loads(result.stdout.strip()).get("systemMessage", "")
+    except Exception:
+        message = ""
+    check("main_powershell_config_report: names the config file",
+          "Config files changed this turn" in message and "settings.json" in message, result.stdout)
+
+
+# The same shape writing a file that is not project config: no config line. A reading that calls
+# every PowerShell write a config write fails here.
+def case_main_powershell_unrelated_write_names_no_config():
+    repo = make_repo("main_powershell_unrelated_write")
+    write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
+    commit_all(repo)
+    command = 'echo "C:\\" ; Set-Content notes.txt x ; echo \\"D"'
+    call = {"type": "tool_use", "name": "PowerShell", "input": {"command": command}}
+    records = [
+        human_record("note the result", T0),
+        assistant_record(tool_use=call),
+        assistant_record(text="done"),
+    ]
+    path = write_transcript(repo, records)
+    result = _run_main({"transcript_path": path, "cwd": repo})
+    check("main_powershell_unrelated_write: exit 0", result.returncode == 0, result.returncode)
+    check("main_powershell_unrelated_write: no config line",
+          "Config files changed" not in result.stdout, result.stdout)
 
 
 def case_main_missing_transcript():
@@ -1961,6 +2006,8 @@ def main():
     case_token_t10_undecodable_file_is_an_error()
     case_main_ordinary_turn()
     case_main_prints_the_config_report()
+    case_main_powershell_config_report()
+    case_main_powershell_unrelated_write_names_no_config()
     case_main_missing_transcript()
     case_main_stop_hook_active_stays_quiet()
 

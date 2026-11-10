@@ -13,9 +13,13 @@ sections. Union would leave duplicate or stale rows silently. The merge tool reg
 The rule takes effect only once it is on main. A lane branched before it merges needs main merged in.
 
 Known cost: union never removes a line that one side kept. When two lanes rewrite the same note, both
-versions stay. A note that one lane deletes or reverts can come back when another lane appends. No
-incident yet, so no check (rule building-guard-needs-incident). `lint/test_notes_union_merge.py` pins
-the rewrite case.
+versions stay. A note that one lane deletes or reverts can come back when another lane appends. A merge of a PR's
+new base revived notes the PR had deleted (PR #1825, 2026-11-08). `check_silent_undo` now refuses a
+revived note, matched by slug, so a reworded copy is caught. It reads the branch's own commits, so it needs no deletion on
+main. It counts copies per slug: it refuses only when head holds more copies than the branch's last lowering commit left,
+so a dedupe that keeps a copy passes. A note with no `- slug:` form is read by its whole line, so only the same text counts
+as a copy. An octopus merge no longer hides a revival: the check keeps its findings and then reports the unread merge as UNKNOWN
+(step notes-union-batch-revival). A note re-added by a non-merge commit passes. An edit in place does not keep a revived note, so a sweep edit never keeps one (lane ruling 2026-11-08 06:20 CST, upheld by the coordinator). A rebase onto main leaves no merge, so a revival there is not seen (debt silent-undo-rebase-no-merge). `lint/test_notes_union_merge.py` pins the rewrite case.
 
 Scope: this repo only. Another repo with its own notes file adds the same line to its own
 `.gitattributes`.
