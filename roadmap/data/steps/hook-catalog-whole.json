@@ -1,0 +1,12 @@
+{
+  "title": "The hook catalog covers every hook and setting, with a runs-on column, linked from the page's Status tab",
+  "phase": "now",
+  "status": "todo",
+  "order": 1036,
+  "owner": "triage",
+  "why": "Owner 16:00 CST Nov 10 (R11, relayed by the retrospective session): \"A -- but also i kinda meant how when questions reach triage, do the pre tool question use stuff run on it just like it would when uqestions used to come in line in the chats?\"",
+  "note": "docs/catalog.md (lint/hook_catalog.py) lists the 36 hooks and matches settings.json. Grow it to cover permissions, the 12 autoMode rules, env, merge/cloud_allow.json, githooks, the cloud refresh hook and the events each mod hooks. Each row gets a runs-on column (Mac, Windows, cloud). The page's Status tab links to it; today neither page skill reads docs/catalog.md. Home: decision hook-catalog-page. Parity answer: an ArtifactData page write runs the same question form (guard.py data_tool_hit) and judge (call_judge.py) as the chat box; measured by triage today (page writes refused by question-judge and past-ruling at 15:42-15:55 CST). Unverified: whether a whole-page Artifact publish skips both.",
+  "updatedAt": "2026-11-10T16:01:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
