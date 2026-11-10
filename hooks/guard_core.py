@@ -1162,7 +1162,7 @@ def _segment_git_c_parts(tokens):
     or None when the segment's command word is not `git` or a `-C` has no value. The env folder is the one
     an `env -C <dir>` or `env --chdir <dir>` in front of the `git` moves it into (`_wrapper_chdir`). The
     git -C folder is every `-C` after the `git`, chained. The two stay apart because `_run_dir` reads them
-    differently: an env folder is a move of the shell, as a `cd` is, and a git -C folder is not.
+    differently: an env folder moves only the segment's own program, and a git -C folder reads first-wins.
     `_segment_git_c_target` joins them for every other caller.
 
     ONLY THE SPACED FORM, `-C <path>`, IS READ. MEASURED against the real binary: `git
@@ -1241,7 +1241,8 @@ def _strip_heredoc_bodies_unconditionally(cmd: str) -> str:
 
 
 def _run_dir(cmd: str, shell_cwd: str) -> str:
-    """Return the directory the command RUNS in: a `git -C`, else the last `cd` or `env -C`, else the cwd.
+    """Return the directory the command RUNS in: a `git -C`, else the env folder when every git segment
+    has one, else the last `cd`, else the cwd.
 
     This is the part both roots share. Neither `--work-tree` nor `--git-dir` is read here,
     because each answers a different question and each belongs to one caller.
@@ -1255,9 +1256,12 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     against the shell cwd, not against the folder an earlier `cd` left. That first-wins reading of
     `git -C` is kept as the owner ruled.
 
-    AN `env -C` FOLDER IS A MOVE, NOT A `git -C`: it moves the shell's folder as a `cd` does, so the
-    LAST of the `cd` and `env -C` segments wins, and a relative one joins onto the folder the earlier
-    one left. With a `git -C` in the same segment, the `git -C` joins onto that env folder.
+    AN `env -C` FOLDER MOVES ONLY ITS OWN PROGRAM, NOT THE SHELL: a later bare `git` in the command
+    still runs in the shell's folder. So the env folder is read only when EVERY git segment carries
+    one; the last of them wins, and a relative one joins onto the folder the last `cd` before it left.
+    Any bare git segment makes the shell's folder (the last `cd`, else the cwd) the answer, and so
+    does a command with no git segment. With a `git -C` in the same segment, the `git -C` joins onto
+    that env folder.
 
     HEREDOC BODIES ARE STRIPPED FIRST, unconditionally, even an interpreter body that
     `strip_heredoc_bodies` keeps for other callers: a `cd` line inside one never moves the
@@ -1265,7 +1269,9 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     """
     cmd = _strip_heredoc_bodies_unconditionally(cmd)
     where = None
-    moved = None   # the folder the last `cd` or `env -C` left
+    moved = None   # the folder the last `cd` left
+    env_moved = None   # the env folder of the last git segment that carries one
+    bare_git = False   # a git segment without an env folder runs in the shell's folder
     for segment in split_segments(cmd):
         tokens = segment_tokens(segment)
         if tokens is None:
@@ -1279,12 +1285,14 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
                 if where is None:
                     where = _chain_chdir(env_dir, git_c)
             elif env_dir:
-                moved = env_dir
+                env_moved = env_dir
+            else:
+                bare_git = True
         cd = _segment_cd_target(tokens)
         if cd is not None:
             moved = cd
     if where is None:
-        where = moved
+        where = env_moved if env_moved and not bare_git else moved
     if where:
         where = _absolute(where, shell_cwd)
     return where or shell_cwd or ""
