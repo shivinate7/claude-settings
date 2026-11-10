@@ -80,7 +80,7 @@ not, it refuses an Input Needed item that cites a waiting-page item whose status
 item N", "page-item N", "Cockpit item N", "item(s) N", "item **N**" or "item N a", and every number of a list after
 the word ("items N, M and K", "N or M", "N/M", "N, M, or K", "N (closed), M", "Items: N, M", an "items:" bullet list)
 and both ends of a range ("N-M"; the middle is not read), outside backticks and quotes; a PR number, "#N" alone, a
-date ("item 2026-11-10"), a bare number and Done or Next text are no cite. The status comes from the waiting copy on
+date that opens with a year ("item" before a year-month-day), a bare number and Done or Next text are no cite. The status comes from the waiting copy on
 origin/<record branch>, read through hooks/feedback_guard.py (Homes.item_statuses, the one reader, one `git grep`
 per Stop). An ArtifactData read of collection `items` in the turn after the last incoming message
 (feedback_guard.read_back_statuses) wins for its item: open skips the copy for that item, closed refuses; a read
@@ -3043,7 +3043,7 @@ def triage_hold(hook, records, active):
 # "(closed)" note after a number, "**214**" and "#214". "items:" at a line end, or a line that opens with "Items"
 # and ends in a label's colon ("Items waiting on you:"), opens a bullet or numbered list: the number after each
 # marker is a cite, the marker is not, and text may follow the number. A list never crosses a line break, so a
-# bullet under "item 214" is no cite. A number that opens a date ("2026-11-10") is no cite. A number after a
+# bullet under "item 214" is no cite. A number that opens a date (a year first) is no cite. A number after a
 # separator or a marker is a cite only when it is bare: no glued letter or "%" ("3rd", "24h", "5%"), no time or
 # decimal ("10:30"), no small fraction ("11/10"), no count or unit word after it (ITEM_COUNT_WORDS). The number
 # right after the word is not held to that, so "item 1 of 3" cites 1. A second matcher beside
