@@ -3179,6 +3179,30 @@ for (const scheme of SCHEMES) {
   });
 }
 
+// The wrap of a folded row's parts (.frow). Where the row cannot take the title and "Show answer" on one line, "Show answer" drops under
+// the title and stays inside the row. A row set to nowrap keeps it beside the title, and at 180 and 240 wide past the row's edge. Each case
+// fails by name under that mutant, and the page passes in both fonts.
+const atWidth = (width, zoom) => `${width} wide${zoom ? " with the root font size doubled" : ""}`;
+for (const [width, zoom] of [[280, false], [240, false], [180, false], [320, true]]) {
+  layoutTest(`folded row, waiting reply: at ${atWidth(width, zoom)}, "Show answer" drops under the title`, async (t) => {
+    const page = await foldedRowPage(t, "wait", width); if (!page) return;
+    const id = FOLD_ROWS.wait.ask.id;
+    if (zoom) await zoomText(page);
+    foldedScope(await foldedDate(page, id), "wait", width);
+    const g = await pressGeo(page, id), s = await showAnswerGeo(page, id);
+    assert.ok(s.t >= g.title.b - 1, `"Show answer" is drawn at ${Math.round(s.t)} px, beside the title that ends at ${Math.round(g.title.b)} px, at ${atWidth(width, zoom)}`);
+  });
+}
+for (const width of [240, 180]) {
+  layoutTest(`folded row, waiting reply: at ${width} wide, "Show answer" stays inside its row`, async (t) => {
+    const page = await foldedRowPage(t, "wait", width); if (!page) return;
+    const id = FOLD_ROWS.wait.ask.id;
+    foldedScope(await foldedDate(page, id), "wait", width);
+    const g = await pressGeo(page, id), s = await showAnswerGeo(page, id);
+    assert.ok(s.r <= g.li.r + 0.5, `"Show answer" ends at ${Math.round(s.r)} px, past the row's edge at ${Math.round(g.li.r)} px, at ${width} wide`);
+  });
+}
+
 // Served-font boxes the fix must keep. At 1440, 820 and 390 wide they equal main's boxes; at 360 wide they hold the folded-date wrap
 // (docs/design/ask-folded-date-notes.md). Each row's box is [left, right, height] of the folded row's li; the row and press are [right, top offset from the li, height] and [left, right, top offset, height]. A box that moves fails by
 // name. The Ask box presses are [Add left, Add right, Send left, Send right]. Tolerance is 1 px.
