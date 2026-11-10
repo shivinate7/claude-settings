@@ -3958,6 +3958,26 @@ for (const width of [768, 1280]) {
   });
 }
 
+// The home pill is how a line shows its routing, and a gap shows as "No home named" (notes section 2). So its text stays whole at
+// tablet and desktop width, beside a long title. The room is the pill's box less its side padding. The text is read as a range,
+// because a cut text keeps its full width in the layout.
+test("ask-phase-out: the home pill of a line keeps its whole text at 768 and 1280 px, beside a long title", async (t) => {
+  for (const width of [768, 1280]) {
+    const page = await open(t, { items: [AP_OPEN, AP_LONG, AP_CLOSED], viewport: { width, height: 900 } }); if (!page) return;
+    await mustHave(page, `#line-${AP_CLOSED.n} .hometag`, `the home pill of No. ${AP_CLOSED.n} at ${width} px`);
+    await mustHave(page, `#line-${AP_LONG.n} .hometag`, `the home pill of No. ${AP_LONG.n} at ${width} px`);
+    for (const n of [AP_CLOSED.n, AP_LONG.n]) {
+      const p = await page.evaluate((sel) => {
+        const pill = document.querySelector(sel), cs = getComputedStyle(pill), range = document.createRange();
+        range.selectNodeContents(pill.lastChild);
+        return { scroll: pill.scrollWidth, client: pill.clientWidth, text: range.getBoundingClientRect().width, room: pill.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) };
+      }, `#line-${n} .hometag`);
+      assert.ok(p.scroll <= p.client, `the home pill of No. ${n} is cut at ${width} px: it scrolls ${p.scroll} px in a box ${p.client} px wide`);
+      assert.ok(p.text <= p.room + 0.5, `the text of the home pill of No. ${n} is cut at ${width} px: the text is ${p.text.toFixed(1)} px wide, the room is ${p.room} px`);
+    }
+  }
+});
+
 test("ask-phase-out: the rail's Answered row follows the Answered section's order, newest answer first", async (t) => {
   const sent = { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" };
   const page = await open(t, { items: [DECISION, TASK, AP_CLOSED, AP_NEWER], answers: { [TASK.id]: sent } }); if (!page) return;
