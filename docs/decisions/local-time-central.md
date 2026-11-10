@@ -15,6 +15,7 @@ In winter the line reads CST and UTC-06:00.
   zoneinfo (Python on Windows often has no tz database) nor the machine zone.
 - The hook is advisory. On an internal error it prints nothing to stdout, writes one `local_time:` line to stderr, and exits 0. It prints
   the time line before it reads stdin to save the owner's message (`owner-feedback-inbox`).
+- A session reads any later time from `~/.claude/bin/now-central` (bare `HH:MM CST`, `--full`, `--iso`), never from memory (owner, 2026-11-08 10:17 CST). The printed time line ends with that pointer. The stamp it saves does not.
 
 Reason: sessions saw only UTC and answered in UTC, which shows the wrong date for the owner every evening.
 
