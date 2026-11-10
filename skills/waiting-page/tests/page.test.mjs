@@ -2442,6 +2442,59 @@ test("answered-sink: a saved card with a lane sinks at load, folded, with its Fi
   assert.equal(said, 1, `No. ${it.n} says "waits on lane" ${said} times`);
 });
 
+// ---------------------------------------------------------------- answered sink: an open item with a lane and a last answer
+// Coordinator pick, 2026-11-10 09:12 CST (owner page item 477). An OPEN item with `lane` and `lastAnswer` and no answers record
+// sinks to the Answered section at load, folded, as a saved card does, and is counted in the section and the rail. Today it stays
+// in its tier. The owner's last answer carries a note, so the fold has a part to hold on either build.
+const LANE_ANS = { choice: "a", note: "Kept the red one.", at: ANSWERED_AT };
+
+test("answered-sink: an open item with a lane and a last answer and no answers record sinks at load, folded, and is counted in the section and the rail", async (t) => {
+  const it = mk("lane-ans", 1, { added: at(5), lane: "ci-done-comment", lastAnswer: LANE_ANS }), other = mk("lane-next", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other] }); if (!page) return;
+  assert.deepEqual(await sectionIds(page), ["tier-calm", "tier-answered"], "the page does not draw the open tier and the Answered section");
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), [other.id], `No. ${it.n} is still in its tier`);
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${it.n} is not folded at load`);
+  await need(page.locator("#b-answered"), "the Answered section has no head");
+  assert.equal((await page.locator("#b-answered .ct").textContent()).trim(), "1", `the Answered section count does not hold No. ${it.n}`);
+  await need(page.locator('#rail a.ov-head[href="#tier-answered"]'), "the rail has no Answered row");
+  assert.equal((await page.locator('#rail a.ov-head[href="#tier-answered"] .ct').textContent()).trim(), "1", `the Answered row count does not hold No. ${it.n}`);
+  assert.ok((await railChipsIn(page, "answered")).includes(it.id), `No. ${it.n}'s rail chip is not in the Answered row`);
+  assert.ok(!(await railChipsIn(page, "calm")).includes(it.id), `No. ${it.n}'s rail chip is still in the open row`);
+});
+
+// Full size (P8): 30 such items sink together, and the section count, the Answered row and the tier all agree.
+test("answered-sink: a page of 30 open items with a lane and a last answer sinks them all at load, and the section, the rail and the tier agree", async (t) => {
+  const lanes = Array.from({ length: 30 }, (_, i) => mk("lane-full-" + (i + 1), i + 1, { added: at(5), lane: "ci-done-comment", lastAnswer: LANE_ANS }));
+  const open1 = mk("lane-full-open", 31, { added: NEW_ADDED });
+  const page = await open(t, { items: [...lanes, open1] }); if (!page) return;
+  assert.deepEqual(await sectionIds(page), ["tier-calm", "tier-answered"], "the page does not draw the open tier and the Answered section");
+  assert.deepEqual((await cardsIn(page, "#tier-answered")).sort(), lanes.map((x) => x.id).sort(), "the Answered section does not hold each lane item");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), [open1.id], "an open lane item is still in its tier");
+  assert.equal((await page.locator("#b-answered .ct").textContent()).trim(), "30", "the Answered section count is not 30");
+  assert.equal((await page.locator('#rail a.ov-head[href="#tier-answered"] .ct').textContent()).trim(), "30", "the Answered row count is not 30");
+});
+
+// A Change on such a card keeps it in the Answered section, open, with its fold locked open, as for a saved card.
+test("answered-sink: a Change on an open item with a lane and a last answer keeps it in the Answered section, open, with its fold locked open", async (t) => {
+  const it = mk("lane-change", 1, { added: at(5), lane: "ci-done-comment", lastAnswer: LANE_ANS }), other = mk("lane-change-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other] }); if (!page) return;
+  assert.deepEqual(await sectionIds(page), ["tier-calm", "tier-answered"], "the page does not draw the open tier and the Answered section");
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  const before = await layout(page);
+  const c = card(page, it), change = c.getByRole("button", { name: "Change", exact: true });
+  await need(change, `No. ${it.n} has no Change button`);
+  await change.click();
+  assert.equal(await sectionOf(page, it), "tier-answered", `Change moved No. ${it.n} out of the Answered section`);
+  assert.deepEqual(await layout(page), before, "Change moved a card");
+  const fold = c.locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control after Change`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", "Change left the fold closed");
+  assert.equal(await c.locator(".opts").isVisible(), true, "the options did not open under Change");
+});
+
 // Case 5 (regression, #1345): a reply that arrives on a card sunk at load opens its fold in place. No card moves.
 test("answered-sink: a reply that arrives on a card sunk at load opens its fold in place, and no card moves", async (t) => {
   const it = mk("live-reply", 1, { added: at(5) }), other = mk("live-open", 2, { added: NEW_ADDED });
@@ -7407,6 +7460,11 @@ for (const scheme of ["light", "dark"]) test(`a long lane slug and an unbroken r
   const fields = { lane: "a-very-long-lane-branch-slug-".repeat(4), lastAnswer: { choice: "b", note: url, at: LA_AT }, reply: url };
   const open1 = mk("ov-open", 1, fields), saved1 = mk("ov-saved", 2, fields);
   const page = await open(t, { items: [open1, saved1], answers: laSaved(saved1), scheme, viewport: { width: 390, height: 900 } }); if (!page) return;
+  // The open card has a lane and a last answer and no answers record, so it sinks to the Answered section folded (coordinator pick,
+  // 2026-11-10 09:12 CST). Its panel sits in that fold, so the fold opens before the measure, or the check reads hidden boxes.
+  assert.equal(await sectionOf(page, open1), "tier-answered", `No. ${open1.n} is not in the Answered section`);
+  await need(card(page, open1).locator("button.unfold"), `No. ${open1.n} has no fold control`);
+  await card(page, open1).locator("button.unfold").click();
   await laText(page, open1); await laText(page, saved1);
   const m = await page.evaluate(() => ({
     sw: document.documentElement.scrollWidth, iw: innerWidth,
