@@ -28,7 +28,8 @@ REMOTE_OUTWARD_TOOLS = tuple(REMOTE_SERVER + "__" + short for short in (
 TASK_NOTIFICATION_TAG = "<task-notification>"
 # An agent hand-back (CLI 2.1.316 text), bare or after a frame line: the plain one or the
 # mid-turn one. The tag name ends at `>` or whitespace.
-_HAND_BACK_TAGS = tuple("<agent-message" + end for end in "> \t\n\r")
+HAND_BACK_TAG = "<agent-message"  # the tag name, without its end
+_HAND_BACK_TAGS = tuple(HAND_BACK_TAG + end for end in "> \t\n\r")
 # Bandaid (debt inbox-saves-other-notices): a peer's send_message frame, bare at the start of the
 # prompt. The tag name ends at `>` or whitespace.
 _PEER_FRAME_TAGS = tuple("<cross-session-message" + end for end in "> \t\n\r")
