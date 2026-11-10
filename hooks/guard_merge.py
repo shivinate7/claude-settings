@@ -574,6 +574,74 @@ def review_record_hit(bodies, repo: str, selector, where: str, edit=None, variab
     return None
 
 
+# ---- a gh write in a cloud session (rule gh-write-cloud)
+#
+# The GitHub MCP tools and the merge tool write there; a `gh` write is refused. Judged per segment from the
+# command word, so quoted text and heredoc bodies never fire. The caller applies it only when is_cloud().
+GH_WRITE_CLOUD_REASON = (
+    "Rule (GitHub): in a cloud session a pull request write, an issue write and an API write made with gh are "
+    "refused. A GitHub write goes through the GitHub MCP tools, and the merge tool merges. "
+    "Remedy: open a draft PR with mcp__github__create_pull_request, comment with mcp__github__add_issue_comment, "
+    "edit or close with mcp__github__update_pull_request or mcp__github__issue_write, review with "
+    "mcp__github__pull_request_review_write, and merge with `merge <pr> --confirm`. "
+    "(rule gh-write-cloud, a GitHub write in a cloud session goes through the MCP tools)"
+)
+GH_WRITE_VERBS = {"pr": ("create", "merge", "comment", "edit", "close", "review", "ready"),
+                  "issue": ("create", "comment", "edit", "close")}
+GH_API_WRITE_METHODS = ("POST", "PATCH", "PUT", "DELETE")
+# `gh api` flags whose next token is data, never a flag.
+GH_API_VALUE_FLAGS = {"-H", "--header", "-q", "--jq", "-t", "--template", "--cache", "-p", "--preview",
+                      "--hostname", "-R", "--repo"}
+
+
+def _gh_api_write(args) -> str:
+    """The label of a `gh api` call that writes, else "". The last method flag wins, as gh reads it; an
+    explicit method alone decides, and with none a field or input flag makes it a POST."""
+    method, fields, index = "", False, 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg in ("-X", "--method"):
+            method = (args[index] if index < len(args) else "").upper()
+            index += 1
+        elif arg.startswith("--method="):
+            method = arg[len("--method="):].upper()
+        elif arg.startswith("-X") and not arg.startswith("--"):
+            method = arg[2:].lstrip("=").upper()
+        elif arg in GH_API_VALUE_FLAGS:
+            index += 1
+        elif arg in ("-h", "--help"):
+            return ""   # help writes nothing
+        elif arg.startswith(("-f", "-F")) and not arg.startswith("--") or arg in ("--field", "--raw-field", "--input") \
+                or arg.startswith(("--field=", "--raw-field=", "--input=")):
+            fields = True
+    if method:
+        return "api " + method if method in GH_API_WRITE_METHODS else ""
+    return "api with fields" if fields else ""
+
+
+def gh_write_of(segment: str) -> str:
+    """The label of a gh write in the segment (or in a `sh -c` script it holds), else "": gh pr create,
+    merge, comment, edit, close, review or ready; gh issue create, comment, edit or close; gh api with
+    a write method, or with a field or input flag and no method."""
+    tokens = segment_tokens(segment) or []
+    script = inline_script(tokens) if tokens else ""
+    if script:
+        for part in split_segments(script):
+            label = gh_write_of(part) if part.strip() else ""
+            if label:
+                return label
+        return ""
+    rest = gh_call_of(segment)
+    if not rest or "-h" in rest or "--help" in rest:
+        return ""
+    if rest[0] == "api":
+        return _gh_api_write(rest[1:])
+    if len(rest) > 1 and rest[1] in GH_WRITE_VERBS.get(rest[0], ()):
+        return rest[0] + " " + rest[1]
+    return ""
+
+
 # ---- a lane commit of the generated records page (decision records-index-at-merge)
 #
 # The page is rebuilt only at merge. The commit is refused when the page it would hold differs from

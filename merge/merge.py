@@ -289,6 +289,17 @@ def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, 
 
 UNDO_MEMO = {}
 UNDO_FLAG, RED_FLAG = "--undo-check-unknown-ok", "--base-red-ok"  # the reason flags: Claude may type each with a reason (decisions silent-undo-check-design, no-merge-onto-red-main)
+CLOSE_CITE = "(decision silent-undo-check-design, a reason flag's reason lands in the merge commit)"
+CLOSE_FORM = re.compile(r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*"
+                        r"(?:(?:https?://)?(?:www\.)?github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/\d+|(?:[\w.-]+/[\w.-]+)?#\d+)")  # GitHub closes the issue that a commit message names after one of these words, by number or by URL
+
+def refuse_closing_reason(*reasons):
+    """The reason lands in the merge commit, and GitHub closes an issue a commit names after a closing keyword.
+    The message never echoes the reason: it would print the closing form into the log."""
+    for flag, reason in zip((UNDO_FLAG, RED_FLAG), reasons):
+        if CLOSE_FORM.search(reason):
+            raise Stop(f"the reason given with {flag} would close an issue when the merge commit lands. Reword the reason so no closing word comes right before an issue number, for example \"cause and fix: PR 2390\". {CLOSE_CITE}")
+
 
 def record_lift(lifts, flag, reason):
     """Keep a reason flag that lifted a check in `lifts` ({flag: reason}), so the merge can carry it. `reason` is what the check returned: None when it passed with no lift.
@@ -3073,6 +3084,8 @@ def relayed_head_holds(root, branch, relayed, live):
 
 HEAD_MOVED = "the head of #{n} moved since the owner's yes was relayed, so that yes does not cover it (decision auto-mode-owner-acts, a relayed yes binds to the head at relay time). A new yes from the owner is needed. Nothing was claimed or pushed."
 
+BATCH_RUNNER_NEEDS_HEAD = "the merge needs the head the CI ran on, so pass it with the --head flag (decision auto-mode-owner-acts, the batch runner merges the head its CI ran on). Nothing was claimed or pushed."
+
 def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None):
     m = cfg.get("merge", {})
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read; the head compare after the lock covers a head that moves before the lock is ours
@@ -3798,6 +3811,7 @@ def main(argv, host=None, lock=None, hosts=None):
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, --reviewed, or --role TIER")
     try:
+        refuse_closing_reason(a.undo_check_unknown_ok, a.base_red_ok)  # first: before the role check, any lock, host read or write
         if a.idle_lanes:
             return idle_lanes(a.live)  # before the role check and any lock: it reads, merges and posts nothing
         if a.lane_lint:
@@ -3816,6 +3830,8 @@ def main(argv, host=None, lock=None, hosts=None):
             return 0 if ok else 1
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
             raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
+        if a.confirm and not a.head and read_merge_role() == "batch-runner":  # before the lock, a claim or any write
+            raise Stop(BATCH_RUNNER_NEEDS_HEAD)
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
         if c:
             raise Stop("not in a git checkout")
@@ -3853,7 +3869,7 @@ def main(argv, host=None, lock=None, hosts=None):
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             body = review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)
-            if review_state(parse_review(body), a.head)[0] == "done":  # a done record is what the lane gives the batch runner, so the lane lint must pass on the head it names (decision pr-review-record)
+            if review_state(parse_review(body), a.head)[0] == "done":  # a done record is what the lane gives the batch runner, so the lane lint must pass for the commit it names (decision pr-review-record)
                 try:
                     with release_on_signals(), contextlib.redirect_stdout(sys.stderr):  # a signal removes lane_lint's worktree; its PASS line is no part of the record
                         lane_lint(root, a.head, h, info["base"], a.lint_unknown_ok)  # lane_lint logs a given unknown reason, as under --lane-lint

@@ -171,7 +171,67 @@ from _transcript import (  # noqa: E402
 import layout  # noqa: E402
 import _clause  # noqa: E402
 
-sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+HOOKS_DIR = os.path.join(HERE, "..", "hooks")
+_STAMP = re.compile(rb'^INSTALL_ID = "([^"]+)"', re.MULTILINE)
+# The stamp sits near byte 30000 of the 320 KB hooks/guard.py; the cap leaves room for the file to grow.
+_STAMP_HEAD_BYTES = 64 * 1024
+_hooks_dirs_answer = None  # hooks_dirs() sets it on its first call
+
+
+def hooks_dirs():
+    """The hooks folders to import helpers from, first to last. The installer stamps hooks/guard.py with
+    `INSTALL_ID = "<id>"` and lands guard.py, the guard_*.py files, shared_names, git_reads, question_form, own_session
+    and precompact_handoff in hooks/guard.d/<id>/ (install.sh land_guard_set). A stamp with that folder present puts it
+    before the flat one. A module the folder lacks falls through to the flat one. No stamp (the repo copy), an
+    unreadable file or no folder gives the flat folder alone.
+
+    The stamp is matched in the first 64 KB of bytes, never an import and never a strict decode, so a stray non-UTF-8
+    byte in guard.py cannot stop this module importing. The answer is kept in a module global, so a run reads guard.py
+    once however many lazy helper imports ask. A run as the script starts from a fresh module, so each hook run reads
+    it once. question_form imports this module a second time, as a fresh module whose global starts empty; an install
+    lands between processes, not inside one. So an import (not a run as the script) that finds shared_names already
+    loaded from the flat folder or a guard.d folder takes that folder as the answer and skips the read."""
+    global _hooks_dirs_answer
+    if _hooks_dirs_answer is None:
+        loaded = _loaded_hooks_dir() if __name__ != "__main__" else None
+        _hooks_dirs_answer = loaded if loaded is not None else _find_hooks_dirs()
+    return list(_hooks_dirs_answer)
+
+
+def _loaded_hooks_dir():
+    """The answer a shared_names already in sys.modules gives: its own folder, or None when it came from elsewhere."""
+    origin = getattr(sys.modules.get("shared_names"), "__file__", None)
+    if not origin:
+        return None
+    folder = os.path.dirname(os.path.realpath(origin))
+    flat = os.path.realpath(HOOKS_DIR)
+    if folder == flat:
+        return [flat]
+    if os.path.dirname(os.path.dirname(folder)) == flat and os.path.basename(os.path.dirname(folder)) == "guard.d":
+        return [folder, flat]
+    return None
+
+
+def _find_hooks_dirs():
+    try:
+        with open(os.path.join(HOOKS_DIR, "guard.py"), "rb") as handle:
+            stamp = _STAMP.search(handle.read(_STAMP_HEAD_BYTES))
+    except OSError:
+        stamp = None
+    if stamp:
+        folder = os.path.join(HOOKS_DIR, "guard.d", stamp.group(1).decode("ascii", "replace"))
+        if os.path.isdir(folder):
+            return [folder, HOOKS_DIR]
+    return [HOOKS_DIR]
+
+
+def _hooks_on_path():
+    """Put hooks_dirs() at the front of sys.path, in order: the one call every lazy helper import makes."""
+    for folder in reversed(hooks_dirs()):
+        sys.path.insert(0, folder)
+
+
+_hooks_on_path()
 from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with hooks/guard.py
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -189,7 +249,7 @@ guard = None
 
 def _load_guard():
     global guard
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     try:
         import guard as loaded
     except ImportError:
@@ -1042,7 +1102,7 @@ def departs_problem(text):
     # hooks/question_form.py is the one home of the predicate: the chat box, the waiting page and this
     # report all call it. lint/ and hooks/ sit side by side, in the repo and under ~/.claude. It loads only
     # for a turn that offers a pick, and an import error fails this one check open (the callers catch it).
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import question_form
     miss = question_form.departs_hit(input_needed_section(text))
     if not miss:
@@ -1151,7 +1211,7 @@ def question_problem(records, turn, text, hook):
     uses, sends = _turn_acts(records, turn, acks)
     if writer and any(writer in t for t in sends):
         return "", ""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     from override import remote_session_id
     own_id = remote_session_id()
     lane, parent = _own_lane_read(hook.get("transcript_path"), own_id) if own_id else (False, None)
@@ -1290,7 +1350,7 @@ def rewrite_stamp_problem(text, human_ts, cwd):
                  if REWRITE_RE.search(s) and _claims_a_rewrite(s)]
     if not sentences:
         return ""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     from datetime import datetime, timezone
     root = repo_root(cwd)
     if not root:
@@ -1434,7 +1494,7 @@ def pending_refusals(hook, text):
     a raised file that cannot be written only means the repeat blocks once more.
     Spec: docs/decisions/refusals-reach-the-owner.md."""
     try:
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         import shared_names
         path = shared_names.refusals_path(hook.get("session_id"))
         if path is None or not os.path.exists(path):
@@ -1496,7 +1556,7 @@ def _shown_flags(hook, flags):
     if not flags:
         return []
     try:
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         import shared_names
         path = shared_names.route_flags_path(hook.get("session_id"))
         if path is None:
@@ -1526,7 +1586,7 @@ def refusal_route_flags(hook):
     route row contradicts, once each per session. Read before pending_refusals settles the file. This is the
     named reader of those flags, so a flag is never written unread: it shows them and never refuses on one."""
     try:
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         import shared_names
         path = shared_names.refusals_path(hook.get("session_id"))
         if path is None or not os.path.exists(path):
@@ -1554,7 +1614,7 @@ def success_route_flags(hook, after):
         answered = {b.get("tool_use_id") for r in after for b in tool_results(r)}
         calls = [(u.get("name"), u.get("input")) for r in after for u in tool_uses(r)
                  if u.get("id") in answered and u.get("id") not in failed]
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         if not calls:  # a turn with no successful call reads no rows file
             return []
         import route_match
@@ -1617,7 +1677,7 @@ def _cited_refusal(hook, line):
     """True when the Why yours `line` names a tool in this session's refusals file, False when it does not, None when
     the file did not read (it cannot be opened, is not UTF-8, or a line in it is not JSON) and names none. The file is
     read here, before pending_refusals settles it: a reply that names the tool under Input Needed clears its row."""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import shared_names
     path = shared_names.refusals_path(hook.get("session_id"))
     if path is None or not os.path.exists(path):
@@ -1649,7 +1709,7 @@ def _route_verdict(ids):
     """(kind, text) for the route ids a Why yours line cites: kind "ok", "works" (a row says the act is doable),
     "dead" (no row holds the id), or "unknown" (the file or the row's outcome on this surface did not read). Reads the
     rows file once, through hooks/route_match.py. A row of another surface says nothing here, so it reads unknown."""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import route_match
     rows = route_match.read_rows()
     if rows is None:
@@ -2346,7 +2406,7 @@ def failed_tries(records, refused=(), recovered=None):
 def refused_tools(hook):
     """The tool names in this session's refusals file, () when it holds none. Raises on a file that cannot be read.
     Called before pending_refusals settles the file away."""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import shared_names
     path = shared_names.refusals_path(hook.get("session_id"))
     if path is None or not os.path.exists(path):
@@ -2541,11 +2601,11 @@ def _gh_json(args, cwd):
 
 def _newest_record(n, comments, merge_mod, cutover=None):
     """(parsed record, body) of the newest review record comment of `comments` (oldest first). No marked comment is
-    (None, None); a marked comment that does not parse is (None, its body), so the caller needs no second read. (None, None) as well when
-    merge's review_newest says the record cannot be trusted: the newest record, or a comment after it, was edited, so a PASS claim reads as
-    merge --reviewed reads it, bad. With a `cutover` (merge's review_stamp_since), the comment's last edit time (updated_at, else
-    created_at) goes to parse_review, so an unstamped record from before the cutover reads as merge --reviewed reads it. With no cutover,
-    the Stamp line is required."""
+    (None, None); a marked comment that does not parse is (None, its body), so the caller needs no second read. With a `cutover`
+    (merge's review_stamp_since), the comment's last edit time (updated_at, else created_at) goes to parse_review, so an unstamped
+    record from before the cutover reads as merge --reviewed reads it. With no cutover, the Stamp line is required.
+    (None, None) as well when merge's review_newest says the record cannot be trusted: the newest record, or a comment after it,
+    was edited, so a PASS claim reads as merge --reviewed reads it, bad."""
     newest, why = merge_mod.review_newest(comments)
     if newest is None or why:
         return None, None
@@ -2571,7 +2631,7 @@ def review_record_problem(hook, text):
     claims = review_claims(text)
     if not claims:
         return "", ""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     from override import remote_session_id
     own_id = remote_session_id()
     if not own_id or not _own_lane_read(hook.get("transcript_path"), own_id)[0]:
@@ -2621,7 +2681,7 @@ def refusal_reason(tools, hold=""):
 
 
 def _marker_path(hook):
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import local_time
     return local_time.report_marker_path(hook.get("session_id"))
 
@@ -2739,7 +2799,7 @@ def has_input_needed(text):
     if "input needed" not in text.casefold():
         return False
     try:
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         from reply_judge import has_input_needed as home
         return home(text)
     except Exception:
@@ -2755,7 +2815,7 @@ def asked_text(text):
     questions = prose_questions(text)
     if not questions:
         return ""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import question_form  # the one home of the Unvetted line
     # An Unvetted marker after the question's own sentence, on its line, goes on a line of its own.
     questions = [UNVETTED_AFTER_SENTENCE.sub(r"\1\n", q) for q in questions]
@@ -2766,14 +2826,14 @@ def asked_text(text):
 def cannot_run(asked, why):
     """The Unvetted refusal for a check that could not run, or '' when the asked text carries its own
     `Unvetted:` line. The marker is read only here, so it never skips a check that can run."""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import question_form
     return "" if question_form.has_unvetted(asked) else UNVETTED_REASON % why
 
 
 def past_ruling_problem(asked, cwd):
     """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''."""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import question_form
     candidates, unknown = question_form.past_rulings(asked, repo_root(cwd) or cwd or os.getcwd())
     print(question_form.unknown_line(unknown), file=sys.stderr)
@@ -2838,7 +2898,7 @@ def question_keys_problem(after, text):
     """The refusal text when two questions share an option key (question_form.key_overlap), else ''."""
     if "input needed" not in text.casefold():
         return ""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import question_form
     clash = question_form.key_overlap(text, earlier_replies(after, text))
     return KEYS_REASON % clash if clash else ""
@@ -2966,7 +3026,7 @@ def triage_hold(hook, records, active):
         entries = stalled_entries(records)
         if not entries:
             return ""
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         from guard_merge import _own_tier_proved
         if not _own_tier_proved(hook.get("transcript_path"), HOLD_TIER):
             return ""
@@ -3037,7 +3097,7 @@ def main():
     reply = last_reply(hook)  # one read of the reply for the hand-off cite, the refusals and the report checks
     hand_off, hand_note = "", ""
     try:
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         hand_off, hand_note = hand_off_problem(hook, reply)
     except Exception as err:  # a read that could not run is UNKNOWN, never clear
         hand_note = "Hand-off guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
