@@ -11886,6 +11886,97 @@ class RedMainBrake(Env):
         self.merged(rc, out)
         self.assertNotIn("actions/runs/1302/jobs", self.host.reads, "only the newest completed run of the group is judged")
 
+    # The cancelled-newest shape (decision no-merge-onto-red-main): main's newest push run, 1403, was cancelled with no red job. Its older
+    # green push run 1402 passed every job of the older red schedule run 1401. The verdict stays red, and the cancelled run is named beside
+    # it with its own re-run as the way out. A lone cancelled run is UNKNOWN, and names the same way out.
+    CAN_RED, CAN_GREEN, CAN_CANCELLED = 1401, 1402, 1403
+
+    def cancelled_beside_red(self):
+        """-> (runs, jobs) of the incident, newest run first, as `go` takes them."""
+        runs = [main_run(self.CAN_CANCELLED, "cancelled"), main_run(self.CAN_GREEN, "success"), main_run(self.CAN_RED, "failure", event="schedule")]
+        jobs = {self.CAN_RED: [main_job("checks", "failure", 20), main_job("scope", "success")],
+                self.CAN_GREEN: [main_job("scope", "success"), main_job("checks", "success", 20), main_job("checks-macos", "success", 30)],
+                self.CAN_CANCELLED: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]}
+        return runs, jobs
+
+    def lone_cancelled(self):
+        """-> (runs, jobs) of a cancelled newest run with no run beneath it."""
+        return [main_run(self.CAN_CANCELLED, "cancelled")], {self.CAN_CANCELLED: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]}
+
+    def assert_rerun_remedy(self, text, run_id):
+        """The way out for a cancelled run is its own re-run, which tests that run's own commit."""
+        self.assertIn(f"gh run rerun {run_id}", text, f"the cancelled run {run_id} is not named with its re-run, `gh run rerun {run_id}`")
+        self.assertIn("own commit", text, "the remedy does not say the re-run tests the run's own commit")
+
+    def test_a_cancelled_newest_run_beside_a_red_run_is_named_with_its_rerun(self):
+        rc, out, before = self.go(*self.cancelled_beside_red())
+        self.refused(rc, out, before)
+        self.assertIn(f"run {self.CAN_RED}", out)
+        self.assertIn("checks: fail", out)
+        self.assert_rerun_remedy(out, self.CAN_CANCELLED)
+        self.assertNotIn(f"gh run rerun {self.CAN_RED}", out, "the red run gets no re-run remedy: only a cancelled run does")
+
+    def test_a_lone_cancelled_newest_run_is_unknown_and_names_its_rerun(self):
+        rc, out, before = self.go(*self.lone_cancelled())
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+        self.assertIn(f"run {self.CAN_CANCELLED}", out)
+        self.assert_rerun_remedy(out, self.CAN_CANCELLED)
+
+    def test_base_verdict_names_the_rerun_of_the_cancelled_run_beside_a_red_run(self):
+        runs, jobs = self.cancelled_beside_red()
+        self.host = MainRunsHost(self.co, self.other, runs, jobs)
+        verdict, detail = merge.base_verdict(self.co, self.host, "main")
+        self.assertEqual(verdict, "red", detail)
+        self.assertIn(f"run {self.CAN_RED}", detail)
+        self.assert_rerun_remedy(detail, self.CAN_CANCELLED)
+
+    def test_base_verdict_names_the_rerun_of_a_lone_cancelled_run(self):
+        runs, jobs = self.lone_cancelled()
+        self.host = MainRunsHost(self.co, self.other, runs, jobs)
+        verdict, detail = merge.base_verdict(self.co, self.host, "main")
+        self.assertEqual(verdict, "unknown", detail)
+        self.assert_rerun_remedy(detail, self.CAN_CANCELLED)
+
+    def test_the_preview_line_names_the_rerun_beside_a_red_run(self):
+        rc, out, before = self.go(*self.cancelled_beside_red(), confirm=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.refs(), before)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("red", line[0])
+        self.assert_rerun_remedy(line[0], self.CAN_CANCELLED)
+
+    def test_the_preview_line_names_the_rerun_of_a_lone_cancelled_run(self):
+        rc, out, before = self.go(*self.lone_cancelled(), confirm=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.refs(), before)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("unknown", line[0].lower())
+        self.assert_rerun_remedy(line[0], self.CAN_CANCELLED)
+
+    # Pins: these pass on the code as it is. The red run gets no re-run remedy, a re-run still going keeps its wait, and a re-run that
+    # passes reads green. Each is the green control beside the red cases above.
+
+    def test_a_red_newest_run_alone_is_refused_with_no_rerun_remedy(self):
+        rc, out, before = self.go([main_run(1421, "failure")], {1421: [main_job("checks", "failure", 20)]})
+        self.refused(rc, out, before)
+        self.assertIn("run 1421", out)
+        self.assertNotIn("gh run rerun", out, "a red run is never offered a re-run")
+
+    def test_a_re_run_in_flight_keeps_its_wait_text_and_names_no_rerun(self):
+        rc, out, before = self.re_run_over_green("in_progress")
+        self.assert_unknown_for_re_run(rc, out, before, "in_progress", 1301)
+        self.assertNotIn("gh run rerun", out, "a re-run still going is waited for, never offered a re-run")
+
+    def test_a_cancelled_run_re_run_to_success_reads_green_and_merges(self):
+        # the re-run keeps its id at attempt 2 and is completed success: as the newest push run it clears the older red schedule run
+        rc, out, _ = self.go([main_run(self.CAN_CANCELLED, "success", run_attempt=2), main_run(self.CAN_RED, "failure", event="schedule")],
+                             {self.CAN_RED: [main_job("checks", "failure", 20), main_job("scope", "success")],
+                              self.CAN_CANCELLED: [main_job("scope", "success"), main_job("checks", "success", 20), main_job("checks-macos", "success", 30)]})
+        self.merged(rc, out)
+
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
     def test_main_refuses_before_taking_the_lock(self):
