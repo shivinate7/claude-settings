@@ -2659,13 +2659,13 @@ TOUCHED_TAIL_LINES = 15  # last output lines a failing test shows; the whole log
 
 def run_touched_tests(wt, base, head):
     """Run the test files the diff base...head touches, inside the lint tree `wt`, once the lint has passed. The batch's merged tree can fail a test
-    that no lane failed alone, so this runs on the integration head. A test the selector keeps out (HEAVY, NEEDS_SETUP) or that needs pwsh is
+    that no lane failed alone, so this runs on the integration head. A test the selector keeps out (HEAVY, NEEDS_SETUP) or a .ps1 with no pwsh on the PATH is
     skipped with its reason, never run and never a pass. The whole stage shares one LINT_SECONDS bound.
     -> (run count, skip lines, fail texts, unknown lines). An unreadable diff, an unloadable selector and a timeout are unknowns, not passes."""
-    c, diff = git(wt, "diff", "--name-only", "--no-renames", f"origin/{base}...{head}")
+    c, diff = git(wt, "diff", "--name-only", "--no-renames", "-z", f"origin/{base}...{head}")  # -z: git quotes a non-ASCII or spaced name otherwise
     if c:
         return 0, [], [], [f"the diff origin/{base}...{head[:9]} could not be read: {diff}"]
-    c, listed = git(wt, "ls-files")
+    c, listed = git(wt, "ls-files", "-z")
     if c:
         return 0, [], [], [f"git ls-files failed in the lint tree: {listed}"]
     try:  # the filename has a hyphen, so no import statement names it
@@ -2675,20 +2675,28 @@ def run_touched_tests(wt, base, head):
         candidates, heavy, needs_setup, reason = selector.candidates, selector.HEAVY, selector.NEEDS_SETUP, selector.reason
     except (Exception, SystemExit) as e:  # the lane's own file: any failure to load it says nothing about the tests
         return 0, [], [], [f"the lint tree's {TOUCHED_SELECTOR} could not be loaded: {type(e).__name__}: {e}"]
-    tracked = set(listed.splitlines())
-    tests = sorted(set().union(*(candidates(p, tracked) for p in diff.splitlines())))
+    tracked = set(listed.split("\0")) - {""}
+    try:
+        tests = sorted(set().union(*(candidates(p, tracked) for p in diff.split("\0") if p)))
+    except Exception as e:  # the lane's selector code: a bug in it must not read as a pass or a traceback
+        return 0, [], [], [f"the selector's candidates() raised {type(e).__name__}: {e}"]
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
     end = time.monotonic() + LINT_SECONDS
     ran, skips, fails, unknowns = 0, [], [], []
     for t in tests:
-        why = reason(t, heavy) or reason(t, needs_setup)
-        if not why and t.endswith(".ps1"):
+        try:
+            why = reason(t, heavy) or reason(t, needs_setup)
+        except Exception as e:  # same: the lane's own selector code
+            unknowns.append(f"{t}: the selector's reason() raised {type(e).__name__}: {e}")
+            continue
+        ps1 = t.endswith(".ps1")
+        if not why and ps1 and not shutil.which("pwsh"):
             why = "no pwsh on this runner"
         if why:
             skips.append(f"skip {t}: {why}")
             continue
-        runner = TOUCHED_RUNNERS.get(os.path.splitext(t)[1])
-        if runner is None:
+        cmd = ["pwsh", "-NoProfile", "-File", t] if ps1 else [TOUCHED_RUNNERS.get(os.path.splitext(t)[1]), t]
+        if cmd[0] is None:
             unknowns.append(f"{t}: no interpreter is known for this file type")
             continue
         left = end - time.monotonic()
@@ -2696,9 +2704,12 @@ def run_touched_tests(wt, base, head):
             unknowns.append(f"{t}: not run, the {LINT_SECONDS} s bound was spent")
             continue
         try:
-            c, out = sh([runner, t], cwd=wt, env=env, timeout=left)
+            c, out = sh(cmd, cwd=wt, env=env, timeout=left)
         except subprocess.TimeoutExpired:
             unknowns.append(f"{t}: did not finish in the {LINT_SECONDS} s bound")
+            continue
+        except OSError as e:  # the interpreter is gone or not executable: the test never ran, so it says nothing
+            unknowns.append(f"{t}: {cmd[0]} could not be started: {e}")
             continue
         if c:
             fails.append("\n".join([f"FAIL {t} (exit {c}); last output:", *out.splitlines()[-TOUCHED_TAIL_LINES:]]))
@@ -2758,6 +2769,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", touched_tests=False):
         raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
     if liftable and unknown_ok.strip():
         say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log)
+        if touched_tests:  # the tests run only after a lint pass, so a lifted unknown must not read as if they had
+            say(f"merge: the touched tests of {short} did not run, because the lint is unknown.")
         return 0
     head_line = f"the lint of {short} against {base} is unknown, not a pass:"
     if not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
