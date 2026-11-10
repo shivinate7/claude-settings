@@ -3978,6 +3978,40 @@ test("ask-phase-out: the home pill of a line keeps its whole text at 768 and 128
   }
 });
 
+// From 521 px the head of a line is one row: the number, the New reply mark and the home pill keep their width, and the title shrinks. So with the
+// mark drawn, the head's children stay inside the head, the title keeps 60 px, and the home pill does not cover Show answer. Each width's
+// cause is its own line in the message, so one width's failure does not hide the others.
+test("ask-phase-out: a long title beside the New reply mark keeps its head inside the row, a 60 px title and a home clear of Show answer, at 521, 600 and 640 px", async (t) => {
+  const row = { ...AP_LONG, home: AP_CLOSED.home, replied: "2026-10-28T09:00:00Z" };
+  const causes = [];
+  for (const width of [521, 600, 640]) {
+    const at = `at ${width} px`;
+    const page = await open(t, { items: [AP_OPEN, row], storage: RPL_NEW, viewport: { width, height: 900 } }); if (!page) return;
+    // The scope comes first: the mark, the head's parts and Show answer are drawn before any of them is measured.
+    await mustHave(page, `#line-${row.n} .fhead .newmark`, `the New reply mark on No. ${row.n} ${at}`);
+    assert.equal((await page.textContent(`#line-${row.n} .fhead .newmark`)).trim(), "New reply", `the mark on No. ${row.n} ${at} does not read New reply`);
+    await mustHave(page, `#line-${row.n} .fhead .ftext`, `the title of No. ${row.n} ${at}`);
+    await mustHave(page, `#line-${row.n} .fhead .hometag`, `the home pill of No. ${row.n} ${at}`);
+    await mustHave(page, `#line-${row.n} .fgo`, `Show answer on No. ${row.n} ${at}`);
+    const goText = await page.textContent(`#line-${row.n} .fgo`);
+    assert.match(goText, /Show answer/, `the control on No. ${row.n} ${at} is not Show answer: ${JSON.stringify(goText)}`);
+    const g = await page.evaluate((n) => {
+      const q = (s) => document.querySelector(`#line-${n} ${s}`);
+      const r = (e) => { const b = e.getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width }; };
+      const head = q(".fhead");
+      return { head: r(head), kids: [...head.children].map((k) => [k.className, r(k)]), title: r(q(".ftext")), pill: r(q(".hometag")), go: r(q(".fgo")) };
+    }, row.n);
+    assert.ok(g.go.width > 1, `Show answer on No. ${row.n} ${at} is ${g.go.width.toFixed(1)} px wide, so it is clipped and not drawn`);
+    const spill = g.kids.filter(([, b]) => b.right > g.head.right + 0.5).map(([c, b]) => `${c.split(" ")[0]} ends ${(b.right - g.head.right).toFixed(1)} px past the head`);
+    if (spill.length) causes.push(`${at}: a child of the head ends past its right edge: ${spill.join(", ")}`);
+    if (g.title.width < 60) causes.push(`${at}: the title is ${g.title.width.toFixed(1)} px wide, under 60 px`);
+    const ox = Math.min(g.pill.right, g.go.right) - Math.max(g.pill.left, g.go.left), oy = Math.min(g.pill.bottom, g.go.bottom) - Math.max(g.pill.top, g.go.top);
+    if (ox > 0 && oy > 0) causes.push(`${at}: the home pill covers Show answer by ${ox.toFixed(1)} px`);
+    await page.close();
+  }
+  assert.equal(causes.length, 0, "the head of a line with the New reply mark does not fit its row:\n" + causes.join("\n"));
+});
+
 test("ask-phase-out: the rail's Answered row follows the Answered section's order, newest answer first", async (t) => {
   const sent = { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" };
   const page = await open(t, { items: [DECISION, TASK, AP_CLOSED, AP_NEWER], answers: { [TASK.id]: sent } }); if (!page) return;
