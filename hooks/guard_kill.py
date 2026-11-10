@@ -652,7 +652,8 @@ DETACHED_LAUNCH_REASON = (
 # `bash -c` or `eval`, a write of the assignment into a file, or a PowerShell `$env:VAR = v`,
 # `Set-Item env:VAR` or `SetEnvironmentVariable`. A read, a grep, and `unset` set nothing. The name
 # is folded to upper case in every form. Shell words come from `segment_tokens`, assignments from
-# `ASSIGNMENT`, and the file write from `_VAR_TOKEN`: no parser of its own.
+# `ASSIGNMENT`, and the file write from `_REDIRECT_TO_PROFILE` and `_assigned_var`: no parser of
+# its own.
 # KNOWN LIMITS: `cross-env` is refused. Not covered: `timeout N env`, `setx`, a PowerShell block,
 # a `<<<` here-string, a CI yaml `env:` key, and `node -e` or `python -c`.
 PLAYWRIGHT_VAR = "PLAYWRIGHT_BROWSERS_PATH"
