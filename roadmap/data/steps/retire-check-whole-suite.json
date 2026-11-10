@@ -1,11 +1,11 @@
 {
-  "title": "A Retire check that cannot finish in the merge tool's time limit is refused before the batch",
+  "title": "Checks that run only at merge run before the batch's CI, so a lane that would fail them is refused first",
   "phase": "now",
-  "status": "todo",
+  "status": "ready",
   "order": 992,
   "why": "A debt's Retire check that runs the whole hooks/test_guard.py can never pass the merge tool's 600 s limit. The refusal shows only at merge, after a full green CI run, so the batch drops late.",
-  "note": "Coordinator 11:52 CST Nov 10, from runner 8's drop of #2119. Fix: the release check (or `merge --reviewed`) runs each Retire check, or refuses one that names a whole suite, before the batch. Follows step debt-close-runs-retire (done, 750cdcd08), which added the Retire run at merge. #2119's lane session_013NEJL29GcaaeoS7a1SJYA2 was unarchived to fix its three checks.",
-  "updatedAt": "2026-11-10T11:52:00-06:00",
+  "note": "Coordinator 11:52 CST Nov 10, from runner 8's drop of #2119. Fix: the release check (or `merge --reviewed`) runs each Retire check, or refuses one that names a whole suite, before the batch. Follows step debt-close-runs-retire (done, 750cdcd08), which added the Retire run at merge. #2119's lane session_013NEJL29GcaaeoS7a1SJYA2 was unarchived to fix its three checks. Owner chat 11:58 CST Nov 10 (relayed by the coordinator 12:00 CST): \"we also need something mechanically that fixes this mark it to triage if its new work\". Ready 11:59 CST; triage builds it with agents after its current page work. Done when: the merge tool's checks that today run only at merge (each closed debt's Retire check, record claims, the rest of merge --confirm's pre-merge gate) run at `merge --reviewed` time or in the batch's pre-push run, and a batch with a lane that would fail them is refused before CI starts. Incident: #2551 green at 11:15 CST, refused at merge 11:50 CST for #2119's three whole-suite Retire checks; one full CI run lost.",
+  "updatedAt": "2026-11-10T11:59:00-06:00",
   "lane": "",
   "owner": "triage",
   "blockedBy": []
