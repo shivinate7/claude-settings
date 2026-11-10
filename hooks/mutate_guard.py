@@ -1094,8 +1094,16 @@ MUTATIONS = [
      '    if matched:\n'
      '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)', "guard", 'cap: a heredoc onto the config settings stays denied'),
     ("cap: the shell route reads the stripped command, so a heredoc body's cap change walks past",
-     '        change = cap_change(raw)',
+     '        change = cap_change(cap_view)',
      '        change = cap_change(stripped)', "guard", 'cap: a heredoc writing a project settings file asks'),
+    ("cap data: the path and the content read the raw command, so a python data body's write asks",
+     '    matched = _shell_write_hit(strip_heredoc_bodies(cap_view), cwd, is_settings_file)\n'
+     '    if matched:\n'
+     '        change = cap_change(cap_view)',
+     '    matched = _shell_write_hit(stripped, cwd, is_settings_file)\n'
+     '    if matched:\n'
+     '        change = cap_change(raw)', "guard",
+     'cap data: the incident shape, a quoted python heredoc whose body only holds a cat-write string, allows'),
     ("cap: an earlier part wins, so an Edit names the value it leaves, not the one it arrives at",
      '            values[key] = value',
      '            values.setdefault(key, value)', "guard", 'cap: Edit turning the force flag off asks'),
