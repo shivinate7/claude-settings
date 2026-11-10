@@ -398,6 +398,81 @@ class ReopenClosed(CloseEnv):
         self.assertIn("reopen: o/alpha #6 (replacer #8 dropped)", lines, "control: #6 has no reopen line:\n" + "\n".join(lines))
         self.assertFalse([l for l in lines if l.startswith("reopen: o/alpha #4 ")], "an open PR was reopened")
 
+    def test_a_chain_whose_tail_is_open_reopens_no_link(self):
+        # Chain #4 -> #7 -> #9. Open #9 names #7, so the chain is alive and #4 stays closed. A reopen here would churn at every wake.
+        lines = self.reopened(closed=[closed_pull(4, head_of(4)), closed_pull(7, head_of(7))],
+                              extra_pulls=[named_pull(9, head_of(9), body="Replaces #7")],
+                              extra_comments=[review_comment(90, 4, "Replaced by #7"), review_comment(91, 7, "Replaced by #9")])
+        self.assertEqual(lines, [], "a closed link reopened while its chain still ends at open #9:\n" + "\n".join(lines))
+
+    def test_a_twelve_chain_with_eleven_closed_links_reopens_no_link(self):
+        # Open #12 names #11, and each of #1 to #11 is closed with its note. Every link is alive through the chain: no reopen line.
+        closed = [closed_pull(n, head_of(n)) for n in range(1, 12)]
+        notes = [review_comment(100 + n, n, f"Replaced by #{n + 1}") for n in range(1, 12)]
+        block = self.block_for_alpha(pulls=[named_pull(12, head_of(12), body="Replaces #11")], comments=notes, closed=closed)
+        self.assertEqual(kind_lines(block, REOPENED), [], "a closed link of a live chain reopened:\n" + "\n".join(block))
+
+    def test_a_closed_chain_tail_reopens_one_link_on_one_wake(self):
+        # Chain #4 -> #7 -> #9, with #9 closed and unmerged. The nearest link #7 reopens (its replacer #9 is dropped). #4 reopens alone or
+        # waits for a later wake: the builder may choose either, and a wake that reopens both is wrong.
+        lines = self.reopened(closed=[closed_pull(4, head_of(4)), closed_pull(7, head_of(7)), closed_pull(9, head_of(9))],
+                              extra_comments=[review_comment(90, 4, "Replaced by #7"), review_comment(91, 7, "Replaced by #9")])
+        self.assertEqual(len(lines), 1, "a closed chain tail reopened more than one link on one wake:\n" + "\n".join(lines))
+        self.assertIn(lines[0], ["reopen: o/alpha #7 (replacer #9 dropped)", "reopen: o/alpha #4 (replacer #7 dropped)"], "\n".join(lines))
+
+
+class ReplacesCycles(CloseEnv):
+    """A cycle of Replaces claims closes none of its members. The two-member cycle is test_a_mutual_replaces_closes_neither in CloseAsReplaced."""
+
+    def test_a_three_cycle_closes_none(self):
+        pulls = [named_pull(1, head_of(1), body="Replaces #3"), named_pull(2, head_of(2), body="Replaces #1"),
+                 named_pull(3, head_of(3), body="Replaces #2")]
+        block = self.block_for_alpha(pulls=pulls)
+        self.assertEqual(kind_lines(block, REPLACED), [], "a three-cycle closed one of its members:\n" + "\n".join(block))
+
+    def test_a_four_cycle_closes_none(self):
+        pulls = [named_pull(1, head_of(1), body="Replaces #4"), named_pull(2, head_of(2), body="Replaces #1"),
+                 named_pull(3, head_of(3), body="Replaces #2"), named_pull(4, head_of(4), body="Replaces #3")]
+        block = self.block_for_alpha(pulls=pulls)
+        self.assertEqual(kind_lines(block, REPLACED), [], "a four-cycle closed one of its members:\n" + "\n".join(block))
+
+    def test_a_claim_that_leads_into_a_cycle_closes_none(self):
+        # #4 names #1, and #1, #2 and #3 form a three-cycle. Following #1's replacers returns to #1, so #4's claim on #1 is dropped too. This is
+        # a state choice the test names, not the mechanism. #1 closes nothing, and neither does any other cycle member.
+        pulls = [named_pull(1, head_of(1), body="Replaces #3"), named_pull(2, head_of(2), body="Replaces #1"),
+                 named_pull(3, head_of(3), body="Replaces #2"), named_pull(4, head_of(4), body="Replaces #1")]
+        block = self.block_for_alpha(pulls=pulls)
+        self.assertEqual(kind_lines(block, REPLACED), [], "a PR that leads into a cycle closed a member of it:\n" + "\n".join(block))
+
+
+class ReplacesFences(CloseEnv):
+    """A Replaces line inside a fenced code block names nothing, and a line that only looks like a fence opens none. Each case sits beside a
+    control: open #10 replaces open #11, a plain claim that prints."""
+
+    def fenced_lines(self, body):
+        """-> the REPLACED lines when open #6 has `body` and names open #5, with the control pair #10 and #11 beside them."""
+        pulls = [named_pull(5, head_of(5)), named_pull(6, head_of(6), body=body), named_pull(10, head_of(10), body="Replaces #11"),
+                 named_pull(11, head_of(11))]
+        return kind_lines(self.block_for_alpha(pulls=pulls), REPLACED)
+
+    def test_a_four_tick_fence_holding_a_three_tick_line_names_nothing(self):
+        # The ``` line inside the four-tick fence does not close it, so `Replaces #5` is still fenced.
+        lines = self.fenced_lines("````\n```\nReplaces #5\n```\n````")
+        self.assertIn("close as replaced: o/alpha #11 by #10", lines, "control: a plain claim prints no line:\n" + "\n".join(lines))
+        self.assertNotIn("close as replaced: o/alpha #5 by #6", lines, "a Replaces inside a four-tick fence closed #5")
+
+    def test_a_three_tick_fence_holding_a_tilde_line_names_nothing(self):
+        # A ~~~ line inside a ``` fence is content, not a closing fence, so `Replaces #5` is still fenced.
+        lines = self.fenced_lines("```\n~~~\nReplaces #5\n~~~\n```")
+        self.assertIn("close as replaced: o/alpha #11 by #10", lines, "control: a plain claim prints no line:\n" + "\n".join(lines))
+        self.assertNotIn("close as replaced: o/alpha #5 by #6", lines, "a Replaces inside a three-tick fence holding a ~~~ line closed #5")
+
+    def test_a_line_of_inline_code_is_not_a_fence(self):
+        # ```x``` opens and closes on one line. It is inline code, not a fence, so the real `Replaces #5` after it counts.
+        lines = self.fenced_lines("```x```\nReplaces #5")
+        self.assertEqual(lines, ["close as replaced: o/alpha #5 by #6", "close as replaced: o/alpha #11 by #10"],
+                         "the line of inline code opened a fence and hid the real Replaces #5")
+
 
 # The gh routes of ReadCost.quiet on main (ddaa393c0), as measured. A run with no reopen candidate must make exactly these.
 QUIET_MAIN_READS = collections.Counter({
@@ -438,6 +513,23 @@ class ReadCost(CloseEnv):
         cand = self.quiet(closed=[closed_pull(4, head_of(4))], extra_comments=[review_comment(90, 4, "Replaced by #6")])
         self.assertEqual(cand - base, collections.Counter({"pulls/4": 1}),
                          "a candidate whose replacer #6 is open: want exactly one read, pulls/4; the body of #6 is already in the open list")
+
+    def chain_reads(self):
+        """-> the gh routes of one run: open #14 with no record, and twelve closed PRs #1 to #12, each with a `Replaced by #13` note. #13 is merged."""
+        closed = [closed_pull(n, head_of(n)) for n in range(1, 13)] + [closed_pull(13, head_of(13), merged=True)]
+        notes = [review_comment(100 + n, n, "Replaced by #13") for n in range(1, 13)]
+        host = closed_host("o/alpha", pulls=[named_pull(14, head_of(14))], comments=notes, closed=closed, count_gh=True)
+        rc, out, err = self.run_args("--reviewed", "--root", self.alpha, hosts={self.alpha: host})
+        self.assertEqual(rc, 0, out + err)
+        return collections.Counter(host.gh_calls)
+
+    def test_a_merged_replacer_shared_by_twelve_candidates_is_read_once_per_wake(self):
+        self.assertEqual(self.chain_reads()["pulls/13"], 1, "the merged replacer #13 was read once per candidate, not once per wake")
+
+    def test_each_closed_candidate_is_read_once_per_wake(self):
+        # Pin: pulls/N is read once for each of the twelve candidates, so twelve reads in all.
+        counts = self.chain_reads()
+        self.assertEqual([counts[f"pulls/{n}"] for n in range(1, 13)], [1] * 12, "a closed candidate was not read exactly once per wake")
 
 
 if __name__ == "__main__":
