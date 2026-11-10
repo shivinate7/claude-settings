@@ -22,7 +22,7 @@ $IsLinked = $false
 # An install from a linked worktree would point the global config at a temp
 # checkout. Refuse before any write. --git-dir and --git-common-dir differ only in a linked
 # worktree; both print relative to -C, so a string compare is enough. No git, or no .git: go on.
-# Decision merge-reinstalls-from-main: the pinned checkout <clone>-live is the one linked worktree
+# Decision install-refuses-linked-tree: the pinned checkout <clone>-live is the one linked worktree
 # allowed, and only on a detached HEAD at the clone's local main commit. $CloneDir moves to the
 # clone, so the post-merge hook lands in the clone's .git\hooks.
 if ($RepoDir) {
