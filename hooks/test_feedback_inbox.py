@@ -4038,6 +4038,9 @@ PLAIN_SAVED_WAKE = ("Saved on the waiting page. Owners: coordinator (session_000
 NOTE_ITEM = "- fb-0961-1 [note] -> noted"
 SAVED_NOTE_WAKE = ("Saved on the waiting page. Owners: coordinator (session_000000000000000000000002). "
                    "Items: 163 none of these (how can we trust the strength of the testing of our tests?), 184 a.")
+# The Undo wake, as the page's noticeText builds it with the " are open again." tail: machine text, no owner words.
+UNDONE_WAKE = ("Undone on the waiting page. Owners: coordinator (session_000000000000000000000002). "
+               "Items: 163, 184 are open again.")
 TEMPLATE_STEP = "page-form-template"  # a step file whose text names the template dir
 PLAIN_STEP = "page-form-plain"  # a step file that names waiting-page but not the template dir
 TEMPLATE_STEP_TEXT = json.dumps({"id": TEMPLATE_STEP, "title": "Route page comments",
@@ -4046,6 +4049,7 @@ PLAIN_STEP_TEXT = json.dumps({"id": PLAIN_STEP, "title": "Route page comments",
                               "text": "Answer each waiting-page comment by hand."})
 SCOPE_IN = (("verbatim", True), ("artifact", True), ("repo", True), ("writer", True))
 NOT_THE_WRITER = "session_000000000000000000000003"  # the writer a transcript names when the session is not the writer
+FORM_FAIL_OPEN = "Feedback guard: page form not checked"  # the systemMessage a page-form stand-down prints
 
 
 def claude_settings_repo():
@@ -4234,6 +4238,21 @@ def case_page_form_failed_record_read_stands_down():
     check(name + ": scope the record branch's step file does not resolve", record_step(root, PLAIN_STEP) is None,
           record_step(root, PLAIN_STEP))
     if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), SCOPE_IN):
+        check(name + ": not blocked", p.code == 0 and block_reason(p) is None, p.desc())
+        msg = (guard_json(p) or {}).get("systemMessage") or ""
+        check(name + ": systemMessage says page form not checked", FORM_FAIL_OPEN in msg, p.desc())
+
+
+def case_page_form_undone_wake_passes():
+    """Red (ruling c164: a page comment is never answered with a thread reply). The page writer's session takes Undo of
+    two items: the page sends the Undone wake, which is machine text with no owner words, and the one item is
+    `[note] -> noted`. The Stop must not block. A Saved wake is exempt from the rule, and an Undo wake has the same
+    machine shape, so it is exempt too."""
+    cfg, sid = new_cfg(), "page-form-undone"
+    root = claude_settings_repo()
+    name = "page-form red: Undone wake from the page's Undo, [note] -> noted"
+    p = page_comment_run(cfg, sid, UNDONE_WAKE, [NOTE_ITEM], cwd=root)
+    if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, UNDONE_WAKE), SCOPE_IN):
         check(name + ": not blocked", p.code == 0 and block_reason(p) is None, p.desc())
 
 
@@ -4458,6 +4477,7 @@ CASES = (
     case_page_form_failed_record_read_stands_down,
     case_page_form_saved_wake_with_a_note_blocks,
     case_page_form_closed_not_page_form_passes,
+    case_page_form_undone_wake_passes,
 )
 
 
