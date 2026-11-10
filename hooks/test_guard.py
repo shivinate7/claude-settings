@@ -3564,8 +3564,8 @@ chained_ask("per-file ask: two -C targets in one checkout, the lane by path then
 
 # FIVE SHAPES THAT RUN A PER-FILE DISCARD IN THE SHARED CHECKOUT. Each one points the discard at
 # the shared checkout while the shell, or a `-C` that names the lane, still reads as the lane. Each
-# verdict is the one each row below pins: deny for 1 to 4 (4 is a Set-Location move, read as a cd),
-# ask for 5 (main reads the lane for 5, so it asks and does not deny; the branch must not allow).
+# verdict is the one each row below pins: deny for all five (4 is a Set-Location move, read as a cd;
+# 5 is an env -C or --chdir, read as the run folder, so other-checkout denies it as it denies git -C).
 # Controls that stay allowed are pinned above: "per-file allow: restore of one modified file"
 # (cwd lane) and "one -C target repeated".
 # 1. --work-tree names the shared checkout, whatever -C says.
@@ -3593,23 +3593,22 @@ for _cd in ("sl", "chdir", "Push-Location"):
     sh("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout"
        % _cd, _cd + " " + slash(GITMAIN) + "; " + VCS + " restore f.txt",
        "deny", "other-checkout", tool="PowerShell", cwd=GITWT)
-# 5. env's own chdir flags. main does not read them and asks, so ask is pinned.
-sh("per-file ask: env -C into the shared checkout, then restore f.txt, from a worktree",
-   "env -C " + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree", cwd=GITWT)
-sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from a worktree",
-   "env --chdir=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree",
+# 5. env's own chdir flags. The guard reads env -C and env --chdir as the run folder, the folder git
+# then runs in, so other-checkout denies each one as it denies a git -C into the shared checkout.
+sh("per-file deny: env -C into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout",
+   "env -C " + slash(GITMAIN) + " " + VCS + " restore f.txt", "deny", "other-checkout", cwd=GITWT)
+sh("per-file deny: env --chdir into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout",
+   "env --chdir=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "deny", "other-checkout",
    cwd=GITWT)
 
 # LATE PROBES (named "late probe", so MUTATE_ONLY="late probe" runs this block alone). Each runs a
-# per-file restore in the shared checkout from the lane by a spelling the guard must still read.
-# The chdir flags only name the shared checkout, so they still ask. The control stays allowed.
+# per-file restore in the shared checkout from the lane. env -vC is read as env -C, so other-checkout
+# denies it. The --ch= abbreviation is not read as --chdir, so it still asks. The control stays allowed.
 _SH = slash(GITMAIN)
-for _label, _cmd in (
-    ("env -vC", "env -vC " + _SH + " " + VCS + " restore f.txt"),
-    ("env --ch= abbreviation", "env --ch=" + _SH + " " + VCS + " restore f.txt"),
-):
-    sh("per-file ask: late probe, %s names the shared checkout, from a worktree" % _label, _cmd,
-       "ask", "shared-tree", cwd=GITWT)
+sh("per-file deny: late probe, env -vC names the shared checkout, from a worktree, denies by other-checkout",
+   "env -vC " + _SH + " " + VCS + " restore f.txt", "deny", "other-checkout", cwd=GITWT)
+sh("per-file ask: late probe, env --ch= abbreviation names the shared checkout, from a worktree",
+   "env --ch=" + _SH + " " + VCS + " restore f.txt", "ask", "shared-tree", cwd=GITWT)
 sh("per-file allow: late probe control, a harmless GIT_TRACE prefix in the lane",
    "GIT_TRACE=1 " + VCS + " restore f.txt", "allow", cwd=GITWT)
 
