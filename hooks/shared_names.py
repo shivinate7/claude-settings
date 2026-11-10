@@ -103,8 +103,81 @@ def repo_tag_names(tag: object, slug: str) -> bool:
     return isinstance(tag, str) and tag.startswith(REPO_TAG) and tag[len(REPO_TAG):].lower() == slug.lower()
 
 
-# The tool that reads and writes the waiting page's items (hooks/guard.py, hooks/call_judge.py).
+# The tool that reads and writes the waiting page's items (hooks/guard.py, hooks/call_judge.py), and the tool that
+# publishes a page (hooks/guard.py page check).
 DATA_TOOL = "ArtifactData"
+PAGE_TOOL = "Artifact"
+# The Mac session's artifact tools (roadmap step artifact-guard-matcher-names). Each stands for an ArtifactData call or
+# the Artifact publish; normalize_data_call turns it into that call so every guard judges one shape.
+# settings.json's matchers must name each (lint/test_settings_matcher.py).
+MAC_ARTIFACT_PREFIX = "mcp__claude-artifacts__"
+MAC_DATA_TOOLS = tuple(MAC_ARTIFACT_PREFIX + short for short in
+                       ("db_get", "db_list", "db_query", "db_write", "db_str_replace"))
+MAC_PAGE_TOOL = MAC_ARTIFACT_PREFIX + "publish_files"
+# Set to True on a normalised Mac data call that names no artifact (no `url`). Which key carries the Mac artifact id is
+# unknown, so such a call is judged as a write to the waiting page, never as a write to another page (coordinator
+# decision, 04:54 CST Nov 10). question_form.waiting_page_root reads it.
+WAITING_PAGE_ASSUMED = "waiting_page_assumed"
+# The ArtifactData op a Mac db_write op stands for, where the names differ.
+_MAC_OPS = {"merge": "update"}
+_MAC_READS = {"db_get": "get", "db_list": "list", "db_query": "query"}
+
+
+def _split_path(path):
+    """(collection, doc_id) from a Mac `<collection>/<id>` path; doc_id is None for a bare collection."""
+    collection, _slash, doc_id = path.strip("/").partition("/")
+    return collection, doc_id or None
+
+
+def _mac_write(entry):
+    """One db_write op as an ArtifactData batch write: `merge` is `update`, and `path` gives `collection` and
+    `doc_id`. Every other key of the op stays, and `path` too, so nothing the op carried is lost. An entry that
+    is no dict passes unchanged."""
+    if not isinstance(entry, dict):
+        return entry
+    write = dict(entry)
+    if isinstance(write.get("op"), str):
+        write["op"] = _MAC_OPS.get(write["op"], write["op"])
+    if isinstance(write.get("path"), str):
+        write["collection"], write["doc_id"] = _split_path(write["path"])
+    return write
+
+
+def normalize_data_call(tool_name, tool_input):
+    """(canonical name, ArtifactData-shaped input) of a tool call. A Mac data tool becomes the ArtifactData call it
+    stands for: db_write is a batch of its `ops` as `writes`, db_get, db_list and db_query are get, list and query,
+    db_str_replace is a str_replace, each with `collection` and `doc_id` read from its `path`. publish_files is the
+    Artifact publish of the `files` entry named index.html (else the first), as `file_path`. Every other top-level
+    key stays in the output, so a judge still sees a key this reads nothing from. A Mac data call with no `url` gets
+    WAITING_PAGE_ASSUMED. Any other call passes through unchanged."""
+    if not isinstance(tool_input, dict):
+        return tool_name, tool_input
+    if tool_name == MAC_PAGE_TOOL:
+        out = dict(tool_input)
+        out["action"] = "publish"
+        files = [f for f in out.get("files") or [] if isinstance(f, dict) and isinstance(f.get("path"), str)]
+        chosen = next((f for f in files if f.get("as") == "index.html"), files[0] if files else None)
+        if chosen is not None and "file_path" not in out:
+            out["file_path"] = chosen["path"]
+        return PAGE_TOOL, out
+    if tool_name not in MAC_DATA_TOOLS:
+        return tool_name, tool_input
+    short = tool_name[len(MAC_ARTIFACT_PREFIX):]
+    out = dict(tool_input)
+    if short == "db_write":
+        out["action"] = "batch"
+        # `ops` moves to `writes`; a value that is no list stays under `ops` so no content is dropped.
+        out["writes"] = [_mac_write(e) for e in out.pop("ops")] if isinstance(out.get("ops"), list) else []
+    else:
+        out["action"] = "str_replace" if short == "db_str_replace" else _MAC_READS[short]
+        # A path is <collection>/<id>; db_query and db_list may carry a bare collection in `collection` or `path`.
+        if isinstance(out.get("path"), str) and (short in ("db_get", "db_str_replace")
+                                                or not isinstance(out.get("collection"), str)):
+            out["collection"], out["doc_id"] = _split_path(out["path"])
+        out.setdefault("doc_id", None)
+    if not isinstance(out.get("url"), str) or not out["url"]:
+        out[WAITING_PAGE_ASSUMED] = True
+    return DATA_TOOL, out
 
 # The folder under the config dir that holds per-hook state files.
 STATE_DIR_NAME = "state"

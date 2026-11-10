@@ -54,6 +54,7 @@ if HERE not in sys.path:
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 from own_session import _CREATED_ID as SESSION_ID  # noqa: E402  the one home of the session id shape
 from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  the one home of the gh logins
+from shared_names import WAITING_PAGE_ASSUMED  # noqa: E402  the one home of the Mac no-artifact mark
 
 PASS = ("", "")
 FORM_RULE, STAKE_RULE = "question-form", "owner-judge"
@@ -1062,10 +1063,17 @@ def _layout():
 
 def waiting_page_root(tool_input, cwd):
     """The git root of cwd's repo when the call's url is that repo's waiting page (lint/layout.py, the one
-    home), else None. A repo with no page reads as unknown; only the none-key check judges its calls."""
+    home), else None. A repo with no page reads as unknown; only the none-key check judges its calls. A call that
+    carries shared_names.WAITING_PAGE_ASSUMED (a Mac data call that names no artifact) is read as naming this
+    repo's page."""
     layout = _layout()
     root = _git_root_of(cwd)
-    return root if root and layout.is_waiting_page_url(root, tool_input.get("url")) else None
+    if not root:
+        return None
+    url = tool_input.get("url")
+    if tool_input.get(WAITING_PAGE_ASSUMED) is True and not url:
+        url = layout.waiting_page(root)
+    return root if layout.is_waiting_page_url(root, url) else None
 
 
 def design_file_problems(writes, root):

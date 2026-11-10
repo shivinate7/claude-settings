@@ -4467,7 +4467,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
 # `command-in-item`, `gh-login-switch`, `task-names-check`, `task-why-cited`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
 # write to this repo's waiting page.
-from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
+from shared_names import DATA_TOOL, PAGE_TOOL, normalize_data_call  # noqa: E402  the one home of the tool names and the Mac call shapes, shared with hooks/call_judge.py
 
 
 def data_tool_judge(tool_input, cwd="", session_id=None):
@@ -4495,7 +4495,6 @@ def data_tool_hit(tool_input, cwd="", session_id=None):
 # and its designData and roadmap blocks all equal to main's own (stale_pages.carries_data), is refused too:
 # it would drop the live page's data. A first publish, with no url, is not judged. A current page with data writes the stamp
 # (stale_pages.STAMP, main's blob sha) that hooks/session_start.sh reads back.
-PAGE_TOOL = "Artifact"
 PAGE_STALE_REASON = ("this file is behind main's skills/waiting-page/page.html, so a publish would put old page code on the "
                      "waiting page. Read the live page (Artifact action read), run the waiting-page skill's "
                      "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url. "
@@ -5955,6 +5954,9 @@ def judge(payload) -> None:
         if matched:
             refuse(tool, "deny", "impeccable-review-only", IMPECCABLE_REASON, matched)
         return
+
+    # A Mac artifact tool is judged as the ArtifactData or Artifact call it stands for (shared_names.normalize_data_call).
+    tool, tool_input = normalize_data_call(tool, tool_input)
 
     if tool == DATA_TOOL:
         import override  # the writer's record id (cse_<x> read as session_<x>); the payload's id is a local UUID

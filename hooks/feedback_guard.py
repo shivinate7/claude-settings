@@ -152,7 +152,7 @@ import local_time  # noqa: E402  the one home of the inbox paths
 import override  # noqa: E402  the one home of the roadmap record ref and folder
 import ruling_home  # noqa: E402  the one home of "a branch's tree holds this file"
 import precompact_handoff  # noqa: E402  the one home of the handoff path
-from shared_names import MACHINE_TAGS  # noqa: E402  the one home of the machine notice tags
+from shared_names import MACHINE_TAGS, normalize_data_call  # noqa: E402  the one home of the machine notice tags and the Mac call shapes
 from guard_core import SHELL_TOOLS  # noqa: E402  the one home of the shell tool names (Bash, PowerShell)
 
 ITEM = re.compile(r"- (fb-\S+)(?:\s+(.*))?$")
@@ -710,7 +710,7 @@ def norm(text):
 def _proves(use, n):
     """True when a tool_use sends page item n: a message naming n as a whole token, or an
     ArtifactData write with key n == n under collection `items`."""
-    name, tool_input = use.get("name") or "", use.get("input")
+    name, tool_input = normalize_data_call(use.get("name") or "", use.get("input"))
     if not isinstance(tool_input, dict):
         return False
     if name in SEND_TOOLS:
@@ -722,7 +722,7 @@ def _proves(use, n):
 def _reads_items(use):
     """True for an ArtifactData get, list or query of collection `items` that names a page url and no out_dir.
     A read with out_dir returns file paths, not the documents, so its result cannot show item n."""
-    name, inp = use.get("name") or "", use.get("input")
+    name, inp = normalize_data_call(use.get("name") or "", use.get("input"))
     return (name.startswith(ARTIFACT_DATA) and isinstance(inp, dict) and inp.get("action") in READ_VERBS
             and inp.get("collection") == "items" and isinstance(inp.get("url"), str) and not inp.get("out_dir"))
 
@@ -1213,7 +1213,7 @@ def _scan_transcript(records, collections):
             continue
         when = _ts(rec)
         for use in _transcript.tool_uses(rec):
-            inp, name = use.get("input"), str(use.get("name", ""))
+            name, inp = normalize_data_call(str(use.get("name", "")), use.get("input"))
             if not isinstance(inp, dict) or when is None:
                 continue
             if name.startswith(ARTIFACT_DATA):
