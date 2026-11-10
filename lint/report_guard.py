@@ -48,7 +48,7 @@ repo with no waiting page gets a systemMessage and no block, unless the session 
 does not wait for a git write: the reply's labels are what it reads. Cost: no file written. Reads: the
 transcript this hook already holds. Only on a turn that asks with no send to the writer: the
 own-record import (hooks/own_session.py) and one more transcript read, in a session with a remote id. A lane
-reads no layout; an owner-facing turn with no counted send reads the extras file once, for the page, and a second time, for the writer key, when the transcript has no meta/page read (`decisions-reach-a-clickable-pick`).
+reads no layout; an owner-facing turn with no counted send reads the extras file for the writer key first, when the transcript has no meta/page read, then for the page; a send to the key writer returns after the first read (`decisions-reach-a-clickable-pick`).
 A reply that holds Input Needed or a prose line ending in `?` also gets the past-ruling check (one Sonnet call, rule
 `past-ruling`, or the Unvetted remedy) and the option-key check (rule `question-keys`), both from hooks/question_form.py.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
@@ -1143,8 +1143,8 @@ def question_problem(records, turn, text, hook):
     Lane: a send to the parent or the page writer; a send to @parent counts only in a lane.
     Cost: nothing past the text check when the turn has no question or sends to the writer. Else the own-record
     import and a transcript read, only in a session with a remote id. A lane reads no layout; an owner-facing
-    turn with no counted send reads the extras file once, for the page (`layout.waiting_page`); with no meta/page
-    read in the transcript it reads it a second time, for the writer key."""
+    turn with no counted send reads the extras file for the writer key (`layout.waiting_page_writer`) first, when the transcript
+    has no meta/page read, then for the page (`layout.waiting_page`); a send to the key writer returns after the first read."""
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
     writer = page_writer_id(records)
