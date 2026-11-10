@@ -1,0 +1,11 @@
+{
+ "id": "triage-owns-debts-notes",
+ "title": "Triage reviews debts and notes like the roadmap, and the page shows both",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "after": [
+  "notes-sightings-expiry"
+ ],
+ "why": "R19, owner 17:00 and 17:11 CST Nov 10 (\"approved\"), relayed by the retrospective session. (1) Step notes-sightings-expiry (PR #1619, owner item 358) lands first: it gives the 190 Until: lines a reader. (2) Triage owns debts and notes as it owns the roadmap: at each batch merge it reviews them whole, merges families, closes stale or past-Until lines, and rewrites the rest in place. (3) The page shows both: notes count, growth, oldest, largest families; the debt count stops counting README.md and notes.md (reads 122 today); the cull panel reads live numbers (47 from Oct 20 today). (4) The writing tool stamps every page and roadmap time, never the model; step page-time-field-valid is the backstop. Homes: CLAUDE.md roles-findings-are-debts-or-notes, skill roadmap, docs/debts/README.md. Plan stage 4, commit a0e485c00. Folds in c55.",
+ "source": "owner 2026-11-10 17:00 and 17:11 CST (R19), via retrospective session"
+}
