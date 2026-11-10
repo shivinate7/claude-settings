@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-10T21:02:00Z",
+  "context": "Goal: shrink the open-PR pile further without losing wanted work.\nProblem (goal): 281 open PRs match no roadmap step, so nothing will pick them up, and whether to drop any of that work is your call.\nBased on (measured): 281 of 519 \"needs fix\" PRs cite no step; their median is 12 files in conflict with main.\nDeparts from: main \u2014 adds a step-matching pass for the 281, with no closes.\nMeanwhile: the coordinator holds the list and starts nothing on it until you answer.",
+  "home": "coordinator plan (open-PR sort, follow-up)",
+  "kind": "decision",
+  "n": 500,
+  "options": [
+    {
+      "gain": "Every PR ends with an owner, or you decide on the orphans together.",
+      "how": "Have triage match each of the 281 to a step, or mark it orphaned, then bring you the orphans as one list.",
+      "key": "a",
+      "label": "Match each to a step, then bring the orphans (Recommended)",
+      "lose": "Triage time during the freeze."
+    },
+    {
+      "gain": "No work now.",
+      "how": "Nothing changes until the freeze on new sessions lifts.",
+      "key": "b",
+      "label": "Leave them until the freeze lifts",
+      "lose": "The 281 drift further behind main."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "coordinator 15:01 CST Nov 10",
+  "repo": "shivinate7/claude-settings",
+  "short": "Find homes for 281 PRs?",
+  "status": "open",
+  "title": "Match the 281 open PRs that cite no roadmap step, then bring you the orphans?",
+  "why": "It gives every open PR an owner or a decision, and it closes nothing."
+}

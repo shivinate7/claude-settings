@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-10T20:53:00Z",
+  "context": "Goal: drain the open-PR pile without losing work.\nProblem (cannot undo): closing a PR is a visible act on GitHub, and you asked to approve one close list.\nBased on (measured): the three-pass sort checked 716 open PRs; 18 PRs either have every change already on main (4) or are wholly contained in an open replacement PR based on main with no PR stacked on them (14).\nBased on (measured): a second check found 32 more PRs that looked closable were not safe to close (22 judged only by a script, 10 with other PRs built on top), so those stay open.\nBased on (ruling): close-replaced-at-open (owner, 2026-11-09 21:27 CST) closes a PR as replaced when its replacement opens; these 14 were opened before that rule ran on them, and you asked at 12:44 CST Nov 10 to approve the one close list from the sort, so the list waits for your word.\nDeparts from: main \u2014 closes 18 open PRs. The list: #1042\u2192#1971 #1850\u2192#1971 #1418 #1422 #1431 #1446\u2192#1766 #1609\u2192#1810 #1785\u2192#2293 #1842 #2235\u2192#2265 #1846 #1851\u2192#1861 #1909\u2192#2050 #2091\u2192#2015 #1581 #1635 #1709 #2140\u2192main.\nMeanwhile: the coordinator closes nothing until you answer.",
+  "home": "coordinator plan (open-PR sort, pass 3)",
+  "kind": "decision",
+  "n": 499,
+  "options": [
+    {
+      "gain": "18 fewer open PRs, and nothing is lost: each head is pushed to archive/<branch> first, and each close comment names its replacement.",
+      "how": "The coordinator pushes each head to archive/<branch>, then closes the 18 with a comment naming each replacement.",
+      "key": "a",
+      "label": "Close all 18 (Recommended)",
+      "lose": "If a replacement PR is later dropped, its closed PR must be reopened by hand."
+    },
+    {
+      "gain": "No PR depends on an open replacement.",
+      "how": "The coordinator archives and closes only the 4 whose changes are all on main.",
+      "key": "b",
+      "label": "Close only the 4 already on main",
+      "lose": "14 duplicate PRs stay open."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "coordinator 14:56 CST Nov 10",
+  "replied": "2026-11-10T20:58:00Z",
+  "reply": "You answered in chat at 14:56 CST: \"close all 18\" (option a). The coordinator pushed all 18 heads to archive/<branch> and closed each PR with a comment naming its replacement or main (14:58 CST).",
+  "repo": "shivinate7/claude-settings",
+  "short": "Close 18 open PRs?",
+  "status": "closed",
+  "title": "Close the 18 open PRs that main or an open replacement already holds?",
+  "why": "It closes only PRs whose every change is on main or in an open replacement, and it archives each head first."
+}
