@@ -2629,8 +2629,8 @@ MUTATIONS = [
     # ---- lane-repo-tag. Each mutant breaks one clause of the lane repo tag check, or of git_reads.github_repo and
     # origin_slug, the reading of a checkout's GitHub repo that the rule shares with the roadmap build.
     ("lane-repo-tag: the rule never fires",
-     '    if lane_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
-     '    if False and lane_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
+     '    if repo_tag_hit_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
+     '    if False and repo_tag_hit_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
      "guard", "lane-repo-tag: lane tag with no repo tag is denied"),
     ("lane-repo-tag: a tag in other case no longer matches",
      '        if repo and repo_tag_names(tag, repo):',
@@ -2699,7 +2699,7 @@ MUTATIONS = [
      'if not (isinstance(tool_input.get(k), str) and tool_input[k])]',
      "guard", "lane-start-settings: lane tag with a whitespace-only model is denied"),
     ("lane-start-settings: the lane tag condition is dropped, so every create_session with no model or source_url is refused",
-     '    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):\n'
+     '    if not is_lane_create_session(tool, tool_input):\n'
      '        return ""\n'
      '    missing = [k for k in ("model", "source_url")',
      '    missing = [k for k in ("model", "source_url")',
@@ -2712,6 +2712,29 @@ MUTATIONS = [
      'if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]',
      'if not (k in tool_input and str(tool_input[k]).strip())]',
      "guard", "lane-start-settings: lane tag with a non-text"),
+    # ---- lane-floor. The floor's refusal names the lane remedy for a lane create_session and the no-model remedy for
+    # every other spawn. Each mutant breaks that choice, or the one lane-tag reading the floor and the three lane checks
+    # share (is_lane_create_session). lane_tags holds no case handling; the casefold lives in is_lane_create_session.
+    ("lane-floor: a lane create_session below the floor gets the no-model remedy again",
+     'LANE_MODEL_FLOOR_REASON if is_lane_create_session(tool, tool_input) else MODEL_FLOOR_REASON,',
+     'MODEL_FLOOR_REASON,',
+     "guard", "floor lane: a lane create_session on haiku is denied with the lane remedy"),
+    ("lane-floor: every floor refusal gets the lane remedy, so an Agent spawn names the lane inputs",
+     'LANE_MODEL_FLOOR_REASON if is_lane_create_session(tool, tool_input) else MODEL_FLOOR_REASON,',
+     'LANE_MODEL_FLOOR_REASON,',
+     "guard", "floor remedy: Agent on haiku keeps the no-model remedy"),
+    ("lane-floor: is_lane_create_session is always False, so no lane check fires",
+     '    return tool == CREATE_SESSION_TOOL and any(',
+     '    return False and any(',
+     "guard", "lane-start-settings: lane tag with no model is denied"),
+    ("lane-floor: is_lane_create_session is always True, so every call is judged as a lane",
+     '    return tool == CREATE_SESSION_TOOL and any(',
+     '    return True or any(',
+     "guard", "lane-start-settings: coordinator call with no model and no source_url is allowed"),
+    ("lane-floor: the lane tag is matched without casefold, so an upper-case lane tag is no lane",
+     'isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))',
+     'isinstance(t, str) and t.strip() == LANE_TAG for t in lane_tags(tool_input))',
+     "guard", "floor lane: an upper-case lane tag on haiku gets the lane remedy"),
     # RULE roadmap-one-writer. A push to the record branch needs the triage tag in the own record, with no
     # set_session_tags call after it.
     ("roadmap-one-writer: the triage tag is not checked, so any own record is a proof",
