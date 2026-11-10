@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL3YdbExdrKFgwkR9kr",
   "why": "q_max browser run 42427075186 on main 7f697a9 is red, 209/210: only the D-369 check fails, and it was also red on 58cad3b. q_max #1038, #1037 and #1011 (page item 154 a) wait on a green main browser run.",
-  "note": "Filed from coordinator 18:12 CST Nov 7. Built as q_max #1104, with runner 9 at 52c19de (coordinator 19:00 CST). Follow-up: qmax-run-end-reason-live.",
-  "updatedAt": "2026-11-07T19:00:00-06:00"
+  "note": "Filed from coordinator 18:12 CST Nov 7. Built as q_max #1104, with runner 9 at 52c19de (coordinator 19:00 CST). Follow-up: qmax-run-end-reason-live. Ruling (owner chat 11:26 CST Nov 10, relayed by the coordinator 11:31 CST): \"sessions like triage are not being archived right? so it can be doing work via agents in its session/lane -- i just said no new spawns at this time\". The freeze bars new sessions only; triage builds this step with agents in its own session (page item 492 closed). This note is the ruling's home until a decision holds it. Not built in triage: it is q_max work, outside this session's repo.",
+  "updatedAt": "2026-11-10T11:28:00-06:00"
 }

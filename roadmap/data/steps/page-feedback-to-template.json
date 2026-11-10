@@ -1,12 +1,12 @@
 {
   "title": "An owner comment on any repo's waiting page about the page's form becomes a claude-settings step that names skills/waiting-page",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 985,
   "owner": "claude-settings",
-  "lane": "",
+  "lane": "triage session_013NEJL42Sv3tJkjpzY7bExj (agents)",
   "blockedBy": [],
   "why": "The owner's page feedback must reach the shared template that builds every repo's page, and today that routing is by hand, so feedback lands in one repo or not at all.",
-  "note": "Owner 09:13 CST Nov 10 (relayed by the coordinator, 09:16 CST): every page feedback he gives goes into the shared template, skills/waiting-page (page.html, SKILL.md), and he expects that to be mechanical. Fix: a comment on the page's form, on any repo's waiting page, becomes a step in claude-settings that names skills/waiting-page; a check proves a page-form comment routes there. Related: ask-phase-out, page-thread-reply-refused (filed in place of reply-size-hook).",
-  "updatedAt": "2026-11-10T09:16:00-06:00"
+  "note": "Owner 09:13 CST Nov 10 (relayed by the coordinator, 09:16 CST): every page feedback he gives goes into the shared template, skills/waiting-page (page.html, SKILL.md), and he expects that to be mechanical. Fix: a comment on the page's form, on any repo's waiting page, becomes a step in claude-settings that names skills/waiting-page; a check proves a page-form comment routes there. Related: ask-phase-out, page-thread-reply-refused (filed in place of reply-size-hook). Ruling (owner chat 11:26 CST Nov 10, relayed by the coordinator 11:31 CST): \"sessions like triage are not being archived right? so it can be doing work via agents in its session/lane -- i just said no new spawns at this time\". The freeze bars new sessions only; triage builds this step with agents in its own session (page item 492 closed). This note is the ruling's home until a decision holds it. Doing 11:35 CST in triage.",
+  "updatedAt": "2026-11-10T11:28:00-06:00"
 }

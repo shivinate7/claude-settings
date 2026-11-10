@@ -1,11 +1,11 @@
 {
   "title": "The STE lint masks a double-backtick code span as one span",
   "why": "lint/ste_lint.py MASK_PATTERNS' inline-code entry (a run of non-backticks between single backticks) mis-pairs a double-backtick span, so the rest of the paragraph lints unmasked and some long sentences hide from STE001. Seen in docs/decisions/red-run-trailer-on-test-commits.md item 1a on #1745: a 32-word sentence went unreported. CI's ste-lint shares the pattern (lane notes-fix-large-3, 04:41 CST Nov 8).",
-  "note": "Fix: the inline-code mask pairs a run of N backticks with the next run of exactly N, as CommonMark does. Red case first: a paragraph with a double-backtick span and a sentence over the limit after it is reported. Control: a single-backtick span masks as today. Queue fix (owner 13:20 CST Nov 7). Filed 04:43 CST Nov 8; Lane notes-fix-large-3, which found it, builds it (coordinator, 04:42 CST Nov 8; owner item 386). Fix the mask in lint/ste_lint.py and in CI's ste-lint copy, from one home if the two share the pattern. Ready as draft #1914 (head a78262f08), base main: INLINE_CODE_RE in lint/ste_lint.py masks double-backtick spans, one home for MASK_PATTERNS and _FIX_MASK. Red cases 1f4c23042 and 28e54d56f. Record: round 1 haiku FAIL, round 2 sonnet PASS, fix check haiku PASS; lane lint PASS (lane, 05:23 CST Nov 8). Follow-up: step backtick-mask-one-home. #1914 round 3 record posted; it goes to runner 8 after lane lint (lane notes-fix-large-3, 07:35 CST Nov 8). backtick-mask-one-home starts after it merges.",
+  "note": "Fix: the inline-code mask pairs a run of N backticks with the next run of exactly N, as CommonMark does. Red case first: a paragraph with a double-backtick span and a sentence over the limit after it is reported. Control: a single-backtick span masks as today. Queue fix (owner 13:20 CST Nov 7). Filed 04:43 CST Nov 8; Lane notes-fix-large-3, which found it, builds it (coordinator, 04:42 CST Nov 8; owner item 386). Fix the mask in lint/ste_lint.py and in CI's ste-lint copy, from one home if the two share the pattern. Ready as draft #1914 (head a78262f08), base main: INLINE_CODE_RE in lint/ste_lint.py masks double-backtick spans, one home for MASK_PATTERNS and _FIX_MASK. Red cases 1f4c23042 and 28e54d56f. Record: round 1 haiku FAIL, round 2 sonnet PASS, fix check haiku PASS; lane lint PASS (lane, 05:23 CST Nov 8). Follow-up: step backtick-mask-one-home. #1914 round 3 record posted; it goes to runner 8 after lane lint (lane notes-fix-large-3, 07:35 CST Nov 8). backtick-mask-one-home starts after it merges. Done: #1914 head 192d32d78 is on main 6e8d6ccf9 (triage git merge-base, 11:33 CST Nov 10).",
   "phase": "now",
-  "status": "ready",
+  "status": "done",
   "order": 605,
   "owner": "triage",
   "lane": "session_013NEJL1rKuNDSwMxwArjXHb",
-  "updatedAt": "2026-11-08T07:37:00-06:00"
+  "updatedAt": "2026-11-10T11:28:00-06:00"
 }
