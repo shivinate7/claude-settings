@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 16:14 CST.
+the history. Last rewrite: 2026-11-10 16:19 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -14,8 +14,8 @@ in the owner's words with the time. Ids (R1, G1, D1) are stable names, not an or
 The words come first, because every later brief uses them. Then the two causes of lost CI runs (checks
 that refuse a green batch at merge, and fixed time limits). Then the review loop that sends lanes back
 (stale review logs, repeated lint, rounds). Then the trust in guards (wrong refusals, a long reply after
-each refusal, unseen holes, an override that feels like a loophole). Each is fixed once, before lanes
-resume, so the resumed lanes run under it.
+each refusal, unseen holes, an override that feels like a loophole). Last, a lane never stalls on a
+popup nobody sees. Each is fixed once, before lanes resume, so the resumed lanes run under it.
 
 ## Stage 1. Drain
 
@@ -252,6 +252,32 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   grant prints one receipt line the owner sees (what it lifts, one act or until when); today a grant
   prints nothing. A refusal no override can lift says so. Home: decision owner-override, rewritten in
   place.
+
+### 3.12 A lane never stalls on a popup
+
+After 3.11, because its third part uses the same owner grant route.
+
+- **R13.** Owner 16:16 CST Nov 10: "I need it to be that lanes that coordinator spawns are either A)
+  banned from ever having any sort of popup / request that interrupts them, or B) in the artifact i get
+  hyperlinks to those sessions that then show me their erequest and clear them -- I strongly lean
+  towards A though"; 16:17 CST: "trying to make sure u dont misunderstand this into opening a large
+  hole"; 16:18 CST: "yes" to the form. Outcome: a popup inside a lane is a stall the owner cannot see,
+  which costs speed and buys no accuracy. Every popup becomes a refusal plus a routed question, never a
+  silent allow, so safety stays the same or stricter.
+  1. A lane never opens the question box: a guard refuses it in any session with a parent. The lane
+     sends the question to its parent, triage puts it on the page, and the lane keeps working on what
+     does not depend on it, or ends its turn.
+  2. A lane starts in a mode where an act not pre-allowed is refused, not asked; the refused act goes to
+     the parent like a question. A builder first confirms the cloud `dontAsk` mode refuses rather than
+     prompts (unverified).
+  3. An act that needs the owner's typed word (an override, a guarded settings write) becomes a page
+     item; his save on the page is the grant (skill waiting-page). Agent text and a coordinator relay
+     never grant.
+  4. Cards no mode can stop (repository trust, computer folder, owner-approval cards): a guard refuses
+     those tools in a lane, and the lane routes the act to its parent.
+  Replaces CLAUDE.md questions-go-to-owner, "The started session may wait on it." Unmeasured: how often
+  lanes have stalled on a popup so far. Home: CLAUDE.md questions-go-to-owner; decision
+  questions-go-to-owner.
 
 ## Stage 4. Make the roadmap and triage mechanical
 
