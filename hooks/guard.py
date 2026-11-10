@@ -48,6 +48,14 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        role-diff-unread. An unread diff of any role, builder included, is logged
                        and allowed.
                        (builders-cannot-edit-tests)
+  brief-scope-diff     deny. A builder, test-author or record-writer commit or push whose diff modifies
+                       or deletes an existing file its brief does not name. The brief is the first user
+                       message of the agent's own transcript. The reason gives the undo route and names
+                       no path. No override lifts it. SubagentStop (`judge_stop`) refuses the first stop
+                       the same way; a second stop logs `brief-scope-unresolved` and passes. A new file
+                       the brief does not name logs `brief-scope-new`, a brief that names no path logs
+                       `brief-scope-unnamed`, and a brief that cannot be read logs `brief-scope-unread`.
+                       All three allow. (agent-commit-file-scope)
   git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
                        Reading, unsetting, or a mention in quoted text passes. (git-env-set-refused)
   shared-tree          deny or ask. A command that throws away work, judged against the state of
@@ -407,9 +415,11 @@ import importlib.util
 import itertools
 import json
 import os
+import posixpath
 import re
 import shlex
 import sys
+import tempfile
 import time
 
 # The shared code lives in guard_core.py, and the rule families in guard_<family>.py, beside this
@@ -2694,30 +2704,387 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None, con
     return found
 
 
-def diff_violation(root: str, role: str):
-    """Judge the agent's own change (`own_changes`). Returns `(offence, noted)`: the first path the role
-    may not change ('' when none, None when git could not answer: UNKNOWN, never clear), and the paths
-    a builder changed that are logged and never refused. Every offence of another role is logged only."""
+# ---- the brief's scope (decision agent-commit-file-scope)
+# A builder, test-author or record-writer commit, push and stop is judged against the paths its brief names.
+# The brief is the first user message of the agent's own transcript: the one transcript read, at commit,
+# push and stop only, and only when the agent has a change to judge. A modified or deleted existing file
+# the brief does not name is refused. A new file, a brief that names no path and a brief that cannot be
+# read are logged and allowed.
+SCOPE_ROLES = (BUILDER_ROLE, AUTHOR_ROLE, WRITER_ROLE)
+SCOPE_RULE = "brief-scope-diff"
+# The step for a refused change that an own commit already holds: a restore of the tree cannot undo it.
+OWN_COMMIT_REMEDY = "if a commit of yours holds the change, stop and report it"
+BRIEF_SCOPE_REASON = (
+    "Rule (Agents): this change modifies or deletes an existing file your brief does not name. The guard "
+    "refuses it at commit, push and stop. Remedy: restore it to its text at HEAD; " + OWN_COMMIT_REMEDY +
+    "; if the task needs it, report it to the orchestrator. This refusal is final: never write the file "
+    "another way. (decision agent-commit-file-scope)"
+)
+BRIEF_LINES = 50   # the lines of a transcript read to find its first user message
+# A path-shaped run: the characters of a path and of a glob, with the brackets, parens, plus and dollar a
+# framework route uses (`app/[id]/page.tsx`, `routes/posts.$id.tsx`). Any other character ends a run, so a
+# lone apostrophe or a colon in the prose cannot hide a name or break the read. `clean_run` strips the
+# prose's own brackets and parens.
+BRIEF_RUN = re.compile(r"[\w.\-/*?@\\\[\]()+$]+")
+BRIEF_LINK = re.compile(r"\]\(")   # a markdown link `[text](path)`: the path is its own run
+BRIEF_POINTER_BYTES = 64 * 1024   # the largest brief file a pointer is read from
+BRIEF_POINTER_EXT = (".md", ".txt")
+BRIEF_PREFIX = re.compile(r"`([\w.\-/]*[A-Za-z0-9][\w.\-/]*-)`")   # a backticked name prefix: `verdict-`
+BRIEF_EMPHASIS = re.compile(r"\*+([^*?]+)\*+\Z")   # `**src/app.py**` names src/app.py
+BRIEF_EXT = re.compile(r"\.[A-Za-z][A-Za-z0-9]{0,9}\Z")
+
+
+def brief_path_of(payload) -> str:
+    """The agent's own transcript: `agent_transcript_path` when the payload carries it (SubagentStop),
+    else the file beside the session's transcript (`stall_watch.agent_transcripts`, the one home). ''
+    when neither can be named."""
+    own = payload.get("agent_transcript_path")
+    if isinstance(own, str) and own:
+        return own
+    session, agent = payload.get("transcript_path"), payload.get("agent_id")
+    if not (isinstance(session, str) and session and isinstance(agent, str) and agent):
+        return ""
+    try:
+        import stall_watch
+        found = stall_watch.agent_transcripts(session, agent, "")
+    except Exception:
+        return ""
+    return found[0] if found else ""
+
+
+def brief_text(path: str):
+    """The first user message of the transcript at `path`, or None when it cannot be read. Only the first
+    user record counts: a later message that names a path adds nothing."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            for _ in range(BRIEF_LINES):
+                line = handle.readline()
+                if not line:
+                    return None
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(entry, dict) or entry.get("type") != "user":
+                    continue
+                message = entry.get("message")
+                content = message.get("content") if isinstance(message, dict) else None
+                if isinstance(content, str):
+                    return content
+                if isinstance(content, list):
+                    return "\n".join(b["text"] for b in content if isinstance(b, dict)
+                                     and b.get("type") == "text" and isinstance(b.get("text"), str))
+                return None
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _segment_match(pattern: str, text: str) -> bool:
+    """One path segment against a pattern of `*` (any run) and `?` (one character), with no backtracking
+    past the last `*`: the time is the product of the two lengths, however many stars the pattern holds."""
+    i = j = 0
+    star, mark = -1, 0
+    while j < len(text):
+        if i < len(pattern) and pattern[i] == "*":
+            star, mark = i, j
+            i += 1
+        elif i < len(pattern) and (pattern[i] == "?" or pattern[i] == text[j]):
+            i += 1
+            j += 1
+        elif star >= 0:
+            mark += 1
+            i, j = star + 1, mark
+        else:
+            return False
+    while i < len(pattern) and pattern[i] == "*":
+        i += 1
+    return i == len(pattern)
+
+
+def glob_segments(pattern: str):
+    """A path glob as segments. A segment that is only `**` crosses `/`; any other run of stars is one `*`."""
+    return [seg if seg == "**" else re.sub(r"\*+", "*", seg) for seg in pattern.split("/")]
+
+
+def glob_match(segments, path: str) -> bool:
+    """`path` against `glob_segments`: `**` takes zero or more whole segments, `*` and `?` stay inside one."""
+    parts = path.split("/")
+    seen = {}
+
+    def walk(i: int, j: int) -> bool:
+        key = (i, j)
+        if key not in seen:
+            if i == len(segments):
+                seen[key] = j == len(parts)
+            elif segments[i] == "**":
+                seen[key] = walk(i + 1, j) or (j < len(parts) and walk(i, j + 1))
+            else:
+                seen[key] = j < len(parts) and _segment_match(segments[i], parts[j]) and walk(i + 1, j + 1)
+        return seen[key]
+
+    return walk(0, 0)
+
+
+def clean_run(run: str) -> str:
+    """A path-shaped run as the path it names: backslashes as `/`, markdown emphasis, a leading `./`, the
+    sentence's own dot or question mark, and a bracket or paren the run closes or opens without its mate,
+    stripped. The case is kept."""
+    token = norm(run)
+    emphasis = BRIEF_EMPHASIS.match(token)
+    token = emphasis.group(1) if emphasis else token
+    while True:
+        before = token
+        token = token.rstrip(".?")
+        for opener, closer in ("()", "[]"):
+            while token.endswith(closer) and token.count(closer) > token.count(opener):
+                token = token[:-1]
+            while token.startswith(opener) and token.count(opener) > token.count(closer):
+                token = token[1:]
+            if token.startswith(opener) and token.endswith(closer) and opener not in token[1:-1] \
+                    and closer not in token[1:-1]:
+                token = token[1:-1]   # a whole run in parens: `(src/app.py)`
+        while token.startswith("./"):
+            token = token[2:]
+        if token == before:
+            return token
+
+
+def brief_runs(text: str):
+    """The cleaned path-shaped runs of a brief, in order."""
+    return [clean_run(run) for run in BRIEF_RUN.findall(BRIEF_LINK.sub(" ", text))]
+
+
+def pointer_read(token: str, top: str):
+    """The text of the brief file a pointer token names, or None. A pointer is a path whose file name holds
+    `brief` and ends `.md` or `.txt`; it is read only from the checkout or the temp folder (where a
+    session's scratchpad is), as a plain file of at most BRIEF_POINTER_BYTES."""
+    if not is_pointer(token):
+        return None
+    try:
+        path = token if os.path.isabs(token) else os.path.join(top, token)
+        real = os.path.realpath(path)
+        homes = [os.path.realpath(top), os.path.realpath(tempfile.gettempdir())]
+        if not any((os.path.normcase(real) + os.sep).startswith(os.path.normcase(home) + os.sep) for home in homes):
+            return None
+        if not os.path.isfile(real) or os.path.getsize(real) > BRIEF_POINTER_BYTES:
+            return None
+        with open(real, encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except (OSError, ValueError):
+        return None
+
+
+def is_pointer(token: str) -> bool:
+    """True when a path-shaped run points at a brief file: its file name holds `brief` and ends `.md` or `.txt`."""
+    name = basename(token).lower()
+    return "brief" in name and name.endswith(BRIEF_POINTER_EXT)
+
+
+def brief_pointer(text: str, top: str):
+    """`(pointed texts, pointers, missed)` for the pointers a message cites. Each pointer is read
+    (`pointer_read`); the texts it gives are read beside the message, never searched for a pointer
+    themselves. `pointers` holds every pointer token, lower case, and `missed` those that did not read."""
+    texts, pointers, missed = [], set(), []
+    for token in brief_runs(text):
+        if not is_pointer(token):
+            continue
+        pointers.add(token.lower())
+        found = pointer_read(token, top)
+        if found is None:
+            missed.append(token.lower())
+        else:
+            texts.append(found)
+    return texts, pointers, missed
+
+
+def checkout_roots(top: str):
+    """The roots an absolute path in a brief may name a repo path under, lower case, longest first: the
+    agent's checkout, then the primary checkout when the agent's sits under its `.claude/worktrees`."""
+    top = norm(top).rstrip("/")
+    roots = [top.lower()] if top else []
+    parent = posixpath.dirname(top)
+    if posixpath.basename(parent) == "worktrees" and posixpath.basename(posixpath.dirname(parent)) == ".claude":
+        roots.append(posixpath.dirname(posixpath.dirname(parent)).lower())
+    return [root for root in roots if root]
+
+
+def top_folders(top: str):
+    """The lower-case names of the folders at the checkout's top, or None when it cannot be listed."""
+    try:
+        return {entry.name.lower() for entry in os.scandir(top) if entry.is_dir()}
+    except OSError:
+        return None
+
+
+class BriefScope:
+    """The paths a brief names, lower case. A path is named by an equal path, a folder it sits under (whole
+    segments), a glob, a bare file name, or the prefix of its file name (only when the brief backticks it).
+    `skip` lists tokens that name nothing: the pointers the message cites. A run with a `/` names a path only
+    when it ends in an extension or `/`, or its first segment is a folder at the checkout's top, so a slash
+    word in prose (`and/or`, `I/O`) names nothing."""
+
+    def __init__(self, text: str, top: str, skip=()):
+        self.exact, self.dirs, self.bare, self.globs, self.prefixes = set(), set(), set(), [], set()
+        for found in BRIEF_PREFIX.finditer(text):
+            self.prefixes.add(norm(found.group(1)).lower())
+        self.roots, self.top, self.folders = checkout_roots(top), top, False
+        for token in brief_runs(text):
+            if token.lower() not in skip:
+                self.add(token.lower())
+
+    def slash_path(self, token: str) -> bool:
+        """True when a run with a `/` names a path, not a slash word in prose."""
+        if token.endswith("/") or BRIEF_EXT.search(token):
+            return True
+        if self.folders is False:
+            self.folders = top_folders(self.top)
+        return self.folders is None or token.split("/", 1)[0] in self.folders
+
+    def add(self, token: str) -> None:
+        if not re.search(r"[a-z0-9]", token):
+            return
+        if token.startswith("/"):
+            # An absolute path names a repo path only inside the checkout (`checkout_roots`). One outside it
+            # (a pointer to a brief file in a scratchpad) can equal no path of the repo, so it names none.
+            root = next((r for r in self.roots if token.startswith(r + "/")), None)
+            if root is None:
+                return
+            token = token[len(root) + 1:]
+        if "/" in token and not self.slash_path(token):
+            return
+        if "*" in token or "?" in token:
+            if "/" in token or BRIEF_EXT.search(token):
+                self.globs.append((glob_segments(token), "/" not in token))
+        elif token.endswith("/"):
+            if token.strip("/"):
+                self.dirs.add(token.rstrip("/"))
+        elif "/" in token:
+            self.exact.add(token)
+            if not BRIEF_EXT.search(token):
+                self.dirs.add(token)   # a folder written with no trailing slash
+        elif BRIEF_EXT.search(token):
+            self.bare.add(token)
+
+    def empty(self) -> bool:
+        return not (self.exact or self.dirs or self.bare or self.globs or self.prefixes)
+
+    def covers(self, rel: str) -> bool:
+        path = norm(rel).lower()
+        name = basename(path)
+        return (path in self.exact or name in self.bare
+                or any(path.startswith(d + "/") for d in self.dirs)
+                or any(glob_match(seg, name if on_name else path) for seg, on_name in self.globs)
+                or any(path.startswith(p) if "/" in p else name.startswith(p) for p in self.prefixes))
+
+
+def generated_pages():
+    """The pages and the folder the repo's own tools write, whatever the brief says: the catalog and the
+    records index (lint/hook_catalog.py) and the plain-English map folder (the `map` kind of
+    lint/layout.json). None when the lint folder cannot be read."""
+    try:
+        catalog = _layout_module("hook_catalog")
+        folder = _layout_module().layout()["kinds"]["map"]["path"]
+        return {catalog.PAGE.lower(), catalog.RECORDS_PAGE.lower()}, {norm(folder).strip("/").lower()}
+    except Exception:
+        return None
+
+
+def existed_at(root: str, old: str, rel: str):
+    """True when `rel` is a file at `old` (a commit or tree), False when it is not or `old` is '' (no
+    commit), None when git failed."""
+    if not old:
+        return False
+    answer = guard_core._git(root, "cat-file", "-e", old + ":" + norm(rel))
+    return None if answer is None else answer.returncode == 0
+
+
+def agent_base(root: str) -> str:
+    """The commit the agent's branch started from: its merge base with the default branch (`origin/main`).
+    '' when that cannot be read, and then a file is judged against the change's own parent."""
+    name = resolve_default_base(root)
+    answer = guard_core._git(root, "merge-base", "HEAD", name) if name else None
+    return answer.stdout.strip() if answer is not None and answer.returncode == 0 else ""
+
+
+def brief_scope_hit(root: str, top: str, brief: str, changes):
+    """Judge the agent's own change (`changes`, from `own_changes`) against its brief. Returns
+    `(offence, facts)`: the first modified or deleted existing file the brief does not name ('' when none),
+    and the log lines `(kind, matched)` (see `note_scope`) for a new unnamed file ("new"), a brief that
+    names no path ("unnamed"), and a brief, pointer or page list that could not be read ("unread"). Only OWN
+    entries count, as for a builder's test change. The names of each brief file the message points at
+    (`brief_pointer`) are added to the message's own. A file is new when the agent's base (`agent_base`) does not hold it.
+    Nothing is read when the change holds no path."""
+    if not any(kind == OWN and paths for _old, _new, paths, kind, _conflicts in changes):
+        return "", []
+    text = brief_text(brief) if brief else None
+    if text is None:
+        return "", [("unread", brief or "no transcript path")]
+    pointed, pointers, missed = brief_pointer(text, top)
+    if missed:
+        return "", [("unread", missed[0])]
+    scope = BriefScope("\n".join([text] + pointed), top, skip=pointers)
+    if scope.empty():
+        return "", [("unnamed", brief)]
+    implied, fresh, base = None, "", None
+    for old, _new, paths, kind, _conflicts in changes:
+        if kind != OWN:
+            continue
+        for rel in paths:
+            if scope.covers(rel):
+                continue
+            if implied is None:
+                implied = generated_pages()
+                if implied is None:
+                    return "", [("unread", "generated pages")]
+            low = norm(rel).lower()
+            if low in implied[0] or any(low.startswith(d + "/") for d in implied[1]):
+                continue
+            if base is None:
+                base = agent_base(root)
+            existed = existed_at(root, base or old, rel)
+            if existed is None:
+                return "", [("unread", rel)]
+            if existed:
+                return rel, []
+            fresh = fresh or rel
+    return "", [("new", fresh)] if fresh else []
+
+
+def diff_violation(root: str, role: str, brief: str = ""):
+    """Judge the agent's own change (`own_changes`). Returns `(offence, noted, rule, facts)`: the first path
+    the role may not change ('' when none, None when git could not answer: UNKNOWN, never clear), the paths
+    a builder changed that are logged and never refused, the rule of the offence, and the log lines
+    `(kind, matched)` the brief's scope adds (`brief_scope_hit`). A builder's test path comes first. Every
+    offence of another role is logged only, and an existing file outside the brief's scope is refused for
+    each judged role (`SCOPE_ROLES`)."""
     top = guard_core._git(root, "rev-parse", "--show-toplevel")
     if top is None or top.returncode != 0:
-        return None, []
+        return None, [], "", []
     top = os.path.realpath(top.stdout.strip())
     changes = own_changes(root, top)
     if changes is None:
-        return None, []
+        return None, [], "", []
     builder = role == BUILDER_ROLE
     noted = []
+    held = ""
     for old, new, paths, kind, conflicts in changes:
         if kind == KEPT and not builder:
             continue
         found = role_offences(root, top, role, paths, old, new, conflicts)
         if found is None:
-            return None, []
+            return None, [], "", []
         for rel in found:
             if not builder or kind == OWN:
-                return rel, noted
+                if builder:
+                    return rel, noted, diff_rule(role), []
+                held = held or rel
+                break
             noted.append(rel)
-    return "", noted
+    offence, facts = brief_scope_hit(root, top, brief, changes) if role in SCOPE_ROLES else ("", [])
+    if offence:
+        return offence, noted, SCOPE_RULE, facts
+    return held, noted, diff_rule(role), facts
 
 
 def diff_rule(role: str) -> str:
@@ -2730,20 +3097,37 @@ def builder_diff_reason() -> str:
     return (
         BUILDER_TEST_REASON + " The guard refuses a test change you made, at commit, push and stop. "
         "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
-        "you added. If a commit of yours holds the change, stop and report it. "
+        "you added; " + OWN_COMMIT_REMEDY + ". "
         "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
         "and report it, so the orchestrator hands the whole merge to a test-author. "
         "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
     )
 
 
-def diff_refusal(tool: str, role: str, root: str) -> None:
+def note_scope(tool: str, facts) -> None:
+    """Log what the brief's scope read (`brief_scope_hit`): one `noted` line for each fact. The rule ids are
+    literals here so the audit of emitted ids lists them."""
+    for kind, matched in facts:
+        if kind == "new":
+            record(tool, "noted", "brief-scope-new", matched)
+        elif kind == "unnamed":
+            record(tool, "noted", "brief-scope-unnamed", matched)
+        else:
+            record(tool, "noted", "brief-scope-unread", matched)
+
+
+def diff_refusal(tool: str, role: str, root: str, brief: str = "") -> None:
     """Judge a role's own change at commit or push. A builder's test change is refused (rule `builder-diff`,
-    with the undo route). A builder's logged change, any other role's offence, and a change that could
+    with the undo route), and so is an existing file outside the brief's scope (rule `brief-scope-diff`,
+    each judged role). A builder's logged change, any other role's offence, and a change that could
     not be read are logged for the reviewer: a refusal on an unread change would be a false alarm."""
-    found, noted = diff_violation(root, role)
+    found, noted, rule, facts = diff_violation(root, role, brief)
+    note_scope(tool, facts)
     if found is None:
         record(tool, "noted", "role-diff-unread", root)
+    elif found and rule == SCOPE_RULE:
+        guard_core.set_override_veto(lambda: True)
+        refuse(tool, "deny", "brief-scope-diff", BRIEF_SCOPE_REASON, found)
     elif found and role == BUILDER_ROLE:
         # A role guard stays outside every override (decision owner-override): a refusal is final.
         guard_core.set_override_veto(lambda: True)
@@ -2758,7 +3142,9 @@ def judge_stop(payload) -> None:
     stop (`stop_hook_active`) is allowed and logs `role-diff-unresolved`, so an agent that cannot fix
     its tree never loops. A builder's logged change and the other roles' offences log under the role's
     rule and never refuse. A cwd that is the main checkout and a change that could not be read log too,
-    and allow. A missing cwd logs nothing."""
+    and allow. A missing cwd logs nothing. An existing file outside the brief's scope blocks the first
+    stop of each judged role the same way (rule `brief-scope-diff`); a second stop logs
+    `brief-scope-unresolved`."""
     role = agent_role(payload)
     if not role:
         return
@@ -2768,7 +3154,16 @@ def judge_stop(payload) -> None:
     if is_worktree(where) is False:
         record("SubagentStop", "noted", "role-diff-main-checkout", where)
         return
-    found, noted = diff_violation(where, role)
+    found, noted, rule, facts = diff_violation(where, role, brief_path_of(payload))
+    note_scope("SubagentStop", facts)
+    if found and rule == SCOPE_RULE:
+        # The same first-stop refusal as a builder's test change, for each judged role; a second stop logs and allows.
+        if payload.get("stop_hook_active"):
+            record("SubagentStop", "noted", "brief-scope-unresolved", found)
+            return
+        record("SubagentStop", "deny", "brief-scope-diff", found)
+        print(json.dumps({"decision": "block", "reason": SCOPE_RULE + ": " + BRIEF_SCOPE_REASON}))
+        sys.exit(0)
     if found != "" and payload.get("stop_hook_active"):
         record("SubagentStop", "noted", "role-diff-unresolved", found or "unread")
     elif found is None:
@@ -3513,13 +3908,13 @@ ROLE_NO_MODEL_REASON = (
 )
 
 
-def _layout_module():
-    """lint/layout.py, imported from the lint folder beside this file's folder. The one home of the import."""
+def _layout_module(name: str = "layout"):
+    """A module of the lint folder beside this file's folder (default lint/layout.py), imported on first
+    use. The one home of the import."""
     lint = os.path.join(_HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
-    import layout
-    return layout
+    return importlib.import_module(name)
 
 
 def record_branch_of(root):
@@ -4125,6 +4520,7 @@ def settle_ask(tool: str, raw: str) -> None:
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", agent: bool = False,
                 background: bool = False, description: str = "", payload=None) -> None:
+    # The agent's own transcript (the brief) is named from `payload` only at a commit or push, never per call.
     POWERSHELL_CALL[0] = tool == "PowerShell"
     PENDING_ASK.clear()
     stripped = strip_heredoc_bodies(raw)
@@ -4135,7 +4531,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         for segment in split_segments(stripped):
             for subcommand, _ in git_calls(segment):
                 if subcommand in ("commit", "push"):
-                    diff_refusal(tool, role, command_root(stripped, cwd))
+                    diff_refusal(tool, role, command_root(stripped, cwd),
+                                 brief_path_of(payload) if isinstance(payload, dict) else "")
 
     # 0c. A command that sets a git location variable (q_max incident, 2026-10-14). Placed before
     # rule 1 on purpose: the deny wins where the shared-tree guard would only ask (arbiter ruling).
