@@ -1753,6 +1753,23 @@ def case_item_51_stray_field():
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
 
 
+# ------------------------------------------------------------------ dismissed: the page's own Mark read
+
+def case_session_update_naming_dismissed_is_refused():
+    """`dismissed` is written by the page's Mark read only (step ask-phase-out). The page draws it, so its itemFields
+    block lists it, yet a session update that names it is refused on both surfaces. The control is a session update
+    that names only a field, which must pass: a refusal of every update would fail it too."""
+    for value in ("2026-11-10T18:00:00Z", None):
+        data = {"dismissed": value}
+        for surface, got in (("page item_hit", call("item_hit", "update", entry_of(data))),
+                             ("page guard", guard_hit("update", entry_of(data)))):
+            check("%s: a session update naming dismissed=%r is refused" % (surface, value),
+                  got[0] != "" and "dismissed" in str(got[1]).lower(),
+                  "want a refusal naming dismissed, got %r" % (got,))
+    verdict("control: a session update naming only the title passes",
+            call("item_hit", "update", entry_of({"title": "Pick a colour"})), None)
+
+
 # ------------------------------------------------------------------ a press link that is not a list; a partial edit of the Why yours line
 #
 # Each case below is also a pytest test (the test_ wrappers after it). A check the case records as failed fails
@@ -2288,7 +2305,8 @@ def case_cross_repo_update_checked_with_needs_repo():
 
 
 def main():
-    for case in (case_item_92, case_item_51_stray_field, case_item_stray_field_refused_from_a_record_branch_checkout,
+    for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
+                 case_item_stray_field_refused_from_a_record_branch_checkout,
                  case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
