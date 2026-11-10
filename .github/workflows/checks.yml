@@ -688,8 +688,8 @@ jobs:
 
       - name: install.sh checkout-detection suite
         if: ${{ needs.scope.outputs.code == 'true' }}
-        # Own cap: n5 (green 7.90, 8.67, 9.60, 9.68 min, runs 42682869856, 42669400649, 42717988296, 42700538152; plus 10.22 min cut at the old 10 min cap, run 42708195330, a floor): cap 14 = slowest green 9.68 / 0.7, rounded up (decision ci-job-caps).
-        timeout-minutes: 14
+        # Own cap: n6 min: 7.90, 8.62, 8.67, 9.60, 9.68 green (runs 42682869856, 42733987294, 42669400649, 42717988296, 42700538152) and 10.22 cut at the old 10 min cap (run 42708195330, a floor); cap 15 = 10.22 / 0.7 = 14.6, rounded up (decision ci-job-caps).
+        timeout-minutes: 15
         run: sh hooks/test_install_src.sh
 
       - name: cloud-setup.sh suite
@@ -807,10 +807,11 @@ jobs:
   checks-waiting-page:
     runs-on: ubuntu-latest
     needs: scope
-    # The suite split off checks-shoot. n1 (12.7 min, run 42733987294, the first run with the suite
-    # apart; an earlier run cut the suite inside checks-shoot at 9.5 min, runs 42708195330 and
-    # 42717988296): cap 19 = 12.7 / 0.7, rounded up (decision ci-job-caps); re-measure at 5 green runs.
-    timeout-minutes: 19
+    # The suite split off checks-shoot. Provisional cap 60: one run so far, 12.7 min and red (run
+    # 42733987294, n=1; an earlier run cut the suite inside checks-shoot at 9.5 min, runs 42708195330
+    # and 42717988296). Re-measure on a green run and at 5 green runs, then set cap = slowest / 0.7,
+    # rounded up (decision ci-job-caps).
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
@@ -881,7 +882,7 @@ jobs:
   shell-macos:
     runs-on: macos-latest
     needs: scope
-    # n30 green, slowest 23.2 min with its suite step at 11.68 (run 42120437163), so about 11.5 min of other steps; the suite step's floor is now 16.2 min (n6, runs 42708195330, 42717988296): 16.2 + 11.5 = 27.7; cap 40 = 27.7 / 0.7, rounded up (decision ci-job-caps).
+    # n30 green, slowest 23.2 min with its suite step at 11.68 (run 42120437163), so about 11.5 min of other steps; the suite step's floor is now 16.2 min (n6, runs 42708195330, 42717988296): 27.7 min is a projection: the step floor 16.2 plus about 11.5 min of other steps from run 42120437163; run 42733987294 measured 24.4 min for the job; cap 40 = 27.7 / 0.7, rounded up (decision ci-job-caps).
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
