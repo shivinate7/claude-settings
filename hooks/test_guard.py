@@ -3609,6 +3609,15 @@ sh("per-file deny: env -C into the lane, then cd into the shared checkout and re
 sh("per-file deny: control, a plain status, then cd into the shared checkout and restore f.txt, from a folder in no checkout, denies by shared-tree",
    VCS + " status && cd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
    "deny", "shared-tree", cwd=NOGIT, lacks=(CHAIN_ASK,))
+# A bare restore of the whole tree is a discard the lane's own dirty tracked file would lose, so it asks in the
+# lane, and chained with a status it denies. The control is that chain with no env wrapper. The decision row puts
+# an env -C on a clean checkout ahead of the status. The shell's folder stays the lane, so the restore must still
+# deny. The verb is restore ., not restore f.txt: a restore of one modified file in the lane is allowed by design
+# (the per-file allow rows), so that verb cannot tell the two readings apart.
+chained_ask("per-file deny: control, a status and a bare restore of the whole tree in a lane with a dirty file, denies as a chained ask command",
+            VCS + " status && " + VCS + " restore .", cwd=GITWT)
+chained_ask("per-file deny: env -C into a clean checkout, then a bare restore of the whole tree in the lane, denies as a chained ask command",
+            "env -C " + slash(SUBJCLEAN) + " " + VCS + " status && " + VCS + " restore .", cwd=GITWT)
 
 # LATE PROBES (named "late probe", so MUTATE_ONLY="late probe" runs this block alone). Each runs a
 # per-file restore in the shared checkout from the lane. env -vC is read as env -C, so other-checkout
@@ -28935,6 +28944,7 @@ LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads the folder an env -C na
 # plain cd into the primary is read first, and a row reports on its own spelling only when that cd reads right.
 RUN_DIR_PRIM = os.path.join(ROOT, "run-dir-prim")   # the primary checkout
 RUN_DIR_LANE = os.path.join(ROOT, "run-dir-lane")   # the linked lane the command is typed from
+RUN_DIR_CLEAN = os.path.join(ROOT, "run-dir-clean")  # another folder, neither the primary nor the lane
 
 
 def _run_dir_names(command, want, cause):
@@ -28969,6 +28979,43 @@ LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir lets a cd after an env -C dec
 LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads an env -C of the primary checkout as the primary",
                          _run_dir_row("env -C %s git status" % slash(RUN_DIR_PRIM), RUN_DIR_PRIM,
                                       "an env -C of the primary checkout was read as something else")))
+
+# An env -C moves only the program it runs. Its folder reaches a bare git that follows it only when EVERY git
+# segment of the command carries an env -C folder. Otherwise a bare git runs in the shell's folder: the cwd,
+# or the folder the last cd left. The three red rows are the three places a bare git can sit beside an env -C
+# into another folder: after it, after a cd and it, and ahead of it. Each row is one spelling, so a failure
+# names one form.
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads a bare git after an env -C into another folder in the shell's folder",
+                         _run_dir_row("env -C %s git status && git log" % slash(RUN_DIR_CLEAN), RUN_DIR_LANE,
+                                      "a bare git after an env -C reads the env folder, as if the env -C moved the shell")))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads a bare git after a cd and an env -C in the cd's folder",
+                         _run_dir_row("cd %s && env -C %s git status && git log" % (slash(RUN_DIR_PRIM), slash(RUN_DIR_CLEAN)),
+                                      RUN_DIR_PRIM,
+                                      "a bare git after a cd and an env -C reads the env folder, as if the env -C moved the shell past the cd")))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads a bare git ahead of an env -C into another folder in the shell's folder",
+                         _run_dir_row("git status && env -C %s git log" % slash(RUN_DIR_CLEAN), RUN_DIR_LANE,
+                                      "a bare git ahead of an env -C reads the env folder, as if the env -C moved the shell for it")))
+# The guards below pin what each red row must keep. A git -C under an env -C joins onto that env folder, and a
+# relative one chains onto it. A non-git env -C moves nothing. A relative git -C after a cd reads the shell's
+# folder, and a git -C ahead of a cd keeps its folder over the cd. With an env -C on every git segment, the last
+# env -C folder is read.
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir joins a git -C onto the env -C folder of its own segment",
+                         _run_dir_row("env -C a git -C b status", os.path.join(RUN_DIR_LANE, "a", "b"),
+                                      "a git -C under an env -C was not joined onto that env folder")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a git after an env -C of a non-git program as the shell's folder",
+                         _run_dir_row("env -C %s true && git status" % slash(RUN_DIR_PRIM), RUN_DIR_LANE,
+                                      "an env -C of a non-git program moved the shell's folder")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a relative git -C after a cd in the shell's folder",
+                         _run_dir_row("cd %s && git -C . status" % slash(RUN_DIR_PRIM), RUN_DIR_LANE,
+                                      "a relative git -C after a cd joined onto the cd folder, not the shell's folder")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a git -C ahead of a cd in its own folder, not the cd's",
+                         _run_dir_row("git -C %s status && cd %s && git status" % (slash(RUN_DIR_LANE), slash(RUN_DIR_PRIM)),
+                                      RUN_DIR_LANE,
+                                      "a cd after a git -C decided the folder over the git -C")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads the last env -C folder when every git segment carries one",
+                         _run_dir_row("env -C %s git status && env -C %s git log" % (slash(RUN_DIR_PRIM), slash(RUN_DIR_CLEAN)),
+                                      RUN_DIR_CLEAN,
+                                      "with an env -C on every git segment, the first env -C folder was read, not the last")))
 
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
