@@ -747,11 +747,15 @@ class ReportGuardTests(unittest.TestCase):
                     self.assertEqual(run.stdout.strip(), "")
 
 
+# A valid Done line that ends a reply, so the turn lands and the cite check runs on the prose above it.
+ITEM_DONE = "\n\n> **Done** BUILT guard, PR #226\n> **Next** none"
+
+
 class DoneFormatAndCiteTests(unittest.TestCase):
     """reports-done-format and speak-cite-id-plus-gloss, both in report_guard.py's Stop hook."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: the run folder, never the system temp dir
         self.addCleanup(self.tmp.cleanup)
 
     def verdict(self, reply):
@@ -885,6 +889,102 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": True}
         self.assertEqual(run_guard(REPORT_GUARD, hook).stdout.strip(), "")
+
+    # speak-cite-id-plus-gloss: a page item cited by number (`item <n>`, `page item <n>`)
+    def test_item_cite_red_bare_item_number_blocks(self):
+        rows = [
+            # Catches: a bare item number after "Per" passes.
+            ("Per item 46." + ITEM_DONE, "'item 46' is a record id"),
+            # Catches: a capitalised Item at the start of a sentence passes.
+            ("Item 46 is next." + ITEM_DONE, "'Item 46' is a record id"),
+            # Catches: a one-digit item number passes.
+            ("Per item 7." + ITEM_DONE, "'item 7' is a record id"),
+            # Catches: a four-digit item number, the longest the rule reads, passes.
+            ("Per item 1234." + ITEM_DONE, "'item 1234' is a record id"),
+            # Catches: a bare item number inside the report body passes.
+            ("> **Done** BUILT guard, PR #226\n> **Next** follow item 46 next", "'item 46' is a record id"),
+        ]
+        for reply, needle in rows:
+            with self.subTest(reply=reply):
+                self.assert_blocked(reply, needle)
+
+    def test_item_cite_red_bare_page_item_blocks(self):
+        # Catches: a page item number passes, so the page word hides a bare number. The needle ends at the
+        # id, so it holds whether the id is read as "page item 12" or "item 12".
+        self.assert_blocked("Waiting on page item 12." + ITEM_DONE, "item 12' is a record id")
+
+    def test_item_cite_allowed_item_plus_gloss(self):
+        rows = [
+            # Catches: false alarm on an item number followed by its gloss in parentheses.
+            "Per item 46 (search pill clear button) holds.",
+            # Catches: false alarm on an item number followed by a colon and its gloss.
+            "Per item 46: search pill clear holds.",
+            # Catches: false alarm on a gloss in parentheses before the item number.
+            "Per search pill clear (item 46) holds.",
+            # Catches: false alarm on the page form with its gloss.
+            "Per page item 12 (search pill clear) holds.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line + ITEM_DONE)
+
+    def test_item_cite_allowed_in_code_link_and_url(self):
+        rows = [
+            # Catches: an item number in a code span is read as a bare id.
+            "Per `item 46`.",
+            # Catches: an item number in a fenced block is read as a bare id.
+            "```\nPer item 46.\n```",
+            # Catches: an item number in a markdown link's text is read as a bare id.
+            "See [item 46](https://x/waiting) for the ask.",
+            # Catches: an item number in a URL query is read as a bare id.
+            "Open https://x/waiting?item=46 to answer.",
+            # Catches: an item number in a URL path is read as a bare id.
+            "Open https://x/waiting/item-46 to answer.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line + ITEM_DONE)
+
+    def test_item_cite_allowed_answered_source_with_gloss(self):
+        # Catches: an answered line that names its item as the source is refused as a bare id.
+        rows = [
+            "answered, see item 46 (clear button).",
+            "Answered in item 46 (search pill clear).",
+            "Item 46 (search pill clear) answered in chat at 17:25 CST.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line + ITEM_DONE)
+
+    def test_item_cite_red_line_word_away_from_item_blocks(self):
+        # Catches: the exemption for "line item" reaches past its own two words, so "a line, item 12." passes. Only
+        # the word right before "item" is exempt.
+        self.assert_blocked("a line, item 12." + ITEM_DONE, "'item 12' is a record id")
+
+    def test_item_cite_allowed_line_item_is_not_a_cite(self):
+        # Catches: "line item 12", a PO or budget line, is read as a page item id.
+        rows = [
+            "The line item 12 on the PO is paid.",
+            "Line item 12 is paid.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line + ITEM_DONE)
+
+    def test_item_cite_red_bare_item_with_hash_blocks(self):
+        # Catches: a bare item number written with a "#" passes, so the "#" hides the id from the cite check.
+        self.assert_blocked("Per item #46." + ITEM_DONE, "item #46' is a record id")
+
+    def test_item_cite_allowed_item_number_as_a_count_or_interval(self):
+        # Catches: "item <n>" that counts or spaces a thing, not a page item, is read as a bare page item id.
+        rows = [
+            "Doing item 2 of 3 now.",
+            "Each item 5 minutes apart.",
+            "Item 2 of 3 done (clear button).",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line + ITEM_DONE)
 
 
 class DoneNamesModelsTests(unittest.TestCase):
@@ -4808,7 +4908,9 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         self.assert_allowed("The owner answers in chat. Answering takes a minute, and the answer is pending.")
 
     def test_an_green_landed_turn_with_a_cited_line_passes(self):
-        reply = "Item 143 answered in chat at 17:25 CST.\n\n> **Done** BUILT abc123\n> **Next** ship it"
+        # A landed turn with a glossed page item that names its source passes. A bare "Item 143" with no gloss is
+        # refused as a record id, so the gloss "(clear button)" is what keeps the line allowed.
+        reply = "Item 143 (clear button) answered in chat at 17:25 CST.\n\n> **Done** BUILT abc123\n> **Next** ship it"
         self.assert_allowed(reply, landed=True)
 
     def test_an_green_stop_hook_active_stays_quiet(self):

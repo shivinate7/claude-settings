@@ -31,6 +31,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from datetime import datetime
 from unittest import mock
@@ -404,6 +405,27 @@ class TriageHoldTests(StalledFixture, unittest.TestCase):
         opens = self.transcript_opens(records, env_id=None)
         self.assertLessEqual(opens, BASE_OPENS, "the Stop opened its transcript %d times; a plain Stop opens it "
                                                 "%d times, and a non-triage Stop may add none" % (opens, BASE_OPENS))
+
+
+class StalledLineReplyTests(unittest.TestCase):
+    """speak-cite-id-plus-gloss on a landed reply that quotes the stalled lines the build prints. The lines come from
+    build.stalled_lines, the one emitter, so the control tracks the real format, not a copy of it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=trg.RUN_FOLDER)  # test-temp-standard: the run folder
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_st_green_emitted_item_and_unknown_lines_are_not_refused(self):
+        # Catches: the build's `stalled step: item <n> (lane ...)` line, quoted in a landed reply, is refused as a bare
+        # item id. The unknown-read line names no id, so it must pass as well.
+        for name, lines in (("item", stalled_lines(items=[(7, "item-cite-carries-name")])),
+                            ("unknown", stalled_lines(items_why="unknown read"))):
+            with self.subTest(line=name):
+                reply = "\n".join(lines) + "\n\n" + WELL_FORMED
+                run = trg.landed_run(self.tmp.name, reply)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                out = json.loads(run.stdout) if run.stdout.strip() else None
+                self.assertIsNone(out, "the reply was refused: %s" % (out and out.get("reason")))
 
 
 if __name__ == "__main__":

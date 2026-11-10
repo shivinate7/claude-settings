@@ -59,6 +59,8 @@ drops one, and the Stop hook names one that is missing. Each sits under its own 
 
 For a list that has a home (a page collection, a roadmap ref, a git ref or a GitHub query), name the home and never copy the list.
 
+When you cite an item by number, such as `item 46`, give its short name beside the number.
+
 ## 5. Check premises
 
 A premise is a statement, not a fact. After a compaction, a /clear or a fork, treat every

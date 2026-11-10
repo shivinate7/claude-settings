@@ -1146,24 +1146,29 @@ LIST_HOME_WANTS = (
 )
 
 
-def list_home_missing(step_text):
-    """The wants the closest window of step_text lacks; empty when one window holds all four.
+def window_missing(text, wants):
+    """The wants the closest window of text lacks; empty when one window holds them all.
 
     A window is one sentence or bullet, or that unit plus the sentence right after it. All
-    four wants must sit in one window, so words spread over the step (a "never" far from any
-    list) cannot satisfy it.
+    the wants must sit in one window, so words spread over the text (a "never" far from any
+    list) cannot satisfy it. `wants` is a sequence of (label, regex) pairs.
     """
     # A bullet marker after a sentence end splits twice, which leaves an empty unit: drop it,
     # or it would sit between two neighbours and break their window.
-    units = [squash(u) for u in re.split(r"(?<=[.!?])\s+|^\s*[-*]\s+", step_text, flags=re.M)]
+    units = [squash(u) for u in re.split(r"(?<=[.!?])\s+|^\s*[-*]\s+", text, flags=re.M)]
     units = [u for u in units if u]
     windows = units + [a + " " + b for a, b in zip(units, units[1:])]
-    best = [label for label, _ in LIST_HOME_WANTS]
+    best = [label for label, _ in wants]
     for window in windows:
-        miss = [label for label, rx in LIST_HOME_WANTS if not re.search(rx, window)]
+        miss = [label for label, rx in wants if not re.search(rx, window)]
         if len(miss) < len(best):
             best = miss
     return best
+
+
+def list_home_missing(step_text):
+    """The wants the closest window of step_text lacks; empty when one window holds all four."""
+    return window_missing(step_text, LIST_HOME_WANTS)
 
 
 def case_prompt_names_list_home_not_copy():
@@ -1177,6 +1182,25 @@ def case_prompt_names_list_home_not_copy():
           "where a list lives (a page, a roadmap ref or a git ref) and never to copy the list",
           not missing,
           "no window of step 4 holds all four; the closest lacks: %s" % "; ".join(missing))
+
+
+ITEM_CITE_WANTS = (
+    ("the word 'item'", r"\bitems?\b"),
+    ("the word 'number'", r"\bnumbers?\b|\bnumbered\b"),
+    ("a short name: 'short name', 'plain name' or 'gloss'", r"\b(?:short|plain)[ -]names?\b|\bgloss"),
+)
+
+
+def case_prompt_item_cite_carries_its_name():
+    # A handoff that cites a page item by number (`item 46`) must give its short name too, as a reply does.
+    # One sentence or bullet of the prompt, with the sentence after it, must say so.
+    with open(os.path.join(HERE, "precompact_handoff_prompt.md"), "r", encoding="utf-8") as f:
+        text = f.read()
+    check("prompt: the file has text (item-cite check)", bool(text.strip()), "empty prompt")
+    missing = window_missing(text, ITEM_CITE_WANTS)
+    check("prompt: a sentence or bullet, with the sentence after it, says an item cited by number "
+          "carries its short name",
+          not missing, "no window holds all three; the closest lacks: %s" % "; ".join(missing))
 
 
 def write_compaction(c):
@@ -2322,6 +2346,7 @@ def main() -> int:
     case_handoffs_dir_keeps_other_sessions()
     case_prompt_lists_working_premises()
     case_prompt_names_list_home_not_copy()
+    case_prompt_item_cite_carries_its_name()
     case_reorient_lists_weak_premises()
     case_reorient_premise_lines_survive_odd_text()
     case_reorient_flags_missing_premises()
