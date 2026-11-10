@@ -3769,9 +3769,9 @@ def main(argv, host=None, lock=None, hosts=None):
         # the last round may run Opus by the owner's override. Checked here, never in parse_review, so a record posted before the rule still parses.
         if a.fix_check and a.fix_check[2].lower() != REVIEW_FIX_GUARD_MODEL:
             p.error(f"--fix-check: every fix check runs on {REVIEW_FIX_GUARD_MODEL}, so give {REVIEW_FIX_GUARD_MODEL} as MODEL, not {a.fix_check[2]}")
-        for n, role, model, _verdict in a.round:
-            if role == REVIEW_ROLES[0] and n >= 2 and "sonnet" not in model.lower() and not (n == 3 and "opus" in model.lower()):
-                p.error(f"--round {n}: a reviewer's round {n} runs sonnet, not {model!r}; only round 3 may run opus (decision agent-model-cap, the reviewer row)")
+        for n, role, model, _verdict in a.round:  # parse_review below refuses any fourth round with no --grant
+            if role == REVIEW_ROLES[0] and n >= 2 and "sonnet" not in model.lower() and not (n >= 3 and "opus" in model.lower()):
+                p.error(f"--round {n}: a reviewer's round {n} runs sonnet, not {model!r}; only round 3, or a granted round 4, may run opus (decision agent-model-cap, the reviewer row)")
         if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant)) is None:
             p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3" if not a.grant
                     else "--round: with --grant the rounds must start at 1, rise by one at a time and end at 4")
