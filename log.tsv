@@ -1,56 +1,56 @@
 session_011DaUc41jAEUmhXE72v4uUb	09:42 CST		sent	
 session_011qC7XdGEvViSU9PuJEJ35C	09:42 CST	transcript	handoff-B (read from transcript, no reply)	archive: archived (owner override 15m, 10:49 CST)
 session_012oh85uKXAanQ2UciVzBEQN	09:42 CST	transcript	handoff-B (read from transcript, no reply)	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKyggQsYbfxs62CE1mx	09:42 CST	09:42 CST	KEEP	
-session_013NEJKygtZewTzZqVEvmyLu	09:42 CST	09:42 CST	KEEP	
-session_013NEJKyh5DtXyHyFdAmQUUz	09:42 CST	09:42 CST	KEEP	
+session_013NEJKyggQsYbfxs62CE1mx	09:42 CST	09:42 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKyggQsYbfxs62CE1mx.idle.md)
+session_013NEJKygtZewTzZqVEvmyLu	09:42 CST	09:42 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKygtZewTzZqVEvmyLu.idle.md)
+session_013NEJKyh5DtXyHyFdAmQUUz	09:42 CST	09:42 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKyh5DtXyHyFdAmQUUz.idle.md)
 session_013NEJKyiKdHCgMQbb5n6Rnp	09:42 CST	09:42 CST	handoff-B	archive: archived
 session_013NEJKyixLRXW96LSwHDY2h	09:42 CST	09:42 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKyjEhPeuaT1HrHD16Y	09:42 CST	09:42 CST	KEEP	
-session_013NEJKynEHKFPsDyJTieAUi	09:42 CST	09:43 CST	KEEP	
+session_013NEJKyjEhPeuaT1HrHD16Y	09:42 CST	09:42 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKyjEhPeuaT1HrHD16Y.idle.md)
+session_013NEJKynEHKFPsDyJTieAUi	09:42 CST	09:43 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKynEHKFPsDyJTieAUi.idle.md)
 session_013NEJKynFH16ipe94euH9od	09:42 CST	09:43 CST	handoff-B	archive: archived
-session_013NEJKyoXvBfn7q6bpofjYg	09:42 CST	09:43 CST	KEEP	
-session_013NEJKyooYBqTh9KkQWNHwe	09:42 CST	09:43 CST	KEEP	
+session_013NEJKyoXvBfn7q6bpofjYg	09:42 CST	09:43 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKyoXvBfn7q6bpofjYg.idle.md)
+session_013NEJKyooYBqTh9KkQWNHwe	09:42 CST	09:43 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKyooYBqTh9KkQWNHwe.idle.md)
 session_013CpPcA1xXsuDXLdsWU4WYc	09:42 CST		send-failed: owner-computer session; owner 10:17 CST: disregard (asked separately)	
-session_013NEJKyoqH7Pdyv1k1rK8bE	09:43 CST	09:43 CST	KEEP	
+session_013NEJKyoqH7Pdyv1k1rK8bE	09:43 CST	09:43 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKyoqH7Pdyv1k1rK8bE.idle.md)
 session_013NEJKypkpzqdbSUr7rAwAn	09:43 CST	09:44 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKypwFEtaJwfYrMpZ5T	09:43 CST	09:43 CST	handoff-B	archive: archived
 session_013NEJKyq9tjSV3zNiViAp4E	09:43 CST	09:43 CST	handoff-B	archive: archived
-session_013NEJKyqF79t9UigCgm3qjb	09:43 CST	09:43 CST	KEEP	
-session_013NEJKyqU19UoQgbHWPzXBz	09:43 CST	09:44 CST	KEEP	
-session_013NEJKyrvZKvULem1eZzY1o	09:43 CST	09:44 CST	KEEP	
+session_013NEJKyqF79t9UigCgm3qjb	09:43 CST	09:43 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKyqF79t9UigCgm3qjb.idle.md)
+session_013NEJKyqU19UoQgbHWPzXBz	09:43 CST	09:44 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKyqU19UoQgbHWPzXBz.idle.md)
+session_013NEJKyrvZKvULem1eZzY1o	09:43 CST	09:44 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKyrvZKvULem1eZzY1o.idle.md)
 session_013NEJKys31F9TckFXjRxWER	09:43 CST	09:44 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKysbEmRBBB3QEfDm2H	09:43 CST	09:44 CST	KEEP (moved from handoff-B; coordinator 09:57 CST, PR released)	
-session_013NEJKytPs46Qp4KDoqbDvz	09:43 CST	09:45 CST	KEEP	
+session_013NEJKysbEmRBBB3QEfDm2H	09:43 CST	09:44 CST	KEEP (moved from handoff-B; coordinator 09:57 CST, PR released)	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKysbEmRBBB3QEfDm2H.idle.md)
+session_013NEJKytPs46Qp4KDoqbDvz	09:43 CST	09:45 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKytPs46Qp4KDoqbDvz.idle.md)
 session_013NEJKyrFd5no3Kf2HBuL79	09:44 CST	09:45 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKyuRd6zdQhuiRC27g9	09:44 CST	09:45 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKyuyMvkyfa5EDmUpJS	09:44 CST	09:44 CST	handoff-B	archive: archived
-session_013NEJKyvCWXz9w73Km3i8RM	09:44 CST	09:45 CST	KEEP	
-session_013NEJKywfKL1Vp4zHaUEbot	09:44 CST	09:45 CST	KEEP	
+session_013NEJKyvCWXz9w73Km3i8RM	09:44 CST	09:45 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKyvCWXz9w73Km3i8RM.idle.md)
+session_013NEJKywfKL1Vp4zHaUEbot	09:44 CST	09:45 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKywfKL1Vp4zHaUEbot.idle.md)
 session_013NEJKyxJkZYdX2VVW9dgp2	09:45 CST	09:45 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKyxUS8epcpStRJ8CAA	09:45 CST	09:45 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKyxaNeXMMuUruLyQ5T	09:45 CST	09:45 CST	KEEP	
+session_013NEJKyxaNeXMMuUruLyQ5T	09:45 CST	09:45 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKyxaNeXMMuUruLyQ5T.idle.md)
 session_013NEJKyxnHZUhFjmTh4XbJa	09:45 CST	09:46 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKyyiqygSunVG2xGMSr	09:45 CST	09:45 CST	KEEP	
-session_013NEJKyzA8bkZSm147VHnke	09:45 CST	09:46 CST	KEEP	
+session_013NEJKyyiqygSunVG2xGMSr	09:45 CST	09:45 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKyyiqygSunVG2xGMSr.idle.md)
+session_013NEJKyzA8bkZSm147VHnke	09:45 CST	09:46 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKyzA8bkZSm147VHnke.idle.md)
 session_013NEJKyzEbN117XUjYmkEjB	09:45 CST	09:46 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKyzGL3yZ2cjQt9Jbj9	09:45 CST	09:45 CST	KEEP	
+session_013NEJKyzGL3yZ2cjQt9Jbj9	09:45 CST	09:45 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKyzGL3yZ2cjQt9Jbj9.idle.md)
 session_013NEJKyzbBcReBkq8QRSuUh	09:45 CST	09:45 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKyzg9A9SDZ926jRCSU	09:45 CST	09:46 CST	KEEP	
+session_013NEJKyzg9A9SDZ926jRCSU	09:45 CST	09:46 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKyzg9A9SDZ926jRCSU.idle.md)
 session_013NEJKz13TfcPPchNJveuuF	09:45 CST	09:46 CST	handoff-B	archive: archived
-session_013NEJKz26y1pT4XskPQbQbz	09:45 CST	09:46 CST	KEEP	
+session_013NEJKz26y1pT4XskPQbQbz	09:45 CST	09:46 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKz26y1pT4XskPQbQbz.idle.md)
 session_013NEJKz3J95T7tJBtSYUXZ9	09:45 CST	09:46 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKz3Pbvh8FJVoT2ydk8	09:45 CST	09:46 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKz49VptC1nSSWVrPN8	09:45 CST	09:46 CST	KEEP	
+session_013NEJKz49VptC1nSSWVrPN8	09:45 CST	09:46 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKz49VptC1nSSWVrPN8.idle.md)
 session_013NEJKz5A22GYG2gprVFFPX	09:45 CST	09:46 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKz5DUxWNjsPPXNF5q1	09:45 CST	09:46 CST	KEEP	
+session_013NEJKz5DUxWNjsPPXNF5q1	09:45 CST	09:46 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKz5DUxWNjsPPXNF5q1.idle.md)
 session_013NEJKz6tCDukV1yMoiPQ83	09:45 CST	09:46 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKz7673bPpSLv4TxyA7	09:45 CST	09:46 CST	KEEP	
-session_013NEJKz785dJ3UKyxpvQuZu	09:45 CST	09:46 CST	KEEP	
-session_013NEJKz8JXQTvhuGYo4UJpi	09:46 CST	09:47 CST	KEEP	
+session_013NEJKz7673bPpSLv4TxyA7	09:45 CST	09:46 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKz7673bPpSLv4TxyA7.idle.md)
+session_013NEJKz785dJ3UKyxpvQuZu	09:45 CST	09:46 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKz785dJ3UKyxpvQuZu.idle.md)
+session_013NEJKz8JXQTvhuGYo4UJpi	09:46 CST	09:47 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKz8JXQTvhuGYo4UJpi.idle.md)
 session_013NEJKz9HoqeRzdjbw9Fnga	09:46 CST	09:47 CST	handoff-B	archive: archived
-session_013NEJKz9f8KxCfb9zS1HSNV	09:46 CST	09:47 CST	KEEP	
-session_013NEJKzBfRycskE32T2Pj9F	09:46 CST	09:46 CST	KEEP	
+session_013NEJKz9f8KxCfb9zS1HSNV	09:46 CST	09:47 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKz9f8KxCfb9zS1HSNV.idle.md)
+session_013NEJKzBfRycskE32T2Pj9F	09:46 CST	09:46 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzBfRycskE32T2Pj9F.idle.md)
 session_013NEJKzCN6jU5Pj5pSZe2Wy	09:46 CST	09:47 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKzCSKTt9Mrr6n9GKiR	09:46 CST	09:46 CST	handoff-B	archive: archived
 session_013NEJKzCcVJYhu39C4BXuSP	09:46 CST	09:46 CST	handoff-B	archive: archived
@@ -58,59 +58,59 @@ session_013NEJKzDBTjFbhzwzV96i8v	09:46 CST	09:47 CST	handoff-B	archive: archived
 session_013NEJKzDXZ6E5hL4PUShA7C	09:46 CST	09:46 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKzEeXJNdTNedKPwtGc	09:46 CST	09:47 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKzFnj7mworq4H2kygK	09:46 CST	09:47 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKzGm25T6yUwjjibfGN	09:46 CST	09:47 CST	KEEP	
+session_013NEJKzGm25T6yUwjjibfGN	09:46 CST	09:47 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzGm25T6yUwjjibfGN.idle.md)
 session_013NEJKzHURrN9PNYKYoXWNg	09:46 CST	09:47 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKzHdMUT3sLtNCaxGEf	09:46 CST	09:47 CST	KEEP	
-session_013NEJKzHfqng3CH3MhVZhgo	09:46 CST	09:47 CST	KEEP	
-session_013NEJKzJ8sWrQskj5XRB52E	09:46 CST	09:47 CST	KEEP	
+session_013NEJKzHdMUT3sLtNCaxGEf	09:46 CST	09:47 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzHdMUT3sLtNCaxGEf.idle.md)
+session_013NEJKzHfqng3CH3MhVZhgo	09:46 CST	09:47 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzHfqng3CH3MhVZhgo.idle.md)
+session_013NEJKzJ8sWrQskj5XRB52E	09:46 CST	09:47 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzJ8sWrQskj5XRB52E.idle.md)
 session_013NEJKzJ9NM4S4A4u3afRoi	09:47 CST	09:47 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKzJDLMd4ijoisYSN9Y	09:47 CST	09:47 CST	handoff-B	archive: archived
-session_013NEJKzJF4Kh97883YXFunk	09:47 CST	09:47 CST	KEEP	
-session_013NEJKzJF4PJoASnkH4btJj	09:47 CST	09:47 CST	KEEP	
-session_013NEJKzJNm3bZgR7SadQNrU	09:47 CST	09:48 CST	KEEP	
-session_013NEJKzJxDxuXzuwNe7fhYn	09:47 CST	09:48 CST	KEEP	
-session_013NEJKzKA8bkAW7ossmC85D	09:47 CST	09:47 CST	KEEP	
+session_013NEJKzJF4Kh97883YXFunk	09:47 CST	09:47 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzJF4Kh97883YXFunk.idle.md)
+session_013NEJKzJF4PJoASnkH4btJj	09:47 CST	09:47 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzJF4PJoASnkH4btJj.idle.md)
+session_013NEJKzJNm3bZgR7SadQNrU	09:47 CST	09:48 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzJNm3bZgR7SadQNrU.idle.md)
+session_013NEJKzJxDxuXzuwNe7fhYn	09:47 CST	09:48 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzJxDxuXzuwNe7fhYn.idle.md)
+session_013NEJKzKA8bkAW7ossmC85D	09:47 CST	09:47 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzKA8bkAW7ossmC85D.idle.md)
 session_013NEJKzKzETHfW4dE8dxrRG	09:47 CST	09:47 CST	handoff-B	archive: archived
 session_013NEJKzLH6miLgNXpJmSXFA	09:47 CST	09:47 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKzLjdrBsFWzoCdBwG7	09:47 CST	09:48 CST	KEEP	
+session_013NEJKzLjdrBsFWzoCdBwG7	09:47 CST	09:48 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzLjdrBsFWzoCdBwG7.idle.md)
 session_013NEJKzLxn6c25hHUunkJmW	09:47 CST	09:48 CST	handoff-B	archive: archived
 session_013NEJKzMBfrPdhX9rxFg8p8	09:47 CST	09:47 CST	handoff-B	archive: archived
 session_013NEJKzMCRUtnAKtxwqd7q1	09:47 CST	09:48 CST	handoff-B	archive: archived
-session_013NEJKzPMtfKqsAuMKqn9cf	09:47 CST	09:48 CST	KEEP	
-session_013NEJKzPiiVLh3Sr1Jdoj76	09:47 CST	09:48 CST	KEEP	
-session_013NEJKzQsAzQkvsohtkLuJP	09:47 CST	09:48 CST	KEEP	
+session_013NEJKzPMtfKqsAuMKqn9cf	09:47 CST	09:48 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzPMtfKqsAuMKqn9cf.idle.md)
+session_013NEJKzPiiVLh3Sr1Jdoj76	09:47 CST	09:48 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzPiiVLh3Sr1Jdoj76.idle.md)
+session_013NEJKzQsAzQkvsohtkLuJP	09:47 CST	09:48 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzQsAzQkvsohtkLuJP.idle.md)
 session_013NEJKzQzNgKVLCQZtWj18k	09:47 CST	09:48 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKzSDXuw4rJESuzdw1Y	09:48 CST	09:49 CST	KEEP	
+session_013NEJKzSDXuw4rJESuzdw1Y	09:48 CST	09:49 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzSDXuw4rJESuzdw1Y.idle.md)
 session_013NEJKzSuTz4WyUf1vuMgxT	09:48 CST	09:48 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKzUUyEjaYnf5oBR6Wp	09:48 CST	09:48 CST	KEEP	
+session_013NEJKzUUyEjaYnf5oBR6Wp	09:48 CST	09:48 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzUUyEjaYnf5oBR6Wp.idle.md)
 session_013NEJKzUe9U19voH62VbCNA	09:48 CST	09:51 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKzVTWMbokJ3KFanBBC	09:48 CST	09:48 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKzVgPmUsPHuYf3Ptxy	09:48 CST	09:49 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKzVtYoetutgUL9DkfZ	09:48 CST	09:48 CST	KEEP	
+session_013NEJKzVtYoetutgUL9DkfZ	09:48 CST	09:48 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzVtYoetutgUL9DkfZ.idle.md)
 session_013NEJKzWDQFGYf8UFfU8Rve	09:48 CST	09:48 CST	handoff-B	archive: archived
 session_013NEJKzXJPDWrSRe3i1fGJd	09:48 CST	09:48 CST	handoff-B	archive: archived 11:00 CST on owner message 10:58 (frozen, handoff stored)
-session_013NEJKzXmA85KHJfwprwzBb	09:48 CST	09:49 CST	KEEP	
-session_013NEJKzXneQD9Ua2o3ww8hJ	09:48 CST	09:49 CST	KEEP	
+session_013NEJKzXmA85KHJfwprwzBb	09:48 CST	09:49 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzXmA85KHJfwprwzBb.idle.md)
+session_013NEJKzXneQD9Ua2o3ww8hJ	09:48 CST	09:49 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzXneQD9Ua2o3ww8hJ.idle.md)
 session_013NEJKzXyKNARtJsbz3Q1R2	09:48 CST	09:48 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKzYhDtNPLcEdeVFEVe	09:48 CST	09:48 CST	KEEP (moved from handoff-B; coordinator 09:57 CST, PR released)	
-session_013NEJKzZtu1sv8D47NpC3yx	09:48 CST	09:49 CST	KEEP	
-session_013NEJKza26i1MbAYrau5Aye	09:48 CST	09:49 CST	KEEP	
+session_013NEJKzYhDtNPLcEdeVFEVe	09:48 CST	09:48 CST	KEEP (moved from handoff-B; coordinator 09:57 CST, PR released)	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzYhDtNPLcEdeVFEVe.idle.md)
+session_013NEJKzZtu1sv8D47NpC3yx	09:48 CST	09:49 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzZtu1sv8D47NpC3yx.idle.md)
+session_013NEJKza26i1MbAYrau5Aye	09:48 CST	09:49 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKza26i1MbAYrau5Aye.idle.md)
 session_013NEJKza5KBoiFbNuiDDxQn	09:48 CST	09:49 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKzacZeiWBs4yJ82HvC	09:48 CST	09:49 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKzanUvmhhL9K3XCNgT	09:48 CST	09:48 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKzayeNCJa4csSCBG7k	09:48 CST	09:49 CST	KEEP	
-session_013NEJKzbDHRpreufhWY48Vb	09:48 CST	09:49 CST	KEEP	
-session_013NEJKzbfZGapcF3iSufHh1	09:50 CST	09:49 CST	KEEP	
+session_013NEJKzayeNCJa4csSCBG7k	09:48 CST	09:49 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzayeNCJa4csSCBG7k.idle.md)
+session_013NEJKzbDHRpreufhWY48Vb	09:48 CST	09:49 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzbDHRpreufhWY48Vb.idle.md)
+session_013NEJKzbfZGapcF3iSufHh1	09:50 CST	09:49 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzbfZGapcF3iSufHh1.idle.md)
 session_013NEJKzc39M5wFtru1uU5u4	09:50 CST	09:50 CST	handoff-B	archive: archived
-session_013NEJKzeYTAqv5GuuSXY1ru	09:50 CST	09:49 CST	KEEP	
+session_013NEJKzeYTAqv5GuuSXY1ru	09:50 CST	09:49 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzeYTAqv5GuuSXY1ru.idle.md)
 session_013NEJKzfKKumSC9zYS7gonr	09:50 CST	09:49 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKzfcSeBe5Ym9pCtxHn	09:50 CST	09:50 CST	KEEP	
+session_013NEJKzfcSeBe5Ym9pCtxHn	09:50 CST	09:50 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzfcSeBe5Ym9pCtxHn.idle.md)
 session_013NEJKzhQbKBYLydFg93MHt	09:50 CST	09:49 CST	handoff-B	archive: archived
-session_013NEJKzhVo8BrXKn2ZpYnYx	09:50 CST	09:50 CST	KEEP	
-session_013NEJKziVLcE1RT5jq36KVX	09:50 CST	09:50 CST	KEEP	
-session_013NEJKzjZ5GyfuZwVjJyTQL	09:50 CST	09:50 CST	KEEP	
+session_013NEJKzhVo8BrXKn2ZpYnYx	09:50 CST	09:50 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzhVo8BrXKn2ZpYnYx.idle.md)
+session_013NEJKziVLcE1RT5jq36KVX	09:50 CST	09:50 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKziVLcE1RT5jq36KVX.idle.md)
+session_013NEJKzjZ5GyfuZwVjJyTQL	09:50 CST	09:50 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzjZ5GyfuZwVjJyTQL.idle.md)
 session_013NEJKzjkypcToggneCjJN8	09:50 CST	09:50 CST	handoff-B	archive: archived
-session_013NEJKzk1MsAcMP53yRaVu1	09:50 CST	09:50 CST	KEEP	
+session_013NEJKzk1MsAcMP53yRaVu1	09:50 CST	09:50 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzk1MsAcMP53yRaVu1.idle.md)
 session_013NEJKzmHFbqZ9QC2TAupBc	09:50 CST	09:50 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKznZeoFs9GZiN7syv9	09:50 CST	09:50 CST	handoff-B	archive: archived
 session_013NEJKzngbRfxA5R33GLjsA	09:50 CST	09:51 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
@@ -118,307 +118,307 @@ session_013NEJKzoJ3vzUKGDk62Hr6K	09:50 CST	09:50 CST	handoff-B	archive: archived
 session_013NEJKzoN2eD5oih2K39Be8	09:50 CST	09:50 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKzp1xjTHtzDvmMRpKj	09:50 CST	09:51 CST	handoff-B	archive: archived
 session_013NEJKzp9uMCVGV7smPn7qJ	09:50 CST	09:50 CST	handoff-B	archive: archived
-session_013NEJKzpRGRNNVi8C4bL4wM	09:50 CST	09:50 CST	KEEP	
+session_013NEJKzpRGRNNVi8C4bL4wM	09:50 CST	09:50 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzpRGRNNVi8C4bL4wM.idle.md)
 session_013NEJKzpdAiMKMRoL5YWGDX	09:50 CST	09:50 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKzr9wjJhiTbhubR8Hc	09:50 CST	09:50 CST	KEEP	
+session_013NEJKzr9wjJhiTbhubR8Hc	09:50 CST	09:50 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzr9wjJhiTbhubR8Hc.idle.md)
 session_013NEJKzsDSbaL3UN9VrRHTu	09:50 CST	09:50 CST	handoff-B	archive: archived
-session_013NEJKzsUKjkcSWJSe2tXSP	09:50 CST	09:50 CST	KEEP	
+session_013NEJKzsUKjkcSWJSe2tXSP	09:50 CST	09:50 CST	KEEP	archive: no-reply to ACTIVE/IDLE ask; left open
 session_013NEJKzsquF2AHqJn51qxTj	09:50 CST	09:50 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJKzstsLQzGsUXajpze5	09:50 CST	09:51 CST	KEEP	
+session_013NEJKzstsLQzGsUXajpze5	09:50 CST	09:51 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzstsLQzGsUXajpze5.idle.md)
 session_013NEJKztJBZ8cbKoGJKQYgL	09:51 CST	09:50 CST	handoff-B	archive: archived
-session_013NEJKzvB3W9ncBB7N3RBEo	09:51 CST	09:51 CST	KEEP	
+session_013NEJKzvB3W9ncBB7N3RBEo	09:51 CST	09:51 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzvB3W9ncBB7N3RBEo.idle.md)
 session_013NEJKzvLxxYCL8moqZGiPM	09:51 CST	09:50 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKzvX8gzYSZhs2sfsew	09:51 CST	09:51 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKzw6Mmu5eviHC3vobt	09:51 CST	09:51 CST	handoff-B	archive: archived
-session_013NEJKzxNVwYRpqaGSyiXos	09:51 CST	09:51 CST	KEEP	
-session_013NEJKzxRE91RXP3PNdpC7J	09:51 CST	09:52 CST	KEEP	
+session_013NEJKzxNVwYRpqaGSyiXos	09:51 CST	09:51 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzxNVwYRpqaGSyiXos.idle.md)
+session_013NEJKzxRE91RXP3PNdpC7J	09:51 CST	09:52 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzxRE91RXP3PNdpC7J.idle.md)
 session_013NEJKzxuVkjiW6xKfSdu5G	09:51 CST	09:51 CST	handoff-B	archive: archived
 session_013NEJKzyHL14AinPBcJmTJo	09:51 CST	09:51 CST	handoff-B	archive: archived
-session_013NEJKzyKZ2mup6VLjVo4RE	09:51 CST	09:51 CST	KEEP	
-session_013NEJKzzZDgvR1V3J7cTEZ6	09:51 CST	09:51 CST	KEEP	
-session_013NEJKzzx35nAWSwPacHRXt	09:51 CST	09:51 CST	KEEP	
-session_013NEJL12vbyCvRzwm56SQpM	09:51 CST	09:51 CST	KEEP	
-session_013NEJL1333yS5ziKFeWsjHC	09:51 CST	09:51 CST	KEEP	
-session_013NEJL14Nf51Qm3VatcpdAQ	09:51 CST	09:52 CST	KEEP	
+session_013NEJKzyKZ2mup6VLjVo4RE	09:51 CST	09:51 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzyKZ2mup6VLjVo4RE.idle.md)
+session_013NEJKzzZDgvR1V3J7cTEZ6	09:51 CST	09:51 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzzZDgvR1V3J7cTEZ6.idle.md)
+session_013NEJKzzx35nAWSwPacHRXt	09:51 CST	09:51 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzzx35nAWSwPacHRXt.idle.md)
+session_013NEJL12vbyCvRzwm56SQpM	09:51 CST	09:51 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL12vbyCvRzwm56SQpM.idle.md)
+session_013NEJL1333yS5ziKFeWsjHC	09:51 CST	09:51 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1333yS5ziKFeWsjHC.idle.md)
+session_013NEJL14Nf51Qm3VatcpdAQ	09:51 CST	09:52 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL14Nf51Qm3VatcpdAQ.idle.md)
 session_013NEJL14UraPZKQB8r9Ue3J	09:51 CST	09:51 CST	handoff-B	archive: archived
 session_013NEJL15NwHsPTuK9zxtCig	09:51 CST	09:51 CST	handoff-B	archive: archived
 session_013NEJL17gMWcgUJ44gi3ZRs	09:51 CST	09:51 CST	handoff-B	archive: archived
 session_013NEJL17nZ2ZrDoa3wBz7Ao	09:51 CST	09:51 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL18oZSggg3BpqSJqPJ	09:51 CST	09:51 CST	KEEP	
-session_013NEJL18smzkUjB4HfZkmrC	09:51 CST	09:51 CST	KEEP	
-session_013NEJL19PYKPFXLekGuTmnX	09:51 CST	09:51 CST	KEEP	
-session_013NEJL1A3ynZBdqa9GKtySk	09:51 CST	09:51 CST	KEEP	
-session_013NEJL1AYEki9v2TCeUZ9Si	09:51 CST	09:52 CST	KEEP	
-session_013NEJL1Aq6pKaCrB1kxda68	09:51 CST	09:52 CST	KEEP	
+session_013NEJL18oZSggg3BpqSJqPJ	09:51 CST	09:51 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL18oZSggg3BpqSJqPJ.idle.md)
+session_013NEJL18smzkUjB4HfZkmrC	09:51 CST	09:51 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL18smzkUjB4HfZkmrC.idle.md)
+session_013NEJL19PYKPFXLekGuTmnX	09:51 CST	09:51 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL19PYKPFXLekGuTmnX.idle.md)
+session_013NEJL1A3ynZBdqa9GKtySk	09:51 CST	09:51 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1A3ynZBdqa9GKtySk.idle.md)
+session_013NEJL1AYEki9v2TCeUZ9Si	09:51 CST	09:52 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1AYEki9v2TCeUZ9Si.idle.md)
+session_013NEJL1Aq6pKaCrB1kxda68	09:51 CST	09:52 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1Aq6pKaCrB1kxda68.idle.md)
 session_013NEJL1BCgLVUACYU5ujv9A	09:52 CST	09:51 CST	handoff-B	archive: archived 11:00 CST on owner message 10:58 (frozen, handoff stored)
 session_013NEJL1BcjeYCubrQhUmWKz	09:52 CST	09:53 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJL1Cejen3sLS5Yn3sA6	09:52 CST	09:52 CST	handoff-B	archive: archived
-session_013NEJL1CxMTqgaXC4PMxQLc	09:52 CST	09:52 CST	KEEP	
-session_013NEJL1DSd9D3Fftt6Rgch4	09:52 CST	09:52 CST	KEEP	
-session_013NEJL1DTMYoLhbUX1pHGkU	09:52 CST	09:52 CST	KEEP	
+session_013NEJL1CxMTqgaXC4PMxQLc	09:52 CST	09:52 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1CxMTqgaXC4PMxQLc.idle.md)
+session_013NEJL1DSd9D3Fftt6Rgch4	09:52 CST	09:52 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1DSd9D3Fftt6Rgch4.idle.md)
+session_013NEJL1DTMYoLhbUX1pHGkU	09:52 CST	09:52 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1DTMYoLhbUX1pHGkU.idle.md)
 session_013NEJL1DWLhvA7rFvCxUjdV	09:52 CST	09:52 CST	handoff-B	archive: archived
-session_013NEJL1E2M7ciXj66Y5zdLH	09:52 CST	09:52 CST	KEEP	
+session_013NEJL1E2M7ciXj66Y5zdLH	09:52 CST	09:52 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1E2M7ciXj66Y5zdLH.idle.md)
 session_013NEJL1E4aAkTZ2bok4QsVD	09:52 CST	09:52 CST	handoff-B	archive: archived
 session_013NEJL1Eaa8LA5StpPbWgvA	09:52 CST	09:52 CST	handoff-B	archive: archived 11:00 CST on owner message 10:58 (frozen, handoff stored)
-session_013NEJL1GYPmzZHut7tx4d68	09:52 CST	09:52 CST	KEEP	
-session_013NEJL1HRER1fc7nQ4BtSVb	09:52 CST	09:52 CST	KEEP	
+session_013NEJL1GYPmzZHut7tx4d68	09:52 CST	09:52 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1GYPmzZHut7tx4d68.idle.md)
+session_013NEJL1HRER1fc7nQ4BtSVb	09:52 CST	09:52 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1HRER1fc7nQ4BtSVb.idle.md)
 session_013NEJL1JwGYbs71pjwKZCfb	09:52 CST	09:53 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL1LjuMhUrYHFuei6Me	09:52 CST	09:52 CST	KEEP	
+session_013NEJL1LjuMhUrYHFuei6Me	09:52 CST	09:52 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1LjuMhUrYHFuei6Me.idle.md)
 session_013NEJL1LqNG3bTFW9NtcAoS	09:52 CST	09:52 CST	handoff-B	archive: archived
-session_013NEJL1M5FMSnTFvUd8wY9u	09:52 CST	09:52 CST	KEEP	
-session_013NEJL1MAU4nrqwiN3pHJzz	09:52 CST	09:53 CST	KEEP	
-session_013NEJL1MUZiHTf89ikYeMTX	09:52 CST	09:53 CST	KEEP	
+session_013NEJL1M5FMSnTFvUd8wY9u	09:52 CST	09:52 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1M5FMSnTFvUd8wY9u.idle.md)
+session_013NEJL1MAU4nrqwiN3pHJzz	09:52 CST	09:53 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1MAU4nrqwiN3pHJzz.idle.md)
+session_013NEJL1MUZiHTf89ikYeMTX	09:52 CST	09:53 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1MUZiHTf89ikYeMTX.idle.md)
 session_013NEJL1MjgTgHAgcXw66Gsk	09:52 CST	09:52 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJL1N3YkCMouc1pELXyu	09:52 CST	09:53 CST	handoff-B	archive: archived
 session_013NEJL1NByCSpoZkrQEnyu8	09:52 CST	09:53 CST	handoff-B	archive: archived
 session_013NEJL1PAG3NhmQAbveNQLo	09:52 CST	09:53 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL1PUcS4Dxhd9Rr1sk2	09:52 CST	09:53 CST	KEEP	
+session_013NEJL1PUcS4Dxhd9Rr1sk2	09:52 CST	09:53 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1PUcS4Dxhd9Rr1sk2.idle.md)
 session_013NEJL1PXbLxTPnJbzMxnZn	09:52 CST	09:53 CST	handoff-B	archive: archived
-session_013NEJL1PfmnFVDD3X2P28Kk	09:52 CST	09:53 CST	KEEP	
-session_013NEJL1PnU1732wEno9CEj7	09:53 CST	09:53 CST	KEEP	
+session_013NEJL1PfmnFVDD3X2P28Kk	09:52 CST	09:53 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1PfmnFVDD3X2P28Kk.idle.md)
+session_013NEJL1PnU1732wEno9CEj7	09:53 CST	09:53 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1PnU1732wEno9CEj7.idle.md)
 session_013NEJL1PyP6demZ4Pyj8fYX	09:53 CST	09:53 CST	handoff-B	archive: archived
-session_013NEJL1RmnRj8FcU6Dx48pJ	09:53 CST	09:53 CST	KEEP	
+session_013NEJL1RmnRj8FcU6Dx48pJ	09:53 CST	09:53 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1RmnRj8FcU6Dx48pJ.idle.md)
 session_013NEJL1Ro26WbnrcSPVsLuX	09:53 CST	09:53 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL1SSD89Hzb8ahrTmfs	09:53 CST	09:53 CST	KEEP	
-session_013NEJL1SsG5NZULw1mG6qgB	09:53 CST	09:54 CST	KEEP	
+session_013NEJL1SSD89Hzb8ahrTmfs	09:53 CST	09:53 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1SSD89Hzb8ahrTmfs.idle.md)
+session_013NEJL1SsG5NZULw1mG6qgB	09:53 CST	09:54 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1SsG5NZULw1mG6qgB.idle.md)
 session_013NEJL1TctxZavHdqbiX2y7	09:53 CST	09:53 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL1Tkb6PbuYpqLF1eDg	09:53 CST	09:54 CST	KEEP	
-session_013NEJL1UMoM1VHADdYGDUZz	09:53 CST	09:53 CST	KEEP	
+session_013NEJL1Tkb6PbuYpqLF1eDg	09:53 CST	09:54 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1Tkb6PbuYpqLF1eDg.idle.md)
+session_013NEJL1UMoM1VHADdYGDUZz	09:53 CST	09:53 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1UMoM1VHADdYGDUZz.idle.md)
 session_013NEJL1Umc5vUUPV286bXnV	09:53 CST	09:54 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL1VtpMs3Aw5JLtyvVD	09:53 CST	09:54 CST	KEEP	
-session_013NEJL1WFQtTFeWPY7r1qYP	09:53 CST	09:54 CST	KEEP	
+session_013NEJL1VtpMs3Aw5JLtyvVD	09:53 CST	09:54 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1VtpMs3Aw5JLtyvVD.idle.md)
+session_013NEJL1WFQtTFeWPY7r1qYP	09:53 CST	09:54 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1WFQtTFeWPY7r1qYP.idle.md)
 session_013NEJL1Ww5ei4o5dFv1mdT9	09:53 CST	09:54 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJL1YhjiXhaxqz8244Ge	09:53 CST	09:54 CST	handoff-B	archive: archived
 session_013NEJL1YxsYqim39RK6JeZP	09:53 CST	09:54 CST	handoff-B	archive: archived
 session_013NEJL1bHn1Kqa94WW5wnW4	09:53 CST	09:53 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL1cp45E4ttwFy1ngig	09:53 CST	09:54 CST	KEEP	
-session_013NEJL1f9CA1PTZPYsRhFQV	09:53 CST	09:54 CST	KEEP	
-session_013NEJL1fQaNp75QW37StZfW	09:53 CST	09:54 CST	KEEP	
+session_013NEJL1cp45E4ttwFy1ngig	09:53 CST	09:54 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1cp45E4ttwFy1ngig.idle.md)
+session_013NEJL1f9CA1PTZPYsRhFQV	09:53 CST	09:54 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1f9CA1PTZPYsRhFQV.idle.md)
+session_013NEJL1fQaNp75QW37StZfW	09:53 CST	09:54 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1fQaNp75QW37StZfW.idle.md)
 session_013NEJL1fiv86hWsZGWhjPR6	09:53 CST	09:54 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJL1h7mKMtSVohetjaW1	09:53 CST	09:54 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJL1jPC89ae6X6Pa4jmf	09:53 CST	09:55 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJL1kNibiCCZ1b61YNWy	09:53 CST	09:54 CST	handoff-B	archive: archived
-session_013NEJL1kQxGCtbbcv6xGfeE	09:53 CST	09:54 CST	KEEP	
+session_013NEJL1kQxGCtbbcv6xGfeE	09:53 CST	09:54 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1kQxGCtbbcv6xGfeE.idle.md)
 session_013NEJL1kqjrZZqdqpz3eaGB	09:53 CST	09:54 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJL1nA83YuznrBBaUdv6	09:55 CST	09:54 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL1nAsHBKJTpeHV1sJN	09:55 CST	09:54 CST	KEEP	
+session_013NEJL1nAsHBKJTpeHV1sJN	09:55 CST	09:54 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1nAsHBKJTpeHV1sJN.idle.md)
 session_013NEJL1oJqBhSKif1484UZ4	09:55 CST	09:54 CST	handoff-B	archive: archived
-session_013NEJL1q9xCaEWZfB6KebLx	09:55 CST	09:55 CST	KEEP	
+session_013NEJL1q9xCaEWZfB6KebLx	09:55 CST	09:55 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1q9xCaEWZfB6KebLx.idle.md)
 session_013NEJL1qigiKQJb7Z7QZ4WT	09:55 CST	09:54 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJL1rJepBiu21f6Rv9jG	09:55 CST	09:54 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL1s91Kb775BV6ECCxH	09:55 CST	09:54 CST	KEEP	
+session_013NEJL1s91Kb775BV6ECCxH	09:55 CST	09:54 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1s91Kb775BV6ECCxH.idle.md)
 session_013NEJL1tSPqSx7QonoVwudz	09:55 CST	11:01 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL1xdQmJC85BLQucDP9	09:55 CST	09:55 CST	KEEP	
+session_013NEJL1xdQmJC85BLQucDP9	09:55 CST	09:55 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL1xdQmJC85BLQucDP9.idle.md)
 session_013NEJL1yXEvUDdtXJ7QhYRE	09:55 CST	09:54 CST	handoff-B	archive: archived 11:00 CST on owner message 10:58 (frozen, handoff stored)
 session_013NEJL213WYGvCs1ZRhXX4V	09:55 CST	09:55 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL22VqTY2w3YtemTyH1	09:55 CST	09:57 CST	KEEP	
+session_013NEJL22VqTY2w3YtemTyH1	09:55 CST	09:57 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL22VqTY2w3YtemTyH1.idle.md)
 session_013NEJL22tdtt5hCLt3whgm1	09:55 CST	09:55 CST	handoff-B	archive: archived
 session_013NEJL232Ko7dmr4v3fmrvF	09:55 CST	09:56 CST	handoff-B	archive: archived
-session_013NEJL24NSUGQwdDXK4sqrb	09:55 CST	09:57 CST	KEEP	
+session_013NEJL24NSUGQwdDXK4sqrb	09:55 CST	09:57 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL24NSUGQwdDXK4sqrb.idle.md)
 session_013NEJL25kXsYSFJpzGQnKKe	09:55 CST	09:55 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL27ELEZB4SAw7gHmkq	09:55 CST	09:55 CST	KEEP	
+session_013NEJL27ELEZB4SAw7gHmkq	09:55 CST	09:55 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL27ELEZB4SAw7gHmkq.idle.md)
 session_013NEJL27bB3sjZacDv3K9e4	09:55 CST	09:55 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJL27e8puG926YPKVUMf	09:55 CST	09:55 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL28sozZFoz9wzHLJGb	09:55 CST	09:55 CST	KEEP	
-session_013NEJL294xwrFinHwofhyir	09:55 CST	09:55 CST	KEEP	
-session_013NEJL29GcaaeoS7a1SJYA2	09:55 CST	09:55 CST	KEEP	
+session_013NEJL28sozZFoz9wzHLJGb	09:55 CST	09:55 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL28sozZFoz9wzHLJGb.idle.md)
+session_013NEJL294xwrFinHwofhyir	09:55 CST	09:55 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL294xwrFinHwofhyir.idle.md)
+session_013NEJL29GcaaeoS7a1SJYA2	09:55 CST	09:55 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL29GcaaeoS7a1SJYA2.idle.md)
 session_013NEJL29QJZ3US3nyhcFYrg	09:55 CST	09:55 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL2B1oRJaBTe16wm1VG	09:55 CST	09:55 CST	KEEP	
-session_013NEJL2B6FrRWBCF8RWpq8y	09:55 CST	09:55 CST	KEEP	
+session_013NEJL2B1oRJaBTe16wm1VG	09:55 CST	09:55 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2B1oRJaBTe16wm1VG.idle.md)
+session_013NEJL2B6FrRWBCF8RWpq8y	09:55 CST	09:55 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2B6FrRWBCF8RWpq8y.idle.md)
 session_013NEJL2BusqrX6qy1CCAgoH	09:56 CST	09:55 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJL2C3ooJFEuJnsQf4yT	09:56 CST	09:55 CST	handoff-B	archive: archived
 session_013NEJL2CTcj9UVLR4KHoUN5	09:56 CST	09:56 CST	handoff-B	archive: archived
-session_013NEJL2ChVc4QiMs2icnEB8	09:56 CST	09:56 CST	KEEP	
-session_013NEJL2CijYGjSSCcJqnVvv	09:56 CST	09:56 CST	KEEP	
+session_013NEJL2ChVc4QiMs2icnEB8	09:56 CST	09:56 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2ChVc4QiMs2icnEB8.idle.md)
+session_013NEJL2CijYGjSSCcJqnVvv	09:56 CST	09:56 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2CijYGjSSCcJqnVvv.idle.md)
 session_013NEJL2D1c515dDRJrYJeuf	09:56 CST	09:56 CST	handoff-B	archive: archived (owner override 10:47 CST, one act)
 session_013NEJL2DBWxESS5TMW5cCFW	09:56 CST	09:56 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL2DJxvbzn1xQzk8nkK	09:56 CST	09:56 CST	KEEP	
+session_013NEJL2DJxvbzn1xQzk8nkK	09:56 CST	09:56 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2DJxvbzn1xQzk8nkK.idle.md)
 session_013NEJL2DcpM9XMtKwYxrYiu	09:56 CST	09:56 CST	handoff-B	archive: archived
 session_013NEJL2DeoKFVg6TCE2pT2F	09:56 CST	09:56 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL2ESvfj9vmLqdMhDQk	09:56 CST	09:56 CST	KEEP	
-session_013NEJL2Eio9EnSRWs5gWQ2Z	09:56 CST	09:56 CST	KEEP	
-session_013NEJL2GCahFnLKLzmw1JAM	09:56 CST	11:01 CST	KEEP	
-session_013NEJL2GctUCgksFKSWZykD	09:56 CST	09:56 CST	KEEP	
+session_013NEJL2ESvfj9vmLqdMhDQk	09:56 CST	09:56 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2ESvfj9vmLqdMhDQk.idle.md)
+session_013NEJL2Eio9EnSRWs5gWQ2Z	09:56 CST	09:56 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2Eio9EnSRWs5gWQ2Z.idle.md)
+session_013NEJL2GCahFnLKLzmw1JAM	09:56 CST	11:01 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2GCahFnLKLzmw1JAM.idle.md)
+session_013NEJL2GctUCgksFKSWZykD	09:56 CST	09:56 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2GctUCgksFKSWZykD.idle.md)
 session_013NEJL2JcSvHjsxTcrYXxwa	09:56 CST	09:57 CST	handoff-B	archive: archived
-session_013NEJL2KVnRww4daXVBQyAK	09:56 CST	09:56 CST	KEEP	
+session_013NEJL2KVnRww4daXVBQyAK	09:56 CST	09:56 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2KVnRww4daXVBQyAK.idle.md)
 session_013NEJL2KhBtBKhdyNpyv8c6	09:56 CST	11:02 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL2L6zBtUfVRwm5DrXB	09:56 CST	09:56 CST	KEEP	
-session_013NEJL2LYXQpmabnoQqYgNv	09:56 CST	09:56 CST	KEEP	
+session_013NEJL2L6zBtUfVRwm5DrXB	09:56 CST	09:56 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2L6zBtUfVRwm5DrXB.idle.md)
+session_013NEJL2LYXQpmabnoQqYgNv	09:56 CST	09:56 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2LYXQpmabnoQqYgNv.idle.md)
 session_013NEJL2NVN5RjCgjRQFXeps	09:56 CST	09:56 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
-session_013NEJL2NiG8k8Ni4BMMeSgi	09:56 CST	09:56 CST	KEEP	
-session_013NEJL2RXfa7QBPNAXaXgp4	09:56 CST	09:56 CST	KEEP	
+session_013NEJL2NiG8k8Ni4BMMeSgi	09:56 CST	09:56 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2NiG8k8Ni4BMMeSgi.idle.md)
+session_013NEJL2RXfa7QBPNAXaXgp4	09:56 CST	09:56 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2RXfa7QBPNAXaXgp4.idle.md)
 session_013NEJL2RYun1AZqEEhFo93w	09:56 CST	09:56 CST	handoff-B	archive: archived
-session_013NEJL2Rd7tasVqys45cgDA	09:56 CST	09:57 CST	KEEP	
+session_013NEJL2Rd7tasVqys45cgDA	09:56 CST	09:57 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2Rd7tasVqys45cgDA.idle.md)
 session_013NEJL2GCqtkmpEVLrpgPF2	09:56 CST	09:56 CST	handoff-B	archive: archived
 session_013NEJL2RiaN86vFhzoAaSH1	09:57 CST	09:57 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJL2TFqvPsYvtYHenDfX	09:57 CST	11:02 CST	handoff-B	archive: archived 11:11 CST
-session_013NEJL2Tw3CgetFAQ4nj252	09:57 CST	11:02 CST	KEEP	
-session_013NEJL2UNZuVUR4h2LWR5QH	09:57 CST	11:02 CST	KEEP	
+session_013NEJL2Tw3CgetFAQ4nj252	09:57 CST	11:02 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2Tw3CgetFAQ4nj252.idle.md)
+session_013NEJL2UNZuVUR4h2LWR5QH	09:57 CST	11:02 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2UNZuVUR4h2LWR5QH.idle.md)
 session_013NEJL2Vu74Q9bbbrv5anAi	09:57 CST	11:02 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL2WHAcHrb2a1N5E29K	09:57 CST	11:02 CST	KEEP	
-session_013NEJL2WYHwGu4KngBLPUaF	09:57 CST	11:02 CST	KEEP	
+session_013NEJL2WHAcHrb2a1N5E29K	09:57 CST	11:02 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2WHAcHrb2a1N5E29K.idle.md)
+session_013NEJL2WYHwGu4KngBLPUaF	09:57 CST	11:02 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2WYHwGu4KngBLPUaF.idle.md)
 session_013NEJL2Xf2CDoR4VGP4EE6P	09:57 CST	11:02 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL2YQfYFx8hbZ2Nta3d	09:57 CST	11:02 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL2Yi1iyx98kfwkRJxW	09:57 CST	11:02 CST	KEEP	
-session_013NEJL2ZJUtVxqpKrEjh7X2	09:57 CST	11:02 CST	KEEP	
+session_013NEJL2Yi1iyx98kfwkRJxW	09:57 CST	11:02 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2Yi1iyx98kfwkRJxW.idle.md)
+session_013NEJL2ZJUtVxqpKrEjh7X2	09:57 CST	11:02 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2ZJUtVxqpKrEjh7X2.idle.md)
 session_013NEJL2ZbrUt2zRpHHNsMec	09:57 CST	11:02 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL2btGMLKqHs4cDQSZ6	09:57 CST	11:02 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL2d6geUTHwAgWHvF7h	09:57 CST	11:02 CST	handoff-B	archive: archived 11:11 CST
 session_013NEJL2ffE4xixcyVkMbpuV	09:57 CST	11:02 CST	handoff-B	archive: archived 11:11 CST
-session_013NEJL2g4J2bZLchTFF8RGp	09:57 CST	11:02 CST	KEEP	
-session_013NEJL2gUM72J6NNfjNQWrR	09:57 CST	11:02 CST	KEEP	
-session_013NEJL2hBkMAyffTo9CdawZ	09:57 CST	11:02 CST	KEEP	
+session_013NEJL2g4J2bZLchTFF8RGp	09:57 CST	11:02 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2g4J2bZLchTFF8RGp.idle.md)
+session_013NEJL2gUM72J6NNfjNQWrR	09:57 CST	11:02 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2gUM72J6NNfjNQWrR.idle.md)
+session_013NEJL2hBkMAyffTo9CdawZ	09:57 CST	11:02 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2hBkMAyffTo9CdawZ.idle.md)
 session_013NEJL2hXLvodLuczRGgNHP	09:57 CST	11:02 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL2iDXGHZSMmcwaj9bV	09:57 CST	11:03 CST	KEEP	
-session_013NEJL2iRRDz4vLswobTwYf	09:57 CST	11:02 CST	KEEP	
+session_013NEJL2iDXGHZSMmcwaj9bV	09:57 CST	11:03 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2iDXGHZSMmcwaj9bV.idle.md)
+session_013NEJL2iRRDz4vLswobTwYf	09:57 CST	11:02 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2iRRDz4vLswobTwYf.idle.md)
 session_013NEJL2jTS37z97cavLKVTC	09:57 CST	09:46 CST	handoff-B	archive: archived
-session_013NEJL2k68U41yt5xBhfp93	09:57 CST	11:02 CST	KEEP	
-session_013NEJL2mzycmcUKim3G7RkZ	09:57 CST	11:03 CST	KEEP	
-session_013NEJL2nvHYs3wA2QnMZfJG	09:59 CST	11:03 CST	KEEP	
+session_013NEJL2k68U41yt5xBhfp93	09:57 CST	11:02 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2k68U41yt5xBhfp93.idle.md)
+session_013NEJL2mzycmcUKim3G7RkZ	09:57 CST	11:03 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2mzycmcUKim3G7RkZ.idle.md)
+session_013NEJL2nvHYs3wA2QnMZfJG	09:59 CST	11:03 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2nvHYs3wA2QnMZfJG.idle.md)
 session_013NEJL2pSKbDkTpUe76U2wp	09:59 CST	11:03 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL2pbVwCShrQnHJDsmU	09:59 CST	11:03 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL2pjRytKQdMCgTwxa6	09:59 CST	11:03 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL2qBDyNbgXYNEhpSrf	09:59 CST	11:03 CST	KEEP	
-session_013NEJL2sZ68ECc62SiwfqPk	09:59 CST	11:03 CST	KEEP	
+session_013NEJL2qBDyNbgXYNEhpSrf	09:59 CST	11:03 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2qBDyNbgXYNEhpSrf.idle.md)
+session_013NEJL2sZ68ECc62SiwfqPk	09:59 CST	11:03 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2sZ68ECc62SiwfqPk.idle.md)
 session_013NEJL2t7akPLp9rbWSVEeF	09:59 CST	11:03 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL2tHzdSpdQQdKHDpij	09:59 CST	11:03 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL2tg4yAv8wfAhJc6Tq	09:59 CST	11:03 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL2tvhNJHroYMGnVvnc	09:59 CST	11:03 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL2unJ4dLGLaDdtaezc	09:59 CST	11:03 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL2vaREMqJHVJ16kbQf	09:59 CST	11:03 CST	KEEP	
-session_013NEJL2zoQmF8pg5MUiNBCj	09:59 CST	11:03 CST	KEEP	
+session_013NEJL2vaREMqJHVJ16kbQf	09:59 CST	11:03 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2vaREMqJHVJ16kbQf.idle.md)
+session_013NEJL2zoQmF8pg5MUiNBCj	09:59 CST	11:03 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL2zoQmF8pg5MUiNBCj.idle.md)
 session_013NEJL3115C7kVTQidSxvGj	09:59 CST	11:03 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL33qiuVEZBa4bipxtY	09:59 CST	11:03 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL33wvLc6xtDnBTJDAw	09:59 CST	11:03 CST	KEEP	
+session_013NEJL33wvLc6xtDnBTJDAw	09:59 CST	11:03 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL33wvLc6xtDnBTJDAw.idle.md)
 session_013NEJL34KjkQwzUueKThXhM	09:59 CST	11:03 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL34RSeYaFjiSJz4Lk5	09:59 CST	11:03 CST	KEEP	
+session_013NEJL34RSeYaFjiSJz4Lk5	09:59 CST	11:03 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL34RSeYaFjiSJz4Lk5.idle.md)
 session_013NEJL36oZi9XZ76KB8nFQy	09:59 CST	11:03 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL37B9ZSA9toGnPeeVa	09:59 CST	11:03 CST	KEEP	
+session_013NEJL37B9ZSA9toGnPeeVa	09:59 CST	11:03 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL37B9ZSA9toGnPeeVa.idle.md)
 session_013NEJL37Ec6fLvdD1sAMqxo	09:59 CST	11:03 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL37UFXTQuAcox7s8fD	09:59 CST	11:03 CST	KEEP	
+session_013NEJL37UFXTQuAcox7s8fD	09:59 CST	11:03 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL37UFXTQuAcox7s8fD.idle.md)
 session_013NEJL37oquqZQEcaccyiTU	09:59 CST	11:04 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL382EZLqWkzVvjj7UP	09:59 CST	11:03 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL38tqHPZrQNHNdo9ba	09:59 CST	11:04 CST	KEEP	
-session_013NEJL38w4WDs3n4aTNNHkB	09:59 CST	11:03 CST	KEEP	
+session_013NEJL38tqHPZrQNHNdo9ba	09:59 CST	11:04 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL38tqHPZrQNHNdo9ba.idle.md)
+session_013NEJL38w4WDs3n4aTNNHkB	09:59 CST	11:03 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL38w4WDs3n4aTNNHkB.idle.md)
 session_013NEJL39DAqcWWfdNFXmxnC	10:00 CST	11:04 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL39dinAf2VGG2b3Weo	10:00 CST	11:04 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL3AdFi6DGipDwcmKEb	10:00 CST	11:04 CST	KEEP	
+session_013NEJL3AdFi6DGipDwcmKEb	10:00 CST	11:04 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3AdFi6DGipDwcmKEb.idle.md)
 session_013NEJL3Afk9GLMC8PGGpQ51	10:00 CST	11:04 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3Ci1xJoJyTgLU5Nt7	10:00 CST	11:04 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3DwgdW1HVejfR77Se	10:00 CST	11:04 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL3EVBLm5RkyvoamcXP	10:00 CST	11:04 CST	KEEP	
+session_013NEJL3EVBLm5RkyvoamcXP	10:00 CST	11:04 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3EVBLm5RkyvoamcXP.idle.md)
 session_013NEJL3FLmYSCJLFHzCk8R9	10:00 CST	11:04 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3G6vFtN2TjNZrMETW	10:00 CST	11:04 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL3HcTDWvQyBwmisvYG	10:00 CST	11:04 CST	KEEP	
+session_013NEJL3HcTDWvQyBwmisvYG	10:00 CST	11:04 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3HcTDWvQyBwmisvYG.idle.md)
 session_013NEJL3JoPTyn7Ny4jUb88L	10:00 CST	11:04 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3K9EJKrLHccAdQtmi	10:00 CST	11:04 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3KYY5NYuanNGEoyjW	10:00 CST	11:04 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL3KhxJ9MV6PvgDun3P	10:00 CST	11:04 CST	KEEP	
+session_013NEJL3KhxJ9MV6PvgDun3P	10:00 CST	11:04 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3KhxJ9MV6PvgDun3P.idle.md)
 session_013NEJL3KvrWSBxStMe8hDMw	10:00 CST	11:04 CST	handoff-B	archive: skipped: blocked on owner pick (page item 428), not archived
-session_013NEJL3Lf166yzVq69LsAxg	10:00 CST	10:11 CST	KEEP	
+session_013NEJL3Lf166yzVq69LsAxg	10:00 CST	10:11 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3Lf166yzVq69LsAxg.idle.md)
 session_013NEJL3MgGYEmmygRpZfXzy	10:00 CST	11:04 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
-session_013NEJL3NAnujQ8Pbt5dXkwP	10:00 CST	11:04 CST	KEEP	
+session_013NEJL3NAnujQ8Pbt5dXkwP	10:00 CST	11:04 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3NAnujQ8Pbt5dXkwP.idle.md)
 session_013NEJL3QM1W7vvrGbQKkPDH	10:00 CST	11:04 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3R2CBFavz7grtbJY8	10:00 CST	11:04 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3RGpDc8Vc7qqAzAR7	10:00 CST	11:04 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
 session_013NEJL3RdQ8rPEF8bMo6YPB	10:00 CST	11:04 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
-session_013NEJL3UQqL6MJxhGPdHzdE	10:00 CST	11:05 CST	KEEP	
+session_013NEJL3UQqL6MJxhGPdHzdE	10:00 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3UQqL6MJxhGPdHzdE.idle.md)
 session_013NEJL3UmACWzQ3FibMH7ad	10:00 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
-session_013NEJL3VS6pwMdVzvbdxQ9J	10:00 CST	11:05 CST	KEEP	
-session_013NEJL3Vfjwv16ew8kaDkSs	10:00 CST	11:05 CST	KEEP	
+session_013NEJL3VS6pwMdVzvbdxQ9J	10:00 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3VS6pwMdVzvbdxQ9J.idle.md)
+session_013NEJL3Vfjwv16ew8kaDkSs	10:00 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3Vfjwv16ew8kaDkSs.idle.md)
 session_013NEJL3WEUbAnzxPEbgtS2X	10:01 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
 session_013NEJL3WMfUf8CyoxsgvqVr	10:01 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
 session_013NEJL3WQPFqTPj2r8Y7rrH	10:01 CST	11:04 CST	handoff-B	archive: skipped: status RUNNING at 11:17 CST, not archived
 session_013NEJL3WizfBeubmNydf4EV	10:01 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
-session_013NEJL3WkjDpDX48MYiGdbs	10:01 CST	11:05 CST	KEEP	
+session_013NEJL3WkjDpDX48MYiGdbs	10:01 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3WkjDpDX48MYiGdbs.idle.md)
 session_013NEJL3WwPeF1P9q883Pktu	10:01 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
-session_013NEJL3XjWoVXFLZP2Lfwy4	10:01 CST	11:05 CST	KEEP	
-session_013NEJL3Z48gxyFumeJZGMHp	10:01 CST	11:05 CST	KEEP	
-session_013NEJL3ZjZdzrS8tBezxY85	10:01 CST	11:05 CST	KEEP	
-session_013NEJL3Zo2s3uQCh8o4Mfwo	10:01 CST	11:05 CST	KEEP	
-session_013NEJL3ZtjRrvWWB5nAzQiv	10:01 CST	11:06 CST	KEEP	
+session_013NEJL3XjWoVXFLZP2Lfwy4	10:01 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3XjWoVXFLZP2Lfwy4.idle.md)
+session_013NEJL3Z48gxyFumeJZGMHp	10:01 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3Z48gxyFumeJZGMHp.idle.md)
+session_013NEJL3ZjZdzrS8tBezxY85	10:01 CST	11:05 CST	KEEP	archive: active-kept (turn/agent running at 11:2x CST)
+session_013NEJL3Zo2s3uQCh8o4Mfwo	10:01 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3Zo2s3uQCh8o4Mfwo.idle.md)
+session_013NEJL3ZtjRrvWWB5nAzQiv	10:01 CST	11:06 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3ZtjRrvWWB5nAzQiv.idle.md)
 session_013NEJL3ZzwXePsQpNjbbeKu	10:01 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
-session_013NEJL3a6tqDKidXRwjLeAE	10:01 CST	11:05 CST	KEEP	
-session_013NEJL3bvXbg7UQvaKpwwq9	10:01 CST	11:05 CST	KEEP	
+session_013NEJL3a6tqDKidXRwjLeAE	10:01 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3a6tqDKidXRwjLeAE.idle.md)
+session_013NEJL3bvXbg7UQvaKpwwq9	10:01 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3bvXbg7UQvaKpwwq9.idle.md)
 session_013NEJL3c8B95wK1Rg8uhD4P	10:01 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
-session_013NEJL3cfg1yrBuezf45D4i	10:01 CST	11:05 CST	KEEP	
+session_013NEJL3cfg1yrBuezf45D4i	10:01 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3cfg1yrBuezf45D4i.idle.md)
 session_013NEJL3dPpqbux58j4atEY5	10:01 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
 session_013NEJL3fy7PDPhWER5r89ep	10:01 CST	11:05 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL3gDkEvHawhJUPygWa	10:01 CST	11:05 CST	KEEP	
-session_013NEJL3gbJkES3NR7ybj7YZ	10:01 CST	11:05 CST	KEEP	
+session_013NEJL3gDkEvHawhJUPygWa	10:01 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3gDkEvHawhJUPygWa.idle.md)
+session_013NEJL3gbJkES3NR7ybj7YZ	10:01 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3gbJkES3NR7ybj7YZ.idle.md)
 session_013NEJL3hRvWLoxZuEPVQkD2	10:01 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
-session_013NEJL3ixw3qjVWMvVLFtg5	10:01 CST	11:05 CST	KEEP	
+session_013NEJL3ixw3qjVWMvVLFtg5	10:01 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3ixw3qjVWMvVLFtg5.idle.md)
 session_013NEJL3jZu7VBFpZ1EZJZGo	10:01 CST	11:05 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL3jcPCBE8pDPGuF8Ts	10:01 CST	11:06 CST	KEEP	
-session_013NEJL3kYhJPjjsWYNCApSh	10:01 CST	11:05 CST	KEEP	
+session_013NEJL3jcPCBE8pDPGuF8Ts	10:01 CST	11:06 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3jcPCBE8pDPGuF8Ts.idle.md)
+session_013NEJL3kYhJPjjsWYNCApSh	10:01 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3kYhJPjjsWYNCApSh.idle.md)
 session_013NEJL3m8RA79gxYptq8LiK	10:01 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3mV1216ziTuNnhQyH	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3oJPK1MdV96LKjYfK	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3oV3tarYB15cE84H6	10:02 CST	11:05 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL3otrRs5sCK9CN5FpB	10:02 CST	11:06 CST	KEEP	
-session_013NEJL3pjhuGumnmrJ5gvqd	10:02 CST	11:06 CST	KEEP	
-session_013NEJL3qDimXFeUC8aPbjdg	10:02 CST	11:06 CST	KEEP	
-session_013NEJL3qFTVRyGAJWFkrALJ	10:02 CST	11:06 CST	KEEP	
+session_013NEJL3otrRs5sCK9CN5FpB	10:02 CST	11:06 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3otrRs5sCK9CN5FpB.idle.md)
+session_013NEJL3pjhuGumnmrJ5gvqd	10:02 CST	11:06 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3pjhuGumnmrJ5gvqd.idle.md)
+session_013NEJL3qDimXFeUC8aPbjdg	10:02 CST	11:06 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3qDimXFeUC8aPbjdg.idle.md)
+session_013NEJL3qFTVRyGAJWFkrALJ	10:02 CST	11:06 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3qFTVRyGAJWFkrALJ.idle.md)
 session_013NEJL3qKvwXBThPagV7fsa	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3qSsV2LJ6R1a1HMCB	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3qwtN2VRPNsTZMhZD	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3r8JbyJKhCzBoC6sF	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL3rTtVuJHBka4oSALE	10:02 CST	11:06 CST	KEEP	
-session_013NEJL3sBYfjKAhvyn761vu	10:02 CST	11:07 CST	KEEP	
+session_013NEJL3rTtVuJHBka4oSALE	10:02 CST	11:06 CST	KEEP	archive: active-kept (turn/agent running at 11:2x CST)
+session_013NEJL3sBYfjKAhvyn761vu	10:02 CST	11:07 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3sBYfjKAhvyn761vu.idle.md)
 session_013NEJL3ttjVfExjpp5nLDcz	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL3uzxpVTQAsNhcR9t9	10:02 CST	11:06 CST	KEEP	
-session_013NEJL3vDrEuXnStMw1crbY	10:02 CST	11:06 CST	KEEP	
-session_013NEJL3wJ76K34vkvm4cKVr	10:02 CST	11:06 CST	KEEP	
+session_013NEJL3uzxpVTQAsNhcR9t9	10:02 CST	11:06 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3uzxpVTQAsNhcR9t9.idle.md)
+session_013NEJL3vDrEuXnStMw1crbY	10:02 CST	11:06 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3vDrEuXnStMw1crbY.idle.md)
+session_013NEJL3wJ76K34vkvm4cKVr	10:02 CST	11:06 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3wJ76K34vkvm4cKVr.idle.md)
 session_013NEJL3xYkfnbekjjC4nzCL	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL3yjhPT25wMf2PRhE2	10:02 CST	11:06 CST	KEEP	
-session_013NEJL3z5XQbr2LcTV4ejh2	10:02 CST	11:06 CST	KEEP	
+session_013NEJL3yjhPT25wMf2PRhE2	10:02 CST	11:06 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3yjhPT25wMf2PRhE2.idle.md)
+session_013NEJL3z5XQbr2LcTV4ejh2	10:02 CST	11:06 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3z5XQbr2LcTV4ejh2.idle.md)
 session_013NEJL3zaJYqXCK4XMrELwY	10:02 CST	11:07 CST	handoff-B	archive: archived CST under owner override 4h
-session_013NEJL3zgkU58DQSPkEYVkP	10:02 CST	11:06 CST	KEEP	
-session_013NEJL41VrPLwKBbnK7TWVn	10:02 CST	11:07 CST	KEEP	
-session_013NEJL43pWHtXmcY4uquu7S	10:02 CST	11:07 CST	KEEP	
+session_013NEJL3zgkU58DQSPkEYVkP	10:02 CST	11:06 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3zgkU58DQSPkEYVkP.idle.md)
+session_013NEJL41VrPLwKBbnK7TWVn	10:02 CST	11:07 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL41VrPLwKBbnK7TWVn.idle.md)
+session_013NEJL43pWHtXmcY4uquu7S	10:02 CST	11:07 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL43pWHtXmcY4uquu7S.idle.md)
 session_013NEJL43txwp8ioromcR8yF	10:02 CST	11:07 CST	handoff-B	archive: archived CST under owner override 4h
-session_013NEJL4487j21efFiHf2AHP	10:02 CST	11:07 CST	KEEP	
+session_013NEJL4487j21efFiHf2AHP	10:02 CST	11:07 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL4487j21efFiHf2AHP.idle.md)
 session_013NEJL448rTgL9ZZJPUnxU1	10:04 CST	11:07 CST	handoff-B	archive: archived CST under owner override 4h
-session_013NEJL44GoM1qXT1kTES4kX	10:04 CST	11:07 CST	KEEP	
-session_013NEJL44p2pd4nwYgCQXqTg	10:04 CST	10:09 CST	KEEP	
+session_013NEJL44GoM1qXT1kTES4kX	10:04 CST	11:07 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL44GoM1qXT1kTES4kX.idle.md)
+session_013NEJL44p2pd4nwYgCQXqTg	10:04 CST	10:09 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL44p2pd4nwYgCQXqTg.idle.md)
 session_013NEJL453SB7Xa11kWihGtm	10:04 CST	11:07 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL456ejBKaXgyyLuYHS	10:04 CST	11:07 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL45afxTyvacTQtAEwZ	10:04 CST	11:07 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL45hcvDWv3G6x2UbGB	10:04 CST	11:07 CST	handoff-B	archive: archived CST under owner override 4h
-session_013NEJL46S2R9TXaCJ1azufQ	10:04 CST	11:07 CST	KEEP	
+session_013NEJL46S2R9TXaCJ1azufQ	10:04 CST	11:07 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL46S2R9TXaCJ1azufQ.idle.md)
 session_013NEJL47tLSmUKDXddQy9Pf	10:04 CST	11:07 CST	handoff-B	archive: archived CST under owner override 4h
 session_013NEJL485VByFJqzsMRBr5M	10:04 CST	11:07 CST	handoff-B	archive: archived CST under owner override 4h
 session_013NEJL48TK8WDdmrKwyXguu	10:04 CST	11:07 CST	handoff-B	archive: archived CST under owner override 4h
 session_013NEJL498Vy1KbTBNwN6b4Y	10:04 CST	11:07 CST	handoff-B	archive: archived CST under owner override 4h
-session_013NEJL49Ps22j3DnVXnSBk6	10:04 CST	11:07 CST	KEEP	
+session_013NEJL49Ps22j3DnVXnSBk6	10:04 CST	11:07 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL49Ps22j3DnVXnSBk6.idle.md)
 session_013NEJL49cWWQx8kXJAVpNoi	10:04 CST	11:07 CST	handoff-B	archive: archived CST under owner override 4h
-session_013NEJL49gUhQAEPTctz3JHn	10:04 CST	11:07 CST	KEEP	
+session_013NEJL49gUhQAEPTctz3JHn	10:04 CST	11:07 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL49gUhQAEPTctz3JHn.idle.md)
 session_013NEJL49purHJfNkeGSVsuH	10:04 CST	11:08 CST	handoff-B	archive: archived CST under owner override 4h
 session_013NEJL4AAzqht4DA1vp1chR	10:04 CST	11:07 CST	handoff-B	archive: archived CST under owner override 4h
 session_013NEJL4AKgGnEPYfk6PZTMQ	10:04 CST	11:08 CST	handoff-B	archive: archived CST under owner override 4h
-session_013NEJL4AKgUjS1CWQvcdNwc	10:04 CST	11:07 CST	KEEP	
-session_013NEJL4B7Z8T1QiJsywtHYt	10:04 CST	11:08 CST	KEEP	
-session_013NEJL4C3s2DVWmjssD9zh1	10:04 CST	11:07 CST	KEEP	
-session_013NEJL4DA5XcyP7kY5qkXP5	10:04 CST	11:07 CST	KEEP	
-session_013NEJL4DMjyFzNbLSgpm8Cm	10:04 CST	11:08 CST	KEEP	
+session_013NEJL4AKgUjS1CWQvcdNwc	10:04 CST	11:07 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL4AKgUjS1CWQvcdNwc.idle.md)
+session_013NEJL4B7Z8T1QiJsywtHYt	10:04 CST	11:08 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL4B7Z8T1QiJsywtHYt.idle.md)
+session_013NEJL4C3s2DVWmjssD9zh1	10:04 CST	11:07 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL4C3s2DVWmjssD9zh1.idle.md)
+session_013NEJL4DA5XcyP7kY5qkXP5	10:04 CST	11:07 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL4DA5XcyP7kY5qkXP5.idle.md)
+session_013NEJL4DMjyFzNbLSgpm8Cm	10:04 CST	11:08 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL4DMjyFzNbLSgpm8Cm.idle.md)
 session_013NEJL4DPEKRiC91yHkQV7m	10:04 CST	11:08 CST	handoff-B	archive: archived CST under owner override 4h
 session_013NEJL4E3uV2CMHXZSfo6xv	10:04 CST	11:08 CST	handoff-B	archive: archived CST under owner override 4h
-session_013NEJL4ErXeDSsWmZzHBqG7	10:04 CST	11:08 CST	KEEP	
+session_013NEJL4ErXeDSsWmZzHBqG7	10:04 CST	11:08 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL4ErXeDSsWmZzHBqG7.idle.md)
 session_013NEJL4F7fFtXaQnEzxbLmh	10:05 CST	11:08 CST	handoff-B	archive: archived CST under owner override 4h
 session_013NEJL4Fy1bpdDySC3FKhf6	10:05 CST	11:08 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL4HFe7Gz9VNMNryxaZ	10:05 CST	11:08 CST	KEEP	
+session_013NEJL4HFe7Gz9VNMNryxaZ	10:05 CST	11:08 CST	KEEP	archive: no-reply to ACTIVE/IDLE ask; left open
 session_013NEJL4J7jxH2NTeETZEdne	10:05 CST	11:08 CST	handoff-B	archive: skipped: blocked on owner pick (override 15m or wait), not archived
 session_013NEJL4JCSmBupBJbVWwRUE	10:05 CST	11:08 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL4KAVGBcxoZzRnGNpj	10:05 CST	11:08 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL4KjioFCNuafMd8V8Q	10:05 CST	11:08 CST	KEEP	
+session_013NEJL4KjioFCNuafMd8V8Q	10:05 CST	11:08 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL4KjioFCNuafMd8V8Q.idle.md)
 session_013NEJL4PiqDj45oM8x6XYaK	10:05 CST	11:08 CST	handoff-B	archive: archived CST under owner override 4h
 session_013NEJL4QVUDvL2methRX8HA	10:05 CST	11:08 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL4Sbj1KE96HjpE6VWN	10:05 CST	11:08 CST	KEEP	
-session_013NEJL4T4kkeqmaqeHiWDLJ	10:05 CST	11:08 CST	KEEP	
+session_013NEJL4Sbj1KE96HjpE6VWN	10:05 CST	11:08 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL4Sbj1KE96HjpE6VWN.idle.md)
+session_013NEJL4T4kkeqmaqeHiWDLJ	10:05 CST	11:08 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL4T4kkeqmaqeHiWDLJ.idle.md)
 session_013NEJL4TDRWqka4aSU2Bv7L	10:05 CST	11:09 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL4U9VGY1K4VRnZxKUo	10:05 CST	11:08 CST	KEEP	
+session_013NEJL4U9VGY1K4VRnZxKUo	10:05 CST	11:08 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL4U9VGY1K4VRnZxKUo.idle.md)
 session_013NEJL4UKALWPAbsRE1HhUo	10:05 CST	11:08 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL4UZnwcbTxUfsYRPJa	10:05 CST	11:09 CST	KEEP	
+session_013NEJL4UZnwcbTxUfsYRPJa	10:05 CST	11:09 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL4UZnwcbTxUfsYRPJa.idle.md)
 session_0144AEXiFqnP3ow1BYkrpztU	10:05 CST		sent	archive: archived unread, no handoff (owner 10:57 CST: old unrelated sessions, archive on sight; override 15m)
 session_014d4zM2pmw7Nd14cBJkxir8	10:05 CST		sent	archive: archived unread, no handoff (owner 10:57 CST: old unrelated sessions, archive on sight; override 15m)
 session_014t6xuYdftdKq28XUqfknku	10:05 CST		sent	archive: archived unread, no handoff (owner 10:57 CST: old unrelated sessions, archive on sight; override 15m)
