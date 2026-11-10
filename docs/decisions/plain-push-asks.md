@@ -7,9 +7,11 @@ A third kind is refused, with its remedy. The owner's typed override lets each t
 
 | Push | Outcome | Rule id |
 |---|---|---|
-| A destination named `main` or `master` (`main`, `HEAD:main`, `x:refs/heads/main`, a bare push that resolves there, `--all`, `--branches`), on a network remote | ask | `push-main` |
+| A destination named `main` or `master` (`main`, `HEAD:main`, `x:refs/heads/main`, a bare push that resolves there, `--all` and `--branches` outside an agent checkout), on a network remote | ask | `push-main` |
 | An implied destination (bare push, `HEAD`, `@`, or the current branch's own name) that differs from the branch's upstream, on the upstream's remote, and does not yet exist there | ask | `push-stray-branch` |
 | A destination (implied, a colon-less refspec, or after the colon) named like an agent-worktree branch (`agent-<hex>`, `claude/agent-<hex>`, `worktree-agent-<hex>`), with or without an upstream | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
+| A push that names `main` and an agent-worktree branch together (`git push origin main HEAD:agent-<hex>`, `git push origin main agent-<hex>`) | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
+| `--all` or `--branches` from a checkout on an agent-worktree branch, to a network remote | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
 | Any other plain push | allow | |
 
 - Item 207 a, `push-main`: main moves only by pull request (`git-main-only-by-pr`). The names are
@@ -38,6 +40,12 @@ A third kind is refused, with its remedy. The owner's typed override lets each t
   `agent-branch-push-refuses`, extends it to the `agent-<hex>` and `claude/agent-<hex>` forms (the
   owner's words name `worktree-agent-*` only). A test-author or builder pushing a lane-named branch
   unasked is not read here; roadmap step `push-ask-reads-brief` holds it.
+- Combined push, owner ruling, chat, 2026-11-10 14:59 CST, question "Combined push", answer "Refuse it".
+  A push that names `main` and an agent-worktree branch is refused as `push-agent-branch`, not asked as
+  `push-main`, so no owner click can carry a stray agent branch to origin. `--all` and `--branches`, to a
+  network remote, are refused from an agent checkout only; from any other checkout they still ask `push-main`.
+  Controls unchanged: `main` alone asks `push-main`; `main` with a lane-named branch asks `push-main`; a lane
+  branch, `HEAD:<lane-branch>`, `archive/*` and deletes are allowed.
 - Silent:
   - a push to the branch's own upstream, unless that name is an agent-worktree name;
   - a first push with no upstream, unless its destination is an agent-worktree name;
@@ -62,7 +70,8 @@ A third kind is refused, with its remedy. The owner's typed override lets each t
 
 Cost: no new process or file. The reads run per push, in the guard's own run. A literal
 destination reads nothing new, except a push to main or master, which reads the remote's URL
-with one `config`. A remote given as a URL or path reads nothing. A refspec push such as `origin lane/foo` adds one `symbolic-ref`.
+with one `config`. `--all` or `--branches` to a network remote adds one `symbolic-ref`, the checkout's branch.
+A remote given as a URL or path reads nothing. A refspec push such as `origin lane/foo` adds one `symbolic-ref`.
 A `HEAD` push or a bare push adds one `symbolic-ref` and one `config`. One whose destination
 differs from its upstream adds one `rev-parse`, a local read of the remote-tracking ref. `record_push_cost_case` in
 `hooks/test_guard.py` proves the counts.
