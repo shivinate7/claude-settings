@@ -150,26 +150,26 @@ session_013NEJL19PYKPFXLekGuTmnX	09:51 CST	09:51 CST	KEEP
 session_013NEJL1A3ynZBdqa9GKtySk	09:51 CST	09:51 CST	KEEP
 session_013NEJL1AYEki9v2TCeUZ9Si	09:51 CST	09:52 CST	KEEP
 session_013NEJL1Aq6pKaCrB1kxda68	09:51 CST	09:52 CST	KEEP
-session_013NEJL1BCgLVUACYU5ujv9A	09:52 CST	09:51 CST	handoff-B
-session_013NEJL1BcjeYCubrQhUmWKz	09:52 CST	09:53 CST	handoff-B
-session_013NEJL1Cejen3sLS5Yn3sA6	09:52 CST	09:52 CST	handoff-B
+session_013NEJL1BCgLVUACYU5ujv9A	09:52 CST	09:51 CST	handoff-B	archive: not tried: session active again (status requires_action, connected); left alone
+session_013NEJL1BcjeYCubrQhUmWKz	09:52 CST	09:53 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
+session_013NEJL1Cejen3sLS5Yn3sA6	09:52 CST	09:52 CST	handoff-B	archive: archived
 session_013NEJL1CxMTqgaXC4PMxQLc	09:52 CST	09:52 CST	KEEP
 session_013NEJL1DSd9D3Fftt6Rgch4	09:52 CST	09:52 CST	KEEP
 session_013NEJL1DTMYoLhbUX1pHGkU	09:52 CST	09:52 CST	KEEP
-session_013NEJL1DWLhvA7rFvCxUjdV	09:52 CST	09:52 CST	handoff-B
+session_013NEJL1DWLhvA7rFvCxUjdV	09:52 CST	09:52 CST	handoff-B	archive: archived
 session_013NEJL1E2M7ciXj66Y5zdLH	09:52 CST	09:52 CST	KEEP
-session_013NEJL1E4aAkTZ2bok4QsVD	09:52 CST	09:52 CST	handoff-B
-session_013NEJL1Eaa8LA5StpPbWgvA	09:52 CST	09:52 CST	handoff-B
+session_013NEJL1E4aAkTZ2bok4QsVD	09:52 CST	09:52 CST	handoff-B	archive: archived
+session_013NEJL1Eaa8LA5StpPbWgvA	09:52 CST	09:52 CST	handoff-B	archive: not tried: session active again (status requires_action, connected); left alone
 session_013NEJL1GYPmzZHut7tx4d68	09:52 CST	09:52 CST	KEEP
 session_013NEJL1HRER1fc7nQ4BtSVb	09:52 CST	09:52 CST	KEEP
-session_013NEJL1JwGYbs71pjwKZCfb	09:52 CST	09:53 CST	handoff-B
+session_013NEJL1JwGYbs71pjwKZCfb	09:52 CST	09:53 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
 session_013NEJL1LjuMhUrYHFuei6Me	09:52 CST	09:52 CST	KEEP
-session_013NEJL1LqNG3bTFW9NtcAoS	09:52 CST	09:52 CST	handoff-B
+session_013NEJL1LqNG3bTFW9NtcAoS	09:52 CST	09:52 CST	handoff-B	archive: archived
 session_013NEJL1M5FMSnTFvUd8wY9u	09:52 CST	09:52 CST	KEEP
 session_013NEJL1MAU4nrqwiN3pHJzz	09:52 CST	09:53 CST	KEEP
 session_013NEJL1MUZiHTf89ikYeMTX	09:52 CST	09:53 CST	KEEP
-session_013NEJL1MjgTgHAgcXw66Gsk	09:52 CST	09:52 CST	handoff-B
-session_013NEJL1N3YkCMouc1pELXyu	09:52 CST	09:53 CST	handoff-B
+session_013NEJL1MjgTgHAgcXw66Gsk	09:52 CST	09:52 CST	handoff-B	archive: refused: the lane records pull request is still open (hook lane-closes-after-records)
+session_013NEJL1N3YkCMouc1pELXyu	09:52 CST	09:53 CST	handoff-B	archive: archived
 session_013NEJL1NByCSpoZkrQEnyu8	09:52 CST	09:53 CST	handoff-B
 session_013NEJL1PAG3NhmQAbveNQLo	09:52 CST	09:53 CST	handoff-B
 session_013NEJL1PUcS4Dxhd9Rr1sk2	09:52 CST	09:53 CST	KEEP
