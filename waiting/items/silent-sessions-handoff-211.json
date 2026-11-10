@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-10T16:47:00Z",
+  "context": "Goal: every idle session hands off and is archived, losing no work (owner, 09:18 CST Nov 10).\nProblem (money): the only way to get their handoff is to read each transcript, and only a session, not an agent, can read one.\nBased on (measured): the collector measured 12-15k tokens per transcript read, even filtered to assistant and result events, so 213 reads is about 3.2M tokens.\nBased on (read): a session left live keeps its full transcript, so leaving one live loses no work.\nDeparts from: main (213 sessions with no stored handoff) \u2014 adds a stored handoff for some or all of them.\nMeanwhile: the collector writes the 213 ids, titles and times to nr.txt on branch archive/session-handoffs-2026-11-10 and waits.",
+  "home": "collector branch archive/session-handoffs-2026-11-10 (nr.txt, head dd474de)",
+  "kind": "decision",
+  "lane": "freeze-handoffs",
+  "links": [
+    {
+      "label": "Collector session",
+      "url": "https://claude.ai/code/session_013NEJL1Hcti7GiUGQLGoLNs"
+    }
+  ],
+  "n": 487,
+  "options": [
+    {
+      "gain": "Every session has a handoff and leaves your list.",
+      "how": "About 11 helper sessions read 20 transcripts each, store the handoffs and archive.",
+      "key": "a",
+      "label": "Read all 213",
+      "lose": "About 3.2M tokens."
+    },
+    {
+      "gain": "The likeliest-live work is captured for about 450k tokens.",
+      "how": "Read the 30 most recently updated; mark the other 183 no-handoff and leave them live.",
+      "key": "b",
+      "label": "Read the 30 newest",
+      "lose": "183 stay in your list with no handoff."
+    },
+    {
+      "gain": "No spend.",
+      "how": "Mark all 213 no-handoff and leave them live.",
+      "key": "c",
+      "label": "Read none",
+      "lose": "213 stay in your list with no handoff."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB); collector session_013NEJL1Hcti7GiUGQLGoLNs acts",
+  "pick": "b",
+  "ref": "collector branch archive/session-handoffs-2026-11-10",
+  "reply": "Your answer, 10:50 CST Nov 10 (none of these): \"retry sending a message again first, then after that those that fail can be read workflow style in haiku xhigh not sonnet\". Re-asking all 213 now. At 11:30 CST the still-silent ones are read by Haiku helper sessions at effort xhigh, then archived. Departs from your words in one way: workflow agents cannot read sessions (hook agent-no-remote-tools), so the readers are Haiku sessions, not workflow agents. (Coordinator 10:51 CST; routed by triage 10:51 CST.)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Collect handoffs of 213 silent sessions?",
+  "status": "closed",
+  "title": "213 sessions never answered the handoff ask. How should their handoffs be collected?",
+  "why": "Recent sessions are the likeliest to hold live work, and a session left live loses nothing."
+}

@@ -24,9 +24,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": "your items 351 a and 347 a (Nov 7)",
-  "reply": "You picked a at 15:04 CST Nov 8: every fix check runs on Sonnet. Routed 15:05 CST to the coordinator and lane guard-fix-check-sonnet (session_013NEJKz9HoqeRzdjbw9Fnga). It stays open until that lane reports done, so the lane's grant check counts your answer.",
+  "reply": "You picked a at 15:04 CST Nov 8: every fix check runs on Sonnet. Done, lane report 09:48 CST Nov 10: #2342 (the spawn guard reads an exact Fix check marker) merged Nov 9 03:37 CST; #1572 (the merge tool refuses a fix-check record below Sonnet) merged in batch 68. Home: agents/reviewer.md, decisions agent-model-cap, hold-unsafe-after-round-3 and pr-review-record, and the GLOSSARY fix check marker row.",
   "repo": "shivinate7/claude-settings",
   "short": "Fix checks: Sonnet on every PR?",
-  "status": "open",
+  "status": "closed",
   "title": "Which model runs a fix check on a PR that is not a guard or check PR?"
 }

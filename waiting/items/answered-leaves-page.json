@@ -32,7 +32,7 @@
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "ref": "decision relayed-grant-read-from-page (\"What counts\"); skills/waiting-page/page_grant.py; lane session_013NEJL1tSPqSx7QonoVwudz",
-  "reply": "Routed 09:07 CST Nov 10 to the coordinator with your note (relayed grants can just stay running). It stays open until the coordinator says which form that means, and it comes back here only if your word is needed.",
+  "reply": "Coordinator, 09:26 CST Nov 10. Read as: the item stays open, so a relayed grant still counts with no second form, and it sinks into Answered (lane answered-leaves-page adds the lane+lastAnswer sink). Correct me if wrong.",
   "repo": "shivinate7/claude-settings",
   "short": "Closed items and relayed grants",
   "status": "open",

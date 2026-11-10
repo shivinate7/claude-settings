@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-10T16:46:00Z",
+  "context": "Goal: every idle session hands off and is archived, losing no work (owner, 09:18 CST Nov 10).\nProblem (rule): the archive guard refuses a session with an open PR or a pushed branch ahead of main, and only your typed override passes it.\nBased on (measured): the collector's log.tsv on branch archive/session-handoffs-2026-11-10, column 5: about 57 were refused for an open PR or a pushed branch ahead with no PR, and about 13 because gh could not read the PR.\nBased on (read): archiving keeps the PR, the branch and the transcript, and an archived session can be unarchived.\nDeparts from: main (the guard keeps all 70 live) \u2014 your override archives them, with their PRs left as drafts.\nMeanwhile: the collector waits on this answer and on item 487 (how to collect the handoffs of the 213 sessions that never replied).",
+  "home": "step freeze handoffs; collector branch archive/session-handoffs-2026-11-10",
+  "kind": "decision",
+  "lane": "freeze-handoffs",
+  "links": [
+    {
+      "label": "Collector session (type the override here)",
+      "url": "https://claude.ai/code/session_013NEJL1Hcti7GiUGQLGoLNs"
+    }
+  ],
+  "n": 486,
+  "options": [
+    {
+      "gain": "Your session list shrinks to live work only; PRs and branches stay.",
+      "how": "Type `override 15m` in the collector session (link below); it archives all 70.",
+      "key": "a",
+      "label": "Archive all 70",
+      "lose": "The 13 whose PR state is unread are archived unchecked."
+    },
+    {
+      "gain": "No session is archived on an unread state.",
+      "how": "Type `override 15m` in the collector session (link below); it skips the 13 whose PR state it could not read.",
+      "key": "b",
+      "label": "Archive 57, keep the 13 unread",
+      "lose": "13 sessions stay live until someone reads them."
+    },
+    {
+      "gain": "Nothing is archived past the guard.",
+      "how": "Do nothing.",
+      "key": "c",
+      "label": "Keep all 70 live",
+      "lose": "70 idle sessions stay in your list."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB); collector session_013NEJL1Hcti7GiUGQLGoLNs acts",
+  "pick": "b",
+  "ref": "collector log.tsv on branch archive/session-handoffs-2026-11-10",
+  "reply": "Your answer, 10:55 CST Nov 10 (none of these): \"already addressing this\". Noted, you are handling the 70. The collector leaves them as they are and acts only on your word in its session. (Coordinator 11:00 CST; routed by triage.)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Archive 70 guard-refused sessions?",
+  "status": "closed",
+  "title": "The guard refused to archive 70 sessions whose handoffs are stored. Archive them anyway?",
+  "why": "The collector stored each handoff, so archiving loses no work, but 13 have a PR state no one has read."
+}

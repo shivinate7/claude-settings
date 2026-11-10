@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-10T15:38:00Z",
+  "checked_with": "session_013NEJL1YBVqsXRPBac7nRcz",
+  "context": "Goal: a sender can tell a message arrived, on any device.\nProblem (rule): no wake route works for every receiver, and the only device-neutral safety net, a sender's timed check-in, rests on a CLAUDE.md sentence you never signed off (09:36 CST).\nBased on (ruling): your ruling of Nov 10, 09:33 CST: everything goes through the mailbox, with the cloud's direct session message (send_message) kept only as a doorbell; at 09:36 CST you said you are unsure of the doorbell.\nBased on (measured): a cloud direct session message to a local computer was refused (elevated_session_untrusted_device), per the messaging design record's table of routes.\nDeparts from: the messaging design record on main, where the cloud keeps its direct session message and no check-in rule exists \u2014 adds one arrival rule for every device.\nMeanwhile: the messaging session asked this in chat at 09:38 CST; your chat answer closes it. The draft that records the timed check-in question as answered waits for you.",
+  "home": "the messaging design record (decision session-messages); step mailbox-all-messages",
+  "id": "mailbox-arrival-check",
+  "kind": "decision",
+  "n": 484,
+  "options": [
+    {
+      "gain": "Same on every device, and nothing is lost silently.",
+      "how": "Every message goes through the mailbox, and a sender that waits for a reply sets one timed check-in; this also settles the open question of whether a sender may set one.",
+      "key": "a",
+      "label": "Mailbox plus one timed check-in per awaited reply (Recommended)",
+      "lose": "An idle receiver reads only at its next turn, and this makes the check-in sentence your rule."
+    },
+    {
+      "gain": "Simplest, with no timers.",
+      "how": "Every message goes through the mailbox, with no timer and no doorbell.",
+      "key": "b",
+      "label": "Mailbox only, no check-in",
+      "lose": "A lost message goes unnoticed until someone looks, and the doorbell from your 09:33 CST ruling drops."
+    },
+    {
+      "gain": "An idle cloud session wakes at once, and your 09:33 CST ruling stands as given.",
+      "how": "Every message goes through the mailbox, and a doorbell wakes the receiver where a route exists (cloud now, local later).",
+      "key": "c",
+      "label": "Mailbox plus a doorbell where one exists",
+      "lose": "Behaviour differs by device, against your word that the device should not matter."
+    }
+  ],
+  "owner": "session-messaging topic session (session_013NEJL1YBVqsXRPBac7nRcz)",
+  "pick": "a",
+  "ref": "page item 482; decision session-messages; PR #2544 (session-messages Q4 edit)",
+  "reply": "Answered in chat, 09:39 CST Nov 10: \"ok one check in is allowed, i just don't think it'll be hollistic enough, but it's allowed that is enough\". A session that waits on a reply may set one timed check-in for it. You did not pick the doorbell; it stays open. Home: the messaging design record (decision session-messages), through its draft; step mailbox-all-messages.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Mailbox arrival check",
+  "status": "closed",
+  "title": "How does a sender know a mailbox message arrived, on any device?",
+  "why": "Recommended: a. It works the same on every device, and no message is lost silently."
+}

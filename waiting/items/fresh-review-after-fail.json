@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-10T15:42:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: a failed round is never quietly forgotten, and a fresh full review still works as it does on main.\nProblem (rule): the lane's change reads a fresh round-1 pass after a round-1 fail as open, where main reads it as done, and the review record decision cites no ruling of yours for that line.\nBased on (ruling): Nov 7, 13:12 CST, you ruled that a failed fix check counts as the next review round, inside the three-round cap; that ruling covers fix checks only.\nDeparts from: main, which reads that fresh pass as done \u2014 b reads it as open.\nMeanwhile: the lane's draft stays a draft under the freeze.",
+  "home": "decision pr-review-record; draft PR #2545 (failed rounds stay failed)",
+  "id": "fresh-review-after-fail",
+  "kind": "decision",
+  "lane": "review-fix-check-round",
+  "n": 485,
+  "options": [
+    {
+      "gain": "A fresh review behaves as on main.",
+      "how": "Only a fix check after a fail keeps the fail; a fresh full review that passes reads done, as on main.",
+      "key": "a",
+      "label": "Keep \"a failed round stays failed\" for fix checks only (Recommended)",
+      "lose": "A later fresh pass can follow an earlier fail with no re-read of what failed."
+    },
+    {
+      "gain": "No failed round is forgotten.",
+      "how": "Any review after a fail keeps the record open until the fail is answered.",
+      "key": "b",
+      "label": "Keep it for every review",
+      "lose": "More re-reads, and two test cases are already re-pointed to fit it."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "decision pr-review-record; PR #2545; your Nov 7 ruling on failed fix checks",
+  "reply": "Your answer, 10:50 CST Nov 10 (none of these): \"shouldnt they all read done after they are fixed?\". Yes. A fixed change reads done once its next review passes, fresh or fix check, inside the three-round cap. Filed on step review-fix-check-round; its lane builds it when the freeze lifts. (Routed by triage 10:55 CST.)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Fresh review after a fail",
+  "status": "closed",
+  "title": "After a failed review round, should a fresh full review's pass still count as done?",
+  "why": "Recommended: a. A fresh full review behaves as on main, and your fix-check ruling still holds."
+}

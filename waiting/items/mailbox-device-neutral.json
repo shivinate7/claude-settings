@@ -1,0 +1,13 @@
+{
+  "added": "2026-11-10T15:36:00Z",
+  "context": "Answered in chat to the session-messaging topic session, 09:34 CST Nov 10: the mailbox design must not depend on the device. Your local computer may be a Windows work laptop or a personal Mac: \"the device I use shouldn't matter\".\n\nYou asked whether \"Mac\" was recorded falsely. It was not wrong but too narrow: it named the only computer measured so far (task 294). The decision is reworded on branch mailbox-one-route, and step session-mailbox-followups now says \"a session on the owner's computer, Mac or Windows\" and runs the trial on a Mac and on a Windows PC.",
+  "home": "decision session-messages (branch mailbox-one-route); step session-mailbox-followups",
+  "id": "mailbox-device-neutral",
+  "kind": "decision",
+  "n": 483,
+  "owner": "session-messaging topic session (session_013NEJL1YBVqsXRPBac7nRcz)",
+  "ref": "decision session-messages; step session-mailbox-followups; task 294",
+  "repo": "shivinate7/claude-settings",
+  "status": "closed",
+  "title": "The session mailbox design does not depend on which computer you use"
+}

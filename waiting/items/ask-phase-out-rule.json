@@ -32,7 +32,7 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": "owner comment, Ask area thread b2ff97bf, Nov 10 09:11 CST",
-  "reply": "Routed 09:16 CST Nov 10: pick a with your read-receipt note. A routed ask or answered item shows one line (its home and the short reply); you press Mark read and it leaves; nothing is deleted. It covers the Ask area and the Answered row. Home: step ask-phase-out.",
+  "reply": "Routed 09:16 CST Nov 10: pick a with your read-receipt note. A routed ask or answered item shows one line (its home and the short reply); you press Mark read and it leaves; nothing is deleted. It covers the Ask area and the Answered row. Home: step ask-phase-out.\nWhere this question was (your 10:51 CST comment on the Answered row): triage posted it as item 480 at 09:13 CST Nov 10, for the coordinator, from your 09:11 CST comment on the Ask area. You answered it at 09:14 CST (a, with the read-receipt note), so it closed and left the page before the Mark read button exists. The button is step ask-phase-out, held by the freeze.",
   "repo": "shivinate7/claude-settings",
   "short": "Asks leave the Ask area",
   "status": "closed",

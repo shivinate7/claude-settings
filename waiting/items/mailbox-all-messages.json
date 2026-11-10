@@ -1,0 +1,13 @@
+{
+  "added": "2026-11-10T15:33:00Z",
+  "context": "Answered in chat to the session-messaging topic session, 09:33 CST Nov 10: every message goes through the git mailbox, cloud to cloud included (\"everything on one side\"). This replaces the decision's line \"Cloud to cloud keeps send_message\".\n\nCloud send_message stays only as a short \"check your mail\" doorbell, so an idle session wakes: the mailbox is read at turn start and cannot wake anyone.\n\nYour reason: a \"delivered\" send_message is not a read, it leaves no copy, and it differs from local SendMessage.\n\nAt 09:36 CST you said you are unsure the doorbell should be the cloud's direct session-to-session message, since it would not work on every device. So \"every message through the mailbox\" stands, and how a sender knows a message arrived is asked as a separate question.\n\nThe build of the mailbox route waits for the freeze (09:18 CST) to lift.",
+  "home": "step mailbox-all-messages; decision session-messages (rewritten after PR #2544 merges)",
+  "id": "mailbox-all-messages",
+  "kind": "decision",
+  "n": 482,
+  "owner": "session-messaging topic session (session_013NEJL1YBVqsXRPBac7nRcz)",
+  "ref": "decision session-messages, line \"Cloud to cloud keeps send_message\"",
+  "repo": "shivinate7/claude-settings",
+  "status": "closed",
+  "title": "Every session message goes through the git mailbox, cloud to cloud included"
+}

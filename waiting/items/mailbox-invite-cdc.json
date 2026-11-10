@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-10T15:21:00Z",
+  "command": {
+    "mac": "cd ~\ngh auth switch -u shivinate7\ngh api -X PUT repos/shivinate7/session-mailbox/collaborators/ssemwal-cdc -f permission=push",
+    "powershell": "cd ~\ngh auth switch -u shivinate7\ngh api -X PUT repos/shivinate7/session-mailbox/collaborators/ssemwal-cdc -f permission=push"
+  },
+  "context": "Goal: sessions under both your GitHub accounts use one session mailbox.\nWhy yours: only the repo's owner can invite and only the invited account can accept; this cloud session's GitHub tools have no collaborator-invite act and a gh api write is refused here, and no session on your computer is reachable (measured 2026-11-10, list_computer_folders at 09:22 CST returned no folders).\nSteps: invite ssemwal-cdc as Write (press the first link, or paste the command below on your Mac or PC). Then, signed in as ssemwal-cdc, press the second link and accept. Then press Done here.\nMeanwhile: the session builds the stale mailbox status text (step mailbox-status-line-stale).",
+  "home": "PR #2484 (session mailbox access for the second account); decision session-messages",
+  "id": "mailbox-invite-cdc",
+  "kind": "task",
+  "lane": "session-messaging-plan",
+  "links": [
+    {
+      "label": "Invite ssemwal-cdc (as shivinate7)",
+      "url": "https://github.com/shivinate7/session-mailbox/settings/access"
+    },
+    {
+      "label": "Accept the invitation (as ssemwal-cdc)",
+      "url": "https://github.com/shivinate7/session-mailbox/invitations"
+    }
+  ],
+  "n": 481,
+  "owner": "session-messaging topic session (session_013NEJL1YBVqsXRPBac7nRcz)",
+  "ref": "PR #2484 (session mailbox access for the second account); decision session-messages",
+  "reply": "Closed 10:20 CST Nov 10. The owner said in chat at 10:19 CST Nov 10, relayed by the session-messaging topic session: \"ssemwal-cdc long has been invited and accepted\". The invite and the accept were done long ago, so this task was stale. Still open, in step session-mailbox-followups: one `mail read` from a cloud session under ssemwal-cdc, to measure that it reaches the mailbox.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Invite ssemwal-cdc to session-mailbox",
+  "status": "closed",
+  "title": "Give your second GitHub account write access to the session mailbox repo",
+  "why": "The shared session mailbox needs sessions under your second account to read and write it."
+}
