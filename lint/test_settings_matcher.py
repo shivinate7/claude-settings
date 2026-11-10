@@ -77,9 +77,6 @@ GUARD_MERGE_SOURCE = os.path.join(HOOKS, "guard_merge.py")
 GUARD_NAMES = ("SPAWN_TOOLS", "START_TOOLS", "SESSION_TOOL", "CREATE_SESSION_TOOL", "SIM_MCP", "PAGE_TOOL",
                "DATA_TOOL", "REMOTE_OUTWARD_TOOLS", "SHELL_TOOLS", "WRITE_TOOLS")
 MERGE_NAMES = ("MERGE_TOOLS", "TRUST_TOOLS", "ARCHIVE_TOOL", "BRIEF_TOOL")
-# guard.py's draft-PR check, `tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True`.
-# That name is a bare literal there, and hoisting it to a constant is out of scope, so it is listed here.
-DRAFT_PR_TOOLS = ("mcp__github__create_pull_request",)
 # The six GitHub MCP write tools the owner named. Each one must be matched, whether or not a guard judges it yet.
 GITHUB_WRITE_TOOLS = tuple("mcp__github__" + short for short in (
     "merge_pull_request", "create_pull_request", "push_files", "create_or_update_file", "delete_file",
@@ -150,14 +147,14 @@ class JudgedToolMatcher(unittest.TestCase):
                                 "%s has no %s: a renamed constant hides its tools from this test"
                                 % (os.path.basename(module.__file__), constant))
                 names += flatten(getattr(module, constant))
-        names += list(DRAFT_PR_TOOLS) + list(GITHUB_WRITE_TOOLS) + sorted(judged_github_in_guard_files())
+        names += list(GITHUB_WRITE_TOOLS) + sorted(judged_github_in_guard_files())
         return sorted(set(names))
 
     def test_guard_matcher_covers_every_judged_tool(self):
         self.assertTrue(self.matchers, "no guard.py entry in settings.json PreToolUse")
-        tools = self.judged_tools()
-        self.assertTrue(tools, "no judged tool names were read: nothing to check")
-        missed = self.unmatched(tools)
+        self.assertTrue(judged_github_in_guard_files(),
+                        "the scan found no mcp__github__ comparison in guard.py or guard_*.py: the scan is broken")
+        missed = self.unmatched(self.judged_tools())
         if missed:
             self.fail("no guard matcher covers: %s" % ", ".join(missed))
 
@@ -168,8 +165,9 @@ class JudgedToolMatcher(unittest.TestCase):
             self.fail("no guard matcher covers: %s" % ", ".join(missed))
 
     def test_github_scan_reads_code_and_not_strings_or_comments(self):
-        # Each line is a real comparison, or text that only looks like one: a comment opener in a string, a
-        # multi-line string, a lone quote in text, and a comparison with another name.
+        # Each line is a real comparison, or text that only looks like one: a comment line, a trailing comment, a
+        # comment opener (#, /*, //) in a string, a multi-line string, a lone quote in text, and a comparison with
+        # another name.
         sample = "\n".join([
             'if tool == "mcp__github__planted_eq": pass',
             'if tool in ("mcp__github__planted_in_a",',
@@ -180,11 +178,16 @@ class JudgedToolMatcher(unittest.TestCase):
             'if tool == "mcp__github__in_a_string": pass',
             '"""',
             'WORDS = "don\'t"',
+            'OPEN, FOUND = "/*", tool == "mcp__github__after_block_opener"',
+            'URL, FOUND2 = "http://x", tool == "mcp__github__after_double_slash"',
+            '# if tool == "mcp__github__in_a_comment": pass',
+            'FLAG = tool == "mcp__github__before_trailing_comment"  # tool == "mcp__github__in_trailing_comment"',
             'if tool == "mcp__github__after_lone_quote": pass',
         ])
         self.assertEqual(judged_github_names(sample), {
             "mcp__github__planted_eq", "mcp__github__planted_in_a", "mcp__github__planted_in_b",
-            "mcp__github__after_lone_quote"})
+            "mcp__github__after_block_opener", "mcp__github__after_double_slash",
+            "mcp__github__before_trailing_comment", "mcp__github__after_lone_quote"})
 
     def test_github_scan_of_empty_source_finds_nothing(self):
         self.assertEqual(judged_github_names(""), set())
